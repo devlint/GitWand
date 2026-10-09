@@ -1330,6 +1330,46 @@ pub(crate) async fn gl_convert_draft_to_ready(cwd: String, iid: i64) -> Result<(
         .map_err(|e| e.to_string())?
 }
 
+/// Edit a MR's title and/or description via `glab api` (`-f` sends each
+/// value as a raw string).
+fn gl_mr_edit_inner(
+    cwd: String,
+    iid: i64,
+    title: Option<String>,
+    body: Option<String>,
+) -> Result<(), String> {
+    let fields = super::pr_edit::edit_fields(&title, &body, "description")?;
+    let endpoint = format!("projects/:fullpath/merge_requests/{}", iid);
+    let mut cmd = hidden_cmd("glab");
+    cmd.args(["api", "-X", "PUT", &endpoint]);
+    for (k, v) in &fields {
+        cmd.args(["-f", &format!("{}={}", k, v)]);
+    }
+    cmd.current_dir(&cwd);
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api edit MR: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "gl edit MR failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn gl_mr_edit(
+    cwd: String,
+    iid: i64,
+    title: Option<String>,
+    body: Option<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || gl_mr_edit_inner(cwd, iid, title, body))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Flatten a `/discussions` response into the flat note-array shape
 /// `/notes` used to return, preserving each note's own fields — notably
 /// `resolvable`/`resolved`, which the flat endpoint never carried (#161).

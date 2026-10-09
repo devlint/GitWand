@@ -32,6 +32,7 @@ import {
   azEnableAutoMerge,
   azDisableAutoMerge,
   azPrReady,
+  azPrEdit,
   azCheckoutPr,
   azPrComments,
   azPrCreateComment,
@@ -61,6 +62,7 @@ import {
   type PrFileHistory,
   type ReviewerCandidate,
   type Account,
+  type PrEdit,
 } from "./types";
 
 export class AzureProvider implements ForgeProvider {
@@ -155,6 +157,10 @@ export class AzureProvider implements ForgeProvider {
 
   convertDraftToReady(cwd: string, number: number): Promise<void> {
     return azPrReady(cwd, number);
+  }
+
+  updatePR(cwd: string, number: number, edit: PrEdit): Promise<void> {
+    return azPrEdit(cwd, number, edit);
   }
 
   // ── Comments ───────────────────────────────────────────────────────────────

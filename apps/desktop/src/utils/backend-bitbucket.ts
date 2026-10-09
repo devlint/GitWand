@@ -13,6 +13,7 @@ import {
   PrReviewComment,
   PrReview,
   ReviewerCandidate,
+  type PrEdit,
 } from "./backend-pr";
 
 // ─── Bitbucket Cloud REST v2 wrappers ───────────────────────────────────────
@@ -178,6 +179,12 @@ export async function bbPrAnnotations(cwd: string, prId: number): Promise<CIAnno
 export async function bbConvertDraftToReady(cwd: string, prId: number): Promise<void> {
   if (!isTauri()) throw new Error("bbConvertDraftToReady requires Tauri");
   return tauriInvoke<void>("bb_convert_draft_to_ready", { cwd, prId });
+}
+
+/** Edit a PR's title and/or description; an omitted field is left unchanged. */
+export async function bbPrEdit(cwd: string, prId: number, edit: PrEdit): Promise<void> {
+  if (!isTauri()) throw new Error("bbPrEdit requires Tauri");
+  return tauriInvoke<void>("bb_pr_edit", { cwd, prId, title: edit.title ?? null, body: edit.body ?? null });
 }
 
 /** Get the current Bitbucket user (from stored credentials). */

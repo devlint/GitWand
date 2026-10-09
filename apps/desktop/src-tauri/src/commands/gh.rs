@@ -892,6 +892,36 @@ pub(crate) async fn gh_pr_ready(cwd: String, number: i64) -> Result<(), String> 
         .map_err(|e| e.to_string())?
 }
 
+fn gh_pr_edit_inner(
+    cwd: String,
+    number: i64,
+    title: Option<String>,
+    body: Option<String>,
+) -> Result<(), String> {
+    let fields = super::pr_edit::edit_fields(&title, &body, "body")?;
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_pr_edit(&cwd, number, &title, &body, &tok);
+    }
+    // `-f` sends each value as a raw string — no `@file` expansion, unlike `-F`.
+    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let path = format!("repos/{}/pulls/{}", nwo, number);
+    gh_api_write(&cwd, "PATCH", &path, &fields)?;
+    Ok(())
+}
+
+/// Edit a PR's title and/or body (a `None` field is left unchanged).
+#[tauri::command]
+pub(crate) async fn gh_pr_edit(
+    cwd: String,
+    number: i64,
+    title: Option<String>,
+    body: Option<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || gh_pr_edit_inner(cwd, number, title, body))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 fn gh_dismiss_review_inner(
     cwd: String,
     number: i64,

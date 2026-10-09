@@ -26,6 +26,11 @@ import PrReactions from "./PrReactions.vue";
 import { resolvePrReviewShortcut, isEditableTarget } from "../composables/usePrReviewKeymap";
 import { usePrReviewNav } from "../composables/usePrReviewNav";
 import { useSettings } from "../composables/useSettings";
+import { useAIProvider } from "../composables/useAIProvider";
+import { usePrDescription } from "../composables/usePrDescription";
+import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
+import AiSparkle from "./AiSparkle.vue";
+import AiTemplateMenu from "./AiTemplateMenu.vue";
 
 const { t } = useI18n();
 
@@ -49,6 +54,144 @@ const isOpenPr = computed(() => {
 
 /** Local UI state for the PR description's formatted / raw switch. */
 const descriptionTab = ref<"formatted" | "raw">("formatted");
+
+// ─── Title / description editing ────────────────────────
+const canEditPr = computed(() => isOpenPr.value && p.forgeSupportsEdit.value);
+
+// The AI draft lives in usePrDescription's module state so it survives leaving
+// the view mid-generation; it is only shown on the PR it was made for.
+const ai = useAIProvider();
+const prDescription = usePrDescription();
+
+const canUpdateDescription = computed(() => canEditPr.value && ai.isAvailable.value);
+// Active PR template (picked from the AI split button), shown on the button.
+const { activeTemplate: activePrTemplate } = useAiTemplates("pr", () => p.cwd.value);
+
+const descriptionDraft = computed(() => {
+  const n = p.prDetail.value?.number;
+  return n == null ? null : prDescription.pendingUpdateFor(p.cwd.value, n);
+});
+const descriptionError = computed(() => {
+  const n = p.prDetail.value?.number;
+  return n == null ? null : prDescription.updateErrorFor(p.cwd.value, n);
+});
+/** An AI update is running for the PR on screen. */
+const isAiUpdating = computed(() => {
+  const n = p.prDetail.value?.number;
+  return n != null && prDescription.isUpdatingFor(p.cwd.value, n);
+});
+
+/** Manual description edit in progress; null when not editing. */
+const editingBody = ref<string | null>(null);
+/** Manual title edit in progress; null when not editing. */
+const editingTitle = ref<string | null>(null);
+const titleInput = ref<HTMLInputElement | null>(null);
+const savingTitle = ref(false);
+const savingBody = ref(false);
+
+// While the AI drafts, a manual edit is locked out: applying the draft would
+// overwrite it. An edit buffer left open when the draft arrives is dropped for
+// the same reason — it must not resurface after Apply / Discard.
+watch(descriptionDraft, (d) => {
+  if (d) editingBody.value = null;
+});
+
+// A manual edit belongs to the PR it was started on.
+// Watch the two values, not an array built per run: a new array is a new
+// identity every time prDetail is replaced (poll, revalidate, a save), which
+// would close the editors and drop what the user typed on the same PR.
+watch(
+  [() => p.cwd.value, () => p.prDetail.value?.number],
+  () => {
+    editingBody.value = null;
+    editingTitle.value = null;
+  },
+);
+
+/** Which editor the description panel shows: the AI draft wins over a manual edit. */
+const bodyEditor = computed<"ai" | "manual" | null>(() =>
+  descriptionDraft.value ? "ai" : editingBody.value !== null ? "manual" : null,
+);
+
+/** Editable in the Raw tab; writes back into whichever draft is open. */
+const editorBody = computed({
+  get: () =>
+    bodyEditor.value === "ai" ? descriptionDraft.value!.body : (editingBody.value ?? ""),
+  set: (body: string) => {
+    if (bodyEditor.value === "ai") {
+      const n = p.prDetail.value?.number;
+      if (n != null) prDescription.setPendingBody(p.cwd.value, n, body);
+    } else if (editingBody.value !== null) {
+      editingBody.value = body;
+    }
+  },
+});
+const editorHtml = computed(() => renderMarkdown(editorBody.value));
+
+async function updateDescriptionWithAI() {
+  const detail = p.prDetail.value;
+  if (!detail) return;
+  // Same per-repo output language as PR creation.
+  try {
+    await prDescription.update(p.cwd.value, detail, { locale: getTemplateLang("pr", p.cwd.value) });
+    descriptionTab.value = "formatted";
+  } catch {
+    // updateError is set by the composable and rendered below.
+  }
+}
+
+function startBodyEdit() {
+  editingBody.value = p.prDetail.value?.body ?? "";
+  descriptionTab.value = "raw";
+}
+
+/** `target` pins the PR the editor belongs to when closing after an await. */
+function closeBodyEditor(kind: "ai" | "manual", target?: { cwd: string; number: number }) {
+  const cwd = target?.cwd ?? p.cwd.value;
+  const n = target?.number ?? p.prDetail.value?.number;
+  if (kind === "ai") {
+    if (n != null) prDescription.clearPendingUpdate(cwd, n);
+  } else if (!target || (target.cwd === p.cwd.value && target.number === n && n === p.prDetail.value?.number)) {
+    editingBody.value = null;
+  }
+}
+
+async function saveBody() {
+  const number = p.prDetail.value?.number;
+  const kind = bodyEditor.value;
+  if (number == null || !kind) return;
+  const target = { cwd: p.cwd.value, number };
+  savingBody.value = true;
+  try {
+    if (await p.updatePr(number, { body: editorBody.value })) closeBodyEditor(kind, target);
+  } finally {
+    savingBody.value = false;
+  }
+}
+
+function startTitleEdit() {
+  editingTitle.value = p.prDetail.value?.title ?? "";
+  nextTick(() => {
+    titleInput.value?.focus();
+    titleInput.value?.select();
+  });
+}
+
+async function saveTitle() {
+  const detail = p.prDetail.value;
+  const title = editingTitle.value?.trim();
+  if (!detail || !title) return;
+  if (title === detail.title) {
+    editingTitle.value = null;
+    return;
+  }
+  savingTitle.value = true;
+  try {
+    if (await p.updatePr(detail.number, { title })) editingTitle.value = null;
+  } finally {
+    savingTitle.value = false;
+  }
+}
 
 const commitsUrl = computed(() => {
   const base = p.prDetail.value?.url || "";
@@ -415,86 +558,135 @@ function submitRequestReviewers() {
         <div class="pdv-hero-top">
           <div class="pdv-hero-title">
             <span class="pdv-pr-num">#{{ p.prDetail.value.number }}</span>
-            <h1 class="pdv-pr-title">{{ p.prDetail.value.title }}</h1>
-            <!-- SWR: cached detail is on screen; show a small badge while the
-                 background revalidation runs. -->
-            <span
-              v-if="p.detailRefreshing.value"
-              class="pdv-refresh-badge"
-              role="status"
-              :title="t('pr.detail.refreshing')"
-            >
-              <span class="pdv-spinner pdv-spinner--sm" aria-hidden="true"></span>
-              {{ t('pr.detail.refreshing') }}
-            </span>
+            <div class="pdv-hero-title-text">
+              <form v-if="editingTitle !== null" class="pdv-title-edit" @submit.prevent="saveTitle">
+                <input
+                  ref="titleInput"
+                  v-model="editingTitle"
+                  class="pdv-title-input"
+                  type="text"
+                  spellcheck="true"
+                  :aria-label="t('pr.detail.editTitle')"
+                  :disabled="savingTitle"
+                  @keydown.esc.prevent="editingTitle = null"
+                />
+                <div class="pdv-title-edit-actions">
+                  <button
+                    type="button"
+                    class="pdv-btn pdv-btn--sm pdv-btn--ghost"
+                    :disabled="savingTitle"
+                    @click="editingTitle = null"
+                  >
+                    {{ t('pr.detail.editCancel') }}
+                  </button>
+                  <button
+                    type="submit"
+                    class="pdv-btn pdv-btn--sm pdv-btn--primary"
+                    :disabled="savingTitle || !editingTitle.trim()"
+                  >
+                    {{ savingTitle ? t('pr.detail.editSaving') : t('pr.detail.editSave') }}
+                  </button>
+                </div>
+              </form>
+              <h1 v-else class="pdv-pr-title">
+                {{ p.prDetail.value.title }}
+                <button
+                  v-if="canEditPr && !isAiUpdating"
+                  type="button"
+                  class="pdv-edit-btn pdv-edit-btn--title"
+                  :title="t('pr.detail.editTitle')"
+                  :aria-label="t('pr.detail.editTitle')"
+                  @click="startTitleEdit"
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M11 2.5l2.5 2.5L6 12.5l-3.2.7.7-3.2L11 2.5z" />
+                  <path d="M9.5 4l2.5 2.5" />
+                </svg>
+                </button>
+              </h1>
+              <!-- SWR: cached detail is on screen; show a small badge under the
+                   title while the background revalidation runs. -->
+              <span
+                v-if="p.detailRefreshing.value"
+                class="pdv-refresh-badge"
+                role="status"
+                :title="t('pr.detail.refreshing')"
+              >
+                <span class="pdv-spinner pdv-spinner--sm" aria-hidden="true"></span>
+                {{ t('pr.detail.refreshing') }}
+              </span>
+            </div>
           </div>
           <div class="pdv-hero-actions">
-            <button class="pdv-btn" @click="openInBrowser(p.prDetail.value.url)" :title="p.forgeLabel.value">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M6.5 3H3v10h10V9.5M9.5 2.5H13V6M13 3l-6 6" />
-              </svg>
-              <span>{{ p.forgeLabel.value }}</span>
-            </button>
-            <button class="pdv-btn" @click="p.checkoutPr(p.selectedPr.value!)">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 8h10M8 3l5 5-5 5" />
-              </svg>
-              <span>{{ t('pr.detail.checkout') }}</span>
-            </button>
-            <button
-              v-if="isOpenPr && p.prDetail.value?.draft"
-              class="pdv-btn pdv-btn--accent"
-              @click="p.convertDraftToReady(p.selectedPr.value!)"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 8l4 4 6-7"/>
-              </svg>
-              <span>{{ t('pr.detail.markAsReady') }}</span>
-            </button>
-            <button
-              v-if="isOpenPr"
-              class="pdv-btn pdv-btn--primary"
-              :disabled="p.mergeBlocked.value"
-              :title="p.mergeBlocked.value ? p.mergeBlockedReason.value : undefined"
-              @click="p.mergingPr.value = p.selectedPr.value"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="4" cy="4" r="2" />
-                <circle cx="4" cy="12" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <path d="M4 6v4" />
-                <path d="M4 12a8 8 0 0 0 8-8" />
-              </svg>
-              <span>{{ t('pr.detail.merge') }}</span>
-            </button>
-            <button
-              v-if="isOpenPr && p.autoMergeOffer.value.kind === 'arm'"
-              class="pdv-btn"
-              @click="p.armAutoMerge()"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="8" cy="8" r="6" />
-                <path d="M8 4.5V8l2.6 1.6" />
-              </svg>
-              <span>{{ t('pr.detail.autoMergeArm') }}</span>
-            </button>
-            <span v-else-if="isOpenPr && p.autoMergeOffer.value.kind === 'disarm'" class="pdv-automerge-armed">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="8" cy="8" r="6" />
-                <path d="M8 4.5V8l2.6 1.6" />
-              </svg>
-              <span>{{ t('pr.detail.autoMergeArmed') }}</span>
-              <button class="pdv-btn pdv-btn--sm pdv-btn--ghost" @click="p.disarmAutoMerge()">
-                {{ t('pr.detail.autoMergeDisarm') }}
+            <div class="pdv-hero-buttons">
+              <button class="pdv-btn" @click="openInBrowser(p.prDetail.value.url)" :title="p.forgeLabel.value">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M6.5 3H3v10h10V9.5M9.5 2.5H13V6M13 3l-6 6" />
+                </svg>
+                <span>{{ p.forgeLabel.value }}</span>
               </button>
-            </span>
-            <span
-              v-else-if="isOpenPr && p.autoMergeOffer.value.kind === 'explain'"
+              <button class="pdv-btn" @click="p.checkoutPr(p.selectedPr.value!)">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 8h10M8 3l5 5-5 5" />
+                </svg>
+                <span>{{ t('pr.detail.checkout') }}</span>
+              </button>
+              <button
+                v-if="isOpenPr && p.prDetail.value?.draft"
+                class="pdv-btn pdv-btn--accent"
+                @click="p.convertDraftToReady(p.selectedPr.value!)"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 8l4 4 6-7"/>
+                </svg>
+                <span>{{ t('pr.detail.markAsReady') }}</span>
+              </button>
+              <button
+                v-if="isOpenPr"
+                class="pdv-btn pdv-btn--primary"
+                :disabled="p.mergeBlocked.value"
+                :title="p.mergeBlocked.value ? p.mergeBlockedReason.value : undefined"
+                @click="p.mergingPr.value = p.selectedPr.value"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="4" cy="4" r="2" />
+                  <circle cx="4" cy="12" r="2" />
+                  <circle cx="12" cy="12" r="2" />
+                  <path d="M4 6v4" />
+                  <path d="M4 12a8 8 0 0 0 8-8" />
+                </svg>
+                <span>{{ t('pr.detail.merge') }}</span>
+              </button>
+              <button
+                v-if="isOpenPr && p.autoMergeOffer.value.kind === 'arm'"
+                class="pdv-btn"
+                @click="p.armAutoMerge()"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6" />
+                  <path d="M8 4.5V8l2.6 1.6" />
+                </svg>
+                <span>{{ t('pr.detail.autoMergeArm') }}</span>
+              </button>
+              <span v-else-if="isOpenPr && p.autoMergeOffer.value.kind === 'disarm'" class="pdv-automerge-armed">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6" />
+                  <path d="M8 4.5V8l2.6 1.6" />
+                </svg>
+                <span>{{ t('pr.detail.autoMergeArmed') }}</span>
+                <button class="pdv-btn pdv-btn--sm pdv-btn--ghost" @click="p.disarmAutoMerge()">
+                  {{ t('pr.detail.autoMergeDisarm') }}
+                </button>
+              </span>
+            </div>
+            <!-- Under the buttons, not beside them: the reason can be long. -->
+            <p
+              v-if="isOpenPr && p.autoMergeOffer.value.kind === 'explain'"
               class="pdv-automerge-unavailable"
               :title="autoMergeExplainReason || undefined"
             >
               {{ t('pr.detail.autoMergeUnavailable') }}<template v-if="autoMergeExplainReason">: {{ autoMergeExplainReason }}</template>
-            </span>
+            </p>
           </div>
         </div>
 
@@ -789,8 +981,48 @@ function submitRequestReviewers() {
           <!-- Description -->
           <section class="pdv-section pdv-section--desc">
             <div class="pdv-desc-head">
-              <h2 class="pdv-section-label">{{ t('pr.detail.description') }}</h2>
-              <div v-if="p.prDetail.value.body" class="pdv-desc-tabs" role="tablist">
+              <span class="pdv-desc-title">
+                <h2 class="pdv-section-label">{{ t('pr.detail.description') }}</h2>
+                <button
+                  v-if="canEditPr && !bodyEditor && !isAiUpdating"
+                  type="button"
+                  class="pdv-edit-btn"
+                  :title="t('pr.detail.editDescription')"
+                  :aria-label="t('pr.detail.editDescription')"
+                  @click="startBodyEdit"
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M11 2.5l2.5 2.5L6 12.5l-3.2.7.7-3.2L11 2.5z" />
+                  <path d="M9.5 4l2.5 2.5" />
+                </svg>
+                </button>
+              </span>
+              <div v-if="canUpdateDescription && !bodyEditor" class="pdv-desc-ai-split">
+                <button
+                  type="button"
+                  class="btn btn--ai pdv-desc-ai pdv-desc-ai-main"
+                  :disabled="isAiUpdating"
+                  :title="t('pr.detail.aiUpdateHint')"
+                  @click="updateDescriptionWithAI"
+                >
+                  <span v-if="isAiUpdating" class="pdv-desc-ai-label ai-loading">
+                    <span class="pdv-spinner pdv-spinner--sm" aria-hidden="true"></span>
+                    {{ t('pr.detail.aiUpdating') }}
+                  </span>
+                  <span v-else class="pdv-desc-ai-label">
+                    <AiSparkle :size="13" />
+                    {{ t('pr.detail.aiUpdate') }}
+                    <span v-if="activePrTemplate" class="pdv-desc-ai-tpl">· {{ activePrTemplate.name }}</span>
+                  </span>
+                </button>
+                <AiTemplateMenu
+                  kind="pr"
+                  :cwd="p.cwd.value"
+                  :disabled="isAiUpdating"
+                  chevron-class="btn btn--ai pdv-desc-ai-chevron"
+                />
+              </div>
+              <div v-if="p.prDetail.value.body || bodyEditor" class="pdv-desc-tabs" role="tablist">
                 <button
                   type="button"
                   role="tab"
@@ -813,7 +1045,53 @@ function submitRequestReviewers() {
                 </button>
               </div>
             </div>
-            <div v-if="p.prDetail.value.body" class="pdv-desc-body">
+            <p v-if="descriptionError && !descriptionDraft" class="pdv-desc-error">
+              {{ descriptionError }}
+            </p>
+            <div v-if="bodyEditor" class="pdv-desc-body pdv-desc-body--draft">
+              <p class="pdv-desc-draft-note">
+                <AiSparkle v-if="bodyEditor === 'ai'" :size="12" />
+                {{ bodyEditor === 'ai' ? t('pr.detail.aiUpdateDraftNote') : t('pr.detail.editDraftNote') }}
+              </p>
+              <div
+                v-if="descriptionTab === 'formatted'"
+                class="pdv-body-formatted"
+                @click="handleDescriptionClick"
+                v-html="editorHtml"
+              />
+              <textarea
+                v-else
+                v-model="editorBody"
+                class="pdv-desc-draft-input"
+                spellcheck="true"
+                :aria-label="t('pr.detail.description')"
+                @keydown.esc.prevent="closeBodyEditor(bodyEditor)"
+              />
+              <div class="pdv-desc-draft-actions">
+                <button
+                  type="button"
+                  class="pdv-btn pdv-btn--sm pdv-btn--ghost"
+                  :disabled="savingBody"
+                  @click="closeBodyEditor(bodyEditor)"
+                >
+                  {{ bodyEditor === 'ai' ? t('pr.detail.aiUpdateDiscard') : t('pr.detail.editCancel') }}
+                </button>
+                <button
+                  type="button"
+                  class="pdv-btn pdv-btn--sm pdv-btn--primary"
+                  :disabled="savingBody || (bodyEditor === 'ai' && !editorBody.trim())"
+                  @click="saveBody"
+                >
+                  <template v-if="bodyEditor === 'ai'">
+                    {{ savingBody ? t('pr.detail.aiUpdateApplying') : t('pr.detail.aiUpdateApply') }}
+                  </template>
+                  <template v-else>
+                    {{ savingBody ? t('pr.detail.editSaving') : t('pr.detail.editSave') }}
+                  </template>
+                </button>
+              </div>
+            </div>
+            <div v-else-if="p.prDetail.value.body" class="pdv-desc-body">
               <div
                 v-if="descriptionTab === 'formatted'"
                 class="pdv-body-formatted"
@@ -1251,8 +1529,7 @@ function submitRequestReviewers() {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  flex-shrink: 0;
-  align-self: center;
+  align-self: flex-start;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -1282,6 +1559,84 @@ function submitRequestReviewers() {
   align-items: baseline;
   gap: var(--space-4);
   min-width: 0;
+  /* The 280px basis is what makes the actions wrap onto their own line on
+     narrow screens, rather than crushing the title. */
+  flex: 1 1 280px;
+}
+
+/* Small icon-only edit button (pencil) beside the title / description label. */
+.pdv-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.pdv-edit-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+.pdv-edit-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+/* Inline after the last word of the title, centred on its line. */
+.pdv-edit-btn--title {
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
+/* Full-width input with its actions on a row underneath. */
+.pdv-title-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 700px;
+}
+.pdv-title-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+.pdv-title-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-snug);
+}
+.pdv-title-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.pdv-desc-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Title + the refresh badge stacked under it. */
+.pdv-hero-title-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  /* Takes the row's remaining width so the title input can fill it. */
   flex: 1;
 }
 
@@ -1308,9 +1663,21 @@ function submitRequestReviewers() {
 
 .pdv-hero-actions {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  /* Stays right-aligned when wrapped onto its own line. */
+  margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.pdv-hero-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-3);
-  flex-shrink: 0;
   align-items: center;
+  max-width: 100%;
 }
 
 /* Forge-side auto-merge (v3.11.0): armed status + inline cancel. */
@@ -1330,11 +1697,12 @@ function submitRequestReviewers() {
 /* Disabled explanation row: the forge's own reason text is rendered as-is
    next to the label (never translated, see AGENTS.md's i18n rule). */
 .pdv-automerge-unavailable {
-  display: inline-flex;
-  align-items: center;
+  /* One line when there is room; wraps on narrow screens. */
+  margin: 0;
+  max-width: 100%;
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
-  white-space: nowrap;
+  text-align: right;
 }
 
 .pdv-hero-meta {
@@ -1563,6 +1931,9 @@ function submitRequestReviewers() {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-6) var(--space-7);
+  /* Clear the floating AppDock (12px offset + pill + breathing room) so the
+     last content can scroll out from under it. */
+  padding-bottom: calc(var(--space-6) + var(--app-dock-height, 44px) + 2 * var(--space-4, 12px));
 }
 
 /* ─── Info tab ───────────────────────────────────────────── */
@@ -2064,7 +2435,7 @@ function submitRequestReviewers() {
 .pdv-desc-tabs {
   display: inline-flex;
   background: var(--color-bg-tertiary);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   padding: 2px;
   gap: 2px;
 }
@@ -2073,7 +2444,7 @@ function submitRequestReviewers() {
   font-weight: var(--font-weight-medium);
   font-family: inherit;
   padding: 2px var(--space-4);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   border: none;
   background: transparent;
   color: var(--color-text-muted);
@@ -2095,6 +2466,102 @@ function submitRequestReviewers() {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
+}
+
+/* AI description update */
+/* Same compact, square-cornered split button as the PR create form's AI
+   button. The chevron and its template menu live in AiTemplateMenu, styled
+   from here via :deep(). */
+.pdv-desc-ai-split {
+  display: inline-flex;
+  margin-right: auto;
+}
+.btn.btn--ai.pdv-desc-ai {
+  min-height: 26px;
+  /* Narrower left side: the sparkle glyph carries its own inset. */
+  padding: 4px 12px 4px 8px;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+.pdv-desc-ai-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn.btn--ai.pdv-desc-ai-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-chevron) {
+  min-height: 26px;
+  padding: 4px 8px;
+  margin-left: -1px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-chevron:hover:not(:disabled)) {
+  color: var(--color-ai-text);
+  transform: none;
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+.pdv-desc-ai-tpl {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+.btn.btn--ai.pdv-desc-ai:hover:not(:disabled) {
+  color: var(--color-ai-text);
+  transform: none;
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+.pdv-desc-body--draft {
+  border-color: var(--color-accent);
+}
+.pdv-desc-draft-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+.pdv-desc-draft-input {
+  display: block;
+  width: 100%;
+  min-height: 280px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--space-5) var(--space-6);
+  border: none;
+  outline: none;
+  resize: vertical;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+}
+.pdv-desc-draft-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--color-border);
+}
+.pdv-desc-error {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-danger);
 }
 
 .pdv-body-formatted {

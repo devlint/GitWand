@@ -35,6 +35,7 @@ import {
   glDisableAutoMerge,
   glCheckoutMr,
   glConvertDraftToReady,
+  glMrEdit,
   glMrNotes,
   glMrCreateNote,
   glMrUpdateNote,
@@ -72,6 +73,7 @@ import type {
   ReviewerCandidate,
   Issue,
   Account,
+  PrEdit,
 } from "./types";
 import type { PendingReviewComment } from "../../utils/backend";
 
@@ -191,6 +193,10 @@ export class GitLabProvider implements ForgeProvider {
 
   convertDraftToReady(cwd: string, number: number): Promise<void> {
     return glConvertDraftToReady(cwd, number);
+  }
+
+  updatePR(cwd: string, number: number, edit: PrEdit): Promise<void> {
+    return glMrEdit(cwd, number, edit);
   }
 
   // ── Notes (comments) ───────────────────────────────────────────────────────

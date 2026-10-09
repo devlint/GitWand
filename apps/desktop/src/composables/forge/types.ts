@@ -28,6 +28,7 @@ import type {
   Issue,
   AutoMergeState,
   AutoMergeSupport,
+  PrEdit,
 } from "../../utils/backend";
 import type { Account } from "../useAccounts";
 
@@ -49,6 +50,7 @@ export type {
   Account,
   AutoMergeState,
   AutoMergeSupport,
+  PrEdit,
 };
 
 // ─── Options / Inputs ───────────────────────────────────────────────────────
@@ -224,6 +226,14 @@ export interface ForgeProvider {
 
   /** Convert a draft PR/MR to "ready for review". */
   convertDraftToReady(cwd: string, number: number): Promise<void>;
+
+  /**
+   * Edit the PR/MR title and/or description (Markdown body); a field left out
+   * of `edit` is unchanged. Optional: forges without a write API for it
+   * (Cursor) omit it, and callers hide the action — see `forgeSupportsEdit`
+   * in `usePrPanel`.
+   */
+  updatePR?(cwd: string, number: number, edit: PrEdit): Promise<void>;
 
   // ── Comments ──────────────────────────────────────────────────────────────
 

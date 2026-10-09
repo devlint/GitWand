@@ -1490,6 +1490,32 @@ pub(crate) fn rest_pr_ready(cwd: &str, number: i64, token: &str) -> Result<(), S
     Ok(())
 }
 
+/// Edit a PR's title and/or body.
+///
+/// The PR number refers to the list the user is looking at, and `rest_list_prs`
+/// lists the *base* repo (the upstream for a fork). Resolve the repo the same
+/// way — going through `get_pr_json` (origin first) would patch the fork's own
+/// PR of the same number.
+pub(crate) fn rest_pr_edit(
+    cwd: &str,
+    number: i64,
+    title: &Option<String>,
+    body: &Option<String>,
+    token: &str,
+) -> Result<(), String> {
+    let payload = super::pr_edit::edit_payload(title, body, "body")?;
+    let repo = match base_owner_repo(cwd, token) {
+        Ok(r) => r,
+        Err(_) => {
+            let (owner, repo) = owner_repo(cwd)?;
+            format!("{}/{}", owner, repo)
+        }
+    };
+    let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
+    api_json("PATCH", &url, token, Some(&payload.to_string()))?;
+    Ok(())
+}
+
 /// GraphQL equivalent of `gh pr merge --auto`, for the configured-token path.
 ///
 /// `enablePullRequestAutoMerge` takes the PR's node id, resolved the same way

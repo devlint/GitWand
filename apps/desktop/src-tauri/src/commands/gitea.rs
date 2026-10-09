@@ -1108,6 +1108,21 @@ pub(crate) async fn gitea_convert_draft_to_ready(cwd: String, index: i64) -> Res
     Ok(())
 }
 
+/// Edit a PR's title and/or body (a `None` field is left unchanged).
+#[tauri::command]
+pub(crate) async fn gitea_pr_edit(
+    cwd: String,
+    index: i64,
+    title: Option<String>,
+    body: Option<String>,
+) -> Result<(), String> {
+    let payload = super::pr_edit::edit_payload(&title, &body, "body")?.to_string();
+    let ctx = gitea_ctx(&cwd)?;
+    let url = format!("{}/pulls/{}", ctx.repo_api(), index);
+    gitea_curl("PATCH", &url, Some(&payload), &ctx.auth)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn gitea_branches(cwd: String) -> Result<Vec<String>, String> {
     let ctx = gitea_ctx(&cwd)?;

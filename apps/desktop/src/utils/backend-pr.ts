@@ -559,6 +559,12 @@ export async function ghPrReady(cwd: string, number: number): Promise<void> {
   return tauriInvoke<void>("gh_pr_ready", { cwd, number });
 }
 
+/** Edit a PR's title and/or description; an omitted field is left unchanged. */
+export async function ghPrEdit(cwd: string, number: number, edit: PrEdit): Promise<void> {
+  if (!isTauri()) throw new Error("ghPrEdit requires Tauri");
+  return tauriInvoke<void>("gh_pr_edit", { cwd, number, title: edit.title ?? null, body: edit.body ?? null });
+}
+
 /** Dismiss a submitted review (B4, v3.6.0). */
 export async function ghDismissReview(
   cwd: string,
@@ -599,6 +605,12 @@ export async function ghRequestReviewers(
 }
 
 // ─── PR Detail, Diff & Checks (Phase 9.1) ──────────────────
+
+/** A PR title and/or description change. An omitted field is left as is. */
+export interface PrEdit {
+  title?: string;
+  body?: string;
+}
 
 export interface PullRequestDetail {
   number: number;
@@ -1421,6 +1433,11 @@ export async function azDisableAutoMerge(cwd: string, number: number): Promise<v
 
 export async function azPrReady(cwd: string, number: number): Promise<void> {
   if (isTauri()) return tauriInvoke<void>("az_pr_ready", { cwd, number });
+  throw new Error(AZURE_WEB_ONLY);
+}
+
+export async function azPrEdit(cwd: string, number: number, edit: PrEdit): Promise<void> {
+  if (isTauri()) return tauriInvoke<void>("az_pr_edit", { cwd, number, title: edit.title ?? null, body: edit.body ?? null });
   throw new Error(AZURE_WEB_ONLY);
 }
 
