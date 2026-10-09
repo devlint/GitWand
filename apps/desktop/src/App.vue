@@ -349,13 +349,14 @@ function showCommitReviewToast(title: string, detail: string) {
   showDetailToast(title, detail);
 }
 
-/** The shared toast with a detail line, shown for `ms`. */
-function showDetailToast(title: string, detail: string, ms = 3000) {
+/** The shared toast, shown for `ms` (0: until dismissed). */
+function showDetailToast(title: string, detail: string | null, ms = 3000) {
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  if (dismissTimer != null) { window.clearTimeout(dismissTimer); dismissTimer = null; }
   successToastLeaving.value = false;
   successToast.value = title;
-  successToastDetail.value = detail;
-  successTimer = window.setTimeout(dismissToast, ms);
+  successToastDetail.value = detail || null;
+  if (ms > 0) successTimer = window.setTimeout(dismissToast, ms);
 }
 
 /** `?` — a one-line toast (per the plan: reuse the existing toast
@@ -737,25 +738,24 @@ const successToastDetail = ref<string | null>(null);
 const successToastLeaving = ref(false);
 const memorizeToast = ref<{ path: string; strategy: ResolutionStrategy } | null>(null);
 let successTimer: number | null = null;
+// The fade-out of a dismissed toast, cancelled when a new one replaces it.
+let dismissTimer: number | null = null;
 
 function dismissToast() {
   successToastLeaving.value = true;
-  window.setTimeout(() => {
+  dismissTimer = window.setTimeout(() => {
     successToast.value = null;
     successToastDetail.value = null;
     successToastLeaving.value = false;
     successTimer = null;
+    dismissTimer = null;
   }, 200);
 }
 
 /** Transient toast for Launchpad mutating actions (merge/nudge) — reuses the
  *  existing toast affordance rather than inventing a second one. */
 function showLaunchpadToast(title: string) {
-  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
-  successToastLeaving.value = false;
-  successToast.value = title;
-  successToastDetail.value = null;
-  successTimer = window.setTimeout(dismissToast, 3000);
+  showDetailToast(title, null);
 }
 
 watch(repoSuccess, (val) => {
@@ -766,9 +766,6 @@ watch(repoSuccess, (val) => {
   if (val === "merge-done" && showMergeSuccess.value) return;
   // Respect the notifications setting
   if (!settings.value.notifications) return;
-
-  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
-  successToastLeaving.value = false;
 
   const meta: Record<string, { key: string; detail?: string }> = {
     "already-up-to-date": { key: "header.syncUpToDate" },
@@ -783,11 +780,12 @@ watch(repoSuccess, (val) => {
     "autostash-parked": { key: "header.pullAutostashParked" },
   };
   const info = meta[val];
-  successToast.value = info ? t(info.key as any) : val;
-  successToastDetail.value = new Date().toLocaleString(undefined, {
-    weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
-  });
-  successTimer = window.setTimeout(dismissToast, 3000);
+  showDetailToast(
+    info ? t(info.key as any) : val,
+    new Date().toLocaleString(undefined, {
+      weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+    }),
+  );
 });
 
 // ─── Conflict handling ──────────────────────────────────
@@ -2566,9 +2564,12 @@ async function resolveAiTaskOrigin(path: string, projectPath?: string): Promise<
   return main.path;
 }
 
-/** Tear down a scratch worktree once it has been removed from disk. */
-async function finalizeWorktreeRemoval(path: string, projectPath: string) {
-  aiTasks.unregister(path);
+/**
+ * Tear down a scratch worktree once it has been removed from disk.
+ * `keepTask`: it is still on disk, keep it registered as an AI task.
+ */
+async function finalizeWorktreeRemoval(path: string, projectPath: string, { keepTask = false } = {}) {
+  if (!keepTask) aiTasks.unregister(path);
   void refreshWorktreeCount(projectPath);
   aiTaskClose.value = null;
   // Reload the project's main checkout so the removed worktree AND its now-
@@ -2627,10 +2628,16 @@ async function onAiTaskMergeBack() {
     await termSessions.disposeRepo(target.path).catch(() => {});
     fileExplorer.disposeRepo(target.path);
     const { cleanup_warning } = await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
-    // Merged even when the scratch couldn't be removed: the task is closed,
-    // the leftover worktree is deleted like any other.
-    await finalizeWorktreeRemoval(target.path, target.projectPath);
-    if (cleanup_warning) showDetailToast(t("aiTask.mergedCleanupFailed"), cleanup_warning, 10000);
+    // Merged from here on, whatever follows. When the scratch couldn't be
+    // removed, it stays an AI task: deleting it then also drops its branch.
+    try {
+      await finalizeWorktreeRemoval(target.path, target.projectPath, { keepTask: cleanup_warning != null });
+    } catch (err) {
+      console.error("[ai-task] refresh after merge-back failed:", err);
+      aiTaskClose.value = null;
+    }
+    // No auto-dismiss: it may be the only sign the worktree is still there.
+    if (cleanup_warning) showDetailToast(t("aiTask.mergedCleanupFailed"), cleanup_warning, 0);
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
   } finally {

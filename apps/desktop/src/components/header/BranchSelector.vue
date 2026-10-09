@@ -463,12 +463,11 @@ const {
   discard: scratchDiscard,
 } = useScratchWorktree(() => props.cwd);
 
-// A merge-back whose cleanup failed still merged: say so where errors show.
-const scratchMessage = computed(() =>
-  scratchError.value ??
-  (scratchCleanupWarning.value
+// A merge-back whose cleanup failed still merged: news, not an error.
+const scratchNotice = computed(() =>
+  scratchCleanupWarning.value
     ? `${t("aiTask.mergedCleanupFailed")} ${scratchCleanupWarning.value}`
-    : null),
+    : null,
 );
 
 // Opening the scratch as a repo tab is what makes the sandbox usable: the user
@@ -804,7 +803,8 @@ onUnmounted(() => {
                   :target-branch="branchDisplay"
                   :scratch-active="scratchActive"
                   :scratch-loading="scratchLoading"
-                  :scratch-error="scratchMessage"
+                  :scratch-error="scratchError"
+                  :scratch-notice="scratchNotice"
                   :threshold="previewThreshold"
                   :estimated-auto-resolutions="previewEstimated"
                   :held-by-threshold="previewHeldBack"

@@ -527,14 +527,14 @@ fn scratch_worktree_merge_back_impl(
         &["worktree", "remove", "--force", &scratch.to_string_lossy()],
     )
     .err();
-    // Best-effort delete of the now-unused scratch branch, then prune. Only a
+    // Prune, then best-effort delete of the now-unused scratch branch. Only a
     // branch GitWand created: the user may have switched the scratch to theirs.
-    // Left alone while the worktree survives: git won't delete a checked-out
-    // branch, and the user removes both together later.
-    if cleanup_warning.is_none() && scratch_branch.starts_with("gitwand-scratch-") {
+    // Git keeps it while a surviving worktree has it checked out; deleting
+    // that worktree as an AI task (`scratch_worktree_discard`) drops it then.
+    let _ = git_in(&repo_root, &["worktree", "prune"]);
+    if scratch_branch.starts_with("gitwand-scratch-") {
         let _ = git_in(&repo_root, &["branch", "-D", &scratch_branch]);
     }
-    let _ = git_in(&repo_root, &["worktree", "prune"]);
 
     Ok(ScratchMergeBackOutcome { cleanup_warning })
 }
@@ -1577,8 +1577,19 @@ mod tests {
         let warning = outcome.cleanup_warning.expect("cleanup failure reported");
         assert!(warning.contains("locked"), "got: {}", warning);
 
+        // Still an AI task: a retry, once unlocked, changes nothing and cleans up.
         repo.git(&["worktree", "unlock", &scratch.path]);
-        let _ = scratch_worktree_discard_impl(repo.cwd(), scratch.path);
+        let outcome = scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), None)
+            .expect("retrying an applied merge-back is harmless");
+        assert!(outcome.cleanup_warning.is_none());
+        assert_eq!(repo.read("task.txt"), "agent edit\n");
+        assert!(!Path::new(&scratch.path).exists());
+        let branch_ref = format!("refs/heads/{}", scratch.branch);
+        assert!(
+            !git_at(&repo.cwd(), &["rev-parse", "--verify", "-q", &branch_ref])
+                .status
+                .success()
+        );
     }
 
     #[test]

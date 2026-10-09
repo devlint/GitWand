@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tauri::ipc::Channel;
@@ -295,55 +296,93 @@ pub(crate) fn terminal_resize(id: u64, cols: u16, rows: u16) -> Result<(), Strin
     result
 }
 
-/// Async so the bounded wait below runs off the main thread.
+/// Async, with the shutdown on a blocking thread: it waits for the processes.
 #[tauri::command]
 pub(crate) async fn terminal_close(id: u64) -> Result<(), String> {
     let handle = lock_sessions().remove(&id);
-    if let Some(mut h) = handle {
-        kill_session(&mut h);
-        // Reap the leader: once this returns, it no longer writes anywhere
-        // (merge-back of an AI task reads the scratch right after). Bounded,
-        // for a process stuck in an uninterruptible syscall.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while matches!(h.child.try_wait(), Ok(None)) && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+    if let Some(h) = handle {
+        tauri::async_runtime::spawn_blocking(move || close_sessions(vec![h]))
+            .await
+            .map_err(|e| format!("terminal close failed: {e}"))?;
     }
     Ok(())
 }
 
 /// Tue toutes les sessions (appelé au quit de l'app).
 pub(crate) fn terminal_close_all() {
-    let mut map = lock_sessions();
-    for (_, mut h) in map.drain() {
-        kill_session(&mut h);
+    let handles: Vec<PtyHandle> = lock_sessions().drain().map(|(_, h)| h).collect();
+    close_sessions(handles);
+}
+
+/// Stop sessions' processes, not only their leaders, and reap the leaders:
+/// once this returns they no longer write anywhere (merge-back of an AI task
+/// reads the scratch right after). SIGHUP first, as a terminal hanging up
+/// does, so shells save their history and agents their session; SIGKILL for
+/// whatever is left after a grace period. The wait is bounded, for a process
+/// stuck in an uninterruptible syscall. On Windows only the leader is killed.
+fn close_sessions(mut handles: Vec<PtyHandle>) {
+    #[cfg(unix)]
+    {
+        let groups: Vec<libc::pid_t> = handles.iter().flat_map(session_groups).collect();
+        stop_groups(&groups, || {
+            handles
+                .iter_mut()
+                .all(|h| !matches!(h.child.try_wait(), Ok(None)))
+        });
+    }
+    for h in &mut handles {
+        let _ = h.child.kill();
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    for h in &mut handles {
+        while matches!(h.child.try_wait(), Ok(None)) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 
-/// Kill a session's processes, not only its leader. The leader runs in its
-/// own session and process group (portable-pty `setsid`s it); what it spawns
-/// stays in that group, except jobs an interactive shell moves to their own,
-/// of which the foreground one is the terminal's process group. A background
-/// job of the shell, or a process that called `setsid` itself, survives.
-/// On Windows only the leader is killed.
-fn kill_session(h: &mut PtyHandle) {
-    #[cfg(unix)]
-    {
-        let foreground = h.master.lock().ok().and_then(|m| m.process_group_leader());
-        let leader = h.child.process_id().map(|p| p as libc::pid_t);
-        kill_process_groups(&[leader, foreground]);
+/// The process groups of a session. The leader runs in its own session and
+/// group (portable-pty `setsid`s it); what it spawns stays in that group,
+/// except jobs an interactive shell moves to their own, of which the
+/// foreground one is the terminal's group — taken only while its leader is
+/// still in this session, so a stale, reused id is never signalled. A
+/// background job of the shell, or a process that called `setsid`, survives.
+#[cfg(unix)]
+fn session_groups(h: &PtyHandle) -> Vec<libc::pid_t> {
+    let Some(leader) = h.child.process_id().map(|p| p as libc::pid_t) else {
+        return Vec::new();
+    };
+    let mut groups = vec![leader];
+    let foreground = h.master.lock().ok().and_then(|m| m.process_group_leader());
+    if let Some(fg) = foreground {
+        // SAFETY: plain syscall, no memory is shared with it.
+        if fg != leader && unsafe { libc::getsid(fg) } == leader {
+            groups.push(fg);
+        }
     }
-    let _ = h.child.kill();
+    groups
+}
+
+/// SIGHUP `groups`, give them up to 500 ms (or until `exited`), then SIGKILL
+/// what is left.
+#[cfg(unix)]
+fn stop_groups(groups: &[libc::pid_t], mut exited: impl FnMut() -> bool) {
+    signal_groups(groups, libc::SIGHUP);
+    let deadline = Instant::now() + Duration::from_millis(500);
+    while !exited() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    signal_groups(groups, libc::SIGKILL);
 }
 
 #[cfg(unix)]
-fn kill_process_groups(groups: &[Option<libc::pid_t>]) {
-    for &pgid in groups.iter().flatten() {
+fn signal_groups(groups: &[libc::pid_t], signal: libc::c_int) {
+    for &pgid in groups {
         // Never 0 (our own group), 1 (init's) or GitWand's own group.
+        // SAFETY: plain syscalls, no memory is shared with them.
         if pgid > 1 && pgid != unsafe { libc::getpgrp() } {
-            // SAFETY: plain syscall, no memory is shared with it.
             unsafe {
-                libc::killpg(pgid, libc::SIGKILL);
+                libc::killpg(pgid, signal);
             }
         }
     }
@@ -355,19 +394,17 @@ mod tests {
     use std::io::BufRead;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
 
     fn alive(pid: libc::pid_t) -> bool {
         // SAFETY: signal 0 only checks the pid exists.
         unsafe { libc::kill(pid, 0) == 0 }
     }
 
-    #[test]
-    fn killing_the_group_takes_the_leaders_children_too() {
-        // A leader in its own group with a child that outlives a plain kill
-        // of the leader, like an agent's subprocess.
+    /// A leader in its own group, with a child that outlives a plain kill of
+    /// the leader, like an agent's subprocess. Returns (leader, child pid).
+    fn spawn_group(script: &str) -> (std::process::Child, libc::pid_t) {
         let mut leader = Command::new("sh")
-            .args(["-c", "sleep 30 & echo $!; wait"])
+            .args(["-c", script])
             .process_group(0)
             .stdout(Stdio::piped())
             .spawn()
@@ -378,15 +415,48 @@ mod tests {
             .unwrap();
         let child: libc::pid_t = line.trim().parse().unwrap();
         assert!(alive(child));
+        (leader, child)
+    }
 
-        kill_process_groups(&[Some(leader.id() as libc::pid_t), None]);
-        leader.wait().unwrap();
-
-        // The orphan is reaped by init, asynchronously.
+    fn wait_gone(pid: libc::pid_t) -> bool {
+        // An orphan is reaped by init, asynchronously.
         let deadline = Instant::now() + Duration::from_secs(5);
-        while alive(child) && Instant::now() < deadline {
+        while alive(pid) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(!alive(child), "the leader's child must be killed too");
+        !alive(pid)
+    }
+
+    #[test]
+    fn stopping_the_group_takes_the_leaders_children_too() {
+        // The child ignores SIGHUP: only the SIGKILL that follows stops it.
+        let (mut leader, child) = spawn_group("(trap '' HUP; sleep 30) & echo $!; wait");
+        let leader_pid = leader.id() as libc::pid_t;
+
+        stop_groups(&[leader_pid], || false);
+        leader.wait().unwrap();
+        assert!(wait_gone(child), "the leader's child must be killed too");
+    }
+
+    #[test]
+    fn stopping_the_group_hangs_up_before_killing() {
+        let marker = std::env::temp_dir().join(format!("gitwand-term-hup-{}", std::process::id()));
+        let script = format!(
+            "trap 'echo hup > {}; exit 0' HUP; sleep 30 & echo $!; wait",
+            marker.display()
+        );
+        let (mut leader, child) = spawn_group(&script);
+        let leader_pid = leader.id() as libc::pid_t;
+
+        let mut status = None;
+        stop_groups(&[leader_pid], || {
+            status = leader.try_wait().unwrap();
+            status.is_some()
+        });
+        let status = status.or_else(|| leader.wait().ok()).unwrap();
+        assert!(status.success(), "the leader exits on its own on SIGHUP");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "hup\n");
+        assert!(wait_gone(child));
+        let _ = std::fs::remove_file(marker);
     }
 }
