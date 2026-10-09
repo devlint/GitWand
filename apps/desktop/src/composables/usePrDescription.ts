@@ -62,7 +62,7 @@ Base branch: ${base}
 --- commits (${head} not in ${base}, newest first) ---
 ${commits.trim() || "(no commits yet)"}
 
---- diffstat (${base}..${head}) ---
+--- diffstat (${base}...${head}, i.e. since the merge base) ---
 ${diffstat.trim() || "(empty)"}
 
 Write the PR description.`;
@@ -130,7 +130,7 @@ ${currentBody.trim() || "(empty)"}
 --- commits (${head} not in ${base}, newest first) ---
 ${commits.trim() || "(no commits yet)"}
 
---- diffstat (${base}..${head}) ---
+--- diffstat (${base}...${head}, i.e. since the merge base) ---
 ${diffstat.trim() || "(empty)"}
 
 Write the updated PR description.`;
@@ -196,6 +196,11 @@ async function collectRange(
   maxStatChars: number,
 ): Promise<{ commits: string; diffstat: string }> {
   const range = `${baseRef}..${headRef}`;
+  // The diffstat uses the merge base (three dots): if the base branch moved on
+  // since the PR branched off, `base..head` would count the base's own new
+  // changes as if the PR made them. The commit list is already "in head, not
+  // in base", which `..` expresses correctly.
+  const statRange = `${baseRef}...${headRef}`;
   let logRes, statRes;
   try {
     [logRes, statRes] = await Promise.all([
@@ -208,7 +213,7 @@ async function collectRange(
         "--no-color",
         "--pretty=format:--- %h%n%s%n%b",
       ]),
-      gitExec(cwd, ["diff", "--stat", "--no-color", range]),
+      gitExec(cwd, ["diff", "--stat", "--no-color", statRange]),
     ]);
   } catch (execErr: unknown) {
     throw new Error(
@@ -260,14 +265,25 @@ export interface PendingPrDescriptionUpdate {
 const isGenerating = ref(false);
 const lastError = ref<string | null>(null);
 const lastResult = ref<PrDescription | null>(null);
-const isUpdating = ref(false);
-const updateError = ref<string | null>(null);
+
 /**
- * Module-level, like the generate state: the model may answer after the user
- * navigated to another PR, and the draft must still be there when they come
- * back. Keyed by cwd + PR number so it never shows on the wrong PR.
+ * Update state is module-level, like the generate state: the model may answer
+ * after the user navigated to another PR, and the draft must still be there
+ * when they come back. Everything is keyed by repo + PR number so a draft or
+ * an error never shows on, or gets replaced by, another PR.
  */
-const pendingUpdate = ref<PendingPrDescriptionUpdate | null>(null);
+const pendingUpdates = ref<Record<string, PendingPrDescriptionUpdate>>({});
+const updateErrors = ref<Record<string, string>>({});
+const updating = ref<Record<string, true>>({});
+
+function prKey(cwd: string, number: number): string {
+  return `${cwd}\u0000${number}`;
+}
+
+function omit<T>(rec: Record<string, T>, key: string): Record<string, T> {
+  const { [key]: _gone, ...rest } = rec;
+  return rest;
+}
 
 export function usePrDescription() {
   const ai = useAIProvider();
@@ -353,8 +369,9 @@ export function usePrDescription() {
   ): Promise<string> {
     const { locale = "fr", maxStatChars = 8_000, maxCommits = 40 } = options;
 
-    isUpdating.value = true;
-    updateError.value = null;
+    const key = prKey(cwd, pr.number);
+    updating.value = { ...updating.value, [key]: true };
+    updateErrors.value = omit(updateErrors.value, key);
 
     try {
       if (!ai.isAvailable.value) {
@@ -389,20 +406,41 @@ export function usePrDescription() {
       }
 
       const body = restoreMedia(text, masked.media);
-      pendingUpdate.value = { cwd, number: pr.number, body };
+      pendingUpdates.value = { ...pendingUpdates.value, [key]: { cwd, number: pr.number, body } };
       return body;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      updateError.value = msg;
+      updateErrors.value = { ...updateErrors.value, [key]: msg };
       throw err;
     } finally {
-      isUpdating.value = false;
+      updating.value = omit(updating.value, key);
     }
   }
 
-  function clearPendingUpdate() {
-    pendingUpdate.value = null;
-    updateError.value = null;
+  /** The AI draft waiting on this PR, if any. */
+  function pendingUpdateFor(cwd: string, number: number): PendingPrDescriptionUpdate | null {
+    return pendingUpdates.value[prKey(cwd, number)] ?? null;
+  }
+
+  /** The last update error of this PR, if any. */
+  function updateErrorFor(cwd: string, number: number): string | null {
+    return updateErrors.value[prKey(cwd, number)] ?? null;
+  }
+
+  function isUpdatingFor(cwd: string, number: number): boolean {
+    return prKey(cwd, number) in updating.value;
+  }
+
+  /** Replace the body of an open draft (the user edited it before applying). */
+  function setPendingBody(cwd: string, number: number, body: string) {
+    const d = pendingUpdateFor(cwd, number);
+    if (d) pendingUpdates.value = { ...pendingUpdates.value, [prKey(cwd, number)]: { ...d, body } };
+  }
+
+  function clearPendingUpdate(cwd: string, number: number) {
+    const key = prKey(cwd, number);
+    pendingUpdates.value = omit(pendingUpdates.value, key);
+    updateErrors.value = omit(updateErrors.value, key);
   }
 
   return {
@@ -410,10 +448,11 @@ export function usePrDescription() {
     lastError,
     lastResult,
     generate,
-    isUpdating,
-    updateError,
-    pendingUpdate,
     update,
+    pendingUpdateFor,
+    updateErrorFor,
+    isUpdatingFor,
+    setPendingBody,
     clearPendingUpdate,
   };
 }

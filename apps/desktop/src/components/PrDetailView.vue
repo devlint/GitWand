@@ -68,8 +68,17 @@ const canUpdateDescription = computed(() => canEditPr.value && ai.isAvailable.va
 const { activeTemplate: activePrTemplate } = useAiTemplates("pr", () => p.cwd.value);
 
 const descriptionDraft = computed(() => {
-  const d = prDescription.pendingUpdate.value;
-  return d && d.cwd === p.cwd.value && d.number === p.prDetail.value?.number ? d : null;
+  const n = p.prDetail.value?.number;
+  return n == null ? null : prDescription.pendingUpdateFor(p.cwd.value, n);
+});
+const descriptionError = computed(() => {
+  const n = p.prDetail.value?.number;
+  return n == null ? null : prDescription.updateErrorFor(p.cwd.value, n);
+});
+/** An AI update is running for the PR on screen. */
+const isAiUpdating = computed(() => {
+  const n = p.prDetail.value?.number;
+  return n != null && prDescription.isUpdatingFor(p.cwd.value, n);
 });
 
 /** Manual description edit in progress; null when not editing. */
@@ -79,6 +88,13 @@ const editingTitle = ref<string | null>(null);
 const titleInput = ref<HTMLInputElement | null>(null);
 const savingTitle = ref(false);
 const savingBody = ref(false);
+
+// While the AI drafts, a manual edit is locked out: applying the draft would
+// overwrite it. An edit buffer left open when the draft arrives is dropped for
+// the same reason — it must not resurface after Apply / Discard.
+watch(descriptionDraft, (d) => {
+  if (d) editingBody.value = null;
+});
 
 // A manual edit belongs to the PR it was started on.
 watch(
@@ -100,8 +116,8 @@ const editorBody = computed({
     bodyEditor.value === "ai" ? descriptionDraft.value!.body : (editingBody.value ?? ""),
   set: (body: string) => {
     if (bodyEditor.value === "ai") {
-      const d = prDescription.pendingUpdate.value;
-      if (d) prDescription.pendingUpdate.value = { ...d, body };
+      const n = p.prDetail.value?.number;
+      if (n != null) prDescription.setPendingBody(p.cwd.value, n, body);
     } else if (editingBody.value !== null) {
       editingBody.value = body;
     }
@@ -127,8 +143,10 @@ function startBodyEdit() {
 }
 
 function closeBodyEditor(kind: "ai" | "manual") {
-  if (kind === "ai") prDescription.clearPendingUpdate();
-  else editingBody.value = null;
+  const n = p.prDetail.value?.number;
+  if (kind === "ai") {
+    if (n != null) prDescription.clearPendingUpdate(p.cwd.value, n);
+  } else editingBody.value = null;
 }
 
 async function saveBody() {
@@ -565,7 +583,7 @@ function submitRequestReviewers() {
               <h1 v-else class="pdv-pr-title">
                 {{ p.prDetail.value.title }}
                 <button
-                  v-if="canEditPr"
+                  v-if="canEditPr && !isAiUpdating"
                   type="button"
                   class="pdv-edit-btn pdv-edit-btn--title"
                   :title="t('pr.detail.editTitle')"
@@ -958,7 +976,7 @@ function submitRequestReviewers() {
               <span class="pdv-desc-title">
                 <h2 class="pdv-section-label">{{ t('pr.detail.description') }}</h2>
                 <button
-                  v-if="canEditPr && !bodyEditor"
+                  v-if="canEditPr && !bodyEditor && !isAiUpdating"
                   type="button"
                   class="pdv-edit-btn"
                   :title="t('pr.detail.editDescription')"
@@ -975,11 +993,11 @@ function submitRequestReviewers() {
                 <button
                   type="button"
                   class="btn btn--ai pdv-desc-ai pdv-desc-ai-main"
-                  :disabled="prDescription.isUpdating.value"
+                  :disabled="isAiUpdating"
                   :title="t('pr.detail.aiUpdateHint')"
                   @click="updateDescriptionWithAI"
                 >
-                  <span v-if="prDescription.isUpdating.value" class="pdv-desc-ai-label ai-loading">
+                  <span v-if="isAiUpdating" class="pdv-desc-ai-label ai-loading">
                     <span class="pdv-spinner pdv-spinner--sm" aria-hidden="true"></span>
                     {{ t('pr.detail.aiUpdating') }}
                   </span>
@@ -992,7 +1010,7 @@ function submitRequestReviewers() {
                 <AiTemplateMenu
                   kind="pr"
                   :cwd="p.cwd.value"
-                  :disabled="prDescription.isUpdating.value"
+                  :disabled="isAiUpdating"
                   chevron-class="btn btn--ai pdv-desc-ai-chevron"
                 />
               </div>
@@ -1019,8 +1037,8 @@ function submitRequestReviewers() {
                 </button>
               </div>
             </div>
-            <p v-if="prDescription.updateError.value && !descriptionDraft" class="pdv-desc-error">
-              {{ prDescription.updateError.value }}
+            <p v-if="descriptionError && !descriptionDraft" class="pdv-desc-error">
+              {{ descriptionError }}
             </p>
             <div v-if="bodyEditor" class="pdv-desc-body pdv-desc-body--draft">
               <p class="pdv-desc-draft-note">

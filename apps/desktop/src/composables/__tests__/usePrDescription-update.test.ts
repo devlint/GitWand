@@ -45,21 +45,22 @@ describe("usePrDescription.update", () => {
     rawPromptMock.mockReset();
     gitExecMock.mockReset();
     isAvailableRef.value = true;
-    usePrDescription().clearPendingUpdate();
+    usePrDescription().clearPendingUpdate("/repo", 42);
+    usePrDescription().clearPendingUpdate("/repo", 43);
   });
 
   it("sends placeholders instead of media and restores the originals", async () => {
     fakeGit(["deadbeef", "origin/main"]);
     rawPromptMock.mockResolvedValue("## Summary\nAdds export and import.\n\n[[IMAGE_1]]\n\n## Demo\n[[IMAGE_2]]");
 
-    const { update, pendingUpdate } = usePrDescription();
+    const { update, pendingUpdateFor } = usePrDescription();
     const body = await update("/repo", pr);
 
     const [, userPrompt] = rawPromptMock.mock.calls[0];
     expect(userPrompt).toContain("[[IMAGE_1]]");
     expect(userPrompt).not.toContain("user-attachments");
     expect(body).toBe(`## Summary\nAdds export and import.\n\n${screenshot}\n\n## Demo\n${video}`);
-    expect(pendingUpdate.value).toEqual({ cwd: "/repo", number: 42, body });
+    expect(pendingUpdateFor("/repo", 42)).toEqual({ cwd: "/repo", number: 42, body });
   });
 
   it("appends media the model dropped", async () => {
@@ -85,11 +86,40 @@ describe("usePrDescription.update", () => {
 
   it("fails without calling the model when the refs are not in the repo", async () => {
     fakeGit([]);
-    const { update, updateError, pendingUpdate } = usePrDescription();
+    const { update, updateErrorFor, pendingUpdateFor } = usePrDescription();
     await expect(update("/repo", pr)).rejects.toThrow();
     expect(rawPromptMock).not.toHaveBeenCalled();
-    expect(updateError.value).toBeTruthy();
-    expect(pendingUpdate.value).toBeNull();
+    expect(updateErrorFor("/repo", 42)).toBeTruthy();
+    expect(pendingUpdateFor("/repo", 42)).toBeNull();
+  });
+
+  it("diffs against the merge base (three dots) while listing commits with two", async () => {
+    fakeGit(["deadbeef", "origin/main"]);
+    rawPromptMock.mockResolvedValue("x");
+    await usePrDescription().update("/repo", pr);
+    expect(gitExecMock).toHaveBeenCalledWith("/repo", ["diff", "--stat", "--no-color", "origin/main...deadbeef"]);
+    expect(gitExecMock).toHaveBeenCalledWith("/repo", expect.arrayContaining(["log", "origin/main..deadbeef"]));
+  });
+
+  it("keeps drafts and errors per PR", async () => {
+    fakeGit(["deadbeef", "origin/main"]);
+    const { update, pendingUpdateFor, updateErrorFor, clearPendingUpdate } = usePrDescription();
+    rawPromptMock.mockResolvedValueOnce("draft for 42");
+    await update("/repo", pr);
+    rawPromptMock.mockResolvedValueOnce("draft for 43");
+    await update("/repo", { ...pr, number: 43 });
+    expect(pendingUpdateFor("/repo", 42)?.body).toContain("draft for 42");
+    expect(pendingUpdateFor("/repo", 43)?.body).toContain("draft for 43");
+    expect(pendingUpdateFor("/other", 42)).toBeNull();
+
+    rawPromptMock.mockResolvedValueOnce("");
+    await expect(update("/repo", { ...pr, number: 43 })).rejects.toThrow();
+    expect(updateErrorFor("/repo", 43)).toBeTruthy();
+    expect(updateErrorFor("/repo", 42)).toBeNull();
+
+    clearPendingUpdate("/repo", 43);
+    expect(pendingUpdateFor("/repo", 43)).toBeNull();
+    expect(pendingUpdateFor("/repo", 42)).not.toBeNull();
   });
 
   it("strips a markdown fence wrapped around the whole answer", async () => {
