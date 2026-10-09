@@ -10,7 +10,7 @@
 
 import { createServer } from "node:http";
 import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, watch } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, chmodSync, watch } from "node:fs";
 import { resolve, join, dirname, basename, sep, isAbsolute, relative } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
@@ -501,7 +501,9 @@ const CLAUDE_CONFIG_ENV = new Set([
   "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY",
   "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_SUBAGENT_MODEL",
   "CLAUDE_CODE_API_KEY_HELPER_TTL_MS", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-  "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "CLAUDE_CODE_PROXY_RESOLVES_HOSTS", "MAX_THINKING_TOKENS",
+  "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "CLAUDE_CODE_PROXY_RESOLVES_HOSTS",
+  "CLAUDE_CODE_GIT_BASH_PATH", "CLAUDE_CODE_SHELL", "CLAUDE_CODE_MAX_RETRIES", "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",
+  "API_TIMEOUT_MS", "ANTHROPIC_BETAS", "DISABLE_COST_WARNINGS", "MAX_THINKING_TOKENS",
   "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "DISABLE_AUTOUPDATER", "DISABLE_PROMPT_CACHING",
   "DISABLE_NON_ESSENTIAL_MODEL_CALLS",
 ]);
@@ -523,8 +525,17 @@ const AI_ENV_PROVIDER = {
     "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_GENAI_USE_VERTEXAI",
   ].includes(k),
 };
-function aiSpawnEnv(cli) {
+/** Mirrors `cached_ai_env_context` (ai.rs): config files read at most every 10 s per CLI. */
+const aiEnvContextCache = new Map();
+function cachedAiEnvContext(cli) {
+  const hit = aiEnvContextCache.get(cli);
+  if (hit && Date.now() - hit.at < 10_000) return hit.ctx;
   const ctx = aiEnvContext(cli);
+  aiEnvContextCache.set(cli, { at: Date.now(), ctx });
+  return ctx;
+}
+function aiSpawnEnv(cli) {
+  const ctx = cachedAiEnvContext(cli);
   const env = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (AI_ENV_BASE.has(k) || AI_ENV_BASE.has(k.toUpperCase()) || k.startsWith("LC_")
@@ -543,16 +554,45 @@ const CLAUDE_DENIED_TOOLS = [
 /** Mirrors `claude_caps` (ai.rs): lockdown flags the installed claude knows, cached per binary. */
 const claudeCapsCache = new Map();
 function claudeCaps(bin) {
-  if (!claudeCapsCache.has(bin)) {
-    const r = spawnSync(bin, ["--help"], { encoding: "utf-8", env: aiSpawnEnv("claude") });
-    const words = new Set(String(r.stdout || "").split(/[\s,]+/));
-    claudeCapsCache.set(bin, {
-      tools: words.has("--tools"),
-      settingSources: words.has("--setting-sources"),
-      strictMcp: words.has("--strict-mcp-config"),
-    });
+  // Keyed on the binary's identity (path, size, mtime); 10 s probe; a failed
+  // or empty probe is not cached. Mirrors `claude_caps` (ai.rs).
+  let id = bin;
+  try { const st = statSync(bin); id = `${bin}\0${st.size}\0${st.mtimeMs}`; } catch { /* keep path */ }
+  if (claudeCapsCache.has(id)) return claudeCapsCache.get(id);
+  const r = spawnSync(bin, ["--help"], { encoding: "utf-8", env: aiSpawnEnv("claude"), timeout: 10_000 });
+  const help = r.status === 0 ? String(r.stdout || "") : "";
+  const words = new Set(help.split(/[\s,]+/));
+  const caps = {
+    tools: words.has("--tools"),
+    settingSources: words.has("--setting-sources"),
+    strictMcp: words.has("--strict-mcp-config"),
+  };
+  if (help.trim()) claudeCapsCache.set(id, caps);
+  return caps;
+}
+/**
+ * Mirrors `ai_neutral_dir` (ai.rs): a private (0700, not a symlink) empty git
+ * repository under the user's cache dir — never the shared /tmp — for the AI
+ * CLIs that must not run inside the repository.
+ */
+function aiNeutralDir() {
+  const home = homedir();
+  const base = process.platform === "darwin" ? join(home, "Library", "Caches")
+    : process.platform === "win32" ? (process.env.LOCALAPPDATA || join(home, "AppData", "Local"))
+    : ((process.env.XDG_CACHE_HOME || "").trim() || join(home, ".cache"));
+  const dir = join(base, "gitwand", "ai-cwd");
+  mkdirSync(dir, { recursive: true });
+  const st = lstatSync(dir);
+  if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`AI working directory ${dir}: is not a plain directory`);
+  if (process.platform !== "win32") {
+    chmodSync(dir, 0o700);
+    if (lstatSync(dir).mode & 0o077) throw new Error(`AI working directory ${dir}: is accessible to other users`);
   }
-  return claudeCapsCache.get(bin);
+  if (!existsSync(join(dir, ".git"))) {
+    const g = spawnSync(GIT, ["init", "-q"], { cwd: dir });
+    if (g.status !== 0) throw new Error(`AI working directory ${dir}: cannot initialise`);
+  }
+  return dir;
 }
 /** Mirrors `claude_lockdown_args` (ai.rs): no tools, no project settings, no MCP. */
 function claudeLockdownArgs(caps) {
@@ -5839,7 +5879,7 @@ async function handleRequest(req, res) {
         claudeArgs.push(...claudeLockdownArgs(claudeCapsNow));
         const r = spawnSync(CLAUDE, claudeArgs, {
           // Mirrors `claude_run_dir`: the repo only when its settings are ignored.
-          cwd: claudeCapsNow.settingSources ? (body.cwd || undefined) : tmpdir(),
+          cwd: claudeCapsNow.settingSources ? (body.cwd || undefined) : aiNeutralDir(),
           input: fullPrompt.replace(/\0/g, ""),
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
@@ -5940,7 +5980,9 @@ async function handleRequest(req, res) {
         if (codexEffort) codexArgs.push("-c", `model_reasoning_effort=${codexEffort}`);
         codexArgs.push("-");
         const r = spawnSync(CODEX, codexArgs, {
-          cwd: body.cwd || undefined,
+          // Never the repository (trusted projects' .codex/config.toml runs
+          // MCP servers). Mirrors codex_cli_prompt_inner.
+          cwd: aiNeutralDir(),
           input: fullPrompt.replace(/\0/g, ""),
           env: aiSpawnEnv("codex"),
           encoding: "utf-8",
@@ -6045,26 +6087,33 @@ async function handleRequest(req, res) {
         }
         const prompt = fullPrompt.replace(/\0/g, "");
         const ocOpts = {
-          cwd: body.cwd || undefined,
-          // Mirrors opencode_cli_prompt_inner: allowlisted env, tools denied.
-          env: { ...aiSpawnEnv("opencode"), OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","webfetch":"deny"}' },
+          // Never the repository (opencode.json MCP servers, .opencode plugins).
+          // Mirrors opencode_cli_prompt_inner / opencode_run_cmd.
+          cwd: aiNeutralDir(),
+          env: {
+            ...aiSpawnEnv("opencode"),
+            OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","webfetch":"deny"}',
+            OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+          },
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
         };
         // Prompt on stdin, off argv, no argv fallback. Mirrors `opencode_result`:
         // a refused or empty answer is an error.
         const r = spawnSync(OPENCODE, ocArgs, { ...ocOpts, input: prompt });
-        const ocOut = `${r.stderr || ""}${r.stdout || ""}`;
-        if (ocOut.includes("You must provide a message") || (r.status === 0 && !String(r.stdout || "").trim())) {
-          return jsonResponse(req, res, {
-            error: "opencode n'a pas lu le prompt sur stdin (version trop ancienne ?) — mettez opencode à jour",
-          }, 500);
+        const ocStdout = String(r.stdout || "");
+        const ocStderr = String(r.stderr || "").trim();
+        const STDIN_HINT = "opencode n'a pas lu le prompt sur stdin (version trop ancienne ?) — mettez opencode à jour";
+        // Same order as opencode_result (ai.rs).
+        if (r.status === 0 && ocStdout.trim()) {
+          return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(ocStdout);
         }
-        if (r.status !== 0) {
-          const detail = (r.stderr || r.stdout || "").trim() || "opencode CLI a échoué sans message";
-          return jsonResponse(req, res, { error: detail }, 500);
-        }
-        return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(r.stdout);
+        let ocError;
+        if (`${ocStderr}${ocStdout}`.includes("You must provide a message")) ocError = STDIN_HINT;
+        else if (ocStderr) ocError = ocStderr;
+        else if (r.status === 0) ocError = STDIN_HINT;
+        else ocError = ocStdout.trim() || "opencode CLI a échoué sans message";
+        return jsonResponse(req, res, { error: ocError }, 500);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }
