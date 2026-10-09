@@ -2258,6 +2258,7 @@ const es: Locale = {
     errorDelete: "Error al eliminar el worktree: {0}",
     errorMergeBack: "Error al fusionar: {0}",
     mergedCleanupFailed: "Fusión hecha, pero no se pudo eliminar la carpeta del worktree. Elimínala a mano.",
+    mergedRefreshFailed: "Fusión hecha. No se pudo actualizar la vista: recarga el repositorio para ver el resultado.",
   },
 
   // ─── Submodules ─────────────────────────────────────────

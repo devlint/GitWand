@@ -2637,6 +2637,7 @@ async function onAiTaskMergeBack() {
     } catch (err) {
       console.error("[ai-task] refresh after merge-back failed:", err);
       aiTaskClose.value = null;
+      if (!cleanup_warning) showDetailToast(t("aiTask.mergedRefreshFailed"), String((err as { message?: string })?.message ?? err));
     }
     // No auto-dismiss: it may be the only sign the worktree is still there.
     if (cleanup_warning) showDetailToast(t("aiTask.mergedCleanupFailed"), cleanup_warning, 0);

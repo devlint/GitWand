@@ -127,6 +127,11 @@ fn base_config_key(branch: &str) -> String {
     format!("branch.{}.gitwandBase", branch)
 }
 
+/// Config key holding the branch (or commit, if detached) it was created on.
+fn source_config_key(branch: &str) -> String {
+    format!("branch.{}.gitwandSource", branch)
+}
+
 /// Create a sibling worktree based on `source_branch` (defaults to the current
 /// HEAD when `None`). The branch/dir is named `gitwand-scratch-<slug>` from the
 /// supplied `name`, falling back to `gitwand-scratch-<timestamp>` when no usable
@@ -241,22 +246,25 @@ fn scratch_worktree_create_impl(
         ));
     }
 
-    // An AI task starts from HEAD: record that commit for merge-back's base
-    // guard. In the branch's config section, so `branch -D` drops it too.
-    // Otherwise drop a stale record a same-named branch may have left.
+    // An AI task starts from HEAD: record that commit and its branch for
+    // merge-back's base guard. In the branch's config section, so `branch -D`
+    // drops them too. Otherwise drop a stale record a same-named branch may
+    // have left.
+    let keys = [
+        base_config_key(&scratch_branch),
+        source_config_key(&scratch_branch),
+    ];
     if from_head {
-        if let Err(e) = git_in(
-            &repo_root,
-            &["config", &base_config_key(&scratch_branch), &base_commit],
-        ) {
-            let _ = scratch_worktree_discard_impl(cwd, scratch_path);
-            return Err(e);
+        for (key, value) in keys.iter().zip([&base_commit, &base_ref]) {
+            if let Err(e) = git_in(&repo_root, &["config", key, value]) {
+                let _ = scratch_worktree_discard_impl(cwd, scratch_path);
+                return Err(e);
+            }
         }
     } else {
-        let _ = git_in(
-            &repo_root,
-            &["config", "--unset", &base_config_key(&scratch_branch)],
-        );
+        for key in &keys {
+            let _ = git_in(&repo_root, &["config", "--unset", key]);
+        }
     }
 
     Ok(ScratchWorktree {
@@ -428,23 +436,30 @@ fn scratch_worktree_merge_back_impl(
         ));
     }
 
-    // GUARD: HEAD must not be behind the commit the task started from, as
-    // after checking out an ancestor branch. Only strictly behind: a base
-    // rewritten since (rebase, amend) is not, and merging HEAD into the task
-    // then lets it through, as the guard above asks.
-    if let Ok(base) = git_in(
+    // GUARD: the main checkout contains the commit the task started from,
+    // or is still on the branch it started from. Otherwise it moved to
+    // another branch (an ancestor, say, even with that branch since merged
+    // into the task), and the squash would also bring the task's source
+    // branch commits. Staying on the source branch is fine even if the base
+    // was rewritten since (rebase, amend): the user merges it into the task.
+    let base = git_in(
         &repo_root,
         &["config", "--get", &base_config_key(&scratch_branch)],
-    ) {
-        let head_sha = git_in(&repo_root, &["rev-parse", "HEAD"])?;
-        let behind = head_sha != base
-            && git_in(&repo_root, &["merge-base", "--is-ancestor", "HEAD", &base]).is_ok();
-        if behind {
+    );
+    let source = git_in(
+        &repo_root,
+        &["config", "--get", &source_config_key(&scratch_branch)],
+    );
+    if let (Ok(base), Ok(source)) = (base, source) {
+        let contains_base =
+            git_in(&repo_root, &["merge-base", "--is-ancestor", &base, "HEAD"]).is_ok();
+        if !contains_base && head != source {
             return Err(format!(
-                "{h} is behind {base:.7}, the commit {b} was created from: merging back would also bring the commits between them. Nothing was changed. Check out the branch {b} was created from, then merge back",
-                h = head,
+                "{b} was created from {s} ({base:.7}), which {h} does not contain: merging back would also bring {s}'s commits. Nothing was changed. Check out {s}, then merge back",
+                b = scratch_branch,
+                s = source,
                 base = base,
-                b = scratch_branch
+                h = head
             ));
         }
     }
@@ -495,8 +510,18 @@ fn scratch_worktree_merge_back_impl(
         // protected without `--exclude-per-directory`). Refresh the stat
         // info first, as `git merge` does, so a touched file isn't "dirty".
         let _ = git_in(&repo_root, &["update-index", "-q", "--refresh"]);
-        git_in(&repo_root, &["read-tree", "-n", "-m", "-u", "HEAD", &task])
-            .map_err(|e| format!("git refused to merge back {}: {}", scratch_branch, e))?;
+        let dry_run = git_cmd()
+            .args(["read-tree", "-n", "-m", "-u", "HEAD", &task])
+            .current_dir(&repo_root)
+            .output()
+            .map_err(|e| format!("git read-tree failed to spawn: {}", e))?;
+        if !dry_run.status.success() {
+            return Err(format!(
+                "git refused to merge back {}: {}",
+                scratch_branch,
+                String::from_utf8_lossy(&dry_run.stderr).trim()
+            ));
+        }
 
         crate::commands::ops::snapshot_before(
             &repo_root.to_string_lossy(),
@@ -572,8 +597,18 @@ fn remove_scratch(
         // Only while the scratch is still a worktree: once removal deleted
         // its `.git`, git would walk up and detach an enclosing repository.
         // Prune then unregisters it, which frees the branch all the same.
+        // No hooks: bookkeeping, like the scratch commit.
         if scratch.join(".git").is_file() {
-            let _ = git_in(scratch, &["checkout", "-q", "--detach"]);
+            let _ = git_in(
+                scratch,
+                &[
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "checkout",
+                    "-q",
+                    "--detach",
+                ],
+            );
         }
     }
     let _ = git_in(repo_root, &["worktree", "prune"]);
@@ -1543,6 +1578,20 @@ mod tests {
         );
         assert!(!repo.path.join("feature.txt").exists());
         assert_eq!(repo.read("task.txt"), "v1\n");
+
+        // Merging main into the task, as the history guard asks once main
+        // moved, must not get around it.
+        repo.write("main-only.txt", "main moves on\n");
+        repo.commit_all("main moves on");
+        assert!(git_at(&scratch.path, &["commit", "-qam", "agent"])
+            .status
+            .success());
+        assert!(git_at(&scratch.path, &["merge", "-q", "--no-edit", "main"])
+            .status
+            .success());
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false))
+            .expect_err("still another branch than the task's source");
+        assert!(!repo.path.join("feature.txt").exists());
 
         // Back on the branch the task started from, it goes through.
         repo.git(&["checkout", "-q", "feature"]);

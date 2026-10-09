@@ -335,12 +335,11 @@ fn close_sessions(mut handles: Vec<PtyHandle>, wait_leaders: bool) {
             }
         });
     }
-    // Only leaders not reaped yet: portable-pty's kill() signals the pid
-    // first, which a reaped leader may have handed to another process.
+    // Windows: the leader is all we kill. On Unix the group SIGKILL above
+    // already reached it.
+    #[cfg(not(unix))]
     for h in &mut handles {
-        if matches!(h.child.try_wait(), Ok(None)) {
-            let _ = h.child.kill();
-        }
+        let _ = h.child.kill();
     }
     if !wait_leaders {
         return;

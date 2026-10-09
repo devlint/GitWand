@@ -8150,12 +8150,22 @@ async function handleRequest(req, res) {
         if (fromHead) {
           try {
             const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" }).trim();
+            let source = base;
+            try {
+              source = execFileSync("git", ["symbolic-ref", "--short", "-q", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" }).trim() || base;
+            } catch {}
             execFileSync("git", ["config", `branch.${branchName}.gitwandBase`, base], { cwd: resolvedCwd });
+            execFileSync("git", ["config", `branch.${branchName}.gitwandSource`, source], { cwd: resolvedCwd });
           } catch (e) {
             // As Rust does: no half-created task left behind.
             try { execFileSync("git", ["worktree", "remove", "--force", scratchPath], { cwd: resolvedCwd }); } catch {}
             try { execFileSync("git", ["branch", "-D", branchName], { cwd: resolvedCwd }); } catch {}
             throw e;
+          }
+        } else {
+          // A stale record a same-named branch may have left.
+          for (const key of ["gitwandBase", "gitwandSource"]) {
+            try { execFileSync("git", ["config", "--unset", `branch.${branchName}.${key}`], { cwd: resolvedCwd }); } catch {}
           }
         }
         return jsonResponse(req, res, {

@@ -2267,6 +2267,7 @@ const fr: Locale = {
     errorDelete: "Échec de la suppression du worktree : {0}",
     errorMergeBack: "Échec de la fusion : {0}",
     mergedCleanupFailed: "Fusion faite, mais le dossier du worktree n'a pas pu être supprimé. Supprimez-le à la main.",
+    mergedRefreshFailed: "Fusion faite. L'actualisation de la vue a échoué : rechargez le dépôt pour voir le résultat.",
   },
 
   // ─── Submodules ─────────────────────────────────────────
