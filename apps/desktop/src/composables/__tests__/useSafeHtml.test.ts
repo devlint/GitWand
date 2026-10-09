@@ -12,7 +12,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { renderMarkdown, safeHtml } from "../useSafeHtml";
+import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../useSafeHtml";
 import { useSettings } from "../useSettings";
 
 afterEach(() => {
@@ -153,6 +153,17 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
     const out = renderMarkdown(`![logo](${url})`);
     expect(out).toContain('alt="logo"');
     expect(out).toContain(url.replace(/&/g, "&amp;"));
+  });
+
+  it("loads remote images for one render when the caller passes consent", () => {
+    const md = "![shot](https://example.com/s.png)";
+    const allowed = renderMarkdown(md, { allowRemoteImages: true });
+    expect(allowed).toContain('src="https://example.com/s.png"');
+    expect(hasBlockedRemoteImages(allowed)).toBe(false);
+    // The consent does not leak into the next render.
+    const next = renderMarkdown(md);
+    expect(next).not.toContain('src="https://example.com/s.png"');
+    expect(hasBlockedRemoteImages(next)).toBe(true);
   });
 
   it("still renders inline data: images when remote ones are blocked", () => {

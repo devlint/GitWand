@@ -17,7 +17,9 @@ import { useSettings } from "../composables/useSettings";
 import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
 import Avatar from "./Avatar.vue";
 import { useAIProvider } from "../composables/useAIProvider";
-import { renderMarkdown, safeHtml } from "../composables/useSafeHtml";
+import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables/useSafeHtml";
+import { useRepoRemoteImages } from "../composables/useRemoteImages";
+import RemoteImagesNotice from "./RemoteImagesNotice.vue";
 import AiSparkle from "./AiSparkle.vue";
 import BaseModal from "./BaseModal.vue";
 import { forgeForRepo, isForgeConnected } from "../composables/forge/useForge";
@@ -834,7 +836,7 @@ function formatDate(dateStr: string): string {
 // projects ship at the top of their README (title, tagline, nav links,
 // shields.io badges) into a dedicated styled header. Anything below
 // that block is run through the standard markdown-it renderer.
-function renderReadme(md: string): string {
+function renderReadme(md: string, allowRemoteImages: boolean): string {
   const { headerHtml, rest } = extractReadmeHeader(md);
   // Strip HTML comments early — READMEs often use them as section
   // dividers, and we don't want them rendered as text. markdown-it's
@@ -842,8 +844,19 @@ function renderReadme(md: string): string {
   const cleaned = rest.replace(/<!--[\s\S]*?-->/g, "");
   // READMEs soft-wrap single newlines (GitHub behaviour) — disable `breaks` so
   // wrapped prose isn't broken up with spurious <br> tags.
-  return headerHtml + renderMarkdown(cleaned, { breaks: false });
+  return headerHtml + renderMarkdown(cleaned, { breaks: false, allowRemoteImages });
 }
+
+// Remote images in the README (badges, screenshots) are withheld unless the
+// user accepted them for this project — a choice remembered per repository.
+const readmeRemoteImages = useRepoRemoteImages(computed(() => props.cwd));
+// Rendered once per content / consent change, not on every re-render.
+const readmeHtml = computed(() => {
+  if (readmeContent.value === null) return "";
+  const allow = readmeRemoteImages.allowed.value;
+  return safeHtml(renderReadme(readmeContent.value, allow), { allowRemoteImages: allow });
+});
+const readmeImagesBlocked = computed(() => hasBlockedRemoteImages(readmeHtml.value));
 
 // The README is injected via `v-html`, so its anchors are plain DOM links the
 // Tauri webview can't act on by itself: `http(s)` links would navigate the app
@@ -1324,12 +1337,17 @@ watch(
           </div>
         </div>
         <div class="readme-body">
+          <RemoteImagesNotice
+            v-if="readmeTab === 'formatted' && readmeImagesBlocked"
+            per-project
+            @allow="readmeRemoteImages.allowForRepo()"
+          />
           <div
             v-if="readmeTab === 'formatted'"
             ref="readmeFormattedEl"
             class="readme-formatted"
             @click="onReadmeLinkClick"
-            v-html="safeHtml(renderReadme(readmeContent))"
+            v-html="readmeHtml"
           />
           <pre v-else class="readme-raw"><code>{{ readmeContent }}</code></pre>
         </div>

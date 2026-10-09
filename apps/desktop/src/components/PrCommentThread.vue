@@ -7,9 +7,10 @@
  *  - Edit / delete on own comments
  *  - Code suggestion detection & "Apply" button
  */
-import { ref, computed } from "vue";
+import { ref, computed, inject } from "vue";
 import type { PrReviewComment } from "../utils/backend";
 import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
+import { PR_REMOTE_IMAGES_KEY } from "../composables/useRemoteImages";
 import { useI18n } from "../composables/useI18n";
 import { formatRelativeAge } from "../utils/relativeTime";
 import Avatar from "./Avatar.vue";
@@ -105,9 +106,13 @@ const suggLabel = computed(() => t("pr.comment.suggestionLabel"));
 // Render each comment's markdown once per data change. Done here rather than in
 // the `v-html` binding so the (expensive) parse + sanitize doesn't re-run on
 // every component re-render for every comment in the thread.
+// Remote images follow the "Show images" choice of the PR detail view that
+// renders this thread (withheld when there is none).
+const prImagesShown = inject(PR_REMOTE_IMAGES_KEY, null);
 const bodyHtmlById = computed(() => {
   const m = new Map<number, string>();
-  for (const c of props.comments) m.set(c.id, renderMarkdown(c.body));
+  const opts = { allowRemoteImages: prImagesShown?.value === true };
+  for (const c of props.comments) m.set(c.id, renderMarkdown(c.body, opts));
   return m;
 });
 

@@ -277,6 +277,8 @@ interface Settings {
   liveRepoWatcher: boolean;
   /** Load remote images in rendered markdown (off: tracking pixels). */
   allowRemoteImages: boolean;
+  /** README remote-image consent per project (normaliseCwd keys). */
+  remoteImagesByRepo: Record<string, boolean>;
   /** Look up commit authors on Gravatar (off: leaks author emails). */
   gravatarEnabled: boolean;
 }
@@ -380,6 +382,7 @@ const defaultSettings: Settings = {
   snapshotAiLabels: false,
   liveRepoWatcher: true,
   allowRemoteImages: false,
+  remoteImagesByRepo: {},
   gravatarEnabled: false,
 };
 

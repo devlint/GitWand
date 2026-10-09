@@ -11,9 +11,11 @@
  * - Stat cards refined with icons + gradient hover
  * - Polished tabs with animation + count badges
  */
-import { computed, inject, nextTick, ref, onMounted, onUnmounted, watch } from "vue";
+import { computed, inject, nextTick, provide, ref, onMounted, onUnmounted, watch } from "vue";
 import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables/usePrPanel";
-import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
+import { renderMarkdown, onMarkdownLinkClick, hasBlockedRemoteImages } from "../composables/useSafeHtml";
+import { PR_REMOTE_IMAGES_KEY } from "../composables/useRemoteImages";
+import RemoteImagesNotice from "./RemoteImagesNotice.vue";
 import Avatar from "./Avatar.vue";
 import { forgeAvatarUrl } from "../composables/useAvatar";
 import { openExternalUrl, type ReviewerCandidate } from "../utils/backend";
@@ -108,6 +110,18 @@ watch(
   },
 );
 
+// Remote images in this PR's description, comments and reviews are withheld
+// until the user clicks "Show images". The choice covers this PR only — the
+// next PR is someone else's markdown — and reaches the inline comment threads
+// through `provide`.
+const prImagesShown = ref(false);
+provide(PR_REMOTE_IMAGES_KEY, prImagesShown);
+watch([() => p.cwd.value, () => p.prDetail.value?.number], () => {
+  prImagesShown.value = false;
+});
+/** Render options for every markdown body of this PR. */
+const mdOpts = computed(() => ({ allowRemoteImages: prImagesShown.value }));
+
 /** Which editor the description panel shows: the AI draft wins over a manual edit. */
 const bodyEditor = computed<"ai" | "manual" | null>(() =>
   descriptionDraft.value ? "ai" : editingBody.value !== null ? "manual" : null,
@@ -126,7 +140,7 @@ const editorBody = computed({
     }
   },
 });
-const editorHtml = computed(() => renderMarkdown(editorBody.value));
+const editorHtml = computed(() => renderMarkdown(editorBody.value, mdOpts.value));
 
 async function updateDescriptionWithAI() {
   const detail = p.prDetail.value;
@@ -261,7 +275,7 @@ const autoMergeExplainReason = computed(() => {
 const sortedComments = computed(() =>
   [...p.prComments.value, ...p.prIssueComments.value]
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-    .map((c) => ({ ...c, bodyHtml: renderMarkdown(c.body) })),
+    .map((c) => ({ ...c, bodyHtml: renderMarkdown(c.body, mdOpts.value) })),
 );
 
 /** Translated verdict label + CSS modifier for a review state. */
@@ -318,7 +332,7 @@ const timeline = computed<TimelineItem[]>(() => {
         author: r.user?.login ?? "",
         verdictLabel: meta.label,
         verdictCls: meta.cls,
-        bodyHtml: r.body?.trim() ? renderMarkdown(r.body) : "",
+        bodyHtml: r.body?.trim() ? renderMarkdown(r.body, mdOpts.value) : "",
         ts: r.submitted_at,
         href: r.html_url,
       };
@@ -331,7 +345,11 @@ const timeline = computed<TimelineItem[]>(() => {
 });
 
 /** PR description rendered once (see `sortedComments` for the rationale). */
-const descriptionHtml = computed(() => renderMarkdown(p.prDetail.value?.body));
+const descriptionHtml = computed(() => renderMarkdown(p.prDetail.value?.body, mdOpts.value));
+const descriptionImagesBlocked = computed(() => hasBlockedRemoteImages(descriptionHtml.value));
+const timelineImagesBlocked = computed(() =>
+  timeline.value.some((item) => hasBlockedRemoteImages(item.bodyHtml)),
+);
 
 const fullscreenImageUrl = ref<string | null>(null);
 
@@ -880,7 +898,7 @@ function submitRequestReviewers() {
             <div v-if="p.prSummaryLoading.value && !p.prSummary.value" class="pdv-summary-loading ai-loading">
               {{ t('pr.summary.loading') }}
             </div>
-            <div v-else class="pdv-summary-body" v-html="renderMarkdown(p.prSummary.value)" />
+            <div v-else class="pdv-summary-body" v-html="renderMarkdown(p.prSummary.value, mdOpts)" />
           </section>
 
           <!-- Stat cards -->
@@ -1092,6 +1110,10 @@ function submitRequestReviewers() {
               </div>
             </div>
             <div v-else-if="p.prDetail.value.body" class="pdv-desc-body">
+              <RemoteImagesNotice
+                v-if="descriptionTab === 'formatted' && descriptionImagesBlocked"
+                @allow="prImagesShown = true"
+              />
               <div
                 v-if="descriptionTab === 'formatted'"
                 class="pdv-body-formatted"
@@ -1119,6 +1141,11 @@ function submitRequestReviewers() {
               {{ t('pr.detail.statComments') }}
               <span class="pdv-section-count">{{ timeline.length }}</span>
             </h2>
+            <!-- One button per PR: skip it here when the description shows it. -->
+            <RemoteImagesNotice
+              v-if="timelineImagesBlocked && !(descriptionImagesBlocked && descriptionTab === 'formatted')"
+              @allow="prImagesShown = true"
+            />
             <ul class="pdv-comments">
               <template v-for="item in timeline">
                 <!-- Review verdict (Approve / Request changes / Comment) -->

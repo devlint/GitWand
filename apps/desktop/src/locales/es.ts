@@ -15,6 +15,9 @@ const es: Locale = {
   // ─── Common ─────────────────────────────────────────────
   common: {
     remoteImageBlocked: "Imagen remota bloqueada",
+    remoteImagesHidden: "Las imágenes remotas están ocultas para proteger tu privacidad.",
+    remoteImagesShow: "Mostrar imágenes",
+    remoteImagesShowForProject: "Mostrar siempre en este proyecto",
     ai: "IA",
     cancel: "Cancelar",
     close: "Cerrar",

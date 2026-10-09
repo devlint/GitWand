@@ -16,6 +16,9 @@ const ptBR: Locale = {
   // ─── Common ─────────────────────────────────────────────
   common: {
     remoteImageBlocked: "Imagem remota bloqueada",
+    remoteImagesHidden: "As imagens remotas estão ocultas para proteger sua privacidade.",
+    remoteImagesShow: "Mostrar imagens",
+    remoteImagesShowForProject: "Sempre mostrar neste projeto",
     ai: "IA",
     cancel: "Cancelar",
     close: "Fechar",

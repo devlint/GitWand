@@ -23,6 +23,9 @@ import type { Locale } from "./en";
 const zhCN: Locale = {
   common: {
     remoteImageBlocked: "已阻止远程图片",
+    remoteImagesHidden: "为保护你的隐私，远程图片已隐藏。",
+    remoteImagesShow: "显示图片",
+    remoteImagesShowForProject: "始终在此项目中显示",
     ai: "AI",
     cancel: "取消",
     close: "关闭",

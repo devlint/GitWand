@@ -12,7 +12,8 @@
  */
 import { computed, inject, nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
-import { renderMarkdown, safeHtml } from "../composables/useSafeHtml";
+import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables/useSafeHtml";
+import RemoteImagesNotice from "./RemoteImagesNotice.vue";
 import { getGitShortlog, type GitBranch, type ReviewerCandidate } from "../utils/backend";
 import { forgeForRepo } from "../composables/forge/useForge";
 import Avatar from "./Avatar.vue";
@@ -283,13 +284,19 @@ function insertCodeBlock() {
 // (markdown-it + DOMPurify). We only add the component-specific empty
 // state here. The rendered HTML is fed to `v-html` via `safeHtml()`,
 // which also re-sanitizes for defense in depth.
+// Remote images in the preview wait for "Show images", like a PR's
+// description; the choice lasts while this view is open.
+const previewImagesShown = ref(false);
 const bodyPreview = computed(() => {
   const src = p.newPrBody.value;
   if (!src.trim()) {
     return `<p class="pcv-preview-empty">${t("pr.create.previewEmpty")}</p>`;
   }
-  return renderMarkdown(src);
+  return safeHtml(renderMarkdown(src, { allowRemoteImages: previewImagesShown.value }), {
+    allowRemoteImages: previewImagesShown.value,
+  });
 });
+const previewImagesBlocked = computed(() => hasBlockedRemoteImages(bodyPreview.value));
 
 // ─── Validation ─────────────────────────────────────────
 const canSubmit = computed(
@@ -686,10 +693,14 @@ function removeReviewer(name: string) {
           />
 
           <!-- Preview -->
+          <RemoteImagesNotice
+            v-if="editorTab === 'preview' && previewImagesBlocked"
+            @allow="previewImagesShown = true"
+          />
           <div
             v-show="editorTab === 'preview'"
             class="pcv-preview"
-            v-html="safeHtml(bodyPreview)"
+            v-html="bodyPreview"
           />
         </div>
         <p class="pcv-hint">{{ t("pr.create.bodyHint") }}</p>

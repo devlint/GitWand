@@ -35,6 +35,30 @@ import { useSettings } from "./useSettings";
 import { t } from "./useI18n";
 
 /**
+ * Per-call consent, set by `safeHtml(raw, { allowRemoteImages: true })` for the
+ * duration of one synchronous sanitize (the "Show images" button of a PR, or a
+ * README whose project the user allowed). Never left set between calls.
+ */
+let remoteImagesOverride = false;
+
+/** Options shared by `safeHtml` and `renderMarkdown`. */
+export interface SafeHtmlOptions {
+  /**
+   * Load remote images for this render even when the global setting is off —
+   * the user accepted them for this PR or project.
+   */
+  allowRemoteImages?: boolean;
+}
+
+/**
+ * True when `html` (a `safeHtml` / `renderMarkdown` result) withheld at least
+ * one remote image — the cue to offer the "Show images" button.
+ */
+export function hasBlockedRemoteImages(html: string | null | undefined): boolean {
+  return !!html && html.includes("md-img-blocked");
+}
+
+/**
  * Whether rendered markdown may load images from remote hosts. Off by
  * default (Settings → `allowRemoteImages`): an `<img>` in someone else's PR
  * body or comment is fetched straight from this machine — unlike on
@@ -44,6 +68,7 @@ import { t } from "./useI18n";
  * the toggle changes.
  */
 function remoteImagesAllowed(): boolean {
+  if (remoteImagesOverride) return true;
   try {
     return useSettings().settings.value.allowRemoteImages === true;
   } catch {
@@ -165,10 +190,15 @@ const PURIFY_CONFIG = {
  * Sanitize pre-built HTML (e.g. diff hunks already coloured by our own
  * syntax highlighter). Returns a string safe to feed to `v-html`.
  */
-export function safeHtml(raw: string | null | undefined): string {
+export function safeHtml(raw: string | null | undefined, options: SafeHtmlOptions = {}): string {
   if (!raw) return "";
   ensureHooks();
-  return DOMPurify.sanitize(raw, PURIFY_CONFIG) as string;
+  remoteImagesOverride = options.allowRemoteImages === true;
+  try {
+    return DOMPurify.sanitize(raw, PURIFY_CONFIG) as string;
+  } finally {
+    remoteImagesOverride = false;
+  }
 }
 
 // ─── Markdown ──────────────────────────────────────────────────────
@@ -259,12 +289,12 @@ rules.link_open = (tokens, idx, options, env, self) => {
  */
 export function renderMarkdown(
   src: string | null | undefined,
-  options: { breaks?: boolean } = {},
+  options: { breaks?: boolean } & SafeHtmlOptions = {},
 ): string {
   if (!src) return "";
   md.set({ breaks: options.breaks ?? true });
   const rawHtml = md.render(src);
-  return safeHtml(rawHtml);
+  return safeHtml(rawHtml, { allowRemoteImages: options.allowRemoteImages });
 }
 
 /**

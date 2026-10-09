@@ -470,6 +470,12 @@ export interface AppSettings {
    */
   allowRemoteImages: boolean;
   /**
+   * Projects whose README may load remote images although
+   * `allowRemoteImages` is off — the user clicked "Always show for this
+   * project" on the README. Keyed by `normaliseCwd(repo path)`.
+   */
+  remoteImagesByRepo: Record<string, boolean>;
+  /**
    * Look up commit authors on Gravatar. Off by default: it sends a hash of
    * every author email of the repos you browse to a third party.
    */
@@ -582,6 +588,7 @@ export const defaultAppSettings: AppSettings = {
   snapshotAiLabels:                  false,
   liveRepoWatcher:                   true,
   allowRemoteImages:                 false,
+  remoteImagesByRepo:                {},
   gravatarEnabled:                   false,
 };
 
