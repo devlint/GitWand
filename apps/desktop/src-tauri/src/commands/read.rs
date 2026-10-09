@@ -2150,11 +2150,43 @@ pub(crate) async fn git_config_identity(cwd: String) -> Result<(String, String),
 /// with ~ expanded to the home directory. Returns null (None) if not set.
 #[tauri::command]
 pub(crate) async fn git_commit_template_path(cwd: String) -> Result<Option<String>, String> {
+    commit_template_path_inner(&cwd)
+}
+
+/// Upper bound on a commit template read by `read_commit_template`. Real
+/// templates are a few lines; anything bigger is not one.
+const MAX_COMMIT_TEMPLATE_BYTES: u64 = 64 * 1024;
+
+/// Read the commit.template configured for the repo. `None` when unset.
+///
+/// The template usually lives outside the repository (`~/.gitmessage`), which
+/// `read_file` refuses — it only reads inside a git working tree. Resolving the
+/// path here, from git config, means the webview never names an arbitrary file
+/// to read: only the one git itself points at.
+#[tauri::command]
+pub(crate) async fn read_commit_template(cwd: String) -> Result<Option<String>, String> {
+    let Some(path) = commit_template_path_inner(&cwd)? else {
+        return Ok(None);
+    };
+    let meta = std::fs::metadata(&path)
+        .map_err(|e| format!("Failed to read commit template {}: {}", path, e))?;
+    if !meta.is_file() || meta.len() > MAX_COMMIT_TEMPLATE_BYTES {
+        return Err(format!(
+            "Commit template is not a small regular file: {}",
+            path
+        ));
+    }
+    std::fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| format!("Failed to read commit template {}: {}", path, e))
+}
+
+fn commit_template_path_inner(cwd: &str) -> Result<Option<String>, String> {
     use crate::git::cmd::git_cmd;
 
     let output = git_cmd()
         .args(["config", "commit.template"])
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .output()
         .map_err(|e| e.to_string())?;
 

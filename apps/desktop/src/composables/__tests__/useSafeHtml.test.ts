@@ -11,8 +11,13 @@
  * DOMPurify a real `window`/`document` to parse against.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { renderMarkdown, safeHtml } from "../useSafeHtml";
+import { useSettings } from "../useSettings";
+
+afterEach(() => {
+  useSettings().settings.value.allowRemoteImages = false;
+});
 
 describe("safeHtml — raw HTML sanitization", () => {
   it("strips <script> tags", () => {
@@ -132,10 +137,28 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
   });
 
   it("renders raw HTML img tags with width and height in markdown", () => {
+    useSettings().settings.value.allowRemoteImages = true;
     const out = renderMarkdown('hello <img width="2521" height="203" alt="image" src="https://github.com/user-attachments/assets/5284ccc2-4567-40f0-88b7-1faec2289bbe" /> world');
     expect(out).toContain('<img width="2521" height="203" alt="image" src="https://github.com/user-attachments/assets/5284ccc2-4567-40f0-88b7-1faec2289bbe">');
   });
 
+  it("withholds remote images by default (tracking pixels)", () => {
+    const url = "https://tracker.example/pixel.gif?pr=42";
+    for (const src of [url, "//tracker.example/p.gif", "http://tracker.example/p.gif"]) {
+      const out = renderMarkdown(`![logo](${src}) <img src="${src}">`);
+      expect(out).not.toMatch(/src="(https?:)?\/\//);
+      expect(out).toContain('class="md-img-blocked"');
+    }
+    // The URL stays visible as a title, alt text is kept.
+    const out = renderMarkdown(`![logo](${url})`);
+    expect(out).toContain('alt="logo"');
+    expect(out).toContain(url.replace(/&/g, "&amp;"));
+  });
+
+  it("still renders inline data: images when remote ones are blocked", () => {
+    const tiny = "data:image/png;base64,iVBORw0KGgo=";
+    expect(safeHtml(`<img src="${tiny}" alt="p">`)).toContain(`src="${tiny}"`);
+  });
 
   it("neutralises javascript: links in markdown", () => {
     // markdown-it's default link validator rejects javascript: URIs, so

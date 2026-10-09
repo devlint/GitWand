@@ -14,6 +14,7 @@
 const en = {
   // ─── Common ─────────────────────────────────────────────
   common: {
+    remoteImageBlocked: "Remote image blocked",
     ai: "AI",
     cancel: "Cancel",
     close: "Close",
@@ -1218,6 +1219,7 @@ const en = {
     aiConnectErrorEmpty: "Please paste your API key",
     aiConnectErrorPrefix: "The key must start with sk-ant-\u2026",
     aiApiKeyLabel: "Anthropic API key",
+    aiApiKeyStored: "Stored in the system keychain — {0}",
     aiApiKeyAvailable: "Available on",
     aiHideKey: "Hide",
     aiShowKey: "Show",
@@ -1397,6 +1399,13 @@ const en = {
     commitSignatureHint: "A small signature added automatically \u2014 removable anytime",
     liveRepoWatcher: "Live repo updates",
     liveRepoWatcherHint: "Refresh instantly from filesystem events instead of polling. Turn off if your repository lives on a network drive.",
+    allowRemoteImages: "Load remote images in markdown",
+    allowRemoteImagesHint: "PR descriptions, comments and READMEs can embed images hosted anywhere. Loading them tells that host your IP address and when you opened the page.",
+    gravatarEnabled: "Show Gravatar avatars for commit authors",
+    gravatarEnabledHint: "Sends a hash of each commit author's email address to gravatar.com.",
+    telemetryEnabled: "Send anonymous launch statistics",
+    telemetryEnabledHint: "One event per launch: a random install ID, app version, OS and language. No repository data.",
+    telemetryForcedOff: "Disabled by the DO_NOT_TRACK or GITWAND_NO_TELEMETRY environment variable.",
     blameAlgorithm: "Blame diff algorithm",
     blameAlgorithmHint: "Controls how git blame detects moved or copied lines. histogram gives the best results for most repos.",
     secretsScannerEnabled: "Scan staged changes for secrets",

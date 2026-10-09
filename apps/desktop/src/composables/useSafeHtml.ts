@@ -31,6 +31,25 @@
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import { openExternalUrl } from "../utils/backend";
+import { useSettings } from "./useSettings";
+import { t } from "./useI18n";
+
+/**
+ * Whether rendered markdown may load images from remote hosts. Off by
+ * default (Settings → `allowRemoteImages`): an `<img>` in someone else's PR
+ * body or comment is fetched straight from this machine — unlike on
+ * github.com, there is no image proxy in between — so it works as a tracking
+ * pixel that learns the reader's IP and when they opened the PR. Read through
+ * the reactive settings so a `computed` that renders markdown re-runs when
+ * the toggle changes.
+ */
+function remoteImagesAllowed(): boolean {
+  try {
+    return useSettings().settings.value.allowRemoteImages === true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Lowercase, strip non-word characters, collapse whitespace / dashes.
@@ -104,6 +123,13 @@ function hardenLinksAndImages(node: Element) {
       if (!/^data:image\/(png|jpeg|gif|webp|svg\+xml);/i.test(src)) {
         node.removeAttribute("src");
       }
+    } else if (/^\s*(https?:)?\/\//i.test(src) && !remoteImagesAllowed()) {
+      // Remote image, not allowed: keep a visible placeholder (alt text) and
+      // the URL in a title so the reader knows what was withheld.
+      node.removeAttribute("src");
+      node.setAttribute("class", "md-img-blocked");
+      if (!node.getAttribute("alt")) node.setAttribute("alt", t("common.remoteImageBlocked"));
+      node.setAttribute("title", `${t("common.remoteImageBlocked")} — ${src.trim()}`);
     }
   }
 }

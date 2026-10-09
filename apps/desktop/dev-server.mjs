@@ -32,6 +32,24 @@ process.on("unhandledRejection", (reason) => {
 });
 
 /**
+ * Throw unless `cwd` lies inside a git working tree (it or an ancestor holds a
+ * `.git` entry). Mirrors `require_git_worktree` in `src-tauri/src/git/cmd.rs`,
+ * messages included: `/api/read-file` and `/api/write-file` refuse any other
+ * cwd, so `read-file { cwd: "/" }` no longer reads arbitrary files.
+ */
+function requireGitWorktree(cwd) {
+  let dir;
+  try { dir = realpathSync.native(cwd); }
+  catch (e) { throw new Error(`cwd does not resolve: ${e.message}`); }
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) return;
+    const up = dirname(dir);
+    if (up === dir) throw new Error(`cwd is not inside a git working tree: ${cwd}`);
+    dir = up;
+  }
+}
+
+/**
  * Resolve `relPath` under `cwd`, ensuring the result stays inside the canonical
  * cwd. Mirrors the Rust `safe_repo_path` helper in `src-tauri/src/lib.rs` so
  * dev-server and the Tauri backend enforce the same boundary.
@@ -367,6 +385,56 @@ const claudeSpawnEnv = (() => {
   delete clean.ANTHROPIC_AUTH_TOKEN;
   return clean;
 })();
+
+/**
+ * Allowlisted environment for an AI CLI prompt. Mirrors `ai_cmd` in
+ * `src-tauri/src/commands/ai.rs`: the CLIs are agents fed untrusted repo
+ * content, so they get home/locale/proxy variables and their own provider's
+ * auth only — never forge tokens (GH_TOKEN, GITLAB_TOKEN) or cloud
+ * credentials (AWS_*, AZURE_*).
+ */
+const AI_ENV_BASE = new Set([
+  "HOME", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LANGUAGE", "TZ", "TMPDIR", "TMP", "TEMP", "PATH",
+  "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+  "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE",
+  "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "USERNAME", "USERDOMAIN",
+  "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+  "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS",
+]);
+const AI_ENV_PROVIDER = {
+  claude: (k) => k === "CLAUDE_CONFIG_DIR",
+  codex: (k) => ["CODEX_HOME", "OPENAI_API_KEY", "OPENAI_BASE_URL"].includes(k),
+  opencode: (k) => k.startsWith("OPENCODE_") || [
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY",
+    "OPENROUTER_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY",
+  ].includes(k),
+  copilot: (k) => k.startsWith("COPILOT_") && k !== "COPILOT_ALLOW_ALL",
+  antigravity: (k) => [
+    "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_GENAI_USE_VERTEXAI",
+  ].includes(k),
+};
+function aiSpawnEnv(cli) {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (AI_ENV_BASE.has(k) || AI_ENV_BASE.has(k.toUpperCase()) || k.startsWith("LC_") || AI_ENV_PROVIDER[cli](k)) {
+      env[k] = v;
+    }
+  }
+  return env;
+}
+
+/** dev:web stand-in for the keychain-held AI API key (memory only). */
+let devAiApiKey = "";
+/** dev:web stand-in for the telemetry opt-out marker. */
+let devTelemetryEnabled = true;
+/** Masked hint of a key — mirrors `key_hint` in commands/ai_http.rs. */
+function aiKeyHint(key) {
+  if (!key) return null;
+  const chars = [...key];
+  if (chars.length <= 8) return "••••••••";
+  return chars.slice(0, 4).join("") + "••••" + chars.slice(-4).join("");
+}
 
 /**
  * Effort levels the AI CLIs accept — same allowlist as the Rust backend's
@@ -1973,7 +2041,7 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/read-file" && req.method === "POST") {
       const { cwd, path } = await readBody(req);
       let fullPath;
-      try { fullPath = safeRepoPath(cwd, path); }
+      try { fullPath = safeRepoPath(cwd, path); requireGitWorktree(cwd); }
       catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
       // Read bytes and decode strictly, mirroring the Rust `read_file`, which is
       // `std::fs::read_to_string` and rejects anything that is not valid UTF-8.
@@ -2000,7 +2068,7 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/write-file" && req.method === "POST") {
       const { cwd, path, content } = await readBody(req);
       let fullPath;
-      try { fullPath = safeRepoPath(cwd, path); }
+      try { fullPath = safeRepoPath(cwd, path); requireGitWorktree(cwd); }
       catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
       // The guard resolves a symlink that leads somewhere real, so `fullPath`
       // is only still a symlink when it dangles (or loops). Writing through it
@@ -3568,6 +3636,28 @@ async function handleRequest(req, res) {
       const home = process.env.HOME || process.env.USERPROFILE || "";
       const expanded = raw.startsWith("~") ? home + raw.slice(1) : raw;
       return jsonResponse(req, res, { path: expanded });
+    }
+
+    // POST /api/read-commit-template  { cwd } -> { content: string | null }
+    // Mirrors commands::read::read_commit_template: the path comes from git
+    // config, never from the client, and only a small regular file is read.
+    if (url.pathname === "/api/read-commit-template" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const r = spawnSync(GIT, ["config", "commit.template"], { cwd: resolve(cwd), encoding: "utf-8" });
+      const raw = r.status === 0 ? (r.stdout || "").trim() : "";
+      if (!raw) return jsonResponse(req, res, { content: null });
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const path = raw.startsWith("~") ? home + raw.slice(1) : raw;
+      try {
+        const st = statSync(path);
+        if (!st.isFile() || st.size > 64 * 1024) {
+          return jsonResponse(req, res, { error: `Commit template is not a small regular file: ${path}` }, 400);
+        }
+        return jsonResponse(req, res, { content: readFileSync(path, "utf-8") });
+      } catch (e) {
+        return jsonResponse(req, res, { error: `Failed to read commit template ${path}: ${e.message}` }, 400);
+      }
     }
 
     // POST /api/git-config-identity  { cwd } -> [name, email]
@@ -5409,6 +5499,73 @@ async function handleRequest(req, res) {
     // OAuth. Mirrors the Rust commands `detect_claude_cli`, `claude_cli_prompt`
     // and `claude_cli_login`.
 
+    // GET/POST /api/ai-api-key — mirrors ai_api_key_hint / ai_api_key_set.
+    // The Rust backend keeps the key in the OS keychain; dev:web keeps it in
+    // this process's memory only, and likewise never returns it — just a hint.
+    if (url.pathname === "/api/ai-api-key") {
+      if (req.method === "GET") return jsonResponse(req, res, { hint: aiKeyHint(devAiApiKey) });
+      if (req.method === "POST") {
+        const { key } = await readBody(req);
+        devAiApiKey = String(key ?? "").trim();
+        return jsonResponse(req, res, { hint: aiKeyHint(devAiApiKey) });
+      }
+    }
+
+    // POST /api/ai-http-request { method, url, body?, auth, timeoutSecs? }
+    // Mirrors commands::ai_http::ai_http_request: validation and error text
+    // included. Answers { status, body } whatever the upstream status.
+    if (url.pathname === "/api/ai-http-request" && req.method === "POST") {
+      const { method, url: target, body, auth, timeoutSecs } = await readBody(req);
+      if (method !== "GET" && method !== "POST") {
+        return jsonResponse(req, res, { error: `Unsupported method: ${method}` }, 400);
+      }
+      if (!/^https?:\/\//.test(target || "")) {
+        return jsonResponse(req, res, { error: "AI endpoint must be an http(s) URL" }, 400);
+      }
+      if (/[\s\x00-\x1f\x7f]/.test(target)) {
+        return jsonResponse(req, res, { error: "AI endpoint contains whitespace or control characters" }, 400);
+      }
+      const headers = { Accept: "application/json" };
+      if (auth === "anthropic" || auth === "bearer") {
+        if (!devAiApiKey) return jsonResponse(req, res, { error: "No AI API key configured" }, 400);
+        if (auth === "anthropic") {
+          headers["x-api-key"] = devAiApiKey;
+          headers["anthropic-version"] = "2023-06-01";
+        } else {
+          headers.Authorization = `Bearer ${devAiApiKey}`;
+        }
+      } else if (auth !== "none") {
+        return jsonResponse(req, res, { error: `Unknown AI auth scheme: ${auth}` }, 400);
+      }
+      if (body !== undefined && body !== null) headers["Content-Type"] = "application/json";
+      const secs = Math.min(600, Math.max(1, Number(timeoutSecs) || 120));
+      try {
+        const upstream = await fetch(target, {
+          method,
+          headers,
+          body: body ?? undefined,
+          signal: AbortSignal.timeout(secs * 1000),
+        });
+        return jsonResponse(req, res, { status: upstream.status, body: await upstream.text() });
+      } catch (e) {
+        return jsonResponse(req, res, { error: `AI request failed: ${e.message}` }, 502);
+      }
+    }
+
+    // GET/POST /api/telemetry-state — mirrors telemetry_get_state /
+    // telemetry_set_enabled. dev:web never sends telemetry; the toggle is
+    // kept in memory so the Settings UI can be exercised.
+    if (url.pathname === "/api/telemetry-state") {
+      if (req.method === "POST") {
+        const { enabled } = await readBody(req);
+        devTelemetryEnabled = enabled !== false;
+        return jsonResponse(req, res, { ok: true });
+      }
+      const forced = ["DO_NOT_TRACK", "GITWAND_NO_TELEMETRY"].some((k) =>
+        ["1", "true", "yes"].includes(String(process.env[k] ?? "").trim().toLowerCase()));
+      return jsonResponse(req, res, { enabled: devTelemetryEnabled, forced_off_by_env: forced });
+    }
+
     // GET /api/claude-cli-detect
     if (url.pathname === "/api/claude-cli-detect" && req.method === "GET") {
       try {
@@ -5492,17 +5649,21 @@ async function handleRequest(req, res) {
           : (body.prompt || "");
         const fmt = body.outputFormat || "text";
         // v2.17 — explicit per-provider model selection.
-        const claudeArgs = ["-p", fullPrompt, "--output-format", fmt];
+        // Prompt on stdin, never argv; tools that act or reach the network
+        // denied. Mirrors claude_cli_prompt_inner.
+        const claudeArgs = ["-p", "--output-format", fmt];
         if (body.model && String(body.model).trim()) {
           claudeArgs.push("--model", String(body.model).trim());
         }
         const claudeEffort = validEffort(body.effort);
         if (claudeEffort) claudeArgs.push("--effort", claudeEffort);
+        claudeArgs.push("--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch");
         const r = spawnSync(CLAUDE, claudeArgs, {
           cwd: body.cwd || undefined,
+          input: fullPrompt.replace(/\0/g, ""),
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
-          env: claudeSpawnEnv,
+          env: aiSpawnEnv("claude"),
         });
         if (r.status !== 0) {
           const detail = (r.stderr || r.stdout || "").trim() || "Claude CLI a échoué sans message";
@@ -5590,15 +5751,18 @@ async function handleRequest(req, res) {
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
           : (body.prompt || "");
         // v2.17 — model flag precedes the positional prompt on `codex exec`.
-        const codexArgs = ["exec"];
+        // Read-only sandbox, prompt on stdin (`-`). Mirrors codex_cli_prompt_inner.
+        const codexArgs = ["exec", "--sandbox", "read-only"];
         if (body.model && String(body.model).trim()) {
           codexArgs.push("--model", String(body.model).trim());
         }
         const codexEffort = validEffort(body.effort);
         if (codexEffort) codexArgs.push("-c", `model_reasoning_effort=${codexEffort}`);
-        codexArgs.push(fullPrompt);
+        codexArgs.push("-");
         const r = spawnSync(CODEX, codexArgs, {
           cwd: body.cwd || undefined,
+          input: fullPrompt.replace(/\0/g, ""),
+          env: aiSpawnEnv("codex"),
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
         });
@@ -5702,6 +5866,8 @@ async function handleRequest(req, res) {
         ocArgs.push(fullPrompt);
         const r = spawnSync(OPENCODE, ocArgs, {
           cwd: body.cwd || undefined,
+          // Mirrors opencode_cli_prompt_inner: allowlisted env, tools denied.
+          env: { ...aiSpawnEnv("opencode"), OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","webfetch":"deny"}' },
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
         });
@@ -5795,8 +5961,7 @@ async function handleRequest(req, res) {
         const cpEffort = validEffort(body.effort);
         if (cpEffort) cpArgs.push("--reasoning-effort", cpEffort);
         cpArgs.push("-p", fullPrompt);
-        const cpEnv = { ...process.env };
-        delete cpEnv.COPILOT_ALLOW_ALL;
+        const cpEnv = aiSpawnEnv("copilot");
         const r = spawnSync(COPILOT, cpArgs, {
           cwd: body.cwd || undefined,
           env: cpEnv,
@@ -5922,6 +6087,7 @@ async function handleRequest(req, res) {
         agyArgs.push("-p", fullPrompt);
         const r = spawnSync(AGY, agyArgs, {
           cwd: body.cwd || undefined,
+          env: aiSpawnEnv("antigravity"),
           encoding: "utf-8",
           timeout: 5 * 60 * 1000,
           maxBuffer: 20 * 1024 * 1024,

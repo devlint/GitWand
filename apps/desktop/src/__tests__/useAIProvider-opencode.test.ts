@@ -32,7 +32,14 @@ const {
   listCopilotModels,
   listCodexModels,
   detectClaudeCli,
+  aiHttpRequest,
+  aiApiKeyHint,
+  aiApiKeySet,
 } = vi.hoisted(() => ({
+  // AI HTTP goes through the backend, which signs with the keychain key.
+  aiHttpRequest: vi.fn(async (..._args: unknown[]) => ({ status: 200, body: "{}" })),
+  aiApiKeyHint: vi.fn(async (): Promise<string | null> => null),
+  aiApiKeySet: vi.fn(async (key: string): Promise<string | null> => (key ? "sk-t••••test" : null)),
   claudeCliPrompt: vi.fn(async () => "ok-claude"),
   codexCliPrompt: vi.fn(async () => "ok-codex"),
   opencodeCliPrompt: vi.fn(async () => "ok-opencode"),
@@ -66,6 +73,9 @@ vi.mock("../utils/backend", () => ({
   listCopilotModels,
   listCodexModels,
   detectClaudeCli,
+  aiHttpRequest,
+  aiApiKeyHint,
+  aiApiKeySet,
 }));
 
 import {
@@ -273,42 +283,37 @@ describe("fetchAnthropicModels", () => {
       },
     ];
     const urls: string[] = [];
-    const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {
-      urls.push(String(url));
-      expect((init?.headers as Record<string, string>)["x-api-key"]).toBe("sk-test");
-      return new Response(JSON.stringify(pages.shift()), { status: 200 });
+    aiHttpRequest.mockImplementation(async (...args: unknown[]) => {
+      const [method, url, auth] = args as [string, string, string];
+      urls.push(url);
+      // The key never travels from the webview: the backend attaches it.
+      expect(method).toBe("GET");
+      expect(auth).toBe("anthropic");
+      return { status: 200, body: JSON.stringify(pages.shift()) };
     });
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const models = await fetchAnthropicModels("https://api.anthropic.com/", "sk-test");
-      expect(models).toEqual([
-        {
-          id: "claude-opus-5-5",
-          name: "Claude Opus 5.5",
-          efforts: ["low", "medium", "high", "xhigh", "max"],
-        },
-        { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", efforts: [] },
-      ]);
-      expect(urls[0]).toBe("https://api.anthropic.com/v1/models?limit=1000");
-      expect(urls[1]).toContain("after_id=claude-opus-5-5");
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    const models = await fetchAnthropicModels("https://api.anthropic.com/");
+    expect(models).toEqual([
+      {
+        id: "claude-opus-5-5",
+        name: "Claude Opus 5.5",
+        efforts: ["low", "medium", "high", "xhigh", "max"],
+      },
+      { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", efforts: [] },
+    ]);
+    expect(urls[0]).toBe("https://api.anthropic.com/v1/models?limit=1000");
+    expect(urls[1]).toContain("after_id=claude-opus-5-5");
   });
 
   it("throws on an API error so the panel can show why", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad key", { status: 401 })));
-    try {
-      await expect(fetchAnthropicModels("", "sk-bad")).rejects.toThrow(/401/);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    aiHttpRequest.mockImplementation(async () => ({ status: 401, body: "bad key" }));
+    await expect(fetchAnthropicModels("")).rejects.toThrow(/401/);
   });
 });
 
 describe("Claude API default list", () => {
   it("offers current models with their efforts before a key is entered", async () => {
-    const models = await listModelsForProvider("claude", { aiApiKey: "", aiApiEndpoint: "" });
+    // No key stored (aiApiKeyHint → null).
+    const models = await listModelsForProvider("claude", { aiApiEndpoint: "" });
     expect(models).toBe(CLAUDE_API_MODELS);
     expect(models.map((m) => m.id)).toContain(DEFAULT_CLAUDE_API_MODEL);
   });

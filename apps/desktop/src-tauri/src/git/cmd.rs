@@ -65,6 +65,25 @@ pub(crate) fn cmd_log_snapshot() -> Vec<CmdLogEntry> {
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+/// Ensure `cwd` lies inside a git working tree: it, or one of its ancestors,
+/// holds a `.git` entry (a directory, or the file a worktree / submodule uses).
+///
+/// `safe_repo_path` only keeps a path inside `cwd`; it says nothing about
+/// `cwd` itself, so `read_file("/", "etc/…")` or `cwd = $HOME` would read
+/// anything. This narrows the raw file commands to repositories. It is a
+/// guard against mistakes and naive payloads, not a hard boundary: a home
+/// directory that is itself a dotfiles repo passes.
+pub(crate) fn require_git_worktree(cwd: &str) -> Result<(), String> {
+    let canonical = Path::new(cwd)
+        .canonicalize()
+        .map_err(|e| format!("cwd does not resolve: {}", e))?;
+    if canonical.ancestors().any(|a| a.join(".git").exists()) {
+        Ok(())
+    } else {
+        Err(format!("cwd is not inside a git working tree: {}", cwd))
+    }
+}
+
 /// Ensure `rel_path`, resolved under `cwd`, stays inside the canonical `cwd`.
 ///
 /// Rejects empty paths, absolute `rel_path` that would escape the root,

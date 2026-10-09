@@ -11,8 +11,10 @@ import {
   listCopilotModels,
   listCodexModels,
   detectClaudeCli,
+  aiHttpRequest,
 } from "../utils/backend";
 import { t } from "./useI18n";
+import { ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
 
 /**
  * AI provider types matching SettingsPanel configuration.
@@ -71,7 +73,6 @@ export const CLI_AGENT_PROVIDERS: CliAgentProvider[] = [
 export interface AISettings {
   aiEnabled: boolean;
   aiProvider: AIProvider;
-  aiApiKey: string;
   aiApiEndpoint: string;
   aiModel: string;
   aiOllamaUrl: string;
@@ -129,7 +130,6 @@ function loadAISettings(): AISettings {
   const defaults: AISettings = {
     aiEnabled: false,
     aiProvider: "none",
-    aiApiKey: "",
     aiApiEndpoint: "https://api.anthropic.com",
     aiModel: DEFAULT_CLAUDE_API_MODEL,
     aiOllamaUrl: "http://localhost:11434",
@@ -193,6 +193,11 @@ export function buildUserPrompt(ctx: ConflictContext): string {
   return prompt;
 }
 
+/** 2xx — the backend answers every upstream status, errors included. */
+function isOk(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
 /**
  * Call the Anthropic Messages API.
  */
@@ -201,31 +206,22 @@ async function callClaude(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<string> {
-  const res = await fetch(`${settings.aiApiEndpoint}/v1/messages`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": settings.aiApiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: settings.aiModel,
-      max_tokens: 4096,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
-      ...(effortForProvider(settings, "claude")
-        ? { output_config: { effort: effortForProvider(settings, "claude") } }
-        : {}),
-    }),
+  // Through the backend, which signs the request with the keychain-held key.
+  const res = await aiHttpRequest("POST", `${settings.aiApiEndpoint}/v1/messages`, "anthropic", {
+    model: settings.aiModel,
+    max_tokens: 4096,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userPrompt }],
+    ...(effortForProvider(settings, "claude")
+      ? { output_config: { effort: effortForProvider(settings, "claude") } }
+      : {}),
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Anthropic API error ${res.status}: ${body}`);
+  if (!isOk(res.status)) {
+    throw new Error(`Anthropic API error ${res.status}: ${res.body}`);
   }
 
-  const data = await res.json();
+  const data = JSON.parse(res.body);
   const textBlock = data.content?.find((b: any) => b.type === "text");
   if (!textBlock) throw new Error("No text content in Anthropic response");
   return textBlock.text;
@@ -240,28 +236,20 @@ async function callOpenAICompat(
   userPrompt: string,
 ): Promise<string> {
   const endpoint = settings.aiApiEndpoint.replace(/\/+$/, "");
-  const res = await fetch(`${endpoint}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.aiApiKey}`,
-    },
-    body: JSON.stringify({
-      model: settings.aiModel,
-      max_tokens: 4096,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    }),
+  const res = await aiHttpRequest("POST", `${endpoint}/chat/completions`, "bearer", {
+    model: settings.aiModel,
+    max_tokens: 4096,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API error ${res.status}: ${body}`);
+  if (!isOk(res.status)) {
+    throw new Error(`API error ${res.status}: ${res.body}`);
   }
 
-  const data = await res.json();
+  const data = JSON.parse(res.body);
   return data.choices?.[0]?.message?.content ?? "";
 }
 
@@ -481,10 +469,7 @@ function anthropicEfforts(capabilities: any): string[] {
  * Fetch the models the Anthropic API key can use (`GET /v1/models`), newest
  * first as the API returns them.
  */
-export async function fetchAnthropicModels(
-  endpoint: string,
-  apiKey: string,
-): Promise<AIModelOption[]> {
+export async function fetchAnthropicModels(endpoint: string): Promise<AIModelOption[]> {
   const base = (endpoint || "https://api.anthropic.com").replace(/\/+$/, "");
   const models: AIModelOption[] = [];
   let afterId: string | undefined;
@@ -493,18 +478,11 @@ export async function fetchAnthropicModels(
     const url = new URL(`${base}/v1/models`);
     url.searchParams.set("limit", "1000");
     if (afterId) url.searchParams.set("after_id", afterId);
-    const res = await fetch(url, {
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      throw new Error(`Anthropic API error ${res.status}: ${await res.text()}`);
+    const res = await aiHttpRequest("GET", url.toString(), "anthropic", undefined, 10);
+    if (!isOk(res.status)) {
+      throw new Error(`Anthropic API error ${res.status}: ${res.body}`);
     }
-    const body = await res.json();
+    const body = JSON.parse(res.body);
     for (const m of body.data ?? []) {
       if (!m?.id) continue;
       models.push({
@@ -523,19 +501,14 @@ export async function fetchAnthropicModels(
  * Fetch the models an OpenAI-compatible endpoint serves (`GET /models`).
  * The endpoint reports ids only — no display name, no effort support.
  */
-export async function fetchOpenAICompatModels(
-  endpoint: string,
-  apiKey: string,
-): Promise<AIModelOption[]> {
+export async function fetchOpenAICompatModels(endpoint: string): Promise<AIModelOption[]> {
   const base = endpoint.replace(/\/+$/, "");
-  const res = await fetch(`${base}/models`, {
-    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${await res.text()}`);
+  const auth = isAiApiKeyConfigured() ? "bearer" : "none";
+  const res = await aiHttpRequest("GET", `${base}/models`, auth, undefined, 10);
+  if (!isOk(res.status)) {
+    throw new Error(`API error ${res.status}: ${res.body}`);
   }
-  const body = await res.json();
+  const body = JSON.parse(res.body);
   return (body.data ?? [])
     .map((m: any) => m?.id)
     .filter((id: unknown): id is string => typeof id === "string" && id.length > 0)
@@ -551,15 +524,15 @@ export async function fetchOpenAICompatModels(
  */
 export async function listModelsForProvider(
   provider: AIProvider,
-  s?: Pick<AISettings, "aiApiEndpoint" | "aiApiKey">,
+  s?: Pick<AISettings, "aiApiEndpoint">,
 ): Promise<AIModelOption[]> {
   switch (provider) {
     case "claude":
-      if (!s?.aiApiKey) return CLAUDE_API_MODELS;
-      return fetchAnthropicModels(s.aiApiEndpoint, s.aiApiKey);
+      if (!isAiApiKeyConfigured()) return CLAUDE_API_MODELS;
+      return fetchAnthropicModels(s?.aiApiEndpoint ?? "");
     case "openai-compat":
       if (!s?.aiApiEndpoint) return [];
-      return fetchOpenAICompatModels(s.aiApiEndpoint, s.aiApiKey);
+      return fetchOpenAICompatModels(s.aiApiEndpoint);
     case "opencode-cli":
       return (await listOpencodeModels()).map((id) => ({ id, name: id, efforts: [] }));
     case "antigravity-cli":
@@ -585,25 +558,20 @@ async function callOllama(
   userPrompt: string,
 ): Promise<string> {
   const url = (settings.aiOllamaUrl || "http://localhost:11434").replace(/\/+$/, "");
-  const res = await fetch(`${url}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: settings.aiOllamaModel || "codellama",
-      stream: false,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    }),
+  const res = await aiHttpRequest("POST", `${url}/api/chat`, "none", {
+    model: settings.aiOllamaModel || "codellama",
+    stream: false,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Ollama error ${res.status}: ${body}`);
+  if (!isOk(res.status)) {
+    throw new Error(`Ollama error ${res.status}: ${res.body}`);
   }
 
-  const data = await res.json();
+  const data = JSON.parse(res.body);
   return data.message?.content ?? "";
 }
 
@@ -643,6 +611,10 @@ detectClaudeCli().then(info => {
   _claudeCliAvailable.value = false;
 });
 
+// The API key lives in the keychain; load whether one is stored so the
+// `isAiApiKeyConfigured()` guards below see it (they are reactive on it).
+void ensureAiApiKeyLoaded();
+
 // ─── Composable ─────────────────────────────────────────
 const isLoading = ref(false);
 const lastError = ref<string | null>(null);
@@ -654,8 +626,8 @@ export function useAIProvider() {
   const isAvailable = computed(() => {
     const s = settings.value;
     if (s.aiEnabled) {
-      if (s.aiProvider === "claude" && s.aiApiKey) return true;
-      if (s.aiProvider === "openai-compat" && s.aiApiKey && s.aiApiEndpoint) return true;
+      if (s.aiProvider === "claude" && isAiApiKeyConfigured()) return true;
+      if (s.aiProvider === "openai-compat" && isAiApiKeyConfigured() && s.aiApiEndpoint) return true;
       if (s.aiProvider === "ollama") return true;
       if (s.aiProvider === "claude-code-cli") return true;
       if (s.aiProvider === "codex-cli") return true;
@@ -687,8 +659,8 @@ export function useAIProvider() {
       const misconfigured =
         !s.aiEnabled ||
         s.aiProvider === "none" ||
-        (s.aiProvider === "claude" && !s.aiApiKey) ||
-        (s.aiProvider === "openai-compat" && (!s.aiApiKey || !s.aiApiEndpoint));
+        (s.aiProvider === "claude" && !isAiApiKeyConfigured()) ||
+        (s.aiProvider === "openai-compat" && (!isAiApiKeyConfigured() || !s.aiApiEndpoint));
       const provider = misconfigured && _claudeCliAvailable.value
         ? "claude-code-cli"
         : s.aiProvider;
@@ -748,8 +720,8 @@ export function useAIProvider() {
     const misconfigured =
       !s.aiEnabled ||
       s.aiProvider === "none" ||
-      (s.aiProvider === "claude" && !s.aiApiKey) ||
-      (s.aiProvider === "openai-compat" && (!s.aiApiKey || !s.aiApiEndpoint));
+      (s.aiProvider === "claude" && !isAiApiKeyConfigured()) ||
+      (s.aiProvider === "openai-compat" && (!isAiApiKeyConfigured() || !s.aiApiEndpoint));
     const provider = misconfigured && _claudeCliAvailable.value
       ? "claude-code-cli"
       : s.aiProvider;
@@ -784,7 +756,7 @@ export function useAIProvider() {
    *   - AI is globally disabled (`aiEnabled === false`)
    *   - No provider is selected (`aiProvider === "none"`)
    *   - The selected provider needs configuration the user hasn't supplied
-   *     (Claude API without `aiApiKey`, OpenAI-compat without endpoint/key…)
+   *     (Claude API without a stored key, OpenAI-compat without endpoint/key…)
    *   - The provider is `"mcp"` — the actual wiring is deferred to §5.2 of
    *     PLAN-v2.5-tie-in (Phase 2). For now this lands in `null` so the
    *     LLM fallback is silently skipped instead of hitting the default
@@ -801,8 +773,8 @@ export function useAIProvider() {
     const s = loadAISettings();
     if (!s.aiEnabled || s.aiProvider === "none") return null;
     if (s.aiProvider === "mcp") return null; // wired in PLAN §5.2 (Phase 2)
-    if (s.aiProvider === "claude" && !s.aiApiKey) return null;
-    if (s.aiProvider === "openai-compat" && (!s.aiApiKey || !s.aiApiEndpoint)) return null;
+    if (s.aiProvider === "claude" && !isAiApiKeyConfigured()) return null;
+    if (s.aiProvider === "openai-compat" && (!isAiApiKeyConfigured() || !s.aiApiEndpoint)) return null;
     return {
       async call(prompt: string): Promise<string> {
         // Forward the core's prompt verbatim — it already contains the

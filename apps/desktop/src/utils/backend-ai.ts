@@ -523,3 +523,98 @@ export async function claudeCliLogin(): Promise<void> {
     throw new Error(msg);
   }
 }
+
+// ─── AI provider HTTP (Anthropic API / OpenAI-compatible / Ollama) ─────────
+//
+// The webview no longer fetch()es AI hosts itself: the request goes through
+// the Rust `ai_http_request` command, which injects the API key from the OS
+// keychain. The key is stored with `aiApiKeySet` and is never readable back
+// from the webview — only a masked hint is (see commands/ai_http.rs).
+
+/** How the stored key is attached to an AI request. */
+export type AiHttpAuth = "anthropic" | "bearer" | "none";
+
+export interface AiHttpResponse {
+  status: number;
+  body: string;
+}
+
+/** Perform one AI provider HTTP request through the backend. */
+export async function aiHttpRequest(
+  method: "GET" | "POST",
+  url: string,
+  auth: AiHttpAuth,
+  body?: unknown,
+  timeoutSecs?: number,
+): Promise<AiHttpResponse> {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  if (isTauri()) {
+    return tauriInvoke<AiHttpResponse>("ai_http_request", {
+      method,
+      url,
+      body: payload,
+      auth,
+      timeoutSecs,
+    }, IPC_TIMEOUT.NONE);
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/ai-http-request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method, url, body: payload, auth, timeoutSecs }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `AI request failed: ${res.status}`);
+  return data as AiHttpResponse;
+}
+
+/**
+ * Store the AI API key in the OS keychain (an empty key clears it). Returns
+ * the masked hint of what is now stored, or null when nothing is.
+ */
+export async function aiApiKeySet(key: string): Promise<string | null> {
+  if (isTauri()) return tauriInvoke<string | null>("ai_api_key_set", { key });
+  const res = await devFetch(`${DEV_SERVER}/api/ai-api-key`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || "ai_api_key_set failed");
+  return data?.hint ?? null;
+}
+
+/** Masked hint of the stored AI API key, or null when none is configured. */
+export async function aiApiKeyHint(): Promise<string | null> {
+  if (isTauri()) return tauriInvoke<string | null>("ai_api_key_hint");
+  try {
+    const res = await devFetch(`${DEV_SERVER}/api/ai-api-key`);
+    if (!res.ok) return null;
+    return (await res.json())?.hint ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Launch telemetry opt-out ─────────────────────────────
+
+export interface TelemetryState {
+  /** The user setting. */
+  enabled: boolean;
+  /** True when DO_NOT_TRACK / GITWAND_NO_TELEMETRY forces it off. */
+  forced_off_by_env: boolean;
+}
+
+export async function telemetryGetState(): Promise<TelemetryState> {
+  if (isTauri()) return tauriInvoke<TelemetryState>("telemetry_get_state");
+  const res = await devFetch(`${DEV_SERVER}/api/telemetry-state`);
+  return (await res.json()) as TelemetryState;
+}
+
+export async function telemetrySetEnabled(enabled: boolean): Promise<void> {
+  if (isTauri()) return tauriInvoke<void>("telemetry_set_enabled", { enabled });
+  await devFetch(`${DEV_SERVER}/api/telemetry-state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}

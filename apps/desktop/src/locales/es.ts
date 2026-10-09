@@ -14,6 +14,7 @@ import type { Locale } from "./en";
 const es: Locale = {
   // ─── Common ─────────────────────────────────────────────
   common: {
+    remoteImageBlocked: "Imagen remota bloqueada",
     ai: "IA",
     cancel: "Cancelar",
     close: "Cerrar",
@@ -1198,6 +1199,7 @@ const es: Locale = {
     aiConnectErrorEmpty: "Pega tu clave API",
     aiConnectErrorPrefix: "La clave debe empezar por sk-ant-…",
     aiApiKeyLabel: "Clave API de Anthropic",
+    aiApiKeyStored: "Guardada en el llavero del sistema — {0}",
     aiApiKeyAvailable: "Disponible en",
     aiHideKey: "Ocultar",
     aiShowKey: "Mostrar",
@@ -1372,6 +1374,13 @@ const es: Locale = {
     commitSignatureHint: "Una pequeña firma añadida automáticamente — se puede quitar en cualquier momento",
     liveRepoWatcher: "Actualización en vivo del repositorio",
     liveRepoWatcherHint: "Actualiza al instante a partir de eventos del sistema de archivos en lugar de sondear. Desactívalo si el repositorio está en una unidad de red.",
+    allowRemoteImages: "Cargar imágenes remotas en markdown",
+    allowRemoteImagesHint: "Las descripciones de PR, comentarios y README pueden incluir imágenes alojadas en cualquier sitio. Cargarlas revela a ese servidor tu dirección IP y cuándo abriste la página.",
+    gravatarEnabled: "Mostrar avatares de Gravatar de los autores de commits",
+    gravatarEnabledHint: "Envía un hash del correo de cada autor de commit a gravatar.com.",
+    telemetryEnabled: "Enviar estadísticas de inicio anónimas",
+    telemetryEnabledHint: "Un evento por inicio: un ID de instalación aleatorio, la versión, el SO y el idioma. Ningún dato del repositorio.",
+    telemetryForcedOff: "Desactivado por la variable de entorno DO_NOT_TRACK o GITWAND_NO_TELEMETRY.",
     blameAlgorithm: "Algoritmo de diff para blame",
     blameAlgorithmHint: "Controla cómo git blame detecta líneas movidas. histogram da los mejores resultados.",
     secretsScannerEnabled: "Escanear cambios en stage en busca de secretos",

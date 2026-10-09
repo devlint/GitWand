@@ -35,6 +35,205 @@ fn valid_effort(effort: Option<&String>) -> Option<&'static str> {
     EFFORT_LEVELS.iter().copied().find(|l| *l == e)
 }
 
+// ─── AI CLI env isolation ────────────────────────────────────────────────
+//
+// The AI CLIs are agents: they can read files and, depending on their own
+// config, run commands. Their prompt carries untrusted text (diffs, PR bodies
+// written by other people), so a prompt injection is a realistic path to
+// "print your environment". `hidden_cmd` alone would hand them every variable
+// the login-shell preload imported (`shell_env.rs`: AWS_*, AZURE_*, …) plus the
+// forge tokens it forwards explicitly (GH_TOKEN, GITLAB_TOKEN). `ai_cmd`
+// starts from an empty environment instead and re-adds only what a CLI needs
+// to locate its own config, reach the network through a corporate proxy, and
+// authenticate with its *own* provider.
+
+/// Which AI CLI a command is being built for — selects the provider-specific
+/// part of the env allowlist.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum AiCli {
+    Claude,
+    Codex,
+    Opencode,
+    Copilot,
+    Antigravity,
+}
+
+/// Variables every AI CLI may inherit: user identity / home / locale / temp,
+/// proxy + CA bundle (corporate networks), and the Windows system variables a
+/// process needs to start at all. Nothing here carries a credential.
+const AI_ENV_BASE: &[&str] = &[
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TERM",
+    "LANG",
+    "LANGUAGE",
+    "TZ",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+    "REQUESTS_CA_BUNDLE",
+    // Windows
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "USERPROFILE",
+    "USERNAME",
+    "USERDOMAIN",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "OS",
+];
+
+/// Forge tokens `hidden_cmd` sets explicitly on every command. They are for
+/// `git` / `gh` / `glab`, never for an AI agent.
+const FORGE_TOKEN_ENV: &[&str] = &[
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GITLAB_TOKEN",
+    "GITLAB_ACCESS_TOKEN",
+];
+
+/// Provider-specific variables: each CLI's own config location and its own
+/// provider's auth. Cloud / forge credentials (AWS_*, AZURE_*, GH_TOKEN, …)
+/// are deliberately absent.
+fn ai_env_allowed_for(cli: AiCli, key: &str) -> bool {
+    match cli {
+        // ANTHROPIC_API_KEY & co. are left out on purpose: the user picked the
+        // CLI provider to use their subscription (see CLAUDE_AUTH_OVERRIDE_ENV).
+        AiCli::Claude => key == "CLAUDE_CONFIG_DIR",
+        AiCli::Codex => matches!(key, "CODEX_HOME" | "OPENAI_API_KEY" | "OPENAI_BASE_URL"),
+        AiCli::Opencode => {
+            key.starts_with("OPENCODE_")
+                || matches!(
+                    key,
+                    "ANTHROPIC_API_KEY"
+                        | "OPENAI_API_KEY"
+                        | "GEMINI_API_KEY"
+                        | "GOOGLE_GENERATIVE_AI_API_KEY"
+                        | "OPENROUTER_API_KEY"
+                        | "GROQ_API_KEY"
+                        | "MISTRAL_API_KEY"
+                        | "DEEPSEEK_API_KEY"
+                        | "XAI_API_KEY"
+                )
+        }
+        // GH_TOKEN is not forwarded: it is the user's forge token, usually with
+        // repo scopes. Copilot authenticates through its own `/login` keychain
+        // entry or a dedicated COPILOT_GITHUB_TOKEN.
+        AiCli::Copilot => key.starts_with("COPILOT_") && key != "COPILOT_ALLOW_ALL",
+        AiCli::Antigravity => matches!(
+            key,
+            "GEMINI_API_KEY"
+                | "GOOGLE_API_KEY"
+                | "GOOGLE_CLOUD_PROJECT"
+                | "GOOGLE_CLOUD_LOCATION"
+                | "GOOGLE_GENAI_USE_VERTEXAI"
+        ),
+    }
+}
+
+/// Whether `key` from GitWand's own environment may reach `cli`.
+fn ai_env_allowed(cli: AiCli, key: &str) -> bool {
+    // Windows env names are case-insensitive; compare the base list that way.
+    let upper = key.to_ascii_uppercase();
+    AI_ENV_BASE.iter().any(|b| *b == key || *b == upper)
+        || key.starts_with("LC_")
+        || ai_env_allowed_for(cli, key)
+}
+
+/// `hidden_cmd` for an AI CLI, with an allowlisted environment (see above).
+///
+/// Keeps what `hidden_cmd` set explicitly — the enriched macOS PATH and the
+/// AppImage library-path fixes — except the forge tokens, then re-adds the
+/// allowlisted variables from GitWand's own environment.
+pub(crate) fn ai_cmd(binary: &str, cli: AiCli) -> std::process::Command {
+    let mut cmd = hidden_cmd(binary);
+    let explicit: Vec<(std::ffi::OsString, std::ffi::OsString)> = cmd
+        .get_envs()
+        .filter_map(|(k, v)| v.map(|v| (k.to_owned(), v.to_owned())))
+        .collect();
+    cmd.env_clear();
+    let mut has_path = false;
+    for (k, v) in explicit {
+        let name = k.to_string_lossy();
+        if FORGE_TOKEN_ENV.contains(&name.as_ref()) {
+            continue;
+        }
+        has_path |= name.eq_ignore_ascii_case("PATH");
+        cmd.env(&k, &v);
+    }
+    if !has_path {
+        if let Some(path) = std::env::var_os("PATH") {
+            cmd.env("PATH", path);
+        }
+    }
+    for (k, v) in std::env::vars_os() {
+        if let Some(name) = k.to_str() {
+            if ai_env_allowed(cli, name) {
+                cmd.env(&k, &v);
+            }
+        }
+    }
+    cmd
+}
+
+/// Run `cmd` with `input` written to its stdin, collecting stdout/stderr.
+///
+/// Used to hand a prompt to a CLI that reads it from stdin, so the prompt —
+/// which holds repository content — never appears in the process argv, where
+/// any local user can read it with `ps`. The write happens on its own thread:
+/// a CLI that starts printing before it has drained stdin would otherwise
+/// deadlock against a full stdout pipe.
+fn output_with_stdin(
+    mut cmd: std::process::Command,
+    input: String,
+) -> std::io::Result<std::process::Output> {
+    use std::io::Write;
+    use std::process::Stdio;
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| std::io::Error::other("failed to open stdin"))?;
+    let writer = std::thread::spawn(move || {
+        // A CLI that exits without reading closes the pipe; that is its
+        // answer to report, not a write error to surface.
+        let _ = stdin.write_all(input.as_bytes());
+    });
+    let out = child.wait_with_output();
+    let _ = writer.join();
+    out
+}
+
 // ─── Claude binary resolution + env hygiene ──────────────────────────────
 
 /// Apply the API-key env strip to a `std::process::Command` before spawning.
@@ -164,7 +363,7 @@ fn detect_claude_cli_inner() -> Result<ClaudeCliInfo, String> {
     };
 
     // Query version only — no auth ping.
-    let version = hidden_cmd(&binary)
+    let version = ai_cmd(&binary, AiCli::Claude)
         .arg("--version")
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -231,14 +430,14 @@ fn claude_cli_prompt_inner(
 
     let fmt = output_format.unwrap_or_else(|| "text".to_string());
 
-    // The prompt is passed as a CLI argument, and spawning a process with an
-    // interior NUL byte fails with "nul byte found in provided data". Binary
-    // or malformed content can leak a `\0` into the prompt via diffs or file
-    // snapshots, so strip NULs defensively before building the command.
+    // Binary or malformed content can leak a `\0` into the prompt via diffs or
+    // file snapshots; strip NULs defensively before handing it to the CLI.
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = hidden_cmd(&binary);
-    cmd.args(["-p", &full_prompt, "--output-format", &fmt]);
+    let mut cmd = ai_cmd(&binary, AiCli::Claude);
+    // `-p` with no positional prompt reads it from stdin: the prompt holds
+    // repository content and must stay out of the argv (see output_with_stdin).
+    cmd.args(["-p", "--output-format", &fmt]);
     // v2.17 — explicit per-provider model selection. When empty, the CLI
     // falls back to its own configured default.
     if let Some(m) = model.as_ref() {
@@ -249,6 +448,18 @@ fn claude_cli_prompt_inner(
     if let Some(e) = valid_effort(effort.as_ref()) {
         cmd.args(["--effort", e]);
     }
+    // GitWand only wants a text answer. The prompt carries untrusted repo
+    // content, so the tools that could act on the machine or reach the network
+    // are denied even if the user's own Claude settings allow them.
+    cmd.args([
+        "--disallowedTools",
+        "Bash",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "WebFetch",
+        "WebSearch",
+    ]);
     strip_claude_auth_env(&mut cmd);
     if let Some(dir) = cwd {
         if !dir.trim().is_empty() {
@@ -256,8 +467,7 @@ fn claude_cli_prompt_inner(
         }
     }
 
-    let output = cmd
-        .output()
+    let output = output_with_stdin(cmd, full_prompt)
         .map_err(|e| format!("Failed to run claude CLI: {}", e))?;
 
     if !output.status.success() {
@@ -316,7 +526,7 @@ fn detect_codex_cli_inner() -> Result<CodexCliInfo, String> {
         }
     };
 
-    let version = hidden_cmd(&binary)
+    let version = ai_cmd(&binary, AiCli::Codex)
         .arg("--version")
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -365,14 +575,17 @@ fn codex_cli_prompt_inner(
         _ => prompt,
     };
 
-    // Strip NUL bytes — the prompt is passed as a CLI argument and an interior
-    // `\0` makes the spawn fail with "nul byte found in provided data".
+    // Strip NUL bytes defensively — binary content can leak them into a diff.
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = hidden_cmd(&binary);
+    let mut cmd = ai_cmd(&binary, AiCli::Codex);
     cmd.arg("exec");
-    // v2.17 — explicit model. Flags must precede the positional prompt on
-    // `codex exec`, so push `--model <m>` before the prompt argument.
+    // GitWand only wants a text answer, and the prompt carries untrusted repo
+    // content: pin the sandbox to read-only (no writes, no network) whatever
+    // the user's own Codex config says.
+    cmd.args(["--sandbox", "read-only"]);
+    // v2.17 — explicit model. Flags must precede the positional `-` on
+    // `codex exec`, so push `--model <m>` before it.
     if let Some(m) = model.as_ref() {
         if !m.trim().is_empty() {
             cmd.args(["--model", m.trim()]);
@@ -383,15 +596,16 @@ fn codex_cli_prompt_inner(
     if let Some(e) = valid_effort(effort.as_ref()) {
         cmd.args(["-c", &format!("model_reasoning_effort={}", e)]);
     }
-    cmd.arg(&full_prompt);
+    // `-` makes `codex exec` read the prompt from stdin, keeping repository
+    // content out of the argv (see output_with_stdin).
+    cmd.arg("-");
     if let Some(dir) = cwd {
         if !dir.trim().is_empty() {
             cmd.current_dir(dir);
         }
     }
 
-    let output = cmd
-        .output()
+    let output = output_with_stdin(cmd, full_prompt)
         .map_err(|e| format!("Failed to run codex CLI: {}", e))?;
 
     if !output.status.success() {
@@ -426,7 +640,7 @@ fn antigravity_list_models_inner() -> Result<Vec<AntigravityModel>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match hidden_cmd(&binary).arg("models").output() {
+    let output = match ai_cmd(&binary, AiCli::Antigravity).arg("models").output() {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()),
     };
@@ -492,7 +706,10 @@ fn codex_list_models_inner() -> Result<Vec<CodexModel>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match hidden_cmd(&binary).args(["debug", "models"]).output() {
+    let output = match ai_cmd(&binary, AiCli::Codex)
+        .args(["debug", "models"])
+        .output()
+    {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()),
     };
@@ -625,7 +842,7 @@ fn detect_antigravity_cli_inner() -> Result<AntigravityCliInfo, String> {
         }
     };
 
-    let version = hidden_cmd(&binary)
+    let version = ai_cmd(&binary, AiCli::Antigravity)
         .arg("--version")
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -680,7 +897,7 @@ fn antigravity_cli_prompt_inner(
     // `\0` makes the spawn fail with "nul byte found in provided data".
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = hidden_cmd(&binary);
+    let mut cmd = ai_cmd(&binary, AiCli::Antigravity);
     // Flags precede the positional prompt passed via `-p`.
     if let Some(m) = model.as_ref() {
         if !m.trim().is_empty() {
@@ -780,7 +997,7 @@ fn detect_opencode_cli_inner() -> Result<OpencodeCliInfo, String> {
         }
     };
 
-    let version = hidden_cmd(&binary)
+    let version = ai_cmd(&binary, AiCli::Opencode)
         .arg("--version")
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -833,8 +1050,16 @@ fn opencode_cli_prompt_inner(
     // `\0` makes the spawn fail with "nul byte found in provided data".
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = hidden_cmd(&binary);
+    let mut cmd = ai_cmd(&binary, AiCli::Opencode);
     cmd.arg("run");
+    // GitWand only wants a text answer, and the prompt carries untrusted repo
+    // content: deny the tools that act on the machine or reach the network.
+    // `OPENCODE_PERMISSION` is merged over the user's config by opencode; set
+    // after `ai_cmd`, so an inherited value cannot loosen it.
+    cmd.env(
+        "OPENCODE_PERMISSION",
+        r#"{"edit":"deny","bash":"deny","webfetch":"deny"}"#,
+    );
     // Model is `provider/model` form; flags precede the positional message.
     if let Some(m) = model.as_ref() {
         if !m.trim().is_empty() {
@@ -883,7 +1108,7 @@ fn opencode_list_models_inner() -> Result<Vec<String>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match hidden_cmd(&binary).arg("models").output() {
+    let output = match ai_cmd(&binary, AiCli::Opencode).arg("models").output() {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()),
     };
@@ -980,7 +1205,7 @@ fn detect_copilot_cli_inner() -> Result<CopilotCliInfo, String> {
         }
     };
 
-    let version = hidden_cmd(&binary)
+    let version = ai_cmd(&binary, AiCli::Copilot)
         .arg("--version")
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -1034,7 +1259,7 @@ fn copilot_cli_prompt_inner(
     // `\0` makes the spawn fail with "nul byte found in provided data".
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = hidden_cmd(&binary);
+    let mut cmd = ai_cmd(&binary, AiCli::Copilot);
     // `--no-color` keeps stdout free of ANSI escapes. Flags precede the
     // positional prompt passed via `-p`.
     cmd.arg("--no-color");
@@ -1096,7 +1321,10 @@ fn copilot_list_models_inner() -> Result<Vec<String>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match hidden_cmd(&binary).args(["help", "config"]).output() {
+    let output = match ai_cmd(&binary, AiCli::Copilot)
+        .args(["help", "config"])
+        .output()
+    {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()),
     };
@@ -1384,5 +1612,91 @@ mod tests {
         assert_eq!(models[1].name, "GPT-6-Astra");
         assert_eq!(models[1].efforts, vec!["low", "ultra"]);
         assert!(parse_codex_models("not json").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod env_isolation_tests {
+    use super::*;
+
+    #[test]
+    fn base_allowlist_admits_home_locale_and_proxy() {
+        for k in [
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "NODE_EXTRA_CA_CERTS",
+        ] {
+            assert!(ai_env_allowed(AiCli::Claude, k), "{k} should pass");
+        }
+        // Windows names are case-insensitive.
+        assert!(ai_env_allowed(AiCli::Codex, "SystemRoot"));
+    }
+
+    #[test]
+    fn credentials_never_reach_any_cli() {
+        let secrets = [
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GITLAB_TOKEN",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AZURE_CLIENT_SECRET",
+            "AZURE_DEVOPS_EXT_PAT",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "NPM_TOKEN",
+        ];
+        for cli in [
+            AiCli::Claude,
+            AiCli::Codex,
+            AiCli::Opencode,
+            AiCli::Copilot,
+            AiCli::Antigravity,
+        ] {
+            for k in secrets {
+                assert!(!ai_env_allowed(cli, k), "{k} leaked to {cli:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn each_cli_gets_only_its_own_provider_auth() {
+        assert!(ai_env_allowed(AiCli::Codex, "OPENAI_API_KEY"));
+        assert!(!ai_env_allowed(AiCli::Claude, "OPENAI_API_KEY"));
+        assert!(!ai_env_allowed(AiCli::Claude, "ANTHROPIC_API_KEY"));
+        assert!(ai_env_allowed(AiCli::Antigravity, "GEMINI_API_KEY"));
+        assert!(!ai_env_allowed(AiCli::Codex, "GEMINI_API_KEY"));
+        assert!(ai_env_allowed(AiCli::Copilot, "COPILOT_GITHUB_TOKEN"));
+        assert!(!ai_env_allowed(AiCli::Copilot, "COPILOT_ALLOW_ALL"));
+    }
+
+    #[test]
+    fn ai_cmd_drops_forge_tokens_set_by_hidden_cmd() {
+        let cmd = ai_cmd("true", AiCli::Codex);
+        let names: Vec<String> = cmd
+            .get_envs()
+            .filter(|(_, v)| v.is_some())
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        for t in FORGE_TOKEN_ENV {
+            assert!(!names.iter().any(|n| n == t), "{t} forwarded");
+        }
+        assert!(
+            names.iter().any(|n| n.eq_ignore_ascii_case("PATH")),
+            "PATH missing"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_with_stdin_feeds_the_prompt_off_argv() {
+        let mut cmd = std::process::Command::new("cat");
+        cmd.env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default());
+        let out = output_with_stdin(cmd, "hello\nworld".to_string()).unwrap();
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "hello\nworld");
     }
 }

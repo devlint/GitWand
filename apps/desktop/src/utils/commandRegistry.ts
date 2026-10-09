@@ -46,6 +46,9 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   // same branch through helpers (`gh_list_prs_inner` and friends), and finding
   // them means following call chains this audit did not undertake. Treat an
   // absent `cliPathOnly` on a forge command as "not checked", not as "agrees".
+  ai_api_key_hint: { route: "/api/ai-api-key" },
+  ai_api_key_set: { route: "/api/ai-api-key" },
+  ai_http_request: { route: "/api/ai-http-request" },
   antigravity_cli_prompt: { route: "/api/antigravity-cli-prompt" },
   antigravity_list_models: { route: "/api/antigravity-models" },
   claude_cli_login: { route: "/api/claude-cli-login" },
@@ -178,6 +181,8 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   snapshot_list: { route: "/api/snapshot-list" },
   snapshot_prune: { route: "/api/snapshot-prune" },
   snapshot_restore: { route: "/api/snapshot-restore" },
+  telemetry_get_state: { route: "/api/telemetry-state" },
+  telemetry_set_enabled: { route: "/api/telemetry-state" },
   terminal_close: { route: "/api/terminal-close" },
   terminal_open: { route: "/api/terminal-open" },
   terminal_resize: { route: "/api/terminal-resize" },
@@ -231,6 +236,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   // Both were fetched by backend.ts while dev-server.mjs declared neither, so
   // both 404'd under pnpm dev:web. Pinned at parity in write-failure.test.mjs.
   git_commit_template_path: { route: "/api/git-commit-template-path" },
+  read_commit_template: { route: "/api/read-commit-template" },
   git_config_identity: { route: "/api/git-config-identity" },
 
   // ─── GAPs this audit found ────────────────────────────────────────────────

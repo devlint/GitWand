@@ -22,6 +22,7 @@ import type { Locale } from "./en";
 
 const zhCN: Locale = {
   common: {
+    remoteImageBlocked: "已阻止远程图片",
     ai: "AI",
     cancel: "取消",
     close: "关闭",
@@ -1276,6 +1277,7 @@ const zhCN: Locale = {
     aiConnectErrorEmpty: "请粘贴你的 API 密钥",
     aiConnectErrorPrefix: "密钥必须以 sk-ant- 开头…",
     aiApiKeyLabel: "Anthropic API 密钥",
+    aiApiKeyStored: "已保存到系统钥匙串 — {0}",
     aiApiKeyAvailable: "可在此获取：",
     aiHideKey: "隐藏",
     aiShowKey: "显示",
@@ -1450,6 +1452,13 @@ const zhCN: Locale = {
     commitSignatureHint: "自动添加的小签名 — 可随时移除",
     liveRepoWatcher: "仓库实时更新",
     liveRepoWatcherHint: "通过文件系统事件即时刷新，而不是定时轮询。如果仓库位于网络驱动器上，请关闭此选项。",
+    allowRemoteImages: "在 Markdown 中加载远程图片",
+    allowRemoteImagesHint: "PR 描述、评论和 README 可以嵌入任意位置托管的图片。加载这些图片会向该主机暴露你的 IP 地址以及打开页面的时间。",
+    gravatarEnabled: "显示提交作者的 Gravatar 头像",
+    gravatarEnabledHint: "会将每位提交作者邮箱地址的哈希发送到 gravatar.com。",
+    telemetryEnabled: "发送匿名启动统计",
+    telemetryEnabledHint: "每次启动一个事件：随机安装 ID、应用版本、操作系统和语言。不包含任何仓库数据。",
+    telemetryForcedOff: "已被环境变量 DO_NOT_TRACK 或 GITWAND_NO_TELEMETRY 禁用。",
     blameAlgorithm: "Blame 差异算法",
     blameAlgorithmHint: "控制 git blame 如何检测移动的行。histogram 在大多数仓库中效果最佳。",
     secretsScannerEnabled: "扫描暂存的更改中的密钥",

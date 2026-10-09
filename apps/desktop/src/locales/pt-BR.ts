@@ -15,6 +15,7 @@ import type { Locale } from "./en";
 const ptBR: Locale = {
   // ─── Common ─────────────────────────────────────────────
   common: {
+    remoteImageBlocked: "Imagem remota bloqueada",
     ai: "IA",
     cancel: "Cancelar",
     close: "Fechar",
@@ -1199,6 +1200,7 @@ const ptBR: Locale = {
     aiConnectErrorEmpty: "Cole sua chave de API",
     aiConnectErrorPrefix: "A chave deve começar com sk-ant-…",
     aiApiKeyLabel: "Chave de API Anthropic",
+    aiApiKeyStored: "Armazenada no chaveiro do sistema — {0}",
     aiApiKeyAvailable: "Disponível em",
     aiHideKey: "Ocultar",
     aiShowKey: "Mostrar",
@@ -1373,6 +1375,13 @@ const ptBR: Locale = {
     commitSignatureHint: "Uma pequena assinatura adicionada automaticamente — removível a qualquer momento",
     liveRepoWatcher: "Atualização ao vivo do repositório",
     liveRepoWatcherHint: "Atualiza instantaneamente a partir de eventos do sistema de arquivos em vez de consultar periodicamente. Desative se o repositório estiver em uma unidade de rede.",
+    allowRemoteImages: "Carregar imagens remotas no markdown",
+    allowRemoteImagesHint: "Descrições de PR, comentários e READMEs podem incorporar imagens hospedadas em qualquer lugar. Carregá-las revela a esse servidor seu endereço IP e quando você abriu a página.",
+    gravatarEnabled: "Mostrar avatares do Gravatar dos autores de commits",
+    gravatarEnabledHint: "Envia um hash do e-mail de cada autor de commit para gravatar.com.",
+    telemetryEnabled: "Enviar estatísticas anônimas de inicialização",
+    telemetryEnabledHint: "Um evento por inicialização: um ID de instalação aleatório, a versão, o SO e o idioma. Nenhum dado do repositório.",
+    telemetryForcedOff: "Desativado pela variável de ambiente DO_NOT_TRACK ou GITWAND_NO_TELEMETRY.",
     blameAlgorithm: "Algoritmo de diff para blame",
     blameAlgorithmHint: "Controla como git blame detecta linhas movidas. histogram dá os melhores resultados.",
     secretsScannerEnabled: "Verificar alterações no stage em busca de segredos",

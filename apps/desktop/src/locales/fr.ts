@@ -8,6 +8,7 @@ import type { Locale } from "./en";
 const fr: Locale = {
   // ─── Common ─────────────────────────────────────────────
   common: {
+    remoteImageBlocked: "Image distante bloquée",
     ai: "IA",
     cancel: "Annuler",
     close: "Fermer",
@@ -1207,6 +1208,7 @@ const fr: Locale = {
     aiConnectErrorEmpty: "Veuillez coller votre cl\u00e9 API",
     aiConnectErrorPrefix: "La cl\u00e9 doit commencer par sk-ant-\u2026",
     aiApiKeyLabel: "Cl\u00e9 API Anthropic",
+    aiApiKeyStored: "Enregistrée dans le trousseau du système — {0}",
     aiApiKeyAvailable: "Disponible sur",
     aiHideKey: "Masquer",
     aiShowKey: "Afficher",
@@ -1381,6 +1383,13 @@ const fr: Locale = {
     commitSignatureHint: "Un petit clin d\u2019\u0153il ajout\u00e9 automatiquement \u2014 supprimable \u00e0 tout moment",
     liveRepoWatcher: "Mise \u00e0 jour live du d\u00e9p\u00f4t",
     liveRepoWatcherHint: "Rafra\u00eechit instantan\u00e9ment \u00e0 partir des \u00e9v\u00e9nements du syst\u00e8me de fichiers au lieu d'interroger p\u00e9riodiquement. \u00c0 d\u00e9sactiver si le d\u00e9p\u00f4t est sur un disque r\u00e9seau.",
+    allowRemoteImages: "Charger les images distantes dans le markdown",
+    allowRemoteImagesHint: "Les descriptions de PR, commentaires et README peuvent intégrer des images hébergées n'importe où. Les charger révèle à cet hôte votre adresse IP et le moment où vous avez ouvert la page.",
+    gravatarEnabled: "Afficher les avatars Gravatar des auteurs de commits",
+    gravatarEnabledHint: "Envoie un hash de l'adresse e-mail de chaque auteur de commit à gravatar.com.",
+    telemetryEnabled: "Envoyer des statistiques de lancement anonymes",
+    telemetryEnabledHint: "Un événement par lancement : un identifiant d'installation aléatoire, la version, l'OS et la langue. Aucune donnée de dépôt.",
+    telemetryForcedOff: "Désactivé par la variable d'environnement DO_NOT_TRACK ou GITWAND_NO_TELEMETRY.",
     blameAlgorithm: "Algorithme de diff pour le blame",
     blameAlgorithmHint: "Contrôle comment git blame détecte les lignes déplacées. histogram donne les meilleurs résultats.",
     secretsScannerEnabled: "Analyser les changements indexés à la recherche de secrets",

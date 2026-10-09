@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost http://localhost:3001 http: https:; img-src 'self' data: blob: https: http:"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost http://localhost:3001 https://registry.modelcontextprotocol.io https://registry.npmjs.org https://github.com; img-src 'self' data: blob: https: http:"
     }
   },
   "bundle": {
