@@ -37,9 +37,18 @@ watchEffect((onCleanup) => {
   onCleanup(() => document.removeEventListener("click", close));
 });
 
-function openDropdown(e: MouseEvent) {
+const menuRef = ref<HTMLElement | null>(null);
+/** The panel is docked at the bottom: when it is short, open the menu upward. */
+const menuUp = ref(false);
+
+async function openDropdown(e: MouseEvent) {
   e.stopPropagation();
   showDropdown.value = !showDropdown.value;
+  if (!showDropdown.value) return;
+  menuUp.value = false;
+  await nextTick();
+  const menu = menuRef.value;
+  if (menu && menu.getBoundingClientRect().bottom > window.innerHeight - 8) menuUp.value = true;
 }
 
 function selectDropdownItem(action: () => void) {
@@ -269,8 +278,9 @@ async function mountTab(tab: TerminalTab) {
     fontSize: settings.value.terminalFontSize ?? 13,
     // AI CLIs take Shift+Enter as "newline in the prompt"; shells get a plain CR.
     shiftEnterNewline: tab.type !== "shell",
-    // App-level terminal shortcuts (new / close / switch tab) never reach the PTY.
-    customKeyHandler: (e) => resolveTerminalShortcut(e, true) === null,
+    // App-level terminal shortcuts (new / close / switch tab, search) never
+    // reach the PTY — Ctrl+F would otherwise also send ^F (page down in vim/less).
+    customKeyHandler: (e) => resolveTerminalShortcut(e, true) === null && !isSearchChord(e),
     readClipboard: clipboardReadText,
     writeClipboard: clipboardWriteText,
     onLinkOpen: (url) => { openExternalUrl(url); },
@@ -468,8 +478,13 @@ function doSearch(direction: "next" | "prev") {
   searchHasResult.value = found !== false;
 }
 
+/** ⌘F / Ctrl+F — opens the terminal search (see onKeyDown). */
+function isSearchChord(e: KeyboardEvent): boolean {
+  return (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f";
+}
+
 function onKeyDown(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+  if (isSearchChord(e)) {
     e.preventDefault();
     openSearch();
   }
@@ -550,12 +565,26 @@ onBeforeUnmount(() => {
       </button>
 
       <div class="tp__new-wrap">
-        <button class="tp__new" v-tooltip="t('terminal.newTab')" :aria-label="t('terminal.newTab')" @click="openDropdown">
+        <button
+          class="tp__new"
+          v-tooltip="t('terminal.newTab')"
+          :aria-label="t('terminal.newTab')"
+          aria-haspopup="menu"
+          :aria-expanded="showDropdown"
+          @click="openDropdown"
+        >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
         </button>
-        <div v-if="showDropdown" class="tp__menu" role="menu" @click.stop>
+        <div
+          v-if="showDropdown"
+          ref="menuRef"
+          class="tp__menu"
+          :class="{ 'tp__menu--up': menuUp }"
+          role="menu"
+          @click.stop
+        >
           <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new'))">
             <svg class="tp__menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
@@ -1085,6 +1114,11 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
+}
+
+.tp__menu--up {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 
 .tp__menu-item {
