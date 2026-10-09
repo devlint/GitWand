@@ -2650,6 +2650,8 @@ const en = {
     searchNoResult: "No results",
     searchPrev: "Previous (Shift+Enter)",
     searchNext: "Next (Enter)",
+    searchClose: "Close search (Esc)",
+    searchOpen: "Search ({0})",
     menuHideOnNav: "Hide on menu switch",
     menuLayout: "Layout",
     modeFullscreen: "Fullscreen",

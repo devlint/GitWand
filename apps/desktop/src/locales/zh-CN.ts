@@ -2618,6 +2618,8 @@ const zhCN: Locale = {
     searchNoResult: "无结果",
     searchPrev: "上一个 (Shift+Enter)",
     searchNext: "下一个 (Enter)",
+    searchClose: "关闭搜索 (Esc)",
+    searchOpen: "搜索 ({0})",
     menuHideOnNav: "切换菜单时隐藏",
     menuLayout: "布局",
     modeFullscreen: "全屏",

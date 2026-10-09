@@ -2609,6 +2609,8 @@ const ptBR: Locale = {
     searchNoResult: "Nenhum resultado",
     searchPrev: "Anterior (Shift+Enter)",
     searchNext: "Próximo (Enter)",
+    searchClose: "Fechar busca (Esc)",
+    searchOpen: "Buscar ({0})",
     menuHideOnNav: "Ocultar ao trocar de menu",
     menuLayout: "Layout",
     modeFullscreen: "Tela cheia",
