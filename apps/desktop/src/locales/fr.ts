@@ -1170,7 +1170,6 @@ const fr: Locale = {
     navGroupSystem: "Système",
     checkForUpdates: "Vérifier les mises à jour",
     upToDate: "À jour",
-    logsTitle: "Journal d'activité",
     logsEmpty: "Aucune entrée de log",
     logsClear: "Effacer",
     logsCopyAll: "Tout copier",
@@ -1298,7 +1297,6 @@ const fr: Locale = {
       },
     },
     aiTemplates: {
-      kindLabel: "Modèle pour",
       promptTemplatesLabel: "Modèles de prompt",
       kindCommit: "Message de commit",
       kindPr: "Pull request",
@@ -1310,7 +1308,6 @@ const fr: Locale = {
       default: "Par défaut",
       defaultDescription: "Prompt intégré utilisé par GitWand quand aucun modèle n'est sélectionné.",
       builtinBadge: "intégré",
-      defaultLabel: "Par défaut",
       customLabel: "Personnalisés",
       empty: "Aucun modèle personnalisé. Dupliquez un modèle intégré pour partir de celui-ci.",
       add: "Nouveau modèle",
@@ -1564,7 +1561,7 @@ const fr: Locale = {
       editor: "Éditeur externe et affichage des diffs et du code.",
       terminal: "Disposition, shell et apparence du terminal intégré.",
       ai: "Activez les fonctions IA, choisissez un fournisseur et configurez le modèle utilisé par GitWand.",
-      aiTemplates: "Personnalisez les prompts utilisés pour les messages de commit, les descriptions de PR et les revues.",
+      aiTemplates: "Personnalisez les prompts utilisés pour les messages de commit, les descriptions de pull request et les notes de version.",
       accounts: "Connectez vos comptes GitHub, GitLab et Bitbucket pour les pull requests et les fonctions distantes.",
       mcp: "Gérez les serveurs MCP disponibles pour les fonctions IA de GitWand.",
       automations: "Tâches optionnelles exécutées automatiquement selon des événements Git ou un planning.",
@@ -1675,7 +1672,6 @@ const fr: Locale = {
   },
 
   hooks: {
-    title: "Hooks Git",
     empty: "Aucun hook configuré. Créez-en un pour exécuter des scripts sur des événements Git.",
     reload: "Actualiser",
     newHook: "Nouveau hook",
@@ -2216,7 +2212,6 @@ const fr: Locale = {
   // ─── Automations (v2.8) ──────────────────────
   automations: {
     title: "Automatisations",
-    subtitle: "T\u00e2ches opt-in qui s\u2019ex\u00e9cutent automatiquement en fonction d\u2019\u00e9v\u00e9nements Git ou d\u2019un planning.",
     requiresAi: "N\u00e9cessite que l\u2019IA soit activ\u00e9e dans l\u2019onglet IA.",
     runNow: "Ex\u00e9cuter",
     running: "En cours\u2026",

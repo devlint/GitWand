@@ -538,7 +538,7 @@ function submitForm() {
   margin-top: var(--space-6);
 }
 
-/* Same look as SettingsPanel's .sp-label (accent bar on the left). */
+/* Same look as SettingsPanel's .sp-section-label (accent bar on the left). */
 .aup-section-title {
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
@@ -563,7 +563,7 @@ function submitForm() {
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #fff;
+  color: var(--color-accent-text);
   background: var(--color-accent);
   border: 1px solid var(--color-accent);
   border-radius: var(--radius-md);
@@ -572,9 +572,12 @@ function submitForm() {
   transition: background 0.12s, border-color 0.12s;
 }
 
+/* Darken on hover rather than using --color-accent-hover: in the dark theme
+   that token is a light violet (#a78bfa) and white text on it drops to
+   ~2.7:1. Mixing in black keeps the label above 4.5:1 in both themes. */
 .aup-add-btn:hover {
-  background: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
+  background: color-mix(in srgb, var(--color-accent) 82%, #000);
+  border-color: color-mix(in srgb, var(--color-accent) 82%, #000);
 }
 
 .aup-rule-card .aup-card-head {

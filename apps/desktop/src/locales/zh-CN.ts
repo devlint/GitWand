@@ -1239,7 +1239,6 @@ const zhCN: Locale = {
     navGroupSystem: "系统",
     checkForUpdates: "检查更新",
     upToDate: "已是最新",
-    logsTitle: "活动日志",
     logsEmpty: "暂无日志记录",
     logsClear: "清空",
     logsCopyAll: "全部复制",
@@ -1367,7 +1366,6 @@ const zhCN: Locale = {
       },
     },
     aiTemplates: {
-      kindLabel: "模板用途",
       promptTemplatesLabel: "提示词模板",
       kindCommit: "提交信息",
       kindPr: "拉取请求",
@@ -1379,7 +1377,6 @@ const zhCN: Locale = {
       default: "默认",
       defaultDescription: "未选择模板时 GitWand 使用的内置提示词。",
       builtinBadge: "内置",
-      defaultLabel: "默认",
       customLabel: "自定义",
       empty: "还没有自定义模板。复制一个内置模板作为起点。",
       add: "新建模板",
@@ -1566,7 +1563,7 @@ const zhCN: Locale = {
       editor: "外部编辑器以及 diff 和代码的显示方式。",
       terminal: "集成终端的布局、Shell 和外观。",
       ai: "启用 AI 功能、选择提供商并配置 GitWand 使用的模型。",
-      aiTemplates: "自定义用于提交信息、PR 描述和代码审查的提示词。",
+      aiTemplates: "自定义用于提交信息、拉取请求描述和发行说明的提示词。",
       accounts: "连接 GitHub、GitLab 和 Bitbucket 账户，用于拉取请求和远程功能。",
       mcp: "管理 GitWand AI 功能可用的 MCP 服务器。",
       automations: "根据 Git 事件或计划自动运行的可选任务。",
@@ -1677,7 +1674,6 @@ const zhCN: Locale = {
   },
 
   hooks: {
-    title: "Git 钩子",
     empty: "尚未配置钩子。创建一个以在 Git 事件上运行脚本。",
     reload: "刷新",
     newHook: "新建钩子",
@@ -2215,7 +2211,6 @@ const zhCN: Locale = {
   // ─── Automations (v2.8) ──────────────────────
   automations: {
     title: "\u81ea\u52a8\u5316",
-    subtitle: "\u57fa\u4e8e Git \u4e8b\u4ef6\u6216\u8ba1\u5212\u81ea\u52a8\u8fd0\u884c\u7684\u53ef\u9009\u4efb\u52a1\u3002",
     requiresAi: "\u9700\u8981\u5728 AI \u6807\u7b7e\u9875\u4e2d\u542f\u7528 AI\u3002",
     runNow: "\u7acb\u5373\u8fd0\u884c",
     running: "\u8fd0\u884c\u4e2d\u2026",

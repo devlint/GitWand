@@ -588,10 +588,6 @@ function tabLabel(id: SettingsTab): string {
   }
 }
 
-// Hooks tab: the Reload / New hook buttons sit next to the section label and
-// drive HooksPanel through its exposed API.
-const hooksPanelRef = ref<InstanceType<typeof HooksPanel> | null>(null);
-
 // AI Templates is entered per template kind from the nav, so its page title
 // names the kind rather than the tab.
 const pageTitle = computed(() =>
@@ -1375,6 +1371,25 @@ const aiTemplateKindLabel: Record<AiTemplateKind, LocaleKey> = {
   pr: "settings.aiTemplates.kindPr",
   releaseNotes: "settings.aiTemplates.kindReleaseNotes",
 };
+// Nav icon per template kind. Keyed by kind so a new kind is a type error
+// here instead of silently borrowing another kind's icon.
+type SvgShape = { tag: "circle" | "path"; attrs: Record<string, string> };
+const aiTemplateKindIcon: Record<AiTemplateKind, SvgShape[]> = {
+  commit: [
+    { tag: "circle", attrs: { cx: "8", cy: "8", r: "2.5" } },
+    { tag: "path", attrs: { d: "M1 8h4.5M10.5 8H15" } },
+  ],
+  pr: [
+    { tag: "circle", attrs: { cx: "4", cy: "3.5", r: "1.5" } },
+    { tag: "circle", attrs: { cx: "4", cy: "12.5", r: "1.5" } },
+    { tag: "circle", attrs: { cx: "12", cy: "12.5", r: "1.5" } },
+    { tag: "path", attrs: { d: "M4 5v6M12 11V6.5A2 2 0 0 0 10 4.5H7.5M9 3l-1.5 1.5L9 6" } },
+  ],
+  releaseNotes: [
+    { tag: "path", attrs: { d: "M2 2.5h6.5L14 8l-5.5 5.5L2 8z" } },
+    { tag: "circle", attrs: { cx: "5.5", cy: "5.5", r: "1", fill: "currentColor", stroke: "none" } },
+  ],
+};
 const aiTemplateKindHint: Record<AiTemplateKind, LocaleKey> = {
   commit: "settings.aiTemplates.hintCommit",
   pr: "settings.aiTemplates.hintPr",
@@ -1581,22 +1596,10 @@ function openAiTemplateKind(kind: AiTemplateKind) {
               <button v-for="kind in AI_TEMPLATE_KINDS" :key="kind" class="sp-nav-item"
                 :class="{ 'sp-nav-item--active': activeSettingsTab === 'aiTemplates' && aiTemplateKind === kind }"
                 @click="openAiTemplateKind(kind)">
-                <svg v-if="kind === 'commit'" width="15" height="15" viewBox="0 0 16 16" fill="none"
-                  stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                  <circle cx="8" cy="8" r="2.5" />
-                  <path d="M1 8h4.5M10.5 8H15" />
-                </svg>
-                <svg v-else-if="kind === 'pr'" width="15" height="15" viewBox="0 0 16 16" fill="none"
-                  stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="4" cy="3.5" r="1.5" />
-                  <circle cx="4" cy="12.5" r="1.5" />
-                  <circle cx="12" cy="12.5" r="1.5" />
-                  <path d="M4 5v6M12 11V6.5A2 2 0 0 0 10 4.5H7.5M9 3l-1.5 1.5L9 6" />
-                </svg>
-                <svg v-else width="15" height="15" viewBox="0 0 16 16" fill="none"
-                  stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M2 2.5h6.5L14 8l-5.5 5.5L2 8z" />
-                  <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                  stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <component :is="shape.tag" v-for="(shape, i) in aiTemplateKindIcon[kind]" :key="i"
+                    v-bind="shape.attrs" />
                 </svg>
                 <span>{{ t(aiTemplateKindLabel[kind]) }}</span>
               </button>
@@ -1899,9 +1902,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 
         <template v-if="activeSettingsTab === 'dashboard'">
           <!-- ── Layout ── -->
-          <div class="sp-row">
-            <span class="sp-label">{{ t('settings.dashboard.layout.label') }}</span>
-          </div>
+          <h3 class="sp-section-label">{{ t('settings.dashboard.layout.label') }}</h3>
 
           <!-- README first row -->
           <div class="sp-row sp-row--checkbox">
@@ -2060,8 +2061,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
           </div>
 
           <!-- Statistiques tier locales (recoverable-before-model) -->
-          <div class="sp-section-divider"></div>
-          <h3 class="sp-section-title">{{ t('settings.tierStats.title') }}</h3>
+          <h3 class="sp-section-label">{{ t('settings.tierStats.title') }}</h3>
           <span class="sp-hint">{{ t('settings.tierStats.hint') }}</span>
           <div v-if="tierStats.totalHunks === 0" class="sp-row">
             <span class="sp-hint">{{ t('settings.tierStats.empty') }}</span>
@@ -2391,9 +2391,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 
         <!-- ═══ INTELLIGENCE ARTIFICIELLE ═══ -->
         <template v-if="activeSettingsTab === 'ai'">
-          <div class="sp-row">
-            <span class="sp-label">{{ t('settings.sectionLabel.ai') }}</span>
-          </div>
+          <h3 class="sp-section-label">{{ t('settings.sectionLabel.ai') }}</h3>
 
           <!-- Enable AI -->
           <div class="sp-row sp-row--checkbox">
@@ -3148,9 +3146,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
           </template>
 
           <!-- ─── AI fallback (v2.5 — .gitwandrc per-repo) ─────── -->
-          <div class="sp-section-divider"></div>
-
-          <h3 class="sp-section-title">{{ t('settings.ai.fallback.title') }}</h3>
+          <h3 class="sp-section-label">{{ t('settings.ai.fallback.title') }}</h3>
 
           <!-- No repo open → disable the entire block with an info message -->
           <div v-if="!llmFallbackHasRepo" class="sp-info-box">
@@ -3298,9 +3294,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
           </div>
 
           <!-- ── Prompt templates ── -->
-          <div class="sp-row">
-            <span class="sp-label">{{ t('settings.aiTemplates.promptTemplatesLabel') }}</span>
-          </div>
+          <h3 class="sp-section-label">{{ t('settings.aiTemplates.promptTemplatesLabel') }}</h3>
 
           <div class="sp-group sp-group--ait">
             <div class="sp-group__head">
@@ -3313,7 +3307,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
             </div>
 
             <div class="sp-group__body">
-              <div class="sp-group__sep">{{ t('settings.aiTemplates.defaultLabel') }}</div>
+              <div class="sp-group__sep">{{ t('settings.aiTemplates.default') }}</div>
 
               <!-- Built-in templates (Default first): read-only, view + duplicate -->
               <div v-for="tpl in aiBuiltinTemplates" :key="tpl.id" class="sp-group__row sp-group__row--muted">
@@ -3439,53 +3433,35 @@ function openAiTemplateKind(kind: AiTemplateKind) {
         <!-- ═══ AUTOMATIONS ═══ -->
         <!-- ═══ ACCOUNTS ═══ -->
         <template v-if="activeSettingsTab === 'accounts'">
-          <div class="sp-row">
-            <span class="sp-label">{{ t('settings.sectionLabel.accounts') }}</span>
-          </div>
+          <h3 class="sp-section-label">{{ t('settings.sectionLabel.accounts') }}</h3>
           <SettingsAccountsTab />
         </template>
 
         <!-- ═══ MCP ═══ -->
         <template v-if="activeSettingsTab === 'mcp'">
-          <div class="sp-row">
-            <span class="sp-label">{{ t('settings.sectionLabel.mcp') }}</span>
-          </div>
+          <h3 class="sp-section-label">{{ t('settings.sectionLabel.mcp') }}</h3>
           <SettingsMcpTab :cwd="props.cwd" />
         </template>
 
         <template v-if="activeSettingsTab === 'automations'">
-          <div class="sp-row">
-            <span class="sp-label">{{ t('settings.sectionLabel.automations') }}</span>
-          </div>
+          <h3 class="sp-section-label">{{ t('settings.sectionLabel.automations') }}</h3>
           <AutomationsPanel />
         </template>
 
         <!-- ═══ HOOKS ═══ -->
         <template v-if="activeSettingsTab === 'hooks'">
-          <div class="sp-logs-header">
-            <span class="sp-label">{{ t('hooks.title') }}</span>
-            <div v-if="props.cwd" class="sp-logs-actions">
-              <button class="bm-btn bm-btn--ghost" :disabled="hooksPanelRef?.loading" @click="hooksPanelRef?.loadHooks()">
-                {{ t('hooks.reload') }}
-              </button>
-              <button class="bm-btn bm-btn--primary" @click="hooksPanelRef?.openNewHookForm()">
-                + {{ t('hooks.newHook') }}
-              </button>
-            </div>
-          </div>
-          <HooksPanel v-if="props.cwd" ref="hooksPanelRef" :cwd="props.cwd" />
+          <HooksPanel v-if="props.cwd" :cwd="props.cwd" />
           <div v-else class="sp-logs-empty">{{ t('hooks.empty') }}</div>
         </template>
 
         <!-- ═══ LOGS ═══ -->
         <template v-if="activeSettingsTab === 'logs'">
-          <div class="sp-logs-header">
-            <span class="sp-label">{{ t('settings.logsTitle') }}</span>
+          <div v-if="(props.errorLog?.length ?? 0) > 0" class="sp-logs-header">
             <div class="sp-logs-actions">
-              <button v-if="(props.errorLog?.length ?? 0) > 0" class="bm-btn bm-btn--ghost" @click="copyAllLogs">
+              <button class="bm-btn bm-btn--ghost" @click="copyAllLogs">
                 {{ t('settings.logsCopyAll') }}
               </button>
-              <button v-if="(props.errorLog?.length ?? 0) > 0" class="bm-btn bm-btn--ghost" @click="emit('clearLogs')">
+              <button class="bm-btn bm-btn--ghost" @click="emit('clearLogs')">
                 {{ t('settings.logsClear') }}
               </button>
             </div>
@@ -3668,13 +3644,15 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 /* Content is capped at 1200px wide, but the scroll container itself spans
    to the window edge so the scrollbar sits at the far right. The cap comes
    from a growing right padding: % padding resolves against .sp-layout's
-   width, so (100% - 220px nav) is this element's width. Base padding
-   matches HelpView's .help-content. */
+   width, so (100% - 220px nav) is this element's width, and subtracting
+   the 1200px cap and the left padding leaves exactly 1200px of content —
+   the same as HelpView's .help-content__inner. Base padding matches
+   HelpView's .help-content. */
 .sp-content {
   flex: 1;
   min-width: 0;
   padding: var(--space-8, 32px) var(--space-10, 48px);
-  padding-right: max(var(--space-10, 48px), calc(100% - 220px - 1200px + var(--space-10, 48px)));
+  padding-right: max(var(--space-10, 48px), calc(100% - 220px - 1200px - var(--space-10, 48px)));
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -3744,34 +3722,30 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 
 
 .sp-label {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Section title inside a tab (accent bar on the left). Distinct from
+   .sp-label, which every form-field label uses. AutomationsPanel's
+   .aup-section-title mirrors it. */
+.sp-section-label {
+  margin: var(--space-6) 0 0;
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin-top: var(--space-6);
   padding-left: var(--space-4);
   border-left: 2px solid var(--color-accent);
   line-height: 1.2;
 }
 
-/* Inside a label row the row itself carries the top spacing. */
-.sp-label-row {
-  margin-top: var(--space-6);
-}
-.sp-label-row .sp-label {
-  margin-top: 0;
-}
-
-/* Logs header row carries the label's top spacing itself. */
-.sp-logs-header .sp-label {
-  margin-top: 0;
-}
-
-/* First setting right under the header line: tighter top spacing. */
-.sp-page-header + .sp-row > .sp-label,
-.sp-page-header + .sp-row > .sp-label-row,
-.sp-page-header + .sp-logs-header {
+/* First section right under the header line: tighter top spacing. */
+.sp-page-header + .sp-section-label {
   margin-top: var(--space-4);
 }
 
@@ -4235,8 +4209,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 .sp-logs-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: var(--space-6);
+  justify-content: flex-end;
   gap: var(--space-4);
 }
 
@@ -4348,13 +4321,6 @@ function openAiTemplateKind(kind: AiTemplateKind) {
   height: 1px;
   background: var(--color-border);
   margin: var(--space-3) 0;
-}
-
-.sp-section-title {
-  margin: 0;
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text);
 }
 
 .sp-warning-box {
@@ -4681,20 +4647,23 @@ function openAiTemplateKind(kind: AiTemplateKind) {
   border-left: none;
   border-right: none;
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   cursor: pointer;
 }
 
+/* Same hover as AutomationsPanel's .aup-add-btn. Darken on hover rather than using --color-accent-hover: in the dark theme
+   that token is a light violet (#a78bfa) and white text on it drops to
+   ~2.7:1. Mixing in black keeps the label above 4.5:1 in both themes. */
 .sp-ait-add:hover {
-  background: var(--color-accent-hover);
+  background: color-mix(in srgb, var(--color-accent) 82%, #000);
 }
 
 /* ── v2.13 / sp-group extensions ─────────────────────── */
 
 /* AI Templates tab: list text is brighter than the default muted group look. */
-/* Sits right under its "Prompt templates" label row: pull it up to eat
+/* Sits right under its "Prompt templates" section label: pull it up to eat
    part of .sp-content's gap so the hint reads as the label's subtext. */
 .sp-group--ait {
   margin-top: calc(-1 * var(--space-5));

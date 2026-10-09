@@ -1178,7 +1178,6 @@ const en = {
     navGroupSystem: "System",
     checkForUpdates: "Check for updates",
     upToDate: "Up to date",
-    logsTitle: "Activity log",
     logsEmpty: "No log entries.",
     logsClear: "Clear",
     logsCopyAll: "Copy all",
@@ -1314,7 +1313,6 @@ const en = {
       },
     },
     aiTemplates: {
-      kindLabel: "Template for",
       promptTemplatesLabel: "Prompt templates",
       kindCommit: "Commit message",
       kindPr: "Pull request",
@@ -1326,7 +1324,6 @@ const en = {
       default: "Default",
       defaultDescription: "Built-in prompt GitWand uses when no template is selected.",
       builtinBadge: "built-in",
-      defaultLabel: "Default",
       customLabel: "Custom",
       empty: "No custom templates yet. Duplicate a built-in one to start from it.",
       add: "New template",
@@ -1581,7 +1578,7 @@ const en = {
       editor: "External editor and how diffs and code are displayed.",
       terminal: "Integrated terminal layout, shell and appearance.",
       ai: "Enable AI features, choose a provider and configure the model GitWand uses.",
-      aiTemplates: "Customize the prompts used for commit messages, PR descriptions and reviews.",
+      aiTemplates: "Customize the prompts used for commit messages, pull request descriptions and release notes.",
       accounts: "Connect GitHub, GitLab and Bitbucket accounts for pull requests and remote features.",
       mcp: "Manage the MCP servers available to GitWand's AI features.",
       automations: "Opt-in tasks that run automatically based on Git events or a schedule.",
@@ -1697,7 +1694,6 @@ const en = {
 
   // \u2500\u2500\u2500 Hooks \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   hooks: {
-    title: "Git Hooks",
     empty: "No hooks configured. Create one to run scripts on Git events.",
     reload: "Reload",
     newHook: "New hook",
@@ -2248,7 +2244,6 @@ const en = {
   // ─── Automations (v2.8) ──────────────────────────────────
   automations: {
     title: "Automations",
-    subtitle: "Opt-in tasks that run automatically based on Git events or a schedule.",
     requiresAi: "Requires AI to be enabled in the AI tab.",
     runNow: "Run now",
     running: "Running…",

@@ -1162,7 +1162,6 @@ const ptBR: Locale = {
     navGroupSystem: "Sistema",
     checkForUpdates: "Verificar atualizações",
     upToDate: "Atualizado",
-    logsTitle: "Registro de atividade",
     logsEmpty: "Sem entradas de log",
     logsClear: "Limpar",
     logsCopyAll: "Copiar tudo",
@@ -1290,7 +1289,6 @@ const ptBR: Locale = {
       },
     },
     aiTemplates: {
-      kindLabel: "Modelo para",
       promptTemplatesLabel: "Modelos de prompt",
       kindCommit: "Mensagem de commit",
       kindPr: "Pull request",
@@ -1302,7 +1300,6 @@ const ptBR: Locale = {
       default: "Padrão",
       defaultDescription: "Prompt integrado que o GitWand usa quando nenhum modelo está selecionado.",
       builtinBadge: "integrado",
-      defaultLabel: "Padrão",
       customLabel: "Personalizados",
       empty: "Nenhum modelo personalizado ainda. Duplique um integrado para começar a partir dele.",
       add: "Novo modelo",
@@ -1555,7 +1552,7 @@ const ptBR: Locale = {
       editor: "Editor externo e como diffs e código são exibidos.",
       terminal: "Layout, shell e aparência do terminal integrado.",
       ai: "Ative os recursos de IA, escolha um provedor e configure o modelo usado pelo GitWand.",
-      aiTemplates: "Personalize os prompts usados para mensagens de commit, descrições de PR e revisões.",
+      aiTemplates: "Personalize os prompts usados para mensagens de commit, descrições de pull request e notas de versão.",
       accounts: "Conecte contas do GitHub, GitLab e Bitbucket para pull requests e recursos remotos.",
       mcp: "Gerencie os servidores MCP disponíveis para os recursos de IA do GitWand.",
       automations: "Tarefas opcionais executadas automaticamente com base em eventos do Git ou em um agendamento.",
@@ -1666,7 +1663,6 @@ const ptBR: Locale = {
   },
 
   hooks: {
-    title: "Hooks do Git",
     empty: "Nenhum hook configurado. Crie um para executar scripts em eventos do Git.",
     reload: "Atualizar",
     newHook: "Novo hook",
@@ -2206,7 +2202,6 @@ const ptBR: Locale = {
   // ─── Automations (v2.8) ──────────────────────
   automations: {
     title: "Automa\u00e7\u00f5es",
-    subtitle: "Tarefas opt-in que executam automaticamente com base em eventos do Git ou em um agendamento.",
     requiresAi: "Requer que a IA esteja habilitada na aba de IA.",
     runNow: "Executar agora",
     running: "Executando\u2026",
