@@ -14,9 +14,9 @@
  * `wrapped` (reactive) hold the last result; bind the classes from them so
  * Vue and the DOM agree.
  *
- * Checks run (on the next frame) on resize of the row and of its children (branch name, counts and
- * locale all change their widths). Children added later (v-if) are picked up
- * after each render.
+ * Checks run (on the next frame) on resize of the row, its children and
+ * grandchildren (branch name, counts and locale all change their widths).
+ * Nodes added later (v-if) are picked up after each render.
  */
 import { ref, onMounted, onUpdated, onBeforeUnmount, type Ref } from "vue";
 
@@ -101,8 +101,16 @@ export function useCollapseOnOverflow(
   function observeAll() {
     const row = target.value;
     if (!row || !observer) return;
-    const current = new Set<Element>([row, ...Array.from(row.children)]);
-    // Children removed by a v-if would otherwise stay observed (and alive).
+    // Grandchildren too: a child whose width is fixed by the layout (wrapped
+    // actions at flex-basis 100%, a shrunk group) doesn't resize when its
+    // content grows — e.g. labels lengthening once a locale chunk loads.
+    const children = Array.from(row.children);
+    const current = new Set<Element>([
+      row,
+      ...children,
+      ...children.flatMap((child) => Array.from(child.children)),
+    ]);
+    // Nodes removed by a v-if would otherwise stay observed (and alive).
     for (const node of observed) {
       if (current.has(node)) continue;
       observer.unobserve(node);

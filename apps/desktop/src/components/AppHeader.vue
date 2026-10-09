@@ -817,6 +817,15 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   order: 1;
   flex-basis: 100%;
 }
+/* Branch + actions + sync can outgrow the row on their own (long labels,
+   ~640–700px): they share the first line with the search and the sync button
+   drops under them, instead of overflowing or pushing the search to a line of
+   its own. */
+.app-header__row--wrapped .header-left {
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  row-gap: var(--space-3);
+}
 .app-header__row--wrapped .header-actions > .header-action-sep:first-child {
   display: none;
 }

@@ -211,6 +211,9 @@ describe("useCollapseOnOverflow", () => {
     const show = ref(false);
     const { row } = mountRow(ACTIONS, () => (show.value ? [h("span", { class: "late" })] : []));
     expect(observe).toHaveBeenCalledWith(row);
+    // Items are grandchildren: they resize even when their group's width is
+    // fixed by the layout (wrapped row), so they must be observed directly.
+    expect(observe).toHaveBeenCalledWith(row.querySelector('[data-collapse-key="stash"]'));
 
     show.value = true;
     await nextTick();
