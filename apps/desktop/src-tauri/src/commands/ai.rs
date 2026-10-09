@@ -119,15 +119,195 @@ const FORGE_TOKEN_ENV: &[&str] = &[
     "GITLAB_ACCESS_TOKEN",
 ];
 
+/// What the user's own CLI configuration says about the variables a CLI
+/// needs beyond its fixed allowlist. Built from GitWand's environment and the
+/// CLIs' *user-level* config files only — never from a file inside the
+/// repository, whose content is as untrusted as the prompt.
+#[derive(Default, Debug, PartialEq, Eq)]
+pub(crate) struct AiEnvContext {
+    /// Claude Code is set up for Amazon Bedrock (`CLAUDE_CODE_USE_BEDROCK`):
+    /// the AWS credential chain must reach it.
+    claude_bedrock: bool,
+    /// Claude Code is set up for Google Vertex AI (`CLAUDE_CODE_USE_VERTEX`).
+    claude_vertex: bool,
+    /// Variable names the user's own config points the CLI at — Codex
+    /// `env_key` (custom providers), opencode `{env:NAME}`.
+    config_refs: Vec<String>,
+}
+
+/// A truthy flag value as Claude Code reads it (`1`, `true`, …).
+fn env_flag_set(v: Option<&str>) -> bool {
+    v.map(|v| v.trim())
+        .is_some_and(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
+}
+
+/// A plausible environment variable name — the only shape of config
+/// reference that is ever forwarded.
+fn is_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// `(bedrock, vertex)` from the `env` block of a Claude Code `settings.json`,
+/// where Bedrock / Vertex setups usually live rather than in the shell.
+fn parse_claude_settings_flags(text: &str) -> (bool, bool) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else {
+        return (false, false);
+    };
+    let flag = |k: &str| {
+        let val = v.get("env").and_then(|e| e.get(k));
+        env_flag_set(
+            val.and_then(|x| x.as_str())
+                .or_else(|| {
+                    val.and_then(|x| x.as_bool())
+                        .map(|b| if b { "1" } else { "0" })
+                })
+                .or_else(|| {
+                    val.and_then(|x| x.as_i64())
+                        .map(|n| if n != 0 { "1" } else { "0" })
+                }),
+        )
+    };
+    (
+        flag("CLAUDE_CODE_USE_BEDROCK"),
+        flag("CLAUDE_CODE_USE_VERTEX"),
+    )
+}
+
+/// `env_key = "NAME"` entries of a Codex `config.toml` (custom model
+/// providers name the variable holding their key this way). A line scan, not
+/// a TOML parser: it only ever yields names, which are then allowlisted.
+fn parse_codex_env_keys(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let rest = line.strip_prefix("env_key")?.trim_start();
+            let value = rest.strip_prefix('=')?.trim();
+            let value = value.split('#').next()?.trim();
+            let name = value.trim_matches(|c| c == '"' || c == '\'');
+            is_env_name(name).then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// `{env:NAME}` substitutions of an opencode config file.
+fn parse_opencode_env_refs(text: &str) -> Vec<String> {
+    text.match_indices("{env:")
+        .filter_map(|(i, m)| {
+            let rest = &text[i + m.len()..];
+            let name = &rest[..rest.find('}')?];
+            is_env_name(name).then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// Build the context for `cli` from `env` (GitWand's environment) and the
+/// user-level config files it locates.
+fn ai_env_context(cli: AiCli, env: &dyn Fn(&str) -> Option<String>) -> AiEnvContext {
+    let read = |p: PathBuf| std::fs::read_to_string(p).ok();
+    let home = env("HOME")
+        .or_else(|| env("USERPROFILE"))
+        .filter(|h| !h.trim().is_empty())
+        .map(PathBuf::from);
+    let mut ctx = AiEnvContext::default();
+    match cli {
+        AiCli::Claude => {
+            ctx.claude_bedrock = env_flag_set(env("CLAUDE_CODE_USE_BEDROCK").as_deref());
+            ctx.claude_vertex = env_flag_set(env("CLAUDE_CODE_USE_VERTEX").as_deref());
+            let dir = env("CLAUDE_CONFIG_DIR")
+                .filter(|d| !d.trim().is_empty())
+                .map(PathBuf::from)
+                .or_else(|| home.as_ref().map(|h| h.join(".claude")));
+            if let Some(text) = dir.and_then(|d| read(d.join("settings.json"))) {
+                let (bedrock, vertex) = parse_claude_settings_flags(&text);
+                ctx.claude_bedrock |= bedrock;
+                ctx.claude_vertex |= vertex;
+            }
+        }
+        AiCli::Codex => {
+            let dir = env("CODEX_HOME")
+                .filter(|d| !d.trim().is_empty())
+                .map(PathBuf::from)
+                .or_else(|| home.as_ref().map(|h| h.join(".codex")));
+            if let Some(text) = dir.and_then(|d| read(d.join("config.toml"))) {
+                ctx.config_refs = parse_codex_env_keys(&text);
+            }
+        }
+        AiCli::Opencode => {
+            let mut files: Vec<PathBuf> = Vec::new();
+            if let Some(f) = env("OPENCODE_CONFIG").filter(|f| !f.trim().is_empty()) {
+                files.push(PathBuf::from(f));
+            }
+            let config_home = env("XDG_CONFIG_HOME")
+                .filter(|d| !d.trim().is_empty())
+                .map(PathBuf::from)
+                .or_else(|| home.as_ref().map(|h| h.join(".config")));
+            if let Some(dir) = config_home.map(|d| d.join("opencode")) {
+                for name in ["opencode.json", "opencode.jsonc", "config.json"] {
+                    files.push(dir.join(name));
+                }
+            }
+            for f in files {
+                if let Some(text) = read(f) {
+                    ctx.config_refs.extend(parse_opencode_env_refs(&text));
+                }
+            }
+        }
+        AiCli::Copilot | AiCli::Antigravity => {}
+    }
+    ctx
+}
+
 /// Provider-specific variables: each CLI's own config location and its own
-/// provider's auth. Cloud / forge credentials (AWS_*, AZURE_*, GH_TOKEN, …)
-/// are deliberately absent.
-fn ai_env_allowed_for(cli: AiCli, key: &str) -> bool {
+/// provider's auth. Cloud credentials (AWS_*, Google ADC) only reach Claude
+/// Code when the user set it up for Bedrock / Vertex; forge tokens (GH_TOKEN,
+/// GITLAB_TOKEN) reach no CLI unless the user's own CLI config names them.
+fn ai_env_allowed_for(cli: AiCli, key: &str, ctx: &AiEnvContext) -> bool {
+    if ctx.config_refs.iter().any(|r| r == key) {
+        return true;
+    }
     match cli {
         // ANTHROPIC_API_KEY & co. are left out on purpose: the user picked the
-        // CLI provider to use their subscription (see CLAUDE_AUTH_OVERRIDE_ENV).
-        AiCli::Claude => key == "CLAUDE_CONFIG_DIR",
-        AiCli::Codex => matches!(key, "CODEX_HOME" | "OPENAI_API_KEY" | "OPENAI_BASE_URL"),
+        // CLI provider to use their subscription (see CLAUDE_AUTH_OVERRIDE_ENV,
+        // also stripped by `strip_claude_auth_env`). The rest of the
+        // ANTHROPIC_* / CLAUDE_CODE_* families is Claude Code's own
+        // configuration: gateway base URL, Bedrock / Vertex / Foundry switches
+        // and their model and region settings, its OAuth token.
+        AiCli::Claude => {
+            if CLAUDE_AUTH_OVERRIDE_ENV.contains(&key) {
+                return false;
+            }
+            key == "CLAUDE_CONFIG_DIR"
+                || key.starts_with("CLAUDE_CODE_")
+                || key.starts_with("ANTHROPIC_")
+                || (ctx.claude_bedrock && key.starts_with("AWS_"))
+                || (ctx.claude_vertex
+                    && (matches!(
+                        key,
+                        "CLOUD_ML_REGION"
+                            | "GOOGLE_APPLICATION_CREDENTIALS"
+                            | "GOOGLE_CLOUD_PROJECT"
+                            | "GOOGLE_CLOUD_QUOTA_PROJECT"
+                            | "GCLOUD_PROJECT"
+                    ) || key.starts_with("VERTEX_REGION_")
+                        || key.starts_with("CLOUDSDK_")))
+        }
+        AiCli::Codex => {
+            key.starts_with("CODEX_")
+                || matches!(
+                    key,
+                    "OPENAI_API_KEY"
+                        | "OPENAI_BASE_URL"
+                        | "OPENAI_ORGANIZATION"
+                        | "OPENAI_PROJECT"
+                        // The documented Azure provider's `env_key`, for
+                        // setups that define it in a profile file.
+                        | "AZURE_OPENAI_API_KEY"
+                )
+        }
         AiCli::Opencode => {
             key.starts_with("OPENCODE_")
                 || matches!(
@@ -159,12 +339,12 @@ fn ai_env_allowed_for(cli: AiCli, key: &str) -> bool {
 }
 
 /// Whether `key` from GitWand's own environment may reach `cli`.
-fn ai_env_allowed(cli: AiCli, key: &str) -> bool {
+fn ai_env_allowed(cli: AiCli, key: &str, ctx: &AiEnvContext) -> bool {
     // Windows env names are case-insensitive; compare the base list that way.
     let upper = key.to_ascii_uppercase();
     AI_ENV_BASE.iter().any(|b| *b == key || *b == upper)
         || key.starts_with("LC_")
-        || ai_env_allowed_for(cli, key)
+        || ai_env_allowed_for(cli, key, ctx)
 }
 
 /// `hidden_cmd` for an AI CLI, with an allowlisted environment (see above).
@@ -193,9 +373,10 @@ pub(crate) fn ai_cmd(binary: &str, cli: AiCli) -> std::process::Command {
             cmd.env("PATH", path);
         }
     }
+    let ctx = ai_env_context(cli, &|k| std::env::var(k).ok());
     for (k, v) in std::env::vars_os() {
         if let Some(name) = k.to_str() {
-            if ai_env_allowed(cli, name) {
+            if ai_env_allowed(cli, name, &ctx) {
                 cmd.env(&k, &v);
             }
         }
@@ -407,6 +588,27 @@ pub(crate) async fn claude_cli_prompt(
     .map_err(|e| e.to_string())?
 }
 
+/// Flags that confine a `claude -p` run to producing text. The prompt carries
+/// untrusted repo content, so the tools that could act on the machine or
+/// reach the network are denied even if the user's own Claude settings allow
+/// them: the built-ins by name — `Task` / `Agent` (sub-agents) included, so
+/// the denial cannot be sidestepped through a delegated run — and every MCP
+/// server, by `--strict-mcp-config` without any `--mcp-config` (MCP tools are
+/// not built-ins, and a user's server can do anything). Verified against
+/// Claude Code 2.1.x; `--strict-mcp-config` dates from 1.0.
+const CLAUDE_LOCKDOWN_ARGS: &[&str] = &[
+    "--strict-mcp-config",
+    "--disallowedTools",
+    "Bash",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "WebFetch",
+    "WebSearch",
+    "Task",
+    "Agent",
+];
+
 fn claude_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
@@ -448,18 +650,7 @@ fn claude_cli_prompt_inner(
     if let Some(e) = valid_effort(effort.as_ref()) {
         cmd.args(["--effort", e]);
     }
-    // GitWand only wants a text answer. The prompt carries untrusted repo
-    // content, so the tools that could act on the machine or reach the network
-    // are denied even if the user's own Claude settings allow them.
-    cmd.args([
-        "--disallowedTools",
-        "Bash",
-        "Edit",
-        "Write",
-        "NotebookEdit",
-        "WebFetch",
-        "WebSearch",
-    ]);
+    cmd.args(CLAUDE_LOCKDOWN_ARGS);
     strip_claude_auth_env(&mut cmd);
     if let Some(dir) = cwd {
         if !dir.trim().is_empty() {
@@ -1046,36 +1237,26 @@ fn opencode_cli_prompt_inner(
         _ => prompt,
     };
 
-    // Strip NUL bytes — the prompt is passed as a CLI argument and an interior
-    // `\0` makes the spawn fail with "nul byte found in provided data".
+    // Strip NUL bytes defensively — binary content can leak them into a diff.
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = ai_cmd(&binary, AiCli::Opencode);
-    cmd.arg("run");
-    // GitWand only wants a text answer, and the prompt carries untrusted repo
-    // content: deny the tools that act on the machine or reach the network.
-    // `OPENCODE_PERMISSION` is merged over the user's config by opencode; set
-    // after `ai_cmd`, so an inherited value cannot loosen it.
-    cmd.env(
-        "OPENCODE_PERMISSION",
-        r#"{"edit":"deny","bash":"deny","webfetch":"deny"}"#,
-    );
-    // Model is `provider/model` form; flags precede the positional message.
-    if let Some(m) = model.as_ref() {
-        if !m.trim().is_empty() {
-            cmd.args(["--model", m.trim()]);
-        }
-    }
-    cmd.arg(&full_prompt);
-    if let Some(dir) = cwd {
-        if !dir.trim().is_empty() {
-            cmd.current_dir(dir);
-        }
-    }
-
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run opencode CLI: {}", e))?;
+    // `opencode run` with no positional message reads it from stdin (when
+    // stdin is not a TTY — verified on opencode 1.17), keeping repository
+    // content out of the argv. An older opencode refuses an empty message
+    // with "You must provide a message"; only then is the prompt passed as
+    // an argument, as before, so an old install keeps working.
+    let output = output_with_stdin(
+        opencode_run_cmd(&binary, model.as_ref(), cwd.as_deref(), None),
+        full_prompt.clone(),
+    )
+    .map_err(|e| format!("Failed to run opencode CLI: {}", e))?;
+    let output = if !output.status.success() && opencode_wants_positional_message(&output) {
+        opencode_run_cmd(&binary, model.as_ref(), cwd.as_deref(), Some(&full_prompt))
+            .output()
+            .map_err(|e| format!("Failed to run opencode CLI: {}", e))?
+    } else {
+        output
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1089,6 +1270,52 @@ fn opencode_cli_prompt_inner(
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// True when opencode refused to run because no positional message was given
+/// — an install too old to read the prompt from stdin.
+fn opencode_wants_positional_message(output: &std::process::Output) -> bool {
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    text.contains("You must provide a message")
+}
+
+/// `opencode run`, locked down, with the prompt as a positional argument only
+/// when `positional` is given (see `opencode_cli_prompt_inner`).
+fn opencode_run_cmd(
+    binary: &str,
+    model: Option<&String>,
+    cwd: Option<&str>,
+    positional: Option<&str>,
+) -> std::process::Command {
+    let mut cmd = ai_cmd(binary, AiCli::Opencode);
+    cmd.arg("run");
+    // GitWand only wants a text answer, and the prompt carries untrusted repo
+    // content: deny the tools that act on the machine or reach the network.
+    // `OPENCODE_PERMISSION` is merged over the user's config by opencode; set
+    // after `ai_cmd`, so an inherited value cannot loosen it.
+    cmd.env(
+        "OPENCODE_PERMISSION",
+        r#"{"edit":"deny","bash":"deny","webfetch":"deny"}"#,
+    );
+    // Model is `provider/model` form; flags precede the positional message.
+    if let Some(m) = model {
+        if !m.trim().is_empty() {
+            cmd.args(["--model", m.trim()]);
+        }
+    }
+    if let Some(p) = positional {
+        cmd.arg(p);
+    }
+    if let Some(dir) = cwd {
+        if !dir.trim().is_empty() {
+            cmd.current_dir(dir);
+        }
+    }
+    cmd
 }
 
 /// Enumerate the models opencode knows about (`opencode models`). Each line
@@ -1618,6 +1845,166 @@ mod tests {
 #[cfg(test)]
 mod env_isolation_tests {
     use super::*;
+    use std::collections::HashMap;
+
+    /// `ai_env_allowed` with no user config in play.
+    fn allowed(cli: AiCli, key: &str) -> bool {
+        ai_env_allowed(cli, key, &AiEnvContext::default())
+    }
+
+    /// A fresh, empty directory under the system temp dir.
+    fn temp_dir(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let d = std::env::temp_dir().join(format!(
+            "gw-ai-env-{}-{}-{}",
+            tag,
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn ctx_for(cli: AiCli, vars: &[(&str, String)]) -> AiEnvContext {
+        let map: HashMap<String, String> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+        ai_env_context(cli, &|k| map.get(k).cloned())
+    }
+
+    #[test]
+    fn claude_gets_its_own_config_families_but_never_the_api_key_overrides() {
+        for k in [
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_VERTEX_PROJECT_ID",
+            "ANTHROPIC_MODEL",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ] {
+            assert!(allowed(AiCli::Claude, k), "{k} should pass");
+        }
+        for k in CLAUDE_AUTH_OVERRIDE_ENV {
+            assert!(!allowed(AiCli::Claude, k), "{k} must stay stripped");
+        }
+    }
+
+    #[test]
+    fn cloud_credentials_reach_claude_only_when_it_is_set_up_for_that_cloud() {
+        let bedrock = AiEnvContext {
+            claude_bedrock: true,
+            ..Default::default()
+        };
+        let vertex = AiEnvContext {
+            claude_vertex: true,
+            ..Default::default()
+        };
+        for k in [
+            "AWS_PROFILE",
+            "AWS_REGION",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SESSION_TOKEN",
+        ] {
+            assert!(ai_env_allowed(AiCli::Claude, k, &bedrock), "{k}");
+            assert!(!ai_env_allowed(AiCli::Claude, k, &vertex), "{k}");
+            assert!(!allowed(AiCli::Claude, k), "{k}");
+        }
+        for k in [
+            "CLOUD_ML_REGION",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "VERTEX_REGION_CLAUDE_4_0_OPUS",
+        ] {
+            assert!(ai_env_allowed(AiCli::Claude, k, &vertex), "{k}");
+            assert!(!ai_env_allowed(AiCli::Claude, k, &bedrock), "{k}");
+        }
+        // Never to another CLI, whatever Claude's setup.
+        assert!(!ai_env_allowed(AiCli::Codex, "AWS_ACCESS_KEY_ID", &bedrock));
+        // Forge tokens stay out even for a Bedrock setup.
+        assert!(!ai_env_allowed(AiCli::Claude, "GH_TOKEN", &bedrock));
+    }
+
+    #[test]
+    fn claude_cloud_setup_is_read_from_env_or_user_settings_json() {
+        assert!(ctx_for(AiCli::Claude, &[("CLAUDE_CODE_USE_BEDROCK", "1".into())]).claude_bedrock);
+        assert!(!ctx_for(AiCli::Claude, &[("CLAUDE_CODE_USE_BEDROCK", "0".into())]).claude_bedrock);
+
+        let dir = temp_dir("claude");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"env":{"CLAUDE_CODE_USE_VERTEX":"1","AWS_PROFILE":"x"}}"#,
+        )
+        .unwrap();
+        let ctx = ctx_for(
+            AiCli::Claude,
+            &[("CLAUDE_CONFIG_DIR", dir.to_string_lossy().into_owned())],
+        );
+        assert!(ctx.claude_vertex);
+        assert!(!ctx.claude_bedrock);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn codex_custom_provider_env_key_is_forwarded() {
+        let dir = temp_dir("codex");
+        std::fs::write(
+            dir.join("config.toml"),
+            "model_provider = \"azure\"\n[model_providers.azure]\nname = \"Azure\"\nenv_key = \"MY_AZURE_KEY\" # comment\n[model_providers.bad]\nenv_key = \"$(rm -rf)\"\n",
+        )
+        .unwrap();
+        let ctx = ctx_for(
+            AiCli::Codex,
+            &[("CODEX_HOME", dir.to_string_lossy().into_owned())],
+        );
+        assert_eq!(ctx.config_refs, vec!["MY_AZURE_KEY".to_string()]);
+        assert!(ai_env_allowed(AiCli::Codex, "MY_AZURE_KEY", &ctx));
+        assert!(allowed(AiCli::Codex, "AZURE_OPENAI_API_KEY"));
+        assert!(!allowed(AiCli::Codex, "MY_AZURE_KEY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opencode_env_substitutions_from_user_config_are_forwarded() {
+        let home = temp_dir("opencode");
+        let cfg = home.join(".config").join("opencode");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(
+            cfg.join("opencode.json"),
+            r#"{"provider":{"corp":{"options":{"apiKey":"{env:CORP_LLM_KEY}","baseURL":"{env:bad name}"}}}}"#,
+        )
+        .unwrap();
+        let ctx = ctx_for(
+            AiCli::Opencode,
+            &[("HOME", home.to_string_lossy().into_owned())],
+        );
+        assert_eq!(ctx.config_refs, vec!["CORP_LLM_KEY".to_string()]);
+        assert!(ai_env_allowed(AiCli::Opencode, "CORP_LLM_KEY", &ctx));
+        assert!(!ai_env_allowed(
+            AiCli::Claude,
+            "CORP_LLM_KEY",
+            &AiEnvContext::default()
+        ));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn config_parsers_only_yield_env_names() {
+        assert_eq!(
+            parse_codex_env_keys("env_key='A_B'\n  env_key = \"C1\"\nenv_key_x = \"D\"\n"),
+            vec!["A_B".to_string(), "C1".to_string()]
+        );
+        assert_eq!(
+            parse_opencode_env_refs("{env:X} {env:Y-Z} {env:"),
+            vec!["X".to_string()]
+        );
+        assert_eq!(parse_claude_settings_flags("not json"), (false, false));
+        assert_eq!(
+            parse_claude_settings_flags(r#"{"env":{"CLAUDE_CODE_USE_BEDROCK":true}}"#),
+            (true, false)
+        );
+    }
 
     #[test]
     fn base_allowlist_admits_home_locale_and_proxy() {
@@ -1629,10 +2016,10 @@ mod env_isolation_tests {
             "https_proxy",
             "NODE_EXTRA_CA_CERTS",
         ] {
-            assert!(ai_env_allowed(AiCli::Claude, k), "{k} should pass");
+            assert!(allowed(AiCli::Claude, k), "{k} should pass");
         }
         // Windows names are case-insensitive.
-        assert!(ai_env_allowed(AiCli::Codex, "SystemRoot"));
+        assert!(allowed(AiCli::Codex, "SystemRoot"));
     }
 
     #[test]
@@ -1656,20 +2043,20 @@ mod env_isolation_tests {
             AiCli::Antigravity,
         ] {
             for k in secrets {
-                assert!(!ai_env_allowed(cli, k), "{k} leaked to {cli:?}");
+                assert!(!allowed(cli, k), "{k} leaked to {cli:?}");
             }
         }
     }
 
     #[test]
     fn each_cli_gets_only_its_own_provider_auth() {
-        assert!(ai_env_allowed(AiCli::Codex, "OPENAI_API_KEY"));
-        assert!(!ai_env_allowed(AiCli::Claude, "OPENAI_API_KEY"));
-        assert!(!ai_env_allowed(AiCli::Claude, "ANTHROPIC_API_KEY"));
-        assert!(ai_env_allowed(AiCli::Antigravity, "GEMINI_API_KEY"));
-        assert!(!ai_env_allowed(AiCli::Codex, "GEMINI_API_KEY"));
-        assert!(ai_env_allowed(AiCli::Copilot, "COPILOT_GITHUB_TOKEN"));
-        assert!(!ai_env_allowed(AiCli::Copilot, "COPILOT_ALLOW_ALL"));
+        assert!(allowed(AiCli::Codex, "OPENAI_API_KEY"));
+        assert!(!allowed(AiCli::Claude, "OPENAI_API_KEY"));
+        assert!(!allowed(AiCli::Claude, "ANTHROPIC_API_KEY"));
+        assert!(allowed(AiCli::Antigravity, "GEMINI_API_KEY"));
+        assert!(!allowed(AiCli::Codex, "GEMINI_API_KEY"));
+        assert!(allowed(AiCli::Copilot, "COPILOT_GITHUB_TOKEN"));
+        assert!(!allowed(AiCli::Copilot, "COPILOT_ALLOW_ALL"));
     }
 
     #[test]
