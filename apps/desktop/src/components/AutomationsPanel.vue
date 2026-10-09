@@ -125,7 +125,6 @@ function submitForm() {
 
 <template>
   <div class="aup-panel">
-    <p class="aup-subtitle">{{ t("automations.subtitle") }}</p>
 
     <!-- ── Auto-resolve ─────────────────────────────────── -->
     <div class="aup-card">
@@ -362,13 +361,6 @@ function submitForm() {
   gap: 12px;
 }
 
-.aup-subtitle {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin: 0 0 4px;
-  line-height: 1.5;
-}
-
 /* ── Card ───────────────────────────────────────────────── */
 .aup-card {
   border: 1px solid var(--color-border);
@@ -543,15 +535,19 @@ function submitForm() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
+  margin-top: var(--space-6);
 }
 
+/* Same look as SettingsPanel's .sp-section-label (accent bar on the left). */
 .aup-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--color-text-muted);
+  color: var(--color-text);
+  line-height: 1.2;
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-accent);
 }
 
 .aup-section-desc {
@@ -564,20 +560,24 @@ function submitForm() {
 .aup-add-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: 6px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--color-accent);
-  background: none;
+  color: var(--color-accent-text);
+  background: var(--color-accent);
   border: 1px solid var(--color-accent);
-  border-radius: 5px;
-  padding: 3px 8px;
+  border-radius: var(--radius-md);
+  padding: 6px 12px;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.12s, border-color 0.12s;
 }
 
+/* Darken on hover rather than using --color-accent-hover: in the dark theme
+   that token is a light violet (#a78bfa) and white text on it drops to
+   ~2.7:1. Mixing in black keeps the label above 4.5:1 in both themes. */
 .aup-add-btn:hover {
-  background: var(--color-accent-soft);
+  background: color-mix(in srgb, var(--color-accent) 82%, #000);
+  border-color: color-mix(in srgb, var(--color-accent) 82%, #000);
 }
 
 .aup-rule-card .aup-card-head {

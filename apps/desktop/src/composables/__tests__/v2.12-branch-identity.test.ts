@@ -193,6 +193,21 @@ describe("useIdentity (module-level functions)", () => {
     expect(resolveIdentity(CWD_A)?.gitEmail).toBe("alice@work.com");
   });
 
+  it("commitIdentityFor() trims, carries the signing key, and follows the repo override", async () => {
+    const { addIdentity, setActiveIdentity, setRepoIdentity, commitIdentityFor } = await import("../useIdentity");
+    const idHome = addIdentity({ label: "Personal", gitName: "Alice", gitEmail: "alice@home.com" });
+    const idWork = addIdentity({ label: "Work", gitName: "  Alice W ", gitEmail: " alice@work.com", gpgKey: " ABC123 " });
+    setActiveIdentity(idHome);
+    setRepoIdentity(CWD_B, idWork);
+    expect(commitIdentityFor(CWD_B)).toEqual({ name: "Alice W", email: "alice@work.com", signingKey: "ABC123" });
+    expect(commitIdentityFor(CWD_A)).toEqual({ name: "Alice", email: "alice@home.com", signingKey: null });
+  });
+
+  it("commitIdentityFor() is null without any identity (git config applies)", async () => {
+    const { commitIdentityFor } = await import("../useIdentity");
+    expect(commitIdentityFor(CWD_A)).toBeNull();
+  });
+
   it("removeIdentity() also clears all repo overrides for that identity", async () => {
     const { addIdentity, setRepoIdentity, removeIdentity, resolveIdentity } = await import("../useIdentity");
     const id = addIdentity({ label: "Work", gitName: "Alice", gitEmail: "alice@work.com" });
@@ -200,6 +215,31 @@ describe("useIdentity (module-level functions)", () => {
     removeIdentity(id);
     // Override for CWD_B should be cleared → resolves null
     expect(resolveIdentity(CWD_B)).toBeNull();
+  });
+
+  it("repoIdentityId() returns the project's own choice, null when following the default", async () => {
+    const { addIdentity, setActiveIdentity, setRepoIdentity, repoIdentityId } = await import("../useIdentity");
+    const idWork = addIdentity({ label: "Work", gitName: "Alice", gitEmail: "alice@work.com" });
+    const idHome = addIdentity({ label: "Personal", gitName: "Alice", gitEmail: "alice@home.com" });
+    setActiveIdentity(idWork);
+    setRepoIdentity(CWD_B, idHome);
+    expect(repoIdentityId(CWD_B)).toBe(idHome);
+    // CWD_A has no choice of its own, even though a global default exists.
+    expect(repoIdentityId(CWD_A)).toBeNull();
+    setRepoIdentity(CWD_B, null);
+    expect(repoIdentityId(CWD_B)).toBeNull();
+  });
+
+  it("each project remembers its own identity independently", async () => {
+    const { addIdentity, setRepoIdentity, resolveIdentity } = await import("../useIdentity");
+    const idWork = addIdentity({ label: "Work", gitName: "Alice", gitEmail: "alice@work.com" });
+    const idHome = addIdentity({ label: "Personal", gitName: "Alice", gitEmail: "alice@home.com" });
+    setRepoIdentity(CWD_A, idWork);
+    setRepoIdentity(CWD_B, idHome);
+    expect(resolveIdentity(CWD_A)?.id).toBe(idWork);
+    expect(resolveIdentity(CWD_B)?.id).toBe(idHome);
+    // Trailing slash is the same project.
+    expect(resolveIdentity(`${CWD_A}/`)?.id).toBe(idWork);
   });
 });
 

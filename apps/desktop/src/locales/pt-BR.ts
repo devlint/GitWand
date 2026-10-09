@@ -463,6 +463,7 @@ const ptBR: Locale = {
     descriptionPlaceholder: "Descrição (opcional)",
     templatePicker: "Modelos",
     identityDefault: "Config global",
+    identityFollowDefault: "Usar o padrão",
   },
 
   // ─── Branch badges + context menu (v2.12) ──────────────
@@ -1162,7 +1163,6 @@ const ptBR: Locale = {
     navGroupSystem: "Sistema",
     checkForUpdates: "Verificar atualizações",
     upToDate: "Atualizado",
-    logsTitle: "Registro de atividade",
     logsEmpty: "Sem entradas de log",
     logsClear: "Limpar",
     logsCopyAll: "Copiar tudo",
@@ -1290,7 +1290,7 @@ const ptBR: Locale = {
       },
     },
     aiTemplates: {
-      kindLabel: "Modelo para",
+      promptTemplatesLabel: "Modelos de prompt",
       kindCommit: "Mensagem de commit",
       kindPr: "Pull request",
       kindReleaseNotes: "Notas de versão",
@@ -1450,6 +1450,9 @@ const ptBR: Locale = {
 
     // Layout do painel
     dashboard: {
+      layout: {
+        label: "Layout",
+      },
       readmeFirst: {
         label: "Mostrar o README primeiro",
         help: "Coloca o cart\u00e3o README acima das linhas de colaboradores e atividade.",
@@ -1540,6 +1543,30 @@ const ptBR: Locale = {
     tabAiTemplates: "Modelos de IA",
     tabAccounts: "Contas",
     tabMcp: "MCP",
+    versionLabel: "Versão: {0}",
+    // Settings page header descriptions (one per tab, shown under the title)
+    pageDesc: {
+      general: "Idioma da interface, tema, notificações e canal de atualização.",
+      dock: "Escolha quais visualizações aparecem no dock, em que ordem e onde o aplicativo abre.",
+      dashboard: "Escolha quais seções o painel do repositório exibe e se o README aparece primeiro.",
+      git: "Executável do Git, identidades, modelos de commit e o comportamento de pull, troca de branch e blame.",
+      editor: "Editor externo e como diffs e código são exibidos.",
+      terminal: "Layout, shell e aparência do terminal integrado.",
+      ai: "Ative os recursos de IA, escolha um provedor e configure o modelo usado pelo GitWand.",
+      aiTemplates: "Personalize os prompts usados para mensagens de commit, descrições de pull request e notas de versão.",
+      accounts: "Conecte contas do GitHub, GitLab e Bitbucket para pull requests e recursos remotos.",
+      mcp: "Gerencie os servidores MCP disponíveis para os recursos de IA do GitWand.",
+      automations: "Tarefas opcionais executadas automaticamente com base em eventos do Git ou em um agendamento.",
+      hooks: "Scripts executados em eventos do Git no repositório atual.",
+      logs: "Erros e avisos recentes registrados durante esta sessão.",
+    },
+    // Section label shown first on tabs whose content starts without one
+    sectionLabel: {
+      ai: "Recursos de IA",
+      accounts: "Contas conectadas",
+      mcp: "Servidores MCP",
+      automations: "Tarefas automatizadas",
+    },
     accountsEmpty: "Nenhuma conta configurada. Adicione uma para ativar GitLab e Bitbucket.",
     accountsAdd: "Adicionar conta",
     accountsRemove: "Remover",
@@ -1626,6 +1653,10 @@ const ptBR: Locale = {
       identityAdd: "Adicionar identidade",
       identitySave: "Salvar",
       identityCancel: "Cancelar",
+      identityDefault: "Identidade padrão",
+      identityDefaultHint: "Usada por todos os projetos sem identidade própria. “Config global” mantém o user.name / user.email do git.",
+      identityProject: "Identidade para {0}",
+      identityProjectHint: "Lembrada apenas para este projeto. Também pode ser trocada no painel de commit.",
       templates: "Modelos de commit",
       templatesEmpty: "Nenhum modelo ainda.",
       templateName: "Nome do modelo",
@@ -1637,7 +1668,6 @@ const ptBR: Locale = {
   },
 
   hooks: {
-    title: "Hooks do Git",
     empty: "Nenhum hook configurado. Crie um para executar scripts em eventos do Git.",
     reload: "Atualizar",
     newHook: "Novo hook",
@@ -2177,7 +2207,6 @@ const ptBR: Locale = {
   // ─── Automations (v2.8) ──────────────────────
   automations: {
     title: "Automa\u00e7\u00f5es",
-    subtitle: "Tarefas opt-in que executam automaticamente com base em eventos do Git ou em um agendamento.",
     requiresAi: "Requer que a IA esteja habilitada na aba de IA.",
     runNow: "Executar agora",
     running: "Executando\u2026",

@@ -465,6 +465,7 @@ const zhCN: Locale = {
     descriptionPlaceholder: "描述（可选）",
     templatePicker: "模板",
     identityDefault: "全局配置",
+    identityFollowDefault: "使用默认",
   },
 
   // ─── 分支徽章 + 右键菜单 (v2.12) ────────────────────────
@@ -1239,7 +1240,6 @@ const zhCN: Locale = {
     navGroupSystem: "系统",
     checkForUpdates: "检查更新",
     upToDate: "已是最新",
-    logsTitle: "活动日志",
     logsEmpty: "暂无日志记录",
     logsClear: "清空",
     logsCopyAll: "全部复制",
@@ -1367,7 +1367,7 @@ const zhCN: Locale = {
       },
     },
     aiTemplates: {
-      kindLabel: "模板用途",
+      promptTemplatesLabel: "提示词模板",
       kindCommit: "提交信息",
       kindPr: "拉取请求",
       kindReleaseNotes: "发行说明",
@@ -1527,6 +1527,9 @@ const zhCN: Locale = {
 
     // \u4eea\u8868\u76d8\u5e03\u5c40
     dashboard: {
+      layout: {
+        label: "布局",
+      },
       readmeFirst: {
         label: "\u4f18\u5148\u663e\u793a README",
         help: "\u5c06 README \u5361\u7247\u79fb\u5230\u8d21\u732e\u8005\u548c\u6d3b\u52a8\u884c\u7684\u4e0a\u65b9\u3002",
@@ -1551,6 +1554,30 @@ const zhCN: Locale = {
     tabAiTemplates: "AI 模板",
     tabAccounts: "\u8d26\u53f7",
     tabMcp: "MCP",
+    versionLabel: "版本：{0}",
+    // Settings page header descriptions (one per tab, shown under the title)
+    pageDesc: {
+      general: "界面语言、主题、通知和更新通道。",
+      dock: "选择在 Dock 中显示哪些视图、它们的顺序以及应用启动时打开的视图。",
+      dashboard: "选择仓库仪表盘显示哪些部分，以及是否优先显示 README。",
+      git: "Git 可执行文件、身份、提交模板，以及 pull、切换分支和 blame 的行为。",
+      editor: "外部编辑器以及 diff 和代码的显示方式。",
+      terminal: "集成终端的布局、Shell 和外观。",
+      ai: "启用 AI 功能、选择提供商并配置 GitWand 使用的模型。",
+      aiTemplates: "自定义用于提交信息、拉取请求描述和发行说明的提示词。",
+      accounts: "连接 GitHub、GitLab 和 Bitbucket 账户，用于拉取请求和远程功能。",
+      mcp: "管理 GitWand AI 功能可用的 MCP 服务器。",
+      automations: "根据 Git 事件或计划自动运行的可选任务。",
+      hooks: "在当前仓库的 Git 事件上运行的脚本。",
+      logs: "本次会话中记录的最近错误和警告。",
+    },
+    // Section label shown first on tabs whose content starts without one
+    sectionLabel: {
+      ai: "AI 功能",
+      accounts: "已连接账户",
+      mcp: "MCP 服务器",
+      automations: "自动化任务",
+    },
     accountsEmpty: "\u672a\u914d\u7f6e\u8d26\u53f7\u3002\u6dfb\u52a0\u4e00\u4e2a\u4ee5\u542f\u7528 GitLab \u548c Bitbucket\u3002",
     accountsAdd: "\u6dfb\u52a0\u8d26\u53f7",
     accountsRemove: "\u5220\u9664",
@@ -1637,6 +1664,10 @@ const zhCN: Locale = {
       identityAdd: "添加身份",
       identitySave: "保存",
       identityCancel: "取消",
+      identityDefault: "默认身份",
+      identityDefaultHint: "用于所有未单独设置身份的项目。“全局配置”沿用 git 自身的 user.name / user.email。",
+      identityProject: "{0} 的身份",
+      identityProjectHint: "仅为此项目记住。也可以在提交面板中切换。",
       templates: "提交模板",
       templatesEmpty: "暂无模板。",
       templateName: "模板名称",
@@ -1648,7 +1679,6 @@ const zhCN: Locale = {
   },
 
   hooks: {
-    title: "Git 钩子",
     empty: "尚未配置钩子。创建一个以在 Git 事件上运行脚本。",
     reload: "刷新",
     newHook: "新建钩子",
@@ -2186,7 +2216,6 @@ const zhCN: Locale = {
   // ─── Automations (v2.8) ──────────────────────
   automations: {
     title: "\u81ea\u52a8\u5316",
-    subtitle: "\u57fa\u4e8e Git \u4e8b\u4ef6\u6216\u8ba1\u5212\u81ea\u52a8\u8fd0\u884c\u7684\u53ef\u9009\u4efb\u52a1\u3002",
     requiresAi: "\u9700\u8981\u5728 AI \u6807\u7b7e\u9875\u4e2d\u542f\u7528 AI\u3002",
     runNow: "\u7acb\u5373\u8fd0\u884c",
     running: "\u8fd0\u884c\u4e2d\u2026",

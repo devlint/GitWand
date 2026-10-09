@@ -475,6 +475,7 @@ const en = {
     templatePicker: "Templates",
     // v2.12 identity selector
     identityDefault: "Global config",
+    identityFollowDefault: "Use default",
   },
 
   // ─── Branch badges + context menu (v2.12) ───────────────
@@ -1178,7 +1179,6 @@ const en = {
     navGroupSystem: "System",
     checkForUpdates: "Check for updates",
     upToDate: "Up to date",
-    logsTitle: "Activity log",
     logsEmpty: "No log entries.",
     logsClear: "Clear",
     logsCopyAll: "Copy all",
@@ -1314,7 +1314,7 @@ const en = {
       },
     },
     aiTemplates: {
-      kindLabel: "Template for",
+      promptTemplatesLabel: "Prompt templates",
       kindCommit: "Commit message",
       kindPr: "Pull request",
       kindReleaseNotes: "Release notes",
@@ -1475,6 +1475,9 @@ const en = {
 
     // Dashboard layout
     dashboard: {
+      layout: {
+        label: "Layout",
+      },
       readmeFirst: {
         label: "Show README first",
         help: "Move the README card above the contributors and activity rows.",
@@ -1566,6 +1569,30 @@ const en = {
     // Accounts + MCP tabs (v2.10)
     tabAccounts: "Accounts",
     tabMcp: "MCP",
+    versionLabel: "Version: {0}",
+    // Settings page header descriptions (one per tab, shown under the title)
+    pageDesc: {
+      general: "Interface language, theme, notifications and update channel.",
+      dock: "Choose which views appear in the dock, in what order, and where the app opens.",
+      dashboard: "Choose which sections the repository dashboard shows, and whether the README comes first.",
+      git: "Git executable, identities, commit templates, and how pull, branch switching and blame behave.",
+      editor: "External editor and how diffs and code are displayed.",
+      terminal: "Integrated terminal layout, shell and appearance.",
+      ai: "Enable AI features, choose a provider and configure the model GitWand uses.",
+      aiTemplates: "Customize the prompts used for commit messages, pull request descriptions and release notes.",
+      accounts: "Connect GitHub, GitLab and Bitbucket accounts for pull requests and remote features.",
+      mcp: "Manage the MCP servers available to GitWand's AI features.",
+      automations: "Opt-in tasks that run automatically based on Git events or a schedule.",
+      hooks: "Scripts that run on Git events in the current repository.",
+      logs: "Recent errors and warnings recorded during this session.",
+    },
+    // Section label shown first on tabs whose content starts without one
+    sectionLabel: {
+      ai: "AI features",
+      accounts: "Connected accounts",
+      mcp: "MCP servers",
+      automations: "Automated tasks",
+    },
     accountsEmpty: "No accounts configured. Add one to enable GitLab and Bitbucket.",
     accountsAdd: "Add account",
     accountsRemove: "Remove",
@@ -1656,6 +1683,10 @@ const en = {
       identityAdd: "Add identity",
       identitySave: "Save",
       identityCancel: "Cancel",
+      identityDefault: "Default identity",
+      identityDefaultHint: "Used by every project that has no identity of its own. “Global config” keeps git’s own user.name / user.email.",
+      identityProject: "Identity for {0}",
+      identityProjectHint: "Remembered for this project only. You can also switch it from the commit panel.",
       templates: "Commit templates",
       templatesEmpty: "No templates yet. Add one to speed up your commit flow.",
       templateName: "Template name",
@@ -1668,7 +1699,6 @@ const en = {
 
   // \u2500\u2500\u2500 Hooks \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   hooks: {
-    title: "Git Hooks",
     empty: "No hooks configured. Create one to run scripts on Git events.",
     reload: "Reload",
     newHook: "New hook",
@@ -2219,7 +2249,6 @@ const en = {
   // ─── Automations (v2.8) ──────────────────────────────────
   automations: {
     title: "Automations",
-    subtitle: "Opt-in tasks that run automatically based on Git events or a schedule.",
     requiresAi: "Requires AI to be enabled in the AI tab.",
     runNow: "Run now",
     running: "Running…",

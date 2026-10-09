@@ -282,17 +282,14 @@ onMounted(() => {
 
 <template>
   <div class="hooks-panel">
-    <!-- Header -->
+    <!-- Actions (the Settings page header already names the tab) -->
     <div class="hp-header">
-      <span class="hp-title">{{ t("hooks.title") }}</span>
-      <div class="hp-actions">
-        <button class="bm-btn bm-btn--ghost hp-btn-sm" @click="loadHooks" :disabled="loading">
-          {{ t("hooks.reload") }}
-        </button>
-        <button class="bm-btn bm-btn--primary hp-btn-sm" @click="showForm = true">
-          + {{ t("hooks.newHook") }}
-        </button>
-      </div>
+      <button class="bm-btn bm-btn--ghost" @click="loadHooks" :disabled="loading">
+        {{ t("hooks.reload") }}
+      </button>
+      <button class="bm-btn bm-btn--primary" @click="showForm = true">
+        + {{ t("hooks.newHook") }}
+      </button>
     </div>
 
     <!-- Error -->
@@ -464,26 +461,11 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.hooks-panel {
-  padding: 16px;
-}
-
 .hp-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.hp-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.hp-actions {
-  display: flex;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
 }
 
 .hp-btn-sm {

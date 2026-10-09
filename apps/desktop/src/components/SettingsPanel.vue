@@ -419,6 +419,9 @@ function updateClampedSetting<K extends keyof Settings>(
 
 function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   settings.value[key] = value;
+  // Identities are written by useIdentity, possibly elsewhere (the commit
+  // menu) while this panel is open: never write back a stale copy.
+  syncIdentityFields();
   saveSettings(settings.value);
   // Keep the shared reactive settings (read by AppDock and friends) in sync so
   // changes like dock order / position apply live, not only on panel close.
@@ -560,10 +563,13 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
 // be hardcoded strings (three of them French), rendered raw with no t()
 // call, shown untranslated in every locale. Every sibling tab label already
 // goes through t() via tabLabel() below.
-const settingsNavGroups: Array<{ labelKey: LocaleKey | null; tabs: SettingsTab[] }> = [
+// `templateKinds`: the group lists one entry per AI template kind instead of
+// tabs; each opens the aiTemplates tab on that kind.
+const settingsNavGroups: Array<{ labelKey: LocaleKey | null; tabs: SettingsTab[]; templateKinds?: boolean }> = [
   { labelKey: "settings.navGroupApplication", tabs: ["general", "dock", "dashboard", "editor", "terminal"] },
   { labelKey: "settings.navGroupRepo", tabs: ["git", "hooks", "accounts"] },
-  { labelKey: "settings.navGroupAi", tabs: ["ai", "aiTemplates", "mcp", "automations"] },
+  { labelKey: "settings.navGroupAi", tabs: ["ai", "mcp", "automations"] },
+  { labelKey: "settings.tabAiTemplates", tabs: [], templateKinds: true },
   { labelKey: "settings.navGroupSystem", tabs: ["logs"] },
 ];
 
@@ -583,6 +589,18 @@ function tabLabel(id: SettingsTab): string {
     case "hooks": return t("settings.tabHooks");
     case "logs": return t("settings.tabLogs");
   }
+}
+
+// AI Templates is entered per template kind from the nav, so its page title
+// names the kind rather than the tab.
+const pageTitle = computed(() =>
+  activeSettingsTab.value === "aiTemplates"
+    ? t(aiTemplateKindLabel[aiTemplateKind.value])
+    : tabLabel(activeSettingsTab.value),
+);
+
+function tabDescription(id: SettingsTab): string {
+  return t(`settings.pageDesc.${id}` as LocaleKey);
 }
 
 // ─── Language ──────────────────────────────────────────
@@ -1262,7 +1280,39 @@ watch(
 
 // ─── v2.12 Identities ────────────────────────────────────
 
-const { identities, add: addIdentity, update: updateIdentity, remove: removeIdentity, setActive: setActiveIdentity } = useIdentity();
+const {
+  identities,
+  repoOverrideId: projectIdentityId,
+  add: addIdentity,
+  update: updateIdentity,
+  remove: removeIdentity,
+  setActive: setActiveIdentity,
+  setRepoOverride: setProjectIdentity,
+} = useIdentity(() => props.cwd ?? "");
+
+/**
+ * useIdentity() writes straight to localStorage; mirror its fields into the
+ * panel's local copy so the next updateSetting() does not write them back stale.
+ */
+function syncIdentityFields() {
+  const fresh = loadSettings();
+  settings.value.identities = fresh.identities;
+  settings.value.activeIdentityId = fresh.activeIdentityId;
+  settings.value.identityOverrideByRepo = fresh.identityOverrideByRepo;
+}
+
+const projectName = computed(() => (props.cwd ?? "").split(/[\\/]/).filter(Boolean).pop() ?? "");
+
+function onDefaultIdentityChange(e: Event) {
+  setActiveIdentity((e.target as HTMLSelectElement).value || null);
+  syncIdentityFields();
+}
+
+function onProjectIdentityChange(e: Event) {
+  if (!props.cwd) return;
+  setProjectIdentity(props.cwd, (e.target as HTMLSelectElement).value || null);
+  syncIdentityFields();
+}
 
 const identityForm = ref<{ label: string; gitName: string; gitEmail: string; gpgKey: string }>({
   label: "", gitName: "", gitEmail: "", gpgKey: "",
@@ -1290,11 +1340,13 @@ function saveIdentityForm() {
   } else {
     addIdentity({ label, gitName, gitEmail, gpgKey: gpgKey || undefined });
   }
+  syncIdentityFields();
   showIdentityForm.value = false;
 }
 
 function deleteIdentity(id: string) {
   removeIdentity(id);
+  syncIdentityFields();
 }
 
 // ─── v2.12 Commit Templates ──────────────────────────────
@@ -1355,6 +1407,25 @@ const aiTemplateKindLabel: Record<AiTemplateKind, LocaleKey> = {
   commit: "settings.aiTemplates.kindCommit",
   pr: "settings.aiTemplates.kindPr",
   releaseNotes: "settings.aiTemplates.kindReleaseNotes",
+};
+// Nav icon per template kind. Keyed by kind so a new kind is a type error
+// here instead of silently borrowing another kind's icon.
+type SvgShape = { tag: "circle" | "path"; attrs: Record<string, string> };
+const aiTemplateKindIcon: Record<AiTemplateKind, SvgShape[]> = {
+  commit: [
+    { tag: "circle", attrs: { cx: "8", cy: "8", r: "2.5" } },
+    { tag: "path", attrs: { d: "M1 8h4.5M10.5 8H15" } },
+  ],
+  pr: [
+    { tag: "circle", attrs: { cx: "4", cy: "3.5", r: "1.5" } },
+    { tag: "circle", attrs: { cx: "4", cy: "12.5", r: "1.5" } },
+    { tag: "circle", attrs: { cx: "12", cy: "12.5", r: "1.5" } },
+    { tag: "path", attrs: { d: "M4 5v6M12 11V6.5A2 2 0 0 0 10 4.5H7.5M9 3l-1.5 1.5L9 6" } },
+  ],
+  releaseNotes: [
+    { tag: "path", attrs: { d: "M2 2.5h6.5L14 8l-5.5 5.5L2 8z" } },
+    { tag: "circle", attrs: { cx: "5.5", cy: "5.5", r: "1", fill: "currentColor", stroke: "none" } },
+  ],
 };
 const aiTemplateKindHint: Record<AiTemplateKind, LocaleKey> = {
   commit: "settings.aiTemplates.hintCommit",
@@ -1446,10 +1517,15 @@ function deleteAiTemplate(id: string) {
 
 watch(aiTemplateKind, closeAiTemplateForm);
 
+function openAiTemplateKind(kind: AiTemplateKind) {
+  activeSettingsTab.value = "aiTemplates";
+  aiTemplateKind.value = kind;
+}
+
 </script>
 
 <template>
-  <BaseModal size="xl" :title="t('settings.title')" :bodyFlush="true" :scrollOwn="true" @close="emit('close')">
+  <BaseModal size="screen" :title="t('settings.title')" :bodyFlush="true" :scrollOwn="true" @close="emit('close')">
     <template #title-icon>
       <span class="bm-title-icon" aria-hidden="true">
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
@@ -1553,6 +1629,18 @@ watch(aiTemplateKind, closeAiTemplateForm);
                 {{ props.errorLog!.length > 99 ? '99+' : props.errorLog!.length }}
               </span>
             </button>
+            <template v-if="group.templateKinds">
+              <button v-for="kind in AI_TEMPLATE_KINDS" :key="kind" class="sp-nav-item"
+                :class="{ 'sp-nav-item--active': activeSettingsTab === 'aiTemplates' && aiTemplateKind === kind }"
+                @click="openAiTemplateKind(kind)">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                  stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <component :is="shape.tag" v-for="(shape, i) in aiTemplateKindIcon[kind]" :key="i"
+                    v-bind="shape.attrs" />
+                </svg>
+                <span>{{ t(aiTemplateKindLabel[kind]) }}</span>
+              </button>
+            </template>
           </div>
         </template>
 
@@ -1585,21 +1673,17 @@ watch(aiTemplateKind, closeAiTemplateForm);
         </div>
 
         <div class="sp-nav-spacer" />
-        <div class="sp-nav-footer">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
-            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="8" cy="3" r="1.5" />
-            <circle cx="3" cy="11" r="1.5" />
-            <circle cx="13" cy="11" r="1.5" />
-            <path d="M8 4.5v3L3 9.6M8 7.5l5 2.1" />
-          </svg>
-          <span class="sp-nav-footer-name">GitWand</span>
-          <span class="sp-nav-footer-version">v{{ appVersion }}</span>
-        </div>
+        <div class="sp-nav-footer">{{ t('settings.versionLabel', appVersion) }}</div>
       </nav>
 
       <!-- ── Right content area ── -->
       <div class="sp-content">
+
+        <!-- Page title + intro, same look as HelpView's section header -->
+        <header class="sp-page-header">
+          <h2 class="sp-page-title">{{ pageTitle }}</h2>
+          <p class="sp-page-intro">{{ tabDescription(activeSettingsTab) }}</p>
+        </header>
 
         <!-- ═══ GÉNÉRAL ═══ -->
         <template v-if="activeSettingsTab === 'general'">
@@ -1854,6 +1938,9 @@ watch(aiTemplateKind, closeAiTemplateForm);
         </template>
 
         <template v-if="activeSettingsTab === 'dashboard'">
+          <!-- ── Layout ── -->
+          <h3 class="sp-section-label">{{ t('settings.dashboard.layout.label') }}</h3>
+
           <!-- README first row -->
           <div class="sp-row sp-row--checkbox">
             <label class="sp-checkbox-label" for="setting-dashboard-readme-first">
@@ -2011,8 +2098,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
           </div>
 
           <!-- Statistiques tier locales (recoverable-before-model) -->
-          <div class="sp-section-divider"></div>
-          <h3 class="sp-section-title">{{ t('settings.tierStats.title') }}</h3>
+          <h3 class="sp-section-label">{{ t('settings.tierStats.title') }}</h3>
           <span class="sp-hint">{{ t('settings.tierStats.hint') }}</span>
           <div v-if="tierStats.totalHunks === 0" class="sp-row">
             <span class="sp-hint">{{ t('settings.tierStats.empty') }}</span>
@@ -2139,6 +2225,30 @@ watch(aiTemplateKind, closeAiTemplateForm);
               </div>
             </div>
           </div>
+
+          <!-- Which identity commits: global default + this project's own choice -->
+          <template v-if="identities.length > 0">
+            <div class="sp-field">
+              <label class="sp-field__label" for="setting-identity-default">{{ t('settings.git.identityDefault') }}</label>
+              <select id="setting-identity-default" class="sp-select" :value="settings.activeIdentityId ?? ''"
+                @change="onDefaultIdentityChange">
+                <option value="">{{ t('commit.identityDefault') }}</option>
+                <option v-for="p in identities" :key="p.id" :value="p.id">{{ p.label }} — {{ p.gitEmail }}</option>
+              </select>
+              <span class="sp-hint">{{ t('settings.git.identityDefaultHint') }}</span>
+            </div>
+            <div v-if="props.cwd" class="sp-field">
+              <label class="sp-field__label" for="setting-identity-project">
+                {{ t('settings.git.identityProject', projectName) }}
+              </label>
+              <select id="setting-identity-project" class="sp-select" :value="projectIdentityId ?? ''"
+                @change="onProjectIdentityChange">
+                <option value="">{{ t('commit.identityFollowDefault') }}</option>
+                <option v-for="p in identities" :key="p.id" :value="p.id">{{ p.label }} — {{ p.gitEmail }}</option>
+              </select>
+              <span class="sp-hint">{{ t('settings.git.identityProjectHint') }}</span>
+            </div>
+          </template>
 
           <!-- ── Templates de commit ── -->
           <div class="sp-group">
@@ -2342,6 +2452,8 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
         <!-- ═══ INTELLIGENCE ARTIFICIELLE ═══ -->
         <template v-if="activeSettingsTab === 'ai'">
+          <h3 class="sp-section-label">{{ t('settings.sectionLabel.ai') }}</h3>
+
           <!-- Enable AI -->
           <div class="sp-row sp-row--checkbox">
             <label class="sp-checkbox-label" for="setting-ai-enabled">
@@ -3095,9 +3207,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
           </template>
 
           <!-- ─── AI fallback (v2.5 — .gitwandrc per-repo) ─────── -->
-          <div class="sp-section-divider"></div>
-
-          <h3 class="sp-section-title">{{ t('settings.ai.fallback.title') }}</h3>
+          <h3 class="sp-section-label">{{ t('settings.ai.fallback.title') }}</h3>
 
           <!-- No repo open → disable the entire block with an info message -->
           <div v-if="!llmFallbackHasRepo" class="sp-info-box">
@@ -3208,17 +3318,6 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
         <!-- ═══ AI TEMPLATES ═══ -->
         <template v-if="activeSettingsTab === 'aiTemplates'">
-          <div class="sp-row">
-            <div class="sp-label">{{ t('settings.aiTemplates.kindLabel') }}</div>
-            <div class="sp-auth-toggle sp-ait-kinds">
-              <button v-for="kind in AI_TEMPLATE_KINDS" :key="kind"
-                :class="['sp-auth-btn', { 'sp-auth-btn--active': aiTemplateKind === kind }]"
-                @click="aiTemplateKind = kind">
-                {{ t(aiTemplateKindLabel[kind]) }}
-              </button>
-            </div>
-          </div>
-
           <!-- Commit message language -->
           <div v-if="aiTemplateKind === 'commit'" class="sp-row">
             <label class="sp-label" for="setting-commit-lang">{{ t('settings.commitMessageLang') }}</label>
@@ -3255,10 +3354,12 @@ watch(aiTemplateKind, closeAiTemplateForm);
             <span class="sp-hint">{{ t('settings.aiTemplates.langOverrideNote') }}</span>
           </div>
 
-          <div class="sp-group">
+          <!-- ── Prompt templates ── -->
+          <h3 class="sp-section-label">{{ t('settings.aiTemplates.promptTemplatesLabel') }}</h3>
+
+          <div class="sp-group sp-group--ait">
             <div class="sp-group__head">
               <div class="sp-group__head-text">
-                <span class="sp-group__label">{{ t(aiTemplateKindLabel[aiTemplateKind]) }}</span>
                 <span class="sp-group__sublabel">
                   {{ t(aiTemplateKindHint[aiTemplateKind]) }}
                   <span class="sp-ait-shared">{{ t('settings.aiTemplates.sharedNote') }}</span>
@@ -3267,6 +3368,8 @@ watch(aiTemplateKind, closeAiTemplateForm);
             </div>
 
             <div class="sp-group__body">
+              <div class="sp-group__sep">{{ t('settings.aiTemplates.default') }}</div>
+
               <!-- Built-in templates (Default first): read-only, view + duplicate -->
               <div v-for="tpl in aiBuiltinTemplates" :key="tpl.id" class="sp-group__row sp-group__row--muted">
                 <div class="sp-group__row-info">
@@ -3333,7 +3436,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
               </div>
 
               <button v-if="!aiTemplateFormMode" class="sp-group__row sp-ait-add" @click="openAiTemplateForm('add')">
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"
                   aria-hidden="true">
                   <path d="M8 3v10M3 8h10" />
                 </svg>
@@ -3391,15 +3494,18 @@ watch(aiTemplateKind, closeAiTemplateForm);
         <!-- ═══ AUTOMATIONS ═══ -->
         <!-- ═══ ACCOUNTS ═══ -->
         <template v-if="activeSettingsTab === 'accounts'">
+          <h3 class="sp-section-label">{{ t('settings.sectionLabel.accounts') }}</h3>
           <SettingsAccountsTab />
         </template>
 
         <!-- ═══ MCP ═══ -->
         <template v-if="activeSettingsTab === 'mcp'">
+          <h3 class="sp-section-label">{{ t('settings.sectionLabel.mcp') }}</h3>
           <SettingsMcpTab :cwd="props.cwd" />
         </template>
 
         <template v-if="activeSettingsTab === 'automations'">
+          <h3 class="sp-section-label">{{ t('settings.sectionLabel.automations') }}</h3>
           <AutomationsPanel />
         </template>
 
@@ -3411,13 +3517,12 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
         <!-- ═══ LOGS ═══ -->
         <template v-if="activeSettingsTab === 'logs'">
-          <div class="sp-logs-header">
-            <h3 class="sp-section-title">{{ t('settings.logsTitle') }}</h3>
+          <div v-if="(props.errorLog?.length ?? 0) > 0" class="sp-logs-header">
             <div class="sp-logs-actions">
-              <button v-if="(props.errorLog?.length ?? 0) > 0" class="bm-btn bm-btn--ghost" @click="copyAllLogs">
+              <button class="bm-btn bm-btn--ghost" @click="copyAllLogs">
                 {{ t('settings.logsCopyAll') }}
               </button>
-              <button v-if="(props.errorLog?.length ?? 0) > 0" class="bm-btn bm-btn--ghost" @click="emit('clearLogs')">
+              <button class="bm-btn bm-btn--ghost" @click="emit('clearLogs')">
                 {{ t('settings.logsClear') }}
               </button>
             </div>
@@ -3451,32 +3556,36 @@ watch(aiTemplateKind, closeAiTemplateForm);
 .sp-layout {
   display: flex;
   flex-direction: row;
-  height: 72vh;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
 /* ─── Left nav sidebar ─────────────────────────────────── */
+/* Mirrors HelpView's .help-nav / .help-nav__item look. */
 .sp-nav {
-  width: 196px;
+  width: 220px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--color-border);
-  padding: var(--space-4) 0 var(--space-3);
+  padding: var(--space-5, 16px) 0 var(--space-3);
   overflow-y: auto;
-  background: var(--color-bg-subtle, var(--color-bg));
 }
 
 .sp-nav-group {
-  padding: 0 var(--space-3) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 2px);
+  padding: 0 var(--space-4, 12px) var(--space-5);
 }
 
 .sp-nav-group-label {
   display: block;
-  padding: var(--space-2) var(--space-3);
-  font-size: 11px;
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-subtle, var(--color-text-muted));
+  padding: var(--space-2) var(--space-4, 12px);
+  font-size: 12px;
+  font-weight: var(--font-weight-bold, 700);
+  color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   user-select: none;
@@ -3487,26 +3596,27 @@ watch(aiTemplateKind, closeAiTemplateForm);
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-muted);
-  background: none;
+  padding: var(--space-3, 6px) var(--space-4, 12px);
+  border-radius: var(--radius-md, 6px);
+  font-size: var(--font-size-base, 13px);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--color-text);
+  background: transparent;
   border: none;
   cursor: pointer;
   text-align: left;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-base), color var(--transition-base);
 }
 
 .sp-nav-item:hover {
-  background: var(--color-bg-elevated, var(--color-surface));
+  background: var(--color-bg-tertiary);
   color: var(--color-text);
 }
 
-.sp-nav-item--active {
-  background: var(--color-bg-elevated, var(--color-surface));
-  color: var(--color-text);
+.sp-nav-item--active,
+.sp-nav-item--active:hover {
+  background: var(--color-accent-soft, rgba(99, 102, 241, 0.1));
+  color: var(--color-accent);
 }
 
 .sp-nav-item svg {
@@ -3575,35 +3685,62 @@ watch(aiTemplateKind, closeAiTemplateForm);
   flex: 1;
 }
 
+/* Version centred both ways in the strip below the line. The negative
+   bottom margin cancels .sp-nav's bottom padding so the strip is symmetric. */
 .sp-nav-footer {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  justify-content: center;
+  min-height: 40px;
+  margin-bottom: calc(-1 * var(--space-3));
   padding: var(--space-3) var(--space-5);
   font-size: 11px;
-  color: var(--color-text-subtle, var(--color-text-muted));
-  opacity: 0.7;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
   border-top: 1px solid var(--color-border);
   margin-top: var(--space-2);
 }
 
-.sp-nav-footer-name {
-  font-weight: var(--font-weight-semibold);
-}
-
-.sp-nav-footer-version {
-  opacity: 0.6;
-}
-
 /* ─── Right content area ───────────────────────────────── */
+/* Content is capped at 1200px wide, but the scroll container itself spans
+   to the window edge so the scrollbar sits at the far right. The cap comes
+   from a growing right padding: % padding resolves against .sp-layout's
+   width, so (100% - 220px nav) is this element's width, and subtracting
+   the 1200px cap and the left padding leaves exactly 1200px of content —
+   the same as HelpView's .help-content__inner. Base padding matches
+   HelpView's .help-content. */
 .sp-content {
   flex: 1;
   min-width: 0;
-  padding: var(--space-7) var(--space-8);
+  padding: var(--space-8, 32px) var(--space-10, 48px);
+  padding-right: max(var(--space-10, 48px), calc(100% - 220px - 1200px - var(--space-10, 48px)));
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
   overflow-y: auto;
+}
+
+/* Mirrors HelpView's .help-section__title / .help-section__intro. The
+   header's margin stacks on .sp-content's gap for extra air before the
+   first setting. */
+.sp-page-header {
+  padding-bottom: var(--space-7);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sp-page-title {
+  font-size: var(--font-size-2xl, 20px);
+  font-weight: var(--font-weight-bold, 700);
+  color: var(--color-text);
+  line-height: 1.2;
+  margin: 0 0 var(--space-1, 2px);
+}
+
+.sp-page-intro {
+  font-size: var(--font-size-lg, 14px);
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin: 0;
 }
 
 .sp-row {
@@ -3651,6 +3788,26 @@ watch(aiTemplateKind, closeAiTemplateForm);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* Section title inside a tab (accent bar on the left). Distinct from
+   .sp-label, which every form-field label uses. AutomationsPanel's
+   .aup-section-title mirrors it. */
+.sp-section-label {
+  margin: var(--space-6) 0 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-accent);
+  line-height: 1.2;
+}
+
+/* First section right under the header line: tighter top spacing. */
+.sp-page-header + .sp-section-label {
+  margin-top: var(--space-4);
 }
 
 /* Label with a small inline action after it — "MODEL (Refresh)". */
@@ -3929,18 +4086,6 @@ watch(aiTemplateKind, closeAiTemplateForm);
   font-weight: var(--font-weight-semibold);
 }
 
-/* AI Templates kind switcher: 3 buttons, so every one but the last gets a divider. */
-.sp-ait-kinds .sp-auth-btn:not(:last-child) {
-  border-right: 1px solid var(--color-border);
-}
-
-/* Taller tabs: this switcher drives the whole section, so give it more weight. */
-.sp-ait-kinds .sp-auth-btn {
-  padding-top: var(--space-5);
-  padding-bottom: var(--space-5);
-  font-weight: var(--font-weight-semibold);
-}
-
 .sp-ait-shared {
   display: block;
   margin-top: 4px;
@@ -4125,7 +4270,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
 .sp-logs-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-4);
 }
 
@@ -4237,13 +4382,6 @@ watch(aiTemplateKind, closeAiTemplateForm);
   height: 1px;
   background: var(--color-border);
   margin: var(--space-3) 0;
-}
-
-.sp-section-title {
-  margin: 0;
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text);
 }
 
 .sp-warning-box {
@@ -4365,7 +4503,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-4) var(--space-5);
   background: var(--color-bg);
   border-bottom: 1px solid var(--color-border);
   transition: background var(--transition-base);
@@ -4416,6 +4554,10 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
 /* ── Empty state ── */
 .sp-group__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 41px;
   padding: var(--space-4) var(--space-3);
   font-size: var(--font-size-sm);
   color: var(--color-text-subtle);
@@ -4556,24 +4698,58 @@ watch(aiTemplateKind, closeAiTemplateForm);
 }
 
 /* "New template": a full-width row of the list, not a header action. */
+/* Filled accent strip so "Add template" reads as a real button. */
 .sp-ait-add {
   width: 100%;
   justify-content: center;
-  gap: 5px;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-3);
   border-top: none;
   border-left: none;
   border-right: none;
-  color: var(--color-accent);
-  font-size: var(--font-size-sm);
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   cursor: pointer;
 }
 
+/* Same hover as AutomationsPanel's .aup-add-btn. Darken on hover rather than using --color-accent-hover: in the dark theme
+   that token is a light violet (#a78bfa) and white text on it drops to
+   ~2.7:1. Mixing in black keeps the label above 4.5:1 in both themes. */
 .sp-ait-add:hover {
-  background: var(--color-accent-soft);
+  background: color-mix(in srgb, var(--color-accent) 82%, #000);
 }
 
 /* ── v2.13 / sp-group extensions ─────────────────────── */
+
+/* AI Templates tab: list text is brighter than the default muted group look. */
+/* Sits right under its "Prompt templates" section label: pull it up to eat
+   part of .sp-content's gap so the hint reads as the label's subtext. */
+.sp-group--ait {
+  margin-top: calc(-1 * var(--space-5));
+}
+
+.sp-group--ait .sp-group__sublabel {
+  font-size: var(--font-size-base);
+  padding: var(--space-3) 0;
+  color: var(--color-text);
+  opacity: 0.85;
+}
+
+.sp-group--ait .sp-group__row--muted {
+  opacity: 1;
+}
+
+.sp-group--ait .sp-group__row-meta {
+  color: var(--color-text);
+  opacity: 0.85;
+}
+
+.sp-group--ait .sp-group__empty {
+  color: var(--color-text-muted);
+}
+
 .sp-section-divider--inner {
   margin: var(--space-4) 0 var(--space-2);
 }
@@ -4604,17 +4780,23 @@ watch(aiTemplateKind, closeAiTemplateForm);
 }
 
 /* Separator between built-ins and custom */
+/* First divider: the body's own border already draws the top edge. */
+.sp-group__sep:first-child {
+  border-top: none;
+}
+
 .sp-group__sep {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: 0 var(--space-3);
-  height: 28px;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
+  height: 31px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--color-text-subtle);
+  /* Text only (opacity would also fade the strip's background/borders). */
+  color: color-mix(in srgb, var(--color-text) 80%, transparent);
   background: var(--color-bg-secondary);
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);

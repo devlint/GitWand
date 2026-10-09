@@ -462,6 +462,7 @@ const es: Locale = {
     descriptionPlaceholder: "Descripción (opcional)",
     templatePicker: "Plantillas",
     identityDefault: "Config global",
+    identityFollowDefault: "Usar la predeterminada",
   },
 
   // ─── Branch badges + context menu (v2.12) ──────────────
@@ -1161,7 +1162,6 @@ const es: Locale = {
     navGroupSystem: "Sistema",
     checkForUpdates: "Buscar actualizaciones",
     upToDate: "Actualizado",
-    logsTitle: "Registro de actividad",
     logsEmpty: "Sin entradas de registro",
     logsClear: "Limpiar",
     logsCopyAll: "Copiar todo",
@@ -1289,7 +1289,7 @@ const es: Locale = {
       },
     },
     aiTemplates: {
-      kindLabel: "Plantilla para",
+      promptTemplatesLabel: "Plantillas de prompt",
       kindCommit: "Mensaje de commit",
       kindPr: "Pull request",
       kindReleaseNotes: "Notas de versión",
@@ -1450,6 +1450,9 @@ const es: Locale = {
 
     // Disposición del panel
     dashboard: {
+      layout: {
+        label: "Diseño",
+      },
       readmeFirst: {
         label: "Mostrar el README primero",
         help: "Coloca la tarjeta README encima de las filas de colaboradores y actividad.",
@@ -1540,6 +1543,30 @@ const es: Locale = {
     tabAiTemplates: "Plantillas de IA",
     tabAccounts: "Cuentas",
     tabMcp: "MCP",
+    versionLabel: "Versión: {0}",
+    // Settings page header descriptions (one per tab, shown under the title)
+    pageDesc: {
+      general: "Idioma de la interfaz, tema, notificaciones y canal de actualizaciones.",
+      dock: "Elige qué vistas aparecen en el dock, en qué orden y dónde se abre la aplicación.",
+      dashboard: "Elige qué secciones muestra el panel del repositorio y si el README aparece primero.",
+      git: "Ejecutable de Git, identidades, plantillas de commit y el comportamiento de pull, cambio de rama y blame.",
+      editor: "Editor externo y cómo se muestran los diffs y el código.",
+      terminal: "Disposición, shell y apariencia del terminal integrado.",
+      ai: "Activa las funciones de IA, elige un proveedor y configura el modelo que usa GitWand.",
+      aiTemplates: "Personaliza los prompts usados para mensajes de commit, descripciones de pull request y notas de versión.",
+      accounts: "Conecta cuentas de GitHub, GitLab y Bitbucket para pull requests y funciones remotas.",
+      mcp: "Gestiona los servidores MCP disponibles para las funciones de IA de GitWand.",
+      automations: "Tareas opcionales que se ejecutan automáticamente según eventos de Git o un horario.",
+      hooks: "Scripts que se ejecutan con eventos de Git en el repositorio actual.",
+      logs: "Errores y advertencias recientes registrados durante esta sesión.",
+    },
+    // Section label shown first on tabs whose content starts without one
+    sectionLabel: {
+      ai: "Funciones de IA",
+      accounts: "Cuentas conectadas",
+      mcp: "Servidores MCP",
+      automations: "Tareas automatizadas",
+    },
     accountsEmpty: "No hay cuentas configuradas. Añade una para activar GitLab y Bitbucket.",
     accountsAdd: "Añadir cuenta",
     accountsRemove: "Eliminar",
@@ -1626,6 +1653,10 @@ const es: Locale = {
       identityAdd: "Agregar identidad",
       identitySave: "Guardar",
       identityCancel: "Cancelar",
+      identityDefault: "Identidad predeterminada",
+      identityDefaultHint: "Usada por todos los proyectos sin identidad propia. «Config global» mantiene el user.name / user.email de git.",
+      identityProject: "Identidad para {0}",
+      identityProjectHint: "Se recuerda solo para este proyecto. También puedes cambiarla desde el panel de commit.",
       templates: "Plantillas de commit",
       templatesEmpty: "Sin plantillas todavía.",
       templateName: "Nombre de plantilla",
@@ -1637,7 +1668,6 @@ const es: Locale = {
   },
 
   hooks: {
-    title: "Hooks de Git",
     empty: "No hay hooks configurados. Crea uno para ejecutar scripts en eventos de Git.",
     reload: "Actualizar",
     newHook: "Nuevo hook",
@@ -2177,7 +2207,6 @@ const es: Locale = {
   // ─── Automations (v2.8) ──────────────────────
   automations: {
     title: "Automatizaciones",
-    subtitle: "Tareas opcionales que se ejecutan autom\u00e1ticamente seg\u00fan eventos Git o un horario.",
     requiresAi: "Requiere que la IA est\u00e9 habilitada en la pesta\u00f1a de IA.",
     runNow: "Ejecutar ahora",
     running: "Ejecutando\u2026",

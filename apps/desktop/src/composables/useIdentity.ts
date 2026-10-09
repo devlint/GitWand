@@ -2,8 +2,11 @@
  * useIdentity — multiple committer identity profiles (v2.12).
  *
  * Allows users to maintain several named git identities (Perso, Pro, Client…)
- * and select which one is active globally or per-repo. The active identity is
- * injected as `-c user.name=… -c user.email=…` in git_commit on the Rust side.
+ * and select which one is active globally or per-repo. Each repo remembers its
+ * own choice (`identityOverrideByRepo`). The resolved identity is passed to
+ * `gitCommit()` (see `commitIdentityFor`), which injects `-c user.name=…
+ * -c user.email=…` (and `user.signingkey` when the profile has one) for that
+ * commit only (git_commit in ops.rs / the dev-server route).
  *
  * Resolution order:
  *   identityOverrideByRepo[cwd] > activeIdentityId > null (use git global config)
@@ -39,18 +42,45 @@ export function findIdentity(id: string): IdentityProfile | undefined {
  */
 export function resolveIdentity(cwd?: string): IdentityProfile | null {
   const s = loadSettings();
-  if (cwd) {
-    const repoId = s.identityOverrideByRepo[normaliseCwd(cwd)];
-    if (repoId) {
-      const found = s.identities.find((p) => p.id === repoId);
-      if (found) return found;
-    }
-  }
+  const repoId = cwd ? repoIdentityId(cwd) : null;
+  if (repoId) return s.identities.find((p) => p.id === repoId) ?? null;
   if (s.activeIdentityId) {
     const found = s.identities.find((p) => p.id === s.activeIdentityId);
     if (found) return found;
   }
   return null;
+}
+
+/**
+ * The identity explicitly chosen for this repo, or null when the repo follows
+ * the global default. A dangling id (profile since deleted) counts as null.
+ */
+export function repoIdentityId(cwd: string): string | null {
+  const s = loadSettings();
+  const id = s.identityOverrideByRepo[normaliseCwd(cwd)];
+  return id && s.identities.some((p) => p.id === id) ? id : null;
+}
+
+/** What `gitCommit()` takes for a commit in this repo, trimmed. */
+export interface CommitIdentity {
+  name: string;
+  email: string;
+  signingKey: string | null;
+}
+
+/**
+ * The identity a commit in `cwd` is made with, or null to use git's own
+ * config. Every commit call site goes through this, so the profile's signing
+ * key travels with its name and email: an overridden email signed with the
+ * global key shows as Unverified on the forges.
+ */
+export function commitIdentityFor(cwd: string): CommitIdentity | null {
+  const p = resolveIdentity(cwd);
+  if (!p) return null;
+  const name = p.gitName.trim();
+  const email = p.gitEmail.trim();
+  if (!name || !email) return null;
+  return { name, email, signingKey: p.gpgKey?.trim() || null };
 }
 
 // ─── write ────────────────────────────────────────────────────────────────────
@@ -119,9 +149,22 @@ export function useIdentity(cwd?: () => string) {
     return resolveIdentity(cwd?.());
   });
 
+  /** Id chosen for the current repo, null when it follows the global default. */
+  const repoOverrideId = computed(() => {
+    void settingsRevision.value;
+    const path = cwd?.();
+    return path ? repoIdentityId(path) : null;
+  });
+  const globalDefault = computed(() => {
+    void settingsRevision.value;
+    return resolveIdentity();
+  });
+
   return {
     identities,
     activeIdentity,
+    repoOverrideId,
+    globalDefault,
     resolve:         (path?: string) => resolveIdentity(path),
     add:             addIdentity,
     update:          updateIdentity,

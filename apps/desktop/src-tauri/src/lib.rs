@@ -392,6 +392,7 @@ pub fn command_parity(
             s("message")?,
             None,
             None,
+            None,
         ))
         .map(parity_ok_marker),
         "git_create_branch" => tauri::async_runtime::block_on(commands::ops::git_create_branch(

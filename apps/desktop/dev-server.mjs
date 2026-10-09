@@ -3031,11 +3031,19 @@ async function handleRequest(req, res) {
 
     // POST /api/git-commit  { cwd, message }
     if (url.pathname === "/api/git-commit" && req.method === "POST") {
-      const { cwd, message } = await readBody(req);
+      const { cwd, message, identityName, identityEmail, identitySigningKey } = await readBody(req);
       if (!cwd || !message) return jsonResponse(req, res, { error: "Missing cwd or message" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        execFileSync("git", ["commit", "-m", message], {
+        // Mirrors git_commit (ops.rs): a per-commit identity override, only
+        // when both name and email are present.
+        const name = (identityName ?? "").trim();
+        const email = (identityEmail ?? "").trim();
+        const key = (identitySigningKey ?? "").trim();
+        const identityArgs = name && email
+          ? ["-c", `user.name=${name}`, "-c", `user.email=${email}`, ...(key ? ["-c", `user.signingkey=${key}`] : [])]
+          : [];
+        execFileSync("git", [...identityArgs, "commit", "-m", message], {
           cwd: resolvedCwd,
           encoding: "utf-8",
         });

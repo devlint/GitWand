@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "../composables/useI18n";
 import { focusableWithin, nextTrapTarget } from "../utils/focusTrap";
 
-type ModalSize = "sm" | "md" | "lg" | "xl" | "full" | "2x";
+type ModalSize = "sm" | "md" | "lg" | "xl" | "full" | "2x" | "screen";
 type ModalPosition = "center" | "top";
 
 const props = withDefaults(
@@ -12,7 +12,7 @@ const props = withDefaults(
     title?: string;
     /** Optional subtitle / secondary text shown next to or below the title (e.g. commit hash). */
     subtitle?: string;
-    /** Panel max-width preset. sm=400, md=520, lg=640, xl=960, full=90vw. 2x=800. */
+    /** Panel max-width preset. sm=400, md=520, lg=640, xl=960, full=90vw. 2x=800. screen=whole window (HelpView-style). */
     size?: ModalSize;
     /** Vertical alignment. "top" keeps the panel pinned toward the top (command palette style). */
     position?: ModalPosition;
@@ -267,6 +267,27 @@ onUnmounted(() => {
 .base-modal--2x   { width: min(800px, 92vw); }
 .base-modal--xl   { width: min(960px, 94vw); max-height: 92vh; }
 .base-modal--full { width: min(1200px, 94vw); max-height: 92vh; }
+
+/* screen: covers the whole window, like HelpView. No card chrome; the
+   header adopts HelpView's compact app-bar look. */
+.base-modal--screen {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--color-bg);
+}
+.base-modal--screen .base-modal__header {
+  min-height: var(--header-height, 48px);
+  padding: 0 var(--space-6, 20px);
+  background: var(--color-bg-secondary);
+  flex-shrink: 0;
+}
+.base-modal--screen .base-modal__title {
+  font-size: var(--font-size-md, 14px);
+}
 
 @keyframes bm-slide-in {
   from { opacity: 0; transform: translateY(-10px) scale(0.98); }

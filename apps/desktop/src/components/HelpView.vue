@@ -11,7 +11,7 @@
  * matching the SettingsPanel layer. Left nav switches between six
  * sections; right pane scrolls the content.
  */
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "../composables/useI18n";
 import type { LocaleKey } from "../locales";
 
@@ -31,14 +31,16 @@ type SectionId =
 
 const activeSection = ref<SectionId>("gettingStarted");
 
-const sections: { id: SectionId; navKey: LocaleKey }[] = [
-  { id: "gettingStarted",    navKey: "help.nav.gettingStarted" },
-  { id: "conflictResolution", navKey: "help.nav.conflictResolution" },
-  { id: "keyboardShortcuts", navKey: "help.nav.keyboardShortcuts" },
-  { id: "gitWorkflow",       navKey: "help.nav.gitWorkflow" },
-  { id: "aiFeatures",        navKey: "help.nav.aiFeatures" },
-  { id: "faq",               navKey: "help.nav.faq" },
+const sections: { id: SectionId; navKey: LocaleKey; titleKey: LocaleKey; introKey?: LocaleKey }[] = [
+  { id: "gettingStarted",     navKey: "help.nav.gettingStarted",     titleKey: "help.gettingStarted.title",     introKey: "help.gettingStarted.intro" },
+  { id: "conflictResolution", navKey: "help.nav.conflictResolution", titleKey: "help.conflictResolution.title", introKey: "help.conflictResolution.intro" },
+  { id: "keyboardShortcuts",  navKey: "help.nav.keyboardShortcuts",  titleKey: "help.keyboardShortcuts.title",  introKey: "help.keyboardShortcuts.intro" },
+  { id: "gitWorkflow",        navKey: "help.nav.gitWorkflow",        titleKey: "help.gitWorkflow.title",        introKey: "help.gitWorkflow.intro" },
+  { id: "aiFeatures",         navKey: "help.nav.aiFeatures",         titleKey: "help.aiFeatures.title",         introKey: "help.aiFeatures.intro" },
+  { id: "faq",                navKey: "help.nav.faq",                titleKey: "help.faq.title" },
 ];
+
+const activeMeta = computed(() => sections.find((s) => s.id === activeSection.value)!);
 
 const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   { action: "help.keyboardShortcuts.openRepo",    keys: ["⌘O"] },
@@ -108,170 +110,161 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 
       <!-- Content area -->
       <div class="help-content">
+        <div class="help-content__inner">
 
-        <!-- Getting started -->
-        <section v-if="activeSection === 'gettingStarted'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.gettingStarted.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.gettingStarted.intro') }}</p>
+          <!-- Section header: title + optional intro (FAQ has none, so no separator) -->
+          <header class="help-section__header">
+            <h2 class="help-section__title">{{ t(activeMeta.titleKey) }}</h2>
+            <p v-if="activeMeta.introKey" class="help-section__intro">{{ t(activeMeta.introKey) }}</p>
+          </header>
 
-          <div class="help-steps">
-            <div class="help-step">
-              <div class="help-step__number">1</div>
-              <div class="help-step__body">
-                <h3 class="help-step__title">{{ t('help.gettingStarted.step1Title') }}</h3>
-                <p>{{ t('help.gettingStarted.step1') }}</p>
+          <!-- Getting started -->
+          <section v-if="activeSection === 'gettingStarted'" class="help-section">
+            <div class="help-steps">
+              <div class="help-step">
+                <div class="help-step__number">1</div>
+                <div class="help-step__body">
+                  <h3 class="help-step__title">{{ t('help.gettingStarted.step1Title') }}</h3>
+                  <p>{{ t('help.gettingStarted.step1') }}</p>
+                </div>
+              </div>
+              <div class="help-step">
+                <div class="help-step__number">2</div>
+                <div class="help-step__body">
+                  <h3 class="help-step__title">{{ t('help.gettingStarted.step2Title') }}</h3>
+                  <p>{{ t('help.gettingStarted.step2') }}</p>
+                </div>
+              </div>
+              <div class="help-step">
+                <div class="help-step__number">3</div>
+                <div class="help-step__body">
+                  <h3 class="help-step__title">{{ t('help.gettingStarted.step3Title') }}</h3>
+                  <p>{{ t('help.gettingStarted.step3') }}</p>
+                </div>
               </div>
             </div>
-            <div class="help-step">
-              <div class="help-step__number">2</div>
-              <div class="help-step__body">
-                <h3 class="help-step__title">{{ t('help.gettingStarted.step2Title') }}</h3>
-                <p>{{ t('help.gettingStarted.step2') }}</p>
+          </section>
+
+          <!-- Conflict resolution -->
+          <section v-else-if="activeSection === 'conflictResolution'" class="help-section">
+            <div class="help-steps">
+              <div class="help-step">
+                <div class="help-step__number">1</div>
+                <div class="help-step__body">
+                  <h3 class="help-step__title">{{ t('help.conflictResolution.step1Title') }}</h3>
+                  <p>{{ t('help.conflictResolution.step1') }}</p>
+                </div>
+              </div>
+              <div class="help-step">
+                <div class="help-step__number">2</div>
+                <div class="help-step__body">
+                  <h3 class="help-step__title">{{ t('help.conflictResolution.step2Title') }}</h3>
+                  <p>{{ t('help.conflictResolution.step2') }}</p>
+                </div>
+              </div>
+              <div class="help-step">
+                <div class="help-step__number">3</div>
+                <div class="help-step__body">
+                  <h3 class="help-step__title">{{ t('help.conflictResolution.step3Title') }}</h3>
+                  <p>{{ t('help.conflictResolution.step3') }}</p>
+                </div>
               </div>
             </div>
-            <div class="help-step">
-              <div class="help-step__number">3</div>
-              <div class="help-step__body">
-                <h3 class="help-step__title">{{ t('help.gettingStarted.step3Title') }}</h3>
-                <p>{{ t('help.gettingStarted.step3') }}</p>
+          </section>
+
+          <!-- Keyboard shortcuts -->
+          <section v-else-if="activeSection === 'keyboardShortcuts'" class="help-section">
+            <table class="help-shortcuts">
+              <thead>
+                <tr>
+                  <th>{{ t('help.keyboardShortcuts.colAction') }}</th>
+                  <th>{{ t('help.keyboardShortcuts.colShortcut') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="shortcut in shortcuts" :key="shortcut.action">
+                  <td>{{ t(shortcut.action) }}</td>
+                  <td class="help-shortcuts__keys">
+                    <kbd v-for="key in shortcut.keys" :key="key">{{ key }}</kbd>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <!-- Git workflow -->
+          <section v-else-if="activeSection === 'gitWorkflow'" class="help-section">
+            <div class="help-cards">
+              <div class="help-card">
+                <h3 class="help-card__title">{{ t('help.gitWorkflow.branchTitle') }}</h3>
+                <p>{{ t('help.gitWorkflow.branch') }}</p>
+              </div>
+              <div class="help-card">
+                <h3 class="help-card__title">{{ t('help.gitWorkflow.stageTitle') }}</h3>
+                <p>{{ t('help.gitWorkflow.stage') }}</p>
+              </div>
+              <div class="help-card">
+                <h3 class="help-card__title">{{ t('help.gitWorkflow.historyTitle') }}</h3>
+                <p>{{ t('help.gitWorkflow.history') }}</p>
+              </div>
+              <div class="help-card">
+                <h3 class="help-card__title">{{ t('help.gitWorkflow.remoteTitle') }}</h3>
+                <p>{{ t('help.gitWorkflow.remote') }}</p>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <!-- Conflict resolution -->
-        <section v-else-if="activeSection === 'conflictResolution'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.conflictResolution.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.conflictResolution.intro') }}</p>
-
-          <div class="help-steps">
-            <div class="help-step">
-              <div class="help-step__number">1</div>
-              <div class="help-step__body">
-                <h3 class="help-step__title">{{ t('help.conflictResolution.step1Title') }}</h3>
-                <p>{{ t('help.conflictResolution.step1') }}</p>
+          <!-- AI features -->
+          <section v-else-if="activeSection === 'aiFeatures'" class="help-section">
+            <div class="help-cards">
+              <div class="help-card">
+                <h3 class="help-card__title">
+                  <span class="help-card__icon" aria-hidden="true">✦</span>
+                  {{ t('help.aiFeatures.commitTitle') }}
+                </h3>
+                <p>{{ t('help.aiFeatures.commit') }}</p>
+              </div>
+              <div class="help-card">
+                <h3 class="help-card__title">
+                  <span class="help-card__icon" aria-hidden="true">✦</span>
+                  {{ t('help.aiFeatures.mergeTitle') }}
+                </h3>
+                <p>{{ t('help.aiFeatures.merge') }}</p>
+              </div>
+              <div class="help-card">
+                <h3 class="help-card__title">{{ t('help.aiFeatures.settingsTitle') }}</h3>
+                <p>{{ t('help.aiFeatures.settings') }}</p>
               </div>
             </div>
-            <div class="help-step">
-              <div class="help-step__number">2</div>
-              <div class="help-step__body">
-                <h3 class="help-step__title">{{ t('help.conflictResolution.step2Title') }}</h3>
-                <p>{{ t('help.conflictResolution.step2') }}</p>
-              </div>
-            </div>
-            <div class="help-step">
-              <div class="help-step__number">3</div>
-              <div class="help-step__body">
-                <h3 class="help-step__title">{{ t('help.conflictResolution.step3Title') }}</h3>
-                <p>{{ t('help.conflictResolution.step3') }}</p>
-              </div>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <!-- Keyboard shortcuts -->
-        <section v-else-if="activeSection === 'keyboardShortcuts'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.keyboardShortcuts.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.keyboardShortcuts.intro') }}</p>
-
-          <table class="help-shortcuts">
-            <thead>
-              <tr>
-                <th>{{ t('help.keyboardShortcuts.colAction') }}</th>
-                <th>{{ t('help.keyboardShortcuts.colShortcut') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="shortcut in shortcuts" :key="shortcut.action">
-                <td>{{ t(shortcut.action) }}</td>
-                <td class="help-shortcuts__keys">
-                  <kbd v-for="key in shortcut.keys" :key="key">{{ key }}</kbd>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
-        <!-- Git workflow -->
-        <section v-else-if="activeSection === 'gitWorkflow'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.gitWorkflow.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.gitWorkflow.intro') }}</p>
-
-          <div class="help-cards">
-            <div class="help-card">
-              <h3 class="help-card__title">{{ t('help.gitWorkflow.branchTitle') }}</h3>
-              <p>{{ t('help.gitWorkflow.branch') }}</p>
+          <!-- FAQ -->
+          <section v-else-if="activeSection === 'faq'" class="help-section">
+            <div class="help-faq">
+              <details class="help-faq__item">
+                <summary class="help-faq__question">{{ t('help.faq.q1') }}</summary>
+                <p class="help-faq__answer">{{ t('help.faq.a1') }}</p>
+              </details>
+              <details class="help-faq__item">
+                <summary class="help-faq__question">{{ t('help.faq.q2') }}</summary>
+                <p class="help-faq__answer">{{ t('help.faq.a2') }}</p>
+              </details>
+              <details class="help-faq__item">
+                <summary class="help-faq__question">{{ t('help.faq.q3') }}</summary>
+                <p class="help-faq__answer">{{ t('help.faq.a3') }}</p>
+              </details>
+              <details class="help-faq__item">
+                <summary class="help-faq__question">{{ t('help.faq.q4') }}</summary>
+                <p class="help-faq__answer">{{ t('help.faq.a4') }}</p>
+              </details>
+              <details class="help-faq__item">
+                <summary class="help-faq__question">{{ t('help.faq.q5') }}</summary>
+                <p class="help-faq__answer">{{ t('help.faq.a5') }}</p>
+              </details>
             </div>
-            <div class="help-card">
-              <h3 class="help-card__title">{{ t('help.gitWorkflow.stageTitle') }}</h3>
-              <p>{{ t('help.gitWorkflow.stage') }}</p>
-            </div>
-            <div class="help-card">
-              <h3 class="help-card__title">{{ t('help.gitWorkflow.historyTitle') }}</h3>
-              <p>{{ t('help.gitWorkflow.history') }}</p>
-            </div>
-            <div class="help-card">
-              <h3 class="help-card__title">{{ t('help.gitWorkflow.remoteTitle') }}</h3>
-              <p>{{ t('help.gitWorkflow.remote') }}</p>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <!-- AI features -->
-        <section v-else-if="activeSection === 'aiFeatures'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.aiFeatures.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.aiFeatures.intro') }}</p>
-
-          <div class="help-cards">
-            <div class="help-card">
-              <h3 class="help-card__title">
-                <span class="help-card__icon" aria-hidden="true">✦</span>
-                {{ t('help.aiFeatures.commitTitle') }}
-              </h3>
-              <p>{{ t('help.aiFeatures.commit') }}</p>
-            </div>
-            <div class="help-card">
-              <h3 class="help-card__title">
-                <span class="help-card__icon" aria-hidden="true">✦</span>
-                {{ t('help.aiFeatures.mergeTitle') }}
-              </h3>
-              <p>{{ t('help.aiFeatures.merge') }}</p>
-            </div>
-            <div class="help-card">
-              <h3 class="help-card__title">{{ t('help.aiFeatures.settingsTitle') }}</h3>
-              <p>{{ t('help.aiFeatures.settings') }}</p>
-            </div>
-          </div>
-        </section>
-
-        <!-- FAQ -->
-        <section v-else-if="activeSection === 'faq'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.faq.title') }}</h2>
-
-          <div class="help-faq">
-            <details class="help-faq__item">
-              <summary class="help-faq__question">{{ t('help.faq.q1') }}</summary>
-              <p class="help-faq__answer">{{ t('help.faq.a1') }}</p>
-            </details>
-            <details class="help-faq__item">
-              <summary class="help-faq__question">{{ t('help.faq.q2') }}</summary>
-              <p class="help-faq__answer">{{ t('help.faq.a2') }}</p>
-            </details>
-            <details class="help-faq__item">
-              <summary class="help-faq__question">{{ t('help.faq.q3') }}</summary>
-              <p class="help-faq__answer">{{ t('help.faq.a3') }}</p>
-            </details>
-            <details class="help-faq__item">
-              <summary class="help-faq__question">{{ t('help.faq.q4') }}</summary>
-              <p class="help-faq__answer">{{ t('help.faq.a4') }}</p>
-            </details>
-            <details class="help-faq__item">
-              <summary class="help-faq__question">{{ t('help.faq.q5') }}</summary>
-              <p class="help-faq__answer">{{ t('help.faq.a5') }}</p>
-            </details>
-          </div>
-        </section>
-
+        </div>
       </div>
     </div>
   </div>
@@ -326,7 +319,7 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-pill, 9999px);
+  border-radius: var(--radius-md, 6px);
   background: transparent;
   color: var(--color-text-muted);
   transition: background var(--transition-base), color var(--transition-base);
@@ -346,8 +339,9 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 }
 
 /* ─── Left nav ───────────────────────────────────────────── */
+/* Nav + content mirror SettingsPanel's .sp-nav / .sp-content. */
 .help-nav {
-  width: 200px;
+  width: 220px;
   flex-shrink: 0;
   padding: var(--space-5, 16px) var(--space-4, 12px);
   border-right: 1px solid var(--color-border);
@@ -364,7 +358,8 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   padding: var(--space-3, 6px) var(--space-4, 12px);
   border-radius: var(--radius-md, 6px);
   font-size: var(--font-size-base, 13px);
-  color: var(--color-text-muted);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--color-text);
   background: transparent;
   transition: background var(--transition-base), color var(--transition-base);
   cursor: pointer;
@@ -372,36 +367,51 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 }
 .help-nav__item:hover {
   background: var(--color-bg-tertiary);
-  color: var(--color-text);
 }
 .help-nav__item--active {
   background: var(--color-accent-soft, rgba(99, 102, 241, 0.1));
   color: var(--color-accent);
-  font-weight: var(--font-weight-medium, 500);
 }
 
 /* ─── Content pane ───────────────────────────────────────── */
+/* The scroll container spans to the window edge (scrollbar at the far
+   right); the inner wrapper carries the 1200px cap, like Settings. */
 .help-content {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
   padding: var(--space-8, 32px) var(--space-10, 48px);
-  max-width: 760px;
 }
 
-.help-section {}
+.help-content__inner {
+  max-width: 1200px;
+}
+
+
+/* Section header mirrors SettingsPanel's .sp-page-header: big bold title,
+   description tight under it, separator line before the content. Rendered
+   once from `sections`, above the per-section bodies. */
+.help-section__header {
+  margin-bottom: var(--space-8, 24px);
+}
 
 .help-section__title {
-  font-size: var(--font-size-xl, 20px);
-  font-weight: var(--font-weight-semibold, 600);
+  font-size: var(--font-size-2xl, 20px);
+  font-weight: var(--font-weight-bold, 700);
   color: var(--color-text);
-  margin-bottom: var(--space-4, 12px);
+  line-height: 1.2;
+  margin: 0 0 var(--space-1, 2px);
 }
 
+/* The separator hangs off the intro, so a section without one (FAQ) gets
+   no line under its title. */
 .help-section__intro {
-  font-size: var(--font-size-base, 13px);
+  font-size: var(--font-size-lg, 14px);
   color: var(--color-text-muted);
   line-height: 1.6;
-  margin-bottom: var(--space-7, 24px);
+  margin: 0;
+  padding-bottom: var(--space-7, 20px);
+  border-bottom: 1px solid var(--color-border);
 }
 
 /* ─── Steps ──────────────────────────────────────────────── */
