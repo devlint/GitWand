@@ -1142,7 +1142,7 @@ function formatActivityDate(dateStr: string): string {
               <button
                 class="action-group-btn action-group-btn--danger"
                 @click.stop="emit('discardSection', sectionKey, sections[sectionKey].map(f => f.path))"
-                :title="t('sidebar.discardAll')"
+                :title="sectionKey === 'staged' ? t('sidebar.discardStagedOnly') : t('sidebar.discardChangesOnly')"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <polyline points="3 6 5 6 21 6"/>
@@ -1296,7 +1296,7 @@ function formatActivityDate(dateStr: string): string {
                       v-if="sectionKey !== 'conflicted'"
                       class="action-group-btn action-group-btn--danger"
                       @click.stop="emit('discardSection', sectionKey, filesUnderFolder(sectionKey, row.path))"
-                      :title="t('sidebar.discardAll')"
+                      :title="sectionKey === 'staged' ? t('sidebar.discardStagedOnlyInFolder') : t('sidebar.discardChangesOnlyInFolder')"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <polyline points="3 6 5 6 21 6"/>

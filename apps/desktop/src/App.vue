@@ -186,7 +186,7 @@ import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
-import { planDiscard } from "./utils/discardPlan";
+import { planDiscard, selectDiscardEntries } from "./utils/discardPlan";
 import { requireOnline } from "./utils/networkGuard";
 // UpdateModal moved above (lazy-loaded) — type imported as UpdateModalType for the template ref
 
@@ -3232,6 +3232,14 @@ const showReleaseNotes = ref(false);
 // ─── Discard-section confirmation modal ─────────────────
 const discardSectionConfirm = ref<{ sectionKey: string; paths: string[] } | null>(null);
 
+/** Staged files the pending discard will also throw away — surfaced as a warning. */
+const discardStagedCount = computed(() => {
+  const ctx = discardSectionConfirm.value;
+  if (!ctx) return 0;
+  return selectDiscardEntries(repoFiles.value, ctx.sectionKey, ctx.paths)
+    .filter(f => f.section === "staged").length;
+});
+
 // ─── Generic confirmation modal ─────────────────────────
 const genericConfirm = ref<{
   title: string;
@@ -3344,12 +3352,7 @@ async function onDiscardSectionConfirmed() {
   if (!ctx) return;
   discardSectionConfirm.value = null;
 
-  const allFiles = repoFiles.value;
-  const targetFiles = ctx.sectionKey === 'all'
-    ? allFiles
-    : allFiles.filter(f => ctx.paths.includes(f.path));
-
-  await discardEntries(targetFiles);
+  await discardEntries(selectDiscardEntries(repoFiles.value, ctx.sectionKey, ctx.paths));
 }
 
 /** Discard working-tree and index changes for the given entries (see `planDiscard`). */
@@ -5057,6 +5060,9 @@ onUnmounted(() => {
     <BaseModal v-if="discardSectionConfirm" :title="t('sidebar.discardAll')" size="sm" role="alertdialog"
       @close="discardSectionConfirm = null">
       <p class="ptc-desc">{{ t('sidebar.discardAllConfirm', discardSectionConfirm.paths.length) }}</p>
+      <p v-if="discardSectionConfirm.sectionKey === 'all' && discardStagedCount > 0" class="ptc-desc ptc-desc--warn">
+        {{ t('sidebar.discardAllStagedWarning', discardStagedCount) }}
+      </p>
       <template #footer>
         <button class="bm-btn bm-btn--ghost" @click="discardSectionConfirm = null">{{ t('common.cancel') }}</button>
         <button class="bm-btn bm-btn--danger" @click="onDiscardSectionConfirmed">{{ t('sidebar.discardAll') }}</button>

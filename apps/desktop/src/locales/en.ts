@@ -218,7 +218,12 @@ const en = {
     unstageAll: "Unstage all",
     discardAll: "Discard all",
     discardAllHint: "Discard all uncommitted changes",
+    discardStagedOnly: "Discard staged files only (unstaged changes are kept)",
+    discardChangesOnly: "Discard unstaged and untracked files only (staged changes are kept)",
+    discardStagedOnlyInFolder: "Discard staged files in this folder only (unstaged changes are kept)",
+    discardChangesOnlyInFolder: "Discard unstaged and untracked files in this folder only (staged changes are kept)",
     discardAllConfirm: "Discard all {0} file(s)? This cannot be undone.",
+    discardAllStagedWarning: "Includes {0} staged file(s): your staged changes will be lost too.",
     stage: "Stage",
     unstage: "Unstage",
     // Commit panel

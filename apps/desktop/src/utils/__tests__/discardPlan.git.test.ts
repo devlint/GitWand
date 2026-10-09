@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { planDiscard } from "../discardPlan";
+import { planDiscard, selectDiscardEntries } from "../discardPlan";
 import type { RepoFileEntry } from "../../composables/useGitRepo";
 
 const GIT_TEST_TIMEOUT_MS = 60_000;
@@ -123,6 +123,45 @@ describe("planDiscard against real git", () => {
   it("discards an untracked file", () => {
     write("scratch.txt", "tmp\n");
     apply([{ path: "scratch.txt", status: "added", section: "untracked" }]);
+    expect(git(["status", "--porcelain"])).toBe("");
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("selectDiscardEntries — discarding the Changes section", () => {
+  it("keeps staged changes, including the staged half of a partially staged file", () => {
+    write("mod.txt", "staged\n");
+    git(["add", "mod.txt"]);
+    write("part.txt", "staged\n");
+    git(["add", "part.txt"]);
+    write("part.txt", "staged\nunstaged\n");
+    write("del.txt", "unstaged\n");
+    write("untracked.txt", "new\n");
+
+    const entries: RepoFileEntry[] = [
+      { path: "mod.txt", status: "modified", section: "staged" },
+      { path: "part.txt", status: "modified", section: "staged" },
+      { path: "part.txt", status: "modified", section: "unstaged" },
+      { path: "del.txt", status: "modified", section: "unstaged" },
+      { path: "untracked.txt", status: "added", section: "untracked" },
+    ];
+    const changesPaths = ["part.txt", "del.txt", "untracked.txt"];
+    apply(selectDiscardEntries(entries, "changes", changesPaths));
+
+    expect(git(["status", "--porcelain"]).split("\n").filter(Boolean).sort())
+      .toEqual(["M  mod.txt", "M  part.txt"]);
+    expect(readFileSync(join(repo, "part.txt"), "utf-8")).toBe("staged\n");
+    expect(existsSync(join(repo, "untracked.txt"))).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("'all' still discards everything", () => {
+    write("mod.txt", "staged\n");
+    git(["add", "mod.txt"]);
+    write("del.txt", "unstaged\n");
+    const entries: RepoFileEntry[] = [
+      { path: "mod.txt", status: "modified", section: "staged" },
+      { path: "del.txt", status: "modified", section: "unstaged" },
+    ];
+    apply(selectDiscardEntries(entries, "all", []));
     expect(git(["status", "--porcelain"])).toBe("");
   }, GIT_TEST_TIMEOUT_MS);
 });

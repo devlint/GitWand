@@ -54,3 +54,25 @@ export function planDiscard(entries: readonly RepoFileEntry[]): DiscardPlan {
     clean: [...clean],
   };
 }
+
+/**
+ * The entries a sidebar discard targets. A partially staged file has two
+ * entries under one path — one `staged`, one `unstaged` — so matching on path
+ * alone would drag the staged entry into a "Changes" discard and wipe the
+ * index too. `sectionKey` is the sidebar's display section: `changes` covers
+ * `unstaged` + `untracked`, `staged` covers `staged`, and `all` covers every
+ * entry.
+ */
+export function selectDiscardEntries(
+  entries: readonly RepoFileEntry[],
+  sectionKey: string,
+  paths: readonly string[],
+): RepoFileEntry[] {
+  if (sectionKey === "all") return [...entries];
+  const wanted = new Set(paths);
+  return entries.filter((e) => {
+    if (!wanted.has(e.path)) return false;
+    if (sectionKey === "changes") return e.section === "unstaged" || e.section === "untracked";
+    return e.section === sectionKey;
+  });
+}
