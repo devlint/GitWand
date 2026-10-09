@@ -770,8 +770,13 @@ onBeforeUnmount(() => {
   justify-content: center;
   padding: var(--space-3, 9px);
   /* min-width = button height: the pill stretches buttons to its inner
-     height (dock height minus padding and border). */
-  min-width: calc(var(--app-dock-height, 44px) - 2 * var(--space-2, 6px) - 2px);
+     height (pill height minus padding and border). The pill itself is
+     stretched to the Terminal/Files tiles (20px icon + padding + border)
+     when they're taller than --app-dock-height. */
+  min-width: calc(
+    max(var(--app-dock-height, 44px), 20px + 2 * var(--space-5, 9px) + 2px)
+    - 2 * var(--space-2, 6px) - 2px
+  );
 }
 
 /* Vertical mode — stack the dock as a column; rotate icon + text 90°. */
