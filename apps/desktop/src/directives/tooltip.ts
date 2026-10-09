@@ -37,6 +37,8 @@ interface TooltipEl extends HTMLElement {
   _tooltipOpts?: TooltipOptions | null;
   /** Scopes the trigger listeners so they are bound once and removed on unmount. */
   _tooltipListeners?: AbortController;
+  /** True when the directive set aria-label itself (icon-only anchor). */
+  _tooltipOwnsLabel?: boolean;
 }
 
 const GAP = 7; // px gap between anchor and tooltip
@@ -104,8 +106,10 @@ function show(el: TooltipEl, opts: TooltipOptions) {
   };
   const pos: TooltipPosition = opts.position ?? autoPos();
 
-  // Position after paint so t.width/height are available
+  // Position after paint so t.width/height are available. A tip hidden
+  // before this frame is already fading out: don't bring it back.
   requestAnimationFrame(() => {
+    if (el._tooltip?.tip !== tip) return;
     place(tip, el, pos);
     tip.classList.add("gw-tooltip--visible");
   });
@@ -127,17 +131,53 @@ function show(el: TooltipEl, opts: TooltipOptions) {
   el._tooltip = { tip, abort, reposition, opts };
 }
 
+/** Matches the `.gw-tooltip--leaving` opacity transition in main.css. */
+const FADE_OUT_MS = 500;
+
+/**
+ * Detach the anchor's tooltip and fade it out; the element is removed once the
+ * fade is over. A timer rather than `transitionend`, which never fires when
+ * reduced motion turns the transition off.
+ */
 function hide(el: TooltipEl) {
   if (!el._tooltip) return;
   const { tip, abort } = el._tooltip;
   abort.abort();
-  tip.remove();
   delete el._tooltip;
+  tip.classList.remove("gw-tooltip--visible");
+  tip.classList.add("gw-tooltip--leaving");
+  setTimeout(() => tip.remove(), FADE_OUT_MS);
+}
+
+/**
+ * Icon-only anchors have no text, so without a native `title` they would have
+ * no accessible name: mirror the tooltip text into aria-label for them. An
+ * anchor with visible text, or an explicit aria-label, is left alone.
+ * Re-evaluated on every update: an anchor that gains text later (an avatar
+ * falling back to initials) gets its own name back.
+ */
+function syncAriaLabel(el: TooltipEl) {
+  const text = el._tooltipOpts?.text;
+  const iconOnly = !el.textContent?.trim();
+  if (el._tooltipOwnsLabel) {
+    if (text && iconOnly) {
+      el.setAttribute("aria-label", text);
+    } else {
+      el.removeAttribute("aria-label");
+      el._tooltipOwnsLabel = false;
+    }
+    return;
+  }
+  if (text && iconOnly && !el.hasAttribute("aria-label")) {
+    el.setAttribute("aria-label", text);
+    el._tooltipOwnsLabel = true;
+  }
 }
 
 export const vTooltip = {
   mounted(el: TooltipEl, { value }: { value: unknown }) {
     el._tooltipOpts = getOptions(value);
+    syncAriaLabel(el);
 
     // Bound once; handlers read el._tooltipOpts so `updated` never re-binds.
     const listeners = new AbortController();
@@ -157,6 +197,7 @@ export const vTooltip = {
   updated(el: TooltipEl, { value }: { value: unknown }) {
     const opts = getOptions(value);
     el._tooltipOpts = opts;
+    syncAriaLabel(el);
 
     // Parent re-renders fire this constantly (often with an identical value):
     // leave a visible tooltip alone unless its content actually changed.
@@ -177,5 +218,7 @@ export const vTooltip = {
     el._tooltipListeners?.abort();
     delete el._tooltipListeners;
     delete el._tooltipOpts;
+    if (el._tooltipOwnsLabel) el.removeAttribute("aria-label");
+    delete el._tooltipOwnsLabel;
   },
 };

@@ -974,7 +974,7 @@ function formatActivityDate(dateStr: string): string {
           class="layout-toggle-btn"
           :class="{ 'layout-toggle-btn--active': changesLayout === 'list' }"
           @click="setChangesLayout('list')"
-          :title="t('sidebar.viewAsList')"
+          v-tooltip="t('sidebar.viewAsList')"
           :aria-pressed="changesLayout === 'list'"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -987,7 +987,7 @@ function formatActivityDate(dateStr: string): string {
           class="layout-toggle-btn"
           :class="{ 'layout-toggle-btn--active': changesLayout === 'tree' }"
           @click="setChangesLayout('tree')"
-          :title="t('sidebar.viewAsTree')"
+          v-tooltip="t('sidebar.viewAsTree')"
           :aria-pressed="changesLayout === 'tree'"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1131,18 +1131,18 @@ function formatActivityDate(dateStr: string): string {
                 v-if="sectionKey === 'changes'"
                 class="action-group-btn"
                 @click.stop="emit('stagePaths', sections[sectionKey].map(f => f.path))"
-                :title="t('sidebar.stageAll')"
+                v-tooltip="t('sidebar.stageAll')"
               >+</button>
               <button
                 v-if="sectionKey === 'staged'"
                 class="action-group-btn"
                 @click.stop="emit('unstageAll')"
-                :title="t('sidebar.unstageAll')"
+                v-tooltip="t('sidebar.unstageAll')"
               >-</button>
               <button
                 class="action-group-btn action-group-btn--danger"
                 @click.stop="emit('discardSection', sectionKey, sections[sectionKey].map(f => f.path))"
-                :title="t('sidebar.discardAll')"
+                v-tooltip="sectionKey === 'staged' ? t('sidebar.discardStagedOnly') : t('sidebar.discardChangesOnly')"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <polyline points="3 6 5 6 21 6"/>
@@ -1178,7 +1178,7 @@ function formatActivityDate(dateStr: string): string {
                 <span
                   class="file-status-badge mono"
                   :style="{ color: statusColor(file.status) }"
-                  :title="file.status"
+                  v-tooltip="file.status"
                 >
                   {{ statusBadge(file.status) }}
                 </span>
@@ -1193,7 +1193,7 @@ function formatActivityDate(dateStr: string): string {
                 <span
                   v-if="file.section === 'staged' && (reviewFindingsByFile?.[file.path] ?? 0) > 0"
                   class="file-review-count"
-                  :title="t('commitReview.fileCountTooltip', reviewFindingsByFile![file.path])"
+                  v-tooltip="t('commitReview.fileCountTooltip', reviewFindingsByFile![file.path])"
                 >{{ reviewFindingsByFile![file.path] }}</span>
                 <!-- Stage / Unstage + Discard per file -->
                 <div v-if="file.section !== 'conflicted'" class="action-group" @click.stop>
@@ -1201,18 +1201,18 @@ function formatActivityDate(dateStr: string): string {
                     v-if="file.section === 'unstaged' || file.section === 'untracked'"
                     class="action-group-btn"
                     @click="onStageClick($event, file.path)"
-                    :title="t('sidebar.stage')"
+                    v-tooltip="t('sidebar.stage')"
                   >+</button>
                   <button
                     v-if="file.section === 'staged'"
                     class="action-group-btn"
                     @click="onUnstageClick($event, file.path)"
-                    :title="t('sidebar.unstage')"
+                    v-tooltip="t('sidebar.unstage')"
                   >-</button>
                   <button
                     class="action-group-btn action-group-btn--danger"
                     @click.stop="emit('discard', file.path, file.section)"
-                    :title="file.section === 'untracked' ? t('sidebar.ctxDeleteFile') : t('sidebar.ctxDiscardChanges')"
+                    v-tooltip="file.section === 'untracked' ? t('sidebar.ctxDeleteFile') : t('sidebar.ctxDiscardChanges')"
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <polyline points="3 6 5 6 21 6"/>
@@ -1284,19 +1284,19 @@ function formatActivityDate(dateStr: string): string {
                       v-if="sectionKey === 'staged'"
                       class="action-group-btn"
                       @click.stop="unstagePaths(filesUnderFolder(sectionKey, row.path))"
-                      :title="t('sidebar.unstageAll')"
+                      v-tooltip="t('sidebar.unstageAll')"
                     >-</button>
                     <button
                       v-if="sectionKey === 'changes'"
                       class="action-group-btn"
                       @click.stop="emit('stagePaths', filesUnderFolder(sectionKey, row.path))"
-                      :title="t('sidebar.stageAll')"
+                      v-tooltip="t('sidebar.stageAll')"
                     >+</button>
                     <button
                       v-if="sectionKey !== 'conflicted'"
                       class="action-group-btn action-group-btn--danger"
                       @click.stop="emit('discardSection', sectionKey, filesUnderFolder(sectionKey, row.path))"
-                      :title="t('sidebar.discardAll')"
+                      v-tooltip="sectionKey === 'staged' ? t('sidebar.discardStagedOnlyInFolder') : t('sidebar.discardChangesOnlyInFolder')"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <polyline points="3 6 5 6 21 6"/>
@@ -1327,7 +1327,7 @@ function formatActivityDate(dateStr: string): string {
                     <span
                       class="file-status-badge mono"
                       :style="{ color: statusColor(row.file!.status) }"
-                      :title="row.file!.status"
+                      v-tooltip="row.file!.status"
                     >
                       {{ statusBadge(row.file!.status) }}
                     </span>
@@ -1342,25 +1342,25 @@ function formatActivityDate(dateStr: string): string {
                     <span
                       v-if="row.file!.section === 'staged' && (reviewFindingsByFile?.[row.path] ?? 0) > 0"
                       class="file-review-count"
-                      :title="t('commitReview.fileCountTooltip', reviewFindingsByFile![row.path])"
+                      v-tooltip="t('commitReview.fileCountTooltip', reviewFindingsByFile![row.path])"
                     >{{ reviewFindingsByFile![row.path] }}</span>
                     <div v-if="row.file!.section !== 'conflicted'" class="action-group" @click.stop>
                       <button
                         v-if="row.file!.section === 'unstaged' || row.file!.section === 'untracked'"
                         class="action-group-btn"
                         @click="onStageClick($event, row.path)"
-                        :title="t('sidebar.stage')"
+                        v-tooltip="t('sidebar.stage')"
                       >+</button>
                       <button
                         v-if="row.file!.section === 'staged'"
                         class="action-group-btn"
                         @click="onUnstageClick($event, row.path)"
-                        :title="t('sidebar.unstage')"
+                        v-tooltip="t('sidebar.unstage')"
                       >-</button>
                       <button
                         class="action-group-btn action-group-btn--danger"
                         @click.stop="emit('discard', row.path, row.file!.section)"
-                        :title="row.file!.section === 'untracked' ? t('sidebar.ctxDeleteFile') : t('sidebar.ctxDiscardChanges')"
+                        v-tooltip="row.file!.section === 'untracked' ? t('sidebar.ctxDeleteFile') : t('sidebar.ctxDiscardChanges')"
                       >
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                           <polyline points="3 6 5 6 21 6"/>
@@ -1414,7 +1414,7 @@ function formatActivityDate(dateStr: string): string {
       <!-- Conventional Commits type picker -->
       <div class="cc-types-wrapper">
         <button v-show="ccCanScrollLeft" class="cc-scroll-btn cc-scroll-btn--left" @click="scrollCcTypes(-1)" tabindex="-1">‹</button>
-        <div class="cc-types" ref="ccTypesEl" :title="t('sidebar.ccTypesTitle')"
+        <div class="cc-types" ref="ccTypesEl" role="group" :aria-label="t('sidebar.ccTypesTitle')"
           :class="{ 'cc-types--fade-left': ccCanScrollLeft, 'cc-types--fade-right': ccCanScrollRight }">
           <button
             v-for="type in CC_TYPES"
@@ -1422,7 +1422,7 @@ function formatActivityDate(dateStr: string): string {
             class="cc-chip"
             :class="{ 'cc-chip--active': activePrefix === type }"
             @click="setCommitType(type)"
-            :title="t(`sidebar.ccType_${type}`)"
+            v-tooltip="t(`sidebar.ccType_${type}`)"
           >{{ type }}</button>
         </div>
         <button v-show="ccCanScrollRight" class="cc-scroll-btn cc-scroll-btn--right" @click="scrollCcTypes(1)" tabindex="-1">›</button>
@@ -1456,7 +1456,7 @@ function formatActivityDate(dateStr: string): string {
             class="commit-ai-btn"
             :class="{ 'commit-ai-btn--loading ai-loading': isGenerating }"
             :disabled="isGenerating || repoStats.staged === 0"
-            :title="isGenerating ? t('sidebar.aiGeneratingTooltip') : t('sidebar.aiGenerateTooltip')"
+            v-tooltip="isGenerating ? t('sidebar.aiGeneratingTooltip') : t('sidebar.aiGenerateTooltip')"
             @click="onGenerateCommitMessage"
           >
             <svg v-if="isGenerating" class="commit-spinner" width="12" height="12" viewBox="0 0 14 14" aria-hidden="true">
@@ -1480,7 +1480,7 @@ function formatActivityDate(dateStr: string): string {
         <div v-if="templates.length > 0" class="commit-template-wrapper">
           <button
             class="commit-template-btn"
-            :title="t('commit.templatePicker')"
+            v-tooltip="t('commit.templatePicker')"
             @click.stop="templatePickerOpen = !templatePickerOpen"
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
@@ -1518,14 +1518,14 @@ function formatActivityDate(dateStr: string): string {
           class="trailer-toggle"
           :class="{ 'trailer-toggle--open': trailerSectionOpen }"
           @click="trailerSectionOpen = !trailerSectionOpen"
-          :title="t('sidebar.trailerToggleTitle')"
+          v-tooltip="t('sidebar.trailerToggleTitle')"
         >
           <svg class="trailer-toggle-caret" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
             <path d="M2.5 3.5L5 6l2.5-2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span>{{ t('sidebar.trailerToggleLabel') }}</span>
           <!-- Dot when any trailer is active -->
-          <span v-if="trailerSob || trailerRbEnabled" class="trailer-active-dot" :title="t('sidebar.trailerActiveTitle')"></span>
+          <span v-if="trailerSob || trailerRbEnabled" class="trailer-active-dot" role="img" :aria-label="t('sidebar.trailerActiveTitle')"></span>
         </button>
 
         <template v-if="trailerSectionOpen">
@@ -1534,7 +1534,7 @@ function formatActivityDate(dateStr: string): string {
             <input type="checkbox" v-model="trailerSob" class="trailer-check" />
             <span class="trailer-main-label">{{ t('sidebar.trailerSobLabel') }}</span>
             <span class="trailer-git-key">Signed-off-by</span>
-            <button type="button" class="trailer-help" :title="t('sidebar.trailerSobHelp')" tabindex="-1" @click.prevent>?</button>
+            <button type="button" class="trailer-help" v-tooltip="t('sidebar.trailerSobHelp')" tabindex="-1" @click.prevent>?</button>
           </label>
           <div v-if="trailerSob && sobValue" class="trailer-value-line">{{ sobValue }}</div>
 
@@ -1543,7 +1543,7 @@ function formatActivityDate(dateStr: string): string {
             <input type="checkbox" v-model="trailerRbEnabled" class="trailer-check" />
             <span class="trailer-main-label">{{ t('sidebar.trailerRbLabel') }}</span>
             <span class="trailer-git-key">Reviewed-by</span>
-            <button type="button" class="trailer-help" :title="t('sidebar.trailerRbHelp')" tabindex="-1" @click.prevent>?</button>
+            <button type="button" class="trailer-help" v-tooltip="t('sidebar.trailerRbHelp')" tabindex="-1" @click.prevent>?</button>
           </label>
           <input
             v-if="trailerRbEnabled"
@@ -1597,7 +1597,7 @@ function formatActivityDate(dateStr: string): string {
           v-if="(secretFindingsCount ?? 0) > 0"
           type="button"
           class="commit-secrets-badge"
-          :title="t('secrets.badgeTooltip', secretFindingsCount ?? 0)"
+          v-tooltip="t('secrets.badgeTooltip', secretFindingsCount ?? 0)"
           @click="emit('openSecrets')"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -1613,7 +1613,7 @@ function formatActivityDate(dateStr: string): string {
           class="commit-review-btn"
           :class="{ 'commit-review-btn--loading': commitReviewRunning }"
           :disabled="commitReviewRunning"
-          :title="commitReviewRunning ? t('commitReview.reviewButtonRunning', commitReviewProgress?.done ?? 0, commitReviewProgress?.total ?? 0) : t('commitReview.reviewButton')"
+          v-tooltip="commitReviewRunning ? t('commitReview.reviewButtonRunning', commitReviewProgress?.done ?? 0, commitReviewProgress?.total ?? 0) : t('commitReview.reviewButton')"
           @click="emit('reviewStaged')"
         >
           <svg v-if="commitReviewRunning" class="commit-spinner" width="12" height="12" viewBox="0 0 14 14" aria-hidden="true">
@@ -1631,7 +1631,7 @@ function formatActivityDate(dateStr: string): string {
           v-if="(commitReviewFindingsCount ?? 0) > 0"
           type="button"
           class="commit-review-badge"
-          :title="commitReviewBadgeTooltip"
+          v-tooltip="commitReviewBadgeTooltip"
           @click="emit('openCommitReview')"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -1653,7 +1653,7 @@ function formatActivityDate(dateStr: string): string {
         <button
           v-if="props.files.length > 0"
           class="commit-discard-all"
-          :title="t('sidebar.discardAll')"
+          v-tooltip="t('sidebar.discardAll')"
           @click="emit('discardSection', 'all', props.files.map(f => f.path))"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">

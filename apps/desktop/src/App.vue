@@ -186,7 +186,7 @@ import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
-import { planDiscard } from "./utils/discardPlan";
+import { planDiscard, selectDiscardEntries, summarizeDiscard } from "./utils/discardPlan";
 import { requireOnline } from "./utils/networkGuard";
 // UpdateModal moved above (lazy-loaded) — type imported as UpdateModalType for the template ref
 
@@ -3232,6 +3232,18 @@ const showReleaseNotes = ref(false);
 // ─── Discard-section confirmation modal ─────────────────
 const discardSectionConfirm = ref<{ sectionKey: string; paths: string[] } | null>(null);
 
+/** What the pending discard touches — drives the modal's wording and warnings. */
+const discardSummary = computed(() => {
+  const ctx = discardSectionConfirm.value;
+  return ctx ? summarizeDiscard(repoFiles.value, ctx.sectionKey, ctx.paths) : null;
+});
+
+const DISCARD_TEXT = {
+  staged: { title: "sidebar.discardStagedTitle", confirm: "sidebar.discardStagedConfirm" },
+  changes: { title: "sidebar.discardChangesTitle", confirm: "sidebar.discardChangesConfirm" },
+  all: { title: "sidebar.discardEverythingTitle", confirm: "sidebar.discardEverythingConfirm" },
+} as const;
+
 // ─── Generic confirmation modal ─────────────────────────
 const genericConfirm = ref<{
   title: string;
@@ -3344,12 +3356,7 @@ async function onDiscardSectionConfirmed() {
   if (!ctx) return;
   discardSectionConfirm.value = null;
 
-  const allFiles = repoFiles.value;
-  const targetFiles = ctx.sectionKey === 'all'
-    ? allFiles
-    : allFiles.filter(f => ctx.paths.includes(f.path));
-
-  await discardEntries(targetFiles);
+  await discardEntries(selectDiscardEntries(repoFiles.value, ctx.sectionKey, ctx.paths));
 }
 
 /** Discard working-tree and index changes for the given entries (see `planDiscard`). */
@@ -5054,12 +5061,18 @@ onUnmounted(() => {
     </BaseModal>
 
     <!-- Discard section confirmation -->
-    <BaseModal v-if="discardSectionConfirm" :title="t('sidebar.discardAll')" size="sm" role="alertdialog"
+    <BaseModal v-if="discardSectionConfirm && discardSummary" :title="t(DISCARD_TEXT[discardSummary.kind].title)" size="sm" role="alertdialog"
       @close="discardSectionConfirm = null">
-      <p class="ptc-desc">{{ t('sidebar.discardAllConfirm', discardSectionConfirm.paths.length) }}</p>
+      <p class="ptc-desc">{{ t(DISCARD_TEXT[discardSummary.kind].confirm, discardSummary.fileCount) }}</p>
+      <p v-if="discardSummary.kind === 'all' && discardSummary.stagedCount > 0" class="ptc-desc ptc-desc--warn">
+        {{ t('sidebar.discardAllStagedWarning', discardSummary.stagedCount) }}
+      </p>
+      <p v-if="discardSummary.alsoUnstagedCount > 0" class="ptc-desc ptc-desc--warn">
+        {{ t('sidebar.discardStagedAlsoUnstagedWarning', discardSummary.alsoUnstagedCount) }}
+      </p>
       <template #footer>
         <button class="bm-btn bm-btn--ghost" @click="discardSectionConfirm = null">{{ t('common.cancel') }}</button>
-        <button class="bm-btn bm-btn--danger" @click="onDiscardSectionConfirmed">{{ t('sidebar.discardAll') }}</button>
+        <button class="bm-btn bm-btn--danger" @click="onDiscardSectionConfirmed">{{ t(DISCARD_TEXT[discardSummary.kind].title) }}</button>
       </template>
     </BaseModal>
 

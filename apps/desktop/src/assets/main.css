@@ -645,6 +645,10 @@ button:focus-visible,
 /* ─── Tooltip (v-tooltip directive) ────────────────────────── */
 .gw-tooltip {
   position: fixed;
+  /* Measured at the viewport origin before place() moves it, so the width
+     is never squeezed by where the element happened to land. */
+  top: 0;
+  left: 0;
   z-index: 9999;
   background: var(--color-surface-inverse);
   color: var(--color-surface-inverse-text);
@@ -653,16 +657,24 @@ button:focus-visible,
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   line-height: var(--line-height-tight);
-  white-space: nowrap;
+  /* Long text wraps onto more lines — never truncated. pre-line keeps any
+     explicit line breaks; overflow-wrap splits long paths and URLs. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  width: max-content;
+  max-width: 280px;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.1s var(--ease-out);
   box-shadow: var(--shadow-sm);
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .gw-tooltip--visible { opacity: 1; }
+/* Appear fast, fade out slowly — directives/tooltip.ts removes the element
+   once FADE_OUT_MS (keep in sync) has elapsed. */
+.gw-tooltip--leaving { transition-duration: 0.5s; }
+@media (prefers-reduced-motion: reduce) {
+  .gw-tooltip { transition: none; }
+}
 
 /* ─── Highlight.js syntax tokens (dark theme) ──────────────── */
 .hljs-keyword,

@@ -1429,7 +1429,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         class="cg-filter-icon-btn"
         :class="{ 'cg-filter-icon-btn--active': props.logBranchFilter === 'current' }"
-        :title="t('log.filterCurrentBranch')"
+        v-tooltip="t('log.filterCurrentBranch')"
         :aria-label="t('log.filterCurrentBranch')"
         :aria-pressed="props.logBranchFilter === 'current'"
         @click="emit('set-log-branch-filter', props.logBranchFilter === 'current' ? 'all' : 'current')"
@@ -1445,7 +1445,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         class="cg-filter-icon-btn"
         :class="{ 'cg-filter-icon-btn--active': props.logAuthorFilter === 'mine' }"
-        :title="t('log.filterMineCommits')"
+        v-tooltip="t('log.filterMineCommits')"
         :aria-label="t('log.filterMineCommits')"
         :aria-pressed="props.logAuthorFilter === 'mine'"
         @click="emit('set-log-author-filter', props.logAuthorFilter === 'mine' ? 'all' : 'mine')"
@@ -1531,7 +1531,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         class="cg-search-nav"
         :disabled="matchedIndices.length === 0"
-        :title="t('log.graphSearchPrev')"
+        v-tooltip="t('log.graphSearchPrev')"
         :aria-label="t('log.graphSearchPrev')"
         @click="navigateSearch(-1)"
       >
@@ -1542,7 +1542,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         class="cg-search-nav"
         :disabled="matchedIndices.length === 0"
-        :title="t('log.graphSearchNext')"
+        v-tooltip="t('log.graphSearchNext')"
         :aria-label="t('log.graphSearchNext')"
         @click="navigateSearch(1)"
       >
@@ -1555,7 +1555,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         class="cg-search-nav cg-filter-btn"
         :class="{ 'cg-filter-btn--active': filterMode }"
         :disabled="!searchQuery.trim()"
-        :title="t('log.graphSearchFilter')"
+        v-tooltip="t('log.graphSearchFilterTitle')"
         :aria-label="t('log.graphSearchFilterTitle')"
         @click="toggleFilterMode"
       >
@@ -1566,7 +1566,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         v-if="searchQuery"
         class="cg-search-nav"
-        :title="t('log.graphSearchClear')"
+        v-tooltip="t('log.graphSearchClear')"
         :aria-label="t('log.graphSearchClear')"
         @click="searchQuery = ''"
       >
@@ -1863,13 +1863,13 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           <template v-if="vc.entry.hashFull === 'WIP'">
             <span class="cg-msg wip-msg">{{ vc.entry.message }}<template v-if="isGeneratingCommitMsg">: <span class="wip-ai ai-loading"><AiSparkle :size="11" />{{ t('sidebar.aiGeneratingTooltip') }}</span></template><template v-else-if="wipSummaryPreview">: <span class="wip-summary">{{ wipSummaryPreview }}</span></template></span>
             <span class="cg-meta wip-meta" v-if="props.repoStats">
-              <span v-if="props.repoStats.added > 0" class="wip-stat wip-stat--added">+{{ props.repoStats.added }}</span>
-              <span v-if="props.repoStats.modified > 0" class="wip-stat wip-stat--modified">~{{ props.repoStats.modified }}</span>
-              <span v-if="props.repoStats.deleted > 0" class="wip-stat wip-stat--deleted">-{{ props.repoStats.deleted }}</span>
-              <span v-if="props.repoStats.renamed > 0" class="wip-stat wip-stat--renamed">→{{ props.repoStats.renamed }}</span>
+              <span v-if="props.repoStats.added > 0" class="wip-stat wip-stat--added" v-tooltip="t('log.wipAdded', props.repoStats.added)">+{{ props.repoStats.added }}</span>
+              <span v-if="props.repoStats.modified > 0" class="wip-stat wip-stat--modified" v-tooltip="t('log.wipModified', props.repoStats.modified)">~{{ props.repoStats.modified }}</span>
+              <span v-if="props.repoStats.deleted > 0" class="wip-stat wip-stat--deleted" v-tooltip="t('log.wipDeleted', props.repoStats.deleted)">-{{ props.repoStats.deleted }}</span>
+              <span v-if="props.repoStats.renamed > 0" class="wip-stat wip-stat--renamed" v-tooltip="t('log.wipRenamed', props.repoStats.renamed)">→{{ props.repoStats.renamed }}</span>
               <button
                 class="wip-discard-inline"
-                :title="t('sidebar.discardAll')"
+                v-tooltip="t('sidebar.discardAll')"
                 @click.stop="emit('wip-discard-all')"
               >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1879,7 +1879,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
               <span
                 v-if="(props.stashes?.length ?? 0) > 0"
                 class="wip-stash-badge"
-                :title="t('stash.pendingBadge', props.stashes!.length)"
+                v-tooltip="t('stash.pendingBadge', props.stashes!.length)"
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
@@ -1935,7 +1935,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             <span class="cg-msg">{{ vc.entry.message }}</span>
             <!-- Author + date -->
             <span class="cg-meta muted">
-              <Avatar class="avatar avatar--sm" :name="vc.entry.author" :email="vc.entry.email" :title="vc.entry.author" />
+              <Avatar class="avatar avatar--sm" :name="vc.entry.author" :email="vc.entry.email" v-tooltip="vc.entry.author" />
               <span class="cg-sep">&middot;</span>
               <span>{{ formatDate(vc.entry.date) }}</span>
             </span>

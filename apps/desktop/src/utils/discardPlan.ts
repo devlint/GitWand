@@ -54,3 +54,69 @@ export function planDiscard(entries: readonly RepoFileEntry[]): DiscardPlan {
     clean: [...clean],
   };
 }
+
+/**
+ * The entries a sidebar discard targets. A partially staged file has two
+ * entries under one path — one `staged`, one `unstaged` — so matching on path
+ * alone would drag the staged entry into a "Changes" discard and wipe the
+ * index too. `sectionKey` is the sidebar's display section: `changes` covers
+ * `unstaged` + `untracked`, `staged` covers `staged`, and `all` covers every
+ * section. Every kind is limited to `paths` — the files the confirmation
+ * listed — so a file that appeared after it opened is never discarded. An
+ * unknown key selects nothing.
+ */
+export function selectDiscardEntries(
+  entries: readonly RepoFileEntry[],
+  sectionKey: string,
+  paths: readonly string[],
+): RepoFileEntry[] {
+  if (!isDiscardKind(sectionKey)) return [];
+  const wanted = new Set(paths);
+  return entries.filter((e) => {
+    if (!wanted.has(e.path)) return false;
+    if (sectionKey === "all") return true;
+    if (sectionKey === "changes") return e.section === "unstaged" || e.section === "untracked";
+    return e.section === "staged";
+  });
+}
+
+export type DiscardKind = "staged" | "changes" | "all";
+
+function isDiscardKind(key: string): key is DiscardKind {
+  return key === "staged" || key === "changes" || key === "all";
+}
+
+/** What a discard confirmation has to tell the user before it runs. */
+export interface DiscardSummary {
+  kind: DiscardKind;
+  /** Distinct paths touched (a partially staged file counts once). */
+  fileCount: number;
+  /** Staged entries that will be thrown away. */
+  stagedCount: number;
+  /**
+   * Staged-section discard only: files that also have unstaged changes.
+   * Discarding the staged entry restores the file from HEAD, so those
+   * unstaged changes are lost too.
+   */
+  alsoUnstagedCount: number;
+}
+
+export function summarizeDiscard(
+  entries: readonly RepoFileEntry[],
+  sectionKey: string,
+  paths: readonly string[],
+): DiscardSummary | null {
+  if (!isDiscardKind(sectionKey)) return null;
+  const kind = sectionKey;
+  const targets = selectDiscardEntries(entries, sectionKey, paths);
+  const staged = targets.filter((e) => e.section === "staged");
+  const unstagedPaths = new Set(
+    entries.filter((e) => e.section === "unstaged").map((e) => e.path),
+  );
+  return {
+    kind,
+    fileCount: new Set(targets.map((e) => e.path)).size,
+    stagedCount: staged.length,
+    alsoUnstagedCount: kind === "staged" ? staged.filter((e) => unstagedPaths.has(e.path)).length : 0,
+  };
+}

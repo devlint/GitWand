@@ -103,6 +103,25 @@ const dockStyle = computed(() => {
   return {};
 });
 
+/**
+ * Side for the dock's tooltips. Horizontal dock: let v-tooltip pick above or
+ * below. Vertical dock: open toward the middle of the window, so a tooltip
+ * never lands on the next icon or off-screen.
+ */
+const tipPosition = computed<"left" | "right" | undefined>(() => {
+  if (!vertical.value) return undefined;
+  const p = livePos.value ?? settings.value.dockPosition;
+  return p && p.x > window.innerWidth / 2 ? "left" : "right";
+});
+
+/** The view buttons' text labels are hidden (icons-only or vertical dock). */
+const labelsHidden = computed(() => iconsOnly.value || vertical.value);
+
+/** v-tooltip binding for a dock button. */
+function tip(text: string) {
+  return { text, position: tipPosition.value };
+}
+
 let startX = 0, startY = 0, originX = 0, originY = 0;
 
 function clampPos(x: number, y: number): { x: number; y: number } {
@@ -339,7 +358,7 @@ onBeforeUnmount(() => {
       <button
         v-if="unlocked"
         class="dock-handle"
-        :title="t('settings.dock.handleTooltip')"
+        v-tooltip="tip(t('settings.dock.handleTooltip'))"
         :aria-label="t('settings.dock.handleTooltip')"
         @pointerdown="startDrag"
         @contextmenu="openMenu($event, null)"
@@ -356,7 +375,8 @@ onBeforeUnmount(() => {
           class="dock-btn"
           :class="{ 'dock-btn--active': isActive(id) }"
           :aria-pressed="isActive(id)"
-          :title="entryLabel(id)"
+          v-tooltip="tip(labelsHidden ? entryLabel(id) : '')"
+          :aria-label="entryLabel(id)"
           @click="emit('changeView', id)"
           @contextmenu="openMenu($event, id)"
         >
@@ -400,7 +420,7 @@ onBeforeUnmount(() => {
       class="dock-terminal"
       :class="{ 'dock-terminal--active': terminalActive }"
       :aria-pressed="terminalActive"
-      :title="t('terminal.headerTooltip')"
+      v-tooltip="tip(t('terminal.headerTooltip'))"
       :aria-label="t('terminal.headerLabel')"
       @click="emit('toggleTerminal')"
       @contextmenu="openMenu($event, 'terminal')"
@@ -418,7 +438,7 @@ onBeforeUnmount(() => {
       class="dock-files"
       :class="{ 'dock-files--active': filesActive }"
       :aria-pressed="filesActive"
-      :title="t('files.headerTooltip')"
+      v-tooltip="tip(t('files.headerTooltip'))"
       :aria-label="t('files.headerLabel')"
       @click="emit('toggleFiles')"
       @contextmenu="openMenu($event, 'files')"
