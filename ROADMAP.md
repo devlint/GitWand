@@ -23,7 +23,7 @@ _v3.12.0 (built-in terminal renderer, WIP in the Git Tree), v3.11.2 (Finder-like
 
 ### On `main`, not released yet
 
-_Merged 2026-10-07/09 (mostly contributions by @t1gu1); no release scheduled yet. #234–#239 already have their `CHANGELOG.md` entries under Unreleased. Version number decided at tag time: #224 changes a v3.12.0 flow. Waiting on @t1gu1's test of #224 on `main` before cutting it._
+_Merged 2026-10-07/09 (mostly contributions by @t1gu1); no release scheduled yet. All of them have their `CHANGELOG.md` entries under Unreleased. Version number decided at tag time: #224 changes a v3.12.0 flow. Waiting on @t1gu1's test of #224 on `main` before cutting it._
 
 - **AI update for PR descriptions + title/description edit** (#234) — "Update with AI" drafts a description from commits + merge-base diffstat with the repo's PR template and language, edited in a Preview/Raw editor before saving through GitHub, GitLab, Bitbucket, Gitea or Azure DevOps (fork: edits the base repo's PR). Media are masked from the model and restored; drafts and errors are keyed per PR
 - **Reasoning effort forwarded + provider model lists** (#237) — the Settings effort finally reaches the CLIs (`claude --effort`, `codex -c model_reasoning_effort`, `copilot --reasoning-effort`, allow-listed); Codex, Copilot and Antigravity pickers list their models; static Claude list before a key; endpoint changes refetch on blur only (key no longer sent to half-typed hosts); AI commands added to `commandRegistry`
