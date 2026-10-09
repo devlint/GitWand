@@ -410,37 +410,73 @@ const envFlagSet = (v) => {
 };
 const isEnvName = (n) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(n);
 const readText = (p) => { try { return readFileSync(p, "utf-8"); } catch { return null; } };
+/** smol-toml (root devDependency) for Codex's config.toml; absent → no env_key forwarded. */
+let parseToml = null;
+try { ({ parse: parseToml } = await import("smol-toml")); } catch { /* optional */ }
+/** Mirrors `parse_codex_env_keys` (ai.rs): every env_key, env_http_headers values. */
+function codexEnvKeys(text) {
+  if (!parseToml) return [];
+  let doc;
+  try { doc = parseToml(text); } catch { return []; }
+  const out = [];
+  const walk = (v) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (!v || typeof v !== "object") return;
+    for (const [k, x] of Object.entries(v)) {
+      if (k === "env_key" && typeof x === "string") out.push(x);
+      else if (k === "env_http_headers" && x && typeof x === "object") {
+        for (const n of Object.values(x)) if (typeof n === "string") out.push(n);
+      } else walk(x);
+    }
+  };
+  walk(doc);
+  return out.filter(isEnvName);
+}
+/** Mirrors `claude_managed_settings_files` (ai.rs). */
+function claudeManagedSettingsFiles() {
+  const dirs = process.platform === "darwin" ? ["/Library/Application Support/ClaudeCode"]
+    : process.platform === "win32" ? ["C:\\Program Files\\ClaudeCode", "C:\\ProgramData\\ClaudeCode"]
+    : ["/etc/claude-code"];
+  const files = [];
+  for (const d of dirs) {
+    files.push(join(d, "managed-settings.json"));
+    try {
+      files.push(...readdirSync(join(d, "managed-settings.d")).filter((n) => n.endsWith(".json")).sort()
+        .map((n) => join(d, "managed-settings.d", n)));
+    } catch { /* none */ }
+  }
+  return files;
+}
 /**
- * Mirrors `ai_env_context` (ai.rs): Claude's Bedrock / Vertex switches (env or
- * the user's settings.json `env`), Codex `env_key`s and opencode `{env:NAME}`
- * from user-level config files only — never from the repository.
+ * Mirrors `ai_env_context` (ai.rs): Claude's Bedrock / Vertex / Foundry
+ * switches (env, user settings.json, managed settings), Codex `env_key`s and
+ * opencode `{env:NAME}` from user-level config files only — never from the
+ * repository.
  */
 function aiEnvContext(cli, env = process.env) {
-  const ctx = { claudeBedrock: false, claudeVertex: false, configRefs: [] };
+  const ctx = { claudeBedrock: false, claudeVertex: false, claudeFoundry: false, configRefs: [] };
   const home = env.HOME || env.USERPROFILE || "";
   if (cli === "claude") {
     ctx.claudeBedrock = envFlagSet(env.CLAUDE_CODE_USE_BEDROCK);
     ctx.claudeVertex = envFlagSet(env.CLAUDE_CODE_USE_VERTEX);
+    ctx.claudeFoundry = envFlagSet(env.CLAUDE_CODE_USE_FOUNDRY);
     const dir = (env.CLAUDE_CONFIG_DIR || "").trim() || (home && join(home, ".claude"));
-    const text = dir && readText(join(dir, "settings.json"));
-    if (text) {
+    const files = [...(dir ? [join(dir, "settings.json")] : []), ...claudeManagedSettingsFiles()];
+    for (const f of files) {
+      const text = readText(f);
+      if (!text) continue;
       try {
         const e = JSON.parse(text)?.env ?? {};
         const flag = (v) => envFlagSet(typeof v === "boolean" ? (v ? "1" : "0") : v);
         ctx.claudeBedrock ||= flag(e.CLAUDE_CODE_USE_BEDROCK);
         ctx.claudeVertex ||= flag(e.CLAUDE_CODE_USE_VERTEX);
+        ctx.claudeFoundry ||= flag(e.CLAUDE_CODE_USE_FOUNDRY);
       } catch { /* not JSON */ }
     }
   } else if (cli === "codex") {
     const dir = (env.CODEX_HOME || "").trim() || (home && join(home, ".codex"));
     const text = dir && readText(join(dir, "config.toml"));
-    if (text) {
-      for (const line of text.split("\n")) {
-        const m = /^\s*env_key\s*=\s*([^#]*)/.exec(line);
-        const name = m && m[1].trim().replace(/^["']|["']$/g, "");
-        if (name && isEnvName(name)) ctx.configRefs.push(name);
-      }
-    }
+    if (text) ctx.configRefs.push(...codexEnvKeys(text));
   } else if (cli === "opencode") {
     const files = [];
     if ((env.OPENCODE_CONFIG || "").trim()) files.push(env.OPENCODE_CONFIG);
@@ -454,12 +490,28 @@ function aiEnvContext(cli, env = process.env) {
   }
   return ctx;
 }
+/** Mirrors CLAUDE_CONFIG_ENV (ai.rs): Claude Code's documented configuration, by name. */
+const CLAUDE_CONFIG_ENV = new Set([
+  "CLAUDE_CONFIG_DIR", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_BEDROCK_BASE_URL",
+  "ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_VERTEX_PROJECT_ID", "ANTHROPIC_FOUNDRY_BASE_URL",
+  "ANTHROPIC_FOUNDRY_RESOURCE", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+  "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH", "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+  "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY",
+  "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_SUBAGENT_MODEL",
+  "CLAUDE_CODE_API_KEY_HELPER_TTL_MS", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+  "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "CLAUDE_CODE_PROXY_RESOLVES_HOSTS", "MAX_THINKING_TOKENS",
+  "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "DISABLE_AUTOUPDATER", "DISABLE_PROMPT_CACHING",
+  "DISABLE_NON_ESSENTIAL_MODEL_CALLS",
+]);
 const AI_ENV_PROVIDER = {
   claude: (k, ctx) => !CLAUDE_AUTH_OVERRIDE.includes(k) && (
-    k === "CLAUDE_CONFIG_DIR" || k.startsWith("CLAUDE_CODE_") || k.startsWith("ANTHROPIC_")
+    CLAUDE_CONFIG_ENV.has(k)
     || (ctx.claudeBedrock && k.startsWith("AWS_"))
     || (ctx.claudeVertex && (["CLOUD_ML_REGION", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT",
-      "GOOGLE_CLOUD_QUOTA_PROJECT", "GCLOUD_PROJECT"].includes(k) || k.startsWith("VERTEX_REGION_") || k.startsWith("CLOUDSDK_")))),
+      "GOOGLE_CLOUD_QUOTA_PROJECT", "GCLOUD_PROJECT"].includes(k) || k.startsWith("VERTEX_REGION_") || k.startsWith("CLOUDSDK_")))
+    || (ctx.claudeFoundry && k === "ANTHROPIC_FOUNDRY_API_KEY")),
   codex: (k) => k.startsWith("CODEX_")
     || ["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORGANIZATION", "OPENAI_PROJECT", "AZURE_OPENAI_API_KEY"].includes(k),
   opencode: (k) => k.startsWith("OPENCODE_") || [
@@ -483,11 +535,34 @@ function aiSpawnEnv(cli) {
   return env;
 }
 
-/** Mirrors CLAUDE_LOCKDOWN_ARGS (ai.rs): built-ins denied, no MCP server. */
-const CLAUDE_LOCKDOWN_ARGS = [
-  "--strict-mcp-config",
-  "--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent",
+/** Mirrors CLAUDE_DENIED_TOOLS (ai.rs). */
+const CLAUDE_DENIED_TOOLS = [
+  "Bash", "BashOutput", "KillBash", "KillShell", "Edit", "MultiEdit", "Write", "NotebookEdit", "NotebookRead",
+  "Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "Task", "Agent", "TodoWrite", "SlashCommand", "Skill",
 ];
+/** Mirrors `claude_caps` (ai.rs): lockdown flags the installed claude knows, cached per binary. */
+const claudeCapsCache = new Map();
+function claudeCaps(bin) {
+  if (!claudeCapsCache.has(bin)) {
+    const r = spawnSync(bin, ["--help"], { encoding: "utf-8", env: aiSpawnEnv("claude") });
+    const words = new Set(String(r.stdout || "").split(/[\s,]+/));
+    claudeCapsCache.set(bin, {
+      tools: words.has("--tools"),
+      settingSources: words.has("--setting-sources"),
+      strictMcp: words.has("--strict-mcp-config"),
+    });
+  }
+  return claudeCapsCache.get(bin);
+}
+/** Mirrors `claude_lockdown_args` (ai.rs): no tools, no project settings, no MCP. */
+function claudeLockdownArgs(caps) {
+  return [
+    ...(caps.tools ? ["--tools", ""] : []),
+    ...(caps.settingSources ? ["--setting-sources", "user"] : []),
+    ...(caps.strictMcp ? ["--strict-mcp-config"] : []),
+    "--disallowedTools", ...CLAUDE_DENIED_TOOLS,
+  ];
+}
 
 /** dev:web stand-in for the keychain-held AI API key (memory only). */
 let devAiApiKey = "";
@@ -5760,9 +5835,11 @@ async function handleRequest(req, res) {
         }
         const claudeEffort = validEffort(body.effort);
         if (claudeEffort) claudeArgs.push("--effort", claudeEffort);
-        claudeArgs.push(...CLAUDE_LOCKDOWN_ARGS);
+        const claudeCapsNow = claudeCaps(CLAUDE);
+        claudeArgs.push(...claudeLockdownArgs(claudeCapsNow));
         const r = spawnSync(CLAUDE, claudeArgs, {
-          cwd: body.cwd || undefined,
+          // Mirrors `claude_run_dir`: the repo only when its settings are ignored.
+          cwd: claudeCapsNow.settingSources ? (body.cwd || undefined) : tmpdir(),
           input: fullPrompt.replace(/\0/g, ""),
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
@@ -5974,11 +6051,14 @@ async function handleRequest(req, res) {
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
         };
-        // Prompt on stdin, off argv; an opencode too old to read stdin refuses
-        // the empty message, and only then gets it as an argument.
-        let r = spawnSync(OPENCODE, ocArgs, { ...ocOpts, input: prompt });
-        if (r.status !== 0 && `${r.stderr || ""}${r.stdout || ""}`.includes("You must provide a message")) {
-          r = spawnSync(OPENCODE, [...ocArgs, prompt], ocOpts);
+        // Prompt on stdin, off argv, no argv fallback. Mirrors `opencode_result`:
+        // a refused or empty answer is an error.
+        const r = spawnSync(OPENCODE, ocArgs, { ...ocOpts, input: prompt });
+        const ocOut = `${r.stderr || ""}${r.stdout || ""}`;
+        if (ocOut.includes("You must provide a message") || (r.status === 0 && !String(r.stdout || "").trim())) {
+          return jsonResponse(req, res, {
+            error: "opencode n'a pas lu le prompt sur stdin (version trop ancienne ?) — mettez opencode à jour",
+          }, 500);
         }
         if (r.status !== 0) {
           const detail = (r.stderr || r.stdout || "").trim() || "opencode CLI a échoué sans message";

@@ -119,6 +119,49 @@ const FORGE_TOKEN_ENV: &[&str] = &[
     "GITLAB_ACCESS_TOKEN",
 ];
 
+/// Claude Code's documented configuration variables: config location,
+/// gateway, models, the Bedrock / Vertex / Foundry switches and endpoints,
+/// its OAuth token and mTLS client certificate, output and traffic settings.
+/// Cloud credentials are not here: see `ai_env_allowed_for`.
+const CLAUDE_CONFIG_ENV: &[&str] = &[
+    "CLAUDE_CONFIG_DIR",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_CUSTOM_HEADERS",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_VERTEX_BASE_URL",
+    "ANTHROPIC_VERTEX_PROJECT_ID",
+    "ANTHROPIC_FOUNDRY_BASE_URL",
+    "ANTHROPIC_FOUNDRY_RESOURCE",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+    "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+    "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_CLIENT_CERT",
+    "CLAUDE_CODE_CLIENT_KEY",
+    "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+    "CLAUDE_CODE_PROXY_RESOLVES_HOSTS",
+    "MAX_THINKING_TOKENS",
+    "DISABLE_TELEMETRY",
+    "DISABLE_ERROR_REPORTING",
+    "DISABLE_AUTOUPDATER",
+    "DISABLE_PROMPT_CACHING",
+    "DISABLE_NON_ESSENTIAL_MODEL_CALLS",
+];
+
 /// What the user's own CLI configuration says about the variables a CLI
 /// needs beyond its fixed allowlist. Built from GitWand's environment and the
 /// CLIs' *user-level* config files only — never from a file inside the
@@ -130,6 +173,8 @@ pub(crate) struct AiEnvContext {
     claude_bedrock: bool,
     /// Claude Code is set up for Google Vertex AI (`CLAUDE_CODE_USE_VERTEX`).
     claude_vertex: bool,
+    /// Claude Code is set up for Microsoft Foundry (`CLAUDE_CODE_USE_FOUNDRY`).
+    claude_foundry: bool,
     /// Variable names the user's own config points the CLI at — Codex
     /// `env_key` (custom providers), opencode `{env:NAME}`.
     config_refs: Vec<String>,
@@ -151,11 +196,20 @@ fn is_env_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// `(bedrock, vertex)` from the `env` block of a Claude Code `settings.json`,
-/// where Bedrock / Vertex setups usually live rather than in the shell.
-fn parse_claude_settings_flags(text: &str) -> (bool, bool) {
+/// Cloud switches found in a Claude Code settings file.
+#[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
+struct ClaudeCloud {
+    bedrock: bool,
+    vertex: bool,
+    foundry: bool,
+}
+
+/// Cloud switches in the `env` block of a Claude Code settings file (user
+/// `settings.json` or the managed, system-wide one), where Bedrock / Vertex /
+/// Foundry setups usually live rather than in the shell.
+fn parse_claude_settings_flags(text: &str) -> ClaudeCloud {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else {
-        return (false, false);
+        return ClaudeCloud::default();
     };
     let flag = |k: &str| {
         let val = v.get("env").and_then(|e| e.get(k));
@@ -171,26 +225,70 @@ fn parse_claude_settings_flags(text: &str) -> (bool, bool) {
                 }),
         )
     };
-    (
-        flag("CLAUDE_CODE_USE_BEDROCK"),
-        flag("CLAUDE_CODE_USE_VERTEX"),
-    )
+    ClaudeCloud {
+        bedrock: flag("CLAUDE_CODE_USE_BEDROCK"),
+        vertex: flag("CLAUDE_CODE_USE_VERTEX"),
+        foundry: flag("CLAUDE_CODE_USE_FOUNDRY"),
+    }
 }
 
-/// `env_key = "NAME"` entries of a Codex `config.toml` (custom model
-/// providers name the variable holding their key this way). A line scan, not
-/// a TOML parser: it only ever yields names, which are then allowlisted.
+/// Claude Code's managed (system-wide, admin-deployed) settings files: the
+/// platform's `managed-settings.json` and the `*.json` drop-ins of its
+/// `managed-settings.d` directory. Read-only, and never repository content.
+fn claude_managed_settings_files() -> Vec<PathBuf> {
+    let dirs: &[&str] = if cfg!(target_os = "macos") {
+        &["/Library/Application Support/ClaudeCode"]
+    } else if cfg!(windows) {
+        &[r"C:\Program Files\ClaudeCode", r"C:\ProgramData\ClaudeCode"]
+    } else {
+        &["/etc/claude-code"]
+    };
+    let mut files = Vec::new();
+    for d in dirs {
+        let d = PathBuf::from(d);
+        files.push(d.join("managed-settings.json"));
+        if let Ok(rd) = std::fs::read_dir(d.join("managed-settings.d")) {
+            let mut dropins: Vec<PathBuf> = rd
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "json"))
+                .collect();
+            dropins.sort();
+            files.extend(dropins);
+        }
+    }
+    files
+}
+
+/// Variable names a Codex `config.toml` points at: every `env_key` (custom
+/// model providers name the variable holding their key this way) and the
+/// values of `env_http_headers` tables, wherever they sit — provider tables,
+/// inline tables, dotted keys, profiles. Parsed as TOML; only names shaped
+/// like variable names are kept, and they are then allowlisted.
 fn parse_codex_env_keys(text: &str) -> Vec<String> {
-    text.lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let rest = line.strip_prefix("env_key")?.trim_start();
-            let value = rest.strip_prefix('=')?.trim();
-            let value = value.split('#').next()?.trim();
-            let name = value.trim_matches(|c| c == '"' || c == '\'');
-            is_env_name(name).then(|| name.to_string())
-        })
-        .collect()
+    fn walk(v: &toml::Value, out: &mut Vec<String>) {
+        match v {
+            toml::Value::Table(t) => {
+                for (k, v) in t {
+                    match (k.as_str(), v) {
+                        ("env_key", toml::Value::String(name)) => out.push(name.clone()),
+                        ("env_http_headers", toml::Value::Table(h)) => {
+                            out.extend(h.values().filter_map(|n| n.as_str().map(str::to_string)))
+                        }
+                        _ => walk(v, out),
+                    }
+                }
+            }
+            toml::Value::Array(a) => a.iter().for_each(|v| walk(v, out)),
+            _ => {}
+        }
+    }
+    let Ok(table) = text.parse::<toml::Table>() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    walk(&toml::Value::Table(table), &mut out);
+    out.retain(|n| is_env_name(n));
+    out
 }
 
 /// `{env:NAME}` substitutions of an opencode config file.
@@ -205,8 +303,22 @@ fn parse_opencode_env_refs(text: &str) -> Vec<String> {
 }
 
 /// Build the context for `cli` from `env` (GitWand's environment) and the
-/// user-level config files it locates.
+/// user-level / system-level config files it locates.
 fn ai_env_context(cli: AiCli, env: &dyn Fn(&str) -> Option<String>) -> AiEnvContext {
+    let managed = if cli == AiCli::Claude {
+        claude_managed_settings_files()
+    } else {
+        Vec::new()
+    };
+    ai_env_context_with(cli, env, &managed)
+}
+
+/// `ai_env_context` with the Claude managed settings files given explicitly.
+fn ai_env_context_with(
+    cli: AiCli,
+    env: &dyn Fn(&str) -> Option<String>,
+    claude_managed: &[PathBuf],
+) -> AiEnvContext {
     let read = |p: PathBuf| std::fs::read_to_string(p).ok();
     let home = env("HOME")
         .or_else(|| env("USERPROFILE"))
@@ -217,14 +329,20 @@ fn ai_env_context(cli: AiCli, env: &dyn Fn(&str) -> Option<String>) -> AiEnvCont
         AiCli::Claude => {
             ctx.claude_bedrock = env_flag_set(env("CLAUDE_CODE_USE_BEDROCK").as_deref());
             ctx.claude_vertex = env_flag_set(env("CLAUDE_CODE_USE_VERTEX").as_deref());
+            ctx.claude_foundry = env_flag_set(env("CLAUDE_CODE_USE_FOUNDRY").as_deref());
             let dir = env("CLAUDE_CONFIG_DIR")
                 .filter(|d| !d.trim().is_empty())
                 .map(PathBuf::from)
                 .or_else(|| home.as_ref().map(|h| h.join(".claude")));
-            if let Some(text) = dir.and_then(|d| read(d.join("settings.json"))) {
-                let (bedrock, vertex) = parse_claude_settings_flags(&text);
-                ctx.claude_bedrock |= bedrock;
-                ctx.claude_vertex |= vertex;
+            let files = dir
+                .map(|d| d.join("settings.json"))
+                .into_iter()
+                .chain(claude_managed.iter().cloned());
+            for text in files.filter_map(read) {
+                let cloud = parse_claude_settings_flags(&text);
+                ctx.claude_bedrock |= cloud.bedrock;
+                ctx.claude_vertex |= cloud.vertex;
+                ctx.claude_foundry |= cloud.foundry;
             }
         }
         AiCli::Codex => {
@@ -272,17 +390,15 @@ fn ai_env_allowed_for(cli: AiCli, key: &str, ctx: &AiEnvContext) -> bool {
     match cli {
         // ANTHROPIC_API_KEY & co. are left out on purpose: the user picked the
         // CLI provider to use their subscription (see CLAUDE_AUTH_OVERRIDE_ENV,
-        // also stripped by `strip_claude_auth_env`). The rest of the
-        // ANTHROPIC_* / CLAUDE_CODE_* families is Claude Code's own
-        // configuration: gateway base URL, Bedrock / Vertex / Foundry switches
-        // and their model and region settings, its OAuth token.
+        // also stripped by `strip_claude_auth_env`). The rest is Claude Code's
+        // documented configuration, by name — not whole ANTHROPIC_* /
+        // CLAUDE_CODE_* families, which would also let through unrelated
+        // secrets such as an ANTHROPIC_ADMIN_KEY.
         AiCli::Claude => {
             if CLAUDE_AUTH_OVERRIDE_ENV.contains(&key) {
                 return false;
             }
-            key == "CLAUDE_CONFIG_DIR"
-                || key.starts_with("CLAUDE_CODE_")
-                || key.starts_with("ANTHROPIC_")
+            CLAUDE_CONFIG_ENV.contains(&key)
                 || (ctx.claude_bedrock && key.starts_with("AWS_"))
                 || (ctx.claude_vertex
                     && (matches!(
@@ -294,6 +410,7 @@ fn ai_env_allowed_for(cli: AiCli, key: &str, ctx: &AiEnvContext) -> bool {
                             | "GCLOUD_PROJECT"
                     ) || key.starts_with("VERTEX_REGION_")
                         || key.starts_with("CLOUDSDK_")))
+                || (ctx.claude_foundry && key == "ANTHROPIC_FOUNDRY_API_KEY")
         }
         AiCli::Codex => {
             key.starts_with("CODEX_")
@@ -588,26 +705,120 @@ pub(crate) async fn claude_cli_prompt(
     .map_err(|e| e.to_string())?
 }
 
-/// Flags that confine a `claude -p` run to producing text. The prompt carries
-/// untrusted repo content, so the tools that could act on the machine or
-/// reach the network are denied even if the user's own Claude settings allow
-/// them: the built-ins by name — `Task` / `Agent` (sub-agents) included, so
-/// the denial cannot be sidestepped through a delegated run — and every MCP
-/// server, by `--strict-mcp-config` without any `--mcp-config` (MCP tools are
-/// not built-ins, and a user's server can do anything). Verified against
-/// Claude Code 2.1.x; `--strict-mcp-config` dates from 1.0.
-const CLAUDE_LOCKDOWN_ARGS: &[&str] = &[
-    "--strict-mcp-config",
-    "--disallowedTools",
+/// Built-in tools denied by name, on top of `--tools ""`: the safety net for a
+/// Claude Code too old to know `--tools`, where only a deny list exists. Every
+/// tool that reads, writes, runs or fetches — reading matters too, an
+/// injected "quote ~/.aws/credentials" lands in the generated text — plus
+/// `Task` / `Agent` (sub-agents), so the denial cannot be sidestepped through
+/// a delegated run. Names a given version lacks (`MultiEdit`, `LS`… in 2.x)
+/// only draw a warning on stderr.
+const CLAUDE_DENIED_TOOLS: &[&str] = &[
     "Bash",
+    "BashOutput",
+    "KillBash",
+    "KillShell",
     "Edit",
+    "MultiEdit",
     "Write",
     "NotebookEdit",
+    "NotebookRead",
+    "Read",
+    "Glob",
+    "Grep",
+    "LS",
     "WebFetch",
     "WebSearch",
     "Task",
     "Agent",
+    "TodoWrite",
+    "SlashCommand",
+    "Skill",
 ];
+
+/// Which lockdown flags the installed `claude` understands, read from its
+/// `--help`. An unknown flag makes the CLI refuse to run at all, so each one
+/// is only passed when listed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+struct ClaudeCaps {
+    /// `--tools ""` — no tool at all (Claude Code 2.x).
+    tools: bool,
+    /// `--setting-sources user` — ignore the project's `.claude/settings*.json`.
+    setting_sources: bool,
+    /// `--strict-mcp-config` — no MCP server unless `--mcp-config` names one.
+    strict_mcp: bool,
+}
+
+fn parse_claude_caps(help: &str) -> ClaudeCaps {
+    let has = |flag: &str| {
+        help.split(|c: char| c.is_whitespace() || c == ',')
+            .any(|w| w == flag)
+    };
+    ClaudeCaps {
+        tools: has("--tools"),
+        setting_sources: has("--setting-sources"),
+        strict_mcp: has("--strict-mcp-config"),
+    }
+}
+
+/// `parse_claude_caps` of `binary --help`, cached per binary path.
+fn claude_caps(binary: &str) -> ClaudeCaps {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<String, ClaudeCaps>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(c) = cache.lock().ok().and_then(|m| m.get(binary).copied()) {
+        return c;
+    }
+    let caps = ai_cmd(binary, AiCli::Claude)
+        .arg("--help")
+        .output()
+        .map(|o| parse_claude_caps(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
+    if let Ok(mut m) = cache.lock() {
+        m.insert(binary.to_string(), caps);
+    }
+    caps
+}
+
+/// Flags that confine a `claude -p` run to producing text. The prompt carries
+/// untrusted repo content, so nothing may act on the machine, read it, or
+/// reach the network, whatever the user's Claude settings allow:
+///
+/// - `--tools ""`: no tool at all — these one-shot generations need none.
+/// - `--setting-sources user`: the repository's `.claude/settings.json` /
+///   `settings.local.json` are not loaded. `-p` skips the workspace-trust
+///   prompt, so without it a cloned repo's `SessionStart` /
+///   `UserPromptSubmit` hook ran on "generate commit message" — verified live
+///   on Claude Code 2.1.296, as is the fix.
+/// - `--strict-mcp-config` without `--mcp-config`: no MCP server.
+/// - the `CLAUDE_DENIED_TOOLS` deny list, for a CLI without `--tools`.
+fn claude_lockdown_args(caps: ClaudeCaps) -> Vec<&'static str> {
+    let mut args = Vec::new();
+    if caps.tools {
+        args.extend(["--tools", ""]);
+    }
+    if caps.setting_sources {
+        args.extend(["--setting-sources", "user"]);
+    }
+    if caps.strict_mcp {
+        args.push("--strict-mcp-config");
+    }
+    args.push("--disallowedTools");
+    args.extend(CLAUDE_DENIED_TOOLS);
+    args
+}
+
+/// Directory to run `claude -p` in. The repository when its project settings
+/// can be ignored (`--setting-sources`); otherwise a neutral directory, so an
+/// older CLI cannot pick up the repository's hooks — the prompt already
+/// carries the content it needs.
+fn claude_run_dir(caps: ClaudeCaps, cwd: Option<&str>) -> Option<PathBuf> {
+    if caps.setting_sources {
+        cwd.filter(|d| !d.trim().is_empty()).map(PathBuf::from)
+    } else {
+        Some(std::env::temp_dir())
+    }
+}
 
 fn claude_cli_prompt_inner(
     prompt: String,
@@ -650,12 +861,11 @@ fn claude_cli_prompt_inner(
     if let Some(e) = valid_effort(effort.as_ref()) {
         cmd.args(["--effort", e]);
     }
-    cmd.args(CLAUDE_LOCKDOWN_ARGS);
+    let caps = claude_caps(&binary);
+    cmd.args(claude_lockdown_args(caps));
     strip_claude_auth_env(&mut cmd);
-    if let Some(dir) = cwd {
-        if !dir.trim().is_empty() {
-            cmd.current_dir(dir);
-        }
+    if let Some(dir) = claude_run_dir(caps, cwd.as_deref()) {
+        cmd.current_dir(dir);
     }
 
     let output = output_with_stdin(cmd, full_prompt)
@@ -1242,54 +1452,47 @@ fn opencode_cli_prompt_inner(
 
     // `opencode run` with no positional message reads it from stdin (when
     // stdin is not a TTY — verified on opencode 1.17), keeping repository
-    // content out of the argv. An older opencode refuses an empty message
-    // with "You must provide a message"; only then is the prompt passed as
-    // an argument, as before, so an old install keeps working.
+    // content out of the argv. There is no argv fallback: an opencode too old
+    // to read stdin fails visibly (see `opencode_result`) instead of quietly
+    // putting the repository content back on the command line.
     let output = output_with_stdin(
-        opencode_run_cmd(&binary, model.as_ref(), cwd.as_deref(), None),
-        full_prompt.clone(),
+        opencode_run_cmd(&binary, model.as_ref(), cwd.as_deref()),
+        full_prompt,
     )
     .map_err(|e| format!("Failed to run opencode CLI: {}", e))?;
-    let output = if !output.status.success() && opencode_wants_positional_message(&output) {
-        opencode_run_cmd(&binary, model.as_ref(), cwd.as_deref(), Some(&full_prompt))
-            .output()
-            .map_err(|e| format!("Failed to run opencode CLI: {}", e))?
-    } else {
-        output
-    };
+    opencode_result(&output)
+}
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if stderr.is_empty() { stdout } else { stderr };
-        return Err(if detail.is_empty() {
-            "opencode CLI a échoué sans message".to_string()
-        } else {
-            detail
-        });
+/// The answer of an `opencode run`, or the error to show. An empty answer is
+/// an error too: an opencode that ignored the stdin prompt may exit 0 with
+/// nothing to say, which must not pass for a generated text.
+fn opencode_result(output: &std::process::Output) -> Result<String, String> {
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let missing_message = format!("{}{}", stderr, stdout).contains("You must provide a message");
+    if output.status.success() && !stdout.trim().is_empty() {
+        return Ok(stdout);
     }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    if missing_message || (output.status.success() && stdout.trim().is_empty()) {
+        return Err(
+            "opencode n'a pas lu le prompt sur stdin (version trop ancienne ?) — mettez opencode à jour"
+                .to_string(),
+        );
+    }
+    let stdout = stdout.trim().to_string();
+    let detail = if stderr.is_empty() { stdout } else { stderr };
+    Err(if detail.is_empty() {
+        "opencode CLI a échoué sans message".to_string()
+    } else {
+        detail
+    })
 }
 
-/// True when opencode refused to run because no positional message was given
-/// — an install too old to read the prompt from stdin.
-fn opencode_wants_positional_message(output: &std::process::Output) -> bool {
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stderr),
-        String::from_utf8_lossy(&output.stdout)
-    );
-    text.contains("You must provide a message")
-}
-
-/// `opencode run`, locked down, with the prompt as a positional argument only
-/// when `positional` is given (see `opencode_cli_prompt_inner`).
+/// `opencode run`, locked down; the prompt goes on stdin.
 fn opencode_run_cmd(
     binary: &str,
     model: Option<&String>,
     cwd: Option<&str>,
-    positional: Option<&str>,
 ) -> std::process::Command {
     let mut cmd = ai_cmd(binary, AiCli::Opencode);
     cmd.arg("run");
@@ -1306,9 +1509,6 @@ fn opencode_run_cmd(
         if !m.trim().is_empty() {
             cmd.args(["--model", m.trim()]);
         }
-    }
-    if let Some(p) = positional {
-        cmd.arg(p);
     }
     if let Some(dir) = cwd {
         if !dir.trim().is_empty() {
@@ -1872,7 +2072,8 @@ mod env_isolation_tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
-        ai_env_context(cli, &|k| map.get(k).cloned())
+        // No managed settings: the machine running the tests may have some.
+        ai_env_context_with(cli, &|k| map.get(k).cloned(), &[])
     }
 
     #[test]
@@ -1890,6 +2091,24 @@ mod env_isolation_tests {
         for k in CLAUDE_AUTH_OVERRIDE_ENV {
             assert!(!allowed(AiCli::Claude, k), "{k} must stay stripped");
         }
+        // Not whole families: unrelated secrets sharing the prefix stay out.
+        for k in [
+            "ANTHROPIC_ADMIN_KEY",
+            "ANTHROPIC_FOUNDRY_API_KEY",
+            "CLAUDE_CODE_DEPLOY_TOKEN",
+            "ANTHROPIC_SOMETHING_SECRET",
+        ] {
+            assert!(!allowed(AiCli::Claude, k), "{k} leaked");
+        }
+        let foundry = AiEnvContext {
+            claude_foundry: true,
+            ..Default::default()
+        };
+        assert!(ai_env_allowed(
+            AiCli::Claude,
+            "ANTHROPIC_FOUNDRY_API_KEY",
+            &foundry
+        ));
     }
 
     #[test]
@@ -1947,6 +2166,37 @@ mod env_isolation_tests {
     }
 
     #[test]
+    fn claude_cloud_setup_is_read_from_managed_settings_too() {
+        let dir = temp_dir("claude-managed");
+        let managed = dir.join("managed-settings.json");
+        std::fs::write(&managed, r#"{"env":{"CLAUDE_CODE_USE_BEDROCK":"true"}}"#).unwrap();
+        let dropin = dir.join("10-foundry.json");
+        std::fs::write(&dropin, r#"{"env":{"CLAUDE_CODE_USE_FOUNDRY":1}}"#).unwrap();
+        let ctx = ai_env_context_with(
+            AiCli::Claude,
+            &|k| (k == "HOME").then(|| dir.join("nohome").to_string_lossy().into_owned()),
+            &[managed, dropin, dir.join("missing.json")],
+        );
+        assert!(ctx.claude_bedrock);
+        assert!(ctx.claude_foundry);
+        assert!(!ctx.claude_vertex);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn managed_settings_locations_are_system_paths() {
+        for f in claude_managed_settings_files() {
+            assert!(f.is_absolute(), "{}", f.display());
+            assert!(
+                f.to_string_lossy().contains("ClaudeCode")
+                    || f.to_string_lossy().contains("claude-code"),
+                "{}",
+                f.display()
+            );
+        }
+    }
+
+    #[test]
     fn codex_custom_provider_env_key_is_forwarded() {
         let dir = temp_dir("codex");
         std::fs::write(
@@ -1991,18 +2241,52 @@ mod env_isolation_tests {
 
     #[test]
     fn config_parsers_only_yield_env_names() {
+        // Every TOML spelling of a provider's env_key: table, inline table,
+        // dotted key, profile; plus env_http_headers values. `env_key_x` and
+        // names that are not variable names are ignored.
+        let toml = r#"
+model_providers.dotted.env_key = "DOTTED_KEY"
+model_providers.inline = { name = "x", env_key = "INLINE_KEY" }
+
+[model_providers.table]
+env_key = 'TABLE_KEY'
+env_key_x = "NOT_ME"
+env_http_headers = { "X-Org" = "ORG_HEADER_VAR" }
+
+[profiles.p.model_providers.q]
+env_key = "PROFILE_KEY"
+
+[model_providers.bad]
+env_key = "$(curl evil)"
+"#;
+        let mut keys = parse_codex_env_keys(toml);
+        keys.sort();
         assert_eq!(
-            parse_codex_env_keys("env_key='A_B'\n  env_key = \"C1\"\nenv_key_x = \"D\"\n"),
-            vec!["A_B".to_string(), "C1".to_string()]
+            keys,
+            [
+                "DOTTED_KEY",
+                "INLINE_KEY",
+                "ORG_HEADER_VAR",
+                "PROFILE_KEY",
+                "TABLE_KEY"
+            ]
+            .map(String::from)
         );
+        assert!(parse_codex_env_keys("not = [valid toml").is_empty());
         assert_eq!(
             parse_opencode_env_refs("{env:X} {env:Y-Z} {env:"),
             vec!["X".to_string()]
         );
-        assert_eq!(parse_claude_settings_flags("not json"), (false, false));
+        assert_eq!(
+            parse_claude_settings_flags("not json"),
+            ClaudeCloud::default()
+        );
         assert_eq!(
             parse_claude_settings_flags(r#"{"env":{"CLAUDE_CODE_USE_BEDROCK":true}}"#),
-            (true, false)
+            ClaudeCloud {
+                bedrock: true,
+                ..Default::default()
+            }
         );
     }
 
@@ -2085,5 +2369,102 @@ mod env_isolation_tests {
         let out = output_with_stdin(cmd, "hello\nworld".to_string()).unwrap();
         assert!(out.status.success());
         assert_eq!(String::from_utf8_lossy(&out.stdout), "hello\nworld");
+    }
+}
+
+#[cfg(test)]
+mod lockdown_tests {
+    use super::*;
+
+    const HELP_2_1: &str = "  --strict-mcp-config   Only use MCP servers from --mcp-config\n  \
+        --setting-sources <sources>   Comma-separated list\n  \
+        --tools <tools...>   Specify the list of available tools\n  \
+        --allowedTools, --allowed-tools <tools...>\n";
+
+    #[test]
+    fn caps_are_read_from_help_by_exact_flag() {
+        assert_eq!(
+            parse_claude_caps(HELP_2_1),
+            ClaudeCaps {
+                tools: true,
+                setting_sources: true,
+                strict_mcp: true
+            }
+        );
+        // `--allowedTools` / `--mcp-config` must not pass for `--tools` / strict.
+        assert_eq!(
+            parse_claude_caps("  --allowedTools <t>\n  --mcp-config <c>\n"),
+            ClaudeCaps::default()
+        );
+    }
+
+    #[test]
+    fn a_current_cli_gets_no_tools_and_no_project_settings() {
+        let caps = parse_claude_caps(HELP_2_1);
+        let args = claude_lockdown_args(caps);
+        let joined = args.join(" ");
+        assert!(args.windows(2).any(|w| w == ["--tools", ""]), "{joined}");
+        assert!(
+            args.windows(2).any(|w| w == ["--setting-sources", "user"]),
+            "{joined}"
+        );
+        assert!(args.contains(&"--strict-mcp-config"));
+        // The deny list rides along, reads and MultiEdit included.
+        for t in [
+            "Read",
+            "Glob",
+            "Grep",
+            "MultiEdit",
+            "Bash",
+            "WebFetch",
+            "Task",
+        ] {
+            assert!(args.contains(&t), "{t} not denied");
+        }
+        // The repository may stay the cwd: its settings are not loaded.
+        assert_eq!(
+            claude_run_dir(caps, Some("/repo")),
+            Some(PathBuf::from("/repo"))
+        );
+    }
+
+    #[test]
+    fn an_old_cli_runs_outside_the_repository() {
+        let caps = ClaudeCaps::default();
+        let args = claude_lockdown_args(caps);
+        assert!(!args.contains(&"--tools"));
+        assert!(!args.contains(&"--setting-sources"));
+        assert!(!args.contains(&"--strict-mcp-config"));
+        assert!(args.contains(&"--disallowedTools") && args.contains(&"Read"));
+        // Without --setting-sources the repo's hooks would load: neutral cwd.
+        assert_eq!(
+            claude_run_dir(caps, Some("/repo")),
+            Some(std::env::temp_dir())
+        );
+    }
+
+    #[cfg(unix)]
+    fn output(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_empty_or_refused_prompt_is_an_error() {
+        assert_eq!(
+            opencode_result(&output(0, "feat: x\n", "")).unwrap(),
+            "feat: x\n"
+        );
+        // An old opencode that ignored stdin: exit 0, nothing said.
+        assert!(opencode_result(&output(0, "  \n", "")).is_err());
+        let err =
+            opencode_result(&output(1, "", "You must provide a message or a command")).unwrap_err();
+        assert!(err.contains("stdin"), "{err}");
+        assert_eq!(opencode_result(&output(2, "", "boom")).unwrap_err(), "boom");
     }
 }
