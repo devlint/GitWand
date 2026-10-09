@@ -4,7 +4,8 @@
  * Allows users to maintain several named git identities (Perso, Pro, Client…)
  * and select which one is active globally or per-repo. Each repo remembers its
  * own choice (`identityOverrideByRepo`). The resolved identity is passed to
- * `gitCommit()`, which injects `-c user.name=… -c user.email=…` for that
+ * `gitCommit()` (see `commitIdentityFor`), which injects `-c user.name=…
+ * -c user.email=…` (and `user.signingkey` when the profile has one) for that
  * commit only (git_commit in ops.rs / the dev-server route).
  *
  * Resolution order:
@@ -41,13 +42,8 @@ export function findIdentity(id: string): IdentityProfile | undefined {
  */
 export function resolveIdentity(cwd?: string): IdentityProfile | null {
   const s = loadSettings();
-  if (cwd) {
-    const repoId = s.identityOverrideByRepo[normaliseCwd(cwd)];
-    if (repoId) {
-      const found = s.identities.find((p) => p.id === repoId);
-      if (found) return found;
-    }
-  }
+  const repoId = cwd ? repoIdentityId(cwd) : null;
+  if (repoId) return s.identities.find((p) => p.id === repoId) ?? null;
   if (s.activeIdentityId) {
     const found = s.identities.find((p) => p.id === s.activeIdentityId);
     if (found) return found;
@@ -65,9 +61,26 @@ export function repoIdentityId(cwd: string): string | null {
   return id && s.identities.some((p) => p.id === id) ? id : null;
 }
 
-/** The global default identity (applies to repos without their own choice). */
-export function defaultIdentity(): IdentityProfile | null {
-  return resolveIdentity();
+/** What `gitCommit()` takes for a commit in this repo, trimmed. */
+export interface CommitIdentity {
+  name: string;
+  email: string;
+  signingKey: string | null;
+}
+
+/**
+ * The identity a commit in `cwd` is made with, or null to use git's own
+ * config. Every commit call site goes through this, so the profile's signing
+ * key travels with its name and email: an overridden email signed with the
+ * global key shows as Unverified on the forges.
+ */
+export function commitIdentityFor(cwd: string): CommitIdentity | null {
+  const p = resolveIdentity(cwd);
+  if (!p) return null;
+  const name = p.gitName.trim();
+  const email = p.gitEmail.trim();
+  if (!name || !email) return null;
+  return { name, email, signingKey: p.gpgKey?.trim() || null };
 }
 
 // ─── write ────────────────────────────────────────────────────────────────────
@@ -144,7 +157,7 @@ export function useIdentity(cwd?: () => string) {
   });
   const globalDefault = computed(() => {
     void settingsRevision.value;
-    return defaultIdentity();
+    return resolveIdentity();
   });
 
   return {

@@ -60,7 +60,7 @@ import { resolveConflictOperation } from "../utils/conflictOperation";
 import { useWorkspaceScope } from "./useWorkspaceScope";
 import { useSettings } from "./useSettings";
 import { useUndoToast } from "./useUndoToast";
-import { resolveIdentity } from "./useIdentity";
+import { commitIdentityFor } from "./useIdentity";
 
 export type ViewMode =
   | "dashboard"
@@ -1062,12 +1062,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // git trailer convention: one blank line before the trailer block.
       const trailerBlock = trailers.trim();
       if (trailerBlock) fullMessage += `\n\n${trailerBlock}`;
-      const identity = resolveIdentity(folderPath.value);
-      const hash = await gitCommit(
-        folderPath.value,
-        fullMessage,
-        identity ? { name: identity.gitName, email: identity.gitEmail } : null,
-      );
+      const hash = await gitCommit(folderPath.value, fullMessage, commitIdentityFor(folderPath.value));
       lastCommitHash.value = hash;
       commitSummary.value = "";
       commitDescription.value = getCommitSignatureDefault();

@@ -193,6 +193,21 @@ describe("useIdentity (module-level functions)", () => {
     expect(resolveIdentity(CWD_A)?.gitEmail).toBe("alice@work.com");
   });
 
+  it("commitIdentityFor() trims, carries the signing key, and follows the repo override", async () => {
+    const { addIdentity, setActiveIdentity, setRepoIdentity, commitIdentityFor } = await import("../useIdentity");
+    const idHome = addIdentity({ label: "Personal", gitName: "Alice", gitEmail: "alice@home.com" });
+    const idWork = addIdentity({ label: "Work", gitName: "  Alice W ", gitEmail: " alice@work.com", gpgKey: " ABC123 " });
+    setActiveIdentity(idHome);
+    setRepoIdentity(CWD_B, idWork);
+    expect(commitIdentityFor(CWD_B)).toEqual({ name: "Alice W", email: "alice@work.com", signingKey: "ABC123" });
+    expect(commitIdentityFor(CWD_A)).toEqual({ name: "Alice", email: "alice@home.com", signingKey: null });
+  });
+
+  it("commitIdentityFor() is null without any identity (git config applies)", async () => {
+    const { commitIdentityFor } = await import("../useIdentity");
+    expect(commitIdentityFor(CWD_A)).toBeNull();
+  });
+
   it("removeIdentity() also clears all repo overrides for that identity", async () => {
     const { addIdentity, setRepoIdentity, removeIdentity, resolveIdentity } = await import("../useIdentity");
     const id = addIdentity({ label: "Work", gitName: "Alice", gitEmail: "alice@work.com" });

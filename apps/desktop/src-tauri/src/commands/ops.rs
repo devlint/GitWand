@@ -134,17 +134,24 @@ pub(crate) async fn git_commit(
     message: String,
     identity_name: Option<String>,
     identity_email: Option<String>,
+    identity_signing_key: Option<String>,
 ) -> Result<String, String> {
     let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let mut cmd = git_cmd();
-    // Inject identity overrides before the `commit` sub-command so git sees them.
-    if let (Some(ref name), Some(ref email)) = (&identity_name, &identity_email) {
-        if !name.is_empty() && !email.is_empty() {
-            cmd.arg("-c")
-                .arg(format!("user.name={}", name))
-                .arg("-c")
-                .arg(format!("user.email={}", email));
+    // Inject identity overrides before the `commit` sub-command so git sees
+    // them. The profile's signing key goes with them: the overridden email
+    // signed with the global key shows as Unverified on the forges.
+    let name = identity_name.as_deref().map(str::trim).unwrap_or("");
+    let email = identity_email.as_deref().map(str::trim).unwrap_or("");
+    if !name.is_empty() && !email.is_empty() {
+        cmd.arg("-c")
+            .arg(format!("user.name={}", name))
+            .arg("-c")
+            .arg(format!("user.email={}", email));
+        let key = identity_signing_key.as_deref().map(str::trim).unwrap_or("");
+        if !key.is_empty() {
+            cmd.arg("-c").arg(format!("user.signingkey={}", key));
         }
     }
     let output = cmd
