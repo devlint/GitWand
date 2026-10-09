@@ -1283,6 +1283,8 @@ const zhCN: Locale = {
     aiApiKeyStored: "已保存到系统钥匙串 — {0}",
     aiApiKeyBoundElsewhere: "此密钥绑定到 {0}。请重新输入以便在此端点使用。",
     aiApiKeyUnbound: "此密钥是在密钥绑定端点之前保存的。请重新输入后再使用。",
+    aiLegacyKeyStuck: "旧版本的 API 密钥仍以明文保存在设置中：无法将其移入系统钥匙串。请重新输入密钥以安全保存，或将其删除。",
+    aiLegacyKeyRemove: "删除",
     aiApiKeyAvailable: "可在此获取：",
     aiHideKey: "隐藏",
     aiShowKey: "显示",

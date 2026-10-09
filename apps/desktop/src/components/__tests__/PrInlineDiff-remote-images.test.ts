@@ -6,7 +6,7 @@
  * PrDetailView offers the button above the diff when one of the file's
  * comments withholds an image (`commentsWithheldImages`).
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, defineComponent, h, nextTick, provide, ref, type App } from "vue";
 import PrInlineDiff from "../PrInlineDiff.vue";
 import { PR_REMOTE_IMAGES_KEY, commentsWithheldImages } from "../../composables/useRemoteImages";
@@ -79,5 +79,26 @@ describe("inline review threads — remote images", () => {
     expect(commentsWithheldImages(withImage, true)).toBe(false);
     expect(commentsWithheldImages([comment("no image"), comment("![local](img/a.png)")], false)).toBe(false);
     expect(commentsWithheldImages([], false)).toBe(false);
+  });
+});
+
+describe("commentsWithheldImages — cached by body", () => {
+  it("renders each distinct body once, and follows the global setting", async () => {
+    const safe = await import("../../composables/useSafeHtml");
+    const { useSettings } = await import("../../composables/useSettings");
+    const spy = vi.spyOn(safe, "renderMarkdown");
+    const body = `cached ![x](${IMG}) ${Math.random()}`;
+    const list = [comment(body), comment(body)];
+    expect(commentsWithheldImages(list, false)).toBe(true);
+    expect(commentsWithheldImages(list, false)).toBe(true);
+    const renders = spy.mock.calls.filter((c) => c[0] === body).length;
+    expect(renders).toBe(1);
+    useSettings().settings.value.allowRemoteImages = true;
+    try {
+      expect(commentsWithheldImages(list, false)).toBe(false);
+    } finally {
+      useSettings().settings.value.allowRemoteImages = false;
+    }
+    spy.mockRestore();
   });
 });

@@ -1205,6 +1205,8 @@ const es: Locale = {
     aiApiKeyStored: "Guardada en el llavero del sistema — {0}",
     aiApiKeyBoundElsewhere: "Esta clave está vinculada a {0}. Introdúcela de nuevo para usarla con este endpoint.",
     aiApiKeyUnbound: "Esta clave se guardó antes de que las claves se vincularan a un endpoint. Introdúcela de nuevo para usarla.",
+    aiLegacyKeyStuck: "Una clave de API de una versión anterior sigue guardada sin cifrar en los ajustes: no se pudo mover al llavero del sistema. Introduce tu clave de nuevo para guardarla de forma segura, o elimínala.",
+    aiLegacyKeyRemove: "Eliminarla",
     aiApiKeyAvailable: "Disponible en",
     aiHideKey: "Ocultar",
     aiShowKey: "Mostrar",

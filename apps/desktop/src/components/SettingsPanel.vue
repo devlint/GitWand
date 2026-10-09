@@ -119,7 +119,7 @@ import {
   settingsRevision,
 } from "../composables/useSettings";
 import { gitCommitTemplatePath, openExternalUrl, aiHttpRequest, telemetryGetState, telemetrySetEnabled } from "../utils/backend";
-import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings } from "../composables/useAiApiKey";
+import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings, endpointOrigin, repairLegacyEndpoint } from "../composables/useAiApiKey";
 export type { AIProvider };
 
 // Re-export for back-compat — earlier callers imported this shape from
@@ -390,7 +390,16 @@ function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     // `aiApiKey` lives in the keychain now (useAiApiKey); never round-trip it.
-    if (raw) return stripAiApiKey({ ...defaultSettings, ...JSON.parse(raw) });
+    if (raw) {
+      const s: Settings = stripAiApiKey({ ...defaultSettings, ...JSON.parse(raw) });
+      // Same repair as useSettings.loadSettings for a scheme-less endpoint.
+      const endpoint = s.aiApiEndpoint?.trim() ?? "";
+      if (endpoint && !endpointOrigin(endpoint)) {
+        const repaired = repairLegacyEndpoint(endpoint);
+        if (repaired) s.aiApiEndpoint = repaired;
+      }
+      return s;
+    }
   } catch { /* ignore */ }
   return { ...defaultSettings };
 }
@@ -779,8 +788,18 @@ const showApiKey = ref(false);
 function apiKeyEndpoint(): string {
   return settings.value.aiApiEndpoint?.trim() || "https://api.anthropic.com";
 }
-/** A key is stored, but for another endpoint than the one configured. */
-const aiKeyBoundElsewhere = computed(() => aiKey.boundElsewhere(apiKeyEndpoint()));
+/**
+ * Warning shown under the key, or null: a stored key bound to another
+ * endpoint (or to none), or a key from an earlier version still unencrypted
+ * in the settings because its move to the keychain failed.
+ */
+const aiKeyWarning = computed<string | null>(() => {
+  if (aiKey.legacyKeyStuck.value) return t("settings.aiLegacyKeyStuck");
+  if (!aiKey.boundElsewhere(apiKeyEndpoint())) return null;
+  return aiKey.origin.value
+    ? t("settings.aiApiKeyBoundElsewhere", aiKey.origin.value)
+    : t("settings.aiApiKeyUnbound");
+});
 
 // Draft of the key input, saved on `change` and when the panel closes.
 const {
@@ -2623,15 +2642,16 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 
               <!-- Connect flow -->
               <template v-if="claudeAuthMode === 'connect'">
+                <div v-if="aiKeyWarning" class="sp-row sp-connect-error">
+                  {{ aiKeyWarning }}
+                  <button v-if="aiKey.legacyKeyStuck.value" class="sp-text-btn" @click="aiKey.discardLegacyKey()">{{ t('settings.aiLegacyKeyRemove') }}</button>
+                </div>
                 <div v-if="aiKeyConfigured" class="sp-row">
                   <div class="sp-connected-badge">
                     <span class="sp-connected-dot"></span>
                     <span>{{ t('settings.aiAuthConnected', maskedApiKey) }}</span>
                     <button class="sp-disconnect-btn" @click="disconnectClaude">{{ t('settings.aiAuthDisconnect')
                     }}</button>
-                  </div>
-                  <div v-if="aiKeyBoundElsewhere" class="sp-connect-error">
-                    {{ aiKey.origin.value ? t('settings.aiApiKeyBoundElsewhere', aiKey.origin.value) : t('settings.aiApiKeyUnbound') }}
                   </div>
                 </div>
                 <div v-else class="sp-row">
@@ -2712,8 +2732,9 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                     <span class="sp-hint">{{ t('settings.aiApiKeyStored', maskedApiKey) }}</span>
                     <button class="sp-text-btn" @click="clearApiKey">{{ t('settings.aiAuthDisconnect') }}</button>
                   </div>
-                  <div v-if="aiKeyBoundElsewhere" class="sp-connect-error">
-                    {{ aiKey.origin.value ? t('settings.aiApiKeyBoundElsewhere', aiKey.origin.value) : t('settings.aiApiKeyUnbound') }}
+                  <div v-if="aiKeyWarning" class="sp-connect-error">
+                    {{ aiKeyWarning }}
+                    <button v-if="aiKey.legacyKeyStuck.value" class="sp-text-btn" @click="aiKey.discardLegacyKey()">{{ t('settings.aiLegacyKeyRemove') }}</button>
                   </div>
                   <div v-if="apiKeyError" class="sp-connect-error">{{ apiKeyError }}</div>
                   <span class="sp-hint">{{ t('settings.aiApiKeyAvailable') }} <a
@@ -3026,8 +3047,9 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                   <span class="sp-hint">{{ t('settings.aiApiKeyStored', maskedApiKey) }}</span>
                   <button class="sp-text-btn" @click="clearApiKey">{{ t('settings.aiAuthDisconnect') }}</button>
                 </div>
-                <div v-if="aiKeyBoundElsewhere" class="sp-connect-error">
-                  {{ aiKey.origin.value ? t('settings.aiApiKeyBoundElsewhere', aiKey.origin.value) : t('settings.aiApiKeyUnbound') }}
+                <div v-if="aiKeyWarning" class="sp-connect-error">
+                  {{ aiKeyWarning }}
+                  <button v-if="aiKey.legacyKeyStuck.value" class="sp-text-btn" @click="aiKey.discardLegacyKey()">{{ t('settings.aiLegacyKeyRemove') }}</button>
                 </div>
                 <div v-if="apiKeyError" class="sp-connect-error">{{ apiKeyError }}</div>
               </div>

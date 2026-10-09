@@ -1214,6 +1214,8 @@ const fr: Locale = {
     aiApiKeyStored: "Enregistrée dans le trousseau du système — {0}",
     aiApiKeyBoundElsewhere: "Cette clé est liée à {0}. Saisissez-la à nouveau pour l’utiliser avec ce point d’accès.",
     aiApiKeyUnbound: "Cette clé a été enregistrée avant que les clés soient liées à un point d’accès. Saisissez-la à nouveau pour l’utiliser.",
+    aiLegacyKeyStuck: "Une clé d’API d’une version précédente est encore enregistrée en clair dans les réglages : elle n’a pas pu être déplacée dans le trousseau du système. Saisissez à nouveau votre clé pour la stocker de façon sûre, ou supprimez-la.",
+    aiLegacyKeyRemove: "La supprimer",
     aiApiKeyAvailable: "Disponible sur",
     aiHideKey: "Masquer",
     aiShowKey: "Afficher",

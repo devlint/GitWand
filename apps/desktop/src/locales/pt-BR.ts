@@ -1206,6 +1206,8 @@ const ptBR: Locale = {
     aiApiKeyStored: "Armazenada no chaveiro do sistema — {0}",
     aiApiKeyBoundElsewhere: "Esta chave está vinculada a {0}. Digite-a novamente para usá-la com este endpoint.",
     aiApiKeyUnbound: "Esta chave foi salva antes de as chaves serem vinculadas a um endpoint. Digite-a novamente para usá-la.",
+    aiLegacyKeyStuck: "Uma chave de API de uma versão anterior ainda está salva sem criptografia nas configurações: não foi possível movê-la para o chaveiro do sistema. Digite sua chave novamente para armazená-la com segurança, ou remova-a.",
+    aiLegacyKeyRemove: "Removê-la",
     aiApiKeyAvailable: "Disponível em",
     aiHideKey: "Ocultar",
     aiShowKey: "Mostrar",

@@ -170,3 +170,77 @@ describe("useAiApiKeyDraft (Settings key input)", () => {
     expect(d.error.value).toBe("keychain locked");
   });
 });
+
+describe("useAiApiKey — permanent migration failures and ordering", () => {
+  it("repairs a legacy endpoint saved without a scheme", async () => {
+    const { repairLegacyEndpoint } = await import("../useAiApiKey");
+    expect(repairLegacyEndpoint("")).toBe("https://api.anthropic.com");
+    expect(repairLegacyEndpoint(undefined)).toBe("https://api.anthropic.com");
+    expect(repairLegacyEndpoint("https://api.openai.com/v1")).toBe("https://api.openai.com/v1");
+    expect(repairLegacyEndpoint("localhost:8080/v1")).toBe("http://localhost:8080/v1");
+    expect(repairLegacyEndpoint("127.0.0.1:11434")).toBe("http://127.0.0.1:11434");
+    expect(repairLegacyEndpoint("api.example.com/v1")).toBe("https://api.example.com/v1");
+    // localhost.evil.com is not loopback.
+    expect(repairLegacyEndpoint("localhost.evil.com/v1")).toBe("https://localhost.evil.com/v1");
+    expect(repairLegacyEndpoint("ftp://x")).toBeNull();
+    expect(repairLegacyEndpoint("not a url at all")).toBeNull();
+  });
+
+  it("migrates a key whose endpoint lacks a scheme, bound to the repaired endpoint", async () => {
+    const { stashLegacyAiApiKey, ensureAiApiKeyLoaded } = await import("../useAiApiKey");
+    stashLegacyAiApiKey("sk-local", "localhost:8080/v1");
+    await ensureAiApiKeyLoaded();
+    expect(aiApiKeySet).toHaveBeenCalledWith("sk-local", "http://localhost:8080/v1");
+  });
+
+  it("loadSettings repairs the scheme-less endpoint too", async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ aiApiEndpoint: "localhost:8080/v1" }));
+    const { loadSettings } = await import("../useSettings");
+    expect(loadSettings().aiApiEndpoint).toBe("http://localhost:8080/v1");
+  });
+
+  it("an unusable endpoint is reported, not retried forever in silence; the user can remove the key", async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ aiApiKey: "sk-stuck", aiApiEndpoint: "ftp://x" }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { loadSettings, saveSettings } = await import("../useSettings");
+    const { ensureAiApiKeyLoaded, useAiApiKey } = await import("../useAiApiKey");
+    const s = loadSettings();
+    await ensureAiApiKeyLoaded();
+    expect(aiApiKeySet).not.toHaveBeenCalled();
+    const k = useAiApiKey();
+    expect(k.legacyKeyStuck.value).toBe(true);
+    expect(stored().aiApiKey).toBe("sk-stuck"); // still its only copy
+    k.discardLegacyKey();
+    expect(k.legacyKeyStuck.value).toBe(false);
+    expect(stored()).not.toHaveProperty("aiApiKey");
+    saveSettings(s);
+    expect(stored()).not.toHaveProperty("aiApiKey");
+    warn.mockRestore();
+  });
+
+  it("a keychain failure is reported as a stuck key too", async () => {
+    aiApiKeySet.mockRejectedValueOnce(new Error("keychain locked"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { stashLegacyAiApiKey, ensureAiApiKeyLoaded, useAiApiKey } = await import("../useAiApiKey");
+    stashLegacyAiApiKey("sk-x");
+    await ensureAiApiKeyLoaded();
+    expect(useAiApiKey().legacyKeyStuck.value).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("a clear made while the migration is in flight is not undone by it", async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ aiApiKey: "sk-legacy" }));
+    let finish!: (v: Info) => void;
+    aiApiKeySet.mockImplementationOnce(() => new Promise((r) => { finish = r; }));
+    const { stashLegacyAiApiKey, useAiApiKey } = await import("../useAiApiKey");
+    stashLegacyAiApiKey("sk-legacy", "https://api.anthropic.com");
+    const k = useAiApiKey();
+    const cleared = k.clear();
+    // The migration finishes after the user asked for the clear.
+    finish({ hint: "sk-l••••gacy", origin: "https://api.anthropic.com" });
+    await cleared;
+    expect(aiApiKeySet.mock.calls.map((c) => c[0])).toEqual(["sk-legacy", ""]);
+    expect(k.hint.value).toBeNull();
+    expect(k.configured.value).toBe(false);
+  });
+});

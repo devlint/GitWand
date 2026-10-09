@@ -1225,6 +1225,8 @@ const en = {
     aiApiKeyStored: "Stored in the system keychain — {0}",
     aiApiKeyBoundElsewhere: "This key is tied to {0}. Enter it again to use it with this endpoint.",
     aiApiKeyUnbound: "This key was stored before keys were tied to an endpoint. Enter it again to use it.",
+    aiLegacyKeyStuck: "An API key from an earlier version is still stored unencrypted in the settings: it could not be moved to the system keychain. Enter your key again to store it securely, or remove it.",
+    aiLegacyKeyRemove: "Remove it",
     aiApiKeyAvailable: "Available on",
     aiHideKey: "Hide",
     aiShowKey: "Show",
