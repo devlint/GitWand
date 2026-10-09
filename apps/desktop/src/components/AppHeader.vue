@@ -54,6 +54,11 @@ import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
 import type { RepoTab } from "../composables/useRepoTabs";
 
 const { t } = useI18n();
+
+// Must match the `max-width: 1024px` breakpoint in <style> that hides the
+// action-button labels — tooltips only appear once the label is gone.
+const ICON_MODE_QUERY = "(max-width: 1024px)";
+const isIconMode = () => window.matchMedia(ICON_MODE_QUERY).matches;
 const ai = useAIProvider();
 const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
 const askConfirm = inject<(options: any) => Promise<boolean>>("askConfirm");
@@ -537,7 +542,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <div class="header-action-sep" aria-hidden="true"></div>
           <button
             class="btn btn--secondary header-action-btn"
-            :title="t('stash.title')"
+            v-tooltip="{ text: t('stash.title'), when: isIconMode }"
             :aria-label="t('stash.title')"
             @click="emit('openStash')"
           >
@@ -553,7 +558,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <!-- Tags button -->
           <button
             class="btn btn--secondary header-action-btn"
-            :title="t('tags.title')"
+            v-tooltip="{ text: t('tags.title'), when: isIconMode }"
             :aria-label="t('tags.title')"
             @click="emit('openTags')"
           >
@@ -567,7 +572,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <!-- Worktrees button -->
           <button
             class="btn btn--secondary header-action-btn"
-            :title="t('worktree.title')"
+            v-tooltip="{ text: t('worktree.title'), when: isIconMode }"
             :aria-label="t('worktree.title')"
             @click="emit('openWorktrees')"
           >
@@ -583,7 +588,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <!-- Submodules button -->
           <button
             class="btn btn--secondary header-action-btn"
-            :title="t('submodule.title')"
+            v-tooltip="{ text: t('submodule.title'), when: isIconMode }"
             :aria-label="t('submodule.title')"
             @click="emit('openSubmodules')"
           >
@@ -600,7 +605,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             <div class="header-action-sep" aria-hidden="true"></div>
             <button
               class="btn btn--secondary header-action-btn"
-              :title="t('dashboard.releaseNotesHint')"
+              v-tooltip="{ text: t('dashboard.releaseNotesHint'), when: isIconMode }"
               :aria-label="t('dashboard.releaseNotes')"
               @click="emit('openReleaseNotes')"
             >
@@ -744,7 +749,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   display: flex;
   align-items: center;
   gap: var(--space-6);
-  height: var(--header-height);
+  min-height: var(--header-height);
   padding: 0 var(--space-6);
 }
 
@@ -758,6 +763,41 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .header-search {
   margin-left: auto;
+}
+
+/* Narrow windows: secondary actions collapse to icon-only (label stays in
+   title/aria-label), then the row wraps instead of overflowing. */
+@media (max-width: 1024px) {
+  /* Keep in sync with ICON_MODE_QUERY in <script setup>. */
+  .header-action-btn > span:not(.header-action-btn__count) {
+    display: none;
+  }
+  .header-action-btn {
+    padding-inline: var(--space-4);
+  }
+}
+
+@media (max-width: 640px) {
+  .app-header__row {
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+  .header-left {
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+  .header-action-sep {
+    display: none;
+  }
+  .header-search {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+  .merge-popover,
+  .undo-popover {
+    width: min(340px, calc(100vw - 2 * var(--space-4)));
+  }
 }
 
 .header-action-sep {

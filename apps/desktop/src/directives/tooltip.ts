@@ -4,6 +4,7 @@
  * Usage:
  *   <button v-tooltip="'Push to remote'">…</button>
  *   <button v-tooltip="{ text: 'Push', position: 'left' }">…</button>
+ *   <button v-tooltip="{ text: 'Push', when: () => isCompact() }">…</button>
  *
  * Positions: "top" (default) | "bottom" | "left" | "right"
  *
@@ -18,6 +19,8 @@ type TooltipPosition = "top" | "bottom" | "left" | "right";
 interface TooltipOptions {
   text: string;
   position?: TooltipPosition;
+  /** Evaluated on each hover/focus; the tooltip is skipped when it returns false. */
+  when?: () => boolean;
 }
 
 interface TooltipEl extends HTMLElement {
@@ -76,6 +79,7 @@ function place(tip: HTMLElement, anchor: HTMLElement, position: TooltipPosition)
 
 function show(el: TooltipEl, opts: TooltipOptions) {
   hide(el); // ensure clean state
+  if (opts.when && !opts.when()) return;
 
   const tip = document.createElement("div");
   tip.className = "gw-tooltip";
