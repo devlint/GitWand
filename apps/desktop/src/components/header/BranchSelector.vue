@@ -466,7 +466,7 @@ const {
 // A merge-back whose cleanup failed still merged: news, not an error.
 const scratchNotice = computed(() =>
   scratchCleanupWarning.value
-    ? `${t("aiTask.mergedCleanupFailed")} ${scratchCleanupWarning.value}`
+    ? `${t("scratch.mergedCleanupFailed")} ${scratchCleanupWarning.value}`
     : null,
 );
 

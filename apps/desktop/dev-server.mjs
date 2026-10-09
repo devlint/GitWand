@@ -8143,6 +8143,12 @@ async function handleRequest(req, res) {
       const ref = sourceBranch ?? "HEAD";
       try {
         execFileSync("git", ["worktree", "add", "-b", branchName, scratchPath, ref], { cwd: resolvedCwd, encoding: "utf-8" });
+        // Mirror Rust: an AI task (no explicit source) records the commit it
+        // starts from, for merge-back's base guard; `branch -D` drops it.
+        if (!sourceBranch?.trim()) {
+          const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" }).trim();
+          execFileSync("git", ["config", `branch.${branchName}.gitwandBase`, base], { cwd: resolvedCwd });
+        }
         return jsonResponse(req, res, {
           path: scratchPath,
           branch: branchName,

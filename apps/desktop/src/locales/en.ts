@@ -2139,6 +2139,7 @@ const en = {
     openIsolated: "Open isolated worktree",
     mergeBack: "Bring changes back",
     discard: "Discard scratch",
+    mergedCleanupFailed: "Changes merged back, but the scratch worktree is still on disk. Discard it to finish.",
     created: "Scratch worktree created",
     mergedBack: "Changes merged back into the main checkout",
     discarded: "Scratch worktree discarded",

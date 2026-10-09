@@ -342,17 +342,16 @@ const commitReviewNav = useCommitReviewNav({
   onHelp: () => showCommitReviewNavHelp(),
 });
 
-/** Shared transient toast for Commit Review's own non-error feedback (the
- *  `?` help reminder, a clean-pass confirmation) — reuses the existing toast
- *  affordance rather than inventing a second one (verifier issue #5). */
-function showCommitReviewToast(title: string, detail: string) {
-  showDetailToast(title, detail);
-}
-
-/** The shared toast, shown for `ms` (0: until dismissed). */
+/**
+ * The shared toast (Commit Review feedback, Launchpad actions, repo
+ * successes…), shown for `ms`. `ms = 0` makes it sticky: shown until
+ * dismissed, and not replaced by a transient one meanwhile.
+ */
 function showDetailToast(title: string, detail: string | null, ms = 3000) {
+  if (stickyToast && ms > 0) return;
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   if (dismissTimer != null) { window.clearTimeout(dismissTimer); dismissTimer = null; }
+  stickyToast = ms === 0;
   successToastLeaving.value = false;
   successToast.value = title;
   successToastDetail.value = detail || null;
@@ -362,7 +361,7 @@ function showDetailToast(title: string, detail: string | null, ms = 3000) {
 /** `?` — a one-line toast (per the plan: reuse the existing toast
  *  affordance, no new help modal). */
 function showCommitReviewNavHelp() {
-  showCommitReviewToast(
+  showDetailToast(
     t("commitReview.navHelp"),
     `${t("commitReview.navNext")} (N) · ${t("commitReview.navPrev")} (P) · ${t("commitReview.dismiss")} (X)`,
   );
@@ -374,7 +373,7 @@ function showCommitReviewNavHelp() {
  *  Called from `reviewStaged` below only when the run actually completed
  *  (not skipped, not superseded) and produced no error. */
 function showCommitReviewCleanToast() {
-  showCommitReviewToast(t("commitReview.summaryClean"), "");
+  showDetailToast(t("commitReview.summaryClean"), null);
 }
 
 /** Task 2 (v3.7.0) — the commit-review keymap is only "active" (bare-letter
@@ -740,8 +739,12 @@ const memorizeToast = ref<{ path: string; strategy: ResolutionStrategy } | null>
 let successTimer: number | null = null;
 // The fade-out of a dismissed toast, cancelled when a new one replaces it.
 let dismissTimer: number | null = null;
+let stickyToast = false;
 
 function dismissToast() {
+  // Dismissed by hand before its timer: the timer must not close the next one.
+  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  stickyToast = false;
   successToastLeaving.value = true;
   dismissTimer = window.setTimeout(() => {
     successToast.value = null;
@@ -752,11 +755,6 @@ function dismissToast() {
   }, 200);
 }
 
-/** Transient toast for Launchpad mutating actions (merge/nudge) — reuses the
- *  existing toast affordance rather than inventing a second one. */
-function showLaunchpadToast(title: string) {
-  showDetailToast(title, null);
-}
 
 watch(repoSuccess, (val) => {
   if (!val) return;
@@ -3011,7 +3009,7 @@ async function openLaunchpadMergePr(pr: PullRequest & { repoPath?: string }) {
   // not `!prPanel.error.value` (sticky from any unrelated prior PR action,
   // so it can both mask a genuine failure and suppress today's success).
   if (prPanel.mergingPr.value === null) {
-    showLaunchpadToast(t("launchpad.toast.merged"));
+    showDetailToast(t("launchpad.toast.merged"), null);
   } else {
     // On failure `prPanel.error` is only rendered inside PrDetailView, which
     // isn't mounted from the Launchpad — funnel it into the app-wide
@@ -3075,7 +3073,7 @@ async function openLaunchpadAutoMergePr(pr: PullRequest & { repoPath?: string })
   if (prPanel.error.value) {
     repoError.value = prPanel.error.value;
   } else {
-    showLaunchpadToast(t("launchpad.toast.autoMergeArmed"));
+    showDetailToast(t("launchpad.toast.autoMergeArmed"), null);
   }
 }
 
@@ -3118,7 +3116,7 @@ async function confirmNudgePr() {
   try {
     await ghIssueAddComment(pr.repoPath!, pr.number, comment);
     nudgeConfirm.value = null;
-    showLaunchpadToast(t("launchpad.toast.nudged"));
+    showDetailToast(t("launchpad.toast.nudged"), null);
   } catch (err: any) {
     repoError.value = err?.message ?? String(err);
     if (nudgeConfirm.value) nudgeConfirm.value.busy = false;

@@ -301,37 +301,43 @@ pub(crate) fn terminal_resize(id: u64, cols: u16, rows: u16) -> Result<(), Strin
 pub(crate) async fn terminal_close(id: u64) -> Result<(), String> {
     let handle = lock_sessions().remove(&id);
     if let Some(h) = handle {
-        tauri::async_runtime::spawn_blocking(move || close_sessions(vec![h]))
+        tauri::async_runtime::spawn_blocking(move || close_sessions(vec![h], true))
             .await
             .map_err(|e| format!("terminal close failed: {e}"))?;
     }
     Ok(())
 }
 
-/// Tue toutes les sessions (appelé au quit de l'app).
+/// Tue toutes les sessions (appelé au quit de l'app, sur le thread de la
+/// boucle d'événements) : grâce SIGHUP seulement, sans attendre les leaders.
 pub(crate) fn terminal_close_all() {
     let handles: Vec<PtyHandle> = lock_sessions().drain().map(|(_, h)| h).collect();
-    close_sessions(handles);
+    close_sessions(handles, false);
 }
 
 /// Stop sessions' processes, not only their leaders, and reap the leaders:
 /// once this returns they no longer write anywhere (merge-back of an AI task
 /// reads the scratch right after). SIGHUP first, as a terminal hanging up
 /// does, so shells save their history and agents their session; SIGKILL for
-/// whatever is left after a grace period. The wait is bounded, for a process
-/// stuck in an uninterruptible syscall. On Windows only the leader is killed.
-fn close_sessions(mut handles: Vec<PtyHandle>) {
+/// whatever is left after a grace period. `wait_leaders` then waits for the
+/// leaders, bounded, for a process stuck in an uninterruptible syscall. On
+/// Windows only the leader is killed.
+fn close_sessions(mut handles: Vec<PtyHandle>, wait_leaders: bool) {
     #[cfg(unix)]
     {
         let groups: Vec<libc::pid_t> = handles.iter().flat_map(session_groups).collect();
         stop_groups(&groups, || {
-            handles
-                .iter_mut()
-                .all(|h| !matches!(h.child.try_wait(), Ok(None)))
+            // Reap the leaders, so a zombie doesn't keep its group alive.
+            for h in &mut handles {
+                let _ = h.child.try_wait();
+            }
         });
     }
     for h in &mut handles {
         let _ = h.child.kill();
+    }
+    if !wait_leaders {
+        return;
     }
     let deadline = Instant::now() + Duration::from_secs(2);
     for h in &mut handles {
@@ -363,16 +369,28 @@ fn session_groups(h: &PtyHandle) -> Vec<libc::pid_t> {
     groups
 }
 
-/// SIGHUP `groups`, give them up to 500 ms (or until `exited`), then SIGKILL
-/// what is left.
+/// SIGHUP `groups`, give them up to 500 ms to empty, then SIGKILL what is
+/// left. Every member counts, not only the leaders: an agent still saving its
+/// session after its shell exited gets the whole grace period. `reap` runs
+/// before each check, for the caller to reap its own children.
 #[cfg(unix)]
-fn stop_groups(groups: &[libc::pid_t], mut exited: impl FnMut() -> bool) {
+fn stop_groups(groups: &[libc::pid_t], mut reap: impl FnMut()) {
     signal_groups(groups, libc::SIGHUP);
     let deadline = Instant::now() + Duration::from_millis(500);
-    while !exited() && Instant::now() < deadline {
+    loop {
+        reap();
+        if groups.iter().all(|&g| !group_alive(g)) || Instant::now() >= deadline {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(10));
     }
     signal_groups(groups, libc::SIGKILL);
+}
+
+#[cfg(unix)]
+fn group_alive(pgid: libc::pid_t) -> bool {
+    // SAFETY: signal 0 only checks the group has a member.
+    unsafe { libc::killpg(pgid, 0) == 0 }
 }
 
 #[cfg(unix)]
@@ -433,9 +451,38 @@ mod tests {
         let (mut leader, child) = spawn_group("(trap '' HUP; sleep 30) & echo $!; wait");
         let leader_pid = leader.id() as libc::pid_t;
 
-        stop_groups(&[leader_pid], || false);
+        stop_groups(&[leader_pid], || {
+            let _ = leader.try_wait();
+        });
         leader.wait().unwrap();
         assert!(wait_gone(child), "the leader's child must be killed too");
+    }
+
+    #[test]
+    fn stopping_the_group_gives_children_the_grace_period_too() {
+        // The leader exits at once on SIGHUP; its child needs 200 ms to
+        // "save" before exiting, like an agent writing its session.
+        let marker =
+            std::env::temp_dir().join(format!("gitwand-term-grace-{}", std::process::id()));
+        // The child prints its pid only once its trap is set.
+        let script = format!(
+            r#"sh -c 'trap "sleep 0.2; echo saved > {}; exit 0" HUP; echo $$; while :; do sleep 0.05; done' & trap 'exit 0' HUP; wait"#,
+            marker.display()
+        );
+        let (mut leader, child) = spawn_group(&script);
+        let leader_pid = leader.id() as libc::pid_t;
+
+        stop_groups(&[leader_pid], || {
+            let _ = leader.try_wait();
+        });
+        let _ = leader.wait();
+        assert!(wait_gone(child));
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap_or_default(),
+            "saved\n",
+            "the child must get to finish before SIGKILL"
+        );
+        let _ = std::fs::remove_file(marker);
     }
 
     #[test]
@@ -450,8 +497,9 @@ mod tests {
 
         let mut status = None;
         stop_groups(&[leader_pid], || {
-            status = leader.try_wait().unwrap();
-            status.is_some()
+            if status.is_none() {
+                status = leader.try_wait().unwrap();
+            }
         });
         let status = status.or_else(|| leader.wait().ok()).unwrap();
         assert!(status.success(), "the leader exits on its own on SIGHUP");

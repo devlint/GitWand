@@ -204,12 +204,11 @@
     />
 
     <!-- ─── Scratch worktree (v2.20.0) ───────────────────── -->
-    <!-- Merged, but the scratch is still on disk: shown even once no
-         conflict is left, which hides the block below. -->
+    <!-- Merged, but the scratch is still on disk. -->
     <div v-if="scratchNotice" class="preview-scratch-notice" role="status">
       {{ scratchNotice }}
     </div>
-    <div v-if="summary.conflictingFiles > 0" class="preview-scratch">
+    <div v-if="summary.conflictingFiles > 0 || scratchActive" class="preview-scratch">
       <!-- Error from the last scratch operation -->
       <div v-if="scratchError" class="preview-scratch-error" role="alert">
         {{ scratchError }}

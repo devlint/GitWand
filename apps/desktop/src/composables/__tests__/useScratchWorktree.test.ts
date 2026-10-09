@@ -61,7 +61,7 @@ describe("useScratchWorktree", () => {
     expect(mockMergeBack).toHaveBeenCalledWith("/repos/main", WT.path, true);
   });
 
-  it("merge-back that merged but could not remove the scratch succeeds with a warning", async () => {
+  it("merge-back that merged but could not remove the scratch succeeds with a warning and keeps it", async () => {
     mockCreate.mockResolvedValue(WT);
     mockMergeBack.mockResolvedValue({ cleanup_warning: "worktree is locked" });
     const { active, error, cleanupWarning, create, mergeBack } = useScratchWorktree(() => "/repos/main");
@@ -70,7 +70,8 @@ describe("useScratchWorktree", () => {
     const ok = await mergeBack();
 
     expect(ok).toBe(true);
-    expect(active.value).toBeNull();
+    // Kept, so it can still be discarded (which drops its branch too).
+    expect(active.value).toEqual(WT);
     expect(error.value).toBeNull();
     expect(cleanupWarning.value).toBe("worktree is locked");
 

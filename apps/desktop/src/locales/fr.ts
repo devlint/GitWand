@@ -2107,6 +2107,7 @@ const fr: Locale = {
     openIsolated: "Ouvrir un worktree isolé",
     mergeBack: "Ramener les changements",
     discard: "Abandonner le scratch",
+    mergedCleanupFailed: "Changements ramenés, mais le worktree scratch est resté sur le disque. Abandonnez-le pour terminer.",
     created: "Worktree scratch créé",
     mergedBack: "Changements ramenés dans le checkout principal",
     discarded: "Worktree scratch abandonné",

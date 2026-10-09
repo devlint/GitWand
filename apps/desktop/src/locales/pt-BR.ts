@@ -2097,6 +2097,7 @@ const ptBR: Locale = {
     openIsolated: "Abrir worktree isolado",
     mergeBack: "Trazer as alterações de volta",
     discard: "Descartar o worktree temporário",
+    mergedCleanupFailed: "Alterações trazidas de volta, mas o worktree temporário continua no disco. Descarte-o para concluir.",
     created: "Worktree temporário criado",
     mergedBack: "Alterações trazidas de volta para o checkout principal",
     discarded: "Worktree temporário descartado",
