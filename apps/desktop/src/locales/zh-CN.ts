@@ -448,6 +448,10 @@ const zhCN: Locale = {
     graphSearchFilterTitle: "仅显示匹配的提交",
     filterCurrentBranch: "仅当前分支",
     filterMineCommits: "仅我的提交",
+    wipAdded: "新增 {0} 个文件",
+    wipModified: "修改 {0} 个文件",
+    wipDeleted: "删除 {0} 个文件",
+    wipRenamed: "重命名 {0} 个文件",
   },
   commit: {
     summary: "概要",

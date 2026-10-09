@@ -450,6 +450,10 @@ const fr: Locale = {
     graphSearchFilterTitle: "Afficher uniquement les commits correspondants",
     filterCurrentBranch: "Branche courante uniquement",
     filterMineCommits: "Mes commits uniquement",
+    wipAdded: "{0} fichier(s) ajouté(s)",
+    wipModified: "{0} fichier(s) modifié(s)",
+    wipDeleted: "{0} fichier(s) supprimé(s)",
+    wipRenamed: "{0} fichier(s) renommé(s)",
   },
   commit: {
     summary: "R\u00e9sum\u00e9",

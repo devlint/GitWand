@@ -457,6 +457,10 @@ const en = {
     graphSearchFilterTitle: "Show only matching commits",
     filterCurrentBranch: "Current branch only",
     filterMineCommits: "My commits only",
+    wipAdded: "{0} file(s) added",
+    wipModified: "{0} file(s) modified",
+    wipDeleted: "{0} file(s) deleted",
+    wipRenamed: "{0} file(s) renamed",
   },
   commit: {
     summary: "Summary",

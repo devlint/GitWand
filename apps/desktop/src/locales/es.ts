@@ -445,6 +445,10 @@ const es: Locale = {
     graphSearchFilterTitle: "Mostrar solo los commits coincidentes",
     filterCurrentBranch: "Solo rama actual",
     filterMineCommits: "Solo mis commits",
+    wipAdded: "{0} archivo(s) añadido(s)",
+    wipModified: "{0} archivo(s) modificado(s)",
+    wipDeleted: "{0} archivo(s) eliminado(s)",
+    wipRenamed: "{0} archivo(s) renombrado(s)",
   },
   commit: {
     summary: "Resumen",

@@ -446,6 +446,10 @@ const ptBR: Locale = {
     graphSearchFilterTitle: "Mostrar apenas os commits correspondentes",
     filterCurrentBranch: "Apenas branch atual",
     filterMineCommits: "Apenas meus commits",
+    wipAdded: "{0} arquivo(s) adicionado(s)",
+    wipModified: "{0} arquivo(s) modificado(s)",
+    wipDeleted: "{0} arquivo(s) excluído(s)",
+    wipRenamed: "{0} arquivo(s) renomeado(s)",
   },
   commit: {
     summary: "Resumo",
