@@ -242,6 +242,10 @@ const fr: Locale = {
     trailerRbLabel: "Relu par",
     trailerRbHelp: "Ajoute « Reviewed-by : nom» au commit. Enregistre qui a relu et approuvé ce changement. Visible dans l’historique git pour la traçabilité.",
     aiGenerateTooltip: "Générer un message avec l'IA",
+    aiRegenerate: "Régénérer",
+    aiShorten: "Raccourcir",
+    aiDetail: "Détailler",
+    aiChangeLang: "Changer de langue",
     aiGeneratingTooltip: "Génération en cours\u2026",
     // Empty
     cleanTree: "Espace de travail propre",
@@ -2270,6 +2274,7 @@ const fr: Locale = {
     noAiProvider: "Aucun provider IA configur\u00e9. Ouvre les R\u00e9glages pour en activer un.",
     noAiProviderShort: "Aucun provider IA configur\u00e9.",
     emptyAiResponse: "Le provider IA n'a retourn\u00e9 aucune r\u00e9ponse.",
+    noMessageToTransform: "Aucun message \u00e0 transformer \u2014 g\u00e9n\u00e8re d'abord un message.",
     aiQueryRequired: "Saisis une requ\u00eate avant de lancer une recherche IA.",
     aiSearchUnparsable: "La r\u00e9ponse du provider IA n'a pas pu \u00eatre analys\u00e9e.",
     aiBranchNameUnparsable: "La r\u00e9ponse du provider IA n'a pas pu \u00eatre convertie en nom de branche valide.",

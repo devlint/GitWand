@@ -249,6 +249,10 @@ const en = {
     trailerRbLabel: "Reviewed by",
     trailerRbHelp: "Adds \u201cReviewed-by: name\u201d to the commit. Records who reviewed and approved this change. Appears in the git history for traceability.",
     aiGenerateTooltip: "Generate message with AI",
+    aiRegenerate: "Regenerate",
+    aiShorten: "Shorten",
+    aiDetail: "Add detail",
+    aiChangeLang: "Change language",
     aiGeneratingTooltip: "Generating\u2026",
     // Empty
     cleanTree: "Working tree clean",
@@ -2302,6 +2306,7 @@ const en = {
     noAiProvider: "No AI provider configured. Open Settings to enable one.",
     noAiProviderShort: "No AI provider configured.",
     emptyAiResponse: "The AI provider returned no response.",
+    noMessageToTransform: "No message to transform \u2014 generate one first.",
     aiQueryRequired: "Type a query before running an AI search.",
     aiSearchUnparsable: "The AI provider's response could not be parsed.",
     aiBranchNameUnparsable: "The AI provider's response could not be converted into a valid branch name.",
