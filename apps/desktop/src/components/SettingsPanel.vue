@@ -119,7 +119,7 @@ import {
   settingsRevision,
 } from "../composables/useSettings";
 import { gitCommitTemplatePath, openExternalUrl, aiHttpRequest, telemetryGetState, telemetrySetEnabled } from "../utils/backend";
-import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings, endpointOrigin, repairLegacyEndpoint } from "../composables/useAiApiKey";
+import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings, normalizeEndpointSetting } from "../composables/useAiApiKey";
 export type { AIProvider };
 
 // Re-export for back-compat — earlier callers imported this shape from
@@ -393,11 +393,7 @@ function loadSettings(): Settings {
     if (raw) {
       const s: Settings = stripAiApiKey({ ...defaultSettings, ...JSON.parse(raw) });
       // Same repair as useSettings.loadSettings for a scheme-less endpoint.
-      const endpoint = s.aiApiEndpoint?.trim() ?? "";
-      if (endpoint && !endpointOrigin(endpoint)) {
-        const repaired = repairLegacyEndpoint(endpoint);
-        if (repaired) s.aiApiEndpoint = repaired;
-      }
+      s.aiApiEndpoint = normalizeEndpointSetting(s.aiApiEndpoint);
       return s;
     }
   } catch { /* ignore */ }

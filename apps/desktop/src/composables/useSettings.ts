@@ -14,7 +14,7 @@ import { detectLocale, isSupportedLocale } from "../locales";
 import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
 import type { AIProvider } from "./useAIProvider";
-import { endpointOrigin, repairLegacyEndpoint, stashLegacyAiApiKey, stripAiApiKey, toPersistedSettings } from "./useAiApiKey";
+import { normalizeEndpointSetting, stashLegacyAiApiKey, stripAiApiKey, toPersistedSettings } from "./useAiApiKey";
 import { DEFAULT_TEMPLATE_PROMPTS, LEGACY_RELEASE_NOTES_RULES_HEADER } from "./aiTemplateDefaults";
 import type { SwitchBehavior } from "../utils/branchSwitchDecision";
 import type { PullDirtyBehavior } from "../utils/pullDirtyDecision";
@@ -678,11 +678,7 @@ export function loadSettings(): AppSettings {
       // and cannot carry the key binding: give it the one the migration of
       // the key used (see repairLegacyEndpoint), in memory — persisted with
       // the next save.
-      const endpoint = typeof s.aiApiEndpoint === "string" ? s.aiApiEndpoint.trim() : "";
-      if (endpoint && !endpointOrigin(endpoint)) {
-        const repaired = repairLegacyEndpoint(endpoint);
-        if (repaired) s.aiApiEndpoint = repaired;
-      }
+      s.aiApiEndpoint = normalizeEndpointSetting(s.aiApiEndpoint);
       const langs = migrateAiLanguages(stored, resolveUiLocale());
       if (langs) {
         Object.assign(s, langs);

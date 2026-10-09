@@ -59,21 +59,20 @@ export function useRepoRemoteImages(cwd: Ref<string | null | undefined>) {
  * Comment body → whether rendering it withholds a remote image. Rendering is
  * markdown-it + DOMPurify, too costly to redo for every comment of the file
  * on each recompute; the answer depends on the body alone (rendered without
- * consent) and the global setting, so it is cached by those. Bounded: dropped wholesale when full.
+ * consent, global setting off), so it is cached by body. Bounded: dropped wholesale when full.
  */
 const withheldByBody = new Map<string, boolean>();
 const WITHHELD_CACHE_MAX = 500;
 
 function bodyWithholdsImages(body: string): boolean {
-  // The global setting changes the answer: part of the key (and read through
-  // the reactive settings, so a computed using this re-runs on toggle).
-  const global = useSettings().settings.value.allowRemoteImages === true;
-  const key = `${global ? 1 : 0}\u0000${body}`;
-  let v = withheldByBody.get(key);
+  // With remote images allowed globally nothing is withheld. Read through the
+  // reactive settings, so a computed using this re-runs on toggle.
+  if (useSettings().settings.value.allowRemoteImages === true) return false;
+  let v = withheldByBody.get(body);
   if (v === undefined) {
     v = hasBlockedRemoteImages(renderMarkdown(body, { allowRemoteImages: false }));
     if (withheldByBody.size >= WITHHELD_CACHE_MAX) withheldByBody.clear();
-    withheldByBody.set(key, v);
+    withheldByBody.set(body, v);
   }
   return v;
 }

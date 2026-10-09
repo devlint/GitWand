@@ -95,7 +95,11 @@ describe("commentsWithheldImages — cached by body", () => {
     expect(renders).toBe(1);
     useSettings().settings.value.allowRemoteImages = true;
     try {
-      expect(commentsWithheldImages(list, false)).toBe(false);
+      const before = spy.mock.calls.length;
+      const other = [comment(`another ![y](${IMG}) ${Math.random()}`)];
+      expect(commentsWithheldImages(other, false)).toBe(false);
+      // Allowed globally: answered without rendering anything.
+      expect(spy.mock.calls.length).toBe(before);
     } finally {
       useSettings().settings.value.allowRemoteImages = false;
     }

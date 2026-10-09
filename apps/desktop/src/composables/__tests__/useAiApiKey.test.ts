@@ -184,6 +184,33 @@ describe("useAiApiKey — permanent migration failures and ordering", () => {
     expect(repairLegacyEndpoint("localhost.evil.com/v1")).toBe("https://localhost.evil.com/v1");
     expect(repairLegacyEndpoint("ftp://x")).toBeNull();
     expect(repairLegacyEndpoint("not a url at all")).toBeNull();
+    // Private, link-local, Docker and LAN-name hosts are reached over http.
+    for (const [raw, want] of [
+      ["192.168.1.20:11434", "http://192.168.1.20:11434"],
+      ["10.0.0.5/v1", "http://10.0.0.5/v1"],
+      ["172.20.1.1:8080", "http://172.20.1.1:8080"],
+      ["169.254.0.9", "http://169.254.0.9"],
+      ["0.0.0.0:11434", "http://0.0.0.0:11434"],
+      ["host.docker.internal:11434", "http://host.docker.internal:11434"],
+      ["gpu-box.local:8000/v1", "http://gpu-box.local:8000/v1"],
+      ["ollama:11434", "http://ollama:11434"],
+      ["[::1]:8080", "http://[::1]:8080"],
+      // Public hosts keep https, explicit port or not.
+      ["172.32.0.1", "https://172.32.0.1"],
+      ["8.8.8.8:8443", "https://8.8.8.8:8443"],
+      ["api.example.com:8443/v1", "https://api.example.com:8443/v1"],
+    ] as const) {
+      expect(repairLegacyEndpoint(raw), raw).toBe(want);
+    }
+  });
+
+  it("normalizeEndpointSetting repairs scheme-less endpoints only", async () => {
+    const { normalizeEndpointSetting } = await import("../useAiApiKey");
+    expect(normalizeEndpointSetting("localhost:8080/v1")).toBe("http://localhost:8080/v1");
+    expect(normalizeEndpointSetting("https://api.openai.com/v1")).toBe("https://api.openai.com/v1");
+    expect(normalizeEndpointSetting("")).toBe("");
+    expect(normalizeEndpointSetting("ftp://x")).toBe("ftp://x");
+    expect(normalizeEndpointSetting(undefined)).toBe("");
   });
 
   it("migrates a key whose endpoint lacks a scheme, bound to the repaired endpoint", async () => {

@@ -92,20 +92,57 @@ function removeLegacyFromStorage(): void {
 }
 
 /**
+ * True for a host that is reached over plain http in practice: loopback,
+ * private (RFC 1918), link-local, CGNAT and unspecified IPv4 addresses, IPv6
+ * loopback / ULA / link-local, `localhost`, `*.local`, `*.internal`
+ * (`host.docker.internal`) and single-label names (a Docker service name
+ * such as `ollama`).
+ */
+function isLocalHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(h);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (h.includes(":")) return h === "::1" || /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
+  return h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local")
+    || h.endsWith(".internal") || !h.includes(".");
+}
+
+/**
  * The endpoint a legacy key was used with, made usable for the binding:
  * as is when it is an http(s) URL, with a scheme added when it lacks one
  * (`localhost:8080/v1` — which the old webview `fetch` could never reach
- * anyway): `http://` for a loopback host, `https://` otherwise. Empty means
- * the Anthropic default. Null when nothing sensible can be made of it.
+ * anyway): `http://` for a local or private host (`isLocalHost`), `https://`
+ * otherwise. Empty means the Anthropic default. Null when nothing sensible
+ * can be made of it.
  */
 export function repairLegacyEndpoint(raw: unknown): string | null {
   const t = typeof raw === "string" ? raw.trim() : "";
   if (!t) return DEFAULT_ENDPOINT;
   if (endpointOrigin(t)) return t;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return null; // another scheme: leave it
-  const loopback = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(?=[:/]|$)/i.test(t);
-  const fixed = (loopback ? "http://" : "https://") + t;
+  let host: string;
+  try {
+    host = new URL(`http://${t}`).hostname;
+  } catch {
+    return null;
+  }
+  const fixed = (isLocalHost(host) ? "http://" : "https://") + t;
   return endpointOrigin(fixed) ? fixed : null;
+}
+
+/**
+ * The `aiApiEndpoint` setting as it should be used: repaired when it was saved
+ * without a scheme (see repairLegacyEndpoint), unchanged otherwise — empty or
+ * beyond repair included. Shared by every settings loader.
+ */
+export function normalizeEndpointSetting(endpoint: unknown): string {
+  const t = typeof endpoint === "string" ? endpoint.trim() : "";
+  if (!t || endpointOrigin(t)) return typeof endpoint === "string" ? endpoint : "";
+  return repairLegacyEndpoint(t) ?? endpoint as string;
 }
 
 /**
