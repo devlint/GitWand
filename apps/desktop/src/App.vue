@@ -346,11 +346,16 @@ const commitReviewNav = useCommitReviewNav({
  *  `?` help reminder, a clean-pass confirmation) — reuses the existing toast
  *  affordance rather than inventing a second one (verifier issue #5). */
 function showCommitReviewToast(title: string, detail: string) {
+  showDetailToast(title, detail);
+}
+
+/** The shared toast with a detail line, shown for `ms`. */
+function showDetailToast(title: string, detail: string, ms = 3000) {
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   successToastLeaving.value = false;
   successToast.value = title;
   successToastDetail.value = detail;
-  successTimer = window.setTimeout(dismissToast, 3000);
+  successTimer = window.setTimeout(dismissToast, ms);
 }
 
 /** `?` — a one-line toast (per the plan: reuse the existing toast
@@ -2621,8 +2626,11 @@ async function onAiTaskMergeBack() {
     // index.lock or open handle that would block the worktree removal.
     await termSessions.disposeRepo(target.path).catch(() => {});
     fileExplorer.disposeRepo(target.path);
-    await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
+    const { cleanup_warning } = await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
+    // Merged even when the scratch couldn't be removed: the task is closed,
+    // the leftover worktree is deleted like any other.
     await finalizeWorktreeRemoval(target.path, target.projectPath);
+    if (cleanup_warning) showDetailToast(t("aiTask.mergedCleanupFailed"), cleanup_warning, 10000);
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
   } finally {

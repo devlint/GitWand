@@ -752,6 +752,15 @@ pub struct ScratchWorktree {
     pub created_at: u64,
 }
 
+/// Outcome of a successful merge-back: the task's changes are in the main
+/// checkout. Removing the scratch afterwards is best-effort; when it fails
+/// (locked worktree, Windows file lock) the merge still stands and the
+/// failure is reported here instead of as an error.
+#[derive(Serialize, Clone, Debug)]
+pub struct ScratchMergeBackOutcome {
+    pub cleanup_warning: Option<String>,
+}
+
 // ─── Claude CLI ────────────────────────────────────────────────────
 
 #[derive(Serialize)]

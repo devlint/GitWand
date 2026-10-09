@@ -2817,6 +2817,16 @@ export async function scratchWorktreeCreate(
   return res.json() as Promise<ScratchWorktree>;
 }
 
+/** Résultat d'un merge-back réussi. */
+export interface ScratchMergeBackOutcome {
+  /**
+   * Erreur de la suppression du scratch, faite après coup : le merge-back a
+   * réussi, mais le worktree est resté sur le disque (verrouillé, fichier
+   * ouvert sous Windows). `null` quand tout a été nettoyé.
+   */
+  cleanup_warning: string | null;
+}
+
 /**
  * Ramène les changements résolus du worktree scratch dans le checkout principal
  * en une opération, puis supprime + prune le scratch.
@@ -2825,8 +2835,12 @@ export async function scratchWorktreeMergeBack(
   cwd: string,
   scratchPath: string,
   snapshotsEnabled?: boolean,
-): Promise<void> {
-  await tauriInvoke<void>("scratch_worktree_merge_back", { cwd, scratchPath, snapshotsEnabled });
+): Promise<ScratchMergeBackOutcome> {
+  return tauriInvoke<ScratchMergeBackOutcome>("scratch_worktree_merge_back", {
+    cwd,
+    scratchPath,
+    snapshotsEnabled,
+  });
 }
 
 /** Abandonne le worktree scratch (remove --force + prune), sans rien ramener. */

@@ -295,10 +295,19 @@ pub(crate) fn terminal_resize(id: u64, cols: u16, rows: u16) -> Result<(), Strin
     result
 }
 
+/// Async so the bounded wait below runs off the main thread.
 #[tauri::command]
-pub(crate) fn terminal_close(id: u64) -> Result<(), String> {
-    if let Some(mut h) = lock_sessions().remove(&id) {
-        let _ = h.child.kill();
+pub(crate) async fn terminal_close(id: u64) -> Result<(), String> {
+    let handle = lock_sessions().remove(&id);
+    if let Some(mut h) = handle {
+        kill_session(&mut h);
+        // Reap the leader: once this returns, it no longer writes anywhere
+        // (merge-back of an AI task reads the scratch right after). Bounded,
+        // for a process stuck in an uninterruptible syscall.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while matches!(h.child.try_wait(), Ok(None)) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
     Ok(())
 }
@@ -307,6 +316,77 @@ pub(crate) fn terminal_close(id: u64) -> Result<(), String> {
 pub(crate) fn terminal_close_all() {
     let mut map = lock_sessions();
     for (_, mut h) in map.drain() {
-        let _ = h.child.kill();
+        kill_session(&mut h);
+    }
+}
+
+/// Kill a session's processes, not only its leader. The leader runs in its
+/// own session and process group (portable-pty `setsid`s it); what it spawns
+/// stays in that group, except jobs an interactive shell moves to their own,
+/// of which the foreground one is the terminal's process group. A background
+/// job of the shell, or a process that called `setsid` itself, survives.
+/// On Windows only the leader is killed.
+fn kill_session(h: &mut PtyHandle) {
+    #[cfg(unix)]
+    {
+        let foreground = h.master.lock().ok().and_then(|m| m.process_group_leader());
+        let leader = h.child.process_id().map(|p| p as libc::pid_t);
+        kill_process_groups(&[leader, foreground]);
+    }
+    let _ = h.child.kill();
+}
+
+#[cfg(unix)]
+fn kill_process_groups(groups: &[Option<libc::pid_t>]) {
+    for &pgid in groups.iter().flatten() {
+        // Never 0 (our own group), 1 (init's) or GitWand's own group.
+        if pgid > 1 && pgid != unsafe { libc::getpgrp() } {
+            // SAFETY: plain syscall, no memory is shared with it.
+            unsafe {
+                libc::killpg(pgid, libc::SIGKILL);
+            }
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::io::BufRead;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    fn alive(pid: libc::pid_t) -> bool {
+        // SAFETY: signal 0 only checks the pid exists.
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    #[test]
+    fn killing_the_group_takes_the_leaders_children_too() {
+        // A leader in its own group with a child that outlives a plain kill
+        // of the leader, like an agent's subprocess.
+        let mut leader = Command::new("sh")
+            .args(["-c", "sleep 30 & echo $!; wait"])
+            .process_group(0)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(leader.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let child: libc::pid_t = line.trim().parse().unwrap();
+        assert!(alive(child));
+
+        kill_process_groups(&[Some(leader.id() as libc::pid_t), None]);
+        leader.wait().unwrap();
+
+        // The orphan is reaped by init, asynchronously.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while alive(child) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(child), "the leader's child must be killed too");
     }
 }

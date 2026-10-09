@@ -456,11 +456,20 @@ const {
   active: scratchActive,
   loading: scratchLoading,
   error: scratchError,
+  cleanupWarning: scratchCleanupWarning,
   originCwd: scratchOriginCwd,
   create: createScratch,
   mergeBack: scratchMergeBack,
   discard: scratchDiscard,
 } = useScratchWorktree(() => props.cwd);
+
+// A merge-back whose cleanup failed still merged: say so where errors show.
+const scratchMessage = computed(() =>
+  scratchError.value ??
+  (scratchCleanupWarning.value
+    ? `${t("aiTask.mergedCleanupFailed")} ${scratchCleanupWarning.value}`
+    : null),
+);
 
 // Opening the scratch as a repo tab is what makes the sandbox usable: the user
 // resolves the conflicts IN that tab, then comes back here to bring them across.
@@ -795,7 +804,7 @@ onUnmounted(() => {
                   :target-branch="branchDisplay"
                   :scratch-active="scratchActive"
                   :scratch-loading="scratchLoading"
-                  :scratch-error="scratchError"
+                  :scratch-error="scratchMessage"
                   :threshold="previewThreshold"
                   :estimated-auto-resolutions="previewEstimated"
                   :held-by-threshold="previewHeldBack"

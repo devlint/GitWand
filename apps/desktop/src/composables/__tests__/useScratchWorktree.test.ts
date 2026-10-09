@@ -43,7 +43,7 @@ describe("useScratchWorktree", () => {
 
   it("merge-back targets the ORIGIN cwd captured at create time, not the current cwd", async () => {
     mockCreate.mockResolvedValue(WT);
-    mockMergeBack.mockResolvedValue(undefined);
+    mockMergeBack.mockResolvedValue({ cleanup_warning: null });
 
     // The getter starts on the main repo, then flips to the scratch path —
     // simulating the user switching to the scratch tab after creation.
@@ -59,6 +59,24 @@ describe("useScratchWorktree", () => {
     // Critical: must use the captured origin, NOT the now-active scratch cwd.
     // Third arg: the snapshotsEnabled setting (default on).
     expect(mockMergeBack).toHaveBeenCalledWith("/repos/main", WT.path, true);
+  });
+
+  it("merge-back that merged but could not remove the scratch succeeds with a warning", async () => {
+    mockCreate.mockResolvedValue(WT);
+    mockMergeBack.mockResolvedValue({ cleanup_warning: "worktree is locked" });
+    const { active, error, cleanupWarning, create, mergeBack } = useScratchWorktree(() => "/repos/main");
+
+    await create("feature");
+    const ok = await mergeBack();
+
+    expect(ok).toBe(true);
+    expect(active.value).toBeNull();
+    expect(error.value).toBeNull();
+    expect(cleanupWarning.value).toBe("worktree is locked");
+
+    // The next operation starts clean.
+    await create("feature");
+    expect(cleanupWarning.value).toBeNull();
   });
 
   it("discard targets the ORIGIN cwd and clears state", async () => {

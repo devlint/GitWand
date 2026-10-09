@@ -2266,6 +2266,7 @@ const zhCN: Locale = {
     working: "处理中…",
     errorDelete: "删除工作树失败：{0}",
     errorMergeBack: "合并失败：{0}",
+    mergedCleanupFailed: "已合并，但 worktree 仍留在磁盘上。请在 worktree 列表中删除它。",
   },
 
   // ─── Submodules ─────────────────────────────────────────

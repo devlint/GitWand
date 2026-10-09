@@ -2298,6 +2298,7 @@ const en = {
     working: "Working…",
     errorDelete: "Failed to delete worktree: {0}",
     errorMergeBack: "Failed to merge back: {0}",
+    mergedCleanupFailed: "Merged back, but the worktree is still on disk. Delete it from the worktree list.",
   },
 
   // ─── Submodules ─────────────────────────────────────────

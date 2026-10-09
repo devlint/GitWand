@@ -115,6 +115,12 @@ uuid = { version = "1", features = ["v4"] }
 # @gitwand/core; see commands/secrets.rs.
 regex = "1"
 
+# `killpg` to stop a terminal's whole process tree, not just its shell (an
+# agent's child could otherwise keep writing to a merged-back AI task).
+# Already in the graph through portable-pty: no compile or size cost.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 # tokio is already in the tree (tauri depends on it) — this entry only makes
 # it nameable from `#[cfg(test)]` code, so a test can build a runtime with a
