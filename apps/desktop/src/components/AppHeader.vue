@@ -170,6 +170,7 @@ const emit = defineEmits<{
   /** v3.11 — apply from the Conflict Predictor. */
   applyFromPreview: [operation: string, ref: string, estimatedHunks: number];
   dismissApply: [];
+  scratchCleanupWarning: [detail: string];
   openResidual: [path: string];
   loadBranches: [];
   // ── Other overlays ───────────────────────────────────────────
@@ -503,6 +504,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             :apply-outcome="props.applyOutcome ?? null"
             @apply-from-preview="(op, r, n) => emit('applyFromPreview', op, r, n)"
             @dismiss-apply="emit('dismissApply')"
+            @scratch-cleanup-warning="(d) => emit('scratchCleanupWarning', d)"
             @open-residual="(p) => emit('openResidual', p)"
           />
 

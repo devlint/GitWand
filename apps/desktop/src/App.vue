@@ -345,11 +345,11 @@ const commitReviewNav = useCommitReviewNav({
 /**
  * The shared toast (Commit Review feedback, Launchpad actions, repo
  * successes…), shown for `ms`. `ms = 0` makes it sticky: shown until
- * dismissed; a transient toast shown meanwhile parks it, and it comes back
- * once that one is gone.
+ * dismissed; a toast shown meanwhile parks it, and it comes back once that
+ * one is gone.
  */
 function showDetailToast(title: string, detail: string | null, ms = 3000) {
-  if (stickyToast && ms > 0) parkedToast = stickyToast;
+  if (stickyToast) parkedToasts.push(stickyToast);
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   if (dismissTimer != null) { window.clearTimeout(dismissTimer); dismissTimer = null; }
   stickyToast = ms === 0 ? { title, detail } : null;
@@ -740,11 +740,12 @@ const memorizeToast = ref<{ path: string; strategy: ResolutionStrategy } | null>
 let successTimer: number | null = null;
 // The fade-out of a dismissed toast, cancelled when a new one replaces it.
 let dismissTimer: number | null = null;
-// The sticky toast on screen, and one a transient toast is covering.
+// The sticky toast on screen, and the ones covered since, shown again in turn.
 let stickyToast: { title: string; detail: string | null } | null = null;
-let parkedToast: { title: string; detail: string | null } | null = null;
+const parkedToasts: { title: string; detail: string | null }[] = [];
 
 function dismissToast() {
+  if (dismissTimer != null) return; // already fading out (double click)
   // Dismissed by hand before its timer: the timer must not close the next one.
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   stickyToast = null;
@@ -755,8 +756,7 @@ function dismissToast() {
     successToastLeaving.value = false;
     successTimer = null;
     dismissTimer = null;
-    const parked = parkedToast;
-    parkedToast = null;
+    const parked = parkedToasts.pop();
     if (parked) showDetailToast(parked.title, parked.detail, 0);
   }, 200);
 }
@@ -2624,9 +2624,10 @@ async function onAiTaskMergeBack() {
   aiTaskCloseError.value = null;
   try {
     const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
-    // Kill the scratch's agent terminal first so no running process holds an
-    // index.lock or open handle that would block the worktree removal.
-    await termSessions.disposeRepo(target.path).catch(() => {});
+    // Stop the scratch's agent terminal first: nothing may write to the
+    // scratch while it is read and merged, nor hold a handle blocking its
+    // removal. Not swallowed, unlike Delete: if it fails, don't merge.
+    await termSessions.disposeRepo(target.path);
     fileExplorer.disposeRepo(target.path);
     const { cleanup_warning } = await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
     // Merged from here on, whatever follows. A scratch that couldn't be
@@ -4368,6 +4369,7 @@ onUnmounted(() => {
       :applying-from-preview="applyingFromPreview" :apply-outcome="applyOutcome"
       @apply-from-preview="handleApplyFromPreview"
       @dismiss-apply="applyOutcome = null"
+      @scratch-cleanup-warning="(d: string) => showDetailToast(t('aiTask.mergedCleanupFailed'), d, 0)"
       @open-residual="handleOpenResidual"
 
       :error-count="logUnreadCount" :is-offline="isOffline" @switch-branch="handleSwitchBranch" @open-logs="openLogsTab"

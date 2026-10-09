@@ -309,7 +309,8 @@ pub(crate) async fn terminal_close(id: u64) -> Result<(), String> {
 }
 
 /// Tue toutes les sessions (appelé au quit de l'app, sur le thread de la
-/// boucle d'événements) : grâce SIGHUP seulement, sans attendre les leaders.
+/// boucle d'événements) : grâce SIGHUP courte (100 ms au total, pas par
+/// session), sans attendre les leaders ensuite.
 pub(crate) fn terminal_close_all() {
     let handles: Vec<PtyHandle> = lock_sessions().drain().map(|(_, h)| h).collect();
     close_sessions(handles, false);
@@ -326,15 +327,20 @@ fn close_sessions(mut handles: Vec<PtyHandle>, wait_leaders: bool) {
     #[cfg(unix)]
     {
         let groups: Vec<libc::pid_t> = handles.iter().flat_map(session_groups).collect();
-        stop_groups(&groups, || {
+        let grace = Duration::from_millis(if wait_leaders { 500 } else { 100 });
+        stop_groups(&groups, grace, || {
             // Reap the leaders, so a zombie doesn't keep its group alive.
             for h in &mut handles {
                 let _ = h.child.try_wait();
             }
         });
     }
+    // Only leaders not reaped yet: portable-pty's kill() signals the pid
+    // first, which a reaped leader may have handed to another process.
     for h in &mut handles {
-        let _ = h.child.kill();
+        if matches!(h.child.try_wait(), Ok(None)) {
+            let _ = h.child.kill();
+        }
     }
     if !wait_leaders {
         return;
@@ -370,16 +376,16 @@ fn session_groups(h: &PtyHandle) -> Vec<libc::pid_t> {
     groups
 }
 
-/// SIGHUP `groups`, give them up to 500 ms to empty, then SIGKILL the ones
+/// SIGHUP `groups`, give them up to `grace` to empty, then SIGKILL the ones
 /// still populated. Every member counts, not only the leaders: an agent
 /// still saving its session after its shell exited gets the whole grace
 /// period. `reap` runs before each check, for the caller to reap its own
 /// children. An emptied group is not signalled again: its id is free for
 /// reuse once its leader is reaped.
 #[cfg(unix)]
-fn stop_groups(groups: &[libc::pid_t], mut reap: impl FnMut()) {
+fn stop_groups(groups: &[libc::pid_t], grace: Duration, mut reap: impl FnMut()) {
     signal_groups(groups, libc::SIGHUP);
-    let deadline = Instant::now() + Duration::from_millis(500);
+    let deadline = Instant::now() + grace;
     let mut alive: Vec<libc::pid_t> = groups.to_vec();
     loop {
         reap();
@@ -394,8 +400,10 @@ fn stop_groups(groups: &[libc::pid_t], mut reap: impl FnMut()) {
 
 #[cfg(unix)]
 fn group_alive(pgid: libc::pid_t) -> bool {
-    // SAFETY: signal 0 only checks the group has a member.
-    unsafe { libc::killpg(pgid, 0) == 0 }
+    // SAFETY: signal 0 only checks the group has a member. Only ESRCH means
+    // empty: EPERM (a setuid member, `sudo`) is a member still running.
+    let probed = unsafe { libc::killpg(pgid, 0) };
+    probed == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 #[cfg(unix)]
@@ -456,7 +464,7 @@ mod tests {
         let (mut leader, child) = spawn_group("(trap '' HUP; sleep 30) & echo $!; wait");
         let leader_pid = leader.id() as libc::pid_t;
 
-        stop_groups(&[leader_pid], || {
+        stop_groups(&[leader_pid], Duration::from_millis(500), || {
             let _ = leader.try_wait();
         });
         leader.wait().unwrap();
@@ -477,7 +485,7 @@ mod tests {
         let (mut leader, child) = spawn_group(&script);
         let leader_pid = leader.id() as libc::pid_t;
 
-        stop_groups(&[leader_pid], || {
+        stop_groups(&[leader_pid], Duration::from_millis(500), || {
             let _ = leader.try_wait();
         });
         let _ = leader.wait();
@@ -501,7 +509,7 @@ mod tests {
         let leader_pid = leader.id() as libc::pid_t;
 
         let mut status = None;
-        stop_groups(&[leader_pid], || {
+        stop_groups(&[leader_pid], Duration::from_millis(500), || {
             if status.is_none() {
                 status = leader.try_wait().unwrap();
             }

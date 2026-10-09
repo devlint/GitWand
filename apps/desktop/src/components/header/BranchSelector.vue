@@ -89,6 +89,8 @@ const props = defineProps<{
   applyFromPreview: [operation: PreviewOperation, ref: string, estimatedHunks: number];
   dismissApply: [];
   openResidual: [path: string];
+  /** Merged back, but the scratch couldn't be removed: git's message. */
+  scratchCleanupWarning: [detail: string];
 }>();
 
 // Whether the working tree has anything worth reporting — drives the
@@ -463,13 +465,6 @@ const {
   discard: scratchDiscard,
 } = useScratchWorktree(() => props.cwd);
 
-// A merge-back whose cleanup failed still merged: news, not an error.
-const scratchNotice = computed(() =>
-  scratchCleanupWarning.value
-    ? `${t("scratch.mergedCleanupFailed")} ${scratchCleanupWarning.value}`
-    : null,
-);
-
 // Opening the scratch as a repo tab is what makes the sandbox usable: the user
 // resolves the conflicts IN that tab, then comes back here to bring them across.
 const { openTab, closeTab, tabs } = useRepoTabs();
@@ -501,6 +496,8 @@ async function handleScratchMergeBack() {
   if (scratchOriginCwd.value) openTab(scratchOriginCwd.value);
   const ok = await scratchMergeBack();
   if (ok) closeScratchTab();
+  // Shown app-wide (sticky toast): this panel is usually off screen by now.
+  if (ok && scratchCleanupWarning.value) emit("scratchCleanupWarning", scratchCleanupWarning.value);
 }
 
 async function handleScratchDiscard() {
@@ -804,7 +801,6 @@ onUnmounted(() => {
                   :scratch-active="scratchActive"
                   :scratch-loading="scratchLoading"
                   :scratch-error="scratchError"
-                  :scratch-notice="scratchNotice"
                   :threshold="previewThreshold"
                   :estimated-auto-resolutions="previewEstimated"
                   :held-by-threshold="previewHeldBack"

@@ -204,11 +204,6 @@
     />
 
     <!-- ─── Scratch worktree (v2.20.0) ───────────────────── -->
-    <!-- Merged, but the scratch is still on disk: shown even once no
-         conflict is left, which hides the block below. -->
-    <div v-if="scratchNotice" class="preview-scratch-notice" role="status">
-      {{ scratchNotice }}
-    </div>
     <div v-if="summary.conflictingFiles > 0" class="preview-scratch">
       <!-- Error from the last scratch operation -->
       <div v-if="scratchError" class="preview-scratch-error" role="alert">
@@ -281,8 +276,6 @@ const props = defineProps<{
   scratchLoading?: boolean;
   /** Error from the last scratch worktree op, surfaced inline. */
   scratchError?: string | null;
-  /** Non-error news from the last scratch op (merged, cleanup failed). */
-  scratchNotice?: string | null;
   /** v3.11 — current numeric confidence bar, 0 disables it. */
   threshold?: number;
   /** Auto-resolutions surviving the bar. */
@@ -781,11 +774,6 @@ function basename(path: string): string {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.preview-scratch-notice {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
-  line-height: 1.4;
 }
 .preview-scratch-error {
   color: var(--color-danger);

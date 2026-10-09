@@ -8140,12 +8140,14 @@ async function handleRequest(req, res) {
         branchName = `gitwand-scratch-${slug}-${Math.floor(ts / 1000)}`;
       }
       const scratchPath = join(resolve(resolvedCwd, ".."), branchName);
-      const ref = sourceBranch ?? "HEAD";
+      // Same rule as Rust: a blank source means HEAD, i.e. an AI task.
+      const fromHead = !sourceBranch?.trim();
+      const ref = fromHead ? "HEAD" : sourceBranch;
       try {
         execFileSync("git", ["worktree", "add", "-b", branchName, scratchPath, ref], { cwd: resolvedCwd, encoding: "utf-8" });
         // Mirror Rust: an AI task (no explicit source) records the commit it
         // starts from, for merge-back's base guard; `branch -D` drops it.
-        if (!sourceBranch?.trim()) {
+        if (fromHead) {
           try {
             const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" }).trim();
             execFileSync("git", ["config", `branch.${branchName}.gitwandBase`, base], { cwd: resolvedCwd });
@@ -8159,7 +8161,7 @@ async function handleRequest(req, res) {
         return jsonResponse(req, res, {
           path: scratchPath,
           branch: branchName,
-          source_branch: sourceBranch ?? "HEAD",
+          source_branch: ref,
           created_at: Math.floor(ts / 1000),
         });
       } catch (e) {

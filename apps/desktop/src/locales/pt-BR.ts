@@ -2097,7 +2097,6 @@ const ptBR: Locale = {
     openIsolated: "Abrir worktree isolado",
     mergeBack: "Trazer as alterações de volta",
     discard: "Descartar o worktree temporário",
-    mergedCleanupFailed: "Alterações trazidas de volta, mas o worktree temporário continua no disco. Exclua-o pela lista de worktrees.",
     created: "Worktree temporário criado",
     mergedBack: "Alterações trazidas de volta para o checkout principal",
     discarded: "Worktree temporário descartado",
@@ -2258,7 +2257,7 @@ const ptBR: Locale = {
     working: "Processando…",
     errorDelete: "Falha ao excluir o worktree: {0}",
     errorMergeBack: "Falha ao fazer merge: {0}",
-    mergedCleanupFailed: "Merge feito, mas o worktree continua no disco. Exclua-o pela lista de worktrees.",
+    mergedCleanupFailed: "Merge feito, mas a pasta do worktree não pôde ser removida. Exclua-a manualmente.",
   },
 
   // ─── Submodules ─────────────────────────────────────────

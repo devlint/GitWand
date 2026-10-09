@@ -2097,7 +2097,6 @@ const es: Locale = {
     openIsolated: "Abrir worktree aislado",
     mergeBack: "Traer los cambios de vuelta",
     discard: "Descartar el worktree temporal",
-    mergedCleanupFailed: "Cambios traídos de vuelta, pero el worktree temporal sigue en el disco. Elimínalo desde la lista de worktrees.",
     created: "Worktree temporal creado",
     mergedBack: "Cambios traídos de vuelta al checkout principal",
     discarded: "Worktree temporal descartado",
@@ -2258,7 +2257,7 @@ const es: Locale = {
     working: "Procesando…",
     errorDelete: "Error al eliminar el worktree: {0}",
     errorMergeBack: "Error al fusionar: {0}",
-    mergedCleanupFailed: "Fusión hecha, pero el worktree sigue en el disco. Elimínalo desde la lista de worktrees.",
+    mergedCleanupFailed: "Fusión hecha, pero no se pudo eliminar la carpeta del worktree. Elimínala a mano.",
   },
 
   // ─── Submodules ─────────────────────────────────────────

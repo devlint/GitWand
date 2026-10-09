@@ -2139,7 +2139,6 @@ const en = {
     openIsolated: "Open isolated worktree",
     mergeBack: "Bring changes back",
     discard: "Discard scratch",
-    mergedCleanupFailed: "Changes merged back, but the scratch worktree is still on disk. Delete it from the worktree list.",
     created: "Scratch worktree created",
     mergedBack: "Changes merged back into the main checkout",
     discarded: "Scratch worktree discarded",
@@ -2299,7 +2298,7 @@ const en = {
     working: "Working…",
     errorDelete: "Failed to delete worktree: {0}",
     errorMergeBack: "Failed to merge back: {0}",
-    mergedCleanupFailed: "Merged back, but the worktree is still on disk. Delete it from the worktree list.",
+    mergedCleanupFailed: "Merged back, but the worktree folder couldn't be removed. Delete it by hand.",
   },
 
   // ─── Submodules ─────────────────────────────────────────

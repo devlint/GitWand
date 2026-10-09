@@ -2107,7 +2107,6 @@ const fr: Locale = {
     openIsolated: "Ouvrir un worktree isolé",
     mergeBack: "Ramener les changements",
     discard: "Abandonner le scratch",
-    mergedCleanupFailed: "Changements ramenés, mais le worktree scratch est resté sur le disque. Supprimez-le depuis la liste des worktrees.",
     created: "Worktree scratch créé",
     mergedBack: "Changements ramenés dans le checkout principal",
     discarded: "Worktree scratch abandonné",
@@ -2267,7 +2266,7 @@ const fr: Locale = {
     working: "En cours…",
     errorDelete: "Échec de la suppression du worktree : {0}",
     errorMergeBack: "Échec de la fusion : {0}",
-    mergedCleanupFailed: "Fusion faite, mais le worktree est resté sur le disque. Supprimez-le depuis la liste des worktrees.",
+    mergedCleanupFailed: "Fusion faite, mais le dossier du worktree n'a pas pu être supprimé. Supprimez-le à la main.",
   },
 
   // ─── Submodules ─────────────────────────────────────────

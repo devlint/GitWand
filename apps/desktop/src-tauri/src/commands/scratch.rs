@@ -155,12 +155,11 @@ fn scratch_worktree_create_impl(
     // ref name (falling back to the HEAD sha if detached).
     // An explicit source is "Resolve in scratch": the scratch starts from the
     // branch being merged, which merge-back is meant to bring along.
-    let from_head = source_branch.as_deref().is_none_or(|b| b.trim().is_empty());
-    let base_ref = match source_branch {
-        Some(b) if !b.trim().is_empty() => b,
+    let (base_ref, from_head) = match source_branch {
+        Some(b) if !b.trim().is_empty() => (b, false),
         _ => match git_in(&repo_root, &["symbolic-ref", "--short", "-q", "HEAD"]) {
-            Ok(b) if !b.is_empty() => b,
-            _ => git_in(&repo_root, &["rev-parse", "HEAD"])?,
+            Ok(b) if !b.is_empty() => (b, true),
+            _ => (git_in(&repo_root, &["rev-parse", "HEAD"])?, true),
         },
     };
 
@@ -244,6 +243,7 @@ fn scratch_worktree_create_impl(
 
     // An AI task starts from HEAD: record that commit for merge-back's base
     // guard. In the branch's config section, so `branch -D` drops it too.
+    // Otherwise drop a stale record a same-named branch may have left.
     if from_head {
         if let Err(e) = git_in(
             &repo_root,
@@ -252,6 +252,11 @@ fn scratch_worktree_create_impl(
             let _ = scratch_worktree_discard_impl(cwd, scratch_path);
             return Err(e);
         }
+    } else {
+        let _ = git_in(
+            &repo_root,
+            &["config", "--unset", &base_config_key(&scratch_branch)],
+        );
     }
 
     Ok(ScratchWorktree {
@@ -370,13 +375,6 @@ fn scratch_worktree_merge_back_impl(
     let repo_root = canonical_cwd(&cwd)?;
     let scratch = validate_scratch_path(&repo_root, &scratch_path)?;
 
-    // Full ref: `--short` answers `heads/<branch>` when a tag has the same name.
-    let scratch_ref = git_in(&scratch, &["symbolic-ref", "HEAD"])?;
-    let scratch_branch = scratch_ref
-        .strip_prefix("refs/heads/")
-        .unwrap_or(&scratch_ref)
-        .to_string();
-
     // GUARD: the main checkout is not mid-operation, conflicted or not (a
     // rebase paused at `edit` has no unmerged entry): the task would be folded
     // into whatever that operation commits next.
@@ -392,6 +390,15 @@ fn scratch_worktree_merge_back_impl(
             op
         ));
     }
+
+    // Full ref: `--short` answers `heads/<branch>` when a tag has the same name.
+    let scratch_ref = git_in(&scratch, &["symbolic-ref", "-q", "HEAD"]).map_err(|_| {
+        "the scratch worktree is not on a branch; nothing was changed. Check out its branch in it, then merge back".to_string()
+    })?;
+    let scratch_branch = scratch_ref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&scratch_ref)
+        .to_string();
 
     // GUARD: no unresolved conflict in the scratch.
     let unresolved = unresolved_conflicts(&scratch)?;
@@ -421,14 +428,20 @@ fn scratch_worktree_merge_back_impl(
         ));
     }
 
-    // GUARD: HEAD must not be behind the commit the task started from.
+    // GUARD: HEAD must not be behind the commit the task started from, as
+    // after checking out an ancestor branch. Only strictly behind: a base
+    // rewritten since (rebase, amend) is not, and merging HEAD into the task
+    // then lets it through, as the guard above asks.
     if let Ok(base) = git_in(
         &repo_root,
         &["config", "--get", &base_config_key(&scratch_branch)],
     ) {
-        if git_in(&repo_root, &["merge-base", "--is-ancestor", &base, "HEAD"]).is_err() {
+        let head_sha = git_in(&repo_root, &["rev-parse", "HEAD"])?;
+        let behind = head_sha != base
+            && git_in(&repo_root, &["merge-base", "--is-ancestor", "HEAD", &base]).is_ok();
+        if behind {
             return Err(format!(
-                "{h} does not contain {base:.7}, the commit {b} was created from: merging back would also bring the commits between them. Nothing was changed. Check out the branch {b} was created from, then merge back",
+                "{h} is behind {base:.7}, the commit {b} was created from: merging back would also bring the commits between them. Nothing was changed. Check out the branch {b} was created from, then merge back",
                 h = head,
                 base = base,
                 b = scratch_branch
@@ -521,34 +534,53 @@ fn scratch_worktree_merge_back_impl(
     }
 
     // The task is merged by now, so a cleanup failure is only a warning.
-    let cleanup_warning = remove_scratch(&repo_root, &scratch, Some(&scratch_branch)).err();
+    let cleanup_warning = remove_scratch(&repo_root, &scratch, Some(&scratch_branch), true).err();
     Ok(ScratchMergeBackOutcome { cleanup_warning })
 }
 
 /// Remove the scratch worktree and prune its registration, then delete the
 /// scratch branch: only one GitWand created, the user may have switched the
-/// scratch to theirs. When the removal fails (locked worktree, Windows file
-/// lock), what is left is detached first, so the branch still goes: no
-/// `gitwand-scratch-*` branch survives to collide with a later task, and the
-/// leftover is a plain worktree no merge-back can target. Detaching keeps the
-/// files as they are.
+/// scratch to theirs. Returns git's message when the removal fails (locked
+/// worktree, Windows file lock).
+///
+/// `release_on_failure` (merge-back, whose work is already merged): when the
+/// removal fails, what is left is detached first, so the branch still goes —
+/// no `gitwand-scratch-*` branch survives to collide with a later task, and
+/// the leftover is a plain worktree no merge-back can target. Detaching keeps
+/// the files. Discard keeps both instead, for a retry once unlocked.
 fn remove_scratch(
     repo_root: &Path,
     scratch: &Path,
     scratch_branch: Option<&str>,
+    release_on_failure: bool,
 ) -> Result<(), String> {
-    let removed = git_in(
-        repo_root,
-        &["worktree", "remove", "--force", &scratch.to_string_lossy()],
-    );
+    let output = git_cmd()
+        .args(["worktree", "remove", "--force"])
+        .arg(scratch)
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git worktree remove failed to spawn: {}", e))?;
+    let removed = if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    };
     if removed.is_err() {
-        let _ = git_in(scratch, &["checkout", "-q", "--detach"]);
+        if !release_on_failure {
+            return removed;
+        }
+        // Only while the scratch is still a worktree: once removal deleted
+        // its `.git`, git would walk up and detach an enclosing repository.
+        // Prune then unregisters it, which frees the branch all the same.
+        if scratch.join(".git").is_file() {
+            let _ = git_in(scratch, &["checkout", "-q", "--detach"]);
+        }
     }
     let _ = git_in(repo_root, &["worktree", "prune"]);
     if let Some(branch) = scratch_branch.filter(|b| b.starts_with("gitwand-scratch-")) {
         let _ = git_in(repo_root, &["branch", "-D", branch]);
     }
-    removed.map(|_| ())
+    removed
 }
 
 /// Abandon the scratch worktree: `git worktree remove --force` + `git worktree
@@ -571,7 +603,7 @@ fn scratch_worktree_discard_impl(cwd: String, scratch_path: String) -> Result<()
         .ok()
         .and_then(|r| r.strip_prefix("refs/heads/").map(str::to_string));
 
-    remove_scratch(&repo_root, &scratch, scratch_branch.as_deref())
+    remove_scratch(&repo_root, &scratch, scratch_branch.as_deref(), false)
 }
 
 #[cfg(test)]
@@ -1617,6 +1649,71 @@ mod tests {
             .status
             .success(),
             "no leftover branch config"
+        );
+    }
+
+    #[test]
+    fn merge_back_accepts_a_base_rewritten_since_once_merged_into_the_task() {
+        // The task's base is amended on the main checkout: HEAD is no longer
+        // a descendant of it, but not behind it either.
+        let repo = TempRepo::new();
+        repo.write("task.txt", "v1\n");
+        repo.commit_all("base");
+        repo.write("wip.txt", "v1\n");
+        repo.commit_all("wip");
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
+        repo.write("wip.txt", "v1, amended\n");
+        repo.git(&["commit", "-qa", "--amend", "-m", "wip, amended"]);
+        write_in(&scratch, "task.txt", "agent edit\n");
+        assert!(git_at(&scratch.path, &["commit", "-qam", "agent"])
+            .status
+            .success());
+        let merged = git_at(&scratch.path, &["merge", "-q", "--no-edit", "main"]);
+        if !merged.status.success() {
+            // wip.txt conflicts: take main's side, as the user would.
+            assert!(git_at(&scratch.path, &["checkout", "--theirs", "wip.txt"])
+                .status
+                .success());
+            assert!(git_at(&scratch.path, &["commit", "-qam", "merge main"])
+                .status
+                .success());
+        }
+
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path, Some(false))
+            .expect("a rewritten base must not dead-end the task");
+        assert_eq!(repo.read("task.txt"), "agent edit\n");
+        assert_eq!(repo.read("wip.txt"), "v1, amended\n");
+    }
+
+    #[test]
+    fn a_failed_discard_keeps_the_branch_for_a_retry() {
+        let repo = TempRepo::new();
+        repo.write("task.txt", "v1\n");
+        repo.commit_all("base");
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
+        repo.git(&["worktree", "lock", &scratch.path]);
+        let err = scratch_worktree_discard_impl(repo.cwd(), scratch.path.clone())
+            .expect_err("a locked worktree resists removal");
+        assert!(
+            !err.contains("[\""),
+            "git's message, not our debug list: {}",
+            err
+        );
+        let branch_ref = format!("refs/heads/{}", scratch.branch);
+        assert!(
+            git_at(&repo.cwd(), &["rev-parse", "--verify", "-q", &branch_ref])
+                .status
+                .success()
+        );
+
+        repo.git(&["worktree", "unlock", &scratch.path]);
+        scratch_worktree_discard_impl(repo.cwd(), scratch.path).expect("retry once unlocked");
+        assert!(
+            !git_at(&repo.cwd(), &["rev-parse", "--verify", "-q", &branch_ref])
+                .status
+                .success()
         );
     }
 }
