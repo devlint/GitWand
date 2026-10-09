@@ -68,7 +68,8 @@
   /* Height of the floating AppDock pill (v2.24.0). Declared here rather than
      inside the component so anything that has to sit clear of the dock — the
      v3.8 undo toast, for one — positions itself from the same number instead
-     of hardcoding a guess that silently drifts. */
+     of hardcoding a guess that silently drifts. Also the side of the dock's
+     square Terminal / Files tiles, and the width of the vertical pill. */
   --app-dock-height: 44px;
 
   /* Code */

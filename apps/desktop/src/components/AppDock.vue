@@ -592,15 +592,21 @@ onBeforeUnmount(() => {
 
 .app-dock__pill {
   pointer-events: auto;
+  /* Pill geometry, declared once: the square icon-button size below is
+     derived from it, so changing the padding or border can't desync them. */
+  --dock-pill-padding: var(--space-2, 4px);
+  --dock-pill-border: 1px;
+  /* Side of a square dock button: the pill's inner height. */
+  --dock-btn-size: calc(var(--app-dock-height, 44px) - 2 * var(--dock-pill-padding) - 2 * var(--dock-pill-border));
   /* Single source of truth, shared with anything that must clear the dock
      (see `--app-dock-height` in assets/main.css). */
   min-height: var(--app-dock-height, 44px);
   display: flex;
   align-items: stretch;
   gap: var(--space-1, 4px);
-  padding: var(--space-2, 6px);
+  padding: var(--dock-pill-padding);
   background: color-mix(in srgb, var(--color-bg-secondary) 97%, transparent);
-  border: 1px solid var(--color-border);
+  border: var(--dock-pill-border) solid var(--color-border);
   border-radius: var(--radius-md, 10px);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.18);
   backdrop-filter: blur(8px);
@@ -613,17 +619,19 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-/* Terminal tile — mirrors the pill's chrome but as a standalone square that
-   sits flush beside the dock and shares its idle-fade behaviour. */
-.dock-terminal {
+/* Terminal & Files tiles — mirror the pill's chrome but as standalone squares
+   that sit flush beside the dock and share its idle-fade behaviour. */
+.dock-terminal,
+.dock-files {
   pointer-events: auto;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Sized from the dock token so the tiles never stretch the pill taller. */
+  /* Sized from the dock token so the tiles never stretch the pill taller;
+     min-height (not height) lets them still stretch with the pill. */
   width: var(--app-dock-height, 44px);
-  height: var(--app-dock-height, 44px);
+  min-height: var(--app-dock-height, 44px);
   background: color-mix(in srgb, var(--color-bg-secondary) 97%, transparent);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md, 10px);
@@ -652,28 +660,6 @@ onBeforeUnmount(() => {
 .dock-terminal:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-}
-
-/* Files tile — mirrors the pill's chrome but as a standalone square that
-   sits flush beside the dock and shares its idle-fade behaviour. */
-.dock-files {
-  pointer-events: auto;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* Sized from the dock token so the tiles never stretch the pill taller. */
-  width: var(--app-dock-height, 44px);
-  height: var(--app-dock-height, 44px);
-  background: color-mix(in srgb, var(--color-bg-secondary) 97%, transparent);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md, 10px);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(8px);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  opacity: var(--dock-idle-opacity, 0.45);
-  transition: opacity 0.2s ease, background 0.15s, color 0.15s;
 }
 
 .app-dock:hover .dock-files {
@@ -773,13 +759,15 @@ onBeforeUnmount(() => {
 .app-dock__pill--icons-only .dock-btn {
   justify-content: center;
   padding: var(--space-3, 9px);
-  /* min-width = stretched height: dock height minus pill padding + border. */
-  min-width: calc(var(--app-dock-height, 44px) - 2 * var(--space-2, 4px) - 2px);
+  /* Square: as wide as the pill's inner height, which the button stretches to. */
+  min-width: var(--dock-btn-size);
 }
 
 /* Vertical mode — stack the dock as a column; rotate icon + text 90°. */
 .app-dock__pill--vertical {
   flex-direction: column;
+  /* Same footprint as the horizontal pill, across instead of down. */
+  min-width: var(--app-dock-height, 44px);
 }
 
 .app-dock__pill--vertical .dock-handle {
@@ -794,6 +782,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--space-3, 9px);
   padding: var(--space-3, 9px);
+  /* Square: as tall as the pill's inner width, which the button stretches to. */
+  min-height: var(--dock-btn-size);
 }
 
 /* Vertical dock is icon-only; keep the glyphs upright. */
