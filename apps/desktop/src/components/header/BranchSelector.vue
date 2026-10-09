@@ -641,7 +641,7 @@ onUnmounted(() => {
       </svg>
     </button>
       <!-- Fused "new branch" button, sits flush to the right of the trigger -->
-      <button class="branch-add-btn" :title="t('branches.create')" :aria-label="t('branches.create')" @click="openCreate">
+      <button class="branch-add-btn" v-tooltip="t('branches.create')" :aria-label="t('branches.create')" @click="openCreate">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
         </svg>

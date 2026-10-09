@@ -622,7 +622,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
         type="button"
         class="repo-tab-new"
         :class="{ 'repo-tab-new--open': showMenu }"
-        :title="t('header.tabStripAddTitle')"
+        v-tooltip="t('header.tabStripAddTitle')"
         :aria-label="t('header.tabStripAddTitle')"
         :aria-expanded="showMenu"
         aria-haspopup="menu"

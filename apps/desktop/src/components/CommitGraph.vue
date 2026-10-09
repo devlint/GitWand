@@ -1429,7 +1429,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         class="cg-filter-icon-btn"
         :class="{ 'cg-filter-icon-btn--active': props.logBranchFilter === 'current' }"
-        :title="t('log.filterCurrentBranch')"
+        v-tooltip="t('log.filterCurrentBranch')"
         :aria-label="t('log.filterCurrentBranch')"
         :aria-pressed="props.logBranchFilter === 'current'"
         @click="emit('set-log-branch-filter', props.logBranchFilter === 'current' ? 'all' : 'current')"
@@ -1445,7 +1445,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         class="cg-filter-icon-btn"
         :class="{ 'cg-filter-icon-btn--active': props.logAuthorFilter === 'mine' }"
-        :title="t('log.filterMineCommits')"
+        v-tooltip="t('log.filterMineCommits')"
         :aria-label="t('log.filterMineCommits')"
         :aria-pressed="props.logAuthorFilter === 'mine'"
         @click="emit('set-log-author-filter', props.logAuthorFilter === 'mine' ? 'all' : 'mine')"
@@ -1935,7 +1935,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             <span class="cg-msg">{{ vc.entry.message }}</span>
             <!-- Author + date -->
             <span class="cg-meta muted">
-              <Avatar class="avatar avatar--sm" :name="vc.entry.author" :email="vc.entry.email" :title="vc.entry.author" />
+              <Avatar class="avatar avatar--sm" :name="vc.entry.author" :email="vc.entry.email" v-tooltip="vc.entry.author" />
               <span class="cg-sep">&middot;</span>
               <span>{{ formatDate(vc.entry.date) }}</span>
             </span>
