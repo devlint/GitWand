@@ -76,3 +76,37 @@ export function selectDiscardEntries(
     return e.section === sectionKey;
   });
 }
+
+/** What a discard confirmation has to tell the user before it runs. */
+export interface DiscardSummary {
+  kind: "staged" | "changes" | "all";
+  /** Distinct paths touched (a partially staged file counts once). */
+  fileCount: number;
+  /** Staged entries that will be thrown away. */
+  stagedCount: number;
+  /**
+   * Staged-section discard only: files that also have unstaged changes.
+   * Discarding the staged entry restores the file from HEAD, so those
+   * unstaged changes are lost too.
+   */
+  alsoUnstagedCount: number;
+}
+
+export function summarizeDiscard(
+  entries: readonly RepoFileEntry[],
+  sectionKey: string,
+  paths: readonly string[],
+): DiscardSummary {
+  const kind = sectionKey === "staged" || sectionKey === "changes" ? sectionKey : "all";
+  const targets = selectDiscardEntries(entries, sectionKey, paths);
+  const staged = targets.filter((e) => e.section === "staged");
+  const unstagedPaths = new Set(
+    entries.filter((e) => e.section === "unstaged").map((e) => e.path),
+  );
+  return {
+    kind,
+    fileCount: new Set(targets.map((e) => e.path)).size,
+    stagedCount: staged.length,
+    alsoUnstagedCount: kind === "staged" ? staged.filter((e) => unstagedPaths.has(e.path)).length : 0,
+  };
+}
