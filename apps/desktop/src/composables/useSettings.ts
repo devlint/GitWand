@@ -10,6 +10,7 @@
  */
 
 import { ref } from "vue";
+import { detectLocale, isSupportedLocale } from "../locales";
 import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
 import type { AIProvider } from "./useAIProvider";
@@ -597,12 +598,56 @@ function migrateReleaseNoteTemplates(list: unknown): ReleaseNoteTemplate[] {
   });
 }
 
+/** UI locale as useI18n resolves it: the saved override, else OS detection. */
+function resolveUiLocale(): string {
+  try {
+    const saved = localStorage.getItem("gitwand-locale");
+    if (saved && isSupportedLocale(saved)) return saved;
+  } catch {
+    // ignore
+  }
+  return detectLocale();
+}
+
+/**
+ * Before the AI templates unification, "which language does the AI write in"
+ * followed the UI locale in most places: `commitMessageLang: ""` = UI locale,
+ * `prAiLanguage: "ui" | "english"` (default "english"), release notes always
+ * the UI locale. The new settings hold an explicit language code each (default
+ * "en"), so an existing install must carry its old behaviour over once.
+ *
+ * `stored` is the raw persisted object. Returns the patch to apply, or null
+ * when the settings are already migrated (`releaseNotesLang` present) or were
+ * never stored.
+ */
+export function migrateAiLanguages(
+  stored: Record<string, unknown>,
+  uiLocale: string,
+): Pick<AppSettings, "commitMessageLang" | "prDescriptionLang" | "releaseNotesLang"> | null {
+  if (typeof stored.releaseNotesLang === "string") return null;
+  const commit = stored.commitMessageLang;
+  return {
+    commitMessageLang: typeof commit === "string" && commit ? commit : uiLocale,
+    prDescriptionLang:
+      typeof stored.prDescriptionLang === "string"
+        ? stored.prDescriptionLang
+        : stored.prAiLanguage === "ui" ? uiLocale : "en",
+    releaseNotesLang: uiLocale,
+  };
+}
+
 export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
-      const s: AppSettings = { ...defaultAppSettings, ...JSON.parse(raw) };
+      const stored = JSON.parse(raw);
+      const s: AppSettings = { ...defaultAppSettings, ...stored };
       s.releaseNoteTemplates = migrateReleaseNoteTemplates(s.releaseNoteTemplates);
+      const langs = migrateAiLanguages(stored, resolveUiLocale());
+      if (langs) {
+        Object.assign(s, langs);
+        saveSettings(s); // once: the keys now exist, so it never runs again
+      }
       return s;
     }
   } catch {

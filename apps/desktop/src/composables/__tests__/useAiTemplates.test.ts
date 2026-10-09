@@ -144,3 +144,42 @@ describe("output language per repo", () => {
     expect(getTemplateLang("pr", CWD)).toBe("en");
   });
 });
+
+describe("AI language migration (existing installs)", () => {
+  const store = (o: object) => localStorage.setItem("gitwand-settings", JSON.stringify(o));
+
+  it("carries the old UI-locale behaviour over, once", () => {
+    localStorage.setItem("gitwand-locale", "fr");
+    store({ commitMessageLang: "", prAiLanguage: "ui" });
+    const s = loadSettings();
+    expect(s.commitMessageLang).toBe("fr");
+    expect(s.prDescriptionLang).toBe("fr");
+    expect(s.releaseNotesLang).toBe("fr");
+    // persisted: later UI-locale changes do not rewrite it
+    localStorage.setItem("gitwand-locale", "es");
+    expect(loadSettings().commitMessageLang).toBe("fr");
+    expect(JSON.parse(localStorage.getItem("gitwand-settings")!).releaseNotesLang).toBe("fr");
+  });
+
+  it("keeps an explicit commit language and maps prAiLanguage english to en", () => {
+    localStorage.setItem("gitwand-locale", "fr");
+    store({ commitMessageLang: "es", prAiLanguage: "english" });
+    const s = loadSettings();
+    expect(s.commitMessageLang).toBe("es");
+    expect(s.prDescriptionLang).toBe("en");
+  });
+
+  it("old PR default (prAiLanguage absent) was English", () => {
+    localStorage.setItem("gitwand-locale", "fr");
+    store({ aiEnabled: true });
+    expect(loadSettings().prDescriptionLang).toBe("en");
+  });
+
+  it("does not touch already-migrated settings, nor new installs", () => {
+    localStorage.setItem("gitwand-locale", "fr");
+    store({ commitMessageLang: "en", prDescriptionLang: "en", releaseNotesLang: "en" });
+    expect(loadSettings().commitMessageLang).toBe("en");
+    localStorage.removeItem("gitwand-settings");
+    expect(loadSettings().commitMessageLang).toBe("en");
+  });
+});
