@@ -1775,8 +1775,10 @@ watch(
 }
 
 .contrib {
-  flex: 0 0 calc((100% - var(--space-3) * 3) / 4);
-  min-width: 150px;
+  /* Below ~280px the stats column squeezes the name and line counts down to
+     an ellipsis: cards never go narrower — the rail scrolls instead. */
+  --contrib-min-width: 280px;
+  flex: 0 0 max(var(--contrib-min-width), calc((100% - var(--space-3) * 3) / 4));
   scroll-snap-align: start;
   display: grid;
   grid-template-columns: 28px 1fr auto;
@@ -1791,7 +1793,7 @@ watch(
 
 /* >4 contributors: shrink cards so more fit and a partial card peeks in. */
 .contributors-scroll--dense .contrib {
-  flex-basis: calc((100% - var(--space-3) * 4) / 6);
+  flex-basis: max(var(--contrib-min-width), calc((100% - var(--space-3) * 5) / 6));
 }
 
 .contrib:hover {
@@ -1801,12 +1803,17 @@ watch(
 
 .contrib-body { min-width: 0; }
 
+/* Merged identities read "Name A / Name B": allow two lines before clipping
+   (the card's title attribute keeps the full name). */
 .contrib-name {
   font-size: var(--font-size-sm);
   color: var(--color-text);
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .contrib-bar {

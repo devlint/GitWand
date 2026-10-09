@@ -4,6 +4,7 @@
  * Usage:
  *   <button v-tooltip="'Push to remote'">…</button>
  *   <button v-tooltip="{ text: 'Push', position: 'left' }">…</button>
+ *   <button v-tooltip="{ text: 'Push', when: (el) => isCompact(el) }">…</button>
  *
  * Positions: "top" (default) | "bottom" | "left" | "right"
  *
@@ -18,13 +19,24 @@ type TooltipPosition = "top" | "bottom" | "left" | "right";
 interface TooltipOptions {
   text: string;
   position?: TooltipPosition;
+  /**
+   * Evaluated on hover/focus, on resize and on update with the anchor element;
+   * the tooltip is skipped (or hidden) while it returns false.
+   */
+  when?: (el: HTMLElement) => boolean;
 }
 
 interface TooltipEl extends HTMLElement {
   _tooltip?: {
     tip: HTMLElement;
     abort: AbortController;
+    reposition: () => void;
+    opts: TooltipOptions;
   };
+  /** Current binding value — refreshed by `updated`, read at show time. */
+  _tooltipOpts?: TooltipOptions | null;
+  /** Scopes the trigger listeners so they are bound once and removed on unmount. */
+  _tooltipListeners?: AbortController;
 }
 
 const GAP = 7; // px gap between anchor and tooltip
@@ -76,6 +88,7 @@ function place(tip: HTMLElement, anchor: HTMLElement, position: TooltipPosition)
 
 function show(el: TooltipEl, opts: TooltipOptions) {
   hide(el); // ensure clean state
+  if (opts.when && !opts.when(el)) return;
 
   const tip = document.createElement("div");
   tip.className = "gw-tooltip";
@@ -103,9 +116,15 @@ function show(el: TooltipEl, opts: TooltipOptions) {
   // Keep position fresh on scroll / resize
   const reposition = () => place(tip, el, pos);
   window.addEventListener("scroll", reposition, { signal, passive: true, capture: true });
-  window.addEventListener("resize", reposition, { signal, passive: true });
+  // A resize can also flip `when` (e.g. a breakpoint brings the label back).
+  const onResize = () => {
+    const when = (el._tooltipOpts ?? opts).when;
+    if (when && !when(el)) hide(el);
+    else reposition();
+  };
+  window.addEventListener("resize", onResize, { signal, passive: true });
 
-  el._tooltip = { tip, abort };
+  el._tooltip = { tip, abort, reposition, opts };
 }
 
 function hide(el: TooltipEl) {
@@ -118,32 +137,45 @@ function hide(el: TooltipEl) {
 
 export const vTooltip = {
   mounted(el: TooltipEl, { value }: { value: unknown }) {
-    const opts = getOptions(value);
-    if (!opts) return;
+    el._tooltipOpts = getOptions(value);
 
-    el.addEventListener("mouseenter", () => show(el, opts));
-    el.addEventListener("mouseleave", () => hide(el));
-    el.addEventListener("focus",      () => show(el, opts));
-    el.addEventListener("blur",       () => hide(el));
-    el.addEventListener("click",      () => hide(el));
+    // Bound once; handlers read el._tooltipOpts so `updated` never re-binds.
+    const listeners = new AbortController();
+    const { signal } = listeners;
+    const onShow = () => {
+      if (el._tooltipOpts) show(el, el._tooltipOpts);
+    };
+    const onHide = () => hide(el);
+    el.addEventListener("mouseenter", onShow, { signal });
+    el.addEventListener("mouseleave", onHide, { signal });
+    el.addEventListener("focus",      onShow, { signal });
+    el.addEventListener("blur",       onHide, { signal });
+    el.addEventListener("click",      onHide, { signal });
+    el._tooltipListeners = listeners;
   },
 
   updated(el: TooltipEl, { value }: { value: unknown }) {
-    // If the tooltip text changed while visible, re-show with new text
-    hide(el);
     const opts = getOptions(value);
-    if (!opts) return;
+    el._tooltipOpts = opts;
 
-    // Re-bind with fresh closure — easiest to just remove and re-add
-    // listeners by replacing the element's handler through a stored ref.
-    // Directives don't give us a clean way to do that without storing refs,
-    // so we use the unmounted + re-mounted pattern here by delegating to a
-    // shared handler set on the element.
-    el.addEventListener("mouseenter", () => show(el, opts));
-    el.addEventListener("mouseleave", () => hide(el));
+    // Parent re-renders fire this constantly (often with an identical value):
+    // leave a visible tooltip alone unless its content actually changed.
+    const visible = el._tooltip;
+    if (!visible) return;
+    if (!opts || (opts.when && !opts.when(el))) {
+      hide(el);
+    } else if (visible.opts.position !== opts.position) {
+      show(el, opts);
+    } else if (visible.tip.textContent !== opts.text) {
+      visible.tip.textContent = opts.text;
+      visible.reposition();
+    }
   },
 
   beforeUnmount(el: TooltipEl) {
     hide(el);
+    el._tooltipListeners?.abort();
+    delete el._tooltipListeners;
+    delete el._tooltipOpts;
   },
 };
