@@ -446,7 +446,6 @@ const fr: Locale = {
     graphSearchNext: "Correspondance suivante",
     graphSearchCount: "{0} / {1}",
     graphSearchClear: "Effacer la recherche",
-    graphSearchFilter: "Filtrer",
     graphSearchFilterTitle: "Afficher uniquement les commits correspondants",
     filterCurrentBranch: "Branche courante uniquement",
     filterMineCommits: "Mes commits uniquement",

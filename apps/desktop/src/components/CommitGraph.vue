@@ -1531,7 +1531,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         class="cg-search-nav"
         :disabled="matchedIndices.length === 0"
-        :title="t('log.graphSearchPrev')"
+        v-tooltip="t('log.graphSearchPrev')"
         :aria-label="t('log.graphSearchPrev')"
         @click="navigateSearch(-1)"
       >
@@ -1542,7 +1542,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         class="cg-search-nav"
         :disabled="matchedIndices.length === 0"
-        :title="t('log.graphSearchNext')"
+        v-tooltip="t('log.graphSearchNext')"
         :aria-label="t('log.graphSearchNext')"
         @click="navigateSearch(1)"
       >
@@ -1555,7 +1555,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         class="cg-search-nav cg-filter-btn"
         :class="{ 'cg-filter-btn--active': filterMode }"
         :disabled="!searchQuery.trim()"
-        :title="t('log.graphSearchFilter')"
+        v-tooltip="t('log.graphSearchFilterTitle')"
         :aria-label="t('log.graphSearchFilterTitle')"
         @click="toggleFilterMode"
       >
@@ -1566,7 +1566,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         v-if="searchQuery"
         class="cg-search-nav"
-        :title="t('log.graphSearchClear')"
+        v-tooltip="t('log.graphSearchClear')"
         :aria-label="t('log.graphSearchClear')"
         @click="searchQuery = ''"
       >

@@ -453,7 +453,6 @@ const en = {
     graphSearchNext: "Next match",
     graphSearchCount: "{0} / {1}",
     graphSearchClear: "Clear search",
-    graphSearchFilter: "Filter",
     graphSearchFilterTitle: "Show only matching commits",
     filterCurrentBranch: "Current branch only",
     filterMineCommits: "My commits only",
