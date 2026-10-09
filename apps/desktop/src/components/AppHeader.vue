@@ -51,16 +51,17 @@ import SearchTrigger from "./header/SearchTrigger.vue";
 import AiSparkle from "./AiSparkle.vue";
 import { useAIProvider } from "../composables/useAIProvider";
 import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
+import { useCompactOnOverflow } from "../composables/useCompactOnOverflow";
 import type { RepoTab } from "../composables/useRepoTabs";
 
 const { t } = useI18n();
 
-// Tooltips only appear once the CSS breakpoint has hidden the button's label;
-// reading the rendered state keeps the breakpoint in one place (<style>).
-const isLabelHidden = (btn: HTMLElement) => {
-  const label = btn.querySelector(".header-action-btn__label");
-  return !!label && getComputedStyle(label).display === "none";
-};
+// The secondary actions drop their labels only when the row would overflow
+// (label widths vary by locale, branch names by repo). Tooltips stand in for
+// the label in that mode only.
+const headerRow = ref<HTMLElement | null>(null);
+const { compact: headerCompact } = useCompactOnOverflow(headerRow, "app-header__row--compact");
+const isHeaderCompact = () => headerCompact.value;
 const ai = useAIProvider();
 const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
 const askConfirm = inject<(options: any) => Promise<boolean>>("askConfirm");
@@ -459,7 +460,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
     </div>
 
     <!-- ── Row 2: Main action row ───────────────────────────── -->
-    <div class="app-header__row">
+    <!-- The --compact class is also toggled by useCompactOnOverflow while it measures. -->
+    <div ref="headerRow" class="app-header__row" :class="{ 'app-header__row--compact': headerCompact }">
       <!-- Left cluster: branch selector + sync + branch actions -->
       <div class="header-left">
         <!-- Fallback: "Open" button when no repo is open -->
@@ -646,7 +648,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <div class="header-action-sep" aria-hidden="true"></div>
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('stash.title'), when: isLabelHidden }"
+          v-tooltip="{ text: t('stash.title'), when: isHeaderCompact }"
           :aria-label="t('stash.title')"
           @click="emit('openStash')"
         >
@@ -662,7 +664,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <!-- Tags button -->
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('tags.title'), when: isLabelHidden }"
+          v-tooltip="{ text: t('tags.title'), when: isHeaderCompact }"
           :aria-label="t('tags.title')"
           @click="emit('openTags')"
         >
@@ -676,7 +678,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <!-- Worktrees button -->
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('worktree.title'), when: isLabelHidden }"
+          v-tooltip="{ text: t('worktree.title'), when: isHeaderCompact }"
           :aria-label="t('worktree.title')"
           @click="emit('openWorktrees')"
         >
@@ -692,7 +694,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <!-- Submodules button -->
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('submodule.title'), when: isLabelHidden }"
+          v-tooltip="{ text: t('submodule.title'), when: isHeaderCompact }"
           :aria-label="t('submodule.title')"
           @click="emit('openSubmodules')"
         >
@@ -777,17 +779,14 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   margin-left: auto;
 }
 
-/* Narrow windows: secondary actions collapse to icon-only (label stays in
-   aria-label and the v-tooltip, which only shows in this mode), then the row
-   wraps instead of overflowing. */
-@media (max-width: 1350px) {
-  /* AppHeader's isLabelHidden() reads this to decide when tooltips show. */
-  .header-action-btn__label {
-    display: none;
-  }
-  .header-action-btn {
-    padding-inline: var(--space-4);
-  }
+/* When the row would overflow (set by useCompactOnOverflow), secondary
+   actions collapse to icon-only; the label stays in aria-label and in the
+   v-tooltip, which only shows in this mode. */
+.app-header__row--compact .header-action-btn__label {
+  display: none;
+}
+.app-header__row--compact .header-action-btn {
+  padding-inline: var(--space-4);
 }
 
 /* Narrower: the icon actions drop to their own row under branch + sync. */
