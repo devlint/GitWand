@@ -18,23 +18,43 @@
  */
 import { ref, onMounted, onUpdated, onBeforeUnmount, type Ref } from "vue";
 
-/** Sub-pixel rounding makes scrollWidth exceed clientWidth by 1 on a fit. */
+/** Tolerated sub-pixel overshoot on a fit. */
 const SLACK = 1;
 
+/**
+ * Does an in-flow child stick out past `el`'s content box? Geometry rather than
+ * scrollWidth, which would also count an open popover or menu positioned
+ * inside `el` and collapse every label while it is open.
+ */
 function overflows(el: Element): boolean {
-  return el.scrollWidth > el.clientWidth + SLACK;
+  const style = getComputedStyle(el);
+  const contentRight =
+    el.getBoundingClientRect().right -
+    (parseFloat(style.paddingRight) || 0) -
+    (parseFloat(style.borderRightWidth) || 0);
+  return Array.from(el.children).some((child) => {
+    const position = getComputedStyle(child).position;
+    if (position === "absolute" || position === "fixed") return false;
+    return child.getBoundingClientRect().right > contentRight + SLACK;
+  });
+}
+
+/** Missing or invalid `data-collapse-order` collapses last, keeping the sort consistent. */
+function collapseOrder(el: HTMLElement): number {
+  const order = Number(el.dataset.collapseOrder);
+  return Number.isFinite(order) ? order : Number.POSITIVE_INFINITY;
 }
 
 export function useCollapseOnOverflow(target: Ref<HTMLElement | null>, collapsedClass: string) {
   const collapsed = ref<ReadonlySet<string>>(new Set());
   let observer: ResizeObserver | null = null;
-  const observed = new WeakSet<Element>();
+  const observed = new Set<Element>();
 
   function check() {
     const row = target.value;
     if (!row) return;
     const items = Array.from(row.querySelectorAll<HTMLElement>("[data-collapse-key]")).sort(
-      (a, b) => Number(a.dataset.collapseOrder) - Number(b.dataset.collapseOrder),
+      (a, b) => collapseOrder(a) - collapseOrder(b),
     );
     const tooWide = () => overflows(row) || Array.from(row.children).some(overflows);
 
@@ -53,7 +73,14 @@ export function useCollapseOnOverflow(target: Ref<HTMLElement | null>, collapsed
   function observeAll() {
     const row = target.value;
     if (!row || !observer) return;
-    for (const node of [row, ...Array.from(row.children)]) {
+    const current = new Set<Element>([row, ...Array.from(row.children)]);
+    // Children removed by a v-if would otherwise stay observed (and alive).
+    for (const node of observed) {
+      if (current.has(node)) continue;
+      observer.unobserve(node);
+      observed.delete(node);
+    }
+    for (const node of current) {
       if (observed.has(node)) continue;
       observed.add(node);
       observer.observe(node);
@@ -62,8 +89,10 @@ export function useCollapseOnOverflow(target: Ref<HTMLElement | null>, collapsed
 
   onMounted(() => {
     if (typeof ResizeObserver === "undefined") return;
-    // A collapse resizes the observed children, which re-fires the observer
-    // once; the second check reaches the same answer and settles.
+    // A collapse resizes sibling children within the callback; the browser
+    // reports those next frame (raising a benign "ResizeObserver loop" error
+    // event, unhandled in this app), where the check reaches the same answer
+    // and settles.
     observer = new ResizeObserver(() => check());
     observeAll();
     check();
@@ -74,6 +103,7 @@ export function useCollapseOnOverflow(target: Ref<HTMLElement | null>, collapsed
   onBeforeUnmount(() => {
     observer?.disconnect();
     observer = null;
+    observed.clear();
   });
 
   return { collapsed, check };

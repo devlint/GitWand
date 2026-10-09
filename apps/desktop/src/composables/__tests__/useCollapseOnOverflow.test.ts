@@ -3,11 +3,11 @@
  * useCollapseOnOverflow — items collapse one at a time, in
  * `data-collapse-order`, only as far as the row needs to fit at full size
  * (measured with every item expanded first), and expand again once there is
- * room. jsdom has no layout: the child's width is faked from which items are
+ * room. jsdom has no layout: element rects are faked from which items are
  * collapsed. Mounted with native `createApp` (no @vue/test-utils dep).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createApp, defineComponent, h, ref, nextTick, type App } from "vue";
+import { createApp, defineComponent, h, ref, nextTick, type App, type VNode } from "vue";
 import { useCollapseOnOverflow } from "../useCollapseOnOverflow";
 
 const CLASS = "is-icon";
@@ -16,27 +16,39 @@ const ICON = 40; // px per collapsed item
 
 let room = 600;
 let roCallback: () => void = () => {};
-const observe = vi.fn((node: Element) => {
-  // Fake the layout once the composable watches the group — onMounted
-  // observes before its first check.
-  if (!(node as HTMLElement).dataset?.group) return;
-  const content = () =>
-    Array.from(node.children).reduce((w, c) => w + (c.classList.contains(CLASS) ? ICON : FULL), 0);
-  Object.defineProperty(node, "scrollWidth", { get: content, configurable: true });
-  Object.defineProperty(node, "clientWidth", { get: () => room, configurable: true });
-});
+const observe = vi.fn();
+const unobserve = vi.fn();
 class FakeResizeObserver {
   constructor(cb: () => void) {
     roCallback = cb;
   }
   observe = observe;
+  unobserve = unobserve;
   disconnect() {}
+}
+
+const rect = (left: number, right: number) => ({ left, right, top: 0, bottom: 20 }) as DOMRect;
+
+/** Row and group are `room` wide; items sit side by side from x = 0. */
+function fakeRect(this: Element): DOMRect {
+  const el = this as HTMLElement;
+  if (el.dataset.row || el.dataset.group) return rect(0, room);
+  if (el.dataset.popover) return rect(0, 5000); // an open menu sticking far out
+  if (el.dataset.collapseKey) {
+    let left = 0;
+    for (let s = el.previousElementSibling; s; s = s.previousElementSibling) {
+      if ((s as HTMLElement).dataset.collapseKey) left += s.classList.contains(CLASS) ? ICON : FULL;
+    }
+    return rect(left, left + (el.classList.contains(CLASS) ? ICON : FULL));
+  }
+  return rect(0, 0);
 }
 
 let app: App | null = null;
 
-/** Items in DOM order; `order` decides which collapses first. */
-function mountRow(items: { key: string; order: number }[] | (() => { key: string; order: number }[])) {
+type Item = { key: string; order?: number };
+
+function mountRow(items: Item[] | (() => Item[]), extra: () => VNode[] = () => []) {
   const list = typeof items === "function" ? items : () => items;
   let collapsed!: ReturnType<typeof useCollapseOnOverflow>["collapsed"];
   const Comp = defineComponent({
@@ -44,7 +56,7 @@ function mountRow(items: { key: string; order: number }[] | (() => { key: string
       const row = ref<HTMLElement | null>(null);
       ({ collapsed } = useCollapseOnOverflow(row, CLASS));
       return () =>
-        h("div", { ref: row }, [
+        h("div", { ref: row, "data-row": "1" }, [
           h(
             "div",
             { "data-group": "1" },
@@ -52,6 +64,7 @@ function mountRow(items: { key: string; order: number }[] | (() => { key: string
               h("button", { key: i.key, "data-collapse-key": i.key, "data-collapse-order": i.order }),
             ),
           ),
+          ...extra(),
         ]);
     },
   });
@@ -66,7 +79,7 @@ function mountRow(items: { key: string; order: number }[] | (() => { key: string
 }
 
 // Five items, DOM order left → right; the rightmost collapses first.
-const ACTIONS = [
+const ACTIONS: Item[] = [
   { key: "stash", order: 5 },
   { key: "tags", order: 4 },
   { key: "worktrees", order: 3 },
@@ -77,13 +90,16 @@ const ACTIONS = [
 describe("useCollapseOnOverflow", () => {
   beforeEach(() => {
     vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(fakeRect);
     room = 600;
     observe.mockClear();
+    unobserve.mockClear();
   });
   afterEach(() => {
     app?.unmount();
     app = null;
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     document.body.innerHTML = "";
   });
 
@@ -104,16 +120,16 @@ describe("useCollapseOnOverflow", () => {
     expect(three.collapsed()).toEqual(["releaseNotes", "submodules", "worktrees"]);
   });
 
-  it("follows data-collapse-order, not DOM order", () => {
-    room = 440;
+  it("follows data-collapse-order, not DOM order; items without one collapse last", () => {
+    room = 380; // two collapses
     const { iconKeys } = mountRow([
-      { key: "a", order: 1 },
+      { key: "none" },
       { key: "b", order: 3 },
-      { key: "c", order: 2 },
+      { key: "a", order: 1 },
       { key: "d", order: 4 },
-      { key: "e", order: 5 },
+      { key: "c", order: 2 },
     ]);
-    expect(iconKeys()).toEqual(["a"]);
+    expect(iconKeys().sort()).toEqual(["a", "c"]);
   });
 
   it("collapses everything when even that is too wide, without looping", () => {
@@ -133,14 +149,26 @@ describe("useCollapseOnOverflow", () => {
     expect(iconKeys()).toEqual(["releaseNotes"]);
   });
 
-  it("observes the row and children rendered later", async () => {
+  it("ignores an absolutely positioned popover sticking out of the row", () => {
+    room = 500; // the items fit exactly
+    const { iconKeys } = mountRow(ACTIONS, () => [
+      h("div", { "data-popover": "1", style: "position: absolute" }),
+    ]);
+    expect(iconKeys()).toEqual([]);
+  });
+
+  it("observes children rendered later and unobserves removed ones", async () => {
     const show = ref(false);
-    const { row } = mountRow(() => (show.value ? ACTIONS : []));
+    const { row } = mountRow(ACTIONS, () => (show.value ? [h("span", { class: "late" })] : []));
     expect(observe).toHaveBeenCalledWith(row);
-    // the group itself is a direct child rendered from the start
-    expect(observe).toHaveBeenCalledWith(row.firstElementChild);
+
     show.value = true;
     await nextTick();
-    expect(row.querySelectorAll("[data-collapse-key]")).toHaveLength(5);
+    const late = row.querySelector(".late");
+    expect(observe).toHaveBeenCalledWith(late);
+
+    show.value = false;
+    await nextTick();
+    expect(unobserve).toHaveBeenCalledWith(late);
   });
 });
