@@ -1559,6 +1559,13 @@ const ptBR: Locale = {
       hooks: "Scripts executados em eventos do Git no repositório atual.",
       logs: "Erros e avisos recentes registrados durante esta sessão.",
     },
+    // Section label shown first on tabs whose content starts without one
+    sectionLabel: {
+      ai: "Recursos de IA",
+      accounts: "Contas conectadas",
+      mcp: "Servidores MCP",
+      automations: "Tarefas automatizadas",
+    },
     accountsEmpty: "Nenhuma conta configurada. Adicione uma para ativar GitLab e Bitbucket.",
     accountsAdd: "Adicionar conta",
     accountsRemove: "Remover",

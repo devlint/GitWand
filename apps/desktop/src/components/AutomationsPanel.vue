@@ -535,15 +535,19 @@ function submitForm() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
+  margin-top: var(--space-6);
 }
 
+/* Same look as SettingsPanel's .sp-label (accent bar on the left). */
 .aup-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--color-text-muted);
+  color: var(--color-text);
+  line-height: 1.2;
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-accent);
 }
 
 .aup-section-desc {
@@ -556,20 +560,21 @@ function submitForm() {
 .aup-add-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: 6px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--color-accent);
-  background: none;
+  color: #fff;
+  background: var(--color-accent);
   border: 1px solid var(--color-accent);
-  border-radius: 5px;
-  padding: 3px 8px;
+  border-radius: var(--radius-md);
+  padding: 6px 12px;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.12s, border-color 0.12s;
 }
 
 .aup-add-btn:hover {
-  background: var(--color-accent-soft);
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
 }
 
 .aup-rule-card .aup-card-head {

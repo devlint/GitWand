@@ -1570,6 +1570,13 @@ const zhCN: Locale = {
       hooks: "在当前仓库的 Git 事件上运行的脚本。",
       logs: "本次会话中记录的最近错误和警告。",
     },
+    // Section label shown first on tabs whose content starts without one
+    sectionLabel: {
+      ai: "AI 功能",
+      accounts: "已连接账户",
+      mcp: "MCP 服务器",
+      automations: "自动化任务",
+    },
     accountsEmpty: "\u672a\u914d\u7f6e\u8d26\u53f7\u3002\u6dfb\u52a0\u4e00\u4e2a\u4ee5\u542f\u7528 GitLab \u548c Bitbucket\u3002",
     accountsAdd: "\u6dfb\u52a0\u8d26\u53f7",
     accountsRemove: "\u5220\u9664",

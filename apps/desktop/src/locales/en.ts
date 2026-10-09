@@ -1585,6 +1585,13 @@ const en = {
       hooks: "Scripts that run on Git events in the current repository.",
       logs: "Recent errors and warnings recorded during this session.",
     },
+    // Section label shown first on tabs whose content starts without one
+    sectionLabel: {
+      ai: "AI features",
+      accounts: "Connected accounts",
+      mcp: "MCP servers",
+      automations: "Automated tasks",
+    },
     accountsEmpty: "No accounts configured. Add one to enable GitLab and Bitbucket.",
     accountsAdd: "Add account",
     accountsRemove: "Remove",

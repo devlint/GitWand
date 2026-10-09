@@ -278,22 +278,18 @@ onMounted(() => {
   loadHooks();
   checkGitwandHook();
 });
+
+// The host (SettingsPanel) renders the Reload / New hook buttons next to its
+// section label, so it drives them through these.
+function openNewHookForm() {
+  showForm.value = true;
+}
+
+defineExpose({ loadHooks, openNewHookForm, loading });
 </script>
 
 <template>
   <div class="hooks-panel">
-    <!-- Header -->
-    <div class="hp-header">
-      <div class="hp-actions">
-        <button class="bm-btn bm-btn--ghost hp-btn-sm" @click="loadHooks" :disabled="loading">
-          {{ t("hooks.reload") }}
-        </button>
-        <button class="bm-btn bm-btn--primary hp-btn-sm" @click="showForm = true">
-          + {{ t("hooks.newHook") }}
-        </button>
-      </div>
-    </div>
-
     <!-- Error -->
     <div v-if="error" class="hp-error">{{ error }}</div>
 
@@ -463,22 +459,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.hooks-panel {
-  padding: 16px;
-}
-
-.hp-header {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  margin-bottom: 16px;
-}
-
-.hp-actions {
-  display: flex;
-  gap: 8px;
-}
-
 .hp-btn-sm {
   padding: 4px 10px;
   font-size: 12px;

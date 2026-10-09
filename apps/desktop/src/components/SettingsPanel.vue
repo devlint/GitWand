@@ -585,6 +585,10 @@ function tabLabel(id: SettingsTab): string {
   }
 }
 
+// Hooks tab: the Reload / New hook buttons sit next to the section label and
+// drive HooksPanel through its exposed API.
+const hooksPanelRef = ref<InstanceType<typeof HooksPanel> | null>(null);
+
 function tabDescription(id: SettingsTab): string {
   return t(`settings.pageDesc.${id}` as LocaleKey);
 }
@@ -2357,6 +2361,10 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
         <!-- ═══ INTELLIGENCE ARTIFICIELLE ═══ -->
         <template v-if="activeSettingsTab === 'ai'">
+          <div class="sp-row">
+            <span class="sp-label">{{ t('settings.sectionLabel.ai') }}</span>
+          </div>
+
           <!-- Enable AI -->
           <div class="sp-row sp-row--checkbox">
             <label class="sp-checkbox-label" for="setting-ai-enabled">
@@ -3270,7 +3278,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
             <span class="sp-hint">{{ t('settings.aiTemplates.langOverrideNote') }}</span>
           </div>
 
-          <div class="sp-group">
+          <div class="sp-group sp-group--ait">
             <div class="sp-group__head">
               <div class="sp-group__head-text">
                 <span class="sp-group__label">{{ t(aiTemplateKindLabel[aiTemplateKind]) }}</span>
@@ -3348,7 +3356,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
               </div>
 
               <button v-if="!aiTemplateFormMode" class="sp-group__row sp-ait-add" @click="openAiTemplateForm('add')">
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"
                   aria-hidden="true">
                   <path d="M8 3v10M3 8h10" />
                 </svg>
@@ -3406,27 +3414,48 @@ watch(aiTemplateKind, closeAiTemplateForm);
         <!-- ═══ AUTOMATIONS ═══ -->
         <!-- ═══ ACCOUNTS ═══ -->
         <template v-if="activeSettingsTab === 'accounts'">
+          <div class="sp-row">
+            <span class="sp-label">{{ t('settings.sectionLabel.accounts') }}</span>
+          </div>
           <SettingsAccountsTab />
         </template>
 
         <!-- ═══ MCP ═══ -->
         <template v-if="activeSettingsTab === 'mcp'">
+          <div class="sp-row">
+            <span class="sp-label">{{ t('settings.sectionLabel.mcp') }}</span>
+          </div>
           <SettingsMcpTab :cwd="props.cwd" />
         </template>
 
         <template v-if="activeSettingsTab === 'automations'">
+          <div class="sp-row">
+            <span class="sp-label">{{ t('settings.sectionLabel.automations') }}</span>
+          </div>
           <AutomationsPanel />
         </template>
 
         <!-- ═══ HOOKS ═══ -->
         <template v-if="activeSettingsTab === 'hooks'">
-          <HooksPanel v-if="props.cwd" :cwd="props.cwd" />
+          <div class="sp-logs-header">
+            <span class="sp-label">{{ t('hooks.title') }}</span>
+            <div v-if="props.cwd" class="sp-logs-actions">
+              <button class="bm-btn bm-btn--ghost" :disabled="hooksPanelRef?.loading" @click="hooksPanelRef?.loadHooks()">
+                {{ t('hooks.reload') }}
+              </button>
+              <button class="bm-btn bm-btn--primary" @click="hooksPanelRef?.openNewHookForm()">
+                + {{ t('hooks.newHook') }}
+              </button>
+            </div>
+          </div>
+          <HooksPanel v-if="props.cwd" ref="hooksPanelRef" :cwd="props.cwd" />
           <div v-else class="sp-logs-empty">{{ t('hooks.empty') }}</div>
         </template>
 
         <!-- ═══ LOGS ═══ -->
         <template v-if="activeSettingsTab === 'logs'">
           <div class="sp-logs-header">
+            <span class="sp-label">{{ t('settings.logsTitle') }}</span>
             <div class="sp-logs-actions">
               <button v-if="(props.errorLog?.length ?? 0) > 0" class="bm-btn bm-btn--ghost" @click="copyAllLogs">
                 {{ t('settings.logsCopyAll') }}
@@ -3694,7 +3723,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
 
 .sp-label {
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   text-transform: uppercase;
@@ -3713,9 +3742,15 @@ watch(aiTemplateKind, closeAiTemplateForm);
   margin-top: 0;
 }
 
+/* Logs header row carries the label's top spacing itself. */
+.sp-logs-header .sp-label {
+  margin-top: 0;
+}
+
 /* First setting right under the header line: tighter top spacing. */
 .sp-page-header + .sp-row > .sp-label,
-.sp-page-header + .sp-row > .sp-label-row {
+.sp-page-header + .sp-row > .sp-label-row,
+.sp-page-header + .sp-logs-header {
   margin-top: var(--space-4);
 }
 
@@ -4191,7 +4226,8 @@ watch(aiTemplateKind, closeAiTemplateForm);
 .sp-logs-header {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  margin-top: var(--space-6);
   gap: var(--space-4);
 }
 
@@ -4482,6 +4518,10 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
 /* ── Empty state ── */
 .sp-group__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 41px;
   padding: var(--space-4) var(--space-3);
   font-size: var(--font-size-sm);
   color: var(--color-text-subtle);
@@ -4622,24 +4662,60 @@ watch(aiTemplateKind, closeAiTemplateForm);
 }
 
 /* "New template": a full-width row of the list, not a header action. */
+/* Filled accent strip so "Add template" reads as a real button. */
 .sp-ait-add {
   width: 100%;
   justify-content: center;
-  gap: 5px;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-3);
   border-top: none;
   border-left: none;
   border-right: none;
-  color: var(--color-accent);
-  font-size: var(--font-size-sm);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   cursor: pointer;
 }
 
 .sp-ait-add:hover {
-  background: var(--color-accent-soft);
+  background: var(--color-accent-hover);
 }
 
 /* ── v2.13 / sp-group extensions ─────────────────────── */
+
+/* AI Templates tab: group label reads like an .sp-label (accent bar) and the
+   list text is brighter than the default muted group look. */
+.sp-group--ait .sp-group__label {
+  font-size: var(--font-size-md);
+  color: var(--color-text);
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-accent);
+}
+
+.sp-group--ait .sp-group__sublabel {
+  font-size: var(--font-size-base);
+  padding: var(--space-3) 0;
+  color: var(--color-text);
+  opacity: 0.85;
+}
+
+.sp-group--ait .sp-group__row--muted {
+  opacity: 1;
+}
+
+.sp-group--ait .sp-group__row-meta {
+  color: var(--color-text);
+  opacity: 0.85;
+}
+
+.sp-group--ait .sp-group__sep,
+.sp-group--ait .sp-group__empty {
+  color: var(--color-text-muted);
+}
+
 .sp-section-divider--inner {
   margin: var(--space-4) 0 var(--space-2);
 }
