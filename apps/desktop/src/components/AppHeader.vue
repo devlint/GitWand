@@ -55,9 +55,9 @@ import type { RepoTab } from "../composables/useRepoTabs";
 
 const { t } = useI18n();
 
-// Must match the `max-width: 1024px` breakpoint in <style> that hides the
+// Must match the `max-width: 1350px` breakpoint in <style> that hides the
 // action-button labels — tooltips only appear once the label is gone.
-const ICON_MODE_QUERY = "(max-width: 1024px)";
+const ICON_MODE_QUERY = "(max-width: 1350px)";
 const isIconMode = () => window.matchMedia(ICON_MODE_QUERY).matches;
 const ai = useAIProvider();
 const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
@@ -538,82 +538,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             @force-push="emit('forcePush')"
           />
 
-          <!-- Stash button -->
-          <div class="header-action-sep" aria-hidden="true"></div>
-          <button
-            class="btn btn--secondary header-action-btn"
-            v-tooltip="{ text: t('stash.title'), when: isIconMode }"
-            :aria-label="t('stash.title')"
-            @click="emit('openStash')"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 8v13H3V8"/>
-              <path d="M1 3h22v5H1z"/>
-              <path d="M10 12h4"/>
-            </svg>
-            <span>{{ t('stash.title') }}</span>
-            <span v-if="(stashCount ?? 0) > 0" class="header-action-btn__count">{{ stashCount }}</span>
-          </button>
-
-          <!-- Tags button -->
-          <button
-            class="btn btn--secondary header-action-btn"
-            v-tooltip="{ text: t('tags.title'), when: isIconMode }"
-            :aria-label="t('tags.title')"
-            @click="emit('openTags')"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M2 2h6l6 6-6 6-6-6V2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-              <circle cx="5.5" cy="5.5" r="1.2" fill="currentColor"/>
-            </svg>
-            <span>{{ t('tags.title') }}</span>
-          </button>
-
-          <!-- Worktrees button -->
-          <button
-            class="btn btn--secondary header-action-btn"
-            v-tooltip="{ text: t('worktree.title'), when: isIconMode }"
-            :aria-label="t('worktree.title')"
-            @click="emit('openWorktrees')"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none" />
-              <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none" />
-              <rect x="5.5" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none" />
-              <path d="M4.5 7v1.5M11.5 7v1.5M4.5 8.5h7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-            </svg>
-            <span>{{ t('worktree.title') }}</span>
-          </button>
-
-          <!-- Submodules button -->
-          <button
-            class="btn btn--secondary header-action-btn"
-            v-tooltip="{ text: t('submodule.title'), when: isIconMode }"
-            :aria-label="t('submodule.title')"
-            @click="emit('openSubmodules')"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <rect x="3" y="3" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="none" />
-              <rect x="6" y="6" width="4" height="4" rx="0.5" stroke="currentColor" stroke-width="1.3" fill="none" />
-            </svg>
-            <span>{{ t('submodule.title') }}</span>
-            <span v-if="(submoduleUpdateCount ?? 0) > 0" class="header-action-btn__count">{{ submoduleUpdateCount }}</span>
-          </button>
-
-          <!-- Release notes button -->
-          <template v-if="ai.isAvailable.value">
-            <div class="header-action-sep" aria-hidden="true"></div>
-            <button
-              class="btn btn--secondary header-action-btn"
-              v-tooltip="{ text: t('dashboard.releaseNotesHint'), when: isIconMode }"
-              :aria-label="t('dashboard.releaseNotes')"
-              @click="emit('openReleaseNotes')"
-            >
-              <AiSparkle :size="14" :busy="releaseNotesBusy" />
-              <span :class="{ 'ai-loading': releaseNotesBusy }">{{ t('dashboard.releaseNotes') }}</span>
-            </button>
-          </template>
-
           <!-- Merge-into picker (triggered by BranchMenu → onBranchMenuMerge) -->
           <div v-if="showMergePopover" class="merge-popover-anchor">
             <div class="merge-popover">
@@ -714,6 +638,85 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         </template>
       </div>
 
+      <!-- Secondary actions: own group so it can drop to a second row on narrow windows. -->
+      <div v-if="hasRepo" class="header-actions">
+        <!-- Stash button -->
+        <div class="header-action-sep" aria-hidden="true"></div>
+        <button
+          class="btn btn--secondary header-action-btn"
+          v-tooltip="{ text: t('stash.title'), when: isIconMode }"
+          :aria-label="t('stash.title')"
+          @click="emit('openStash')"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 8v13H3V8"/>
+            <path d="M1 3h22v5H1z"/>
+            <path d="M10 12h4"/>
+          </svg>
+          <span>{{ t('stash.title') }}</span>
+          <span v-if="(stashCount ?? 0) > 0" class="header-action-btn__count">{{ stashCount }}</span>
+        </button>
+
+        <!-- Tags button -->
+        <button
+          class="btn btn--secondary header-action-btn"
+          v-tooltip="{ text: t('tags.title'), when: isIconMode }"
+          :aria-label="t('tags.title')"
+          @click="emit('openTags')"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 2h6l6 6-6 6-6-6V2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            <circle cx="5.5" cy="5.5" r="1.2" fill="currentColor"/>
+          </svg>
+          <span>{{ t('tags.title') }}</span>
+        </button>
+
+        <!-- Worktrees button -->
+        <button
+          class="btn btn--secondary header-action-btn"
+          v-tooltip="{ text: t('worktree.title'), when: isIconMode }"
+          :aria-label="t('worktree.title')"
+          @click="emit('openWorktrees')"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none" />
+            <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none" />
+            <rect x="5.5" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none" />
+            <path d="M4.5 7v1.5M11.5 7v1.5M4.5 8.5h7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+          </svg>
+          <span>{{ t('worktree.title') }}</span>
+        </button>
+
+        <!-- Submodules button -->
+        <button
+          class="btn btn--secondary header-action-btn"
+          v-tooltip="{ text: t('submodule.title'), when: isIconMode }"
+          :aria-label="t('submodule.title')"
+          @click="emit('openSubmodules')"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="3" y="3" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="none" />
+            <rect x="6" y="6" width="4" height="4" rx="0.5" stroke="currentColor" stroke-width="1.3" fill="none" />
+          </svg>
+          <span>{{ t('submodule.title') }}</span>
+          <span v-if="(submoduleUpdateCount ?? 0) > 0" class="header-action-btn__count">{{ submoduleUpdateCount }}</span>
+        </button>
+
+        <!-- Release notes button -->
+        <template v-if="ai.isAvailable.value">
+          <div class="header-action-sep" aria-hidden="true"></div>
+          <button
+            class="btn btn--secondary header-action-btn"
+            v-tooltip="{ text: t('dashboard.releaseNotesHint'), when: isIconMode }"
+            :aria-label="t('dashboard.releaseNotes')"
+            @click="emit('openReleaseNotes')"
+          >
+            <AiSparkle :size="14" :busy="releaseNotesBusy" />
+            <span :class="{ 'ai-loading': releaseNotesBusy }">{{ t('dashboard.releaseNotes') }}</span>
+          </button>
+        </template>
+      </div>
+
       <SearchTrigger v-if="hasRepo" class="header-search" @open-search="emit('openSearch')" />
 
     </div>
@@ -748,7 +751,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .app-header__row {
   display: flex;
   align-items: center;
-  gap: var(--space-6);
+  gap: var(--space-4);
   min-height: var(--header-height);
   padding: 0 var(--space-6);
 }
@@ -761,19 +764,42 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   position: relative; /* anchor for merge + undo popovers */
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
 .header-search {
   margin-left: auto;
 }
 
 /* Narrow windows: secondary actions collapse to icon-only (label stays in
    title/aria-label), then the row wraps instead of overflowing. */
-@media (max-width: 1024px) {
+@media (max-width: 1350px) {
   /* Keep in sync with ICON_MODE_QUERY in <script setup>. */
   .header-action-btn > span:not(.header-action-btn__count) {
     display: none;
   }
   .header-action-btn {
     padding-inline: var(--space-4);
+  }
+}
+
+/* Narrower: the icon actions drop to their own row under branch + sync. */
+@media (max-width: 975px) {
+  .app-header__row {
+    flex-wrap: wrap;
+    row-gap: var(--space-3);
+    padding-block: var(--space-3);
+  }
+  .header-actions {
+    order: 1;
+    flex-basis: 100%;
+  }
+  .header-actions > .header-action-sep:first-child {
+    display: none;
   }
 }
 
@@ -791,6 +817,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
     display: none;
   }
   .header-search {
+    order: 2;
     flex: 1 1 100%;
     margin-left: 0;
   }
