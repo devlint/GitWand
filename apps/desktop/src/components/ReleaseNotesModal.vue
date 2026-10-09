@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { gitListTags, getGitBranches, gitExec, type GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
-import { useReleaseNotes, FROM_PROJECT_START } from "../composables/useReleaseNotes";
+import {
+  useReleaseNotes,
+  FROM_PROJECT_START,
+  getReleaseNotesDraft,
+  isGeneratingReleaseNotes,
+} from "../composables/useReleaseNotes";
 import BaseModal from "./BaseModal.vue";
-import { OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
-import { useReleaseNoteTemplates, getActiveTemplateId } from "../composables/useReleaseNoteTemplates";
+import AiTemplateMenu from "./AiTemplateMenu.vue";
+import AiSparkle from "./AiSparkle.vue";
+import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 
 const props = defineProps<{
   cwd: string;
@@ -16,31 +22,16 @@ const emit = defineEmits<{
   (e: "close"): void;
 }>();
 
-const { t, locale } = useI18n();
-const {
-  isGenerating,
-  generate: generateReleaseNotes,
-  lastError,
-} = useReleaseNotes();
+const { t } = useI18n();
+const { generateDraft } = useReleaseNotes();
 
-const openSettings = inject(OPEN_SETTINGS_KEY, undefined);
-const { templates, activate } = useReleaseNoteTemplates(() => props.cwd);
-const selectedTemplateId = ref<string | null>(null);
+// Active AI template (picked from the Generate split button), shown on the button.
+const { activeTemplate } = useAiTemplates("releaseNotes", () => props.cwd);
 
-function saveTemplate() {
-  activate(selectedTemplateId.value);
-}
-
-function goToSettings() {
-  emit("close");
-  if (openSettings) {
-    openSettings("releaseNotes");
-  }
-}
-
-const from = ref("");
-const to = ref("HEAD");
-const markdown = ref("");
+// Refs + generated text live in the per-repo draft, so they survive closing
+// the modal (and a generation still running when it closes).
+const draft = computed(() => getReleaseNotesDraft(props.cwd));
+const isGenerating = computed(() => isGeneratingReleaseNotes(props.cwd));
 const copied = ref(false);
 
 // Ref pickers (tags + branches) for the from/to selects.
@@ -84,20 +75,25 @@ async function previousBranch(localNames: string[]): Promise<string> {
 const { settings } = useSettings();
 
 onMounted(async () => {
-  selectedTemplateId.value = getActiveTemplateId(props.cwd);
+  // Reopened: keep the refs the user had picked (no default to resolve).
+  const hasRefs = !!draft.value.from;
   const [, tags, headSha] = await Promise.all([
     getGitBranches(props.cwd, settings.value.defaultBranch)
       .then((b) => { branches.value = b; })
       .catch(() => { branches.value = []; }),
     gitListTags(props.cwd).catch(() => []),
-    gitExec(props.cwd, ["rev-parse", "HEAD"])
-      .then((r) => (r.exitCode === 0 ? (r.stdout ?? "").trim() : ""))
-      .catch(() => ""),
+    hasRefs
+      ? ""
+      : gitExec(props.cwd, ["rev-parse", "HEAD"])
+          .then((r) => (r.exitCode === 0 ? (r.stdout ?? "").trim() : ""))
+          .catch(() => ""),
   ]);
 
   // Newest tag first (max tagger/committer date).
   const sorted = [...tags].sort((a, b) => b.date.localeCompare(a.date));
   tagNames.value = sorted.map((tg) => tg.name);
+
+  if (hasRefs) return;
 
   if (sorted.length) {
     // Default "from" = newest tag that is NOT on HEAD — otherwise `tag..HEAD`
@@ -105,33 +101,24 @@ onMounted(async () => {
     const beforeHead = headSha
       ? sorted.find((tg) => !sameCommit(tg.hash, headSha))
       : undefined;
-    from.value = (beforeHead ?? sorted[0])?.name ?? "";
+    draft.value.from = (beforeHead ?? sorted[0])?.name ?? "";
   } else {
     // No tags: fall back to the closest ancestor branch, then to the very first
     // commit ("from the project creation").
     const prev = await previousBranch(localBranchNames.value);
-    from.value = prev || FROM_PROJECT_START;
+    draft.value.from = prev || FROM_PROJECT_START;
   }
 });
 
-async function runGenerate() {
+function runGenerate() {
   copied.value = false;
-  try {
-    markdown.value = await generateReleaseNotes(
-      props.cwd,
-      from.value,
-      to.value,
-      { locale: locale.value },
-    );
-  } catch {
-    markdown.value = "";
-  }
+  void generateDraft(props.cwd, { locale: getTemplateLang("releaseNotes", props.cwd) });
 }
 
 async function copy() {
-  if (!markdown.value) return;
+  if (!draft.value.markdown) return;
   try {
-    await navigator.clipboard.writeText(markdown.value);
+    await navigator.clipboard.writeText(draft.value.markdown);
     copied.value = true;
     setTimeout(() => { copied.value = false; }, 1500);
   } catch { /* clipboard perms may be denied */ }
@@ -141,14 +128,14 @@ async function copy() {
 <template>
   <BaseModal
     :title="t('dashboard.releaseNotesTitle')"
-    size="lg"
+    size="2x"
     @close="emit('close')"
   >
     <p class="rn-desc">{{ t('dashboard.releaseNotesDesc') }}</p>
     <div class="rn-refs">
       <label class="rn-field">
         <span>{{ t('dashboard.releaseNotesFrom') }}</span>
-        <select v-model="from" class="rn-input mono">
+        <select v-model="draft.from" class="rn-input mono" :disabled="isGenerating">
           <option value="HEAD">HEAD</option>
           <option :value="FROM_PROJECT_START">{{ t('dashboard.releaseNotesFromCreation') }}</option>
           <optgroup v-if="tagNames.length" :label="t('dashboard.releaseNotesTags')">
@@ -165,7 +152,7 @@ async function copy() {
       <span class="rn-sep">..</span>
       <label class="rn-field">
         <span>{{ t('dashboard.releaseNotesTo') }}</span>
-        <select v-model="to" class="rn-input mono">
+        <select v-model="draft.to" class="rn-input mono" :disabled="isGenerating">
           <option value="HEAD">HEAD</option>
           <optgroup v-if="tagNames.length" :label="t('dashboard.releaseNotesTags')">
             <option v-for="tn in tagNames" :key="`t-${tn}`" :value="tn">{{ tn }}</option>
@@ -178,43 +165,43 @@ async function copy() {
           </optgroup>
         </select>
       </label>
-      <label class="rn-field">
-        <span class="rn-template-label-container">
-          <span>{{ t('dashboard.releaseNotesTemplate') }}</span>
-          <button class="rn-settings-link" @click="goToSettings" :title="t('dashboard.releaseNotesTemplateShortcut')">
-            <svg viewBox="0 0 24 24" width="12" height="12">
-              <path fill="currentColor" d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/>
-            </svg>
-          </button>
-        </span>
-        <select v-model="selectedTemplateId" class="rn-input" @change="saveTemplate">
-          <option :value="null">{{ t('settings.ai.releaseNotes.defaultTemplate') }}</option>
-          <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
-        </select>
-      </label>
-      <button
-        class="bm-btn bm-btn--primary rn-btn-sm rn-generate"
-        :class="{ 'rn-generate--loading ai-loading': isGenerating }"
-        :disabled="isGenerating || !from.trim() || !to.trim()"
-        @click="runGenerate"
-      >
-        <span class="rn-generate-label">{{ t('dashboard.releaseNotesGenerate') }}</span>
-        <svg v-if="isGenerating" class="rn-generate-loader" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-          <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3" />
-          <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" />
-        </svg>
-      </button>
+      <div class="rn-split">
+        <button
+          type="button"
+          class="btn btn--ai rn-ai-btn rn-split-main"
+          :disabled="isGenerating || !draft.from.trim() || !draft.to.trim()"
+          @click="runGenerate"
+        >
+          <span v-if="isGenerating" class="rn-ai-label ai-loading">
+            <span class="rn-spinner" aria-hidden="true"></span>
+            {{ t('pr.create.aiGenerating') }}
+          </span>
+          <span v-else class="rn-ai-label">
+            <AiSparkle :size="13" />
+            {{ t('dashboard.releaseNotesGenerate') }}
+            <span v-if="activeTemplate" class="rn-active-tpl">· {{ activeTemplate.name }}</span>
+          </span>
+        </button>
+        <AiTemplateMenu
+          kind="releaseNotes"
+          :cwd="cwd"
+          :disabled="isGenerating"
+          chevron-class="btn btn--ai rn-ai-btn rn-split-chevron"
+          @manage="emit('close')"
+        />
+      </div>
     </div>
-    <p v-if="lastError" class="rn-error">{{ lastError }}</p>
+    <p v-if="draft.error" class="rn-error">{{ draft.error }}</p>
     <textarea
-      v-model="markdown"
+      v-model="draft.markdown"
       class="rn-textarea mono"
-      rows="14"
+      :disabled="isGenerating"
+      rows="22"
       spellcheck="false"
       :placeholder="t('dashboard.releaseNotesPlaceholder')"
     />
     <template #footer>
-      <button class="bm-btn bm-btn--ghost" :disabled="!markdown" @click="copy">
+      <button class="bm-btn bm-btn--ghost" :disabled="!draft.markdown" @click="copy">
         {{ copied ? t('dashboard.releaseNotesCopied') : t('dashboard.releaseNotesCopy') }}
       </button>
       <button class="bm-btn bm-btn--primary" @click="emit('close')">{{ t('common.close') }}</button>
@@ -233,28 +220,6 @@ async function copy() {
 .rn-field { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .rn-sep { padding-bottom: var(--space-3); color: var(--color-text-muted); }
 
-.rn-btn-sm {
-  height: 32px;
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  line-height: 1;
-}
-
-/* Loader swap: keep the label in the DOM (reserves width across states and
-   locales) but hide it while generating, with the sparkle centred on top. */
-.rn-generate { position: relative; }
-.rn-generate--loading .rn-generate-label { visibility: hidden; }
-.rn-generate-loader {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  margin: -7px 0 0 -7px; /* half the 14px box — keeps it centred under rotation */
-  animation: rn-spin 0.7s linear infinite;
-}
-
-@keyframes rn-spin {
-  to { transform: rotate(360deg); }
-}
 
 .rn-input,
 .rn-textarea {
@@ -276,6 +241,12 @@ async function copy() {
 .rn-textarea:focus {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.rn-input:disabled,
+.rn-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .rn-field .rn-input { min-width: 140px; }
@@ -302,28 +273,63 @@ select.rn-input {
   border-left: 3px solid var(--color-danger, #ef4444);
 }
 
-.rn-template-label-container {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
+/* Generate split button — the PR view's AI button (.btn--ai + sparkle),
+   taller to line up with the ref selects. The chevron lives in
+   AiTemplateMenu, styled from here via :deep(). */
+.rn-split {
+  display: inline-flex;
+  margin-left: auto;
 }
-
-.rn-settings-link {
+.rn-split :deep(.btn.btn--ai.rn-ai-btn) {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+.rn-split :deep(.btn.btn--ai.rn-ai-btn:hover:not(:disabled)) {
+  color: var(--color-ai-text);
+  transform: none;
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+.rn-split .btn.btn--ai.rn-split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.rn-split :deep(.btn.btn--ai.rn-split-chevron) {
+  padding: 0 8px;
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.rn-ai-label {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
+  gap: 6px;
 }
-
-.rn-settings-link:hover {
-  opacity: 1;
-  color: var(--color-accent);
+.rn-active-tpl {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+.rn-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: rn-spin 0.7s linear infinite;
+}
+@keyframes rn-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rn-spinner { animation: none; }
 }
 </style>
 

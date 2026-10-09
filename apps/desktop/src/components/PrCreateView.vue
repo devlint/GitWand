@@ -19,8 +19,9 @@ import Avatar from "./Avatar.vue";
 import { useI18n } from "../composables/useI18n";
 import { useAIProvider } from "../composables/useAIProvider";
 import { usePrDescription } from "../composables/usePrDescription";
-import { loadSettings } from "../composables/useSettings";
+import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 import AiSparkle from "./AiSparkle.vue";
+import AiTemplateMenu from "./AiTemplateMenu.vue";
 
 const props = defineProps<{
   currentBranch: string;
@@ -31,13 +32,15 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: "cancel"): void }>();
 
 const p = inject<PrPanelState>(PR_PANEL_KEY)!;
-const { t, locale } = useI18n();
+const { t } = useI18n();
 const ai = useAIProvider();
 const {
   isGenerating: isGeneratingPrDescription,
   lastError: aiPrError,
   generate: generatePrDescription,
 } = usePrDescription();
+// Active AI template (picked from the AI split button), shown on the button.
+const { activeTemplate: activePrTemplate } = useAiTemplates("pr", () => props.cwd);
 
 async function generateWithAI() {
   const hasContent = p.newPrTitle.value.trim() || p.newPrBody.value.trim();
@@ -48,8 +51,8 @@ async function generateWithAI() {
   // user switched repo meanwhile.
   const cwd = props.cwd;
   try {
-    // PR language: "english" (default) forces English; "ui" follows the app locale.
-    const prLang = loadSettings().prAiLanguage === "ui" ? locale.value : "en";
+    // PR language: picked for this repo, else the Settings default.
+    const prLang = getTemplateLang("pr", cwd);
     const result = await generatePrDescription(
       cwd,
       props.currentBranch,
@@ -572,23 +575,31 @@ function removeReviewer(name: string) {
       <section class="pcv-section">
         <div class="pcv-label-row">
           <label class="pcv-label" for="pcv-title-input">{{ t("pr.create.titleLabel") }}</label>
-          <button
-            v-if="ai.isAvailable.value"
-            type="button"
-            class="btn btn--ai pcv-ai-btn"
-            :disabled="isGeneratingPrDescription || baseIsSameAsHead"
-            :title="t('pr.create.aiHint')"
-            @click="generateWithAI"
-          >
-            <span v-if="isGeneratingPrDescription" class="pcv-ai-label ai-loading">
-              <span class="pcv-spinner pcv-spinner--sm" aria-hidden="true"></span>
-              {{ t('pr.create.aiGenerating') }}
-            </span>
-            <span v-else class="pcv-ai-label">
-              <AiSparkle :size="13" />
-              {{ t('pr.create.aiGenerate') }}
-            </span>
-          </button>
+          <div v-if="ai.isAvailable.value" class="pcv-ai-split">
+            <button
+              type="button"
+              class="btn btn--ai pcv-ai-btn pcv-ai-main"
+              :disabled="isGeneratingPrDescription || baseIsSameAsHead"
+              :title="t('pr.create.aiHint')"
+              @click="generateWithAI"
+            >
+              <span v-if="isGeneratingPrDescription" class="pcv-ai-label ai-loading">
+                <span class="pcv-spinner pcv-spinner--sm" aria-hidden="true"></span>
+                {{ t('pr.create.aiGenerating') }}
+              </span>
+              <span v-else class="pcv-ai-label">
+                <AiSparkle :size="13" />
+                {{ t('pr.create.aiGenerate') }}
+                <span v-if="activePrTemplate" class="pcv-ai-active-tpl">· {{ activePrTemplate.name }}</span>
+              </span>
+            </button>
+            <AiTemplateMenu
+              kind="pr"
+              :cwd="cwd"
+              :disabled="isGeneratingPrDescription"
+              chevron-class="btn btn--ai pcv-ai-chevron"
+            />
+          </div>
         </div>
         <input
           id="pcv-title-input"
@@ -1200,6 +1211,38 @@ function removeReviewer(name: string) {
   background:
     linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
     linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+/* AI split button — mirrors the commit summary's AI button. The chevron and
+   its template menu live in AiTemplateMenu, styled from here via :deep(). */
+.pcv-ai-split {
+  display: inline-flex;
+  margin-left: auto;
+}
+.btn.btn--ai.pcv-ai-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.pcv-ai-split :deep(.btn.btn--ai.pcv-ai-chevron) {
+  min-height: 26px;
+  padding: 4px 8px;
+  margin-left: -1px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.pcv-ai-split :deep(.btn.btn--ai.pcv-ai-chevron:hover:not(:disabled)) {
+  color: var(--color-ai-text);
+  transform: none;
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+.pcv-ai-active-tpl {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
 }
 .pcv-spinner--sm {
   width: 10px;

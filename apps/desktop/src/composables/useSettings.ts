@@ -10,9 +10,11 @@
  */
 
 import { ref } from "vue";
+import { detectLocale, isSupportedLocale } from "../locales";
 import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
 import type { AIProvider } from "./useAIProvider";
+import { DEFAULT_TEMPLATE_PROMPTS, LEGACY_RELEASE_NOTES_RULES_HEADER } from "./aiTemplateDefaults";
 import type { SwitchBehavior } from "../utils/branchSwitchDecision";
 import type { PullDirtyBehavior } from "../utils/pullDirtyDecision";
 
@@ -83,15 +85,11 @@ export interface CommitTemplate {
   body: string;
 }
 
-/** Named release note template (v3). */
-export interface ReleaseNoteTemplate {
-  /** UUID v4. */
-  id: string;
-  /** Display name, e.g. "Security focus", "SaaS". */
-  name: string;
-  /** Custom rules to be appended to the prompt. */
-  customRules: string;
-}
+/**
+ * Named release note template. Same shape as every AI template: a full system
+ * prompt replacing the default one (see useAiTemplates).
+ */
+export type ReleaseNoteTemplate = AiPromptPreset;
 
 
 /**
@@ -136,13 +134,12 @@ export interface AppSettings {
   blameAlgorithm: BlameAlgorithm;
   /** Auto-update channel (v2.0). "stable" = Tauri plugin auto-install; "beta" = manual fetch + browser-open. */
   updateChannel: "stable" | "beta";
-  /** Language used for AI-generated commit messages. "" = follow UI locale. */
+  /** Language used for AI-generated commit messages (locale code). "" = English. */
   commitMessageLang: string;
-  /**
-   * Language for AI-generated PR title/body. "english" (default — PRs are most
-   * often written in English) or "ui" to match the app's current locale.
-   */
-  prAiLanguage: "english" | "ui";
+  /** Language used for AI-generated release notes (locale code). "" = English. */
+  releaseNotesLang: string;
+  /** Language used for AI-generated PR titles and descriptions (locale code). "" = English. */
+  prDescriptionLang: string;
   /** Whether AI features are enabled. */
   aiEnabled: boolean;
   /** Active AI provider. */
@@ -350,6 +347,23 @@ export interface AppSettings {
    * "use the default prompt". Special value "__builtin_*" for built-in presets.
    */
   activePresetIdByRepo: Record<string, string | null>;
+  // ── AI Templates: pull requests ───────────────────────────
+  /** User-defined AI templates for PR title + description generation. */
+  prTemplates: AiPromptPreset[];
+
+  /**
+   * Output language picked per repo (keyed by cwd) and per AI template kind
+   * ("commit" | "pr" | "releaseNotes") from the AI button menu. Absent = the
+   * global default (commitMessageLang / prDescriptionLang / releaseNotesLang).
+   */
+  aiTemplateLangByRepo: Record<string, Record<string, string>>;
+
+  /**
+   * ID of the active PR template per repo (keyed by cwd).
+   * Null / absent / "__builtin_default" means "use the default prompt".
+   */
+  activePrTemplateIdByRepo: Record<string, string | null>;
+
   // ── v3 Release Note Templates ─────────────────────────────
   /** Saved release note templates (v3). */
   releaseNoteTemplates: ReleaseNoteTemplate[];
@@ -473,8 +487,9 @@ export const defaultAppSettings: AppSettings = {
   notificationsByPeople: true,
   blameAlgorithm: "histogram",
   updateChannel: "stable",
-  commitMessageLang: "",
-  prAiLanguage: "english",
+  commitMessageLang: "en",
+  releaseNotesLang: "en",
+  prDescriptionLang: "en",
   aiEnabled: false,
   aiProvider: "none",
   aiApiKey: "",
@@ -531,6 +546,9 @@ export const defaultAppSettings: AppSettings = {
   aiPromptPresets:        [],
   activePresetIdByRepo:   {},
   // v3
+  prTemplates:                       [],
+  aiTemplateLangByRepo:              {},
+  activePrTemplateIdByRepo:          {},
   releaseNoteTemplates:              [],
   activeReleaseNoteTemplateIdByRepo: {},
   // v3.x terminal
@@ -569,10 +587,77 @@ export function normaliseCwd(cwd: string): string {
 
 // ─── Load / save helpers ──────────────────────────────────
 
+/**
+ * Release note templates used to hold only `customRules` appended to the
+ * default prompt. Turn such a legacy entry into a full-prompt template that
+ * sends the model exactly what it used to receive.
+ */
+function migrateReleaseNoteTemplates(list: unknown): ReleaseNoteTemplate[] {
+  if (!Array.isArray(list)) return [];
+  return list.map((tpl) => {
+    if (typeof tpl?.systemPrompt === "string") return tpl as ReleaseNoteTemplate;
+    const rules = typeof tpl?.customRules === "string" ? tpl.customRules.trim() : "";
+    const base = DEFAULT_TEMPLATE_PROMPTS.releaseNotes;
+    return {
+      id: String(tpl?.id ?? crypto.randomUUID()),
+      name: String(tpl?.name ?? ""),
+      systemPrompt: rules ? `${base}\n\n${LEGACY_RELEASE_NOTES_RULES_HEADER}\n${rules}` : base,
+    };
+  });
+}
+
+/** UI locale as useI18n resolves it: the saved override, else OS detection. */
+function resolveUiLocale(): string {
+  try {
+    const saved = localStorage.getItem("gitwand-locale");
+    if (saved && isSupportedLocale(saved)) return saved;
+  } catch {
+    // ignore
+  }
+  return detectLocale();
+}
+
+/**
+ * Before the AI templates unification, "which language does the AI write in"
+ * followed the UI locale in most places: `commitMessageLang: ""` = UI locale,
+ * `prAiLanguage: "ui" | "english"` (default "english"), release notes always
+ * the UI locale. The new settings hold an explicit language code each (default
+ * "en"), so an existing install must carry its old behaviour over once.
+ *
+ * `stored` is the raw persisted object. Returns the patch to apply, or null
+ * when the settings are already migrated (`releaseNotesLang` present) or were
+ * never stored.
+ */
+export function migrateAiLanguages(
+  stored: Record<string, unknown>,
+  uiLocale: string,
+): Pick<AppSettings, "commitMessageLang" | "prDescriptionLang" | "releaseNotesLang"> | null {
+  if (typeof stored.releaseNotesLang === "string") return null;
+  const commit = stored.commitMessageLang;
+  return {
+    commitMessageLang: typeof commit === "string" && commit ? commit : uiLocale,
+    prDescriptionLang:
+      typeof stored.prDescriptionLang === "string"
+        ? stored.prDescriptionLang
+        : stored.prAiLanguage === "ui" ? uiLocale : "en",
+    releaseNotesLang: uiLocale,
+  };
+}
+
 export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...defaultAppSettings, ...JSON.parse(raw) };
+    if (raw) {
+      const stored = JSON.parse(raw);
+      const s: AppSettings = { ...defaultAppSettings, ...stored };
+      s.releaseNoteTemplates = migrateReleaseNoteTemplates(s.releaseNoteTemplates);
+      const langs = migrateAiLanguages(stored, resolveUiLocale());
+      if (langs) {
+        Object.assign(s, langs);
+        saveSettings(s); // once: the keys now exist, so it never runs again
+      }
+      return s;
+    }
   } catch {
     // ignore
   }
@@ -595,15 +680,17 @@ export function saveSettings(s: AppSettings): void {
 // ─── Singleton reactive ref ───────────────────────────────
 // Shared across all useSettings() calls in the same Vue app instance.
 
-const _settings = ref<AppSettings>(loadSettings());
-
 /**
  * Monotonic counter bumped on every saveSettings() / refreshSettings().
  * Read it inside a computed (`settingsRevision.value`) to register a reactive
  * dependency on "settings changed", even when the underlying value is read
  * straight from localStorage rather than the `_settings` ref.
  */
+// Declared before `_settings`: the one-time AI language migration in
+// loadSettings() saves (and bumps this) while the module is still loading.
 export const settingsRevision = ref(0);
+
+const _settings = ref<AppSettings>(loadSettings());
 
 /** Re-read all settings from localStorage (call after SettingsPanel saves). */
 export function refreshSettings(): void {

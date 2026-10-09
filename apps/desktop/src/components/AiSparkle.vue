@@ -13,15 +13,25 @@
  *    buttons use 16; inline-with-label uses 14.
  *  - animated: set to false for static contexts (e.g. tooltips,
  *    disabled state where the pulse feels distracting).
+ *  - busy: swap the sparkle for a same-size spinner while the AI
+ *    request is in flight.
  */
 defineProps<{
   size?: number;
   animated?: boolean;
+  busy?: boolean;
 }>();
 </script>
 
 <template>
+  <span
+    v-if="busy"
+    class="ai-sparkle-spinner"
+    :style="{ width: `${size ?? 14}px`, height: `${size ?? 14}px` }"
+    aria-hidden="true"
+  ></span>
   <svg
+    v-else
     class="ai-sparkle"
     :class="{ 'ai-sparkle--animated': animated !== false }"
     :width="size ?? 14"
@@ -68,9 +78,21 @@ defineProps<{
   }
 }
 
+.ai-sparkle-spinner {
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
 /* Respect reduced-motion preference — keep the icon, drop the pulse. */
 @media (prefers-reduced-motion: reduce) {
-  .ai-sparkle--animated {
+  .ai-sparkle--animated,
+  .ai-sparkle-spinner {
     animation: none;
   }
 }

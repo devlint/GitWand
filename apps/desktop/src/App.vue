@@ -52,6 +52,7 @@ import { useSnapshots } from "./composables/useSnapshots";
 const TagsPanel = defineAsyncComponent(() => import("./components/TagsPanel.vue"));
 const WorktreeManager = defineAsyncComponent(() => import("./components/WorktreeManager.vue"));
 const SubmodulePanel = defineAsyncComponent(() => import("./components/SubmodulePanel.vue"));
+const ReleaseNotesModal = defineAsyncComponent(() => import("./components/ReleaseNotesModal.vue"));
 const LaunchpadView = defineAsyncComponent(() => import("./components/LaunchpadView.vue"));
 const AgentSessionsPanel = defineAsyncComponent(() => import("./components/AgentSessionsPanel.vue"));
 const AiTaskCloseModal = defineAsyncComponent(() => import("./components/AiTaskCloseModal.vue"));
@@ -124,6 +125,7 @@ import { useLaunchpadPrs } from "./composables/useLaunchpadPrs";
 import { diffLaunchpad, isBotAuthor, type LaunchpadEvent } from "./composables/useLaunchpadNotifications";
 import { osNotify } from "./composables/useOsNotification";
 import { useReleaseNotes } from "./composables/useReleaseNotes";
+import { getTemplateLang } from "./composables/useAiTemplates";
 import { useFolderHistory } from "./composables/useFolderHistory";
 import { useAppMenu } from "./composables/useAppMenu";
 import { useLogs } from "./composables/useLogs";
@@ -2147,7 +2149,7 @@ function onPaletteSelectCommit(hash: string) {
 
 // ─── Settings panel ─────────────────────────────────────
 const showSettings = ref(false);
-const settingsInitialTab = ref<"general" | "dock" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes" | undefined>(undefined);
+const settingsInitialTab = ref<"general" | "dock" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "aiTemplates" | undefined>(undefined);
 
 // ─── Error log (in-memory ring buffer, feeds SettingsPanel Logs tab) ─
 // Uses the useLogs() singleton composable — no localStorage persistence so a
@@ -3224,6 +3226,9 @@ const pendingQuickCreate = ref(false);
 // ─── Submodule panel ─────────────────────────────────────
 const showSubmodules = ref(false);
 
+// ─── Release notes modal (header button) ─────────────────
+const showReleaseNotes = ref(false);
+
 // ─── Discard-section confirmation modal ─────────────────
 const discardSectionConfirm = ref<{ sectionKey: string; paths: string[] } | null>(null);
 
@@ -3859,7 +3864,9 @@ const scheduler = useScheduler({
     const tags = await gitListTags(repoFolderPath.value);
     if (tags.length < 2) return;
     const sorted = [...tags].sort((a, b) => b.date.localeCompare(a.date));
-    await generateReleaseNotesFn(repoFolderPath.value, sorted[1].name, sorted[0].name);
+    await generateReleaseNotesFn(repoFolderPath.value, sorted[1].name, sorted[0].name, {
+      locale: getTemplateLang("releaseNotes", repoFolderPath.value),
+    });
   },
   triggerAiCommit: async () => {
     // Surface the commit panel — the user will see staged files there
@@ -4348,7 +4355,7 @@ onUnmounted(() => {
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
       :submodule-update-count="submoduleUpdateCount"
-      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true"
+      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true" @open-release-notes="showReleaseNotes = true"
       @open-time-machine="showTimeMachine = true" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
@@ -4724,6 +4731,10 @@ onUnmounted(() => {
       @close="showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false;"
       @load-branches="loadBranches"
       @open-tab="(path) => { openTab(path); showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false; }" />
+
+    <!-- Release notes generator (shared modal, also on Dashboard + Tags panel) -->
+    <ReleaseNotesModal v-if="showReleaseNotes && repoFolderPath" :cwd="repoFolderPath"
+      @close="showReleaseNotes = false" />
 
     <!-- Submodule panel (uses BaseModal internally → own Teleport + backdrop) -->
     <SubmodulePanel v-if="showSubmodules && repoFolderPath" :cwd="repoFolderPath" :updates="submoduleUpdates"

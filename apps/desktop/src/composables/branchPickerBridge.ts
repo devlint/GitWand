@@ -32,7 +32,7 @@ export const TOGGLE_GIT_TREE_KEY: InjectionKey<() => void> = Symbol("toggleGitTr
 
 /** Settings tab identifiers accepted by {@link OPEN_SETTINGS_KEY}. */
 export type SettingsTabTarget =
-  | "general" | "dock" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
+  | "general" | "dock" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "aiTemplates";
 
 /** Open the Settings panel, optionally on a specific tab (e.g. from the PR sidebar). */
 export const OPEN_SETTINGS_KEY: InjectionKey<(tab?: SettingsTabTarget) => void> = Symbol("openSettings");

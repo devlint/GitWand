@@ -14,6 +14,7 @@ import {
 import type { ViewMode } from "../composables/useGitRepo";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
+import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
 import Avatar from "./Avatar.vue";
 import { useAIProvider } from "../composables/useAIProvider";
 import { renderMarkdown, safeHtml } from "../composables/useSafeHtml";
@@ -28,6 +29,7 @@ const { settings } = useSettings();
 const ai = useAIProvider();
 // ─── Release notes modal (shared with TagsPanel) ──────────
 const releaseNotesOpen = ref(false);
+const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
 
 const props = defineProps<{
   cwd: string;
@@ -1253,8 +1255,8 @@ watch(
                 @click="releaseNotesOpen = true"
               >
                 <span class="dv-ai-label">
-                  <AiSparkle :size="13" />
-                  {{ t('dashboard.releaseNotes') }}
+                  <AiSparkle :size="13" :busy="releaseNotesBusy" />
+                  <span :class="{ 'ai-loading': releaseNotesBusy }">{{ t('dashboard.releaseNotes') }}</span>
                 </span>
               </button>
             </div>

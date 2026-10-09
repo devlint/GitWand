@@ -3,6 +3,8 @@ import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { localeLabels, type SupportedLocale } from "../locales";
 import { t } from "./useI18n";
+import { applyLang, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
+import { getActiveTemplate } from "./useAiTemplates";
 
 /**
  * Generates a structured Pull Request title + body from the commits
@@ -35,42 +37,16 @@ function localeToEnglishName(code: string): string {
   return map[code] ?? localeLabels[code as SupportedLocale] ?? code;
 }
 
-function buildSystemPrompt(locale: string): string {
-  const lang = localeToEnglishName(locale);
-  return `You are a senior engineer drafting a GitHub Pull Request description.
-
-You will receive:
-- The head branch name
-- The base branch name
-- The list of commits between base..head (most recent first)
-- A diffstat summary (files changed + added/deleted lines)
-
-Produce a JSON object with exactly two keys: "title" and "body".
-
-Title rules:
-- Single line, 72 characters maximum, imperative mood, no trailing period.
-- If the commits look like Conventional Commits, keep the type/scope prefix
-  in the title (e.g. "feat(auth): support OAuth2 PKCE flow").
-- Prefer the INTENT of the change over mechanics.
-
-Body rules:
-- Markdown, three sections in this order:
-    ## Summary
-    1–3 sentences in plain prose covering WHAT changes and WHY.
-    ## Changes
-    Bulleted list of concrete changes (one line each). Do not dump
-    commit hashes.
-    ## Test plan
-    Short checklist ("- [ ] …") with 2–5 items relevant to the change.
-- If you notice breaking changes, add a ## Breaking changes section
-  after the summary.
-- Write every section in ${lang}. Keep the headings in ${lang} too
-  (Résumé / Changements / Plan de test in French; Summary / Changes /
-  Test plan in English).
-
-Output rules:
-- Output ONLY the JSON object, no markdown fences, no preamble, no
-  trailing prose. Both fields are required strings.`;
+/**
+ * The system prompt: the repo's active PR template if one is selected,
+ * otherwise the default prompt. `${lang}` is substituted either way.
+ */
+function buildSystemPrompt(cwd: string, locale: string): string {
+  const template = getActiveTemplate("pr", cwd);
+  return applyLang(
+    template?.systemPrompt ?? DEFAULT_TEMPLATE_PROMPTS.pr,
+    localeToEnglishName(locale),
+  );
 }
 
 function buildUserPrompt(
@@ -194,7 +170,7 @@ export function usePrDescription() {
       }
       const diffstat = clip((statRes.stdout ?? "").trim(), maxStatChars);
 
-      const systemPrompt = buildSystemPrompt(locale);
+      const systemPrompt = buildSystemPrompt(cwd, locale);
       const userPrompt = buildUserPrompt(headBranch, baseBranch, commits, diffstat);
 
       const raw = await ai.rawPrompt(systemPrompt, userPrompt);
