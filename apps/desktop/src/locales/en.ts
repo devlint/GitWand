@@ -1315,6 +1315,7 @@ const en = {
     },
     aiTemplates: {
       kindLabel: "Template for",
+      promptTemplatesLabel: "Prompt templates",
       kindCommit: "Commit message",
       kindPr: "Pull request",
       kindReleaseNotes: "Release notes",
@@ -1325,6 +1326,7 @@ const en = {
       default: "Default",
       defaultDescription: "Built-in prompt GitWand uses when no template is selected.",
       builtinBadge: "built-in",
+      defaultLabel: "Default",
       customLabel: "Custom",
       empty: "No custom templates yet. Duplicate a built-in one to start from it.",
       add: "New template",

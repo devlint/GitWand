@@ -1291,6 +1291,7 @@ const ptBR: Locale = {
     },
     aiTemplates: {
       kindLabel: "Modelo para",
+      promptTemplatesLabel: "Modelos de prompt",
       kindCommit: "Mensagem de commit",
       kindPr: "Pull request",
       kindReleaseNotes: "Notas de versão",
@@ -1301,6 +1302,7 @@ const ptBR: Locale = {
       default: "Padrão",
       defaultDescription: "Prompt integrado que o GitWand usa quando nenhum modelo está selecionado.",
       builtinBadge: "integrado",
+      defaultLabel: "Padrão",
       customLabel: "Personalizados",
       empty: "Nenhum modelo personalizado ainda. Duplique um integrado para começar a partir dele.",
       add: "Novo modelo",

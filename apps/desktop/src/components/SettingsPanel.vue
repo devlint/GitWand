@@ -560,10 +560,13 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
 // be hardcoded strings (three of them French), rendered raw with no t()
 // call, shown untranslated in every locale. Every sibling tab label already
 // goes through t() via tabLabel() below.
-const settingsNavGroups: Array<{ labelKey: LocaleKey | null; tabs: SettingsTab[] }> = [
+// `templateKinds`: the group lists one entry per AI template kind instead of
+// tabs; each opens the aiTemplates tab on that kind.
+const settingsNavGroups: Array<{ labelKey: LocaleKey | null; tabs: SettingsTab[]; templateKinds?: boolean }> = [
   { labelKey: "settings.navGroupApplication", tabs: ["general", "dock", "dashboard", "editor", "terminal"] },
   { labelKey: "settings.navGroupRepo", tabs: ["git", "hooks", "accounts"] },
-  { labelKey: "settings.navGroupAi", tabs: ["ai", "aiTemplates", "mcp", "automations"] },
+  { labelKey: "settings.navGroupAi", tabs: ["ai", "mcp", "automations"] },
+  { labelKey: "settings.tabAiTemplates", tabs: [], templateKinds: true },
   { labelKey: "settings.navGroupSystem", tabs: ["logs"] },
 ];
 
@@ -588,6 +591,14 @@ function tabLabel(id: SettingsTab): string {
 // Hooks tab: the Reload / New hook buttons sit next to the section label and
 // drive HooksPanel through its exposed API.
 const hooksPanelRef = ref<InstanceType<typeof HooksPanel> | null>(null);
+
+// AI Templates is entered per template kind from the nav, so its page title
+// names the kind rather than the tab.
+const pageTitle = computed(() =>
+  activeSettingsTab.value === "aiTemplates"
+    ? t(aiTemplateKindLabel[aiTemplateKind.value])
+    : tabLabel(activeSettingsTab.value),
+);
 
 function tabDescription(id: SettingsTab): string {
   return t(`settings.pageDesc.${id}` as LocaleKey);
@@ -1454,6 +1465,11 @@ function deleteAiTemplate(id: string) {
 
 watch(aiTemplateKind, closeAiTemplateForm);
 
+function openAiTemplateKind(kind: AiTemplateKind) {
+  activeSettingsTab.value = "aiTemplates";
+  aiTemplateKind.value = kind;
+}
+
 </script>
 
 <template>
@@ -1561,6 +1577,30 @@ watch(aiTemplateKind, closeAiTemplateForm);
                 {{ props.errorLog!.length > 99 ? '99+' : props.errorLog!.length }}
               </span>
             </button>
+            <template v-if="group.templateKinds">
+              <button v-for="kind in AI_TEMPLATE_KINDS" :key="kind" class="sp-nav-item"
+                :class="{ 'sp-nav-item--active': activeSettingsTab === 'aiTemplates' && aiTemplateKind === kind }"
+                @click="openAiTemplateKind(kind)">
+                <svg v-if="kind === 'commit'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                  stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                  <circle cx="8" cy="8" r="2.5" />
+                  <path d="M1 8h4.5M10.5 8H15" />
+                </svg>
+                <svg v-else-if="kind === 'pr'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                  stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="4" cy="3.5" r="1.5" />
+                  <circle cx="4" cy="12.5" r="1.5" />
+                  <circle cx="12" cy="12.5" r="1.5" />
+                  <path d="M4 5v6M12 11V6.5A2 2 0 0 0 10 4.5H7.5M9 3l-1.5 1.5L9 6" />
+                </svg>
+                <svg v-else width="15" height="15" viewBox="0 0 16 16" fill="none"
+                  stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 2.5h6.5L14 8l-5.5 5.5L2 8z" />
+                  <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+                </svg>
+                <span>{{ t(aiTemplateKindLabel[kind]) }}</span>
+              </button>
+            </template>
           </div>
         </template>
 
@@ -1611,7 +1651,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
         <!-- Page title + intro, same look as HelpView's section header -->
         <header class="sp-page-header">
-          <h2 class="sp-page-title">{{ tabLabel(activeSettingsTab) }}</h2>
+          <h2 class="sp-page-title">{{ pageTitle }}</h2>
           <p class="sp-page-intro">{{ tabDescription(activeSettingsTab) }}</p>
         </header>
 
@@ -3231,17 +3271,6 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
         <!-- ═══ AI TEMPLATES ═══ -->
         <template v-if="activeSettingsTab === 'aiTemplates'">
-          <div class="sp-row">
-            <div class="sp-label">{{ t('settings.aiTemplates.kindLabel') }}</div>
-            <div class="sp-auth-toggle sp-ait-kinds">
-              <button v-for="kind in AI_TEMPLATE_KINDS" :key="kind"
-                :class="['sp-auth-btn', { 'sp-auth-btn--active': aiTemplateKind === kind }]"
-                @click="aiTemplateKind = kind">
-                {{ t(aiTemplateKindLabel[kind]) }}
-              </button>
-            </div>
-          </div>
-
           <!-- Commit message language -->
           <div v-if="aiTemplateKind === 'commit'" class="sp-row">
             <label class="sp-label" for="setting-commit-lang">{{ t('settings.commitMessageLang') }}</label>
@@ -3278,10 +3307,14 @@ watch(aiTemplateKind, closeAiTemplateForm);
             <span class="sp-hint">{{ t('settings.aiTemplates.langOverrideNote') }}</span>
           </div>
 
+          <!-- ── Prompt templates ── -->
+          <div class="sp-row">
+            <span class="sp-label">{{ t('settings.aiTemplates.promptTemplatesLabel') }}</span>
+          </div>
+
           <div class="sp-group sp-group--ait">
             <div class="sp-group__head">
               <div class="sp-group__head-text">
-                <span class="sp-group__label">{{ t(aiTemplateKindLabel[aiTemplateKind]) }}</span>
                 <span class="sp-group__sublabel">
                   {{ t(aiTemplateKindHint[aiTemplateKind]) }}
                   <span class="sp-ait-shared">{{ t('settings.aiTemplates.sharedNote') }}</span>
@@ -3290,6 +3323,8 @@ watch(aiTemplateKind, closeAiTemplateForm);
             </div>
 
             <div class="sp-group__body">
+              <div class="sp-group__sep">{{ t('settings.aiTemplates.defaultLabel') }}</div>
+
               <!-- Built-in templates (Default first): read-only, view + duplicate -->
               <div v-for="tpl in aiBuiltinTemplates" :key="tpl.id" class="sp-group__row sp-group__row--muted">
                 <div class="sp-group__row-info">
@@ -4030,18 +4065,6 @@ watch(aiTemplateKind, closeAiTemplateForm);
   font-weight: var(--font-weight-semibold);
 }
 
-/* AI Templates kind switcher: 3 buttons, so every one but the last gets a divider. */
-.sp-ait-kinds .sp-auth-btn:not(:last-child) {
-  border-right: 1px solid var(--color-border);
-}
-
-/* Taller tabs: this switcher drives the whole section, so give it more weight. */
-.sp-ait-kinds .sp-auth-btn {
-  padding-top: var(--space-5);
-  padding-bottom: var(--space-5);
-  font-weight: var(--font-weight-semibold);
-}
-
 .sp-ait-shared {
   display: block;
   margin-top: 4px;
@@ -4467,7 +4490,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-4) var(--space-5);
   background: var(--color-bg);
   border-bottom: 1px solid var(--color-border);
   transition: background var(--transition-base);
@@ -4684,15 +4707,11 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
 /* ── v2.13 / sp-group extensions ─────────────────────── */
 
-/* AI Templates tab: group label reads like an .sp-label (accent bar) and the
-   list text is brighter than the default muted group look. */
-.sp-group--ait .sp-group__label {
-  font-size: var(--font-size-md);
-  color: var(--color-text);
-  letter-spacing: 0.04em;
-  line-height: 1.2;
-  padding-left: var(--space-4);
-  border-left: 2px solid var(--color-accent);
+/* AI Templates tab: list text is brighter than the default muted group look. */
+/* Sits right under its "Prompt templates" label row: pull it up to eat
+   part of .sp-content's gap so the hint reads as the label's subtext. */
+.sp-group--ait {
+  margin-top: calc(-1 * var(--space-5));
 }
 
 .sp-group--ait .sp-group__sublabel {
@@ -4711,7 +4730,6 @@ watch(aiTemplateKind, closeAiTemplateForm);
   opacity: 0.85;
 }
 
-.sp-group--ait .sp-group__sep,
 .sp-group--ait .sp-group__empty {
   color: var(--color-text-muted);
 }
@@ -4746,17 +4764,23 @@ watch(aiTemplateKind, closeAiTemplateForm);
 }
 
 /* Separator between built-ins and custom */
+/* First divider: the body's own border already draws the top edge. */
+.sp-group__sep:first-child {
+  border-top: none;
+}
+
 .sp-group__sep {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: 0 var(--space-3);
-  height: 28px;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
+  height: 31px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--color-text-subtle);
+  /* Text only (opacity would also fade the strip's background/borders). */
+  color: color-mix(in srgb, var(--color-text) 80%, transparent);
   background: var(--color-bg-secondary);
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);

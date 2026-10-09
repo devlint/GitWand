@@ -1290,6 +1290,7 @@ const es: Locale = {
     },
     aiTemplates: {
       kindLabel: "Plantilla para",
+      promptTemplatesLabel: "Plantillas de prompt",
       kindCommit: "Mensaje de commit",
       kindPr: "Pull request",
       kindReleaseNotes: "Notas de versión",
@@ -1300,6 +1301,7 @@ const es: Locale = {
       default: "Predeterminada",
       defaultDescription: "Prompt integrado que GitWand usa cuando no hay ninguna plantilla seleccionada.",
       builtinBadge: "integrada",
+      defaultLabel: "Predeterminadas",
       customLabel: "Personalizadas",
       empty: "Aún no hay plantillas personalizadas. Duplica una integrada para partir de ella.",
       add: "Nueva plantilla",

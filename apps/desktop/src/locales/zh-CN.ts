@@ -1368,6 +1368,7 @@ const zhCN: Locale = {
     },
     aiTemplates: {
       kindLabel: "模板用途",
+      promptTemplatesLabel: "提示词模板",
       kindCommit: "提交信息",
       kindPr: "拉取请求",
       kindReleaseNotes: "发行说明",
@@ -1378,6 +1379,7 @@ const zhCN: Locale = {
       default: "默认",
       defaultDescription: "未选择模板时 GitWand 使用的内置提示词。",
       builtinBadge: "内置",
+      defaultLabel: "默认",
       customLabel: "自定义",
       empty: "还没有自定义模板。复制一个内置模板作为起点。",
       add: "新建模板",
