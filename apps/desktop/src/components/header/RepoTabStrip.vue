@@ -640,14 +640,14 @@ function onCloseClick(e: MouseEvent, tabId: number) {
       <div
         v-if="showMenu"
         ref="menuEl"
-        class="repo-tab-new-menu"
+        class="gw-menu repo-tab-new-menu"
         role="menu"
         :style="menuStyle"
       >
         <button
           type="button"
           role="menuitem"
-          class="repo-tab-new-item"
+          class="gw-menu__item repo-tab-new-item"
           @click="pickAction('newTab')"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -658,7 +658,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
         <button
           type="button"
           role="menuitem"
-          class="repo-tab-new-item"
+          class="gw-menu__item repo-tab-new-item"
           @click="pickAction('openClone')"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -675,7 +675,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
         <button
           type="button"
           role="menuitem"
-          class="repo-tab-new-item"
+          class="gw-menu__item repo-tab-new-item"
           @click="pickAction('openFork')"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -695,7 +695,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
           then a secondary separator before recents (only if both exist).
         -->
         <template v-if="hasAnyRepo">
-          <div class="repo-tab-new-separator" role="separator" aria-hidden="true"></div>
+          <div class="gw-menu__separator repo-tab-new-separator" role="separator" aria-hidden="true"></div>
           <div v-if="pinnedRepos.length > 0" class="repo-tab-new-section">
             <div class="repo-tab-new-section-label">{{ t('header.tabStripPinnedSection') }}</div>
             <button
@@ -703,7 +703,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
               :key="entry.path"
               type="button"
               role="menuitem"
-              class="repo-tab-new-item repo-tab-new-item--recent"
+              class="gw-menu__item repo-tab-new-item repo-tab-new-item--recent"
               :title="entry.path"
               @click="closeMenu(); emit('openRecent', entry.path)"
             >
@@ -719,7 +719,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
           </div>
           <div
             v-if="pinnedRepos.length > 0 && recentRepos.length > 0"
-            class="repo-tab-new-separator repo-tab-new-separator--inner"
+            class="gw-menu__separator repo-tab-new-separator repo-tab-new-separator--inner"
             role="separator"
             aria-hidden="true"
           ></div>
@@ -730,7 +730,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
               :key="entry.path"
               type="button"
               role="menuitem"
-              class="repo-tab-new-item repo-tab-new-item--recent"
+              class="gw-menu__item repo-tab-new-item repo-tab-new-item--recent"
               :title="entry.path"
               @click="closeMenu(); emit('openRecent', entry.path)"
             >
@@ -752,7 +752,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
       <div
         v-if="wtMenuTabId !== null"
         ref="wtMenuEl"
-        class="repo-tab-new-menu repo-wt-menu"
+        class="gw-menu repo-tab-new-menu repo-wt-menu"
         role="menu"
         :style="wtMenuStyle"
       >
@@ -762,7 +762,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
         <button
           type="button"
           role="menuitem"
-          class="repo-tab-new-item repo-wt-item"
+          class="gw-menu__item repo-tab-new-item repo-wt-item"
           :class="{ 'repo-wt-item--active': isRowActive(wtMainPath) }"
           @click="pickWorktree(wtMainPath)"
         >
@@ -787,7 +787,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
             <button
               type="button"
               role="menuitem"
-              class="repo-tab-new-item repo-wt-item repo-wt-item--grow"
+              class="gw-menu__item repo-tab-new-item repo-wt-item repo-wt-item--grow"
               :title="w.path"
               @click="pickWorktree(w.path)"
             >
@@ -1123,66 +1123,23 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 /* Dropdown menu — teleported to body, so position: fixed (top/left set
    inline from the trigger's bounding rect). Scoped CSS still applies via
    the data-v attribute that Vue keeps on the teleported root element. */
+/* Look from the shared .gw-menu / .gw-menu__item (main.css). */
 .repo-tab-new-menu {
   position: fixed;
   min-width: 240px;
   max-width: 320px;
   max-height: 360px;
   overflow-y: auto;
-  padding: var(--space-2);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
   z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   scrollbar-width: thin;
 }
 
-.repo-tab-new-item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: 0;
-  color: var(--color-text);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  text-align: left;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.repo-tab-new-item:hover {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-
-.repo-tab-new-item svg {
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-}
-
-.repo-tab-new-item:hover svg {
-  color: var(--color-accent);
-}
 
 /* ─── Pinned + Recent sections ──────────────────────────
    Two adjacent sub-sections, each with its own header. The
    `inner` separator visually splits pinned/recent when both
    exist, while the top-level separator splits actions from
    the history block. */
-.repo-tab-new-separator {
-  height: 1px;
-  background: var(--color-border);
-  margin: var(--space-2) 0;
-}
-
 .repo-tab-new-separator--inner {
   margin: var(--space-1) 0;
 }

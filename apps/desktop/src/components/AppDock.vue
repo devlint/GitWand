@@ -108,10 +108,18 @@ const dockStyle = computed(() => {
  * below. Vertical dock: open toward the middle of the window, so a tooltip
  * never lands on the next icon or off-screen.
  */
+// Reactive window width: a computed reading window.innerWidth directly never
+// re-runs on resize, so the side went stale once the dock crossed the middle.
+const viewportWidth = ref(window.innerWidth);
+function onWindowResize() {
+  viewportWidth.value = window.innerWidth;
+}
+window.addEventListener("resize", onWindowResize, { passive: true });
+
 const tipPosition = computed<"left" | "right" | undefined>(() => {
   if (!vertical.value) return undefined;
   const p = livePos.value ?? settings.value.dockPosition;
-  return p && p.x > window.innerWidth / 2 ? "left" : "right";
+  return p && p.x > viewportWidth.value / 2 ? "left" : "right";
 });
 
 /** The view buttons' text labels are hidden (icons-only or vertical dock). */
@@ -339,6 +347,7 @@ function removeFilesFromDock() {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener("resize", onWindowResize);
   window.removeEventListener("pointermove", onDrag);
   window.removeEventListener("pointerup", endDrag);
   closeMenu();

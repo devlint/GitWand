@@ -642,6 +642,51 @@ button:focus-visible,
 [data-theme="light"] .wd-del { background: rgba(239, 68, 68, 0.2); }
 [data-theme="light"] .wd-ins { background: rgba(34, 197, 94, 0.2); }
 
+/* ─── Dropdown menu (tab bar "+" menu, terminal "+" menu) ───── */
+/* Look only: each component positions its menu and adds its own variants. */
+.gw-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+.gw-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.gw-menu__item:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+.gw-menu__item svg {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+.gw-menu__item:hover svg {
+  color: var(--color-accent);
+}
+.gw-menu__separator {
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--color-border);
+}
+
 /* ─── Tooltip (v-tooltip directive) ────────────────────────── */
 .gw-tooltip {
   position: fixed;

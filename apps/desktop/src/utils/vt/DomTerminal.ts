@@ -68,7 +68,8 @@ function colorCss(c: number): string {
   return PALETTE[c & 0xff];
 }
 
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+/** Shared with TerminalPanel so its shortcut hints match the key handling here. */
+export const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
 const WORD_RE = /[\p{L}\p{N}_\-./~:@%+#?=&]/u;
 

@@ -169,4 +169,30 @@ describe("v-tooltip", () => {
     vTooltip.updated(el, { value: "Laurent G." });
     expect(el.hasAttribute("aria-label")).toBe(false);
   });
+
+  it("describes an anchor with its own text by the tooltip while shown, then restores", () => {
+    const el = document.createElement("button");
+    el.textContent = "+";
+    el.setAttribute("aria-describedby", "hint");
+    document.body.appendChild(el);
+    vTooltip.mounted(el, { value: "Stage" });
+    el.dispatchEvent(new Event("focus"));
+    const tip = tips()[0] as HTMLElement;
+    expect(el.getAttribute("aria-describedby")).toBe(`hint ${tip.id}`);
+    el.dispatchEvent(new Event("blur"));
+    expect(el.getAttribute("aria-describedby")).toBe("hint");
+  });
+
+  it("does not describe an anchor whose name already is the tooltip text", () => {
+    const icon = mount("Discard"); // icon-only: the text became its aria-label
+    icon.dispatchEvent(new Event("focus"));
+    expect(icon.hasAttribute("aria-describedby")).toBe(false);
+
+    const labelled = document.createElement("button");
+    labelled.setAttribute("aria-label", "Stash");
+    document.body.appendChild(labelled);
+    vTooltip.mounted(labelled, { value: "Stash" });
+    labelled.dispatchEvent(new Event("focus"));
+    expect(labelled.hasAttribute("aria-describedby")).toBe(false);
+  });
 });
