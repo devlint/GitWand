@@ -475,6 +475,7 @@ const en = {
     templatePicker: "Templates",
     // v2.12 identity selector
     identityDefault: "Global config",
+    identityFollowDefault: "Use default",
   },
 
   // ─── Branch badges + context menu (v2.12) ───────────────
@@ -1682,6 +1683,10 @@ const en = {
       identityAdd: "Add identity",
       identitySave: "Save",
       identityCancel: "Cancel",
+      identityDefault: "Default identity",
+      identityDefaultHint: "Used by every project that has no identity of its own. “Global config” keeps git’s own user.name / user.email.",
+      identityProject: "Identity for {0}",
+      identityProjectHint: "Remembered for this project only. You can also switch it from the commit panel.",
       templates: "Commit templates",
       templatesEmpty: "No templates yet. Add one to speed up your commit flow.",
       templateName: "Template name",

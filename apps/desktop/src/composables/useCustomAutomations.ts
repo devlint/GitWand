@@ -12,6 +12,7 @@
 
 import { ref } from "vue";
 import { shellExec, gitStage, gitCommit } from "../utils/backend";
+import { resolveIdentity } from "./useIdentity";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -154,7 +155,12 @@ export function useCustomAutomations() {
 
     if (message.trim()) {
       await gitStage(cwd, ["."]);
-      const commitHash = await gitCommit(cwd, message);
+      const identity = resolveIdentity(cwd);
+      const commitHash = await gitCommit(
+        cwd,
+        message,
+        identity ? { name: identity.gitName, email: identity.gitEmail } : null,
+      );
       return { output, commitHash };
     }
     return { output };

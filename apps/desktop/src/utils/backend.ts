@@ -856,14 +856,25 @@ export async function gitUnstagePatch(cwd: string, patch: string): Promise<void>
 /**
  * Create a commit with the given message. Returns the short hash.
  */
-export async function gitCommit(cwd: string, message: string): Promise<string> {
+/**
+ * Commit staged changes. When `identity` is given, it is injected as
+ * `-c user.name=… -c user.email=…` for this commit only — the repo's git
+ * config is left untouched.
+ */
+export async function gitCommit(
+  cwd: string,
+  message: string,
+  identity?: { name: string; email: string } | null,
+): Promise<string> {
+  const identityName = identity?.name ?? null;
+  const identityEmail = identity?.email ?? null;
   if (isTauri()) {
-    return tauriInvoke<string>("git_commit", { cwd, message });
+    return tauriInvoke<string>("git_commit", { cwd, message, identityName, identityEmail });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-commit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, message }),
+    body: JSON.stringify({ cwd, message, identityName, identityEmail }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

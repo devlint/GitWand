@@ -462,6 +462,7 @@ const es: Locale = {
     descriptionPlaceholder: "Descripción (opcional)",
     templatePicker: "Plantillas",
     identityDefault: "Config global",
+    identityFollowDefault: "Usar la predeterminada",
   },
 
   // ─── Branch badges + context menu (v2.12) ──────────────
@@ -1652,6 +1653,10 @@ const es: Locale = {
       identityAdd: "Agregar identidad",
       identitySave: "Guardar",
       identityCancel: "Cancelar",
+      identityDefault: "Identidad predeterminada",
+      identityDefaultHint: "Usada por todos los proyectos sin identidad propia. «Config global» mantiene el user.name / user.email de git.",
+      identityProject: "Identidad para {0}",
+      identityProjectHint: "Se recuerda solo para este proyecto. También puedes cambiarla desde el panel de commit.",
       templates: "Plantillas de commit",
       templatesEmpty: "Sin plantillas todavía.",
       templateName: "Nombre de plantilla",

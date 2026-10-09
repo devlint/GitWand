@@ -463,6 +463,7 @@ const ptBR: Locale = {
     descriptionPlaceholder: "Descrição (opcional)",
     templatePicker: "Modelos",
     identityDefault: "Config global",
+    identityFollowDefault: "Usar o padrão",
   },
 
   // ─── Branch badges + context menu (v2.12) ──────────────
@@ -1652,6 +1653,10 @@ const ptBR: Locale = {
       identityAdd: "Adicionar identidade",
       identitySave: "Salvar",
       identityCancel: "Cancelar",
+      identityDefault: "Identidade padrão",
+      identityDefaultHint: "Usada por todos os projetos sem identidade própria. “Config global” mantém o user.name / user.email do git.",
+      identityProject: "Identidade para {0}",
+      identityProjectHint: "Lembrada apenas para este projeto. Também pode ser trocada no painel de commit.",
       templates: "Modelos de commit",
       templatesEmpty: "Nenhum modelo ainda.",
       templateName: "Nome do modelo",

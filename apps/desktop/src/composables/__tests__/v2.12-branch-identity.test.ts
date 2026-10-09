@@ -201,6 +201,31 @@ describe("useIdentity (module-level functions)", () => {
     // Override for CWD_B should be cleared → resolves null
     expect(resolveIdentity(CWD_B)).toBeNull();
   });
+
+  it("repoIdentityId() returns the project's own choice, null when following the default", async () => {
+    const { addIdentity, setActiveIdentity, setRepoIdentity, repoIdentityId } = await import("../useIdentity");
+    const idWork = addIdentity({ label: "Work", gitName: "Alice", gitEmail: "alice@work.com" });
+    const idHome = addIdentity({ label: "Personal", gitName: "Alice", gitEmail: "alice@home.com" });
+    setActiveIdentity(idWork);
+    setRepoIdentity(CWD_B, idHome);
+    expect(repoIdentityId(CWD_B)).toBe(idHome);
+    // CWD_A has no choice of its own, even though a global default exists.
+    expect(repoIdentityId(CWD_A)).toBeNull();
+    setRepoIdentity(CWD_B, null);
+    expect(repoIdentityId(CWD_B)).toBeNull();
+  });
+
+  it("each project remembers its own identity independently", async () => {
+    const { addIdentity, setRepoIdentity, resolveIdentity } = await import("../useIdentity");
+    const idWork = addIdentity({ label: "Work", gitName: "Alice", gitEmail: "alice@work.com" });
+    const idHome = addIdentity({ label: "Personal", gitName: "Alice", gitEmail: "alice@home.com" });
+    setRepoIdentity(CWD_A, idWork);
+    setRepoIdentity(CWD_B, idHome);
+    expect(resolveIdentity(CWD_A)?.id).toBe(idWork);
+    expect(resolveIdentity(CWD_B)?.id).toBe(idHome);
+    // Trailing slash is the same project.
+    expect(resolveIdentity(`${CWD_A}/`)?.id).toBe(idWork);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -2,8 +2,10 @@
  * useIdentity — multiple committer identity profiles (v2.12).
  *
  * Allows users to maintain several named git identities (Perso, Pro, Client…)
- * and select which one is active globally or per-repo. The active identity is
- * injected as `-c user.name=… -c user.email=…` in git_commit on the Rust side.
+ * and select which one is active globally or per-repo. Each repo remembers its
+ * own choice (`identityOverrideByRepo`). The resolved identity is passed to
+ * `gitCommit()`, which injects `-c user.name=… -c user.email=…` for that
+ * commit only (git_commit in ops.rs / the dev-server route).
  *
  * Resolution order:
  *   identityOverrideByRepo[cwd] > activeIdentityId > null (use git global config)
@@ -51,6 +53,21 @@ export function resolveIdentity(cwd?: string): IdentityProfile | null {
     if (found) return found;
   }
   return null;
+}
+
+/**
+ * The identity explicitly chosen for this repo, or null when the repo follows
+ * the global default. A dangling id (profile since deleted) counts as null.
+ */
+export function repoIdentityId(cwd: string): string | null {
+  const s = loadSettings();
+  const id = s.identityOverrideByRepo[normaliseCwd(cwd)];
+  return id && s.identities.some((p) => p.id === id) ? id : null;
+}
+
+/** The global default identity (applies to repos without their own choice). */
+export function defaultIdentity(): IdentityProfile | null {
+  return resolveIdentity();
 }
 
 // ─── write ────────────────────────────────────────────────────────────────────
@@ -119,9 +136,22 @@ export function useIdentity(cwd?: () => string) {
     return resolveIdentity(cwd?.());
   });
 
+  /** Id chosen for the current repo, null when it follows the global default. */
+  const repoOverrideId = computed(() => {
+    void settingsRevision.value;
+    const path = cwd?.();
+    return path ? repoIdentityId(path) : null;
+  });
+  const globalDefault = computed(() => {
+    void settingsRevision.value;
+    return defaultIdentity();
+  });
+
   return {
     identities,
     activeIdentity,
+    repoOverrideId,
+    globalDefault,
     resolve:         (path?: string) => resolveIdentity(path),
     add:             addIdentity,
     update:          updateIdentity,

@@ -495,13 +495,14 @@ const { activePreset } = useAiPromptPresets(() => props.cwd);
 
 // ─── v2.12 Identity selector ─────────────────────────────
 
-const { identities, activeIdentity, setActive: setActiveIdentity } = useIdentity(() => props.cwd);
+const { identities, activeIdentity, repoOverrideId, globalDefault, setRepoOverride } = useIdentity(() => props.cwd);
 const identityMenuOpen = ref(false);
 
 function closeIdentityMenu() { identityMenuOpen.value = false; }
 
+/** The choice is remembered for this repo only; null = follow the global default. */
 function setIdentityFromMenu(id: string | null) {
-  setActiveIdentity(id);
+  if (props.cwd) setRepoOverride(props.cwd, id);
   identityMenuOpen.value = false;
 }
 
@@ -1570,24 +1571,27 @@ function formatActivityDate(dateStr: string): string {
         <div v-if="identityMenuOpen" class="commit-identity-menu">
           <div
             class="commit-identity-item"
-            :class="{ 'commit-identity-item--active': !activeIdentity }"
+            :class="{ 'commit-identity-item--active': !repoOverrideId }"
             @click="setIdentityFromMenu(null)"
           >
-            <span>{{ t('commit.identityDefault') }}</span>
-            <svg v-if="!activeIdentity" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="commit-identity-item-info">
+              <span class="commit-identity-item-label">{{ t('commit.identityFollowDefault') }}</span>
+              <span class="commit-identity-item-meta">{{ globalDefault ? globalDefault.label : t('commit.identityDefault') }}</span>
+            </div>
+            <svg v-if="!repoOverrideId" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
           <div
             v-for="p in identities"
             :key="p.id"
             class="commit-identity-item"
-            :class="{ 'commit-identity-item--active': activeIdentity?.id === p.id }"
+            :class="{ 'commit-identity-item--active': repoOverrideId === p.id }"
             @click="setIdentityFromMenu(p.id)"
           >
             <div class="commit-identity-item-info">
               <span class="commit-identity-item-label">{{ p.label }}</span>
               <span class="commit-identity-item-meta mono">{{ p.gitName }} &lt;{{ p.gitEmail }}&gt;</span>
             </div>
-            <svg v-if="activeIdentity?.id === p.id" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg v-if="repoOverrideId === p.id" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
         </div>
       </div>

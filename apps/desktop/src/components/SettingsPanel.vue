@@ -1277,7 +1277,39 @@ watch(
 
 // ─── v2.12 Identities ────────────────────────────────────
 
-const { identities, add: addIdentity, update: updateIdentity, remove: removeIdentity, setActive: setActiveIdentity } = useIdentity();
+const {
+  identities,
+  repoOverrideId: projectIdentityId,
+  add: addIdentity,
+  update: updateIdentity,
+  remove: removeIdentity,
+  setActive: setActiveIdentity,
+  setRepoOverride: setProjectIdentity,
+} = useIdentity(() => props.cwd ?? "");
+
+/**
+ * useIdentity() writes straight to localStorage; mirror its fields into the
+ * panel's local copy so the next updateSetting() does not write them back stale.
+ */
+function syncIdentityFields() {
+  const fresh = loadSettings();
+  settings.value.identities = fresh.identities;
+  settings.value.activeIdentityId = fresh.activeIdentityId;
+  settings.value.identityOverrideByRepo = fresh.identityOverrideByRepo;
+}
+
+const projectName = computed(() => (props.cwd ?? "").split(/[\\/]/).filter(Boolean).pop() ?? "");
+
+function onDefaultIdentityChange(e: Event) {
+  setActiveIdentity((e.target as HTMLSelectElement).value || null);
+  syncIdentityFields();
+}
+
+function onProjectIdentityChange(e: Event) {
+  if (!props.cwd) return;
+  setProjectIdentity(props.cwd, (e.target as HTMLSelectElement).value || null);
+  syncIdentityFields();
+}
 
 const identityForm = ref<{ label: string; gitName: string; gitEmail: string; gpgKey: string }>({
   label: "", gitName: "", gitEmail: "", gpgKey: "",
@@ -1305,11 +1337,13 @@ function saveIdentityForm() {
   } else {
     addIdentity({ label, gitName, gitEmail, gpgKey: gpgKey || undefined });
   }
+  syncIdentityFields();
   showIdentityForm.value = false;
 }
 
 function deleteIdentity(id: string) {
   removeIdentity(id);
+  syncIdentityFields();
 }
 
 // ─── v2.12 Commit Templates ──────────────────────────────
@@ -2188,6 +2222,30 @@ function openAiTemplateKind(kind: AiTemplateKind) {
               </div>
             </div>
           </div>
+
+          <!-- Which identity commits: global default + this project's own choice -->
+          <template v-if="identities.length > 0">
+            <div class="sp-field">
+              <label class="sp-field__label" for="setting-identity-default">{{ t('settings.git.identityDefault') }}</label>
+              <select id="setting-identity-default" class="sp-select" :value="settings.activeIdentityId ?? ''"
+                @change="onDefaultIdentityChange">
+                <option value="">{{ t('commit.identityDefault') }}</option>
+                <option v-for="p in identities" :key="p.id" :value="p.id">{{ p.label }} — {{ p.gitEmail }}</option>
+              </select>
+              <span class="sp-hint">{{ t('settings.git.identityDefaultHint') }}</span>
+            </div>
+            <div v-if="props.cwd" class="sp-field">
+              <label class="sp-field__label" for="setting-identity-project">
+                {{ t('settings.git.identityProject', projectName) }}
+              </label>
+              <select id="setting-identity-project" class="sp-select" :value="projectIdentityId ?? ''"
+                @change="onProjectIdentityChange">
+                <option value="">{{ t('commit.identityFollowDefault') }}</option>
+                <option v-for="p in identities" :key="p.id" :value="p.id">{{ p.label }} — {{ p.gitEmail }}</option>
+              </select>
+              <span class="sp-hint">{{ t('settings.git.identityProjectHint') }}</span>
+            </div>
+          </template>
 
           <!-- ── Templates de commit ── -->
           <div class="sp-group">

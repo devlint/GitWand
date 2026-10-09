@@ -465,6 +465,7 @@ const zhCN: Locale = {
     descriptionPlaceholder: "描述（可选）",
     templatePicker: "模板",
     identityDefault: "全局配置",
+    identityFollowDefault: "使用默认",
   },
 
   // ─── 分支徽章 + 右键菜单 (v2.12) ────────────────────────
@@ -1663,6 +1664,10 @@ const zhCN: Locale = {
       identityAdd: "添加身份",
       identitySave: "保存",
       identityCancel: "取消",
+      identityDefault: "默认身份",
+      identityDefaultHint: "用于所有未单独设置身份的项目。“全局配置”沿用 git 自身的 user.name / user.email。",
+      identityProject: "{0} 的身份",
+      identityProjectHint: "仅为此项目记住。也可以在提交面板中切换。",
       templates: "提交模板",
       templatesEmpty: "暂无模板。",
       templateName: "模板名称",

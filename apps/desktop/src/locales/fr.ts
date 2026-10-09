@@ -467,6 +467,7 @@ const fr: Locale = {
     descriptionPlaceholder: "Description (optionnel)",
     templatePicker: "Modèles",
     identityDefault: "Config globale",
+    identityFollowDefault: "Utiliser le défaut",
   },
 
   // ─── Badges de branche + menu contextuel (v2.12) ────────
@@ -1661,6 +1662,10 @@ const fr: Locale = {
       identityAdd: "Ajouter une identité",
       identitySave: "Enregistrer",
       identityCancel: "Annuler",
+      identityDefault: "Identité par défaut",
+      identityDefaultHint: "Utilisée par tous les projets sans identité propre. « Config globale » garde le user.name / user.email de git.",
+      identityProject: "Identité pour {0}",
+      identityProjectHint: "Mémorisée pour ce projet uniquement. Modifiable aussi depuis le panneau de commit.",
       templates: "Templates de commit",
       templatesEmpty: "Aucun template pour l'instant.",
       templateName: "Nom du template",
