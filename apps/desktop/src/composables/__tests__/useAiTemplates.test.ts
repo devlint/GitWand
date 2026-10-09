@@ -5,7 +5,7 @@
  * Each test clears localStorage before running so there is no bleed-over.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   addTemplate,
   builtinTemplates,
@@ -173,6 +173,17 @@ describe("AI language migration (existing installs)", () => {
     localStorage.setItem("gitwand-locale", "fr");
     store({ aiEnabled: true });
     expect(loadSettings().prDescriptionLang).toBe("en");
+  });
+
+  it("migrating while the module first loads keeps the user's settings in the singleton", async () => {
+    localStorage.setItem("gitwand-locale", "fr");
+    store({ aiEnabled: true, aiProvider: "claude-code", commitMessageLang: "" });
+    vi.resetModules();
+    const fresh = await import("../useSettings");
+    const s = fresh.useSettings().settings.value;
+    expect(s.aiEnabled).toBe(true);
+    expect(s.aiProvider).toBe("claude-code");
+    expect(s.commitMessageLang).toBe("fr");
   });
 
   it("does not touch already-migrated settings, nor new installs", () => {
