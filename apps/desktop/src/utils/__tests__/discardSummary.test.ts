@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { summarizeDiscard } from "../discardPlan";
+import { selectDiscardEntries, summarizeDiscard } from "../discardPlan";
 import type { RepoFileEntry } from "../../composables/useGitRepo";
 
 const entries: RepoFileEntry[] = [
@@ -24,8 +24,25 @@ describe("summarizeDiscard", () => {
   });
 
   it("counts a partially staged file once when discarding everything", () => {
-    expect(summarizeDiscard(entries, "all", [])).toEqual({
+    expect(summarizeDiscard(entries, "all", ["a.txt", "part.txt", "b.txt", "new.txt"])).toEqual({
       kind: "all", fileCount: 4, stagedCount: 2, alsoUnstagedCount: 0,
     });
+  });
+
+  it("returns null for a section key it does not know", () => {
+    expect(summarizeDiscard(entries, "conflicted", ["a.txt"])).toBeNull();
+  });
+});
+
+describe("selectDiscardEntries", () => {
+  it("limits 'all' to the confirmed paths, so a file that appeared since is kept", () => {
+    const confirmed = ["a.txt", "part.txt", "b.txt"];
+    const now = [...entries, { path: "build.log", status: "added", section: "untracked" } as RepoFileEntry];
+    const picked = selectDiscardEntries(now, "all", confirmed).map((e) => `${e.section}:${e.path}`);
+    expect(picked).toEqual(["staged:a.txt", "staged:part.txt", "unstaged:part.txt", "unstaged:b.txt"]);
+  });
+
+  it("selects nothing for an unknown section key", () => {
+    expect(selectDiscardEntries(entries, "conflicted", ["a.txt", "b.txt"])).toEqual([]);
   });
 });

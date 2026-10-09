@@ -61,25 +61,34 @@ export function planDiscard(entries: readonly RepoFileEntry[]): DiscardPlan {
  * alone would drag the staged entry into a "Changes" discard and wipe the
  * index too. `sectionKey` is the sidebar's display section: `changes` covers
  * `unstaged` + `untracked`, `staged` covers `staged`, and `all` covers every
- * entry.
+ * section. Every kind is limited to `paths` — the files the confirmation
+ * listed — so a file that appeared after it opened is never discarded. An
+ * unknown key selects nothing.
  */
 export function selectDiscardEntries(
   entries: readonly RepoFileEntry[],
   sectionKey: string,
   paths: readonly string[],
 ): RepoFileEntry[] {
-  if (sectionKey === "all") return [...entries];
+  if (!isDiscardKind(sectionKey)) return [];
   const wanted = new Set(paths);
   return entries.filter((e) => {
     if (!wanted.has(e.path)) return false;
+    if (sectionKey === "all") return true;
     if (sectionKey === "changes") return e.section === "unstaged" || e.section === "untracked";
-    return e.section === sectionKey;
+    return e.section === "staged";
   });
+}
+
+export type DiscardKind = "staged" | "changes" | "all";
+
+function isDiscardKind(key: string): key is DiscardKind {
+  return key === "staged" || key === "changes" || key === "all";
 }
 
 /** What a discard confirmation has to tell the user before it runs. */
 export interface DiscardSummary {
-  kind: "staged" | "changes" | "all";
+  kind: DiscardKind;
   /** Distinct paths touched (a partially staged file counts once). */
   fileCount: number;
   /** Staged entries that will be thrown away. */
@@ -96,8 +105,9 @@ export function summarizeDiscard(
   entries: readonly RepoFileEntry[],
   sectionKey: string,
   paths: readonly string[],
-): DiscardSummary {
-  const kind = sectionKey === "staged" || sectionKey === "changes" ? sectionKey : "all";
+): DiscardSummary | null {
+  if (!isDiscardKind(sectionKey)) return null;
+  const kind = sectionKey;
   const targets = selectDiscardEntries(entries, sectionKey, paths);
   const staged = targets.filter((e) => e.section === "staged");
   const unstagedPaths = new Set(

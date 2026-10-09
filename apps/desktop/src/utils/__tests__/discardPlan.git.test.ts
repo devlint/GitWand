@@ -153,7 +153,7 @@ describe("selectDiscardEntries — discarding the Changes section", () => {
     expect(existsSync(join(repo, "untracked.txt"))).toBe(false);
   }, GIT_TEST_TIMEOUT_MS);
 
-  it("'all' still discards everything", () => {
+  it("'all' discards every confirmed path, staged or not", () => {
     write("mod.txt", "staged\n");
     git(["add", "mod.txt"]);
     write("del.txt", "unstaged\n");
@@ -161,7 +161,7 @@ describe("selectDiscardEntries — discarding the Changes section", () => {
       { path: "mod.txt", status: "modified", section: "staged" },
       { path: "del.txt", status: "modified", section: "unstaged" },
     ];
-    apply(selectDiscardEntries(entries, "all", []));
+    apply(selectDiscardEntries(entries, "all", ["mod.txt", "del.txt"]));
     expect(git(["status", "--porcelain"])).toBe("");
   }, GIT_TEST_TIMEOUT_MS);
 });
