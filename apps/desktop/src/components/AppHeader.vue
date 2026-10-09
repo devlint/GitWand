@@ -51,17 +51,19 @@ import SearchTrigger from "./header/SearchTrigger.vue";
 import AiSparkle from "./AiSparkle.vue";
 import { useAIProvider } from "../composables/useAIProvider";
 import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
-import { useCompactOnOverflow } from "../composables/useCompactOnOverflow";
+import { useCollapseOnOverflow } from "../composables/useCollapseOnOverflow";
 import type { RepoTab } from "../composables/useRepoTabs";
 
 const { t } = useI18n();
 
-// The secondary actions drop their labels only when the row would overflow
-// (label widths vary by locale, branch names by repo). Tooltips stand in for
-// the label in that mode only.
+// Secondary actions drop their label one by one, right to left (see
+// data-collapse-order), only as far as the row needs to fit — label widths
+// vary by locale, branch names by repo. A collapsed button's tooltip stands in
+// for its label.
 const headerRow = ref<HTMLElement | null>(null);
-const { compact: headerCompact } = useCompactOnOverflow(headerRow, "app-header__row--compact");
-const isHeaderCompact = () => headerCompact.value;
+const { collapsed: collapsedActions } = useCollapseOnOverflow(headerRow, "header-action-btn--icon");
+const isCollapsed = (key: string) => collapsedActions.value.has(key);
+const iconTooltip = (key: string, text: string) => ({ text, when: () => isCollapsed(key) });
 const ai = useAIProvider();
 const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
 const askConfirm = inject<(options: any) => Promise<boolean>>("askConfirm");
@@ -460,8 +462,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
     </div>
 
     <!-- ── Row 2: Main action row ───────────────────────────── -->
-    <!-- The --compact class is also toggled by useCompactOnOverflow while it measures. -->
-    <div ref="headerRow" class="app-header__row" :class="{ 'app-header__row--compact': headerCompact }">
+    <div ref="headerRow" class="app-header__row">
       <!-- Left cluster: branch selector + sync + branch actions -->
       <div class="header-left">
         <!-- Fallback: "Open" button when no repo is open -->
@@ -648,7 +649,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <div class="header-action-sep" aria-hidden="true"></div>
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('stash.title'), when: isHeaderCompact }"
+          :class="{ 'header-action-btn--icon': isCollapsed('stash') }"
+          data-collapse-key="stash"
+          data-collapse-order="5"
+          v-tooltip="iconTooltip('stash', t('stash.title'))"
           :aria-label="t('stash.title')"
           @click="emit('openStash')"
         >
@@ -664,7 +668,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <!-- Tags button -->
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('tags.title'), when: isHeaderCompact }"
+          :class="{ 'header-action-btn--icon': isCollapsed('tags') }"
+          data-collapse-key="tags"
+          data-collapse-order="4"
+          v-tooltip="iconTooltip('tags', t('tags.title'))"
           :aria-label="t('tags.title')"
           @click="emit('openTags')"
         >
@@ -678,7 +685,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <!-- Worktrees button -->
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('worktree.title'), when: isHeaderCompact }"
+          :class="{ 'header-action-btn--icon': isCollapsed('worktrees') }"
+          data-collapse-key="worktrees"
+          data-collapse-order="3"
+          v-tooltip="iconTooltip('worktrees', t('worktree.title'))"
           :aria-label="t('worktree.title')"
           @click="emit('openWorktrees')"
         >
@@ -694,7 +704,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <!-- Submodules button -->
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('submodule.title'), when: isHeaderCompact }"
+          :class="{ 'header-action-btn--icon': isCollapsed('submodules') }"
+          data-collapse-key="submodules"
+          data-collapse-order="2"
+          v-tooltip="iconTooltip('submodules', t('submodule.title'))"
           :aria-label="t('submodule.title')"
           @click="emit('openSubmodules')"
         >
@@ -711,6 +724,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <div class="header-action-sep" aria-hidden="true"></div>
           <button
             class="btn btn--secondary header-action-btn"
+            :class="{ 'header-action-btn--icon': isCollapsed('releaseNotes') }"
+            data-collapse-key="releaseNotes"
+            data-collapse-order="1"
             v-tooltip="t('dashboard.releaseNotesHint')"
             :aria-label="t('dashboard.releaseNotes')"
             @click="emit('openReleaseNotes')"
@@ -779,13 +795,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   margin-left: auto;
 }
 
-/* When the row would overflow (set by useCompactOnOverflow), secondary
-   actions collapse to icon-only; the label stays in aria-label and in the
-   v-tooltip, which only shows in this mode. */
-.app-header__row--compact .header-action-btn__label {
+/* Collapsed by useCollapseOnOverflow when the row would overflow: icon-only,
+   the label stays in aria-label and in the v-tooltip. */
+.header-action-btn--icon .header-action-btn__label {
   display: none;
 }
-.app-header__row--compact .header-action-btn {
+.header-action-btn.header-action-btn--icon {
   padding-inline: var(--space-4);
 }
 
