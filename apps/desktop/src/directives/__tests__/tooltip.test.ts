@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { vTooltip } from "../tooltip";
 
 function tips() {
-  return [...document.querySelectorAll(".gw-tooltip")].map((t) => t.textContent);
+  return [...document.querySelectorAll(".gw-tooltip:not(.gw-tooltip--leaving)")].map((t) => t.textContent);
 }
 
 function anchor(text = "") {
@@ -55,6 +55,23 @@ describe("v-tooltip", () => {
     const before = document.querySelector(".gw-tooltip");
     vTooltip.updated(el, { value: { text: "Terminal", position: "right" } });
     expect(document.querySelector(".gw-tooltip")).toBe(before);
+  });
+
+  it("fades a hidden tooltip out, then removes it", () => {
+    vi.useFakeTimers();
+    try {
+      const el = anchor();
+      vTooltip.mounted(el, { value: "bye" });
+      el.dispatchEvent(new Event("mouseenter"));
+      el.dispatchEvent(new Event("mouseleave"));
+      const tip = document.querySelector(".gw-tooltip");
+      expect(tip?.classList.contains("gw-tooltip--leaving")).toBe(true);
+      expect(tip?.classList.contains("gw-tooltip--visible")).toBe(false);
+      vi.advanceTimersByTime(500);
+      expect(document.querySelector(".gw-tooltip")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stops listening once unmounted", () => {

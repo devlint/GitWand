@@ -114,12 +114,22 @@ function show(el: TooltipEl, opts: TooltipOptions) {
   el._tooltip = { tip, abort };
 }
 
+/** Matches the `.gw-tooltip` opacity transition in main.css. */
+const FADE_MS = 500;
+
+/**
+ * Detach the anchor's tooltip and fade it out; the element is removed once the
+ * fade is over. A timer rather than `transitionend`, which never fires when
+ * reduced motion turns the transition off.
+ */
 function hide(el: TooltipEl) {
   if (!el._tooltip) return;
   const { tip, abort } = el._tooltip;
   abort.abort();
-  tip.remove();
   delete el._tooltip;
+  tip.classList.remove("gw-tooltip--visible");
+  tip.classList.add("gw-tooltip--leaving");
+  setTimeout(() => tip.remove(), FADE_MS);
 }
 
 /**
