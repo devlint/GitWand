@@ -767,7 +767,11 @@ onBeforeUnmount(() => {
 }
 
 .app-dock__pill--icons-only .dock-btn {
+  justify-content: center;
   padding: var(--space-3, 9px);
+  /* min-width = button height: the pill stretches buttons to its inner
+     height (dock height minus padding and border). */
+  min-width: calc(var(--app-dock-height, 44px) - 2 * var(--space-2, 6px) - 2px);
 }
 
 /* Vertical mode — stack the dock as a column; rotate icon + text 90°. */
@@ -787,6 +791,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--space-3, 9px);
   padding: var(--space-3, 9px);
+  /* Height isn't stretched here, so the icons-only min-width would skew it. */
+  min-width: 0;
 }
 
 /* Vertical dock is icon-only; keep the glyphs upright. */
