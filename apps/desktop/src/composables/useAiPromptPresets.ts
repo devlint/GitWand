@@ -13,7 +13,7 @@
 
 import { computed } from "vue";
 import { loadSettings, settingsRevision, type AiPromptPreset } from "./useSettings";
-import { addTemplate, updateTemplate, removeTemplate, setActiveTemplate } from "./useAiTemplates";
+import { addTemplate, updateTemplate, removeTemplate, setActiveTemplate, getActiveTemplateId } from "./useAiTemplates";
 import { BUILTIN_PRESETS } from "./aiTemplateDefaults";
 
 export { BUILTIN_PRESETS };
@@ -38,7 +38,7 @@ export function allPresetsWithBuiltins(): AiPromptPreset[] {
 
 /** Resolve the active preset for a given repo, or null (= default). */
 export function getActivePresetId(cwd: string): string | null {
-  return loadSettings().activePresetIdByRepo[cwd] ?? null;
+  return getActiveTemplateId("commit", cwd);
 }
 
 export function getActivePreset(cwd: string): AiPromptPreset | null {

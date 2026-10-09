@@ -488,7 +488,7 @@ const openRepoLabel = computed<string>(() => {
 
 // ─── AI commit message generation ─────────────────────────
 const ai = useAIProvider();
-const { isGenerating, lastError: aiError, generate: generateCommitMsg } = useCommitMessage();
+const { isGenerating, lastError: aiError, generate: generateCommitMsg, transform: transformCommitMsg } = useCommitMessage();
 // ─── AI template (commit kind) ────────────────────────────
 // Picked from the AI chevron menu (AiTemplateMenu); applied at generation.
 const { activePreset } = useAiPromptPresets(() => props.cwd);
@@ -641,6 +641,24 @@ async function onGenerateCommitMessage() {
     applyMessage(cwd, msg);
   } catch {
     // lastError is already set by the composable — the UI shows it.
+  }
+}
+
+/** Rewrite actions of the AI menu: regenerate, or transform the current message. */
+async function onAiAction(action: "regenerate" | "shorten" | "detail" | "changeLang", targetLocale?: string) {
+  if (isGenerating.value) return;
+  if (action === "regenerate") {
+    await onGenerateCommitMessage();
+    return;
+  }
+  const currentMsg = [props.commitSummary, props.commitDescription].filter(Boolean).join("\n");
+  if (!currentMsg.trim()) return;
+  const cwd = props.cwd;
+  try {
+    const msg = await transformCommitMsg(action, currentMsg, targetLocale, cwd);
+    applyMessage(cwd, msg);
+  } catch {
+    // aiError is set by the composable.
   }
 }
 
@@ -1454,6 +1472,8 @@ function formatActivityDate(dateStr: string): string {
             :disabled="isGenerating"
             placement="above"
             chevron-class="commit-ai-chevron"
+            :rewrite="{ canRegenerate: repoStats.staged > 0, hasSummary: !!commitSummary }"
+            @rewrite="onAiAction"
           />
         </div>
         <!-- Template picker button -->
