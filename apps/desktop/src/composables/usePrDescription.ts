@@ -405,7 +405,7 @@ export function usePrDescription() {
         throw new Error(t("errors.emptyAiResponse"));
       }
 
-      const body = restoreMedia(text, masked.media);
+      const body = restoreMedia(text, masked.media, masked.adjacentTicks);
       pendingUpdates.value = { ...pendingUpdates.value, [key]: { cwd, number: pr.number, body } };
       return body;
     } catch (err: unknown) {

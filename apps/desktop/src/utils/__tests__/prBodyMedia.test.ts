@@ -34,7 +34,7 @@ describe("maskMedia", () => {
 
   it("leaves a body without media untouched", () => {
     const body = "## Summary\nNo screenshots, see https://example.com/page.";
-    expect(maskMedia(body)).toEqual({ text: body, media: [] });
+    expect(maskMedia(body)).toEqual({ text: body, media: [], adjacentTicks: [] });
   });
 });
 
@@ -126,5 +126,35 @@ describe("restoreMedia", () => {
     const body = "Text\n![a](https://x.test/a.png)\nMore\n<video src=\"v.mp4\"></video>";
     const { text, media: m } = maskMedia(body);
     expect(restoreMedia(text, m)).toBe(body);
+  });
+});
+
+describe("mask -> restore identity", () => {
+  const samples = [
+    "write `![a](b)` to embed",
+    "Use `x`![a](https://e/i.png) here",
+    "![a](https://e/i.png)`code`",
+    "`a`![i](https://e/i.png)`b`",
+    "``double ![a](b) tick`` then ![z](https://e/z.png)",
+    "`[[IMAGE_1]]` and ![a](https://e/a.png)",
+    "plain ![a](https://e/a.png) text",
+    "```\n![in fence](x.png)\n```\n`inline ![c](d)`\n![real](https://e/r.png)",
+    "a lone ` tick then ![a](https://e/a.png)\n\nnext para ` tick",
+    "<img src=\"x.png\">`code`",
+  ];
+  for (const body of samples) {
+    it(`round-trips ${JSON.stringify(body)}`, () => {
+      const m = maskMedia(body);
+      expect(restoreMedia(m.text, m.media, m.adjacentTicks)).toBe(body);
+    });
+  }
+
+  it("does not mask media inside an inline code span", () => {
+    expect(maskMedia("write `![a](b)` to embed").media).toEqual([]);
+  });
+
+  it("still strips a backtick pair the model added around a placeholder", () => {
+    const m = maskMedia("see ![a](https://e/a.png) ok");
+    expect(restoreMedia("see `[[IMAGE_1]]` ok", m.media, m.adjacentTicks)).toBe("see ![a](https://e/a.png) ok");
   });
 });

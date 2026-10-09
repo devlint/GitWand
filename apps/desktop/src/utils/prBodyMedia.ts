@@ -16,6 +16,11 @@ export interface MaskedMedia {
   text: string;
   /** The original snippets, `media[n - 1]` for placeholder `[[IMAGE_n]]`. */
   media: string[];
+  /**
+   * 0-based indexes of placeholders that sit right next to a backtick the
+   * user wrote. `restoreMedia` must never treat those backticks as model drift.
+   */
+  adjacentTicks: number[];
 }
 
 /** `(…)` of a markdown link/image: allows spaces (titles) and one level of nested parens. */
@@ -55,7 +60,23 @@ const MEDIA_RE = new RegExp([...MEDIA_ALTERNATIVES, LITERAL_PLACEHOLDER].join("|
 const LITERAL_RE = new RegExp(LITERAL_PLACEHOLDER, "gi");
 
 /** Tolerates the usual model drift: spacing, case, backtick wrapping. */
-const PLACEHOLDER_RE = /`?\[\[\s*IMAGE_(\d+)\s*\]\]`?/gi;
+const PLACEHOLDER_RE = /(`?)\[\[\s*IMAGE_(\d+)\s*\]\](`?)/gi;
+
+/** Inline code spans (not across a blank line): media inside is just code. */
+const INLINE_CODE_RE = /(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
+
+/** Split a non-fenced run into inline-code / other pieces. */
+function splitInlineCode(text: string): { code: boolean; text: string }[] {
+  const out: { code: boolean; text: string }[] = [];
+  let last = 0;
+  for (const m of text.matchAll(INLINE_CODE_RE)) {
+    if (m.index > last) out.push({ code: false, text: text.slice(last, m.index) });
+    out.push({ code: true, text: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ code: false, text: text.slice(last) });
+  return out;
+}
 
 export function placeholder(n: number): string {
   return `[[IMAGE_${n}]]`;
@@ -103,9 +124,14 @@ export function maskMedia(body: string): MaskedMedia {
     return leading + placeholder(media.length);
   };
   const text = splitFences(body)
+    .flatMap((part) => (part.code ? [part] : splitInlineCode(part.text)))
     .map((part) => part.text.replace(part.code ? LITERAL_RE : MEDIA_RE, mask))
     .join("");
-  return { text, media };
+  const adjacentTicks: number[] = [];
+  for (const m of text.matchAll(PLACEHOLDER_RE)) {
+    if (m[1] || m[3]) adjacentTicks.push(Number(m[2]) - 1);
+  }
+  return { text, media, adjacentTicks };
 }
 
 /**
@@ -113,13 +139,23 @@ export function maskMedia(body: string): MaskedMedia {
  * at its first occurrence; repeats and placeholders that match no media are
  * removed; media whose placeholder the model dropped is appended at the end.
  */
-export function restoreMedia(text: string, media: string[]): string {
+export function restoreMedia(
+  text: string,
+  media: string[],
+  adjacentTicks: readonly number[] = [],
+): string {
   const used = new Set<number>();
-  let out = text.replace(PLACEHOLDER_RE, (_m, digits: string) => {
+  const keep = new Set(adjacentTicks);
+  let out = text.replace(PLACEHOLDER_RE, (_m, pre: string, digits: string, post: string) => {
     const idx = Number(digits) - 1;
-    if (idx < 0 || idx >= media.length || used.has(idx)) return "";
+    // Masking never adds backticks: only a pair the model wrapped around a
+    // placeholder is drift. A single one, or one next to a placeholder the
+    // user's own backtick touched, belongs to the user.
+    const drift = pre && post && !keep.has(idx);
+    const [a, b] = drift ? ["", ""] : [pre, post];
+    if (idx < 0 || idx >= media.length || used.has(idx)) return a + b;
     used.add(idx);
-    return media[idx]!;
+    return a + media[idx]! + b;
   });
   const missing = media.filter((_, i) => !used.has(i));
   out = out.trim();

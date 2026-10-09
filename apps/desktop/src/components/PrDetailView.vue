@@ -97,8 +97,11 @@ watch(descriptionDraft, (d) => {
 });
 
 // A manual edit belongs to the PR it was started on.
+// Watch the two values, not an array built per run: a new array is a new
+// identity every time prDetail is replaced (poll, revalidate, a save), which
+// would close the editors and drop what the user typed on the same PR.
 watch(
-  () => [p.cwd.value, p.prDetail.value?.number],
+  [() => p.cwd.value, () => p.prDetail.value?.number],
   () => {
     editingBody.value = null;
     editingTitle.value = null;
@@ -142,20 +145,25 @@ function startBodyEdit() {
   descriptionTab.value = "raw";
 }
 
-function closeBodyEditor(kind: "ai" | "manual") {
-  const n = p.prDetail.value?.number;
+/** `target` pins the PR the editor belongs to when closing after an await. */
+function closeBodyEditor(kind: "ai" | "manual", target?: { cwd: string; number: number }) {
+  const cwd = target?.cwd ?? p.cwd.value;
+  const n = target?.number ?? p.prDetail.value?.number;
   if (kind === "ai") {
-    if (n != null) prDescription.clearPendingUpdate(p.cwd.value, n);
-  } else editingBody.value = null;
+    if (n != null) prDescription.clearPendingUpdate(cwd, n);
+  } else if (!target || (target.cwd === p.cwd.value && target.number === n && n === p.prDetail.value?.number)) {
+    editingBody.value = null;
+  }
 }
 
 async function saveBody() {
   const number = p.prDetail.value?.number;
   const kind = bodyEditor.value;
   if (number == null || !kind) return;
+  const target = { cwd: p.cwd.value, number };
   savingBody.value = true;
   try {
-    if (await p.updatePr(number, { body: editorBody.value })) closeBodyEditor(kind);
+    if (await p.updatePr(number, { body: editorBody.value })) closeBodyEditor(kind, target);
   } finally {
     savingBody.value = false;
   }
