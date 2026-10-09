@@ -111,8 +111,10 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 
         <!-- Getting started -->
         <section v-if="activeSection === 'gettingStarted'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.gettingStarted.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.gettingStarted.intro') }}</p>
+          <header class="help-section__header">
+            <h2 class="help-section__title">{{ t('help.gettingStarted.title') }}</h2>
+            <p class="help-section__intro">{{ t('help.gettingStarted.intro') }}</p>
+          </header>
 
           <div class="help-steps">
             <div class="help-step">
@@ -141,8 +143,10 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 
         <!-- Conflict resolution -->
         <section v-else-if="activeSection === 'conflictResolution'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.conflictResolution.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.conflictResolution.intro') }}</p>
+          <header class="help-section__header">
+            <h2 class="help-section__title">{{ t('help.conflictResolution.title') }}</h2>
+            <p class="help-section__intro">{{ t('help.conflictResolution.intro') }}</p>
+          </header>
 
           <div class="help-steps">
             <div class="help-step">
@@ -171,8 +175,10 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 
         <!-- Keyboard shortcuts -->
         <section v-else-if="activeSection === 'keyboardShortcuts'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.keyboardShortcuts.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.keyboardShortcuts.intro') }}</p>
+          <header class="help-section__header">
+            <h2 class="help-section__title">{{ t('help.keyboardShortcuts.title') }}</h2>
+            <p class="help-section__intro">{{ t('help.keyboardShortcuts.intro') }}</p>
+          </header>
 
           <table class="help-shortcuts">
             <thead>
@@ -194,8 +200,10 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 
         <!-- Git workflow -->
         <section v-else-if="activeSection === 'gitWorkflow'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.gitWorkflow.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.gitWorkflow.intro') }}</p>
+          <header class="help-section__header">
+            <h2 class="help-section__title">{{ t('help.gitWorkflow.title') }}</h2>
+            <p class="help-section__intro">{{ t('help.gitWorkflow.intro') }}</p>
+          </header>
 
           <div class="help-cards">
             <div class="help-card">
@@ -219,8 +227,10 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 
         <!-- AI features -->
         <section v-else-if="activeSection === 'aiFeatures'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.aiFeatures.title') }}</h2>
-          <p class="help-section__intro">{{ t('help.aiFeatures.intro') }}</p>
+          <header class="help-section__header">
+            <h2 class="help-section__title">{{ t('help.aiFeatures.title') }}</h2>
+            <p class="help-section__intro">{{ t('help.aiFeatures.intro') }}</p>
+          </header>
 
           <div class="help-cards">
             <div class="help-card">
@@ -246,7 +256,9 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 
         <!-- FAQ -->
         <section v-else-if="activeSection === 'faq'" class="help-section">
-          <h2 class="help-section__title">{{ t('help.faq.title') }}</h2>
+          <header class="help-section__header help-section__header--plain">
+            <h2 class="help-section__title">{{ t('help.faq.title') }}</h2>
+          </header>
 
           <div class="help-faq">
             <details class="help-faq__item">
@@ -326,7 +338,7 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-pill, 9999px);
+  border-radius: var(--radius-md, 6px);
   background: transparent;
   color: var(--color-text-muted);
   transition: background var(--transition-base), color var(--transition-base);
@@ -346,8 +358,9 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 }
 
 /* ─── Left nav ───────────────────────────────────────────── */
+/* Nav + content mirror SettingsPanel's .sp-nav / .sp-content. */
 .help-nav {
-  width: 200px;
+  width: 220px;
   flex-shrink: 0;
   padding: var(--space-5, 16px) var(--space-4, 12px);
   border-right: 1px solid var(--color-border);
@@ -364,7 +377,8 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   padding: var(--space-3, 6px) var(--space-4, 12px);
   border-radius: var(--radius-md, 6px);
   font-size: var(--font-size-base, 13px);
-  color: var(--color-text-muted);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--color-text);
   background: transparent;
   transition: background var(--transition-base), color var(--transition-base);
   cursor: pointer;
@@ -377,31 +391,49 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 .help-nav__item--active {
   background: var(--color-accent-soft, rgba(99, 102, 241, 0.1));
   color: var(--color-accent);
-  font-weight: var(--font-weight-medium, 500);
 }
 
 /* ─── Content pane ───────────────────────────────────────── */
+/* Capped at 1200px like Settings, but the scroll container spans to the
+   window edge so the scrollbar sits at the far right: % padding resolves
+   against .help-body's width, so (100% - 220px nav) is this element's width. */
 .help-content {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
   padding: var(--space-8, 32px) var(--space-10, 48px);
-  max-width: 760px;
+  padding-right: max(var(--space-10, 48px), calc(100% - 220px - 1200px + var(--space-10, 48px)));
 }
 
 .help-section {}
 
+/* Section header mirrors SettingsPanel's .sp-page-header: big bold title,
+   description tight under it, separator line before the content. */
+.help-section__header {
+  padding-bottom: var(--space-7, 20px);
+  margin-bottom: var(--space-8, 24px);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* FAQ: no intro, so no separator either. */
+.help-section__header--plain {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
 .help-section__title {
-  font-size: var(--font-size-xl, 20px);
-  font-weight: var(--font-weight-semibold, 600);
+  font-size: var(--font-size-2xl, 20px);
+  font-weight: var(--font-weight-bold, 700);
   color: var(--color-text);
-  margin-bottom: var(--space-4, 12px);
+  line-height: 1.2;
+  margin: 0 0 var(--space-1, 2px);
 }
 
 .help-section__intro {
-  font-size: var(--font-size-base, 13px);
+  font-size: var(--font-size-lg, 14px);
   color: var(--color-text-muted);
   line-height: 1.6;
-  margin-bottom: var(--space-7, 24px);
+  margin: 0;
 }
 
 /* ─── Steps ──────────────────────────────────────────────── */
