@@ -15,7 +15,7 @@ const en = {
   // ─── Common ─────────────────────────────────────────────
   common: {
     remoteImageBlocked: "Remote image blocked",
-    remoteImagesHidden: "Remote images are hidden to protect your privacy.",
+    remoteImagesHidden: "Remote images are blocked by default as a security measure.",
     remoteImagesShow: "Show images",
     remoteImagesShowForProject: "Always show for this project",
     ai: "AI",
