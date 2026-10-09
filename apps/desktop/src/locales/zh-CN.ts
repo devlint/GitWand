@@ -1281,6 +1281,8 @@ const zhCN: Locale = {
     aiConnectErrorPrefix: "密钥必须以 sk-ant- 开头…",
     aiApiKeyLabel: "Anthropic API 密钥",
     aiApiKeyStored: "已保存到系统钥匙串 — {0}",
+    aiApiKeyBoundElsewhere: "此密钥绑定到 {0}。请重新输入以便在此端点使用。",
+    aiApiKeyUnbound: "此密钥是在密钥绑定端点之前保存的。请重新输入后再使用。",
     aiApiKeyAvailable: "可在此获取：",
     aiHideKey: "隐藏",
     aiShowKey: "显示",

@@ -1204,6 +1204,8 @@ const ptBR: Locale = {
     aiConnectErrorPrefix: "A chave deve começar com sk-ant-…",
     aiApiKeyLabel: "Chave de API Anthropic",
     aiApiKeyStored: "Armazenada no chaveiro do sistema — {0}",
+    aiApiKeyBoundElsewhere: "Esta chave está vinculada a {0}. Digite-a novamente para usá-la com este endpoint.",
+    aiApiKeyUnbound: "Esta chave foi salva antes de as chaves serem vinculadas a um endpoint. Digite-a novamente para usá-la.",
     aiApiKeyAvailable: "Disponível em",
     aiHideKey: "Ocultar",
     aiShowKey: "Mostrar",

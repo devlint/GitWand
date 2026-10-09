@@ -1203,6 +1203,8 @@ const es: Locale = {
     aiConnectErrorPrefix: "La clave debe empezar por sk-ant-…",
     aiApiKeyLabel: "Clave API de Anthropic",
     aiApiKeyStored: "Guardada en el llavero del sistema — {0}",
+    aiApiKeyBoundElsewhere: "Esta clave está vinculada a {0}. Introdúcela de nuevo para usarla con este endpoint.",
+    aiApiKeyUnbound: "Esta clave se guardó antes de que las claves se vincularan a un endpoint. Introdúcela de nuevo para usarla.",
     aiApiKeyAvailable: "Disponible en",
     aiHideKey: "Ocultar",
     aiShowKey: "Mostrar",

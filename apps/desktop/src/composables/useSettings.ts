@@ -14,7 +14,7 @@ import { detectLocale, isSupportedLocale } from "../locales";
 import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
 import type { AIProvider } from "./useAIProvider";
-import { stashLegacyAiApiKey, stripAiApiKey } from "./useAiApiKey";
+import { stashLegacyAiApiKey, stripAiApiKey, toPersistedSettings } from "./useAiApiKey";
 import { DEFAULT_TEMPLATE_PROMPTS, LEGACY_RELEASE_NOTES_RULES_HEADER } from "./aiTemplateDefaults";
 import type { SwitchBehavior } from "../utils/branchSwitchDecision";
 import type { PullDirtyBehavior } from "../utils/pullDirtyDecision";
@@ -670,7 +670,7 @@ export function loadSettings(): AppSettings {
       // The AI API key moved to the OS keychain: hand a legacy value over and
       // keep it out of the in-memory settings (see useAiApiKey).
       if (stored && typeof stored === "object" && "aiApiKey" in stored) {
-        stashLegacyAiApiKey(stored.aiApiKey);
+        stashLegacyAiApiKey(stored.aiApiKey, stored.aiApiEndpoint);
       }
       const s: AppSettings = stripAiApiKey({ ...defaultAppSettings, ...stored });
       s.releaseNoteTemplates = migrateReleaseNoteTemplates(s.releaseNoteTemplates);
@@ -689,7 +689,9 @@ export function loadSettings(): AppSettings {
 
 export function saveSettings(s: AppSettings): void {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(stripAiApiKey(s)));
+    // Never the key itself — except a legacy one whose move to the keychain
+    // has not succeeded yet, which is its only copy (see useAiApiKey).
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(toPersistedSettings(s)));
   } catch {
     // ignore
   }

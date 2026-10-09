@@ -402,9 +402,66 @@ const AI_ENV_BASE = new Set([
   "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
   "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS",
 ]);
+/** Mirrors CLAUDE_AUTH_OVERRIDE_ENV (types.rs): stripped so the CLI uses the subscription. */
+const CLAUDE_AUTH_OVERRIDE = ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
+const envFlagSet = (v) => {
+  const t = String(v ?? "").trim();
+  return t !== "" && t !== "0" && t.toLowerCase() !== "false";
+};
+const isEnvName = (n) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(n);
+const readText = (p) => { try { return readFileSync(p, "utf-8"); } catch { return null; } };
+/**
+ * Mirrors `ai_env_context` (ai.rs): Claude's Bedrock / Vertex switches (env or
+ * the user's settings.json `env`), Codex `env_key`s and opencode `{env:NAME}`
+ * from user-level config files only — never from the repository.
+ */
+function aiEnvContext(cli, env = process.env) {
+  const ctx = { claudeBedrock: false, claudeVertex: false, configRefs: [] };
+  const home = env.HOME || env.USERPROFILE || "";
+  if (cli === "claude") {
+    ctx.claudeBedrock = envFlagSet(env.CLAUDE_CODE_USE_BEDROCK);
+    ctx.claudeVertex = envFlagSet(env.CLAUDE_CODE_USE_VERTEX);
+    const dir = (env.CLAUDE_CONFIG_DIR || "").trim() || (home && join(home, ".claude"));
+    const text = dir && readText(join(dir, "settings.json"));
+    if (text) {
+      try {
+        const e = JSON.parse(text)?.env ?? {};
+        const flag = (v) => envFlagSet(typeof v === "boolean" ? (v ? "1" : "0") : v);
+        ctx.claudeBedrock ||= flag(e.CLAUDE_CODE_USE_BEDROCK);
+        ctx.claudeVertex ||= flag(e.CLAUDE_CODE_USE_VERTEX);
+      } catch { /* not JSON */ }
+    }
+  } else if (cli === "codex") {
+    const dir = (env.CODEX_HOME || "").trim() || (home && join(home, ".codex"));
+    const text = dir && readText(join(dir, "config.toml"));
+    if (text) {
+      for (const line of text.split("\n")) {
+        const m = /^\s*env_key\s*=\s*([^#]*)/.exec(line);
+        const name = m && m[1].trim().replace(/^["']|["']$/g, "");
+        if (name && isEnvName(name)) ctx.configRefs.push(name);
+      }
+    }
+  } else if (cli === "opencode") {
+    const files = [];
+    if ((env.OPENCODE_CONFIG || "").trim()) files.push(env.OPENCODE_CONFIG);
+    const cfgHome = (env.XDG_CONFIG_HOME || "").trim() || (home && join(home, ".config"));
+    if (cfgHome) for (const n of ["opencode.json", "opencode.jsonc", "config.json"]) files.push(join(cfgHome, "opencode", n));
+    for (const f of files) {
+      const text = readText(f);
+      if (!text) continue;
+      for (const m of text.matchAll(/\{env:([^}]*)\}/g)) if (isEnvName(m[1])) ctx.configRefs.push(m[1]);
+    }
+  }
+  return ctx;
+}
 const AI_ENV_PROVIDER = {
-  claude: (k) => k === "CLAUDE_CONFIG_DIR",
-  codex: (k) => ["CODEX_HOME", "OPENAI_API_KEY", "OPENAI_BASE_URL"].includes(k),
+  claude: (k, ctx) => !CLAUDE_AUTH_OVERRIDE.includes(k) && (
+    k === "CLAUDE_CONFIG_DIR" || k.startsWith("CLAUDE_CODE_") || k.startsWith("ANTHROPIC_")
+    || (ctx.claudeBedrock && k.startsWith("AWS_"))
+    || (ctx.claudeVertex && (["CLOUD_ML_REGION", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT",
+      "GOOGLE_CLOUD_QUOTA_PROJECT", "GCLOUD_PROJECT"].includes(k) || k.startsWith("VERTEX_REGION_") || k.startsWith("CLOUDSDK_")))),
+  codex: (k) => k.startsWith("CODEX_")
+    || ["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORGANIZATION", "OPENAI_PROJECT", "AZURE_OPENAI_API_KEY"].includes(k),
   opencode: (k) => k.startsWith("OPENCODE_") || [
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY",
     "OPENROUTER_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY",
@@ -415,17 +472,43 @@ const AI_ENV_PROVIDER = {
   ].includes(k),
 };
 function aiSpawnEnv(cli) {
+  const ctx = aiEnvContext(cli);
   const env = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (AI_ENV_BASE.has(k) || AI_ENV_BASE.has(k.toUpperCase()) || k.startsWith("LC_") || AI_ENV_PROVIDER[cli](k)) {
+    if (AI_ENV_BASE.has(k) || AI_ENV_BASE.has(k.toUpperCase()) || k.startsWith("LC_")
+      || ctx.configRefs.includes(k) || AI_ENV_PROVIDER[cli](k, ctx)) {
       env[k] = v;
     }
   }
   return env;
 }
 
+/** Mirrors CLAUDE_LOCKDOWN_ARGS (ai.rs): built-ins denied, no MCP server. */
+const CLAUDE_LOCKDOWN_ARGS = [
+  "--strict-mcp-config",
+  "--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent",
+];
+
 /** dev:web stand-in for the keychain-held AI API key (memory only). */
 let devAiApiKey = "";
+/** Origin the dev key is bound to — mirrors `StoredKey::origin` in ai_http.rs. */
+let devAiApiKeyOrigin = null;
+/**
+ * Parse an AI endpoint as `parse_endpoint` (ai_http.rs) does: http(s), a host,
+ * no credentials, no whitespace / control characters. Throws the same text.
+ */
+function parseAiEndpoint(raw) {
+  const s = String(raw ?? "");
+  if (/[\s\x00-\x1f\x7f]/.test(s)) throw new Error("AI endpoint contains whitespace or control characters");
+  let u;
+  try { u = new URL(s); } catch { throw new Error("AI endpoint must be an http(s) URL"); }
+  if ((u.protocol !== "http:" && u.protocol !== "https:") || !u.hostname) {
+    throw new Error("AI endpoint must be an http(s) URL");
+  }
+  if (u.username || u.password) throw new Error("AI endpoint must not carry credentials");
+  return u;
+}
+const devAiKeyInfo = () => (devAiApiKey ? { hint: aiKeyHint(devAiApiKey), origin: devAiApiKeyOrigin } : null);
 /** dev:web stand-in for the telemetry opt-out marker. */
 let devTelemetryEnabled = true;
 /** Masked hint of a key — mirrors `key_hint` in commands/ai_http.rs. */
@@ -5503,31 +5586,48 @@ async function handleRequest(req, res) {
     // The Rust backend keeps the key in the OS keychain; dev:web keeps it in
     // this process's memory only, and likewise never returns it — just a hint.
     if (url.pathname === "/api/ai-api-key") {
-      if (req.method === "GET") return jsonResponse(req, res, { hint: aiKeyHint(devAiApiKey) });
+      if (req.method === "GET") return jsonResponse(req, res, { info: devAiKeyInfo() });
       if (req.method === "POST") {
-        const { key } = await readBody(req);
-        devAiApiKey = String(key ?? "").trim();
-        return jsonResponse(req, res, { hint: aiKeyHint(devAiApiKey) });
+        const { key, endpoint } = await readBody(req);
+        const trimmed = String(key ?? "").trim();
+        if (!trimmed) {
+          devAiApiKey = "";
+          devAiApiKeyOrigin = null;
+          return jsonResponse(req, res, { info: null });
+        }
+        // Bound to the endpoint's origin, like `ai_api_key_set`.
+        if (!String(endpoint ?? "").trim()) {
+          return jsonResponse(req, res, { error: "An AI endpoint is required to store the API key" }, 400);
+        }
+        let origin;
+        try { origin = parseAiEndpoint(String(endpoint).trim()).origin; }
+        catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
+        devAiApiKey = trimmed;
+        devAiApiKeyOrigin = origin;
+        return jsonResponse(req, res, { info: devAiKeyInfo() });
       }
     }
 
     // POST /api/ai-http-request { method, url, body?, auth, timeoutSecs? }
-    // Mirrors commands::ai_http::ai_http_request: validation and error text
-    // included. Answers { status, body } whatever the upstream status.
+    // Mirrors commands::ai_http::ai_http_request: validation, key binding and
+    // error text included. Answers { status, body } whatever the upstream status.
     if (url.pathname === "/api/ai-http-request" && req.method === "POST") {
       const { method, url: target, body, auth, timeoutSecs } = await readBody(req);
+      let parsed;
+      try { parsed = parseAiEndpoint(target); }
+      catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
       if (method !== "GET" && method !== "POST") {
         return jsonResponse(req, res, { error: `Unsupported method: ${method}` }, 400);
-      }
-      if (!/^https?:\/\//.test(target || "")) {
-        return jsonResponse(req, res, { error: "AI endpoint must be an http(s) URL" }, 400);
-      }
-      if (/[\s\x00-\x1f\x7f]/.test(target)) {
-        return jsonResponse(req, res, { error: "AI endpoint contains whitespace or control characters" }, 400);
       }
       const headers = { Accept: "application/json" };
       if (auth === "anthropic" || auth === "bearer") {
         if (!devAiApiKey) return jsonResponse(req, res, { error: "No AI API key configured" }, 400);
+        // The key goes to the origin it is bound to, nowhere else.
+        if (devAiApiKeyOrigin !== parsed.origin) {
+          return jsonResponse(req, res, {
+            error: `The stored AI API key is tied to ${devAiApiKeyOrigin}; enter it again in Settings to use it with ${parsed.origin}`,
+          }, 400);
+        }
         if (auth === "anthropic") {
           headers["x-api-key"] = devAiApiKey;
           headers["anthropic-version"] = "2023-06-01";
@@ -5538,12 +5638,15 @@ async function handleRequest(req, res) {
         return jsonResponse(req, res, { error: `Unknown AI auth scheme: ${auth}` }, 400);
       }
       if (body !== undefined && body !== null) headers["Content-Type"] = "application/json";
-      const secs = Math.min(600, Math.max(1, Number(timeoutSecs) || 120));
+      // No timeout given = a completion: generous ceiling, as COMPLETION_TIMEOUT_SECS.
+      const COMPLETION_TIMEOUT_SECS = 30 * 60;
+      const secs = Math.min(COMPLETION_TIMEOUT_SECS, Math.max(1, Number(timeoutSecs) || COMPLETION_TIMEOUT_SECS));
       try {
-        const upstream = await fetch(target, {
+        const upstream = await fetch(parsed.href, {
           method,
           headers,
           body: body ?? undefined,
+          redirect: "manual",
           signal: AbortSignal.timeout(secs * 1000),
         });
         return jsonResponse(req, res, { status: upstream.status, body: await upstream.text() });
@@ -5657,7 +5760,7 @@ async function handleRequest(req, res) {
         }
         const claudeEffort = validEffort(body.effort);
         if (claudeEffort) claudeArgs.push("--effort", claudeEffort);
-        claudeArgs.push("--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch");
+        claudeArgs.push(...CLAUDE_LOCKDOWN_ARGS);
         const r = spawnSync(CLAUDE, claudeArgs, {
           cwd: body.cwd || undefined,
           input: fullPrompt.replace(/\0/g, ""),
@@ -5863,14 +5966,20 @@ async function handleRequest(req, res) {
         if (body.model && String(body.model).trim()) {
           ocArgs.push("--model", String(body.model).trim());
         }
-        ocArgs.push(fullPrompt);
-        const r = spawnSync(OPENCODE, ocArgs, {
+        const prompt = fullPrompt.replace(/\0/g, "");
+        const ocOpts = {
           cwd: body.cwd || undefined,
           // Mirrors opencode_cli_prompt_inner: allowlisted env, tools denied.
           env: { ...aiSpawnEnv("opencode"), OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","webfetch":"deny"}' },
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
-        });
+        };
+        // Prompt on stdin, off argv; an opencode too old to read stdin refuses
+        // the empty message, and only then gets it as an argument.
+        let r = spawnSync(OPENCODE, ocArgs, { ...ocOpts, input: prompt });
+        if (r.status !== 0 && `${r.stderr || ""}${r.stdout || ""}`.includes("You must provide a message")) {
+          r = spawnSync(OPENCODE, [...ocArgs, prompt], ocOpts);
+        }
         if (r.status !== 0) {
           const detail = (r.stderr || r.stdout || "").trim() || "opencode CLI a échoué sans message";
           return jsonResponse(req, res, { error: detail }, 500);

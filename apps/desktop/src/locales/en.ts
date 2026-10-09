@@ -1223,6 +1223,8 @@ const en = {
     aiConnectErrorPrefix: "The key must start with sk-ant-\u2026",
     aiApiKeyLabel: "Anthropic API key",
     aiApiKeyStored: "Stored in the system keychain — {0}",
+    aiApiKeyBoundElsewhere: "This key is tied to {0}. Enter it again to use it with this endpoint.",
+    aiApiKeyUnbound: "This key was stored before keys were tied to an endpoint. Enter it again to use it.",
     aiApiKeyAvailable: "Available on",
     aiHideKey: "Hide",
     aiShowKey: "Show",

@@ -33,9 +33,23 @@
 /// webview could read any other application's stored secret by name.
 const SERVICE_PREFIX: &str = "gitwand:";
 
-/// Services whose secret the backend reads itself and must never hand back to
-/// the webview — the AI API key is injected by `ai_http_request` only.
+/// Services the backend manages itself, through dedicated commands: the
+/// generic commands below may neither read them (the AI API key is injected by
+/// `ai_http_request` only) nor write or delete them (its value carries the
+/// origin the key is bound to, which only `ai_api_key_set` may set — together
+/// with the key).
 const BACKEND_ONLY_SERVICES: &[&str] = &[crate::commands::ai_http::AI_KEY_SERVICE];
+
+/// Refuse the generic commands on a backend-only service.
+fn check_not_backend_only(service: &str) -> Result<(), String> {
+    if BACKEND_ONLY_SERVICES.contains(&service) {
+        return Err(format!(
+            "`{}` is managed by the backend and cannot be accessed from the frontend",
+            service
+        ));
+    }
+    Ok(())
+}
 
 /// Reject services outside the GitWand namespace (see `SERVICE_PREFIX`).
 fn check_service(service: &str) -> Result<(), String> {
@@ -60,6 +74,7 @@ pub(crate) async fn set_credential(
     value: String,
 ) -> Result<(), String> {
     check_service(&service)?;
+    check_not_backend_only(&service)?;
     let entry = keyring::Entry::new(&service, &account)
         .map_err(|e| format!("keyring init failed for {}/{}: {}", service, account, e))?;
     entry
@@ -75,9 +90,7 @@ pub(crate) async fn set_credential(
 #[tauri::command]
 pub(crate) async fn get_credential(service: String, account: String) -> Result<String, String> {
     check_service(&service)?;
-    if BACKEND_ONLY_SERVICES.contains(&service.as_str()) {
-        return Err(format!("`{}` cannot be read from the frontend", service));
-    }
+    check_not_backend_only(&service)?;
     let entry = keyring::Entry::new(&service, &account)
         .map_err(|e| format!("keyring init failed for {}/{}: {}", service, account, e))?;
     entry.get_password().map_err(|_| {
@@ -94,6 +107,7 @@ pub(crate) async fn get_credential(service: String, account: String) -> Result<S
 #[tauri::command]
 pub(crate) async fn delete_credential(service: String, account: String) -> Result<(), String> {
     check_service(&service)?;
+    check_not_backend_only(&service)?;
     let entry = match keyring::Entry::new(&service, &account) {
         Ok(e) => e,
         Err(_) => return Ok(()), // Entry cannot exist if we can't init
@@ -127,16 +141,26 @@ mod tests {
     }
 
     #[test]
-    fn backend_only_service_cannot_be_read() {
+    fn backend_only_service_cannot_be_read_written_or_deleted() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let err = rt
-            .block_on(get_credential(
-                crate::commands::ai_http::AI_KEY_SERVICE.to_string(),
-                "api-key".to_string(),
+        let svc = || crate::commands::ai_http::AI_KEY_SERVICE.to_string();
+        let acct = || "api-key".to_string();
+        let errs = [
+            rt.block_on(get_credential(svc(), acct())).unwrap_err(),
+            // Writing would let a webview script rebind the AI key to a host
+            // of its choosing; deleting is the AI key's own clear command.
+            rt.block_on(set_credential(
+                svc(),
+                acct(),
+                r#"{"key":"k","origin":"https://evil.example"}"#.to_string(),
             ))
-            .unwrap_err();
-        assert!(err.contains("cannot be read"), "got: {err}");
+            .unwrap_err(),
+            rt.block_on(delete_credential(svc(), acct())).unwrap_err(),
+        ];
+        for err in errs {
+            assert!(err.contains("managed by the backend"), "got: {err}");
+        }
     }
 }

@@ -119,7 +119,7 @@ import {
   settingsRevision,
 } from "../composables/useSettings";
 import { gitCommitTemplatePath, openExternalUrl, aiHttpRequest, telemetryGetState, telemetrySetEnabled } from "../utils/backend";
-import { useAiApiKey, stripAiApiKey } from "../composables/useAiApiKey";
+import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings } from "../composables/useAiApiKey";
 export type { AIProvider };
 
 // Re-export for back-compat — earlier callers imported this shape from
@@ -397,7 +397,8 @@ function loadSettings(): Settings {
 
 function saveSettings(s: Settings) {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(stripAiApiKey(s)));
+    // See useSettings.saveSettings: a legacy key awaiting migration is kept.
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(toPersistedSettings(s)));
   } catch { /* ignore */ }
 }
 
@@ -769,21 +770,24 @@ async function detectOllama() {
 const aiKey = useAiApiKey();
 const aiKeyConfigured = aiKey.configured;
 const maskedApiKey = computed(() => aiKey.hint.value ?? "");
-const apiKeyDraft = ref("");
-const apiKeyError = ref<string | null>(null);
 const showApiKey = ref(false);
 
-async function saveApiKeyDraft() {
-  const draft = apiKeyDraft.value.trim();
-  if (!draft) return;
-  try {
-    await aiKey.save(draft);
-    apiKeyDraft.value = "";
-    apiKeyError.value = null;
-  } catch (e) {
-    apiKeyError.value = (e as Error).message;
-  }
+/**
+ * Endpoint the key is bound to when saved: the backend only ever sends it to
+ * this origin (see useAiApiKey).
+ */
+function apiKeyEndpoint(): string {
+  return settings.value.aiApiEndpoint?.trim() || "https://api.anthropic.com";
 }
+/** A key is stored, but for another endpoint than the one configured. */
+const aiKeyBoundElsewhere = computed(() => aiKey.boundElsewhere(apiKeyEndpoint()));
+
+// Draft of the key input, saved on `change` and when the panel closes.
+const {
+  draft: apiKeyDraft,
+  error: apiKeyError,
+  save: saveApiKeyDraft,
+} = useAiApiKeyDraft(apiKeyEndpoint);
 
 async function clearApiKey() {
   try {
@@ -841,7 +845,7 @@ async function validateAndSaveClaudeKey(key: string) {
     return;
   }
   try {
-    await aiKey.save(trimmed);
+    await aiKey.save(trimmed, apiKeyEndpoint());
   } catch (e) {
     claudeConnectError.value = (e as Error).message;
     claudeConnectStep.value = "error";
@@ -2626,6 +2630,9 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                     <button class="sp-disconnect-btn" @click="disconnectClaude">{{ t('settings.aiAuthDisconnect')
                     }}</button>
                   </div>
+                  <div v-if="aiKeyBoundElsewhere" class="sp-connect-error">
+                    {{ aiKey.origin.value ? t('settings.aiApiKeyBoundElsewhere', aiKey.origin.value) : t('settings.aiApiKeyUnbound') }}
+                  </div>
                 </div>
                 <div v-else class="sp-row">
                   <div class="sp-connect-flow">
@@ -2704,6 +2711,9 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                   <div v-if="aiKeyConfigured" class="sp-key-stored">
                     <span class="sp-hint">{{ t('settings.aiApiKeyStored', maskedApiKey) }}</span>
                     <button class="sp-text-btn" @click="clearApiKey">{{ t('settings.aiAuthDisconnect') }}</button>
+                  </div>
+                  <div v-if="aiKeyBoundElsewhere" class="sp-connect-error">
+                    {{ aiKey.origin.value ? t('settings.aiApiKeyBoundElsewhere', aiKey.origin.value) : t('settings.aiApiKeyUnbound') }}
                   </div>
                   <div v-if="apiKeyError" class="sp-connect-error">{{ apiKeyError }}</div>
                   <span class="sp-hint">{{ t('settings.aiApiKeyAvailable') }} <a
@@ -3015,6 +3025,9 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 <div v-if="aiKeyConfigured" class="sp-key-stored">
                   <span class="sp-hint">{{ t('settings.aiApiKeyStored', maskedApiKey) }}</span>
                   <button class="sp-text-btn" @click="clearApiKey">{{ t('settings.aiAuthDisconnect') }}</button>
+                </div>
+                <div v-if="aiKeyBoundElsewhere" class="sp-connect-error">
+                  {{ aiKey.origin.value ? t('settings.aiApiKeyBoundElsewhere', aiKey.origin.value) : t('settings.aiApiKeyUnbound') }}
                 </div>
                 <div v-if="apiKeyError" class="sp-connect-error">{{ apiKeyError }}</div>
               </div>

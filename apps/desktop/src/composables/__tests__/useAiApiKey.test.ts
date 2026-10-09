@@ -1,16 +1,20 @@
 /**
  * The AI API key moved from the localStorage settings blob to the OS
- * keychain. These pin the migration and the "never written back" guarantee.
+ * keychain. These pin the migration, the "never written back" guarantee, and
+ * that a failed migration never loses the only copy of the key.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+type Info = { hint: string; origin: string | null };
 const { aiApiKeySet, aiApiKeyHint } = vi.hoisted(() => ({
-  aiApiKeySet: vi.fn(async (key: string): Promise<string | null> => (key ? "sk-a••••wxyz" : null)),
-  aiApiKeyHint: vi.fn(async (): Promise<string | null> => null),
+  aiApiKeySet: vi.fn(async (key: string, endpoint?: string): Promise<Info | null> =>
+    key ? { hint: "sk-a••••wxyz", origin: endpoint ? new URL(endpoint).origin : null } : null),
+  aiApiKeyHint: vi.fn(async (): Promise<Info | null> => null),
 }));
 vi.mock("../../utils/backend", () => ({ aiApiKeySet, aiApiKeyHint }));
 
 const SETTINGS_KEY = "gitwand-settings";
+const stored = () => JSON.parse(localStorage.getItem(SETTINGS_KEY)!);
 
 beforeEach(() => {
   localStorage.clear();
@@ -19,17 +23,23 @@ beforeEach(() => {
 });
 
 describe("useAiApiKey migration", () => {
-  it("moves a legacy key to the keychain and removes it from localStorage", async () => {
+  it("moves a legacy key to the keychain, bound to its endpoint, and removes it from localStorage", async () => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ aiApiKey: "sk-ant-legacy-wxyz", aiEnabled: true }));
     const { stashLegacyAiApiKey, ensureAiApiKeyLoaded, isAiApiKeyConfigured } = await import("../useAiApiKey");
-    aiApiKeyHint.mockResolvedValueOnce("sk-a••••wxyz");
-    stashLegacyAiApiKey("sk-ant-legacy-wxyz");
+    aiApiKeyHint.mockResolvedValueOnce({ hint: "sk-a••••wxyz", origin: "https://api.anthropic.com" });
+    stashLegacyAiApiKey("sk-ant-legacy-wxyz", "https://api.anthropic.com");
     await ensureAiApiKeyLoaded();
-    expect(aiApiKeySet).toHaveBeenCalledWith("sk-ant-legacy-wxyz");
-    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY)!);
-    expect(stored).not.toHaveProperty("aiApiKey");
-    expect(stored.aiEnabled).toBe(true);
+    expect(aiApiKeySet).toHaveBeenCalledWith("sk-ant-legacy-wxyz", "https://api.anthropic.com");
+    expect(stored()).not.toHaveProperty("aiApiKey");
+    expect(stored().aiEnabled).toBe(true);
     expect(isAiApiKeyConfigured()).toBe(true);
+  });
+
+  it("binds a legacy key to the endpoint it was used with, Anthropic by default", async () => {
+    const { stashLegacyAiApiKey, ensureAiApiKeyLoaded } = await import("../useAiApiKey");
+    stashLegacyAiApiKey("sk-x", "");
+    await ensureAiApiKeyLoaded();
+    expect(aiApiKeySet).toHaveBeenCalledWith("sk-x", "https://api.anthropic.com");
   });
 
   it("keeps the legacy key when the keychain write fails, so the next launch retries", async () => {
@@ -39,17 +49,124 @@ describe("useAiApiKey migration", () => {
     const { stashLegacyAiApiKey, ensureAiApiKeyLoaded } = await import("../useAiApiKey");
     stashLegacyAiApiKey("sk-x");
     await ensureAiApiKeyLoaded();
-    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!).aiApiKey).toBe("sk-x");
+    expect(stored().aiApiKey).toBe("sk-x");
+    warn.mockRestore();
+  });
+
+  it("a settings save after a failed migration keeps the legacy key (its only copy)", async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ aiApiKey: "sk-only-copy-1234", aiEnabled: true }));
+    aiApiKeySet.mockRejectedValueOnce(new Error("libsecret missing"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { loadSettings, saveSettings } = await import("../useSettings");
+    const { ensureAiApiKeyLoaded } = await import("../useAiApiKey");
+    const s = loadSettings();
+    expect(s).not.toHaveProperty("aiApiKey");
+    await ensureAiApiKeyLoaded();
+    // Any later write of the settings — a toggle flipped anywhere in the app.
+    saveSettings({ ...s, aiEnabled: false });
+    expect(stored().aiApiKey).toBe("sk-only-copy-1234");
+    expect(stored().aiEnabled).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("a settings save while the migration is still in flight keeps the legacy key", async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ aiApiKey: "sk-inflight-1234" }));
+    let fail!: (e: Error) => void;
+    aiApiKeySet.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { loadSettings, saveSettings } = await import("../useSettings");
+    const { ensureAiApiKeyLoaded } = await import("../useAiApiKey");
+    const s = loadSettings();
+    saveSettings(s);
+    expect(stored().aiApiKey).toBe("sk-inflight-1234");
+    fail(new Error("keychain locked"));
+    await ensureAiApiKeyLoaded();
+    saveSettings(s);
+    expect(stored().aiApiKey).toBe("sk-inflight-1234");
+    warn.mockRestore();
+  });
+
+  it("a key entered after a failed migration supersedes the legacy one", async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ aiApiKey: "sk-old" }));
+    aiApiKeySet.mockRejectedValueOnce(new Error("keychain locked"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { loadSettings, saveSettings } = await import("../useSettings");
+    const { ensureAiApiKeyLoaded, useAiApiKey } = await import("../useAiApiKey");
+    const s = loadSettings();
+    await ensureAiApiKeyLoaded();
+    await useAiApiKey().save("sk-new", "https://api.anthropic.com");
+    expect(stored()).not.toHaveProperty("aiApiKey");
+    saveSettings(s);
+    expect(stored()).not.toHaveProperty("aiApiKey");
     warn.mockRestore();
   });
 
   it("loadSettings hands the legacy key over and saveSettings never writes it back", async () => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ aiApiKey: "sk-legacy-1234567" }));
     const { loadSettings, saveSettings } = await import("../useSettings");
+    const { ensureAiApiKeyLoaded } = await import("../useAiApiKey");
     const s = loadSettings();
     expect(s).not.toHaveProperty("aiApiKey");
-    expect(aiApiKeySet).toHaveBeenCalledWith("sk-legacy-1234567");
+    expect(aiApiKeySet).toHaveBeenCalledWith("sk-legacy-1234567", "https://api.anthropic.com");
+    await ensureAiApiKeyLoaded();
     saveSettings({ ...s, aiApiKey: "sneaky" } as typeof s);
-    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!)).not.toHaveProperty("aiApiKey");
+    expect(stored()).not.toHaveProperty("aiApiKey");
+  });
+});
+
+describe("useAiApiKey endpoint binding", () => {
+  it("flags a key bound to another origin, or to none", async () => {
+    const { useAiApiKey } = await import("../useAiApiKey");
+    const k = useAiApiKey();
+    expect(k.boundElsewhere("https://api.openai.com/v1")).toBe(false); // nothing stored
+    await k.save("sk-1", "https://api.anthropic.com");
+    expect(aiApiKeySet).toHaveBeenLastCalledWith("sk-1", "https://api.anthropic.com");
+    expect(k.boundElsewhere("https://api.anthropic.com/")).toBe(false);
+    expect(k.boundElsewhere("https://api.openai.com/v1")).toBe(true);
+    expect(k.boundElsewhere("not a url")).toBe(true);
+    aiApiKeySet.mockResolvedValueOnce({ hint: "••••••••", origin: null });
+    await k.save("sk-2", "https://api.anthropic.com");
+    expect(k.boundElsewhere("https://api.anthropic.com")).toBe(true);
+  });
+});
+
+describe("useAiApiKeyDraft (Settings key input)", () => {
+  it("saves a pending draft when its owner goes away (Settings closed before blur)", async () => {
+    const { effectScope } = await import("vue");
+    const { useAiApiKeyDraft, ensureAiApiKeyLoaded } = await import("../useAiApiKey");
+    await ensureAiApiKeyLoaded();
+    const scope = effectScope();
+    const d = scope.run(() => useAiApiKeyDraft(() => "https://api.openai.com/v1"))!;
+    d.draft.value = "  sk-pasted-1234  ";
+    expect(aiApiKeySet).not.toHaveBeenCalled();
+    scope.stop();
+    await Promise.resolve();
+    expect(aiApiKeySet).toHaveBeenCalledWith("sk-pasted-1234", "https://api.openai.com/v1");
+  });
+
+  it("does nothing on dispose with an empty draft, and clears the draft once saved", async () => {
+    const { effectScope } = await import("vue");
+    const { useAiApiKeyDraft, ensureAiApiKeyLoaded } = await import("../useAiApiKey");
+    await ensureAiApiKeyLoaded();
+    const scope = effectScope();
+    const d = scope.run(() => useAiApiKeyDraft(() => "https://api.anthropic.com"))!;
+    d.draft.value = "sk-typed";
+    await d.save();
+    expect(d.draft.value).toBe("");
+    expect(aiApiKeySet).toHaveBeenCalledTimes(1);
+    scope.stop();
+    await Promise.resolve();
+    expect(aiApiKeySet).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the draft and reports the error when the keychain refuses it", async () => {
+    const { useAiApiKeyDraft, ensureAiApiKeyLoaded } = await import("../useAiApiKey");
+    await ensureAiApiKeyLoaded();
+    aiApiKeySet.mockRejectedValueOnce(new Error("keychain locked"));
+    const d = useAiApiKeyDraft(() => "https://api.anthropic.com");
+    d.draft.value = "sk-typed";
+    await d.save();
+    expect(d.draft.value).toBe("sk-typed");
+    expect(d.error.value).toBe("keychain locked");
   });
 });

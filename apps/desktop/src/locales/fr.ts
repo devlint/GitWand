@@ -1212,6 +1212,8 @@ const fr: Locale = {
     aiConnectErrorPrefix: "La cl\u00e9 doit commencer par sk-ant-\u2026",
     aiApiKeyLabel: "Cl\u00e9 API Anthropic",
     aiApiKeyStored: "Enregistrée dans le trousseau du système — {0}",
+    aiApiKeyBoundElsewhere: "Cette clé est liée à {0}. Saisissez-la à nouveau pour l’utiliser avec ce point d’accès.",
+    aiApiKeyUnbound: "Cette clé a été enregistrée avant que les clés soient liées à un point d’accès. Saisissez-la à nouveau pour l’utiliser.",
     aiApiKeyAvailable: "Disponible sur",
     aiHideKey: "Masquer",
     aiShowKey: "Afficher",

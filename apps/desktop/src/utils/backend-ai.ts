@@ -567,29 +567,41 @@ export async function aiHttpRequest(
   return data as AiHttpResponse;
 }
 
+/** What the webview may know about the stored AI API key. */
+export interface AiKeyInfo {
+  /** Masked form of the key. */
+  hint: string;
+  /**
+   * Origin (`scheme://host[:port]`) the key is bound to: the backend attaches
+   * it to requests for that origin only. Null for a key stored before the
+   * binding existed, which must be entered again.
+   */
+  origin: string | null;
+}
+
 /**
- * Store the AI API key in the OS keychain (an empty key clears it). Returns
- * the masked hint of what is now stored, or null when nothing is.
+ * Store the AI API key in the OS keychain, bound to the origin of `endpoint`
+ * (an empty key clears it). Returns what is now stored, or null.
  */
-export async function aiApiKeySet(key: string): Promise<string | null> {
-  if (isTauri()) return tauriInvoke<string | null>("ai_api_key_set", { key });
+export async function aiApiKeySet(key: string, endpoint?: string): Promise<AiKeyInfo | null> {
+  if (isTauri()) return tauriInvoke<AiKeyInfo | null>("ai_api_key_set", { key, endpoint });
   const res = await devFetch(`${DEV_SERVER}/api/ai-api-key`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key }),
+    body: JSON.stringify({ key, endpoint }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || "ai_api_key_set failed");
-  return data?.hint ?? null;
+  return data?.info ?? null;
 }
 
-/** Masked hint of the stored AI API key, or null when none is configured. */
-export async function aiApiKeyHint(): Promise<string | null> {
-  if (isTauri()) return tauriInvoke<string | null>("ai_api_key_hint");
+/** Masked hint and bound origin of the stored AI API key, or null. */
+export async function aiApiKeyHint(): Promise<AiKeyInfo | null> {
+  if (isTauri()) return tauriInvoke<AiKeyInfo | null>("ai_api_key_hint");
   try {
     const res = await devFetch(`${DEV_SERVER}/api/ai-api-key`);
     if (!res.ok) return null;
-    return (await res.json())?.hint ?? null;
+    return (await res.json())?.info ?? null;
   } catch {
     return null;
   }
