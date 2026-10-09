@@ -981,10 +981,12 @@ function modelOptionLabel(m: AIModelOption): string {
 }
 
 // A saved effort can outlive the model that accepted it (model changed
-// elsewhere, list refreshed, provider renamed it). Once the list is known,
-// drop an effort the current model does not take.
+// elsewhere, list refreshed, provider renamed it). Only judged when the
+// current model is in the list: an unlisted model (fallback list after a
+// failed fetch, no key yet, free text) says nothing about what it accepts,
+// so its saved effort is kept.
 watch([modelOptions, currentModel], () => {
-  if (isStaleEffort(currentEffort.value, effortOptions.value, modelOptions.value.length > 0)) {
+  if (isStaleEffort(currentEffort.value, effortOptions.value, currentModelOption.value != null)) {
     onEffortChange("");
   }
 });
