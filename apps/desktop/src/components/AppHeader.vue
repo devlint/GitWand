@@ -57,8 +57,9 @@ const { t } = useI18n();
 
 // Must match the `max-width: 1350px` breakpoint in <style> that hides the
 // action-button labels — tooltips only appear once the label is gone.
-const ICON_MODE_QUERY = "(max-width: 1350px)";
-const isIconMode = () => window.matchMedia(ICON_MODE_QUERY).matches;
+// One shared MediaQueryList: `.matches` is live, no need to re-query per hover.
+const iconModeQuery = window.matchMedia("(max-width: 1350px)");
+const isIconMode = () => iconModeQuery.matches;
 const ai = useAIProvider();
 const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
 const askConfirm = inject<(options: any) => Promise<boolean>>("askConfirm");
@@ -707,7 +708,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <div class="header-action-sep" aria-hidden="true"></div>
           <button
             class="btn btn--secondary header-action-btn"
-            v-tooltip="{ text: t('dashboard.releaseNotesHint'), when: isIconMode }"
+            v-tooltip="t('dashboard.releaseNotesHint')"
             :aria-label="t('dashboard.releaseNotes')"
             @click="emit('openReleaseNotes')"
           >
@@ -776,9 +777,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 /* Narrow windows: secondary actions collapse to icon-only (label stays in
-   title/aria-label), then the row wraps instead of overflowing. */
+   aria-label and the v-tooltip, which only shows in this mode), then the row
+   wraps instead of overflowing. */
 @media (max-width: 1350px) {
-  /* Keep in sync with ICON_MODE_QUERY in <script setup>. */
+  /* Keep in sync with iconModeQuery in <script setup>. */
   .header-action-btn > span:not(.header-action-btn__count) {
     display: none;
   }
