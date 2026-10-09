@@ -78,6 +78,8 @@ import {
   CLAUDE_API_MODELS,
   DEFAULT_CLAUDE_API_MODEL,
   fallbackModelsForProvider,
+  isFetchableEndpoint,
+  isStaleEffort,
   type AISettings,
 } from "../composables/useAIProvider";
 
@@ -311,8 +313,43 @@ describe("Claude API default list", () => {
     expect(models.map((m) => m.id)).toContain(DEFAULT_CLAUDE_API_MODEL);
   });
 
+  it("lists only real model ids, and Haiku 4.5 takes no effort", () => {
+    const ids = CLAUDE_API_MODELS.map((m) => m.id);
+    expect(ids).not.toContain("claude-haiku-5-5");
+    const haiku = CLAUDE_API_MODELS.find((m) => m.id === "claude-haiku-4-5-20251001");
+    expect(haiku).toBeDefined();
+    expect(haiku!.efforts).toEqual([]);
+  });
+
   it("falls back to that list only for the Claude API", () => {
     expect(fallbackModelsForProvider("claude")).toBe(CLAUDE_API_MODELS);
     expect(fallbackModelsForProvider("openai-compat")).toEqual([]);
+  });
+});
+
+describe("isFetchableEndpoint", () => {
+  it("accepts a complete http(s) URL with a host", () => {
+    expect(isFetchableEndpoint("https://api.openai.com/v1")).toBe(true);
+    expect(isFetchableEndpoint("http://localhost:11434/v1")).toBe(true);
+  });
+
+  it("refuses half-typed or non-http endpoints, so the key is not sent there", () => {
+    for (const e of ["", "   ", "https://", "https:/", "api.openai.com", "ftp://host/x", "http://"]) {
+      expect(isFetchableEndpoint(e), e).toBe(false);
+    }
+  });
+});
+
+describe("isStaleEffort", () => {
+  it("is stale when a saved effort is absent from the loaded model's options", () => {
+    expect(isStaleEffort("max", ["low", "medium"], true)).toBe(true);
+    expect(isStaleEffort("low", ["low", "medium"], true)).toBe(false);
+    // A model with no effort at all (Haiku 4.5) invalidates any saved one.
+    expect(isStaleEffort("high", [], true)).toBe(true);
+  });
+
+  it("never clears while the list is not loaded, or when nothing is saved", () => {
+    expect(isStaleEffort("max", [], false)).toBe(false);
+    expect(isStaleEffort("", ["low"], true)).toBe(false);
   });
 });

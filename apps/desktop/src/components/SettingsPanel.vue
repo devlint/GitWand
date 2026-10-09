@@ -91,6 +91,8 @@ import {
   CLI_AGENT_PROVIDERS,
   DEFAULT_CLAUDE_API_MODEL,
   fallbackModelsForProvider,
+  isFetchableEndpoint,
+  isStaleEffort,
   listModelsForProvider,
   providerEfforts,
 } from "../composables/useAIProvider";
@@ -922,12 +924,15 @@ async function loadModels(provider: AIProvider = settings.value.aiProvider) {
   }
 }
 
-// Refetch when the provider, key or endpoint changes — debounced so typing a
-// key does not fire one request per keystroke. Only once the AI tab has been
-// opened: before that, nobody is looking at the list.
+// Refetch when the provider or key changes — debounced so typing a key does
+// not fire one request per keystroke. The endpoint is deliberately NOT
+// watched: the fetch sends the API key to it, so every keystroke would leak
+// the key to each half-typed host. It refetches on blur instead (see
+// `onEndpointBlur`). Only once the AI tab has been opened: before that,
+// nobody is looking at the list.
 let modelsReloadTimer: ReturnType<typeof setTimeout> | undefined;
 watch(
-  () => [settings.value.aiProvider, settings.value.aiApiKey, settings.value.aiApiEndpoint],
+  () => [settings.value.aiProvider, settings.value.aiApiKey],
   () => {
     if (!aiDetectDone) return;
     modelOptions.value = [];
@@ -936,6 +941,14 @@ watch(
   },
 );
 onUnmounted(() => clearTimeout(modelsReloadTimer));
+
+/** Endpoint field committed: refetch, but only for a complete URL. */
+function onEndpointBlur() {
+  if (!aiDetectDone || !isFetchableEndpoint(settings.value.aiApiEndpoint)) return;
+  clearTimeout(modelsReloadTimer);
+  modelOptions.value = [];
+  loadModels();
+}
 
 const currentModel = computed(() =>
   usesApiModelField.value
@@ -967,6 +980,15 @@ function modelOptionLabel(m: AIModelOption): string {
   return parts.join(" · ");
 }
 
+// A saved effort can outlive the model that accepted it (model changed
+// elsewhere, list refreshed, provider renamed it). Once the list is known,
+// drop an effort the current model does not take.
+watch([modelOptions, currentModel], () => {
+  if (isStaleEffort(currentEffort.value, effortOptions.value, modelOptions.value.length > 0)) {
+    onEffortChange("");
+  }
+});
+
 function onModelChange(val: string) {
   if (usesApiModelField.value) {
     updateSetting("aiModel", val);
@@ -975,7 +997,9 @@ function onModelChange(val: string) {
     next[settings.value.aiProvider] = val;
     updateSetting("aiModelByProvider", next);
   }
-  // An effort the new model does not take would fail the next request.
+  // An effort the new model does not take would fail the next request. (The
+  // watch above covers it once the list is known; this also covers a
+  // free-text model, where the list is empty.)
   if (currentEffort.value && !effortOptions.value.includes(currentEffort.value)) {
     onEffortChange("");
   }
@@ -2739,6 +2763,7 @@ function deleteReleaseNoteTemplate(id: string) {
                 <label class="sp-label" for="setting-ai-endpoint">{{ t('settings.aiCompatEndpoint') }}</label>
                 <input id="setting-ai-endpoint" class="sp-input mono" type="text" :value="settings.aiApiEndpoint"
                   @input="updateSetting('aiApiEndpoint', ($event.target as HTMLInputElement).value)"
+                  @blur="onEndpointBlur"
                   placeholder="https://api.openai.com/v1" />
                 <span class="sp-hint">{{ t('settings.aiCompatEndpointHint') }}</span>
               </div>

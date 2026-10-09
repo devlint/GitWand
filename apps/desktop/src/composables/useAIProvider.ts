@@ -377,7 +377,8 @@ export const CLAUDE_API_MODELS: AIModelOption[] = [
   { id: "claude-opus-5-5", name: "Claude Opus 5.5", efforts: CLAUDE_EFFORTS },
   { id: "claude-fable-5-1", name: "Claude Fable 5.1", efforts: CLAUDE_EFFORTS },
   { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", efforts: CLAUDE_EFFORTS },
-  { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", efforts: CLAUDE_EFFORTS },
+  // Haiku 4.5 does not support the effort parameter.
+  { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", efforts: [] },
 ];
 
 /**
@@ -396,7 +397,7 @@ export const CLAUDE_CODE_MODELS: AIModelOption[] = [
   { id: "fable", name: "Fable (latest)", efforts: CLAUDE_CODE_EFFORTS },
   { id: "opus", name: "Opus (latest)", efforts: CLAUDE_CODE_EFFORTS },
   { id: "sonnet", name: "Sonnet (latest)", efforts: CLAUDE_CODE_EFFORTS },
-  { id: "haiku", name: "Haiku (latest)", efforts: CLAUDE_CODE_EFFORTS },
+  { id: "haiku", name: "Haiku (latest)", efforts: [] },
 ];
 
 /**
@@ -444,6 +445,29 @@ export function effortForProvider(
 ): string | undefined {
   const e = s.aiEffortByProvider?.[provider]?.trim();
   return e && (EFFORT_LEVELS as readonly string[]).includes(e) ? e : undefined;
+}
+
+/**
+ * True for a complete http(s) URL with a host. Gates the model fetch that
+ * carries the API key: a half-typed endpoint must not receive it.
+ */
+export function isFetchableEndpoint(endpoint: string): boolean {
+  try {
+    const u = new URL(endpoint.trim());
+    return (u.protocol === "http:" || u.protocol === "https:") && u.hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A saved effort the current model no longer accepts. Only judged once the
+ * model list has loaded: while it is loading or empty the options are not
+ * known yet. An empty option list on a loaded list is meaningful (Haiku 4.5
+ * accepts no effort).
+ */
+export function isStaleEffort(effort: string, options: string[], listLoaded: boolean): boolean {
+  return listLoaded && effort !== "" && !options.includes(effort);
 }
 
 /** Effort levels a Claude `/v1/models` entry reports as supported. */
