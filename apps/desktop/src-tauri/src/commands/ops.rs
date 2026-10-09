@@ -414,12 +414,48 @@ pub(crate) async fn git_split_commit(
 
 // ─── Git push / pull / merge ─────────────────────────────────
 
+/// Build `--force-with-lease=refs/heads/<branch>:<sha>`: the push is refused
+/// unless the remote branch still sits exactly on `sha`. Both parts are
+/// validated — the sha must be a full hex object name, the branch free of
+/// characters git forbids in ref names (and of a leading `-`).
+fn force_with_lease_arg(branch: &str, sha: &str) -> Result<String, String> {
+    let sha_ok = matches!(sha.len(), 40 | 64) && sha.bytes().all(|b| b.is_ascii_hexdigit());
+    if !sha_ok {
+        return Err("invalid lease sha".to_string());
+    }
+    let branch_ok = !branch.is_empty()
+        && !branch.starts_with('-')
+        && !branch.starts_with('/')
+        && !branch.ends_with('/')
+        && !branch.ends_with('.')
+        && !branch.contains("..")
+        && !branch.contains("//")
+        && !branch.contains("@{")
+        && !branch
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || "~^:?*[\\".contains(c));
+    if !branch_ok {
+        return Err("invalid lease branch".to_string());
+    }
+    Ok(format!("--force-with-lease=refs/heads/{}:{}", branch, sha))
+}
+
 #[tauri::command]
 pub(crate) async fn git_push(
     cwd: String,
     set_upstream: Option<bool>,
     force: Option<bool>,
+    lease_branch: Option<String>,
+    lease_sha: Option<String>,
 ) -> Result<GitPushPullResult, String> {
+    // Explicit lease (branch + the remote tip the user was shown). Validated
+    // before anything runs: a malformed value must never degrade into a bare
+    // `--force-with-lease`, which trusts whatever the last fetch brought in.
+    let lease_arg = match (lease_branch.as_deref(), lease_sha.as_deref()) {
+        (None, None) => None,
+        (Some(branch), Some(sha)) => Some(force_with_lease_arg(branch, sha)?),
+        _ => return Err("lease_branch and lease_sha must be given together".to_string()),
+    };
     // Shared guard: push is network-bound and touches only refs, not the
     // index/worktree, so it need not exclude reads — but it must not overlap a
     // writer (checkout/pull/rebase) mutating the refs it is about to publish.
@@ -429,7 +465,10 @@ pub(crate) async fn git_push(
         args.extend(["--set-upstream", "origin", "HEAD"]);
     }
     if force.unwrap_or(false) {
-        args.push("--force-with-lease");
+        match lease_arg.as_deref() {
+            Some(lease) => args.push(lease),
+            None => args.push("--force-with-lease"),
+        }
     }
     let _t0 = Instant::now();
     let output = git_cmd()
@@ -6185,5 +6224,36 @@ mod reveal_tests {
             "Path not found: src/gone.rs"
         );
         let _ = std::fs::remove_dir_all(&repo);
+    }
+}
+
+#[cfg(test)]
+mod force_with_lease_tests {
+    use super::force_with_lease_arg;
+
+    const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    #[test]
+    fn builds_an_explicit_lease() {
+        assert_eq!(
+            force_with_lease_arg("feat/x", SHA).unwrap(),
+            format!("--force-with-lease=refs/heads/feat/x:{SHA}")
+        );
+    }
+
+    #[test]
+    fn rejects_bad_sha() {
+        assert!(force_with_lease_arg("feat", "HEAD").is_err());
+        assert!(force_with_lease_arg("feat", &SHA[..39]).is_err());
+        assert!(force_with_lease_arg("feat", &SHA.replace('0', "g")).is_err());
+    }
+
+    #[test]
+    fn rejects_bad_branch() {
+        for b in [
+            "", "-f", "a b", "a:b", "a..b", "a~1", "a\\b", "a\nb", "x/", "a@{1}",
+        ] {
+            assert!(force_with_lease_arg(b, SHA).is_err(), "{b:?}");
+        }
     }
 }

@@ -3221,20 +3221,36 @@ async function handleRequest(req, res) {
 
     // POST /api/git-push  { cwd, setUpstream?, force? }
     if (url.pathname === "/api/git-push" && req.method === "POST") {
-      const { cwd, setUpstream, force } = await readBody(req);
+      const { cwd, setUpstream, force, leaseBranch, leaseSha } = await readBody(req);
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        let cmd = "git push";
-        if (setUpstream) cmd += " --set-upstream origin HEAD";
-        if (force) cmd += " --force-with-lease";
-        cmd += " 2>&1";
-        const stdout = execSync(cmd, {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-        });
-        return jsonResponse(req, res, { success: true, message: stdout.trim() });
+        const args = ["push"];
+        if (setUpstream) args.push("--set-upstream", "origin", "HEAD");
+        if (force) {
+          const hasBranch = leaseBranch != null;
+          const hasSha = leaseSha != null;
+          if (hasBranch !== hasSha) {
+            return jsonResponse(req, res, { success: false, message: "lease_branch and lease_sha must be given together" });
+          }
+          if (hasBranch) {
+            // Mirrors force_with_lease_arg() in src-tauri/src/commands/ops.rs.
+            const shaOk = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(String(leaseSha));
+            const b = String(leaseBranch);
+            const branchOk =
+              b !== "" && !/^[-/]/.test(b) && !/[/.]$/.test(b) && !b.includes("..") && !b.includes("//") &&
+              !b.includes("@{") && !/[\u0000-\u0020\u007f~^:?*[\\]/.test(b);
+            if (!shaOk) return jsonResponse(req, res, { success: false, message: "invalid lease sha" });
+            if (!branchOk) return jsonResponse(req, res, { success: false, message: "invalid lease branch" });
+            args.push(`--force-with-lease=refs/heads/${b}:${leaseSha}`);
+          } else {
+            args.push("--force-with-lease");
+          }
+        }
+        const r = spawnSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
+        const out = ((r.stdout || "") + (r.stderr || "")).trim();
+        if (r.error) return jsonResponse(req, res, { success: false, message: r.error.message });
+        return jsonResponse(req, res, { success: r.status === 0, message: out });
       } catch (err) {
         return jsonResponse(req, res, { success: false, message: ((err.stdout || "") + (err.stderr || "")).toString().trim() || err.message });
       }

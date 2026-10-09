@@ -954,19 +954,30 @@ export interface GitPushPullResult {
  * which publishes the current branch to a same-named branch on origin and
  * records it as the upstream. Used when pushing a branch that has no
  * tracking configured yet.
+ *
+ * `force` pushes with `--force-with-lease`. With `lease`, the lease is explicit
+ * (`--force-with-lease=refs/heads/<branch>:<sha>`): the push is refused unless
+ * the remote branch still sits on `sha`, whatever a later fetch brought in.
  */
 export async function gitPush(
   cwd: string,
   setUpstream: boolean = false,
   force: boolean = false,
+  lease?: { branch: string; sha: string },
 ): Promise<GitPushPullResult> {
+  const leaseBranch = lease?.branch ?? null;
+  const leaseSha = lease?.sha ?? null;
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_push", { cwd, setUpstream, force }, IPC_TIMEOUT.NETWORK);
+    return tauriInvoke<GitPushPullResult>(
+      "git_push",
+      { cwd, setUpstream, force, leaseBranch, leaseSha },
+      IPC_TIMEOUT.NETWORK,
+    );
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-push`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, setUpstream, force }),
+    body: JSON.stringify({ cwd, setUpstream, force, leaseBranch, leaseSha }),
   });
   return res.json();
 }
