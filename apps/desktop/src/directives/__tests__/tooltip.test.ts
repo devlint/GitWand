@@ -2,8 +2,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { vTooltip } from "../tooltip";
 
-type Binding = { value: unknown; oldValue: unknown };
-
 function tips() {
   return [...document.querySelectorAll(".gw-tooltip")].map((t) => t.textContent);
 }
@@ -23,7 +21,7 @@ describe("v-tooltip", () => {
   it("shows one tooltip with the latest text after many updates", () => {
     const el = anchor();
     vTooltip.mounted(el, { value: "a" });
-    for (let i = 0; i < 5; i++) vTooltip.updated(el, { value: `v${i}`, oldValue: i ? `v${i - 1}` : "a" } as Binding);
+    for (let i = 0; i < 5; i++) vTooltip.updated(el, { value: `v${i}` });
     el.dispatchEvent(new Event("mouseenter"));
     expect(tips()).toEqual(["v4"]);
     el.dispatchEvent(new Event("mouseleave"));
@@ -35,7 +33,7 @@ describe("v-tooltip", () => {
     vTooltip.mounted(el, { value: "" });
     el.dispatchEvent(new Event("mouseenter"));
     expect(tips()).toEqual([]);
-    vTooltip.updated(el, { value: "late", oldValue: "" });
+    vTooltip.updated(el, { value: "late" });
     el.dispatchEvent(new Event("mouseenter"));
     expect(tips()).toEqual(["late"]);
   });
@@ -44,10 +42,19 @@ describe("v-tooltip", () => {
     const el = anchor();
     vTooltip.mounted(el, { value: "one" });
     el.dispatchEvent(new Event("mouseenter"));
-    vTooltip.updated(el, { value: "two", oldValue: "one" });
+    vTooltip.updated(el, { value: "two" });
     expect(tips()).toEqual(["two"]);
-    vTooltip.updated(el, { value: "", oldValue: "two" });
+    vTooltip.updated(el, { value: "" });
     expect(tips()).toEqual([]);
+  });
+
+  it("keeps a visible tooltip in place when an object binding re-renders unchanged", () => {
+    const el = anchor();
+    vTooltip.mounted(el, { value: { text: "Terminal", position: "right" } });
+    el.dispatchEvent(new Event("mouseenter"));
+    const before = document.querySelector(".gw-tooltip");
+    vTooltip.updated(el, { value: { text: "Terminal", position: "right" } });
+    expect(document.querySelector(".gw-tooltip")).toBe(before);
   });
 
   it("stops listening once unmounted", () => {
@@ -62,7 +69,7 @@ describe("v-tooltip", () => {
     const icon = anchor();
     vTooltip.mounted(icon, { value: "Discard" });
     expect(icon.getAttribute("aria-label")).toBe("Discard");
-    vTooltip.updated(icon, { value: "Delete", oldValue: "Discard" });
+    vTooltip.updated(icon, { value: "Delete" });
     expect(icon.getAttribute("aria-label")).toBe("Delete");
 
     const labelled = anchor("Stage all");

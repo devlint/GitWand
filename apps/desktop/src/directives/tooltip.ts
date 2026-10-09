@@ -157,13 +157,16 @@ export const vTooltip = {
     el._tooltipListeners = listeners;
   },
 
-  updated(el: TooltipEl, { value, oldValue }: { value: unknown; oldValue: unknown }) {
-    el._tooltipOpts = getOptions(value);
+  updated(el: TooltipEl, { value }: { value: unknown }) {
+    const prev = el._tooltipOpts;
+    const next = getOptions(value);
+    el._tooltipOpts = next;
     syncAriaLabel(el);
     if (!el._tooltip) return;
-    // Visible tooltip: refresh its text, or drop it if the text went away.
-    if (!el._tooltipOpts) hide(el);
-    else if (value !== oldValue) show(el, el._tooltipOpts);
+    // Visible tooltip: refresh it only when what it shows changed — an
+    // object binding is a new object on every render, so identity is noise.
+    if (!next) hide(el);
+    else if (next.text !== prev?.text || next.position !== prev?.position) show(el, next);
   },
 
   beforeUnmount(el: TooltipEl) {
