@@ -779,6 +779,8 @@ struct ClaudeCaps {
     setting_sources: bool,
     /// `--strict-mcp-config` — no MCP server unless `--mcp-config` names one.
     strict_mcp: bool,
+    /// `--no-session-persistence` — no transcript written for the run.
+    no_session_persistence: bool,
 }
 
 fn parse_claude_caps(help: &str) -> ClaudeCaps {
@@ -790,6 +792,7 @@ fn parse_claude_caps(help: &str) -> ClaudeCaps {
         tools: has("--tools"),
         setting_sources: has("--setting-sources"),
         strict_mcp: has("--strict-mcp-config"),
+        no_session_persistence: has("--no-session-persistence"),
     }
 }
 
@@ -849,14 +852,15 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
             }
         }
     };
-    status.filter(|s| s.success())?;
-    // Exited successfully. Its stdout reaches EOF unless a grandchild still
-    // holds it: then kill what is left of the group too (no leaked helper),
-    // and keep the output already received.
+    // Exited (or killed). Its stdout reaches EOF unless a grandchild still
+    // holds it: then kill what is left of the group too — whatever the exit
+    // status, so no helper leaks — and keep the output already received. The
+    // reader thread is never joined: at worst it is left behind, blocked.
     if rx.recv_timeout(Duration::from_secs(2)).is_err() {
         kill_tree(&mut child);
         let _ = rx.recv_timeout(Duration::from_secs(1));
     }
+    status.filter(|s| s.success())?;
     let buf = collected.lock().ok()?.clone();
     (!buf.is_empty()).then(|| String::from_utf8_lossy(&buf).into_owned())
 }
@@ -873,6 +877,12 @@ fn kill_tree(child: &mut std::process::Child) {
             }
         }
     }
+    // Windows: `taskkill /T` walks the tree from the child, so it only reaches
+    // the grandchildren while the child is still alive (the timeout path).
+    // Once the child has exited, a grandchild still holding stdout cannot be
+    // found this way; a Job Object would, but needs Win32 bindings this crate
+    // does not take on. `stdout_within` therefore never joins its reader: at
+    // worst that grandchild and a blocked thread are left behind.
     #[cfg(windows)]
     {
         let _ = hidden_cmd("taskkill")
@@ -942,23 +952,46 @@ fn neutral_dir_base() -> Option<PathBuf> {
     dirs::cache_dir().or_else(dirs::home_dir)
 }
 
-/// Where the per-run directories are created, validated once per process
-/// (see `prepare_runs_base`). Unit tests use a directory under the temp dir,
-/// so they neither touch the real cache nor need to be allowed to write it.
+/// Stale-run cutoff for the sweep done when the base is (re)prepared — not
+/// before each run, so a run in progress is never swept by its own process.
+/// Generous, because another GitWand process starting up sweeps too and has
+/// no way to know which runs are still live.
+const STALE_RUN_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Where the per-run directories are created. Prepared once per process
+/// (see `prepare_runs_base`), stale leftovers swept then; prepared again if
+/// it has disappeared since (a cache cleaner). A failure is not remembered:
+/// the next run tries again. Unit tests use a per-process directory under the
+/// temp dir, so they neither touch the real cache nor collide with another
+/// user's or process's test run.
 fn ai_runs_base() -> Result<PathBuf, String> {
-    use std::sync::OnceLock;
-    static BASE: OnceLock<Result<PathBuf, String>> = OnceLock::new();
-    BASE.get_or_init(|| {
-        #[cfg(not(test))]
-        let root = neutral_dir_base()
-            .ok_or_else(|| "No per-user directory to run the AI CLI in".to_string())?;
-        #[cfg(test)]
-        let root = std::env::temp_dir().join("gitwand-test-cache");
-        prepare_runs_base(&root.join("gitwand").join("ai-runs"))
-    })
-    .clone()
+    use std::sync::Mutex;
+    static BASE: Mutex<Option<PathBuf>> = Mutex::new(None);
+    #[cfg(not(test))]
+    let root = neutral_dir_base();
+    #[cfg(test)]
+    let root =
+        Some(std::env::temp_dir().join(format!("gitwand-test-cache-{}", std::process::id())));
+    ai_runs_base_in(&BASE, root)
 }
 
+/// `ai_runs_base` with its cache and root given explicitly.
+fn ai_runs_base_in(
+    cache: &std::sync::Mutex<Option<PathBuf>>,
+    root: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    let mut cached = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(b) = cached.as_ref() {
+        if b.is_dir() {
+            return Ok(b.clone());
+        }
+    }
+    let root = root.ok_or_else(|| "No per-user directory to run the AI CLI in".to_string())?;
+    let base = prepare_runs_base(&root.join("gitwand").join("ai-runs"))?;
+    sweep_stale_run_dirs(&base, STALE_RUN_AGE);
+    *cached = Some(base.clone());
+    Ok(base)
+}
 /// Create the base if needed and require it to be a real directory (not a
 /// symlink) owned by the current user — hard requirements. Its mode is set to
 /// 0700; on a filesystem that ignores Unix modes (NFS/SMB, exFAT) that may not
@@ -1016,7 +1049,6 @@ pub(crate) struct AiRunDir {
 
 impl AiRunDir {
     fn create(base: &std::path::Path, git_repo: bool) -> Result<AiRunDir, String> {
-        sweep_stale_run_dirs(base, std::time::Duration::from_secs(60 * 60));
         let path = base.join(format!("run-{}", random_token()));
         let mut builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
@@ -1080,8 +1112,8 @@ fn random_token() -> String {
 }
 
 /// Remove `run-*` directories older than `max_age` — leftovers of a run whose
-/// process was killed before its `AiRunDir` was dropped. Symlinks are removed
-/// as links, never followed.
+/// process was killed before its `AiRunDir` was dropped. Called when the base
+/// is prepared (`ai_runs_base`). Symlinks are removed as links, never followed.
 fn sweep_stale_run_dirs(base: &std::path::Path, max_age: std::time::Duration) {
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
@@ -1140,6 +1172,11 @@ fn ai_prompt_cmd(binary: &str, cli: AiCli) -> Result<(std::process::Command, AiR
 ///   `UserPromptSubmit` hook ran on "generate commit message" — verified live
 ///   on Claude Code 2.1.296, as is the fix.
 /// - `--strict-mcp-config` without `--mcp-config`: no MCP server.
+/// - `--no-session-persistence`: no transcript under `~/.claude/projects` —
+///   every run has a fresh working directory, so each would otherwise leave a
+///   session file (holding the prompt, i.e. repository content) in a project
+///   folder of its own. Verified on 2.1.296: the transcript is gone; an empty
+///   project folder is still created per run.
 /// - the `CLAUDE_DENIED_TOOLS` deny list, for a CLI without `--tools`.
 fn claude_lockdown_args(caps: ClaudeCaps) -> Vec<&'static str> {
     let mut args = Vec::new();
@@ -1151,6 +1188,9 @@ fn claude_lockdown_args(caps: ClaudeCaps) -> Vec<&'static str> {
     }
     if caps.strict_mcp {
         args.push("--strict-mcp-config");
+    }
+    if caps.no_session_persistence {
+        args.push("--no-session-persistence");
     }
     args.push("--disallowedTools");
     args.extend(CLAUDE_DENIED_TOOLS);
@@ -1833,16 +1873,22 @@ fn opencode_result(output: &std::process::Output) -> Result<String, String> {
 }
 
 /// Whether CLI stderr reads like an error report rather than log noise,
-/// judged line by line: an `ERROR` / `FATAL` level token (as a whole word, in
-/// capitals, as loggers print it), a line that starts with `error:` /
-/// `error `, an HTTP
-/// auth / quota / server status (401, 403, 429, 5xx as a whole token next to
-/// `status`, `http` or `code`), or one of a few unambiguous phrases. A
-/// lowercase `error` inside a word or a module name (`error-reporter`) is
-/// not enough; when unsure the caller shows the stdin hint with the tail.
+/// judged line by line once ANSI colour codes are stripped:
+///
+/// - an `ERROR` / `FATAL` level token (whole word, in capitals);
+/// - a word ending in `Error:` / `error:` (`Error: …`, `ProviderAuthError: …`);
+/// - an HTTP auth / quota / server status: `HTTP/1.1 429`, or 401/403/429/5xx
+///   right after `status`, `http` or `code` (`status=401`);
+/// - a JSON error object, `"name":"…Error"`;
+/// - a few unambiguous phrases (permission denied, rate limit, …).
+///
+/// A lowercase `error` inside a word (`error-reporter`) or without a colon
+/// (`Error reporting enabled`) is not enough; when unsure the caller shows the
+/// stdin hint with the stderr tail.
 fn stderr_looks_like_error(stderr: &str) -> bool {
     const STATUS: &[&str] = &["401", "403", "429", "500", "502", "503", "504"];
     const PHRASES: &[&str] = &[
+        "permission denied",
         "unauthorized",
         "forbidden",
         "rate limit",
@@ -1853,26 +1899,71 @@ fn stderr_looks_like_error(stderr: &str) -> bool {
         "invalid_api_key",
         "authentication failed",
     ];
-    stderr.lines().any(|line| {
-        let trimmed = line
-            .trim_start_matches(|c: char| !c.is_ascii_alphanumeric())
-            .to_ascii_lowercase();
+    let is_error_status = |t: &str| {
+        t.len() == 3
+            && (t.starts_with('4') || t.starts_with('5'))
+            && t.bytes().all(|b| b.is_ascii_digit())
+    };
+    strip_ansi(stderr).lines().any(|line| {
         let tokens: Vec<&str> = line
             .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
             .filter(|t| !t.is_empty())
             .collect();
+        let words: Vec<&str> = line.split_whitespace().collect();
         let lower = line.to_ascii_lowercase();
         tokens.iter().any(|t| matches!(*t, "ERROR" | "FATAL"))
-            || trimmed.starts_with("error:")
-            || trimmed.starts_with("error ")
+            || words
+                .iter()
+                .any(|w| w.ends_with("Error:") || w.ends_with("error:"))
+            || words
+                .windows(2)
+                .any(|w| w[0].starts_with("HTTP/") && is_error_status(w[1]))
             || tokens.windows(2).any(|w| {
                 matches!(
                     w[0].to_ascii_lowercase().as_str(),
                     "status" | "http" | "code"
                 ) && STATUS.contains(&w[1])
             })
+            || json_error_name(line)
             || PHRASES.iter().any(|p| lower.contains(p))
     })
+}
+
+/// `"name": "…Error"` somewhere in `line` (a serialised error object).
+fn json_error_name(line: &str) -> bool {
+    line.match_indices("\"name\"").any(|(i, m)| {
+        let rest = line[i + m.len()..].trim_start();
+        let Some(rest) = rest.strip_prefix(':') else {
+            return false;
+        };
+        let Some(rest) = rest.trim_start().strip_prefix('"') else {
+            return false;
+        };
+        rest.split('"').next().is_some_and(|v| v.ends_with("Error"))
+    })
+}
+
+/// `s` without ANSI escape sequences (CSI `ESC [ … final`, and lone `ESC x`).
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        if chars.peek() == Some(&'[') {
+            chars.next();
+            for c in chars.by_ref() {
+                if ('\u{40}'..='\u{7e}').contains(&c) {
+                    break;
+                }
+            }
+        } else {
+            chars.next();
+        }
+    }
+    out
 }
 /// `opencode run`, locked down; the prompt goes on stdin.
 fn opencode_run_cmd(
@@ -2755,7 +2846,8 @@ mod lockdown_tests {
     const HELP_2_1: &str = "  --strict-mcp-config   Only use MCP servers from --mcp-config\n  \
         --setting-sources <sources>   Comma-separated list\n  \
         --tools <tools...>   Specify the list of available tools\n  \
-        --allowedTools, --allowed-tools <tools...>\n";
+        --allowedTools, --allowed-tools <tools...>\n  \
+        --no-session-persistence   Disable session persistence\n";
 
     #[test]
     fn caps_are_read_from_help_by_exact_flag() {
@@ -2764,7 +2856,8 @@ mod lockdown_tests {
             ClaudeCaps {
                 tools: true,
                 setting_sources: true,
-                strict_mcp: true
+                strict_mcp: true,
+                no_session_persistence: true,
             }
         );
         // `--allowedTools` / `--mcp-config` must not pass for `--tools` / strict.
@@ -2785,6 +2878,7 @@ mod lockdown_tests {
             "{joined}"
         );
         assert!(args.contains(&"--strict-mcp-config"));
+        assert!(args.contains(&"--no-session-persistence"));
         // The deny list rides along, reads and MultiEdit included.
         for t in [
             "Read",
@@ -2854,11 +2948,26 @@ mod lockdown_tests {
             assert_eq!(opencode_result(&output(0, "", e)).unwrap_err(), e);
         }
         // …log noise that merely contains the words does not.
+        for e in [
+            // ANSI colours stripped first (opencode's own error output).
+            "\u{1b}[91m\u{1b}[1mError: \u{1b}[0mOpenCode's free tier can only be used from within OpenCode",
+            "ProviderAuthError: missing key",
+            "fatal: Permission denied (publickey)",
+            "< HTTP/1.1 503 Service Unavailable",
+            r#"{"name":"APIError","data":{"message":"bad"}}"#,
+            r#"{"name": "ProviderModelNotFoundError"}"#,
+        ] {
+            assert!(stderr_looks_like_error(e), "{e}");
+        }
         for noise in [
             "INFO loaded error-reporter plugin",
             "DEBUG invalid cache entry skipped",
             "update available: 1.18 (401 changes)",
             "errors: 0",
+            "Error reporting enabled",
+            "\u{1b}[2mINFO\u{1b}[0m service=bus type=session.updated",
+            r#"{"name":"session","error":null}"#,
+            "HTTP/1.1 200 OK",
         ] {
             assert!(!stderr_looks_like_error(noise), "{noise}");
         }
@@ -2979,6 +3088,21 @@ mod neutral_dir_tests {
         let link = scratch.0.join("ai-runs");
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(prepare_runs_base(&link).is_err());
+    }
+
+    #[test]
+    fn runs_base_is_prepared_again_after_being_deleted() {
+        let scratch = Scratch::new("reprep");
+        let cache = std::sync::Mutex::new(None);
+        // A failure is not remembered.
+        assert!(ai_runs_base_in(&cache, None).is_err());
+        let base = ai_runs_base_in(&cache, Some(scratch.0.clone())).unwrap();
+        std::fs::remove_dir_all(&base).unwrap();
+        let again = ai_runs_base_in(&cache, Some(scratch.0.clone())).unwrap();
+        assert_eq!(again, base);
+        assert!(again.is_dir());
+        let run = AiRunDir::create(&again, false).unwrap();
+        assert!(run.path().is_dir());
     }
 
     #[test]

@@ -561,7 +561,7 @@ async function claudeCaps(bin) {
   try { const st = statSync(bin); id = `${bin}\0${st.size}\0${st.mtimeMs}`; } catch { /* keep path */ }
   const hit = claudeCapsCache.get(id);
   if (hit?.caps) return hit.caps;
-  const none = { tools: false, settingSources: false, strictMcp: false };
+  const none = { tools: false, settingSources: false, strictMcp: false, noSessionPersistence: false };
   if (hit?.failedAt && Date.now() - hit.failedAt < 5 * 60_000) return none;
   const help = await new Promise((resolveHelp) => {
     let out = "";
@@ -599,6 +599,7 @@ async function claudeCaps(bin) {
     tools: words.has("--tools"),
     settingSources: words.has("--setting-sources"),
     strictMcp: words.has("--strict-mcp-config"),
+    noSessionPersistence: words.has("--no-session-persistence"),
   };
   claudeCapsCache.set(id, { caps });
   return caps;
@@ -611,7 +612,8 @@ let aiRunsBaseCache = null;
  * filesystem does not keep it. Never the shared /tmp.
  */
 function aiRunsBase() {
-  if (aiRunsBaseCache) return aiRunsBaseCache;
+  // Prepared again if deleted since (cache cleaner); a failure is not cached.
+  if (aiRunsBaseCache && existsSync(aiRunsBaseCache)) return aiRunsBaseCache;
   const home = homedir();
   const xdg = (process.env.XDG_CACHE_HOME || "").trim();
   const root = process.platform === "darwin" ? join(home, "Library", "Caches")
@@ -629,10 +631,11 @@ function aiRunsBase() {
     const mode = lstatSync(dir).mode & 0o777;
     if (mode & 0o077) console.warn(`[dev-server] ${dir} keeps mode ${mode.toString(8)}; per-run directories still apply`);
   }
+  sweepStaleRunDirs(dir); // at setup only, never before each run
   aiRunsBaseCache = dir;
   return dir;
 }
-/** Mirrors `sweep_stale_run_dirs` (ai.rs): drop run-* leftovers older than an hour. */
+/** Mirrors `sweep_stale_run_dirs` / STALE_RUN_AGE (ai.rs): drop run-* leftovers older than a day. */
 function sweepStaleRunDirs(base) {
   let names = [];
   try { names = readdirSync(base); } catch { return; }
@@ -641,7 +644,7 @@ function sweepStaleRunDirs(base) {
     const p = join(base, n);
     try {
       const st = lstatSync(p);
-      if (Date.now() - st.mtimeMs > 60 * 60_000) rmSync(p, { recursive: true, force: true });
+      if (Date.now() - st.mtimeMs > 24 * 60 * 60_000) rmSync(p, { recursive: true, force: true });
     } catch { /* gone */ }
   }
 }
@@ -653,7 +656,6 @@ function sweepStaleRunDirs(base) {
  */
 function spawnAiSync(bin, args, opts, { gitRepo = false } = {}) {
   const base = aiRunsBase();
-  sweepStaleRunDirs(base);
   const dir = mkdtempSync(join(base, "run-"));
   try {
     if (gitRepo) {
@@ -662,21 +664,26 @@ function spawnAiSync(bin, args, opts, { gitRepo = false } = {}) {
     }
     return spawnSync(bin, args, { ...opts, cwd: dir });
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    // Best effort, like AiRunDir's Drop: never replaces the CLI's result.
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* EBUSY/EPERM */ }
   }
 }
 /** Mirrors `stderr_looks_like_error` (ai.rs). */
 function stderrLooksLikeError(stderr) {
   const STATUS = ["401", "403", "429", "500", "502", "503", "504"];
-  const PHRASES = ["unauthorized", "forbidden", "rate limit", "rate-limited", "quota exceeded",
-    "insufficient_quota", "invalid api key", "invalid_api_key", "authentication failed"];
-  return String(stderr || "").split("\n").some((line) => {
-    const trimmed = line.replace(/^[^A-Za-z0-9]+/, "").toLowerCase();
+  const PHRASES = ["permission denied", "unauthorized", "forbidden", "rate limit", "rate-limited",
+    "quota exceeded", "insufficient_quota", "invalid api key", "invalid_api_key", "authentication failed"];
+  // eslint-disable-next-line no-control-regex
+  const clean = String(stderr || "").replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]|\x1b./g, "");
+  return clean.split("\n").some((line) => {
     const tokens = line.split(/[^A-Za-z0-9_]+/).filter(Boolean);
+    const words = line.split(/\s+/).filter(Boolean);
     const lower = line.toLowerCase();
     return tokens.some((t) => t === "ERROR" || t === "FATAL")
-      || trimmed.startsWith("error:") || trimmed.startsWith("error ")
+      || words.some((w) => w.endsWith("Error:") || w.endsWith("error:"))
+      || words.some((w, k) => k > 0 && words[k - 1].startsWith("HTTP/") && /^[45]\d\d$/.test(w))
       || tokens.some((t, k) => k > 0 && ["status", "http", "code"].includes(tokens[k - 1].toLowerCase()) && STATUS.includes(t))
+      || /"name"\s*:\s*"[^"]*Error"/.test(line)
       || PHRASES.some((p) => lower.includes(p));
   });
 }
@@ -686,6 +693,7 @@ function claudeLockdownArgs(caps) {
     ...(caps.tools ? ["--tools", ""] : []),
     ...(caps.settingSources ? ["--setting-sources", "user"] : []),
     ...(caps.strictMcp ? ["--strict-mcp-config"] : []),
+    ...(caps.noSessionPersistence ? ["--no-session-persistence"] : []),
     "--disallowedTools", ...CLAUDE_DENIED_TOOLS,
   ];
 }
