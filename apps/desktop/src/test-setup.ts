@@ -80,3 +80,15 @@ if (typeof (globalThis as Record<string, unknown>).Storage !== "function") {
 
 installStorageShimIfNeeded("localStorage");
 installStorageShimIfNeeded("sessionStorage");
+
+// Pin the UI locale to English. `useI18n` falls back to `navigator.language`
+// when no locale is saved, and Node (the default "node" environment) derives
+// that from the host's ICU locale — so on a French machine `t()` returned
+// French and string assertions like "took too long to respond" failed
+// locally while passing on CI's en-US runners. Tests assert English copy.
+if (typeof navigator !== "undefined" && navigator.language !== "en-US") {
+  Object.defineProperty(navigator, "language", {
+    value: "en-US",
+    configurable: true,
+  });
+}

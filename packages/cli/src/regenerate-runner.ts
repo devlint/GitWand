@@ -59,7 +59,7 @@ const NETWORK_PROBE_HOSTS: Partial<Record<RegenEcosystem["id"], string>> = {
 };
 
 /** Budget de la sonde DNS hors-ligne — rapide, ne doit jamais bloquer longtemps. */
-const OFFLINE_PROBE_TIMEOUT_MS = 2_000;
+const OFFLINE_PROBE_TIMEOUT_MS = 5_000;
 
 /**
  * Fix round 1 (Important #2) — AGENTS.md : « Strip environment variables
