@@ -791,7 +791,7 @@ const ccCanScrollRight = ref(false);
 function updateCcScroll() {
   const el = ccTypesEl.value;
   if (!el) return;
-  ccCanScrollLeft.value = el.scrollLeft > 0;
+  ccCanScrollLeft.value = el.scrollLeft > 1;
   ccCanScrollRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
 }
 
@@ -799,13 +799,22 @@ function scrollCcTypes(dir: -1 | 1) {
   const el = ccTypesEl.value;
   if (!el) return;
   el.scrollLeft = dir === 1 ? el.scrollWidth : 0;
-  ccCanScrollLeft.value = dir === 1;
-  ccCanScrollRight.value = dir === -1;
 }
 
+// Keep arrows in sync with trackpad/wheel scrolling and sidebar resizes,
+// not just arrow clicks.
+let ccResizeObserver: ResizeObserver | null = null;
 watch(ccTypesEl, (el) => {
-  if (el) nextTick(updateCcScroll);
+  ccResizeObserver?.disconnect();
+  ccResizeObserver = null;
+  if (!el) return;
+  nextTick(updateCcScroll);
+  if (typeof ResizeObserver !== "undefined") {
+    ccResizeObserver = new ResizeObserver(updateCcScroll);
+    ccResizeObserver.observe(el);
+  }
 });
+onUnmounted(() => ccResizeObserver?.disconnect());
 
 /** The active type prefix extracted from the current summary, or "" if none. */
 const activePrefix = computed(() => {
@@ -1458,7 +1467,7 @@ function formatActivityDate(dateStr: string): string {
       <div class="commit-top-row">
         <div class="cc-types-wrapper">
           <button v-show="ccCanScrollLeft" class="cc-scroll-btn cc-scroll-btn--left" @click="scrollCcTypes(-1)" tabindex="-1">‹</button>
-          <div class="cc-types" ref="ccTypesEl" role="group" :aria-label="t('sidebar.ccTypesTitle')"
+          <div class="cc-types" ref="ccTypesEl" role="group" @scroll.passive="updateCcScroll" :aria-label="t('sidebar.ccTypesTitle')"
             :class="{ 'cc-types--fade-left': ccCanScrollLeft, 'cc-types--fade-right': ccCanScrollRight }">
             <button
               v-for="type in CC_TYPES"
