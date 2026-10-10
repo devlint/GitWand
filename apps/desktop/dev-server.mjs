@@ -566,7 +566,8 @@ async function claudeCaps(bin) {
   const help = await new Promise((resolveHelp) => {
     let out = "";
     let done = false;
-    const finish = (v) => { if (!done) { done = true; clearTimeout(timer); resolveHelp(v); } };
+    let timer = null; // declared before `finish` can run (spawn may throw synchronously)
+    const finish = (v) => { if (!done) { done = true; if (timer) clearTimeout(timer); resolveHelp(v); } };
     let child;
     try {
       child = spawn(bin, ["--help"], {
@@ -575,7 +576,7 @@ async function claudeCaps(bin) {
         detached: process.platform !== "win32",
       });
     } catch { return finish(""); }
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       try {
         if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)]);
         else process.kill(-child.pid, "SIGKILL");
@@ -602,18 +603,21 @@ async function claudeCaps(bin) {
   claudeCapsCache.set(id, { caps });
   return caps;
 }
+let aiRunsBaseCache = null;
 /**
- * Mirrors `ai_neutral_dir` (ai.rs): a private (0700, not a symlink) empty git
- * repository under the user's cache dir — never the shared /tmp — for the AI
- * CLIs that must not run inside the repository.
+ * Mirrors `ai_runs_base` / `prepare_runs_base` (ai.rs): the per-user base of
+ * the per-run directories, validated once — a real directory (not a
+ * symlink) owned by the current user; mode 0700, with one warning when the
+ * filesystem does not keep it. Never the shared /tmp.
  */
-function aiNeutralDir() {
+function aiRunsBase() {
+  if (aiRunsBaseCache) return aiRunsBaseCache;
   const home = homedir();
   const xdg = (process.env.XDG_CACHE_HOME || "").trim();
-  const base = process.platform === "darwin" ? join(home, "Library", "Caches")
+  const root = process.platform === "darwin" ? join(home, "Library", "Caches")
     : process.platform === "win32" ? (process.env.LOCALAPPDATA || join(home, "AppData", "Local"))
     : (isAbsolute(xdg) ? xdg : join(home, ".cache"));
-  const dir = join(base, "gitwand", "ai-cwd");
+  const dir = join(root, "gitwand", "ai-runs");
   mkdirSync(dir, { recursive: true });
   const st = lstatSync(dir);
   if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`AI working directory ${dir}: is not a plain directory`);
@@ -621,23 +625,60 @@ function aiNeutralDir() {
     if (typeof process.getuid === "function" && st.uid !== process.getuid()) {
       throw new Error(`AI working directory ${dir}: belongs to another user`);
     }
-    try { chmodSync(dir, 0o700); } catch { /* reported below */ }
+    try { chmodSync(dir, 0o700); } catch (e) { console.warn(`[dev-server] cannot restrict ${dir}: ${e.message}`); }
     const mode = lstatSync(dir).mode & 0o777;
-    if (mode & 0o077) console.warn(`[dev-server] ${dir} keeps mode ${mode.toString(8)}; using it anyway`);
+    if (mode & 0o077) console.warn(`[dev-server] ${dir} keeps mode ${mode.toString(8)}; per-run directories still apply`);
   }
-  if (!existsSync(join(dir, ".git"))) {
-    const g = spawnSync(GIT, ["init", "-q"], { cwd: dir });
-    if (g.status !== 0 && !existsSync(join(dir, ".git"))) {
-      throw new Error(`AI working directory ${dir}: cannot initialise`);
-    }
-  }
+  aiRunsBaseCache = dir;
   return dir;
+}
+/** Mirrors `sweep_stale_run_dirs` (ai.rs): drop run-* leftovers older than an hour. */
+function sweepStaleRunDirs(base) {
+  let names = [];
+  try { names = readdirSync(base); } catch { return; }
+  for (const n of names) {
+    if (!n.startsWith("run-")) continue;
+    const p = join(base, n);
+    try {
+      const st = lstatSync(p);
+      if (Date.now() - st.mtimeMs > 60 * 60_000) rmSync(p, { recursive: true, force: true });
+    } catch { /* gone */ }
+  }
+}
+/**
+ * Mirrors `ai_prompt_cmd` + `AiRunDir` (ai.rs): run an AI CLI in a fresh
+ * private directory of its own (mkdtemp: exclusive, 0700), a git repository
+ * when the CLI needs one (Codex), removed afterwards whatever happens — never
+ * the repository, never a directory another run could have left files in.
+ */
+function spawnAiSync(bin, args, opts, { gitRepo = false } = {}) {
+  const base = aiRunsBase();
+  sweepStaleRunDirs(base);
+  const dir = mkdtempSync(join(base, "run-"));
+  try {
+    if (gitRepo) {
+      const g = spawnSync(GIT, ["init", "-q"], { cwd: dir });
+      if (g.status !== 0) throw new Error(`AI working directory ${dir}: git init failed`);
+    }
+    return spawnSync(bin, args, { ...opts, cwd: dir });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 /** Mirrors `stderr_looks_like_error` (ai.rs). */
 function stderrLooksLikeError(stderr) {
-  const l = String(stderr || "").toLowerCase();
-  return ["error", "failed", "unauthorized", "forbidden", "denied", "invalid", "quota",
-    "rate limit", "rate-limit", "exceeded", "exception", " 401", " 403", " 429"].some((w) => l.includes(w));
+  const STATUS = ["401", "403", "429", "500", "502", "503", "504"];
+  const PHRASES = ["unauthorized", "forbidden", "rate limit", "rate-limited", "quota exceeded",
+    "insufficient_quota", "invalid api key", "invalid_api_key", "authentication failed"];
+  return String(stderr || "").split("\n").some((line) => {
+    const trimmed = line.replace(/^[^A-Za-z0-9]+/, "").toLowerCase();
+    const tokens = line.split(/[^A-Za-z0-9_]+/).filter(Boolean);
+    const lower = line.toLowerCase();
+    return tokens.some((t) => t === "ERROR" || t === "FATAL")
+      || trimmed.startsWith("error:") || trimmed.startsWith("error ")
+      || tokens.some((t, k) => k > 0 && ["status", "http", "code"].includes(tokens[k - 1].toLowerCase()) && STATUS.includes(t))
+      || PHRASES.some((p) => lower.includes(p));
+  });
 }
 /** Mirrors `claude_lockdown_args` (ai.rs): no tools, no project settings, no MCP. */
 function claudeLockdownArgs(caps) {
@@ -5902,7 +5943,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/claude-cli-prompt  { prompt, systemPrompt?, cwd?, outputFormat?, model? }
+    // POST /api/claude-cli-prompt  { prompt, systemPrompt?, outputFormat?, model?, effort? } — runs in a fresh private dir
     if (url.pathname === "/api/claude-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -5922,10 +5963,8 @@ async function handleRequest(req, res) {
         if (claudeEffort) claudeArgs.push("--effort", claudeEffort);
         const claudeCapsNow = await claudeCaps(CLAUDE);
         claudeArgs.push(...claudeLockdownArgs(claudeCapsNow));
-        const r = spawnSync(CLAUDE, claudeArgs, {
-          // Mirrors `claude_run_dir`: the repo only when its settings are ignored.
-          // Every AI CLI runs in the private neutral dir. Mirrors ai_prompt_cmd.
-          cwd: aiNeutralDir(),
+        // Fresh per-run directory, never the repository (spawnAiSync).
+        const r = spawnAiSync(CLAUDE, claudeArgs, {
           input: fullPrompt.replace(/\0/g, ""),
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
@@ -6008,7 +6047,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/codex-cli-prompt  { prompt, systemPrompt?, cwd?, model? }
+    // POST /api/codex-cli-prompt  { prompt, systemPrompt?, model?, effort? } — runs in a fresh private dir
     if (url.pathname === "/api/codex-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -6025,15 +6064,14 @@ async function handleRequest(req, res) {
         const codexEffort = validEffort(body.effort);
         if (codexEffort) codexArgs.push("-c", `model_reasoning_effort=${codexEffort}`);
         codexArgs.push("-");
-        const r = spawnSync(CODEX, codexArgs, {
-          // Never the repository (trusted projects' .codex/config.toml runs
-          // MCP servers). Mirrors codex_cli_prompt_inner.
-          cwd: aiNeutralDir(),
+        // Fresh per-run git repository, never the repository (trusted
+        // projects' .codex/config.toml runs MCP servers). Mirrors codex_cli_prompt_inner.
+        const r = spawnAiSync(CODEX, codexArgs, {
           input: fullPrompt.replace(/\0/g, ""),
           env: aiSpawnEnv("codex"),
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
-        });
+        }, { gitRepo: true });
         if (r.status !== 0) {
           const detail = (r.stderr || r.stdout || "").trim() || "Codex CLI a échoué sans message";
           return jsonResponse(req, res, { error: detail }, 500);
@@ -6119,7 +6157,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/opencode-cli-prompt  { prompt, systemPrompt?, cwd?, model? }
+    // POST /api/opencode-cli-prompt  { prompt, systemPrompt?, model? } — runs in a fresh private dir
     if (url.pathname === "/api/opencode-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -6132,10 +6170,10 @@ async function handleRequest(req, res) {
           ocArgs.push("--model", String(body.model).trim());
         }
         const prompt = fullPrompt.replace(/\0/g, "");
+        // Runs via spawnAiSync in a fresh per-run directory, never the
+        // repository (opencode.json MCP servers, .opencode plugins).
+        // Mirrors opencode_cli_prompt_inner / opencode_run_cmd.
         const ocOpts = {
-          // Never the repository (opencode.json MCP servers, .opencode plugins).
-          // Mirrors opencode_cli_prompt_inner / opencode_run_cmd.
-          cwd: aiNeutralDir(),
           env: {
             ...aiSpawnEnv("opencode"),
             OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","webfetch":"deny"}',
@@ -6146,7 +6184,7 @@ async function handleRequest(req, res) {
         };
         // Prompt on stdin, off argv, no argv fallback. Mirrors `opencode_result`:
         // a refused or empty answer is an error.
-        const r = spawnSync(OPENCODE, ocArgs, { ...ocOpts, input: prompt });
+        const r = spawnAiSync(OPENCODE, ocArgs, { ...ocOpts, input: prompt });
         const ocStdout = String(r.stdout || "");
         const ocStderr = String(r.stderr || "").trim();
         const STDIN_HINT = "opencode n'a pas lu le prompt sur stdin (version trop ancienne ?) — mettez opencode à jour";
@@ -6233,7 +6271,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/copilot-cli-prompt  { prompt, systemPrompt?, cwd?, model? }
+    // POST /api/copilot-cli-prompt  { prompt, systemPrompt?, model?, effort? } — runs in a fresh private dir
     if (url.pathname === "/api/copilot-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -6249,8 +6287,7 @@ async function handleRequest(req, res) {
         if (cpEffort) cpArgs.push("--reasoning-effort", cpEffort);
         cpArgs.push("-p", fullPrompt);
         const cpEnv = aiSpawnEnv("copilot");
-        const r = spawnSync(COPILOT, cpArgs, {
-          cwd: aiNeutralDir(), // never the repository — mirrors ai_prompt_cmd
+        const r = spawnAiSync(COPILOT, cpArgs, { // fresh per-run dir — mirrors ai_prompt_cmd
           env: cpEnv,
           encoding: "utf-8",
           timeout: 5 * 60 * 1000,
@@ -6359,7 +6396,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/antigravity-cli-prompt  { prompt, systemPrompt?, cwd?, model? }
+    // POST /api/antigravity-cli-prompt  { prompt, systemPrompt?, model? } — runs in a fresh private dir
     if (url.pathname === "/api/antigravity-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -6372,8 +6409,7 @@ async function handleRequest(req, res) {
           agyArgs.push("--model", String(body.model).trim());
         }
         agyArgs.push("-p", fullPrompt);
-        const r = spawnSync(AGY, agyArgs, {
-          cwd: aiNeutralDir(), // never the repository — mirrors ai_prompt_cmd
+        const r = spawnAiSync(AGY, agyArgs, { // fresh per-run dir — mirrors ai_prompt_cmd
           env: aiSpawnEnv("antigravity"),
           encoding: "utf-8",
           timeout: 5 * 60 * 1000,

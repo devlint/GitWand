@@ -819,12 +819,25 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
         .spawn()
         .ok()?;
     let mut out = child.stdout.take()?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = out.read_to_end(&mut buf);
-        let _ = tx.send(buf);
-    });
+    // Read incrementally into a shared buffer, so what arrived is usable even
+    // if EOF never comes (a grandchild still holding the pipe).
+    let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    {
+        let collected = collected.clone();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            while let Ok(n) = out.read(&mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                if let Ok(mut c) = collected.lock() {
+                    c.extend_from_slice(&chunk[..n]);
+                }
+            }
+            let _ = tx.send(());
+        });
+    }
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
@@ -837,9 +850,15 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
         }
     };
     status.filter(|s| s.success())?;
-    // Exited: its stdout reaches EOF unless a grandchild still holds it.
-    let buf = rx.recv_timeout(Duration::from_secs(2)).ok()?;
-    Some(String::from_utf8_lossy(&buf).into_owned())
+    // Exited successfully. Its stdout reaches EOF unless a grandchild still
+    // holds it: then kill what is left of the group too (no leaked helper),
+    // and keep the output already received.
+    if rx.recv_timeout(Duration::from_secs(2)).is_err() {
+        kill_tree(&mut child);
+        let _ = rx.recv_timeout(Duration::from_secs(1));
+    }
+    let buf = collected.lock().ok()?.clone();
+    (!buf.is_empty()).then(|| String::from_utf8_lossy(&buf).into_owned())
 }
 
 /// Kill `child` and everything it started (see `stdout_within`).
@@ -913,7 +932,7 @@ fn claude_caps(binary: &str) -> ClaudeCaps {
         Probe::Failed(_) => ClaudeCaps::default(),
     }
 }
-/// Base of the private working directory: the user's own cache directory
+/// Base of the private working directories: the user's own cache directory
 /// (`~/Library/Caches`, `$XDG_CACHE_HOME` if absolute else `~/.cache`,
 /// `%LOCALAPPDATA%`), the home directory failing that — never the shared
 /// system temp dir: on Linux `/tmp` is world-writable, and another local user
@@ -923,35 +942,31 @@ fn neutral_dir_base() -> Option<PathBuf> {
     dirs::cache_dir().or_else(dirs::home_dir)
 }
 
-/// Private working directory every AI CLI runs in (see `ai_prompt_cmd`).
-/// Unit tests use a per-process directory under the temp dir instead, so they
-/// neither touch the real cache nor depend on being allowed to write it.
-fn ai_neutral_dir() -> Result<PathBuf, String> {
-    #[cfg(not(test))]
-    let base = neutral_dir_base()
-        .ok_or_else(|| "No per-user directory to run the AI CLI in".to_string())?;
-    #[cfg(test)]
-    let base = std::env::temp_dir().join(format!("gitwand-test-cache-{}", std::process::id()));
-    prepare_neutral_dir(&base.join("gitwand").join("ai-cwd"))
+/// Where the per-run directories are created, validated once per process
+/// (see `prepare_runs_base`). Unit tests use a directory under the temp dir,
+/// so they neither touch the real cache nor need to be allowed to write it.
+fn ai_runs_base() -> Result<PathBuf, String> {
+    use std::sync::OnceLock;
+    static BASE: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    BASE.get_or_init(|| {
+        #[cfg(not(test))]
+        let root = neutral_dir_base()
+            .ok_or_else(|| "No per-user directory to run the AI CLI in".to_string())?;
+        #[cfg(test)]
+        let root = std::env::temp_dir().join("gitwand-test-cache");
+        prepare_runs_base(&root.join("gitwand").join("ai-runs"))
+    })
+    .clone()
 }
-/// Create `dir` if needed and check it is a real directory, not a symlink,
-/// owned by the current user, made an empty git repository so `codex exec`
-/// accepts it (nobody trusted it, so Codex loads no project config from it).
-///
-/// Its mode is set to 0700. When that does not stick — NFS/SMB, exFAT and
-/// other filesystems that ignore Unix modes — the setup goes on with a
-/// warning rather than failing: the directory still belongs to the user and
-/// sits in their own cache directory, whose parent permissions are what kept
-/// other users out to begin with; refusing would disable Codex, opencode and
-/// the other CLIs entirely on such setups. A directory owned by someone else
-/// is refused.
-///
-/// Serialised: two generations starting together would otherwise both run
-/// `git init` and the loser fail on git's config lock.
-fn prepare_neutral_dir(dir: &std::path::Path) -> Result<PathBuf, String> {
-    use std::sync::Mutex;
-    static SETUP: Mutex<()> = Mutex::new(());
-    let _guard = SETUP.lock().unwrap_or_else(|e| e.into_inner());
+
+/// Create the base if needed and require it to be a real directory (not a
+/// symlink) owned by the current user — hard requirements. Its mode is set to
+/// 0700; on a filesystem that ignores Unix modes (NFS/SMB, exFAT) that may not
+/// stick, and the setup then goes on with a single warning: the base still
+/// belongs to the user inside their own cache directory, and what runs there
+/// is a fresh directory per run, created 0700 and removed afterwards, so
+/// nothing a run leaves behind is ever picked up by another (see `AiRunDir`).
+fn prepare_runs_base(dir: &std::path::Path) -> Result<PathBuf, String> {
     let fail = |what: &str, e: &dyn std::fmt::Display| {
         format!("AI working directory {}: {} ({})", dir.display(), what, e)
     };
@@ -968,50 +983,151 @@ fn prepare_neutral_dir(dir: &std::path::Path) -> Result<PathBuf, String> {
         if meta.uid() != uid {
             return Err(fail("belongs to another user", &meta.uid()));
         }
-        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        if let Err(e) = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)) {
+            eprintln!("[ai] cannot restrict {}: {}", dir.display(), e);
+        }
         let mode = std::fs::symlink_metadata(dir)
             .map(|m| m.permissions().mode())
             .unwrap_or(0o777);
         if mode & 0o077 != 0 {
             eprintln!(
-                "[ai] {} keeps mode {:o} (filesystem ignores Unix modes?); using it anyway",
+                "[ai] {} keeps mode {:o} (filesystem ignores Unix modes?); per-run directories still apply",
                 dir.display(),
                 mode & 0o777
             );
         }
     }
-    if !dir.join(".git").exists() {
-        let ok = git_cmd()
-            .args(["init", "-q"])
-            .current_dir(dir)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        // Another process may have initialised it meanwhile: what matters is
-        // that it is a repository now.
-        if !ok && !dir.join(".git").exists() {
-            return Err(fail("cannot initialise", &"git init failed"));
-        }
-    }
     Ok(dir.to_path_buf())
 }
 
-/// `ai_cmd` for a prompt run, in the given private working directory.
+/// A fresh, private, empty working directory for one AI CLI run, removed when
+/// dropped (on success, error or timeout alike).
+///
+/// Every run gets its own: a prompt-injected run could otherwise leave a
+/// `.opencode/plugin/x.js`, `.claude/settings.json` or `.codex/config.toml`
+/// behind for the next run of another CLI to load. Created exclusively with
+/// mode 0700 under `ai_runs_base`, with a random name — creation fails on any
+/// existing entry, symlinks included. Made an empty git repository when the
+/// CLI insists on one (`codex exec`); nobody trusted it, so Codex loads no
+/// project config from it.
+pub(crate) struct AiRunDir {
+    path: PathBuf,
+}
+
+impl AiRunDir {
+    fn create(base: &std::path::Path, git_repo: bool) -> Result<AiRunDir, String> {
+        sweep_stale_run_dirs(base, std::time::Duration::from_secs(60 * 60));
+        let path = base.join(format!("run-{}", random_token()));
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(&path).map_err(|e| {
+            format!(
+                "AI working directory {}: cannot create ({})",
+                path.display(),
+                e
+            )
+        })?;
+        let dir = AiRunDir { path };
+        if git_repo {
+            let ok = git_cmd()
+                .args(["init", "-q"])
+                .current_dir(&dir.path)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if !ok {
+                return Err(format!(
+                    "AI working directory {}: git init failed",
+                    dir.path.display()
+                ));
+            }
+        }
+        Ok(dir)
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for AiRunDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// An unpredictable name component: OS-seeded hasher keys, the time and a
+/// counter. Unpredictability is a bonus — creation is exclusive anyway.
+fn random_token() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let mut h = RandomState::new().build_hasher();
+    h.write_u64(COUNTER.fetch_add(1, Ordering::Relaxed));
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    );
+    h.write_u32(std::process::id());
+    format!("{:016x}{:08x}", h.finish(), std::process::id())
+}
+
+/// Remove `run-*` directories older than `max_age` — leftovers of a run whose
+/// process was killed before its `AiRunDir` was dropped. Symlinks are removed
+/// as links, never followed.
+fn sweep_stale_run_dirs(base: &std::path::Path, max_age: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+    for e in entries.flatten() {
+        if !e.file_name().to_string_lossy().starts_with("run-") {
+            continue;
+        }
+        let Ok(meta) = std::fs::symlink_metadata(e.path()) else {
+            continue;
+        };
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age > max_age);
+        if !old {
+            continue;
+        }
+        if meta.file_type().is_dir() {
+            let _ = std::fs::remove_dir_all(e.path());
+        } else {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// `ai_cmd` for a prompt run, in the given working directory.
 fn ai_prompt_cmd_in(binary: &str, cli: AiCli, dir: &std::path::Path) -> std::process::Command {
     let mut cmd = ai_cmd(binary, cli);
     cmd.current_dir(dir);
     cmd
 }
 
-/// `ai_cmd` for a prompt run: every AI CLI runs in the private neutral
-/// directory (`ai_neutral_dir`), never in the repository. The CLIs load
+/// `ai_cmd` for a prompt run: every AI CLI runs in a fresh private directory
+/// of its own (`AiRunDir`), never in the repository. The CLIs load
 /// configuration from their working directory — project hooks for Claude,
 /// `opencode.json` MCP servers and `.opencode/plugin/*` for opencode, a
 /// trusted project's `.codex/config.toml` MCP servers for Codex, all verified
 /// live to run a repository's commands — and the prompt already carries the
-/// content they need. Fails rather than fall back to the repository.
-fn ai_prompt_cmd(binary: &str, cli: AiCli) -> Result<std::process::Command, String> {
-    Ok(ai_prompt_cmd_in(binary, cli, &ai_neutral_dir()?))
+/// content they need. Keep the returned `AiRunDir` alive until the process has
+/// exited; dropping it removes the directory. Fails rather than fall back to
+/// the repository.
+fn ai_prompt_cmd(binary: &str, cli: AiCli) -> Result<(std::process::Command, AiRunDir), String> {
+    let run = AiRunDir::create(&ai_runs_base()?, cli == AiCli::Codex)?;
+    Ok((ai_prompt_cmd_in(binary, cli, run.path()), run))
 }
 /// Flags that confine a `claude -p` run to producing text. The prompt carries
 /// untrusted repo content, so nothing may act on the machine, read it, or
@@ -1067,7 +1183,8 @@ fn claude_cli_prompt_inner(
     // file snapshots; strip NULs defensively before handing it to the CLI.
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = ai_prompt_cmd(&binary, AiCli::Claude)?;
+    // `_run_dir` lives until the end of the function: the CLI has exited.
+    let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Claude)?;
     // `-p` with no positional prompt reads it from stdin: the prompt holds
     // repository content and must stay out of the argv (see output_with_stdin).
     cmd.args(["-p", "--output-format", &fmt]);
@@ -1194,7 +1311,8 @@ fn codex_cli_prompt_inner(
     // Strip NUL bytes defensively — binary content can leak them into a diff.
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = ai_prompt_cmd(&binary, AiCli::Codex)?;
+    // `_run_dir` lives until the end of the function: the CLI has exited.
+    let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Codex)?;
     cmd.arg("exec");
     // GitWand only wants a text answer, and the prompt carries untrusted repo
     // content: pin the sandbox to read-only (no writes, no network) whatever
@@ -1215,7 +1333,7 @@ fn codex_cli_prompt_inner(
     // `-` makes `codex exec` read the prompt from stdin, keeping repository
     // content out of the argv (see output_with_stdin).
     cmd.arg("-");
-    // Runs in the neutral directory (ai_prompt_cmd): a trusted project's
+    // Runs in a fresh private directory (ai_prompt_cmd): a trusted project's
     // `.codex/config.toml` MCP servers ran from the repository, verified live
     // on codex-cli 0.147. `-c mcp_servers={}` does not remove them (it merges).
 
@@ -1509,7 +1627,8 @@ fn antigravity_cli_prompt_inner(
     // `\0` makes the spawn fail with "nul byte found in provided data".
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = ai_prompt_cmd(&binary, AiCli::Antigravity)?;
+    // `_run_dir` lives until the end of the function: the CLI has exited.
+    let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Antigravity)?;
     // Flags precede the positional prompt passed via `-p`.
     if let Some(m) = model.as_ref() {
         if !m.trim().is_empty() {
@@ -1659,12 +1778,13 @@ fn opencode_cli_prompt_inner(
     // content out of the argv. There is no argv fallback: an opencode too old
     // to read stdin fails visibly (see `opencode_result`) instead of quietly
     // putting the repository content back on the command line.
-    // Runs in the neutral directory: a repository's `opencode.json` MCP
+    // Runs in a fresh private directory: a repository's `opencode.json` MCP
     // server and `.opencode/plugin/*` both ran on "generate", verified live on
     // opencode 1.17.11. OPENCODE_DISABLE_PROJECT_CONFIG stops the former but
     // not the plugin.
+    let run_dir = AiRunDir::create(&ai_runs_base()?, false)?;
     let output = output_with_stdin(
-        opencode_run_cmd(&binary, model.as_ref(), &ai_neutral_dir()?),
+        opencode_run_cmd(&binary, model.as_ref(), run_dir.path()),
         full_prompt,
     )
     .map_err(|e| format!("Failed to run opencode CLI: {}", e))?;
@@ -1712,27 +1832,47 @@ fn opencode_result(output: &std::process::Output) -> Result<String, String> {
     })
 }
 
-/// Whether CLI stderr reads like an error report rather than log noise.
+/// Whether CLI stderr reads like an error report rather than log noise,
+/// judged line by line: an `ERROR` / `FATAL` level token (as a whole word, in
+/// capitals, as loggers print it), a line that starts with `error:` /
+/// `error `, an HTTP
+/// auth / quota / server status (401, 403, 429, 5xx as a whole token next to
+/// `status`, `http` or `code`), or one of a few unambiguous phrases. A
+/// lowercase `error` inside a word or a module name (`error-reporter`) is
+/// not enough; when unsure the caller shows the stdin hint with the tail.
 fn stderr_looks_like_error(stderr: &str) -> bool {
-    let l = stderr.to_ascii_lowercase();
-    [
-        "error",
-        "failed",
+    const STATUS: &[&str] = &["401", "403", "429", "500", "502", "503", "504"];
+    const PHRASES: &[&str] = &[
         "unauthorized",
         "forbidden",
-        "denied",
-        "invalid",
-        "quota",
         "rate limit",
-        "rate-limit",
-        "exceeded",
-        "exception",
-        " 401",
-        " 403",
-        " 429",
-    ]
-    .iter()
-    .any(|w| l.contains(w))
+        "rate-limited",
+        "quota exceeded",
+        "insufficient_quota",
+        "invalid api key",
+        "invalid_api_key",
+        "authentication failed",
+    ];
+    stderr.lines().any(|line| {
+        let trimmed = line
+            .trim_start_matches(|c: char| !c.is_ascii_alphanumeric())
+            .to_ascii_lowercase();
+        let tokens: Vec<&str> = line
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .filter(|t| !t.is_empty())
+            .collect();
+        let lower = line.to_ascii_lowercase();
+        tokens.iter().any(|t| matches!(*t, "ERROR" | "FATAL"))
+            || trimmed.starts_with("error:")
+            || trimmed.starts_with("error ")
+            || tokens.windows(2).any(|w| {
+                matches!(
+                    w[0].to_ascii_lowercase().as_str(),
+                    "status" | "http" | "code"
+                ) && STATUS.contains(&w[1])
+            })
+            || PHRASES.iter().any(|p| lower.contains(p))
+    })
 }
 /// `opencode run`, locked down; the prompt goes on stdin.
 fn opencode_run_cmd(
@@ -1750,7 +1890,7 @@ fn opencode_run_cmd(
         "OPENCODE_PERMISSION",
         r#"{"edit":"deny","bash":"deny","webfetch":"deny"}"#,
     );
-    // Belt and braces with the neutral directory (see opencode_cli_prompt_inner).
+    // Belt and braces with the per-run directory (see opencode_cli_prompt_inner).
     cmd.env("OPENCODE_DISABLE_PROJECT_CONFIG", "1");
     // Model is `provider/model` form; flags precede the positional message.
     if let Some(m) = model {
@@ -1927,7 +2067,8 @@ fn copilot_cli_prompt_inner(
     // `\0` makes the spawn fail with "nul byte found in provided data".
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = ai_prompt_cmd(&binary, AiCli::Copilot)?;
+    // `_run_dir` lives until the end of the function: the CLI has exited.
+    let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Copilot)?;
     // `--no-color` keeps stdout free of ANSI escapes. Flags precede the
     // positional prompt passed via `-p`.
     cmd.arg("--no-color");
@@ -2702,6 +2843,25 @@ mod lockdown_tests {
             opencode_result(&output(0, "", "Error: rate limited\n")).unwrap_err(),
             "Error: rate limited"
         );
+        // Line / level based: an ERROR level token or an HTTP status counts…
+        for e in [
+            "2026-10-10 ERROR provider call failed",
+            "request failed status=401",
+            "HTTP 429 Too Many Requests",
+            "rate limit reached",
+        ] {
+            assert!(stderr_looks_like_error(e), "{e}");
+            assert_eq!(opencode_result(&output(0, "", e)).unwrap_err(), e);
+        }
+        // …log noise that merely contains the words does not.
+        for noise in [
+            "INFO loaded error-reporter plugin",
+            "DEBUG invalid cache entry skipped",
+            "update available: 1.18 (401 changes)",
+            "errors: 0",
+        ] {
+            assert!(!stderr_looks_like_error(noise), "{noise}");
+        }
         // Exit 0, empty answer, only log noise on stderr: keep the hint,
         // with the end of stderr.
         let err =
@@ -2715,62 +2875,114 @@ mod lockdown_tests {
 mod neutral_dir_tests {
     use super::*;
 
-    fn scratch(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("gw-neutral-{}-{}", tag, std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        d
+    /// A per-test scratch directory, removed when dropped.
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new(tag: &str) -> Scratch {
+            let d = std::env::temp_dir().join(format!("gw-runs-{}-{}", tag, random_token()));
+            std::fs::create_dir_all(&d).unwrap();
+            Scratch(d)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     #[cfg(unix)]
     #[test]
-    fn neutral_dir_is_private_and_a_git_repository() {
+    fn each_run_gets_a_fresh_private_dir_removed_afterwards() {
         use std::os::unix::fs::PermissionsExt;
-        let d = scratch("ok").join("ai-cwd");
-        let got = prepare_neutral_dir(&d).unwrap();
-        assert_eq!(got, d);
-        let mode = std::fs::metadata(&d).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o700);
-        assert!(d.join(".git").is_dir());
-        // Idempotent, and tightens a directory left group/world-accessible.
-        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o777)).unwrap();
-        prepare_neutral_dir(&d).unwrap();
+        let scratch = Scratch::new("fresh");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        let a = AiRunDir::create(&base, false).unwrap();
+        let b = AiRunDir::create(&base, true).unwrap();
+        assert_ne!(a.path(), b.path());
         assert_eq!(
-            std::fs::metadata(&d).unwrap().permissions().mode() & 0o777,
+            std::fs::metadata(a.path()).unwrap().permissions().mode() & 0o777,
             0o700
         );
-        let _ = std::fs::remove_dir_all(d.parent().unwrap());
-    }
-
-    #[test]
-    fn concurrent_first_use_initialises_once_without_failing() {
-        let d = scratch("race").join("ai-cwd");
-        let handles: Vec<_> = (0..8)
-            .map(|_| {
-                let d = d.clone();
-                std::thread::spawn(move || prepare_neutral_dir(&d))
-            })
-            .collect();
-        for h in handles {
-            assert_eq!(h.join().unwrap(), Ok(d.clone()));
-        }
-        assert!(d.join(".git").is_dir());
-        let _ = std::fs::remove_dir_all(d.parent().unwrap());
+        assert!(!a.path().join(".git").exists());
+        assert!(b.path().join(".git").is_dir(), "Codex needs a repository");
+        // What a run leaves behind is gone with its directory.
+        std::fs::create_dir_all(a.path().join(".opencode/plugin")).unwrap();
+        std::fs::write(a.path().join(".opencode/plugin/x.js"), "x").unwrap();
+        let (pa, pb) = (a.path().to_path_buf(), b.path().to_path_buf());
+        drop(a);
+        drop(b);
+        assert!(!pa.exists() && !pb.exists());
     }
 
     #[cfg(unix)]
     #[test]
-    fn neutral_dir_refuses_a_symlink() {
-        let root = scratch("link");
-        let target = root.join("elsewhere");
+    fn run_dir_creation_never_reuses_an_existing_entry() {
+        let scratch = Scratch::new("excl");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        // A planted symlink with a run- name is not followed or reused.
+        let target = scratch.0.join("elsewhere");
         std::fs::create_dir_all(&target).unwrap();
-        let link = root.join("ai-cwd");
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-        assert!(prepare_neutral_dir(&link).is_err());
-        let _ = std::fs::remove_dir_all(&root);
+        std::os::unix::fs::symlink(&target, base.join("run-planted")).unwrap();
+        let run = AiRunDir::create(&base, false).unwrap();
+        assert!(std::fs::symlink_metadata(run.path()).unwrap().is_dir());
+        assert!(!std::fs::symlink_metadata(run.path())
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[test]
-    fn neutral_dir_base_is_per_user_not_the_shared_temp_dir() {
+    fn stale_run_dirs_are_swept_fresh_ones_kept() {
+        let scratch = Scratch::new("sweep");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        std::fs::create_dir_all(base.join("run-old/.claude")).unwrap();
+        std::fs::create_dir_all(base.join("keep-me")).unwrap();
+        let fresh = AiRunDir::create(&base, false).unwrap();
+        // Everything counts as stale with a zero max age, except non-run names.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        sweep_stale_run_dirs(&base, std::time::Duration::from_millis(1));
+        assert!(!base.join("run-old").exists());
+        assert!(base.join("keep-me").exists());
+        assert!(!fresh.path().exists());
+        // With an hour's grace, a live run is left alone.
+        let live = AiRunDir::create(&base, false).unwrap();
+        sweep_stale_run_dirs(&base, std::time::Duration::from_secs(3600));
+        assert!(live.path().exists());
+    }
+
+    #[test]
+    fn concurrent_runs_get_distinct_dirs() {
+        let scratch = Scratch::new("race");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let base = base.clone();
+                std::thread::spawn(move || {
+                    let r = AiRunDir::create(&base, true).unwrap();
+                    assert!(r.path().join(".git").is_dir());
+                    r.path().to_path_buf()
+                })
+            })
+            .collect();
+        let mut paths: Vec<PathBuf> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        paths.sort();
+        paths.dedup();
+        assert_eq!(paths.len(), 8);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runs_base_refuses_a_symlink() {
+        let scratch = Scratch::new("link");
+        let target = scratch.0.join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        let link = scratch.0.join("ai-runs");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(prepare_runs_base(&link).is_err());
+    }
+
+    #[test]
+    fn runs_base_is_per_user_not_the_shared_temp_dir() {
         // Location only: nothing is created in the real cache directory.
         if let Some(base) = neutral_dir_base() {
             assert!(
@@ -2782,19 +2994,17 @@ mod neutral_dir_tests {
                 assert!(base.starts_with(home), "{}", base.display());
             }
         }
-        // Unit tests themselves use a per-process directory under temp.
-        let d = ai_neutral_dir().unwrap();
+        // Unit tests themselves use a directory under temp.
+        let d = ai_runs_base().unwrap();
         assert!(d.starts_with(std::env::temp_dir()));
-        assert!(d.ends_with(std::path::Path::new("gitwand").join("ai-cwd")));
+        assert!(d.ends_with(std::path::Path::new("gitwand").join("ai-runs")));
     }
 
     #[test]
-    fn prompt_commands_run_in_the_neutral_dir() {
-        let cmd = ai_prompt_cmd_in("claude", AiCli::Claude, std::path::Path::new("/neutral"));
-        assert_eq!(
-            cmd.get_current_dir(),
-            Some(std::path::Path::new("/neutral"))
-        );
+    fn prompt_commands_each_run_in_their_own_dir() {
+        let cmd = ai_prompt_cmd_in("claude", AiCli::Claude, std::path::Path::new("/run"));
+        assert_eq!(cmd.get_current_dir(), Some(std::path::Path::new("/run")));
+        let mut seen = Vec::new();
         for cli in [
             AiCli::Claude,
             AiCli::Codex,
@@ -2802,37 +3012,62 @@ mod neutral_dir_tests {
             AiCli::Copilot,
             AiCli::Antigravity,
         ] {
-            let cmd = ai_prompt_cmd("x", cli).unwrap();
-            assert_eq!(
-                cmd.get_current_dir(),
-                Some(ai_neutral_dir().unwrap().as_path())
-            );
+            let (cmd, run) = ai_prompt_cmd("x", cli).unwrap();
+            assert_eq!(cmd.get_current_dir(), Some(run.path()));
+            assert!(run.path().starts_with(ai_runs_base().unwrap()));
+            seen.push(run.path().to_path_buf());
         }
+        seen.dedup();
+        assert_eq!(seen.len(), 5);
+    }
+
+    /// Whether process `pid` still exists (signal 0 probes without killing).
+    #[cfg(unix)]
+    fn alive(pid: i32) -> bool {
+        // SAFETY: signal 0 only checks for existence.
+        unsafe { libc::kill(pid, 0) == 0 }
     }
 
     #[cfg(unix)]
     #[test]
-    fn a_timed_out_probe_does_not_hang_on_a_grandchild_holding_stdout() {
-        // A wrapper that does not `exec`: the grandchild keeps stdout open.
+    fn a_probe_never_hangs_or_leaks_on_a_grandchild_holding_stdout() {
+        let scratch = Scratch::new("probe");
+        let pidfile = scratch.0.join("pid");
+        // Timeout with a wrapper that does not `exec`: the whole group dies.
         let mut wrapper = std::process::Command::new("sh");
-        wrapper.args(["-c", "sleep 30 & sleep 30"]);
+        wrapper.args([
+            "-c",
+            &format!("sleep 30 & echo $! > '{}'; sleep 30", pidfile.display()),
+        ]);
         let t = std::time::Instant::now();
-        assert!(stdout_within(wrapper, std::time::Duration::from_millis(300)).is_none());
+        assert!(stdout_within(wrapper, std::time::Duration::from_millis(500)).is_none());
         assert!(
             t.elapsed() < std::time::Duration::from_secs(5),
-            "took {:?}",
+            "{:?}",
             t.elapsed()
         );
-        // A wrapper whose grandchild outlives a successful exit: bounded too.
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!alive(pid), "timed-out probe left its grandchild running");
+
+        // Successful exit, grandchild still holding stdout: the output is
+        // kept (not a failure) and the grandchild is killed.
         let mut leaky = std::process::Command::new("sh");
-        leaky.args(["-c", "echo hi; sleep 30 &"]);
+        leaky.args(["-c", "sleep 30 & echo $!"]);
         let t = std::time::Instant::now();
-        let _ = stdout_within(leaky, std::time::Duration::from_secs(5));
+        let out = stdout_within(leaky, std::time::Duration::from_secs(5)).expect("output kept");
         assert!(
             t.elapsed() < std::time::Duration::from_secs(8),
-            "took {:?}",
+            "{:?}",
             t.elapsed()
         );
+        let pid: i32 = out.trim().parse().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!alive(pid), "probe left its grandchild running");
     }
 
     #[test]
