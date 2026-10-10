@@ -188,20 +188,13 @@ const {
 
 // ─── Create with AI (fire-and-forget) ────────────────────────────
 // The modal closes right away; the trigger chip shows a pulsing
-// "Generating" placeholder until the new branch becomes current.
+// "Generating" placeholder until the new branch is created and checked out.
 const aiCreatePending = ref(false);
-let aiCreateFallback: ReturnType<typeof setTimeout> | null = null;
 
-function endAiCreate() {
-  aiCreatePending.value = false;
-  if (aiCreateFallback) clearTimeout(aiCreateFallback);
-  aiCreateFallback = null;
-}
-
-// The placeholder holds until the header actually shows the new branch, so
-// the old name never flashes back between the AI reply and the refresh.
-watch(() => props.branchDisplay, () => {
-  if (aiCreatePending.value && !isGeneratingBranchName.value) endAiCreate();
+// createBranch holds isSwitchingBranch through its refresh, so the header
+// already shows the new branch by the time the flag drops.
+watch(() => props.isSwitchingBranch, (busy) => {
+  if (!busy && !isGeneratingBranchName.value) aiCreatePending.value = false;
 });
 
 async function handleBranchCreateAI() {
@@ -209,25 +202,20 @@ async function handleBranchCreateAI() {
   const hint = newBranchName.value;
   closePopover();
   aiCreatePending.value = true;
-  let name: string;
-  try {
-    name = await suggestBranchName(props.cwd, hint);
-  } catch {
+  const name = await suggestBranchName(props.cwd, hint).catch(() => null);
+  if (!name) {
     // Reopen the form with the hint kept; the error renders inside it.
-    endAiCreate();
+    aiCreatePending.value = false;
     newBranchName.value = hint;
     showCreate.value = true;
     return;
   }
   emit("createBranch", name);
-  // Creation can stop short (dirty-tree prompt, git error): don't leave the
-  // placeholder stuck if the branch never becomes current.
-  aiCreateFallback = setTimeout(endAiCreate, 4000);
+  // createBranch raises isSwitchingBranch before its first await. If it didn't
+  // (dirty-tree prompt, refusal), there's nothing to wait for.
+  await nextTick();
+  if (!props.isSwitchingBranch) aiCreatePending.value = false;
 }
-
-onUnmounted(() => {
-  if (aiCreateFallback) clearTimeout(aiCreateFallback);
-});
 
 function togglePopover() {
   showPopover.value = !showPopover.value;
@@ -617,6 +605,12 @@ function syncTriggerWidth(animate: boolean) {
   el.style.transition = "none";
   el.style.width = "";
   const to = el.getBoundingClientRect().width;
+  // Same width (e.g. "3 modified" → "4 modified"): skip the reflow below.
+  if (animate && Math.abs(to - from) < 0.5) {
+    el.style.width = `${from}px`;
+    el.style.transition = "";
+    return;
+  }
   el.style.width = `${animate ? from : to}px`;
   void el.offsetWidth; // commit the start width before re-enabling the transition
   el.style.transition = "";
@@ -650,7 +644,7 @@ onUnmounted(() => {
       When stats are absent, the chip collapses to a single line via
       the `branch-trigger--with-stats` modifier being dropped.
     -->
-    <div class="branch-trigger-group" :class="{ 'branch-trigger-group--ai': ai.isAvailable.value }">
+    <div class="branch-trigger-group">
     <button
       ref="triggerEl"
       class="branch-trigger"
@@ -681,7 +675,7 @@ onUnmounted(() => {
             <rect x="7.5" y="8" width="1" height="6" />
           </svg>
           <Transition name="bs-name-fade" mode="out-in">
-            <span v-if="aiCreatePending" key="ai" class="branch-trigger__name branch-trigger__name--generating mono">{{ t('common.generating') }}…</span>
+            <span v-if="aiCreatePending" key="ai" class="branch-trigger__name branch-trigger__name--generating mono ai-loading">{{ t('common.generating') }}…</span>
             <span v-else key="name" class="branch-trigger__name mono">{{ branchDisplay }}</span>
           </Transition>
           <span
@@ -726,12 +720,12 @@ onUnmounted(() => {
         v-if="ai.isAvailable.value"
         type="button"
         class="bs-create-ai"
-        :disabled="aiCreatePending || isGeneratingBranchName"
+        :disabled="aiCreatePending"
         :aria-label="t('branches.createWithAi')"
         v-tooltip="t('branches.createWithAiHint')"
         @click="handleBranchCreateAI"
       >
-        <span class="bs-create-ai__label">{{ t('common.ai') }}</span>
+        {{ t('common.ai') }}
       </button>
     </div>
 
@@ -1051,7 +1045,7 @@ onUnmounted(() => {
       <template #footer>
         <button class="bm-btn bm-btn--ghost" @click="cancelCreate">{{ t('common.cancel') }}</button>
         <!-- Split: plain create on the left, create-with-AI segment on the right -->
-        <div class="bs-create-split" :class="{ 'bs-create-split--ai': ai.isAvailable.value }">
+        <div class="bs-create-split">
           <button class="bm-btn bm-btn--primary" :disabled="!newBranchName.trim()" @click="handleBranchCreate">
             {{ t('common.create') }}
           </button>
@@ -1059,12 +1053,11 @@ onUnmounted(() => {
             v-if="ai.isAvailable.value"
             type="button"
             class="bs-create-ai"
-            :disabled="isGeneratingBranchName"
             :aria-label="t('branches.createWithAi')"
             v-tooltip="t('branches.createWithAi')"
             @click="handleBranchCreateAI"
           >
-            <span class="bs-create-ai__label">{{ t('common.ai') }}</span>
+            {{ t('common.ai') }}
           </button>
         </div>
       </template>
@@ -1100,7 +1093,8 @@ onUnmounted(() => {
   cursor: pointer;
   transition: background var(--transition-base), color var(--transition-base);
 }
-.branch-trigger-group--ai .branch-add-btn {
+/* Squared off when the AI segment follows it. */
+.branch-add-btn:not(:last-child) {
   border-radius: 0;
 }
 .branch-add-btn:hover {
@@ -1180,14 +1174,9 @@ onUnmounted(() => {
   max-width: 240px;
 }
 
-/* "Create with AI" placeholder: breathes while the name is generated. */
+/* "Create with AI" placeholder; the pulse comes from the global .ai-loading. */
 .branch-trigger__name--generating {
   color: var(--color-ai);
-  animation: bs-generating-pulse 1.4s ease-in-out infinite;
-}
-@keyframes bs-generating-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
 }
 .bs-name-fade-enter-active,
 .bs-name-fade-leave-active {
@@ -1196,9 +1185,6 @@ onUnmounted(() => {
 .bs-name-fade-enter-from,
 .bs-name-fade-leave-to {
   opacity: 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .branch-trigger__name--generating { animation: none; }
 }
 
 /* AI segment, shared by the header ([branch][+][AI]) and the new-branch
@@ -1209,19 +1195,25 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: stretch;
 }
-.bs-create-split--ai > .bm-btn {
+.bs-create-split > .bm-btn:not(:last-child) {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
 .bs-create-ai {
+  /* Fill color; the border gradient starts from it too. Variants only set this. */
+  --bs-ai-fill: var(--color-bg-tertiary);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0 var(--space-3);
   background:
-    linear-gradient(var(--color-bg-tertiary), var(--color-bg-tertiary)) padding-box,
-    linear-gradient(90deg, var(--color-bg-tertiary) 0%, var(--color-ai) 55%, #c084fc 100%) border-box;
+    linear-gradient(var(--bs-ai-fill), var(--bs-ai-fill)) padding-box,
+    linear-gradient(90deg, var(--bs-ai-fill) 0%, var(--color-ai) 55%, #c084fc 100%) border-box;
   color: var(--color-text);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
   border: 1px solid transparent;
   /* Divider like the "+" button's left edge, but lighter: the button gray
      with 30% of that edge's --color-bg mixed in. Hover included. */
@@ -1233,26 +1225,16 @@ onUnmounted(() => {
 /* In the modal: dark like the footer's Cancel button (transparent over
    --color-bg), with the border fading in from that same dark. */
 .bs-create-split > .bs-create-ai {
+  --bs-ai-fill: var(--color-bg);
   padding: 0 var(--space-4);
-  background:
-    linear-gradient(var(--color-bg), var(--color-bg)) padding-box,
-    linear-gradient(90deg, var(--color-bg) 0%, var(--color-ai) 55%, #c084fc 100%) border-box;
 }
 /* Hover like the trigger and "+": lighter gray fill, gradient border kept. */
 .bs-create-ai:hover:not(:disabled) {
-  background:
-    linear-gradient(var(--color-border), var(--color-border)) padding-box,
-    linear-gradient(90deg, var(--color-border) 0%, var(--color-ai) 55%, #c084fc 100%) border-box;
+  --bs-ai-fill: var(--color-border);
 }
 .bs-create-ai:disabled {
   opacity: 0.35;
   cursor: not-allowed;
-}
-.bs-create-ai__label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  line-height: 1;
 }
 
 .branch-add-btn:disabled {
