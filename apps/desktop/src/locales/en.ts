@@ -476,6 +476,7 @@ const en = {
     // v2.12 identity selector
     identityDefault: "Global config",
     identityFollowDefault: "Use default",
+    identityManage: "Manage profiles…",
   },
 
   // ─── Branch badges + context menu (v2.12) ───────────────

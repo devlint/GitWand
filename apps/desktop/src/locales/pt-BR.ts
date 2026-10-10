@@ -464,6 +464,7 @@ const ptBR: Locale = {
     templatePicker: "Modelos",
     identityDefault: "Config global",
     identityFollowDefault: "Usar o padrão",
+    identityManage: "Gerenciar perfis…",
   },
 
   // ─── Branch badges + context menu (v2.12) ──────────────

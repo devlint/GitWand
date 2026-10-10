@@ -468,6 +468,7 @@ const fr: Locale = {
     templatePicker: "Modèles",
     identityDefault: "Config globale",
     identityFollowDefault: "Utiliser le défaut",
+    identityManage: "Gérer les profils…",
   },
 
   // ─── Badges de branche + menu contextuel (v2.12) ────────

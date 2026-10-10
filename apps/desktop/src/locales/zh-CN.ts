@@ -466,6 +466,7 @@ const zhCN: Locale = {
     templatePicker: "模板",
     identityDefault: "全局配置",
     identityFollowDefault: "使用默认",
+    identityManage: "管理身份…",
   },
 
   // ─── 分支徽章 + 右键菜单 (v2.12) ────────────────────────

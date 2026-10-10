@@ -1,4 +1,4 @@
-import type { InjectionKey, Ref } from "vue";
+import { ref, type InjectionKey, type Ref } from "vue";
 
 /**
  * Counter-bump bridges between the native macOS menu (or any other
@@ -36,6 +36,14 @@ export type SettingsTabTarget =
 
 /** Open the Settings panel, optionally on a specific tab (e.g. from the PR sidebar). */
 export const OPEN_SETTINGS_KEY: InjectionKey<(tab?: SettingsTabTarget) => void> = Symbol("openSettings");
+
+/**
+ * Section of a Settings tab to scroll to when the panel opens. Set by a caller
+ * right before it opens Settings (e.g. the commit panel's "Manage profiles");
+ * SettingsPanel consumes and clears it on mount.
+ */
+export type SettingsSectionTarget = "identities";
+export const requestedSettingsSection = ref<SettingsSectionTarget | null>(null);
 
 
 /**

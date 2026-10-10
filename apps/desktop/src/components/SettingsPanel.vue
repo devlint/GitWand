@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
 import { clampHistoryBudget } from "@gitwand/core";
 import { mergeLlmFallbackForSave } from "../utils/llmFallbackRc";
 import { useI18n } from "../composables/useI18n";
@@ -98,6 +98,7 @@ import {
 } from "../composables/useAIProvider";
 import { useLogs, type LogEntry } from "../composables/useLogs";
 import { useIdentity } from "../composables/useIdentity";
+import { requestedSettingsSection } from "../composables/branchPickerBridge";
 import { useCommitTemplates } from "../composables/useCommitTemplates";
 import {
   AI_TEMPLATE_KINDS,
@@ -1335,7 +1336,15 @@ function onLlmFallbackMinModeChange(val: MinMode) {
   llmFallback.value.minMode = val;
 }
 
+/** Section the opener asked to land on (see requestedSettingsSection). */
+const identitiesSection = ref<HTMLElement | null>(null);
+
 onMounted(() => {
+  const section = requestedSettingsSection.value;
+  requestedSettingsSection.value = null;
+  if (section === "identities") {
+    nextTick(() => identitiesSection.value?.scrollIntoView({ block: "start" }));
+  }
   // The non-immediate `activeSettingsTab` watcher above does not fire for the
   // tab we open on, so replay its side effects for the initial tab here. The
   // AI CLI detection only runs when the AI tab is actually shown — probing the
@@ -2265,7 +2274,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
           </div>
 
           <!-- ── Identités ── -->
-          <div class="sp-group">
+          <div ref="identitiesSection" class="sp-group">
             <div class="sp-group__head">
               <span class="sp-group__label">{{ t('settings.git.identities') }}</span>
               <button v-if="!showIdentityForm" class="sp-group__action" @click="openAddIdentity">
@@ -2284,8 +2293,8 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 
               <div v-for="p in identities" :key="p.id" class="sp-group__row">
                 <div class="sp-group__row-info">
-                  <span class="sp-group__row-name">{{ p.label }}</span>
-                  <span class="sp-group__row-meta mono">{{ p.gitName }} &lt;{{ p.gitEmail }}&gt;</span>
+                  <span class="sp-group__row-name sp-profile-name">{{ p.label }}</span>
+                  <span class="sp-group__row-meta sp-profile-meta mono">{{ p.gitName }} &lt;{{ p.gitEmail }}&gt;</span>
                 </div>
                 <div class="sp-group__row-aside">
                   <span v-if="p.gpgKey" class="sp-tag">GPG</span>
@@ -3504,8 +3513,8 @@ function openAiTemplateKind(kind: AiTemplateKind) {
               <!-- Built-in templates (Default first): read-only, view + duplicate -->
               <div v-for="tpl in aiBuiltinTemplates" :key="tpl.id" class="sp-group__row sp-group__row--muted">
                 <div class="sp-group__row-info">
-                  <span class="sp-group__row-name">{{ aiTemplateName(tpl) }}</span>
-                  <span class="sp-group__row-meta">{{ aiTemplateMeta(tpl) }}</span>
+                  <span class="sp-group__row-name sp-profile-name">{{ aiTemplateName(tpl) }}</span>
+                  <span class="sp-group__row-meta sp-profile-meta">{{ aiTemplateMeta(tpl) }}</span>
                 </div>
                 <div class="sp-group__row-aside" style="opacity:1">
                   <span class="sp-tag">{{ t('settings.aiTemplates.builtinBadge') }}</span>
@@ -3537,8 +3546,8 @@ function openAiTemplateKind(kind: AiTemplateKind) {
               <!-- User templates: edit + duplicate + delete -->
               <div v-for="tpl in aiUserTemplates" :key="tpl.id" class="sp-group__row">
                 <div class="sp-group__row-info">
-                  <span class="sp-group__row-name">{{ tpl.name }}</span>
-                  <span class="sp-group__row-meta">{{ aiTemplateMeta(tpl) }}</span>
+                  <span class="sp-group__row-name sp-profile-name">{{ tpl.name }}</span>
+                  <span class="sp-group__row-meta sp-profile-meta">{{ aiTemplateMeta(tpl) }}</span>
                 </div>
                 <div class="sp-group__row-aside">
                   <button class="sp-ghost-btn" @click="openAiTemplateForm('edit', tpl)"
@@ -4654,7 +4663,19 @@ function openAiTemplateKind(kind: AiTemplateKind) {
   background: var(--color-bg-secondary);
 }
 
-.sp-group__row:hover .sp-group__row-aside {
+.sp-group__row:hover /* Identity and AI template rows: same look as the commit panel's profile
+   menu (RepoSidebar) and the AI template menu (AiTemplateMenu). */
+.sp-profile-name {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sp-profile-meta {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 35%, var(--color-text-muted));
+}
+
+.sp-group__row-aside {
   opacity: 1;
 }
 
@@ -4876,11 +4897,6 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 
 .sp-group--ait .sp-group__row--muted {
   opacity: 1;
-}
-
-.sp-group--ait .sp-group__row-meta {
-  color: var(--color-text);
-  opacity: 0.85;
 }
 
 .sp-group--ait .sp-group__empty {

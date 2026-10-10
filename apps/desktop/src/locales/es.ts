@@ -463,6 +463,7 @@ const es: Locale = {
     templatePicker: "Plantillas",
     identityDefault: "Config global",
     identityFollowDefault: "Usar la predeterminada",
+    identityManage: "Gestionar perfiles…",
   },
 
   // ─── Branch badges + context menu (v2.12) ──────────────

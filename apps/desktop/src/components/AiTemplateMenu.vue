@@ -292,13 +292,11 @@ onUnmounted(close);
   border-color: var(--color-accent);
   font-weight: var(--font-weight-semibold);
 }
-.atm-menu li.is-active .atm-name {
-  font-weight: var(--font-weight-semibold);
-}
 .atm-menu .atm-title {
   padding-top: var(--space-1);
   padding-bottom: var(--space-2);
-  font-size: var(--font-size-xs);
+  font-size: 11.5px;
+  font-weight: var(--font-weight-bold);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -319,9 +317,14 @@ onUnmounted(close);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Same look as the commit panel's profile menu (RepoSidebar). */
+.atm-name {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+}
 .atm-desc {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 35%, var(--color-text-muted));
 }
 .atm-menu .atm-sep {
   height: 1px;
