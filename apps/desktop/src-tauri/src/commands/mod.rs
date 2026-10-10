@@ -1,4 +1,5 @@
 pub(crate) mod ai;
+pub(crate) mod ai_http;
 pub(crate) mod azure;
 pub(crate) mod bitbucket;
 pub(crate) mod credentials;
@@ -16,6 +17,7 @@ pub(crate) mod read;
 pub(crate) mod scratch;
 pub(crate) mod secrets;
 pub(crate) mod snapshots;
+pub(crate) mod telemetry;
 pub(crate) mod terminal;
 pub(crate) mod watcher;
 pub(crate) mod workspace;

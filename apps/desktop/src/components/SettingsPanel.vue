@@ -118,7 +118,8 @@ import {
   refreshSettings as refreshSharedSettings,
   settingsRevision,
 } from "../composables/useSettings";
-import { gitCommitTemplatePath, openExternalUrl } from "../utils/backend";
+import { gitCommitTemplatePath, openExternalUrl, aiHttpRequest, telemetryGetState, telemetrySetEnabled } from "../utils/backend";
+import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings, normalizeEndpointSetting } from "../composables/useAiApiKey";
 export type { AIProvider };
 
 // Re-export for back-compat — earlier callers imported this shape from
@@ -174,7 +175,6 @@ interface Settings {
   // AI settings
   aiEnabled: boolean;
   aiProvider: AIProvider;
-  aiApiKey: string;
   aiApiEndpoint: string;
   aiModel: string;
   // Per-provider model selection for CLI agents (v2.17)
@@ -275,6 +275,12 @@ interface Settings {
   snapshotAiLabels: boolean;
   /** Live Repo (v3.10.0): subscribe to filesystem events instead of polling. */
   liveRepoWatcher: boolean;
+  /** Load remote images in rendered markdown (off: tracking pixels). */
+  allowRemoteImages: boolean;
+  /** README remote-image consent per project (normaliseCwd keys). */
+  remoteImagesByRepo: Record<string, boolean>;
+  /** Look up commit authors on Gravatar (off: leaks author emails). */
+  gravatarEnabled: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -298,7 +304,6 @@ const defaultSettings: Settings = {
   // AI defaults
   aiEnabled: false,
   aiProvider: "none",
-  aiApiKey: "",
   aiApiEndpoint: "https://api.anthropic.com",
   aiModel: DEFAULT_CLAUDE_API_MODEL,
   aiModelByProvider: {},
@@ -376,19 +381,29 @@ const defaultSettings: Settings = {
   snapshotMaxCount: 200,
   snapshotAiLabels: false,
   liveRepoWatcher: true,
+  allowRemoteImages: false,
+  remoteImagesByRepo: {},
+  gravatarEnabled: false,
 };
 
 function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...defaultSettings, ...JSON.parse(raw) };
+    // `aiApiKey` lives in the keychain now (useAiApiKey); never round-trip it.
+    if (raw) {
+      const s: Settings = stripAiApiKey({ ...defaultSettings, ...JSON.parse(raw) });
+      // Same repair as useSettings.loadSettings for a scheme-less endpoint.
+      s.aiApiEndpoint = normalizeEndpointSetting(s.aiApiEndpoint);
+      return s;
+    }
   } catch { /* ignore */ }
   return { ...defaultSettings };
 }
 
 function saveSettings(s: Settings) {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    // See useSettings.saveSettings: a legacy key awaiting migration is kept.
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(toPersistedSettings(s)));
   } catch { /* ignore */ }
 }
 
@@ -740,9 +755,10 @@ const ollamaModels = ref<string[]>([]);
 async function detectOllama() {
   try {
     const url = settings.value.aiOllamaUrl || "http://localhost:11434";
-    const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(2000) });
-    if (res.ok) {
-      const data = await res.json();
+    // Through the backend: the webview's CSP no longer reaches arbitrary hosts.
+    const res = await aiHttpRequest("GET", `${url.replace(/\/+$/, "")}/api/tags`, "none", undefined, 2);
+    if (res.status >= 200 && res.status < 300) {
+      const data = JSON.parse(res.body);
       ollamaAvailable.value = true;
       if (data.models && Array.isArray(data.models)) {
         ollamaModels.value = data.models.map((m: any) => m.name || m.model).filter(Boolean);
@@ -754,19 +770,72 @@ async function detectOllama() {
   }
 }
 
-// API key visibility toggle
+// API key — stored in the OS keychain, never read back: the panel only sees
+// a masked hint. The input holds a draft that is saved on change.
+const aiKey = useAiApiKey();
+const aiKeyConfigured = aiKey.configured;
+const maskedApiKey = computed(() => aiKey.hint.value ?? "");
 const showApiKey = ref(false);
 
-const maskedApiKey = computed(() => {
-  const key = settings.value.aiApiKey;
-  if (!key) return "";
-  if (key.length <= 8) return "••••••••";
-  return key.slice(0, 4) + "••••" + key.slice(-4);
+/**
+ * Endpoint the key is bound to when saved: the backend only ever sends it to
+ * this origin (see useAiApiKey).
+ */
+function apiKeyEndpoint(): string {
+  return settings.value.aiApiEndpoint?.trim() || "https://api.anthropic.com";
+}
+/**
+ * Warning shown under the key, or null: a stored key bound to another
+ * endpoint (or to none), or a key from an earlier version still unencrypted
+ * in the settings because its move to the keychain failed.
+ */
+const aiKeyWarning = computed<string | null>(() => {
+  if (aiKey.legacyKeyStuck.value) return t("settings.aiLegacyKeyStuck");
+  if (!aiKey.boundElsewhere(apiKeyEndpoint())) return null;
+  return aiKey.origin.value
+    ? t("settings.aiApiKeyBoundElsewhere", aiKey.origin.value)
+    : t("settings.aiApiKeyUnbound");
 });
+
+// Draft of the key input, saved on `change` and when the panel closes.
+const {
+  draft: apiKeyDraft,
+  error: apiKeyError,
+  save: saveApiKeyDraft,
+} = useAiApiKeyDraft(apiKeyEndpoint);
+
+async function clearApiKey() {
+  try {
+    await aiKey.clear();
+    apiKeyError.value = null;
+  } catch (e) {
+    apiKeyError.value = (e as Error).message;
+  }
+}
+
+// Launch telemetry — the setting lives in the backend (it must be readable
+// before the webview loads), not in localStorage.
+const telemetryEnabled = ref(true);
+const telemetryForcedOff = ref(false);
+telemetryGetState()
+  .then((st) => {
+    telemetryEnabled.value = st.enabled;
+    telemetryForcedOff.value = st.forced_off_by_env;
+  })
+  .catch(() => { /* backend unavailable — keep defaults */ });
+
+async function onTelemetryChange(enabled: boolean) {
+  telemetryEnabled.value = enabled;
+  try {
+    await telemetrySetEnabled(enabled);
+  } catch {
+    telemetryEnabled.value = !enabled;
+  }
+}
 
 // ─── Claude OAuth-like Connect flow ─────────────────────
 const claudeAuthMode = ref<"apikey" | "connect">(
-  settings.value.aiApiKey ? "apikey" : "connect",
+  aiKeyConfigured.value ? "apikey" : "connect",
 );
 const claudeConnectStep = ref<"idle" | "waiting" | "success" | "error">("idle");
 const claudeConnectError = ref<string | null>(null);
@@ -778,7 +847,7 @@ function startClaudeConnect() {
   claudeConnectError.value = null;
 }
 
-function validateAndSaveClaudeKey(key: string) {
+async function validateAndSaveClaudeKey(key: string) {
   const trimmed = key.trim();
   if (!trimmed) {
     claudeConnectError.value = t("settings.aiConnectErrorEmpty");
@@ -790,7 +859,14 @@ function validateAndSaveClaudeKey(key: string) {
     claudeConnectStep.value = "error";
     return;
   }
-  updateSetting("aiApiKey", trimmed);
+  try {
+    await aiKey.save(trimmed, apiKeyEndpoint());
+  } catch (e) {
+    claudeConnectError.value = (e as Error).message;
+    claudeConnectStep.value = "error";
+    return;
+  }
+  claudeConnectKeyInput.value = "";
   claudeConnectStep.value = "success";
   claudeConnectError.value = null;
   // Auto-dismiss after 2s
@@ -802,8 +878,8 @@ function validateAndSaveClaudeKey(key: string) {
   }, 2000);
 }
 
-function disconnectClaude() {
-  updateSetting("aiApiKey", "");
+async function disconnectClaude() {
+  await clearApiKey();
   claudeAuthMode.value = "connect";
   claudeConnectStep.value = "idle";
 }
@@ -973,7 +1049,7 @@ async function loadModels(provider: AIProvider = settings.value.aiProvider) {
 // nobody is looking at the list.
 let modelsReloadTimer: ReturnType<typeof setTimeout> | undefined;
 watch(
-  () => [settings.value.aiProvider, settings.value.aiApiKey],
+  () => [settings.value.aiProvider, aiKey.revision.value],
   () => {
     if (!aiDetectDone) return;
     modelOptions.value = [];
@@ -1752,6 +1828,37 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 t('settings.updateChannelStableHint') }}
             </span>
           </div>
+
+          <!-- Privacy: third-party requests the app makes on its own -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-remote-images">
+              <input id="setting-remote-images" type="checkbox" class="sp-checkbox"
+                :checked="settings.allowRemoteImages"
+                @change="updateSetting('allowRemoteImages', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.allowRemoteImages') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.allowRemoteImagesHint') }}</span>
+          </div>
+
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-gravatar">
+              <input id="setting-gravatar" type="checkbox" class="sp-checkbox"
+                :checked="settings.gravatarEnabled"
+                @change="updateSetting('gravatarEnabled', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.gravatarEnabled') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.gravatarEnabledHint') }}</span>
+          </div>
+
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-telemetry">
+              <input id="setting-telemetry" type="checkbox" class="sp-checkbox"
+                :checked="telemetryEnabled && !telemetryForcedOff" :disabled="telemetryForcedOff"
+                @change="onTelemetryChange(($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.telemetryEnabled') }}</span>
+            </label>
+            <span class="sp-hint">{{ telemetryForcedOff ? t('settings.telemetryForcedOff') : t('settings.telemetryEnabledHint') }}</span>
+          </div>
         </template>
 
         <!-- ═══ DASHBOARD ═══ -->
@@ -2505,8 +2612,8 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                  bug: no behavior change here, just an indicator so this isn't invisible
                  in the provider UI). -->
             <div
-              v-if="claudeCliInfo?.found && ((settings.aiProvider === 'claude' && !settings.aiApiKey)
-                || (settings.aiProvider === 'openai-compat' && (!settings.aiApiKey || !settings.aiApiEndpoint)))"
+              v-if="claudeCliInfo?.found && ((settings.aiProvider === 'claude' && !aiKeyConfigured)
+                || (settings.aiProvider === 'openai-compat' && (!aiKeyConfigured || !settings.aiApiEndpoint)))"
               class="sp-row"
             >
               <span class="sp-hint">{{ t('settings.aiProviderCliFallbackHint') }}</span>
@@ -2531,7 +2638,11 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 
               <!-- Connect flow -->
               <template v-if="claudeAuthMode === 'connect'">
-                <div v-if="settings.aiApiKey" class="sp-row">
+                <div v-if="aiKeyWarning" class="sp-row sp-connect-error">
+                  {{ aiKeyWarning }}
+                  <button v-if="aiKey.legacyKeyStuck.value" class="sp-text-btn" @click="aiKey.discardLegacyKey()">{{ t('settings.aiLegacyKeyRemove') }}</button>
+                </div>
+                <div v-if="aiKeyConfigured" class="sp-row">
                   <div class="sp-connected-badge">
                     <span class="sp-connected-dot"></span>
                     <span>{{ t('settings.aiAuthConnected', maskedApiKey) }}</span>
@@ -2595,9 +2706,9 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                   <label class="sp-label" for="setting-ai-key">{{ t('settings.aiApiKeyLabel') }}</label>
                   <div class="sp-key-row">
                     <input id="setting-ai-key" class="sp-input mono sp-input--key"
-                      :type="showApiKey ? 'text' : 'password'" :value="settings.aiApiKey"
-                      @input="updateSetting('aiApiKey', ($event.target as HTMLInputElement).value)"
-                      placeholder="sk-ant-api03-..." />
+                      :type="showApiKey ? 'text' : 'password'" v-model="apiKeyDraft"
+                      autocomplete="off" @change="saveApiKeyDraft"
+                      :placeholder="maskedApiKey || 'sk-ant-api03-...'" />
                     <button class="sp-key-toggle" @click="showApiKey = !showApiKey"
                       :title="showApiKey ? t('settings.aiHideKey') : t('settings.aiShowKey')">
                       <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none"
@@ -2613,6 +2724,15 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                       </svg>
                     </button>
                   </div>
+                  <div v-if="aiKeyConfigured" class="sp-key-stored">
+                    <span class="sp-hint">{{ t('settings.aiApiKeyStored', maskedApiKey) }}</span>
+                    <button class="sp-text-btn" @click="clearApiKey">{{ t('settings.aiAuthDisconnect') }}</button>
+                  </div>
+                  <div v-if="aiKeyWarning" class="sp-connect-error">
+                    {{ aiKeyWarning }}
+                    <button v-if="aiKey.legacyKeyStuck.value" class="sp-text-btn" @click="aiKey.discardLegacyKey()">{{ t('settings.aiLegacyKeyRemove') }}</button>
+                  </div>
+                  <div v-if="apiKeyError" class="sp-connect-error">{{ apiKeyError }}</div>
                   <span class="sp-hint">{{ t('settings.aiApiKeyAvailable') }} <a
                       href="https://console.anthropic.com/settings/keys" target="_blank"
                       class="sp-link">console.anthropic.com</a></span>
@@ -2901,9 +3021,9 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 <label class="sp-label" for="setting-ai-key-compat">{{ t('settings.aiCompatApiKey') }}</label>
                 <div class="sp-key-row">
                   <input id="setting-ai-key-compat" class="sp-input mono sp-input--key"
-                    :type="showApiKey ? 'text' : 'password'" :value="settings.aiApiKey"
-                    @input="updateSetting('aiApiKey', ($event.target as HTMLInputElement).value)"
-                    placeholder="sk-..." />
+                    :type="showApiKey ? 'text' : 'password'" v-model="apiKeyDraft"
+                    autocomplete="off" @change="saveApiKeyDraft"
+                    :placeholder="maskedApiKey || 'sk-...'" />
                   <button class="sp-key-toggle" @click="showApiKey = !showApiKey"
                     :title="showApiKey ? t('settings.aiHideKey') : t('settings.aiShowKey')">
                     <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -2919,6 +3039,15 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                     </svg>
                   </button>
                 </div>
+                <div v-if="aiKeyConfigured" class="sp-key-stored">
+                  <span class="sp-hint">{{ t('settings.aiApiKeyStored', maskedApiKey) }}</span>
+                  <button class="sp-text-btn" @click="clearApiKey">{{ t('settings.aiAuthDisconnect') }}</button>
+                </div>
+                <div v-if="aiKeyWarning" class="sp-connect-error">
+                  {{ aiKeyWarning }}
+                  <button v-if="aiKey.legacyKeyStuck.value" class="sp-text-btn" @click="aiKey.discardLegacyKey()">{{ t('settings.aiLegacyKeyRemove') }}</button>
+                </div>
+                <div v-if="apiKeyError" class="sp-connect-error">{{ apiKeyError }}</div>
               </div>
 
             </template>
@@ -4007,6 +4136,12 @@ function openAiTemplateKind(kind: AiTemplateKind) {
 /* ─── API key row ──────────────────────────────────────── */
 .sp-key-row {
   display: flex;
+  gap: var(--space-3);
+}
+
+.sp-key-stored {
+  display: flex;
+  align-items: center;
   gap: var(--space-3);
 }
 

@@ -14,6 +14,7 @@ import { detectLocale, isSupportedLocale } from "../locales";
 import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
 import type { AIProvider } from "./useAIProvider";
+import { normalizeEndpointSetting, stashLegacyAiApiKey, stripAiApiKey, toPersistedSettings } from "./useAiApiKey";
 import { DEFAULT_TEMPLATE_PROMPTS, LEGACY_RELEASE_NOTES_RULES_HEADER } from "./aiTemplateDefaults";
 import type { SwitchBehavior } from "../utils/branchSwitchDecision";
 import type { PullDirtyBehavior } from "../utils/pullDirtyDecision";
@@ -144,8 +145,6 @@ export interface AppSettings {
   aiEnabled: boolean;
   /** Active AI provider. */
   aiProvider: AIProvider;
-  /** API key for Claude / OpenAI providers. */
-  aiApiKey: string;
   /** API endpoint override (Claude / OpenAI-compatible). */
   aiApiEndpoint: string;
   /** Model name for Claude / OpenAI providers. */
@@ -464,6 +463,23 @@ export interface AppSettings {
    * which is what network mounts and FUSE filesystems need.
    */
   liveRepoWatcher: boolean;
+  /**
+   * Load images from remote hosts in rendered markdown (PR bodies, comments,
+   * READMEs). Off by default: an image URL in someone else's PR is a tracking
+   * pixel that learns your IP and when you read it.
+   */
+  allowRemoteImages: boolean;
+  /**
+   * Projects whose README may load remote images although
+   * `allowRemoteImages` is off — the user clicked "Always show for this
+   * project" on the README. Keyed by `normaliseCwd(repo path)`.
+   */
+  remoteImagesByRepo: Record<string, boolean>;
+  /**
+   * Look up commit authors on Gravatar. Off by default: it sends a hash of
+   * every author email of the repos you browse to a third party.
+   */
+  gravatarEnabled: boolean;
 }
 
 export type TerminalMode = "floating" | "fullscreen" | "bottom";
@@ -492,7 +508,6 @@ export const defaultAppSettings: AppSettings = {
   prDescriptionLang: "en",
   aiEnabled: false,
   aiProvider: "none",
-  aiApiKey: "",
   aiApiEndpoint: "https://api.anthropic.com",
   // Same as `DEFAULT_CLAUDE_API_MODEL` (useAIProvider) — not imported, since
   // loading useAIProvider starts CLI detection as a side effect.
@@ -572,6 +587,9 @@ export const defaultAppSettings: AppSettings = {
   snapshotMaxCount:                  200,
   snapshotAiLabels:                  false,
   liveRepoWatcher:                   true,
+  allowRemoteImages:                 false,
+  remoteImagesByRepo:                {},
+  gravatarEnabled:                   false,
 };
 
 const SETTINGS_KEY = "gitwand-settings";
@@ -649,8 +667,18 @@ export function loadSettings(): AppSettings {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
       const stored = JSON.parse(raw);
-      const s: AppSettings = { ...defaultAppSettings, ...stored };
+      // The AI API key moved to the OS keychain: hand a legacy value over and
+      // keep it out of the in-memory settings (see useAiApiKey).
+      if (stored && typeof stored === "object" && "aiApiKey" in stored) {
+        stashLegacyAiApiKey(stored.aiApiKey, stored.aiApiEndpoint);
+      }
+      const s: AppSettings = stripAiApiKey({ ...defaultAppSettings, ...stored });
       s.releaseNoteTemplates = migrateReleaseNoteTemplates(s.releaseNoteTemplates);
+      // An endpoint saved without a scheme (`localhost:8080/v1`) never worked
+      // and cannot carry the key binding: give it the one the migration of
+      // the key used (see repairLegacyEndpoint), in memory — persisted with
+      // the next save.
+      s.aiApiEndpoint = normalizeEndpointSetting(s.aiApiEndpoint);
       const langs = migrateAiLanguages(stored, resolveUiLocale());
       if (langs) {
         Object.assign(s, langs);
@@ -666,7 +694,9 @@ export function loadSettings(): AppSettings {
 
 export function saveSettings(s: AppSettings): void {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    // Never the key itself — except a legacy one whose move to the keychain
+    // has not succeeded yet, which is its only copy (see useAiApiKey).
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(toPersistedSettings(s)));
   } catch {
     // ignore
   }

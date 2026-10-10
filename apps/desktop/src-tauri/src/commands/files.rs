@@ -22,12 +22,14 @@ use std::path::PathBuf;
 #[tauri::command]
 pub(crate) async fn read_file(cwd: String, path: String) -> Result<String, String> {
     let full = safe_repo_path(&cwd, &path)?;
+    require_git_worktree(&cwd)?;
     std::fs::read_to_string(&full).map_err(|e| format!("Failed to read {}: {}", path, e))
 }
 
 #[tauri::command]
 pub(crate) async fn write_file(cwd: String, path: String, content: String) -> Result<(), String> {
     let full = safe_repo_path(&cwd, &path)?;
+    require_git_worktree(&cwd)?;
     // `safe_repo_path` resolves a symlink that leads somewhere real, so `full`
     // is only still a symlink when it dangles (or loops). Writing through it
     // would create its target, wherever that is, including outside the repo.
@@ -649,6 +651,31 @@ mod write_file_tests {
         let p = repo.path.parent().unwrap().join(name);
         std::fs::create_dir_all(&p).unwrap();
         Outside(p)
+    }
+
+    /// `cwd` itself must be a repository: `read_file("/", "etc/hosts")` used to
+    /// read any file on the machine.
+    #[test]
+    fn refuses_a_cwd_outside_any_git_working_tree() {
+        let repo = TempRepo::new("cwd-not-repo");
+        let out = outside(&repo);
+        std::fs::write(out.0.join("secret"), "s").unwrap();
+        let cwd = out.0.to_string_lossy().into_owned();
+        let read =
+            tauri::async_runtime::block_on(read_file(cwd.clone(), "secret".into())).unwrap_err();
+        assert!(read.contains("not inside a git working tree"), "{read}");
+        let write =
+            tauri::async_runtime::block_on(write_file(cwd, "w".into(), "x".into())).unwrap_err();
+        assert!(write.contains("not inside a git working tree"), "{write}");
+        assert!(!out.0.join("w").exists());
+
+        // A subdirectory of a repository is inside its working tree.
+        repo.write("sub/a.txt", "a");
+        let sub = repo.path.join("sub").to_string_lossy().into_owned();
+        assert_eq!(
+            tauri::async_runtime::block_on(read_file(sub, "a.txt".into())).unwrap(),
+            "a"
+        );
     }
 
     /// Writing through a dangling symlink creates its target, wherever that

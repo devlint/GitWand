@@ -1705,6 +1705,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-updater",
  "tokio",
+ "toml 1.1.2+spec-1.1.0",
  "uuid",
 ]
 

@@ -4086,6 +4086,23 @@ export async function gitCommitTemplatePath(cwd: string): Promise<string | null>
   return data?.path ?? null;
 }
 
+/**
+ * Read the commit.template configured for the repo, or null if unset. The
+ * backend resolves the path from git config itself: the template usually
+ * lives outside the repo (`~/.gitmessage`), where `readFile` refuses to read.
+ */
+export async function readCommitTemplate(cwd: string): Promise<string | null> {
+  if (isTauri()) return tauriInvoke<string | null>("read_commit_template", { cwd });
+  const res = await devFetch(`${DEV_SERVER}/api/read-commit-template`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || "read_commit_template failed");
+  return data?.content ?? null;
+}
+
 // ─── Re-exports from per-domain sub-modules (v2.11) ──────────────────────────
 // All 77 existing `import { ... } from './utils/backend'` continue to work.
 // Vite/Rollup tree-shakes these: functions not reachable from the main chunk

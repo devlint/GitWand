@@ -11,7 +11,7 @@
 
 import { computed } from "vue";
 import { loadSettings, saveSettings, type CommitTemplate } from "./useSettings";
-import { gitCommitTemplatePath, readFile } from "../utils/backend";
+import { readCommitTemplate } from "../utils/backend";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -56,17 +56,13 @@ export function removeTemplate(id: string): void {
 
 /**
  * Import the repo's git commit.template file as a new GitWand template.
- * Reads the path from git config, then reads the file content via Tauri.
+ * The backend resolves the path from git config and reads the file.
  * No-op if commit.template is not configured.
  * Throws if the file cannot be read.
  */
 export async function importFromGitMessage(cwd: string): Promise<string | null> {
-  const path = await gitCommitTemplatePath(cwd);
-  if (!path) return null;
-
-  // readFile(cwd, path) — pass the absolute path as `path` and "/" as cwd.
-  // The Rust read_file command resolves the path as-is when path is absolute.
-  const raw = await readFile("/", path);
+  const raw = await readCommitTemplate(cwd);
+  if (raw === null) return null;
 
   // Parse: first non-comment, non-empty line = subject; rest = body
   const lines = raw.split("\n").filter((l) => !l.startsWith("#"));

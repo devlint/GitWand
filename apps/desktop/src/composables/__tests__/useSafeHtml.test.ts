@@ -11,8 +11,13 @@
  * DOMPurify a real `window`/`document` to parse against.
  */
 
-import { describe, expect, it } from "vitest";
-import { renderMarkdown, safeHtml } from "../useSafeHtml";
+import { afterEach, describe, expect, it } from "vitest";
+import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../useSafeHtml";
+import { useSettings } from "../useSettings";
+
+afterEach(() => {
+  useSettings().settings.value.allowRemoteImages = false;
+});
 
 describe("safeHtml — raw HTML sanitization", () => {
   it("strips <script> tags", () => {
@@ -132,10 +137,80 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
   });
 
   it("renders raw HTML img tags with width and height in markdown", () => {
+    useSettings().settings.value.allowRemoteImages = true;
     const out = renderMarkdown('hello <img width="2521" height="203" alt="image" src="https://github.com/user-attachments/assets/5284ccc2-4567-40f0-88b7-1faec2289bbe" /> world');
     expect(out).toContain('<img width="2521" height="203" alt="image" src="https://github.com/user-attachments/assets/5284ccc2-4567-40f0-88b7-1faec2289bbe">');
   });
 
+  it("withholds remote images by default (tracking pixels)", () => {
+    const url = "https://tracker.example/pixel.gif?pr=42";
+    for (const src of [url, "//tracker.example/p.gif", "http://tracker.example/p.gif"]) {
+      const out = renderMarkdown(`![logo](${src}) <img src="${src}">`);
+      expect(out).not.toMatch(/src="(https?:)?\/\//);
+      expect(out).toContain('class="md-img-blocked"');
+    }
+    // The URL stays visible as a title, alt text is kept.
+    const out = renderMarkdown(`![logo](${url})`);
+    expect(out).toContain('alt="logo"');
+    expect(out).toContain(url.replace(/&/g, "&amp;"));
+  });
+
+  it("withholds remote images whatever spelling the URL parser forgives", () => {
+    // Each of these is fetched from tracker.example by a browser: the URL
+    // parser drops ASCII tab / newline anywhere and C0 controls / spaces at
+    // the ends, reads `\` as `/` in special schemes, and takes `https:host`
+    // as `https://host`. A prefix regex on the raw text missed them.
+    const payloads = [
+      "h&#9;ttps://tracker.example/p.gif",
+      "ht&#10;tp://tracker.example/p.gif",
+      "https:&#13;//tracker.example/p.gif",
+      "&#1;https://tracker.example/p.gif",
+      "&#31; //tracker.example/p.gif",
+      "\\\\tracker.example/p.gif",
+      "/\\tracker.example/p.gif",
+      "\\/tracker.example/p.gif",
+      "HTTPS://tracker.example/p.gif",
+      "https:tracker.example/p.gif",
+      "ftp://tracker.example/p.gif",
+    ];
+    for (const p of payloads) {
+      const out = safeHtml(`<img src="${p}" alt="a">`);
+      const img = new DOMParser().parseFromString(out, "text/html").querySelector("img");
+      expect(img?.getAttribute("src"), p).toBeNull();
+      expect(img?.className, p).toBe("md-img-blocked");
+    }
+    // DOMPurify drops a `file:` src on its own, before our hook sees it.
+    expect(safeHtml('<img src="file:///etc/p.png">')).not.toContain("file:");
+  });
+
+  it("keeps relative (same-document) images when remote ones are blocked", () => {
+    for (const src of ["x", "./img/a.png", "/abs/a.png", "img/a%20b.png"]) {
+      const out = safeHtml(`<img src="${src}">`);
+      expect(out, src).toContain(`src="${src}"`);
+      expect(hasBlockedRemoteImages(out), src).toBe(false);
+    }
+  });
+
+  it("drops non-image data: URLs even when disguised by whitespace", () => {
+    const out = safeHtml('<img src="&#9;data:text/html;base64,PHNjcmlwdD4=">');
+    expect(out).not.toContain("data:text/html");
+  });
+
+  it("loads remote images for one render when the caller passes consent", () => {
+    const md = "![shot](https://example.com/s.png)";
+    const allowed = renderMarkdown(md, { allowRemoteImages: true });
+    expect(allowed).toContain('src="https://example.com/s.png"');
+    expect(hasBlockedRemoteImages(allowed)).toBe(false);
+    // The consent does not leak into the next render.
+    const next = renderMarkdown(md);
+    expect(next).not.toContain('src="https://example.com/s.png"');
+    expect(hasBlockedRemoteImages(next)).toBe(true);
+  });
+
+  it("still renders inline data: images when remote ones are blocked", () => {
+    const tiny = "data:image/png;base64,iVBORw0KGgo=";
+    expect(safeHtml(`<img src="${tiny}" alt="p">`)).toContain(`src="${tiny}"`);
+  });
 
   it("neutralises javascript: links in markdown", () => {
     // markdown-it's default link validator rejects javascript: URIs, so

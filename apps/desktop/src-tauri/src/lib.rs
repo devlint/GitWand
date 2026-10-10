@@ -722,8 +722,9 @@ pub fn run() {
             // auto-captures OS, app version and locale, so only install_id is
             // sent as a custom property. track_event runs in the background.
             // Skipped unless built with --features telemetry.
+            // Honours the user's opt-out and DO_NOT_TRACK (commands/telemetry.rs).
             #[cfg(feature = "telemetry")]
-            {
+            if commands::telemetry::telemetry_allowed() {
                 let install_id = get_or_create_install_id();
                 let _ = app.track_event(
                     "launch",
@@ -965,6 +966,11 @@ pub fn run() {
             commands::credentials::set_credential,
             commands::credentials::get_credential,
             commands::credentials::delete_credential,
+            commands::ai_http::ai_api_key_set,
+            commands::ai_http::ai_api_key_hint,
+            commands::ai_http::ai_http_request,
+            commands::telemetry::telemetry_get_state,
+            commands::telemetry::telemetry_set_enabled,
             // ── Bitbucket Cloud REST v2 ──
             commands::bitbucket::bb_list_prs,
             commands::bitbucket::bb_list_issues,
@@ -1020,6 +1026,7 @@ pub fn run() {
             commands::read::git_branch_merged,
             commands::read::git_config_identity,
             commands::read::git_commit_template_path,
+            commands::read::read_commit_template,
             // ── v2.21.0 Monorepo Scope ──
             commands::read::git_rev_count,
             commands::terminal::terminal_open,

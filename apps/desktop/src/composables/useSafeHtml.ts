@@ -31,6 +31,50 @@
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import { openExternalUrl } from "../utils/backend";
+import { useSettings } from "./useSettings";
+import { t } from "./useI18n";
+
+/**
+ * Per-call consent, set by `safeHtml(raw, { allowRemoteImages: true })` for the
+ * duration of one synchronous sanitize (the "Show images" button of a PR, or a
+ * README whose project the user allowed). Never left set between calls.
+ */
+let remoteImagesOverride = false;
+
+/** Options shared by `safeHtml` and `renderMarkdown`. */
+export interface SafeHtmlOptions {
+  /**
+   * Load remote images for this render even when the global setting is off —
+   * the user accepted them for this PR or project.
+   */
+  allowRemoteImages?: boolean;
+}
+
+/**
+ * True when `html` (a `safeHtml` / `renderMarkdown` result) withheld at least
+ * one remote image — the cue to offer the "Show images" button.
+ */
+export function hasBlockedRemoteImages(html: string | null | undefined): boolean {
+  return !!html && html.includes("md-img-blocked");
+}
+
+/**
+ * Whether rendered markdown may load images from remote hosts. Off by
+ * default (Settings → `allowRemoteImages`): an `<img>` in someone else's PR
+ * body or comment is fetched straight from this machine — unlike on
+ * github.com, there is no image proxy in between — so it works as a tracking
+ * pixel that learns the reader's IP and when they opened the PR. Read through
+ * the reactive settings so a `computed` that renders markdown re-runs when
+ * the toggle changes.
+ */
+function remoteImagesAllowed(): boolean {
+  if (remoteImagesOverride) return true;
+  try {
+    return useSettings().settings.value.allowRemoteImages === true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Lowercase, strip non-word characters, collapse whitespace / dashes.
@@ -80,6 +124,44 @@ const ALLOWED_ATTR = [
 ];
 
 /**
+ * What the WHATWG URL parser ignores before parsing an attribute value:
+ * leading / trailing C0 controls and spaces, and ASCII tab / newline anywhere.
+ * `h&#9;ttps://host/x` (the entity decodes to a tab) is therefore a plain
+ * `https://host/x` to the browser, and must be one to us too.
+ */
+function normalizeUrlText(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  return raw.replace(/[\t\n\r]/g, "").replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "");
+}
+
+/**
+ * Bases that stand in for the document while classifying an image URL. Both
+ * are special schemes, as the webview's own is on Windows (http): there `\\host`
+ * and `/\\host` are network paths. Two of them because `scheme:host/x` is
+ * relative when `scheme` is the base's own — `https:tracker/x` against an
+ * https document — and absolute otherwise: a URL is local only if it is local
+ * against both, so its scheme cannot pick the base's.
+ */
+const LOCAL_IMAGE_BASES = [
+  new URL("https://gitwand-local.invalid/"),
+  new URL("ws://gitwand-local.invalid/"),
+];
+
+/**
+ * True unless `src` resolves to the document itself — i.e. it is relative.
+ * Decided by parsing, as the browser will: scheme-relative `//host`,
+ * backslash forms, `scheme:host` shorthands, absolute URLs of any scheme, and
+ * anything unparsable all count as remote.
+ */
+function isRemoteImageSrc(src: string): boolean {
+  try {
+    return LOCAL_IMAGE_BASES.some((base) => new URL(src, base).origin !== base.origin);
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Tighten `<a>` targets and `img`/`a` protocols. DOMPurify already blocks
  * `javascript:` by default, but we also explicitly forbid `data:` outside
  * of a short whitelist of image mime types to keep the attack surface small.
@@ -98,12 +180,21 @@ function hardenLinksAndImages(node: Element) {
   }
   if (node.tagName === "IMG") {
     const src = node.getAttribute("src") ?? "";
-    if (/^\s*javascript:/i.test(src)) {
+    // Decide on what the browser will actually fetch, not on the raw text.
+    const norm = normalizeUrlText(src);
+    if (/^javascript:/i.test(norm)) {
       node.removeAttribute("src");
-    } else if (src.startsWith("data:")) {
-      if (!/^data:image\/(png|jpeg|gif|webp|svg\+xml);/i.test(src)) {
+    } else if (/^data:/i.test(norm)) {
+      if (!/^data:image\/(png|jpeg|gif|webp|svg\+xml);/i.test(norm)) {
         node.removeAttribute("src");
       }
+    } else if (src && isRemoteImageSrc(norm) && !remoteImagesAllowed()) {
+      // Remote image, not allowed: keep a visible placeholder (alt text) and
+      // the URL in a title so the reader knows what was withheld.
+      node.removeAttribute("src");
+      node.setAttribute("class", "md-img-blocked");
+      if (!node.getAttribute("alt")) node.setAttribute("alt", t("common.remoteImageBlocked"));
+      node.setAttribute("title", `${t("common.remoteImageBlocked")} — ${src.trim()}`);
     }
   }
 }
@@ -139,10 +230,15 @@ const PURIFY_CONFIG = {
  * Sanitize pre-built HTML (e.g. diff hunks already coloured by our own
  * syntax highlighter). Returns a string safe to feed to `v-html`.
  */
-export function safeHtml(raw: string | null | undefined): string {
+export function safeHtml(raw: string | null | undefined, options: SafeHtmlOptions = {}): string {
   if (!raw) return "";
   ensureHooks();
-  return DOMPurify.sanitize(raw, PURIFY_CONFIG) as string;
+  remoteImagesOverride = options.allowRemoteImages === true;
+  try {
+    return DOMPurify.sanitize(raw, PURIFY_CONFIG) as string;
+  } finally {
+    remoteImagesOverride = false;
+  }
 }
 
 // ─── Markdown ──────────────────────────────────────────────────────
@@ -233,12 +329,12 @@ rules.link_open = (tokens, idx, options, env, self) => {
  */
 export function renderMarkdown(
   src: string | null | undefined,
-  options: { breaks?: boolean } = {},
+  options: { breaks?: boolean } & SafeHtmlOptions = {},
 ): string {
   if (!src) return "";
   md.set({ breaks: options.breaks ?? true });
   const rawHtml = md.render(src);
-  return safeHtml(rawHtml);
+  return safeHtml(rawHtml, { allowRemoteImages: options.allowRemoteImages });
 }
 
 /**

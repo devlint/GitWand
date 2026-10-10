@@ -27,6 +27,41 @@
 //! # }
 //! ```
 
+/// Namespace every service handled here must live under. Without it the
+/// commands would be a generic keychain reader: on Linux (libsecret) and
+/// Windows (Credential Manager) nothing prompts, so a script running in the
+/// webview could read any other application's stored secret by name.
+const SERVICE_PREFIX: &str = "gitwand:";
+
+/// Services the backend manages itself, through dedicated commands: the
+/// generic commands below may neither read them (the AI API key is injected by
+/// `ai_http_request` only) nor write or delete them (its value carries the
+/// origin the key is bound to, which only `ai_api_key_set` may set — together
+/// with the key).
+const BACKEND_ONLY_SERVICES: &[&str] = &[crate::commands::ai_http::AI_KEY_SERVICE];
+
+/// Refuse the generic commands on a backend-only service.
+fn check_not_backend_only(service: &str) -> Result<(), String> {
+    if BACKEND_ONLY_SERVICES.contains(&service) {
+        return Err(format!(
+            "`{}` is managed by the backend and cannot be accessed from the frontend",
+            service
+        ));
+    }
+    Ok(())
+}
+
+/// Reject services outside the GitWand namespace (see `SERVICE_PREFIX`).
+fn check_service(service: &str) -> Result<(), String> {
+    if !service.starts_with(SERVICE_PREFIX) || service.len() == SERVICE_PREFIX.len() {
+        return Err(format!(
+            "Refusing keychain access outside the `{}` namespace",
+            SERVICE_PREFIX
+        ));
+    }
+    Ok(())
+}
+
 /// Store a credential in the OS keychain.
 ///
 /// `service` — namespaced key, e.g. `"gitwand:bitbucket"`.
@@ -38,6 +73,8 @@ pub(crate) async fn set_credential(
     account: String,
     value: String,
 ) -> Result<(), String> {
+    check_service(&service)?;
+    check_not_backend_only(&service)?;
     let entry = keyring::Entry::new(&service, &account)
         .map_err(|e| format!("keyring init failed for {}/{}: {}", service, account, e))?;
     entry
@@ -52,6 +89,8 @@ pub(crate) async fn set_credential(
 /// "Please configure your credentials in Settings > Accounts."
 #[tauri::command]
 pub(crate) async fn get_credential(service: String, account: String) -> Result<String, String> {
+    check_service(&service)?;
+    check_not_backend_only(&service)?;
     let entry = keyring::Entry::new(&service, &account)
         .map_err(|e| format!("keyring init failed for {}/{}: {}", service, account, e))?;
     entry.get_password().map_err(|_| {
@@ -67,6 +106,8 @@ pub(crate) async fn get_credential(service: String, account: String) -> Result<S
 /// Silently succeeds if the entry does not exist (idempotent).
 #[tauri::command]
 pub(crate) async fn delete_credential(service: String, account: String) -> Result<(), String> {
+    check_service(&service)?;
+    check_not_backend_only(&service)?;
     let entry = match keyring::Entry::new(&service, &account) {
         Ok(e) => e,
         Err(_) => return Ok(()), // Entry cannot exist if we can't init
@@ -78,5 +119,48 @@ pub(crate) async fn delete_credential(service: String, account: String) -> Resul
             "Failed to delete credential {}/{}: {}",
             service, account, e
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn foreign_services_are_refused() {
+        for s in [
+            "Chrome Safe Storage",
+            "gitwand",
+            "gitwand:",
+            "git-credential",
+            "GITWAND:x",
+        ] {
+            assert!(check_service(s).is_err(), "{s} accepted");
+        }
+        assert!(check_service("gitwand:bitbucket").is_ok());
+    }
+
+    #[test]
+    fn backend_only_service_cannot_be_read_written_or_deleted() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let svc = || crate::commands::ai_http::AI_KEY_SERVICE.to_string();
+        let acct = || "api-key".to_string();
+        let errs = [
+            rt.block_on(get_credential(svc(), acct())).unwrap_err(),
+            // Writing would let a webview script rebind the AI key to a host
+            // of its choosing; deleting is the AI key's own clear command.
+            rt.block_on(set_credential(
+                svc(),
+                acct(),
+                r#"{"key":"k","origin":"https://evil.example"}"#.to_string(),
+            ))
+            .unwrap_err(),
+            rt.block_on(delete_credential(svc(), acct())).unwrap_err(),
+        ];
+        for err in errs {
+            assert!(err.contains("managed by the backend"), "got: {err}");
+        }
     }
 }

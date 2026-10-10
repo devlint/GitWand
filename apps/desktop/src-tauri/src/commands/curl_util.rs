@@ -62,7 +62,11 @@ pub(crate) fn run_curl(
 ///
 /// `code` is the process exit code (`None` if killed by a signal); `stderr` is
 /// curl's captured standard error (populated thanks to `--show-error`).
-fn curl_transport_check(success: bool, code: Option<i32>, stderr: &str) -> Result<(), String> {
+pub(crate) fn curl_transport_check(
+    success: bool,
+    code: Option<i32>,
+    stderr: &str,
+) -> Result<(), String> {
     if success {
         return Ok(());
     }

@@ -58,14 +58,14 @@ export async function detectClaudeCli(): Promise<ClaudeCliInfo> {
  * @param systemPrompt Optional system-level instructions (prepended as a
  *                     `# System` section since `claude -p` has no separate
  *                     system channel).
- * @param cwd Optional working directory for the CLI process.
+ * The CLI runs in a fresh private directory chosen by the backend, never
+ * in the repository (its config could run commands): there is no cwd.
  * @param outputFormat "text" (default) or "json".
  * @returns Raw stdout from the CLI.
  */
 export async function claudeCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   outputFormat: "text" | "json" = "text",
   model?: string,
   effort?: string,
@@ -74,7 +74,6 @@ export async function claudeCliPrompt(
     return tauriInvoke<string>("claude_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       outputFormat,
       model,
       effort,
@@ -83,7 +82,7 @@ export async function claudeCliPrompt(
   const res = await devFetch(`${DEV_SERVER}/api/claude-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, outputFormat, model, effort }),
+    body: JSON.stringify({ prompt, systemPrompt, outputFormat, model, effort }),
   });
   if (!res.ok) {
     let msg = `claude CLI error ${res.status}`;
@@ -140,7 +139,6 @@ export async function detectCodexCli(): Promise<CodexCliInfo> {
 export async function codexCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   model?: string,
   effort?: string,
 ): Promise<string> {
@@ -148,7 +146,6 @@ export async function codexCliPrompt(
     return tauriInvoke<string>("codex_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       model,
       effort,
     }, IPC_TIMEOUT.NONE);
@@ -156,7 +153,7 @@ export async function codexCliPrompt(
   const res = await devFetch(`${DEV_SERVER}/api/codex-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model, effort }),
+    body: JSON.stringify({ prompt, systemPrompt, model, effort }),
   });
   if (!res.ok) {
     let msg = `codex CLI error ${res.status}`;
@@ -248,21 +245,19 @@ export async function detectOpencodeCli(): Promise<OpencodeCliInfo> {
 export async function opencodeCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   model?: string,
 ): Promise<string> {
   if (isTauri()) {
     return tauriInvoke<string>("opencode_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       model,
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/opencode-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model }),
+    body: JSON.stringify({ prompt, systemPrompt, model }),
   });
   if (!res.ok) {
     let msg = `opencode CLI error ${res.status}`;
@@ -343,7 +338,6 @@ export async function detectCopilotCli(): Promise<CopilotCliInfo> {
 export async function copilotCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   model?: string,
   effort?: string,
 ): Promise<string> {
@@ -351,7 +345,6 @@ export async function copilotCliPrompt(
     return tauriInvoke<string>("copilot_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       model,
       effort,
     }, IPC_TIMEOUT.NONE);
@@ -359,7 +352,7 @@ export async function copilotCliPrompt(
   const res = await devFetch(`${DEV_SERVER}/api/copilot-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model, effort }),
+    body: JSON.stringify({ prompt, systemPrompt, model, effort }),
   });
   if (!res.ok) {
     let msg = `copilot CLI error ${res.status}`;
@@ -440,21 +433,19 @@ export async function detectAntigravityCli(): Promise<AntigravityCliInfo> {
 export async function antigravityCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   model?: string,
 ): Promise<string> {
   if (isTauri()) {
     return tauriInvoke<string>("antigravity_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       model,
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/antigravity-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model }),
+    body: JSON.stringify({ prompt, systemPrompt, model }),
   });
   if (!res.ok) {
     let msg = `antigravity CLI error ${res.status}`;
@@ -522,4 +513,111 @@ export async function claudeCliLogin(): Promise<void> {
     } catch { /* ignore */ }
     throw new Error(msg);
   }
+}
+
+// ─── AI provider HTTP (Anthropic API / OpenAI-compatible / Ollama) ─────────
+//
+// The webview no longer fetch()es AI hosts itself: the request goes through
+// the Rust `ai_http_request` command, which injects the API key from the OS
+// keychain. The key is stored with `aiApiKeySet` and is never readable back
+// from the webview — only a masked hint is (see commands/ai_http.rs).
+
+/** How the stored key is attached to an AI request. */
+export type AiHttpAuth = "anthropic" | "bearer" | "none";
+
+export interface AiHttpResponse {
+  status: number;
+  body: string;
+}
+
+/** Perform one AI provider HTTP request through the backend. */
+export async function aiHttpRequest(
+  method: "GET" | "POST",
+  url: string,
+  auth: AiHttpAuth,
+  body?: unknown,
+  timeoutSecs?: number,
+): Promise<AiHttpResponse> {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  if (isTauri()) {
+    return tauriInvoke<AiHttpResponse>("ai_http_request", {
+      method,
+      url,
+      body: payload,
+      auth,
+      timeoutSecs,
+    }, IPC_TIMEOUT.NONE);
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/ai-http-request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method, url, body: payload, auth, timeoutSecs }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `AI request failed: ${res.status}`);
+  return data as AiHttpResponse;
+}
+
+/** What the webview may know about the stored AI API key. */
+export interface AiKeyInfo {
+  /** Masked form of the key. */
+  hint: string;
+  /**
+   * Origin (`scheme://host[:port]`) the key is bound to: the backend attaches
+   * it to requests for that origin only. Null for a key stored before the
+   * binding existed, which must be entered again.
+   */
+  origin: string | null;
+}
+
+/**
+ * Store the AI API key in the OS keychain, bound to the origin of `endpoint`
+ * (an empty key clears it). Returns what is now stored, or null.
+ */
+export async function aiApiKeySet(key: string, endpoint?: string): Promise<AiKeyInfo | null> {
+  if (isTauri()) return tauriInvoke<AiKeyInfo | null>("ai_api_key_set", { key, endpoint });
+  const res = await devFetch(`${DEV_SERVER}/api/ai-api-key`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, endpoint }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || "ai_api_key_set failed");
+  return data?.info ?? null;
+}
+
+/** Masked hint and bound origin of the stored AI API key, or null. */
+export async function aiApiKeyHint(): Promise<AiKeyInfo | null> {
+  if (isTauri()) return tauriInvoke<AiKeyInfo | null>("ai_api_key_hint");
+  try {
+    const res = await devFetch(`${DEV_SERVER}/api/ai-api-key`);
+    if (!res.ok) return null;
+    return (await res.json())?.info ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Launch telemetry opt-out ─────────────────────────────
+
+export interface TelemetryState {
+  /** The user setting. */
+  enabled: boolean;
+  /** True when DO_NOT_TRACK / GITWAND_NO_TELEMETRY forces it off. */
+  forced_off_by_env: boolean;
+}
+
+export async function telemetryGetState(): Promise<TelemetryState> {
+  if (isTauri()) return tauriInvoke<TelemetryState>("telemetry_get_state");
+  const res = await devFetch(`${DEV_SERVER}/api/telemetry-state`);
+  return (await res.json()) as TelemetryState;
+}
+
+export async function telemetrySetEnabled(enabled: boolean): Promise<void> {
+  if (isTauri()) return tauriInvoke<void>("telemetry_set_enabled", { enabled });
+  await devFetch(`${DEV_SERVER}/api/telemetry-state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
 }

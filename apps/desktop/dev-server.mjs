@@ -10,7 +10,7 @@
 
 import { createServer } from "node:http";
 import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, watch } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, chmodSync, watch } from "node:fs";
 import { resolve, join, dirname, basename, sep, isAbsolute, relative } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
@@ -30,6 +30,24 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("[dev-server] unhandledRejection — server kept alive:", reason);
 });
+
+/**
+ * Throw unless `cwd` lies inside a git working tree (it or an ancestor holds a
+ * `.git` entry). Mirrors `require_git_worktree` in `src-tauri/src/git/cmd.rs`,
+ * messages included: `/api/read-file` and `/api/write-file` refuse any other
+ * cwd, so `read-file { cwd: "/" }` no longer reads arbitrary files.
+ */
+function requireGitWorktree(cwd) {
+  let dir;
+  try { dir = realpathSync.native(cwd); }
+  catch (e) { throw new Error(`cwd does not resolve: ${e.message}`); }
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) return;
+    const up = dirname(dir);
+    if (up === dir) throw new Error(`cwd is not inside a git working tree: ${cwd}`);
+    dir = up;
+  }
+}
 
 /**
  * Resolve `relPath` under `cwd`, ensuring the result stays inside the canonical
@@ -367,6 +385,349 @@ const claudeSpawnEnv = (() => {
   delete clean.ANTHROPIC_AUTH_TOKEN;
   return clean;
 })();
+
+/**
+ * Allowlisted environment for an AI CLI prompt. Mirrors `ai_cmd` in
+ * `src-tauri/src/commands/ai.rs`: the CLIs are agents fed untrusted repo
+ * content, so they get home/locale/proxy variables and their own provider's
+ * auth only — never forge tokens (GH_TOKEN, GITLAB_TOKEN) or cloud
+ * credentials (AWS_*, AZURE_*).
+ */
+const AI_ENV_BASE = new Set([
+  "HOME", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LANGUAGE", "TZ", "TMPDIR", "TMP", "TEMP", "PATH",
+  "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+  "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE",
+  "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "USERNAME", "USERDOMAIN",
+  "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+  "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS",
+]);
+/** Mirrors CLAUDE_AUTH_OVERRIDE_ENV (types.rs): stripped so the CLI uses the subscription. */
+const CLAUDE_AUTH_OVERRIDE = ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
+const envFlagSet = (v) => {
+  const t = String(v ?? "").trim();
+  return t !== "" && t !== "0" && t.toLowerCase() !== "false";
+};
+const isEnvName = (n) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(n);
+const readText = (p) => { try { return readFileSync(p, "utf-8"); } catch { return null; } };
+/** smol-toml (root devDependency) for Codex's config.toml; absent → no env_key forwarded. */
+let parseToml = null;
+try { ({ parse: parseToml } = await import("smol-toml")); } catch { /* optional */ }
+/** Mirrors `parse_codex_env_keys` (ai.rs): every env_key, env_http_headers values. */
+function codexEnvKeys(text) {
+  if (!parseToml) return [];
+  let doc;
+  try { doc = parseToml(text); } catch { return []; }
+  const out = [];
+  const walk = (v) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (!v || typeof v !== "object") return;
+    for (const [k, x] of Object.entries(v)) {
+      if (k === "env_key" && typeof x === "string") out.push(x);
+      else if (k === "env_http_headers" && x && typeof x === "object") {
+        for (const n of Object.values(x)) if (typeof n === "string") out.push(n);
+      } else walk(x);
+    }
+  };
+  walk(doc);
+  return out.filter(isEnvName);
+}
+/** Mirrors `claude_managed_settings_files` (ai.rs). */
+function claudeManagedSettingsFiles() {
+  const dirs = process.platform === "darwin" ? ["/Library/Application Support/ClaudeCode"]
+    : process.platform === "win32" ? ["C:\\Program Files\\ClaudeCode", "C:\\ProgramData\\ClaudeCode"]
+    : ["/etc/claude-code"];
+  const files = [];
+  for (const d of dirs) {
+    files.push(join(d, "managed-settings.json"));
+    try {
+      files.push(...readdirSync(join(d, "managed-settings.d")).filter((n) => n.endsWith(".json")).sort()
+        .map((n) => join(d, "managed-settings.d", n)));
+    } catch { /* none */ }
+  }
+  return files;
+}
+/**
+ * Mirrors `ai_env_context` (ai.rs): Claude's Bedrock / Vertex / Foundry
+ * switches (env, user settings.json, managed settings), Codex `env_key`s and
+ * opencode `{env:NAME}` from user-level config files only — never from the
+ * repository.
+ */
+function aiEnvContext(cli, env = process.env) {
+  const ctx = { claudeBedrock: false, claudeVertex: false, claudeFoundry: false, configRefs: [] };
+  const home = env.HOME || env.USERPROFILE || "";
+  if (cli === "claude") {
+    ctx.claudeBedrock = envFlagSet(env.CLAUDE_CODE_USE_BEDROCK);
+    ctx.claudeVertex = envFlagSet(env.CLAUDE_CODE_USE_VERTEX);
+    ctx.claudeFoundry = envFlagSet(env.CLAUDE_CODE_USE_FOUNDRY);
+    const dir = (env.CLAUDE_CONFIG_DIR || "").trim() || (home && join(home, ".claude"));
+    const files = [...(dir ? [join(dir, "settings.json")] : []), ...claudeManagedSettingsFiles()];
+    for (const f of files) {
+      const text = readText(f);
+      if (!text) continue;
+      try {
+        const e = JSON.parse(text)?.env ?? {};
+        const flag = (v) => envFlagSet(typeof v === "boolean" ? (v ? "1" : "0") : v);
+        ctx.claudeBedrock ||= flag(e.CLAUDE_CODE_USE_BEDROCK);
+        ctx.claudeVertex ||= flag(e.CLAUDE_CODE_USE_VERTEX);
+        ctx.claudeFoundry ||= flag(e.CLAUDE_CODE_USE_FOUNDRY);
+      } catch { /* not JSON */ }
+    }
+  } else if (cli === "codex") {
+    const dir = (env.CODEX_HOME || "").trim() || (home && join(home, ".codex"));
+    const text = dir && readText(join(dir, "config.toml"));
+    if (text) ctx.configRefs.push(...codexEnvKeys(text));
+  } else if (cli === "opencode") {
+    const files = [];
+    if ((env.OPENCODE_CONFIG || "").trim()) files.push(env.OPENCODE_CONFIG);
+    const cfgHome = (env.XDG_CONFIG_HOME || "").trim() || (home && join(home, ".config"));
+    if (cfgHome) for (const n of ["opencode.json", "opencode.jsonc", "config.json"]) files.push(join(cfgHome, "opencode", n));
+    for (const f of files) {
+      const text = readText(f);
+      if (!text) continue;
+      for (const m of text.matchAll(/\{env:([^}]*)\}/g)) if (isEnvName(m[1])) ctx.configRefs.push(m[1]);
+    }
+  }
+  return ctx;
+}
+/** Mirrors CLAUDE_CONFIG_ENV (ai.rs): Claude Code's documented configuration, by name. */
+const CLAUDE_CONFIG_ENV = new Set([
+  "CLAUDE_CONFIG_DIR", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_BEDROCK_BASE_URL",
+  "ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_VERTEX_PROJECT_ID", "ANTHROPIC_FOUNDRY_BASE_URL",
+  "ANTHROPIC_FOUNDRY_RESOURCE", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+  "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH", "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+  "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY",
+  "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_SUBAGENT_MODEL",
+  "CLAUDE_CODE_API_KEY_HELPER_TTL_MS", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+  "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "CLAUDE_CODE_PROXY_RESOLVES_HOSTS",
+  "CLAUDE_CODE_GIT_BASH_PATH", "CLAUDE_CODE_SHELL", "CLAUDE_CODE_MAX_RETRIES", "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",
+  "API_TIMEOUT_MS", "ANTHROPIC_BETAS", "DISABLE_COST_WARNINGS", "MAX_THINKING_TOKENS",
+  "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "DISABLE_AUTOUPDATER", "DISABLE_PROMPT_CACHING",
+  "DISABLE_NON_ESSENTIAL_MODEL_CALLS",
+]);
+const AI_ENV_PROVIDER = {
+  claude: (k, ctx) => !CLAUDE_AUTH_OVERRIDE.includes(k) && (
+    CLAUDE_CONFIG_ENV.has(k)
+    || (ctx.claudeBedrock && k.startsWith("AWS_"))
+    || (ctx.claudeVertex && (["CLOUD_ML_REGION", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT",
+      "GOOGLE_CLOUD_QUOTA_PROJECT", "GCLOUD_PROJECT"].includes(k) || k.startsWith("VERTEX_REGION_") || k.startsWith("CLOUDSDK_")))
+    || (ctx.claudeFoundry && k === "ANTHROPIC_FOUNDRY_API_KEY")),
+  codex: (k) => k.startsWith("CODEX_")
+    || ["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORGANIZATION", "OPENAI_PROJECT", "AZURE_OPENAI_API_KEY"].includes(k),
+  opencode: (k) => k.startsWith("OPENCODE_") || [
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY",
+    "OPENROUTER_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY",
+  ].includes(k),
+  copilot: (k) => k.startsWith("COPILOT_") && k !== "COPILOT_ALLOW_ALL",
+  antigravity: (k) => [
+    "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_GENAI_USE_VERTEXAI",
+  ].includes(k),
+};
+/** Mirrors `cached_ai_env_context` (ai.rs): config files read at most every 10 s per CLI. */
+const aiEnvContextCache = new Map();
+function cachedAiEnvContext(cli) {
+  const hit = aiEnvContextCache.get(cli);
+  if (hit && Date.now() - hit.at < 10_000) return hit.ctx;
+  const ctx = aiEnvContext(cli);
+  aiEnvContextCache.set(cli, { at: Date.now(), ctx });
+  return ctx;
+}
+function aiSpawnEnv(cli) {
+  const ctx = cachedAiEnvContext(cli);
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (AI_ENV_BASE.has(k) || AI_ENV_BASE.has(k.toUpperCase()) || k.startsWith("LC_")
+      || ctx.configRefs.includes(k) || AI_ENV_PROVIDER[cli](k, ctx)) {
+      env[k] = v;
+    }
+  }
+  return env;
+}
+
+/** Mirrors CLAUDE_DENIED_TOOLS (ai.rs). */
+const CLAUDE_DENIED_TOOLS = [
+  "Bash", "BashOutput", "KillBash", "KillShell", "Edit", "MultiEdit", "Write", "NotebookEdit", "NotebookRead",
+  "Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "Task", "Agent", "TodoWrite", "SlashCommand", "Skill",
+];
+/** Mirrors `claude_caps` (ai.rs): lockdown flags the installed claude knows, cached per binary. */
+const claudeCapsCache = new Map();
+async function claudeCaps(bin) {
+  // Keyed on the binary's identity (path, size, mtime). 10 s probe in its own
+  // process group, killed as a whole on timeout and never waited on past it.
+  // A failed or empty probe is remembered for 5 minutes. Mirrors `claude_caps`.
+  let id = bin;
+  try { const st = statSync(bin); id = `${bin}\0${st.size}\0${st.mtimeMs}`; } catch { /* keep path */ }
+  const hit = claudeCapsCache.get(id);
+  if (hit?.caps) return hit.caps;
+  const none = { tools: false, settingSources: false, strictMcp: false, noSessionPersistence: false };
+  if (hit?.failedAt && Date.now() - hit.failedAt < 5 * 60_000) return none;
+  const help = await new Promise((resolveHelp) => {
+    let out = "";
+    let done = false;
+    let timer = null; // declared before `finish` can run (spawn may throw synchronously)
+    const finish = (v) => { if (!done) { done = true; if (timer) clearTimeout(timer); resolveHelp(v); } };
+    let child;
+    try {
+      child = spawn(bin, ["--help"], {
+        env: aiSpawnEnv("claude"),
+        stdio: ["ignore", "pipe", "ignore"],
+        detached: process.platform !== "win32",
+      });
+    } catch { return finish(""); }
+    timer = setTimeout(() => {
+      try {
+        if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)]);
+        else process.kill(-child.pid, "SIGKILL");
+      } catch { /* already gone */ }
+      finish("");
+    }, 10_000);
+    child.stdout.on("data", (d) => { out += d; });
+    child.on("error", () => finish(""));
+    child.on("exit", (code) => {
+      // Give the pipe a moment to drain, without waiting on a grandchild.
+      setTimeout(() => finish(code === 0 ? out : ""), 200);
+    });
+  });
+  if (!help.trim()) {
+    claudeCapsCache.set(id, { failedAt: Date.now() });
+    return none;
+  }
+  const words = new Set(help.split(/[\s,]+/));
+  const caps = {
+    tools: words.has("--tools"),
+    settingSources: words.has("--setting-sources"),
+    strictMcp: words.has("--strict-mcp-config"),
+    noSessionPersistence: words.has("--no-session-persistence"),
+  };
+  claudeCapsCache.set(id, { caps });
+  return caps;
+}
+let aiRunsBaseCache = null;
+/**
+ * Mirrors `ai_runs_base` / `prepare_runs_base` (ai.rs): the per-user base of
+ * the per-run directories, validated once — a real directory (not a
+ * symlink) owned by the current user; mode 0700, with one warning when the
+ * filesystem does not keep it. Never the shared /tmp.
+ */
+function aiRunsBase() {
+  // Prepared again if deleted since (cache cleaner); a failure is not cached.
+  if (aiRunsBaseCache && existsSync(aiRunsBaseCache)) return aiRunsBaseCache;
+  const home = homedir();
+  const xdg = (process.env.XDG_CACHE_HOME || "").trim();
+  const root = process.platform === "darwin" ? join(home, "Library", "Caches")
+    : process.platform === "win32" ? (process.env.LOCALAPPDATA || join(home, "AppData", "Local"))
+    : (isAbsolute(xdg) ? xdg : join(home, ".cache"));
+  const dir = join(root, "gitwand", "ai-runs");
+  mkdirSync(dir, { recursive: true });
+  const st = lstatSync(dir);
+  if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`AI working directory ${dir}: is not a plain directory`);
+  if (process.platform !== "win32") {
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) {
+      throw new Error(`AI working directory ${dir}: belongs to another user`);
+    }
+    try { chmodSync(dir, 0o700); } catch (e) { console.warn(`[dev-server] cannot restrict ${dir}: ${e.message}`); }
+    const mode = lstatSync(dir).mode & 0o777;
+    if (mode & 0o077) console.warn(`[dev-server] ${dir} keeps mode ${mode.toString(8)}; per-run directories still apply`);
+  }
+  sweepStaleRunDirs(dir); // at setup only, never before each run
+  aiRunsBaseCache = dir;
+  return dir;
+}
+/** Mirrors `sweep_stale_run_dirs` / STALE_RUN_AGE (ai.rs): drop run-* leftovers older than a day. */
+function sweepStaleRunDirs(base) {
+  let names = [];
+  try { names = readdirSync(base); } catch { return; }
+  for (const n of names) {
+    if (!n.startsWith("run-")) continue;
+    const p = join(base, n);
+    try {
+      const st = lstatSync(p);
+      if (Date.now() - st.mtimeMs > 24 * 60 * 60_000) rmSync(p, { recursive: true, force: true });
+    } catch { /* gone */ }
+  }
+}
+/**
+ * Mirrors `ai_prompt_cmd` + `AiRunDir` (ai.rs): run an AI CLI in a fresh
+ * private directory of its own (mkdtemp: exclusive, 0700), a git repository
+ * when the CLI needs one (Codex), removed afterwards whatever happens — never
+ * the repository, never a directory another run could have left files in.
+ */
+function spawnAiSync(bin, args, opts, { gitRepo = false } = {}) {
+  const base = aiRunsBase();
+  const dir = mkdtempSync(join(base, "run-"));
+  try {
+    if (gitRepo) {
+      const g = spawnSync(GIT, ["init", "-q"], { cwd: dir });
+      if (g.status !== 0) throw new Error(`AI working directory ${dir}: git init failed`);
+    }
+    return spawnSync(bin, args, { ...opts, cwd: dir });
+  } finally {
+    // Best effort, like AiRunDir's Drop: never replaces the CLI's result.
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* EBUSY/EPERM */ }
+  }
+}
+/** Mirrors `stderr_looks_like_error` (ai.rs). */
+function stderrLooksLikeError(stderr) {
+  const STATUS = ["401", "403", "429", "500", "502", "503", "504"];
+  const PHRASES = ["permission denied", "unauthorized", "forbidden", "rate limit", "rate-limited",
+    "quota exceeded", "insufficient_quota", "invalid api key", "invalid_api_key", "authentication failed"];
+  // eslint-disable-next-line no-control-regex
+  const clean = String(stderr || "").replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]|\x1b./g, "");
+  return clean.split("\n").some((line) => {
+    const tokens = line.split(/[^A-Za-z0-9_]+/).filter(Boolean);
+    const words = line.split(/\s+/).filter(Boolean);
+    const lower = line.toLowerCase();
+    return tokens.some((t) => t === "ERROR" || t === "FATAL")
+      || line.trimStart().startsWith("error ")
+      || words.some((w) => w.endsWith("Error:") || w.endsWith("error:"))
+      || words.some((w, k) => k > 0 && words[k - 1].startsWith("HTTP/") && /^[45]\d\d$/.test(w))
+      || tokens.some((t, k) => k > 0 && ["status", "http", "code"].includes(tokens[k - 1].toLowerCase()) && STATUS.includes(t))
+      || /"name"\s*:\s*"[^"]*Error"/.test(line)
+      || PHRASES.some((p) => lower.includes(p));
+  });
+}
+/** Mirrors `claude_lockdown_args` (ai.rs): no tools, no project settings, no MCP. */
+function claudeLockdownArgs(caps) {
+  return [
+    ...(caps.tools ? ["--tools", ""] : []),
+    ...(caps.settingSources ? ["--setting-sources", "user"] : []),
+    ...(caps.strictMcp ? ["--strict-mcp-config"] : []),
+    ...(caps.noSessionPersistence ? ["--no-session-persistence"] : []),
+    "--disallowedTools", ...CLAUDE_DENIED_TOOLS,
+  ];
+}
+
+/** dev:web stand-in for the keychain-held AI API key (memory only). */
+let devAiApiKey = "";
+/** Origin the dev key is bound to — mirrors `StoredKey::origin` in ai_http.rs. */
+let devAiApiKeyOrigin = null;
+/**
+ * Parse an AI endpoint as `parse_endpoint` (ai_http.rs) does: http(s), a host,
+ * no credentials, no whitespace / control characters. Throws the same text.
+ */
+function parseAiEndpoint(raw) {
+  const s = String(raw ?? "");
+  if (/[\s\x00-\x1f\x7f]/.test(s)) throw new Error("AI endpoint contains whitespace or control characters");
+  let u;
+  try { u = new URL(s); } catch { throw new Error("AI endpoint must be an http(s) URL"); }
+  if ((u.protocol !== "http:" && u.protocol !== "https:") || !u.hostname) {
+    throw new Error("AI endpoint must be an http(s) URL");
+  }
+  if (u.username || u.password) throw new Error("AI endpoint must not carry credentials");
+  return u;
+}
+const devAiKeyInfo = () => (devAiApiKey ? { hint: aiKeyHint(devAiApiKey), origin: devAiApiKeyOrigin } : null);
+/** dev:web stand-in for the telemetry opt-out marker. */
+let devTelemetryEnabled = true;
+/** Masked hint of a key — mirrors `key_hint` in commands/ai_http.rs. */
+function aiKeyHint(key) {
+  if (!key) return null;
+  const chars = [...key];
+  if (chars.length <= 8) return "••••••••";
+  return chars.slice(0, 4).join("") + "••••" + chars.slice(-4).join("");
+}
 
 /**
  * Effort levels the AI CLIs accept — same allowlist as the Rust backend's
@@ -1973,7 +2334,7 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/read-file" && req.method === "POST") {
       const { cwd, path } = await readBody(req);
       let fullPath;
-      try { fullPath = safeRepoPath(cwd, path); }
+      try { fullPath = safeRepoPath(cwd, path); requireGitWorktree(cwd); }
       catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
       // Read bytes and decode strictly, mirroring the Rust `read_file`, which is
       // `std::fs::read_to_string` and rejects anything that is not valid UTF-8.
@@ -2000,7 +2361,7 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/write-file" && req.method === "POST") {
       const { cwd, path, content } = await readBody(req);
       let fullPath;
-      try { fullPath = safeRepoPath(cwd, path); }
+      try { fullPath = safeRepoPath(cwd, path); requireGitWorktree(cwd); }
       catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
       // The guard resolves a symlink that leads somewhere real, so `fullPath`
       // is only still a symlink when it dangles (or loops). Writing through it
@@ -3568,6 +3929,28 @@ async function handleRequest(req, res) {
       const home = process.env.HOME || process.env.USERPROFILE || "";
       const expanded = raw.startsWith("~") ? home + raw.slice(1) : raw;
       return jsonResponse(req, res, { path: expanded });
+    }
+
+    // POST /api/read-commit-template  { cwd } -> { content: string | null }
+    // Mirrors commands::read::read_commit_template: the path comes from git
+    // config, never from the client, and only a small regular file is read.
+    if (url.pathname === "/api/read-commit-template" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const r = spawnSync(GIT, ["config", "commit.template"], { cwd: resolve(cwd), encoding: "utf-8" });
+      const raw = r.status === 0 ? (r.stdout || "").trim() : "";
+      if (!raw) return jsonResponse(req, res, { content: null });
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const path = raw.startsWith("~") ? home + raw.slice(1) : raw;
+      try {
+        const st = statSync(path);
+        if (!st.isFile() || st.size > 64 * 1024) {
+          return jsonResponse(req, res, { error: `Commit template is not a small regular file: ${path}` }, 400);
+        }
+        return jsonResponse(req, res, { content: readFileSync(path, "utf-8") });
+      } catch (e) {
+        return jsonResponse(req, res, { error: `Failed to read commit template ${path}: ${e.message}` }, 400);
+      }
     }
 
     // POST /api/git-config-identity  { cwd } -> [name, email]
@@ -5409,6 +5792,93 @@ async function handleRequest(req, res) {
     // OAuth. Mirrors the Rust commands `detect_claude_cli`, `claude_cli_prompt`
     // and `claude_cli_login`.
 
+    // GET/POST /api/ai-api-key — mirrors ai_api_key_hint / ai_api_key_set.
+    // The Rust backend keeps the key in the OS keychain; dev:web keeps it in
+    // this process's memory only, and likewise never returns it — just a hint.
+    if (url.pathname === "/api/ai-api-key") {
+      if (req.method === "GET") return jsonResponse(req, res, { info: devAiKeyInfo() });
+      if (req.method === "POST") {
+        const { key, endpoint } = await readBody(req);
+        const trimmed = String(key ?? "").trim();
+        if (!trimmed) {
+          devAiApiKey = "";
+          devAiApiKeyOrigin = null;
+          return jsonResponse(req, res, { info: null });
+        }
+        // Bound to the endpoint's origin, like `ai_api_key_set`.
+        if (!String(endpoint ?? "").trim()) {
+          return jsonResponse(req, res, { error: "An AI endpoint is required to store the API key" }, 400);
+        }
+        let origin;
+        try { origin = parseAiEndpoint(String(endpoint).trim()).origin; }
+        catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
+        devAiApiKey = trimmed;
+        devAiApiKeyOrigin = origin;
+        return jsonResponse(req, res, { info: devAiKeyInfo() });
+      }
+    }
+
+    // POST /api/ai-http-request { method, url, body?, auth, timeoutSecs? }
+    // Mirrors commands::ai_http::ai_http_request: validation, key binding and
+    // error text included. Answers { status, body } whatever the upstream status.
+    if (url.pathname === "/api/ai-http-request" && req.method === "POST") {
+      const { method, url: target, body, auth, timeoutSecs } = await readBody(req);
+      let parsed;
+      try { parsed = parseAiEndpoint(target); }
+      catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
+      if (method !== "GET" && method !== "POST") {
+        return jsonResponse(req, res, { error: `Unsupported method: ${method}` }, 400);
+      }
+      const headers = { Accept: "application/json" };
+      if (auth === "anthropic" || auth === "bearer") {
+        if (!devAiApiKey) return jsonResponse(req, res, { error: "No AI API key configured" }, 400);
+        // The key goes to the origin it is bound to, nowhere else.
+        if (devAiApiKeyOrigin !== parsed.origin) {
+          return jsonResponse(req, res, {
+            error: `The stored AI API key is tied to ${devAiApiKeyOrigin}; enter it again in Settings to use it with ${parsed.origin}`,
+          }, 400);
+        }
+        if (auth === "anthropic") {
+          headers["x-api-key"] = devAiApiKey;
+          headers["anthropic-version"] = "2023-06-01";
+        } else {
+          headers.Authorization = `Bearer ${devAiApiKey}`;
+        }
+      } else if (auth !== "none") {
+        return jsonResponse(req, res, { error: `Unknown AI auth scheme: ${auth}` }, 400);
+      }
+      if (body !== undefined && body !== null) headers["Content-Type"] = "application/json";
+      // No timeout given = a completion: generous ceiling, as COMPLETION_TIMEOUT_SECS.
+      const COMPLETION_TIMEOUT_SECS = 30 * 60;
+      const secs = Math.min(COMPLETION_TIMEOUT_SECS, Math.max(1, Number(timeoutSecs) || COMPLETION_TIMEOUT_SECS));
+      try {
+        const upstream = await fetch(parsed.href, {
+          method,
+          headers,
+          body: body ?? undefined,
+          redirect: "manual",
+          signal: AbortSignal.timeout(secs * 1000),
+        });
+        return jsonResponse(req, res, { status: upstream.status, body: await upstream.text() });
+      } catch (e) {
+        return jsonResponse(req, res, { error: `AI request failed: ${e.message}` }, 502);
+      }
+    }
+
+    // GET/POST /api/telemetry-state — mirrors telemetry_get_state /
+    // telemetry_set_enabled. dev:web never sends telemetry; the toggle is
+    // kept in memory so the Settings UI can be exercised.
+    if (url.pathname === "/api/telemetry-state") {
+      if (req.method === "POST") {
+        const { enabled } = await readBody(req);
+        devTelemetryEnabled = enabled !== false;
+        return jsonResponse(req, res, { ok: true });
+      }
+      const forced = ["DO_NOT_TRACK", "GITWAND_NO_TELEMETRY"].some((k) =>
+        ["1", "true", "yes"].includes(String(process.env[k] ?? "").trim().toLowerCase()));
+      return jsonResponse(req, res, { enabled: devTelemetryEnabled, forced_off_by_env: forced });
+    }
+
     // GET /api/claude-cli-detect
     if (url.pathname === "/api/claude-cli-detect" && req.method === "GET") {
       try {
@@ -5482,7 +5952,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/claude-cli-prompt  { prompt, systemPrompt?, cwd?, outputFormat?, model? }
+    // POST /api/claude-cli-prompt  { prompt, systemPrompt?, outputFormat?, model?, effort? } — runs in a fresh private dir
     if (url.pathname === "/api/claude-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -5492,17 +5962,22 @@ async function handleRequest(req, res) {
           : (body.prompt || "");
         const fmt = body.outputFormat || "text";
         // v2.17 — explicit per-provider model selection.
-        const claudeArgs = ["-p", fullPrompt, "--output-format", fmt];
+        // Prompt on stdin, never argv; tools that act or reach the network
+        // denied. Mirrors claude_cli_prompt_inner.
+        const claudeArgs = ["-p", "--output-format", fmt];
         if (body.model && String(body.model).trim()) {
           claudeArgs.push("--model", String(body.model).trim());
         }
         const claudeEffort = validEffort(body.effort);
         if (claudeEffort) claudeArgs.push("--effort", claudeEffort);
-        const r = spawnSync(CLAUDE, claudeArgs, {
-          cwd: body.cwd || undefined,
+        const claudeCapsNow = await claudeCaps(CLAUDE);
+        claudeArgs.push(...claudeLockdownArgs(claudeCapsNow));
+        // Fresh per-run directory, never the repository (spawnAiSync).
+        const r = spawnAiSync(CLAUDE, claudeArgs, {
+          input: fullPrompt.replace(/\0/g, ""),
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
-          env: claudeSpawnEnv,
+          env: aiSpawnEnv("claude"),
         });
         if (r.status !== 0) {
           const detail = (r.stderr || r.stdout || "").trim() || "Claude CLI a échoué sans message";
@@ -5581,7 +6056,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/codex-cli-prompt  { prompt, systemPrompt?, cwd?, model? }
+    // POST /api/codex-cli-prompt  { prompt, systemPrompt?, model?, effort? } — runs in a fresh private dir
     if (url.pathname === "/api/codex-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -5590,18 +6065,22 @@ async function handleRequest(req, res) {
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
           : (body.prompt || "");
         // v2.17 — model flag precedes the positional prompt on `codex exec`.
-        const codexArgs = ["exec"];
+        // Read-only sandbox, prompt on stdin (`-`). Mirrors codex_cli_prompt_inner.
+        const codexArgs = ["exec", "--sandbox", "read-only"];
         if (body.model && String(body.model).trim()) {
           codexArgs.push("--model", String(body.model).trim());
         }
         const codexEffort = validEffort(body.effort);
         if (codexEffort) codexArgs.push("-c", `model_reasoning_effort=${codexEffort}`);
-        codexArgs.push(fullPrompt);
-        const r = spawnSync(CODEX, codexArgs, {
-          cwd: body.cwd || undefined,
+        codexArgs.push("-");
+        // Fresh per-run git repository, never the repository (trusted
+        // projects' .codex/config.toml runs MCP servers). Mirrors codex_cli_prompt_inner.
+        const r = spawnAiSync(CODEX, codexArgs, {
+          input: fullPrompt.replace(/\0/g, ""),
+          env: aiSpawnEnv("codex"),
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
-        });
+        }, { gitRepo: true });
         if (r.status !== 0) {
           const detail = (r.stderr || r.stdout || "").trim() || "Codex CLI a échoué sans message";
           return jsonResponse(req, res, { error: detail }, 500);
@@ -5687,7 +6166,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/opencode-cli-prompt  { prompt, systemPrompt?, cwd?, model? }
+    // POST /api/opencode-cli-prompt  { prompt, systemPrompt?, model? } — runs in a fresh private dir
     if (url.pathname === "/api/opencode-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -5699,17 +6178,38 @@ async function handleRequest(req, res) {
         if (body.model && String(body.model).trim()) {
           ocArgs.push("--model", String(body.model).trim());
         }
-        ocArgs.push(fullPrompt);
-        const r = spawnSync(OPENCODE, ocArgs, {
-          cwd: body.cwd || undefined,
+        const prompt = fullPrompt.replace(/\0/g, "");
+        // Runs via spawnAiSync in a fresh per-run directory, never the
+        // repository (opencode.json MCP servers, .opencode plugins).
+        // Mirrors opencode_cli_prompt_inner / opencode_run_cmd.
+        const ocOpts = {
+          env: {
+            ...aiSpawnEnv("opencode"),
+            OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","webfetch":"deny"}',
+            OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+          },
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
-        });
-        if (r.status !== 0) {
-          const detail = (r.stderr || r.stdout || "").trim() || "opencode CLI a échoué sans message";
-          return jsonResponse(req, res, { error: detail }, 500);
+        };
+        // Prompt on stdin, off argv, no argv fallback. Mirrors `opencode_result`:
+        // a refused or empty answer is an error.
+        const r = spawnAiSync(OPENCODE, ocArgs, { ...ocOpts, input: prompt });
+        const ocStdout = String(r.stdout || "");
+        const ocStderr = String(r.stderr || "").trim();
+        const STDIN_HINT = "opencode n'a pas lu le prompt sur stdin (version trop ancienne ?) — mettez opencode à jour";
+        // Same order as opencode_result (ai.rs).
+        if (r.status === 0 && ocStdout.trim()) {
+          return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(ocStdout);
         }
-        return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(r.stdout);
+        let ocError;
+        if (`${ocStderr}${ocStdout}`.includes("You must provide a message")) ocError = STDIN_HINT;
+        else if (r.status !== 0) ocError = ocStderr || ocStdout.trim() || "opencode CLI a échoué sans message";
+        else if (stderrLooksLikeError(ocStderr)) ocError = ocStderr;
+        else {
+          const tail = ocStderr ? ocStderr.split("\n").slice(-5).join("\n") : "";
+          ocError = tail ? `${STDIN_HINT}\n${tail}` : STDIN_HINT;
+        }
+        return jsonResponse(req, res, { error: ocError }, 500);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }
@@ -5780,7 +6280,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/copilot-cli-prompt  { prompt, systemPrompt?, cwd?, model? }
+    // POST /api/copilot-cli-prompt  { prompt, systemPrompt?, model?, effort? } — runs in a fresh private dir
     if (url.pathname === "/api/copilot-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -5795,10 +6295,8 @@ async function handleRequest(req, res) {
         const cpEffort = validEffort(body.effort);
         if (cpEffort) cpArgs.push("--reasoning-effort", cpEffort);
         cpArgs.push("-p", fullPrompt);
-        const cpEnv = { ...process.env };
-        delete cpEnv.COPILOT_ALLOW_ALL;
-        const r = spawnSync(COPILOT, cpArgs, {
-          cwd: body.cwd || undefined,
+        const cpEnv = aiSpawnEnv("copilot");
+        const r = spawnAiSync(COPILOT, cpArgs, { // fresh per-run dir — mirrors ai_prompt_cmd
           env: cpEnv,
           encoding: "utf-8",
           timeout: 5 * 60 * 1000,
@@ -5907,7 +6405,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/antigravity-cli-prompt  { prompt, systemPrompt?, cwd?, model? }
+    // POST /api/antigravity-cli-prompt  { prompt, systemPrompt?, model? } — runs in a fresh private dir
     if (url.pathname === "/api/antigravity-cli-prompt" && req.method === "POST") {
       try {
         const body = await readBody(req);
@@ -5920,8 +6418,8 @@ async function handleRequest(req, res) {
           agyArgs.push("--model", String(body.model).trim());
         }
         agyArgs.push("-p", fullPrompt);
-        const r = spawnSync(AGY, agyArgs, {
-          cwd: body.cwd || undefined,
+        const r = spawnAiSync(AGY, agyArgs, { // fresh per-run dir — mirrors ai_prompt_cmd
+          env: aiSpawnEnv("antigravity"),
           encoding: "utf-8",
           timeout: 5 * 60 * 1000,
           maxBuffer: 20 * 1024 * 1024,
