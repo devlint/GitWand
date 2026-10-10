@@ -435,8 +435,10 @@ function updateClampedSetting<K extends keyof Settings>(
 function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   settings.value[key] = value;
   // Identities are written by useIdentity, possibly elsewhere (the commit
-  // menu) while this panel is open: never write back a stale copy.
+  // menu) while this panel is open: never write back a stale copy. Same for
+  // the per-repo AI template / language picked from the AI button menus.
   syncIdentityFields();
+  syncAiTemplateSettings();
   saveSettings(settings.value);
   // Keep the shared reactive settings (read by AppDock and friends) in sync so
   // changes like dock order / position apply live, not only on panel close.

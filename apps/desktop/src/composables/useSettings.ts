@@ -9,7 +9,7 @@
  *   const { settings, refreshSettings } = useSettings()
  */
 
-import { ref } from "vue";
+import { ref, toRaw } from "vue";
 import { detectLocale, isSupportedLocale } from "../locales";
 import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
@@ -705,6 +705,13 @@ export function saveSettings(s: AppSettings): void {
   // useArchivedBranches, …) have no other reactive dependency, so without this
   // bump their computeds would stay stale until a full reload.
   settingsRevision.value++;
+  // Keep the shared ref in step with what was just written. Many writers
+  // (useAiTemplates, useIdentity, …) save a fresh loadSettings() copy; if the
+  // ref kept its old value, the next saveSettings(settings.value) from a
+  // component (dock, terminal, file explorer…) would write that stale copy
+  // back and silently drop their changes — e.g. the per-repo AI language and
+  // template picked from the commit AI menu.
+  if (toRaw(s) !== toRaw(_settings.value)) _settings.value = stripAiApiKey({ ...s });
 }
 
 // ─── Singleton reactive ref ───────────────────────────────
@@ -720,7 +727,10 @@ export function saveSettings(s: AppSettings): void {
 // loadSettings() saves (and bumps this) while the module is still loading.
 export const settingsRevision = ref(0);
 
-const _settings = ref<AppSettings>(loadSettings());
+// Created before the first loadSettings(): its one-time migration saves, and
+// saveSettings() syncs this ref.
+const _settings = ref<AppSettings>({ ...defaultAppSettings });
+_settings.value = loadSettings();
 
 /** Re-read all settings from localStorage (call after SettingsPanel saves). */
 export function refreshSettings(): void {

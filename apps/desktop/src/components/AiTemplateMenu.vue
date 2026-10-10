@@ -11,7 +11,8 @@
  * clipping ancestor (modal body, view container) never cuts it off.
  *
  * Above the templates, a Language row sets the kind's output language — the
- * same setting as Settings → AI Templates, so both stay in sync.
+ * same setting as Settings → AI Templates, so both stay in sync. With
+ * `translatable`, picking a language also translates the current message.
  */
 import { computed, inject, onUnmounted, ref, useTemplateRef } from "vue";
 import { useI18n } from "../composables/useI18n";
@@ -32,18 +33,13 @@ const props = defineProps<{
   chevronClass?: string;
   /** Open the menu under the chevron (default) or above it. */
   placement?: "below" | "above";
-  /**
-   * Rewrite actions shown above the language/template rows (commit kind).
-   * `hasSummary` / `canRegenerate` drive the same enable rules as the old
-   * commit AI menu: Shorten / Add detail / Translate need a message to work
-   * on, Regenerate needs staged changes.
-   */
-  rewrite?: { canRegenerate: boolean; hasSummary: boolean };
+  /** A message exists that picking a language should also translate (commit kind). */
+  translatable?: boolean;
 }>();
 
 const emit = defineEmits<{
-  /** A rewrite action was picked (Translate carries the target locale). */
-  (e: "rewrite", action: "regenerate" | "shorten" | "detail" | "changeLang", locale?: string): void;
+  /** A language was picked while `translatable`: translate the message into it. */
+  (e: "translate", locale: string): void;
   /** Fired before Settings opens, e.g. so a modal host can close itself. */
   (e: "manage"): void;
 }>();
@@ -119,11 +115,15 @@ function pick(id: string | null) {
   close();
 }
 
-function rewriteAction(action: "regenerate" | "shorten" | "detail" | "changeLang", disabled: boolean, locale?: string) {
-  if (disabled) return;
-  if (action === "changeLang" && locale) setLang(locale);
+/**
+ * Sets the kind's output language and, when `translatable`, also asks the
+ * host to translate the current message into it.
+ */
+function pickLang(loc: string) {
+  setLang(loc);
+  if (!props.translatable) return;
   close();
-  emit("rewrite", action, locale);
+  emit("translate", loc);
 }
 
 function manage() {
@@ -167,33 +167,6 @@ onUnmounted(close);
     >
       <p class="atm-note">{{ t('settings.aiTemplates.perProjectNote') }}</p>
       <ul class="atm-list" role="menu">
-        <template v-if="rewrite">
-          <li role="menuitem" :class="{ 'is-disabled': !rewrite.canRegenerate }"
-            :aria-disabled="!rewrite.canRegenerate" @click="rewriteAction('regenerate', !rewrite.canRegenerate)">
-            <span class="atm-name">{{ t('sidebar.aiRegenerate') }}</span>
-          </li>
-          <li role="menuitem" :class="{ 'is-disabled': !rewrite.hasSummary }"
-            :aria-disabled="!rewrite.hasSummary" @click="rewriteAction('shorten', !rewrite.hasSummary)">
-            <span class="atm-name">{{ t('sidebar.aiShorten') }}</span>
-          </li>
-          <li role="menuitem" :class="{ 'is-disabled': !rewrite.hasSummary }"
-            :aria-disabled="!rewrite.hasSummary" @click="rewriteAction('detail', !rewrite.hasSummary)">
-            <span class="atm-name">{{ t('sidebar.aiDetail') }}</span>
-          </li>
-          <li class="atm-title">{{ t('sidebar.aiChangeLang') }}</li>
-          <li class="atm-langs" role="group" :aria-label="t('sidebar.aiChangeLang')">
-            <button
-              v-for="loc in supportedLocales"
-              :key="loc"
-              type="button"
-              class="atm-chip"
-              :disabled="!rewrite.hasSummary"
-              :title="localeLabels[loc]"
-              @click="rewriteAction('changeLang', !rewrite.hasSummary, loc)"
-            >{{ loc.split('-')[0].toUpperCase() }}</button>
-          </li>
-          <li class="atm-sep" role="separator"></li>
-        </template>
         <li class="atm-title">{{ t('settings.aiTemplates.language') }}</li>
         <li class="atm-langs" role="group" :aria-label="t('settings.aiTemplates.language')">
           <button
@@ -204,7 +177,7 @@ onUnmounted(close);
             :class="{ 'is-active': loc === lang }"
             :title="localeLabels[loc]"
             :aria-pressed="loc === lang"
-            @click="setLang(loc)"
+            @click="pickLang(loc)"
           >{{ loc.split('-')[0].toUpperCase() }}</button>
         </li>
         <li class="atm-sep" role="separator"></li>
@@ -313,21 +286,6 @@ onUnmounted(close);
 .atm-chip:hover {
   background: var(--color-bg-tertiary);
   border-color: var(--color-accent);
-}
-.atm-chip:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.atm-chip:disabled:hover {
-  background: var(--color-bg-secondary);
-  border-color: var(--color-border);
-}
-.atm-menu li.is-disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.atm-menu li.is-disabled:hover {
-  background: transparent;
 }
 .atm-chip.is-active {
   color: var(--color-accent);

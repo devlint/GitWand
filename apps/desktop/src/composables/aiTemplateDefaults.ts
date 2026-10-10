@@ -28,6 +28,17 @@ export function applyLang(prompt: string, lang: string): string {
   return prompt.replace(/\$\{lang\}/g, lang);
 }
 
+/**
+ * Like {@link applyLang}, but a prompt without the `${lang}` placeholder (a
+ * user template written without it) still gets the language: an explicit
+ * instruction is appended, so the language picked for the repo always applies.
+ */
+export function applyLangStrict(prompt: string, lang: string): string {
+  return /\$\{lang\}/.test(prompt)
+    ? applyLang(prompt, lang)
+    : `${prompt.trimEnd()}\n\nWrite the output in ${lang}.`;
+}
+
 const DEFAULT_COMMIT_PROMPT = `You are a senior software engineer writing a Git commit message.
 
 Rules:

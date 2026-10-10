@@ -264,10 +264,6 @@ const en = {
     trailerRbLabel: "Reviewed by",
     trailerRbHelp: "Adds \u201cReviewed-by: name\u201d to the commit. Records who reviewed and approved this change. Appears in the git history for traceability.",
     aiGenerateTooltip: "Generate message with AI",
-    aiRegenerate: "Regenerate",
-    aiShorten: "Shorten",
-    aiDetail: "Add detail",
-    aiChangeLang: "Change language",
     aiGeneratingTooltip: "Generating\u2026",
     // Empty
     cleanTree: "Working tree clean",

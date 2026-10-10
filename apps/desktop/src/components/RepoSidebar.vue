@@ -645,18 +645,14 @@ async function onGenerateCommitMessage() {
   }
 }
 
-/** Rewrite actions of the AI menu: regenerate, or transform the current message. */
-async function onAiAction(action: "regenerate" | "shorten" | "detail" | "changeLang", targetLocale?: string) {
+/** Language picked in the AI menu while a message exists: translate it. */
+async function onAiTranslate(targetLocale: string) {
   if (isGenerating.value) return;
-  if (action === "regenerate") {
-    await onGenerateCommitMessage();
-    return;
-  }
   const currentMsg = [props.commitSummary, props.commitDescription].filter(Boolean).join("\n");
   if (!currentMsg.trim()) return;
   const cwd = props.cwd;
   try {
-    const msg = await transformCommitMsg(action, currentMsg, targetLocale, cwd);
+    const msg = await transformCommitMsg("changeLang", currentMsg, targetLocale, cwd);
     applyMessage(cwd, msg);
   } catch {
     // aiError is set by the composable.
@@ -1473,8 +1469,8 @@ function formatActivityDate(dateStr: string): string {
             :disabled="isGenerating"
             placement="above"
             chevron-class="commit-ai-chevron"
-            :rewrite="{ canRegenerate: repoStats.staged > 0, hasSummary: !!commitSummary }"
-            @rewrite="onAiAction"
+            :translatable="!!commitSummary"
+            @translate="onAiTranslate"
           />
         </div>
         <!-- Template picker button -->

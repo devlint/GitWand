@@ -257,10 +257,6 @@ const fr: Locale = {
     trailerRbLabel: "Relu par",
     trailerRbHelp: "Ajoute « Reviewed-by : nom» au commit. Enregistre qui a relu et approuvé ce changement. Visible dans l’historique git pour la traçabilité.",
     aiGenerateTooltip: "Générer un message avec l'IA",
-    aiRegenerate: "Régénérer",
-    aiShorten: "Raccourcir",
-    aiDetail: "Détailler",
-    aiChangeLang: "Changer de langue",
     aiGeneratingTooltip: "Génération en cours\u2026",
     // Empty
     cleanTree: "Espace de travail propre",

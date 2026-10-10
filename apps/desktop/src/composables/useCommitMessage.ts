@@ -3,7 +3,7 @@ import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { localeLabels, type SupportedLocale } from "../locales";
 import { t } from "./useI18n";
-import { applyLang, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
+import { applyLang, applyLangStrict, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
 
 /**
  * Generates commit messages from the currently staged diff.
@@ -28,12 +28,13 @@ export interface CommitMessageOptions {
   systemPromptOverride?: string;
 }
 
-export type CommitMessageAction = "shorten" | "detail" | "changeLang";
+export type CommitMessageAction = "changeLang";
 
 /** Map locale codes to their English name for prompts. Falls back to the locale label or code itself. */
 function localeToEnglishName(code: string): string {
   const map: Record<string, string> = {
     fr: "French", en: "English", es: "Spanish", de: "German",
+    "pt-BR": "Brazilian Portuguese", "zh-CN": "Simplified Chinese",
     it: "Italian", pt: "Portuguese", ja: "Japanese", ko: "Korean",
     zh: "Chinese", nl: "Dutch", ru: "Russian", ar: "Arabic",
     pl: "Polish", sv: "Swedish", da: "Danish", nb: "Norwegian",
@@ -50,16 +51,6 @@ Rules:
 4. Output ONLY the raw commit message — no code fences, no explanations.`;
 
   switch (action) {
-    case "shorten":
-      return {
-        system: `${base}\n5. Make the message shorter and more concise. Remove the body if it exists. Keep only the essential information in the subject.`,
-        user: `Shorten this commit message:\n\n${currentMessage}`,
-      };
-    case "detail":
-      return {
-        system: `${base}\n5. Make the message more detailed. Add a body (2-4 lines) explaining WHY the change was made and WHAT it impacts. Keep the subject line intact or improve it.`,
-        user: `Add more detail to this commit message:\n\n${currentMessage}`,
-      };
     case "changeLang": {
       const lang = localeToEnglishName(targetLocale ?? "en");
       return {
@@ -174,7 +165,7 @@ export function useCommitMessage() {
       // The ${lang} placeholder in preset prompts is substituted at this point.
       const lang = localeToEnglishName(locale);
       const systemPrompt = systemPromptOverride
-        ? applyLang(systemPromptOverride, lang)
+        ? applyLangStrict(systemPromptOverride, lang)
         : buildSystemPrompt(locale);
       const userPrompt = buildUserPrompt(diff, statusRes.stdout ?? "");
 
@@ -197,7 +188,7 @@ export function useCommitMessage() {
   }
 
   /**
-   * Transform an existing commit message: shorten, add detail, or change language.
+   * Transform an existing commit message (currently: translate it).
    */
   async function transform(
     action: CommitMessageAction,
