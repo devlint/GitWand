@@ -983,21 +983,6 @@ onMounted(() => {
 <template>
   <div class="gw-landing">
 
-    <!-- Language picker (mirrors the 5 locales of the desktop app) -->
-    <div class="lang-picker" role="group" aria-label="Language">
-      <button
-        v-for="L in LOCALES"
-        :key="L.code"
-        class="lang-pill"
-        :class="{ 'lang-pill--active': locale === L.code }"
-        :title="L.title"
-        :aria-pressed="locale === L.code"
-        @click="setLocale(L.code)"
-      >
-        {{ L.label }}
-      </button>
-    </div>
-
     <!-- ══════════════════════════════════════
          1 · HERO
     ══════════════════════════════════════ -->
@@ -1009,11 +994,28 @@ onMounted(() => {
       </div>
 
       <div class="nc-wrap nc-hero__body">
-        <a class="nc-pill" href="/changelog">
-          <span class="nc-pill__dot"></span>
-          {{ nt.badge }}
-          <span class="nc-pill__arrow">→</span>
-        </a>
+        <div class="nc-hero__top">
+          <a class="nc-pill" href="/changelog">
+            <span class="nc-pill__dot"></span>
+            {{ nt.badge }}
+            <span class="nc-pill__arrow">→</span>
+          </a>
+
+          <!-- Language picker (mirrors the 5 locales of the desktop app) -->
+          <div class="lang-picker" role="group" aria-label="Language">
+            <button
+              v-for="L in LOCALES"
+              :key="L.code"
+              class="lang-pill"
+              :class="{ 'lang-pill--active': locale === L.code }"
+              :title="L.title"
+              :aria-pressed="locale === L.code"
+              @click="setLocale(L.code)"
+            >
+              {{ L.label }}
+            </button>
+          </div>
+        </div>
 
         <h1 class="nc-h1">
           {{ nt.h1a }} <span class="nc-shine">{{ nt.h1b }}</span>{{ nt.h1c }}
@@ -1447,10 +1449,6 @@ onMounted(() => {
    Language picker (5 locales, segmented)
 ─────────────────────────────────────────── */
 .lang-picker {
-  position: fixed;
-  top: 78px;
-  right: 20px;
-  z-index: 100;
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -2109,11 +2107,20 @@ onMounted(() => {
 .nc-hero__orb-a { top: -320px; left: 50%; width: 1100px; height: 760px; margin-left: -550px; }
 .nc-hero__orb-b { top: -220px; right: -180px; width: 760px; height: 620px; }
 .nc-hero__body {
-  padding-top: 64px;
+  padding-top: 24px;
   display: flex;
   flex-direction: column;
   gap: 22px;
 }
+
+.nc-hero__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.nc-hero__top .nc-pill { align-self: center; }
 
 .nc-pill {
   align-self: flex-start;
@@ -2152,7 +2159,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 13px 14px;
+  padding: 13px 10px 13px 14px;
   font-family: var(--nc-font-mono);
   font-size: 13px;
   color: var(--nc-neutral-300);
@@ -2169,7 +2176,7 @@ onMounted(() => {
   color: var(--nc-neutral-400);
   border-left: 1px solid var(--nc-neutral-800);
   padding-left: 10px;
-  min-width: 4.5em;
+  min-width: 5ch;
   text-align: left;
 }
 
@@ -2682,7 +2689,26 @@ onMounted(() => {
   font-weight: 400;
 }
 .btn-ghost:hover { border-color: var(--nc-accent-500); color: var(--nc-accent-200); }
-.btn-split__main { border-right-color: color-mix(in srgb, var(--nc-accent-300) 45%, transparent); }
+/* Bouton scindé : le cadre (bordure, rayon, halo) porte sur le conteneur,
+   pas sur chaque moitié — sinon l'override .btn-primary ci-dessus redonne à
+   chacune ses propres coins et bordure, et on voit deux boutons accolés. */
+.btn-split {
+  border: 1px solid var(--nc-accent-300);
+  border-radius: var(--nc-radius-md);
+  box-shadow: var(--nc-glow);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.btn-split:hover { border-color: var(--nc-accent-200); }
+.btn-split > .btn-primary {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.btn-split > .btn-primary:hover { transform: none; }
+.btn-split > .btn-split__aside {
+  border-left: 1px solid color-mix(in srgb, var(--nc-accent-300) 45%, transparent);
+}
 
 /* Sélecteur de langue */
 .lang-pill {
