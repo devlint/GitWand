@@ -5,7 +5,7 @@ import { useI18n } from "../composables/useI18n";
 import BaseModal from "./BaseModal.vue";
 import AiSparkle from "./AiSparkle.vue";
 import { useAIProvider } from "../composables/useAIProvider";
-import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
+import { isGeneratingReleaseNotes } from "../composables/releaseNotesState";
 
 const ReleaseNotesModal = defineAsyncComponent(() => import("./ReleaseNotesModal.vue"));
 

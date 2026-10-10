@@ -14,7 +14,7 @@ import {
 import type { ViewMode } from "../composables/useGitRepo";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
-import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
+import { isGeneratingReleaseNotes } from "../composables/releaseNotesState";
 import Avatar from "./Avatar.vue";
 import { useAIProvider } from "../composables/useAIProvider";
 import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables/useSafeHtml";

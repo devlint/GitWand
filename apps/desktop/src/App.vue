@@ -124,7 +124,6 @@ import { resolveCommitReviewShortcut } from "./composables/commitReviewKeymap";
 import { useLaunchpadPrs } from "./composables/useLaunchpadPrs";
 import { diffLaunchpad, isBotAuthor, type LaunchpadEvent } from "./composables/useLaunchpadNotifications";
 import { osNotify } from "./composables/useOsNotification";
-import { useReleaseNotes } from "./composables/useReleaseNotes";
 import { getTemplateLang } from "./composables/useAiTemplates";
 import { useFolderHistory } from "./composables/useFolderHistory";
 import { useAppMenu } from "./composables/useAppMenu";
@@ -3874,8 +3873,6 @@ function onSettingsClose() {
 
 
 // ─── Scheduler (v2.8) ────────────────────────────────────
-const { generate: generateReleaseNotesFn } = useReleaseNotes();
-
 const scheduler = useScheduler({
   cwd: repoFolderPath as import("vue").Ref<string>,
   settings,
@@ -3897,7 +3894,9 @@ const scheduler = useScheduler({
     const tags = await gitListTags(repoFolderPath.value);
     if (tags.length < 2) return;
     const sorted = [...tags].sort((a, b) => b.date.localeCompare(a.date));
-    await generateReleaseNotesFn(repoFolderPath.value, sorted[1].name, sorted[0].name, {
+    // Loaded on demand: the generator stays out of the main bundle.
+    const { useReleaseNotes } = await import("./composables/useReleaseNotes");
+    await useReleaseNotes().generate(repoFolderPath.value, sorted[1].name, sorted[0].name, {
       locale: getTemplateLang("releaseNotes", repoFolderPath.value),
     });
   },

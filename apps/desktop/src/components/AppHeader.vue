@@ -50,7 +50,7 @@ import BranchMenu from "./header/BranchMenu.vue";
 import SearchTrigger from "./header/SearchTrigger.vue";
 import AiSparkle from "./AiSparkle.vue";
 import { useAIProvider } from "../composables/useAIProvider";
-import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
+import { isGeneratingReleaseNotes } from "../composables/releaseNotesState";
 import { useCollapseOnOverflow } from "../composables/useCollapseOnOverflow";
 import type { RepoTab } from "../composables/useRepoTabs";
 
