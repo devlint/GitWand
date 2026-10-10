@@ -85,25 +85,27 @@ onUnmounted(close);
     @click.stop="show"
   >
     <!-- Note with text lines and a + in its corner: add context to the prompt -->
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"
-      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M11 7.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h4"/>
-      <path d="M5 5h3.5M5 8h2.5"/>
-      <path d="M12.5 9.5v5M10 12h5"/>
-    </svg><span v-if="context" class="aic-dot" aria-hidden="true"></span>
+    <span class="aic-icon">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M11 7.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h4"/>
+        <path d="M5 5h3.5M5 8h2.5"/>
+        <path d="M12.5 9.5v5M10 12h5"/>
+      </svg><span v-if="context" class="aic-dot" aria-hidden="true"></span>
+    </span>
   </button>
   <BaseModal
     v-if="open"
     :title="t('settings.aiTemplates.ctxTitle')"
-    size="md"
+    size="2x"
     @close="close"
   >
     <p class="aic-hint">{{ t('settings.aiTemplates.ctxHint') }}</p>
     <textarea
       ref="textarea"
       v-model="draft"
-      class="input aic-textarea"
-      rows="8"
+      class="aic-textarea"
+      rows="14"
       :placeholder="t('settings.aiTemplates.ctxPlaceholder')"
       @keydown="onTextareaKey"
     ></textarea>
@@ -122,10 +124,17 @@ onUnmounted(close);
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
 }
-/* Context set: a dot, so the button tells it before the tooltip does. */
+.aic-icon {
+  position: relative;
+  display: inline-flex;
+}
+/* Context set: a dot on the sheet's top-right corner, so the button tells it
+   before the tooltip does. */
 .aic-dot {
+  position: absolute;
+  top: -1px;
+  right: -2px;
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -136,11 +145,31 @@ onUnmounted(close);
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
-/* Look and focus ring from the global .input. */
 .aic-textarea {
+  display: block;
+  width: 100%;
+  min-height: 280px;
   box-sizing: border-box;
-  line-height: 1.45;
+  padding: var(--space-4) var(--space-5);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg-tertiary, var(--color-bg));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  outline: none;
   resize: vertical;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.aic-textarea:hover { border-color: var(--color-border-strong); }
+.aic-textarea:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+.aic-textarea::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.7;
 }
 /* Clear sits on the left, away from Save. */
 .aic-clear {
