@@ -857,7 +857,18 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
     // status, so no helper leaks — and keep the output already received. The
     // reader thread is never joined: at worst it is left behind, blocked.
     if rx.recv_timeout(Duration::from_secs(2)).is_err() {
-        kill_tree(&mut child);
+        // Only while the group still has members: its id cannot have been
+        // reused then. On Windows the child is reaped by now and its pid may
+        // be reused, so taskkill is not retried (see kill_tree).
+        #[cfg(unix)]
+        if let Ok(pgid) = libc::pid_t::try_from(child.id()) {
+            // SAFETY: plain syscalls; signal 0 only probes the group.
+            unsafe {
+                if libc::killpg(pgid, 0) == 0 {
+                    libc::killpg(pgid, libc::SIGKILL);
+                }
+            }
+        }
         let _ = rx.recv_timeout(Duration::from_secs(1));
     }
     status.filter(|s| s.success())?;
@@ -1912,6 +1923,9 @@ fn stderr_looks_like_error(stderr: &str) -> bool {
         let words: Vec<&str> = line.split_whitespace().collect();
         let lower = line.to_ascii_lowercase();
         tokens.iter().any(|t| matches!(*t, "ERROR" | "FATAL"))
+            // Lowercase `error …` at line start (`error sending request …`);
+            // the capitalised prose `Error reporting enabled` is not one.
+            || line.trim_start().starts_with("error ")
             || words
                 .iter()
                 .any(|w| w.ends_with("Error:") || w.ends_with("error:"))
@@ -2956,6 +2970,7 @@ mod lockdown_tests {
             "< HTTP/1.1 503 Service Unavailable",
             r#"{"name":"APIError","data":{"message":"bad"}}"#,
             r#"{"name": "ProviderModelNotFoundError"}"#,
+            "error sending request for url (https://api.example/v1)",
         ] {
             assert!(stderr_looks_like_error(e), "{e}");
         }

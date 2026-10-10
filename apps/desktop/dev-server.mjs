@@ -680,6 +680,7 @@ function stderrLooksLikeError(stderr) {
     const words = line.split(/\s+/).filter(Boolean);
     const lower = line.toLowerCase();
     return tokens.some((t) => t === "ERROR" || t === "FATAL")
+      || line.trimStart().startsWith("error ")
       || words.some((w) => w.endsWith("Error:") || w.endsWith("error:"))
       || words.some((w, k) => k > 0 && words[k - 1].startsWith("HTTP/") && /^[45]\d\d$/.test(w))
       || tokens.some((t, k) => k > 0 && ["status", "http", "code"].includes(tokens[k - 1].toLowerCase()) && STATUS.includes(t))
