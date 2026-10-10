@@ -194,12 +194,13 @@ describe("useAiApiKey — permanent migration failures and ordering", () => {
       ["0.0.0.0:11434", "http://0.0.0.0:11434"],
       ["host.docker.internal:11434", "http://host.docker.internal:11434"],
       ["[::1]:8080", "http://[::1]:8080"],
-      ["ollama.localhost:11434/v1", "http://ollama.localhost:11434/v1"],
       // Names that only look internal may be HTTPS-only gateways: https.
       ["gpu-box.local:8000/v1", "https://gpu-box.local:8000/v1"],
       ["llm.corp.internal/v1", "https://llm.corp.internal/v1"],
       ["ollama:11434", "https://ollama:11434"],
       ["ai-proxy:443/v1", "https://ai-proxy:443/v1"],
+      // *.localhost may still go to DNS: not trusted as loopback.
+      ["ollama.localhost:11434/v1", "https://ollama.localhost:11434/v1"],
       // :443 means TLS, even on a private address.
       ["10.0.0.5:443/v1", "https://10.0.0.5:443/v1"],
       // Public hosts keep https, explicit port or not.
