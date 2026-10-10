@@ -553,21 +553,53 @@ const CLAUDE_DENIED_TOOLS = [
 ];
 /** Mirrors `claude_caps` (ai.rs): lockdown flags the installed claude knows, cached per binary. */
 const claudeCapsCache = new Map();
-function claudeCaps(bin) {
-  // Keyed on the binary's identity (path, size, mtime); 10 s probe; a failed
-  // or empty probe is not cached. Mirrors `claude_caps` (ai.rs).
+async function claudeCaps(bin) {
+  // Keyed on the binary's identity (path, size, mtime). 10 s probe in its own
+  // process group, killed as a whole on timeout and never waited on past it.
+  // A failed or empty probe is remembered for 5 minutes. Mirrors `claude_caps`.
   let id = bin;
   try { const st = statSync(bin); id = `${bin}\0${st.size}\0${st.mtimeMs}`; } catch { /* keep path */ }
-  if (claudeCapsCache.has(id)) return claudeCapsCache.get(id);
-  const r = spawnSync(bin, ["--help"], { encoding: "utf-8", env: aiSpawnEnv("claude"), timeout: 10_000 });
-  const help = r.status === 0 ? String(r.stdout || "") : "";
+  const hit = claudeCapsCache.get(id);
+  if (hit?.caps) return hit.caps;
+  const none = { tools: false, settingSources: false, strictMcp: false };
+  if (hit?.failedAt && Date.now() - hit.failedAt < 5 * 60_000) return none;
+  const help = await new Promise((resolveHelp) => {
+    let out = "";
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; clearTimeout(timer); resolveHelp(v); } };
+    let child;
+    try {
+      child = spawn(bin, ["--help"], {
+        env: aiSpawnEnv("claude"),
+        stdio: ["ignore", "pipe", "ignore"],
+        detached: process.platform !== "win32",
+      });
+    } catch { return finish(""); }
+    const timer = setTimeout(() => {
+      try {
+        if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)]);
+        else process.kill(-child.pid, "SIGKILL");
+      } catch { /* already gone */ }
+      finish("");
+    }, 10_000);
+    child.stdout.on("data", (d) => { out += d; });
+    child.on("error", () => finish(""));
+    child.on("exit", (code) => {
+      // Give the pipe a moment to drain, without waiting on a grandchild.
+      setTimeout(() => finish(code === 0 ? out : ""), 200);
+    });
+  });
+  if (!help.trim()) {
+    claudeCapsCache.set(id, { failedAt: Date.now() });
+    return none;
+  }
   const words = new Set(help.split(/[\s,]+/));
   const caps = {
     tools: words.has("--tools"),
     settingSources: words.has("--setting-sources"),
     strictMcp: words.has("--strict-mcp-config"),
   };
-  if (help.trim()) claudeCapsCache.set(id, caps);
+  claudeCapsCache.set(id, { caps });
   return caps;
 }
 /**
@@ -577,22 +609,35 @@ function claudeCaps(bin) {
  */
 function aiNeutralDir() {
   const home = homedir();
+  const xdg = (process.env.XDG_CACHE_HOME || "").trim();
   const base = process.platform === "darwin" ? join(home, "Library", "Caches")
     : process.platform === "win32" ? (process.env.LOCALAPPDATA || join(home, "AppData", "Local"))
-    : ((process.env.XDG_CACHE_HOME || "").trim() || join(home, ".cache"));
+    : (isAbsolute(xdg) ? xdg : join(home, ".cache"));
   const dir = join(base, "gitwand", "ai-cwd");
   mkdirSync(dir, { recursive: true });
   const st = lstatSync(dir);
   if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`AI working directory ${dir}: is not a plain directory`);
   if (process.platform !== "win32") {
-    chmodSync(dir, 0o700);
-    if (lstatSync(dir).mode & 0o077) throw new Error(`AI working directory ${dir}: is accessible to other users`);
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) {
+      throw new Error(`AI working directory ${dir}: belongs to another user`);
+    }
+    try { chmodSync(dir, 0o700); } catch { /* reported below */ }
+    const mode = lstatSync(dir).mode & 0o777;
+    if (mode & 0o077) console.warn(`[dev-server] ${dir} keeps mode ${mode.toString(8)}; using it anyway`);
   }
   if (!existsSync(join(dir, ".git"))) {
     const g = spawnSync(GIT, ["init", "-q"], { cwd: dir });
-    if (g.status !== 0) throw new Error(`AI working directory ${dir}: cannot initialise`);
+    if (g.status !== 0 && !existsSync(join(dir, ".git"))) {
+      throw new Error(`AI working directory ${dir}: cannot initialise`);
+    }
   }
   return dir;
+}
+/** Mirrors `stderr_looks_like_error` (ai.rs). */
+function stderrLooksLikeError(stderr) {
+  const l = String(stderr || "").toLowerCase();
+  return ["error", "failed", "unauthorized", "forbidden", "denied", "invalid", "quota",
+    "rate limit", "rate-limit", "exceeded", "exception", " 401", " 403", " 429"].some((w) => l.includes(w));
 }
 /** Mirrors `claude_lockdown_args` (ai.rs): no tools, no project settings, no MCP. */
 function claudeLockdownArgs(caps) {
@@ -5875,11 +5920,12 @@ async function handleRequest(req, res) {
         }
         const claudeEffort = validEffort(body.effort);
         if (claudeEffort) claudeArgs.push("--effort", claudeEffort);
-        const claudeCapsNow = claudeCaps(CLAUDE);
+        const claudeCapsNow = await claudeCaps(CLAUDE);
         claudeArgs.push(...claudeLockdownArgs(claudeCapsNow));
         const r = spawnSync(CLAUDE, claudeArgs, {
           // Mirrors `claude_run_dir`: the repo only when its settings are ignored.
-          cwd: claudeCapsNow.settingSources ? (body.cwd || undefined) : aiNeutralDir(),
+          // Every AI CLI runs in the private neutral dir. Mirrors ai_prompt_cmd.
+          cwd: aiNeutralDir(),
           input: fullPrompt.replace(/\0/g, ""),
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
@@ -6110,9 +6156,12 @@ async function handleRequest(req, res) {
         }
         let ocError;
         if (`${ocStderr}${ocStdout}`.includes("You must provide a message")) ocError = STDIN_HINT;
-        else if (ocStderr) ocError = ocStderr;
-        else if (r.status === 0) ocError = STDIN_HINT;
-        else ocError = ocStdout.trim() || "opencode CLI a échoué sans message";
+        else if (r.status !== 0) ocError = ocStderr || ocStdout.trim() || "opencode CLI a échoué sans message";
+        else if (stderrLooksLikeError(ocStderr)) ocError = ocStderr;
+        else {
+          const tail = ocStderr ? ocStderr.split("\n").slice(-5).join("\n") : "";
+          ocError = tail ? `${STDIN_HINT}\n${tail}` : STDIN_HINT;
+        }
         return jsonResponse(req, res, { error: ocError }, 500);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
@@ -6201,7 +6250,7 @@ async function handleRequest(req, res) {
         cpArgs.push("-p", fullPrompt);
         const cpEnv = aiSpawnEnv("copilot");
         const r = spawnSync(COPILOT, cpArgs, {
-          cwd: body.cwd || undefined,
+          cwd: aiNeutralDir(), // never the repository — mirrors ai_prompt_cmd
           env: cpEnv,
           encoding: "utf-8",
           timeout: 5 * 60 * 1000,
@@ -6324,7 +6373,7 @@ async function handleRequest(req, res) {
         }
         agyArgs.push("-p", fullPrompt);
         const r = spawnSync(AGY, agyArgs, {
-          cwd: body.cwd || undefined,
+          cwd: aiNeutralDir(), // never the repository — mirrors ai_prompt_cmd
           env: aiSpawnEnv("antigravity"),
           encoding: "utf-8",
           timeout: 5 * 60 * 1000,
