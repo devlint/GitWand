@@ -192,7 +192,7 @@ describe("rawPrompt provider dispatch", () => {
     const { rawPrompt } = useAIProvider();
     const out = await rawPrompt("sys", "user");
     expect(out).toBe("ok-opencode");
-    expect(opencodeCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "anthropic/claude-x");
+    expect(opencodeCliPrompt).toHaveBeenCalledWith("user", "sys", "anthropic/claude-x");
   });
 
   it("forwards the per-provider model to Codex", async () => {
@@ -201,7 +201,7 @@ describe("rawPrompt provider dispatch", () => {
       aiModelByProvider: { "codex-cli": "gpt-5-codex" },
     });
     await useAIProvider().rawPrompt("sys", "user");
-    expect(codexCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "gpt-5-codex", undefined);
+    expect(codexCliPrompt).toHaveBeenCalledWith("user", "sys", "gpt-5-codex", undefined);
   });
 
   it("forwards the per-provider model to Claude Code", async () => {
@@ -210,7 +210,7 @@ describe("rawPrompt provider dispatch", () => {
       aiModelByProvider: { "claude-code-cli": "opus" },
     });
     await useAIProvider().rawPrompt("sys", "user");
-    expect(claudeCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "text", "opus", undefined);
+    expect(claudeCliPrompt).toHaveBeenCalledWith("user", "sys", "text", "opus", undefined);
   });
 
   it("routes copilot-cli to copilotCliPrompt with the selected model", async () => {
@@ -220,7 +220,7 @@ describe("rawPrompt provider dispatch", () => {
     });
     const out = await useAIProvider().rawPrompt("sys", "user");
     expect(out).toBe("ok-copilot");
-    expect(copilotCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "gpt-5", undefined);
+    expect(copilotCliPrompt).toHaveBeenCalledWith("user", "sys", "gpt-5", undefined);
   });
 
   it("forwards the per-provider effort to Claude Code, Codex and Copilot", async () => {
@@ -229,21 +229,21 @@ describe("rawPrompt provider dispatch", () => {
       aiEffortByProvider: { "claude-code-cli": "max", "codex-cli": "high", "copilot-cli": "low" },
     });
     await useAIProvider().rawPrompt("sys", "user");
-    expect(claudeCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "text", undefined, "max");
+    expect(claudeCliPrompt).toHaveBeenCalledWith("user", "sys", "text", undefined, "max");
 
     setSettings({ aiProvider: "codex-cli", aiEffortByProvider: { "codex-cli": "high" } });
     await useAIProvider().rawPrompt("sys", "user");
-    expect(codexCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, undefined, "high");
+    expect(codexCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "high");
 
     setSettings({ aiProvider: "copilot-cli", aiEffortByProvider: { "copilot-cli": "low" } });
     await useAIProvider().rawPrompt("sys", "user");
-    expect(copilotCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, undefined, "low");
+    expect(copilotCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "low");
   });
 
   it("passes undefined when no model is configured (CLI default)", async () => {
     setSettings({ aiProvider: "opencode-cli", aiModelByProvider: {} });
     await useAIProvider().rawPrompt("s", "u");
-    expect(opencodeCliPrompt).toHaveBeenCalledWith("u", "s", undefined, undefined);
+    expect(opencodeCliPrompt).toHaveBeenCalledWith("u", "s", undefined);
   });
 });
 

@@ -263,7 +263,7 @@ async function callClaudeCodeCli(
   model?: string,
   effort?: string,
 ): Promise<string> {
-  const result = await claudeCliPrompt(userPrompt, systemPrompt, undefined, "text", model, effort);
+  const result = await claudeCliPrompt(userPrompt, systemPrompt, "text", model, effort);
   return result ?? "";
 }
 
@@ -277,7 +277,7 @@ async function callCodexCli(
   model?: string,
   effort?: string,
 ): Promise<string> {
-  const result = await codexCliPrompt(userPrompt, systemPrompt, undefined, model, effort);
+  const result = await codexCliPrompt(userPrompt, systemPrompt, model, effort);
   return result ?? "";
 }
 
@@ -291,7 +291,7 @@ async function callOpencodeCli(
   userPrompt: string,
   model?: string,
 ): Promise<string> {
-  const result = await opencodeCliPrompt(userPrompt, systemPrompt, undefined, model);
+  const result = await opencodeCliPrompt(userPrompt, systemPrompt, model);
   return result ?? "";
 }
 
@@ -305,7 +305,7 @@ async function callCopilotCli(
   model?: string,
   effort?: string,
 ): Promise<string> {
-  const result = await copilotCliPrompt(userPrompt, systemPrompt, undefined, model, effort);
+  const result = await copilotCliPrompt(userPrompt, systemPrompt, model, effort);
   return result ?? "";
 }
 
@@ -318,7 +318,7 @@ async function callAntigravityCli(
   userPrompt: string,
   model?: string,
 ): Promise<string> {
-  const result = await antigravityCliPrompt(userPrompt, systemPrompt, undefined, model);
+  const result = await antigravityCliPrompt(userPrompt, systemPrompt, model);
   return result ?? "";
 }
 

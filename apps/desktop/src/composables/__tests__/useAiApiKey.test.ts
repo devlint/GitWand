@@ -182,9 +182,10 @@ describe("useAiApiKey — permanent migration failures and ordering", () => {
     expect(repairLegacyEndpoint("api.example.com/v1")).toBe("https://api.example.com/v1");
     // localhost.evil.com is not loopback.
     expect(repairLegacyEndpoint("localhost.evil.com/v1")).toBe("https://localhost.evil.com/v1");
+    expect(repairLegacyEndpoint("host.docker.internal.evil.com")).toBe("https://host.docker.internal.evil.com");
     expect(repairLegacyEndpoint("ftp://x")).toBeNull();
     expect(repairLegacyEndpoint("not a url at all")).toBeNull();
-    // Private, link-local, Docker and LAN-name hosts are reached over http.
+    // Loopback, private, link-local and the Docker host are reached over http.
     for (const [raw, want] of [
       ["192.168.1.20:11434", "http://192.168.1.20:11434"],
       ["10.0.0.5/v1", "http://10.0.0.5/v1"],
@@ -192,9 +193,14 @@ describe("useAiApiKey — permanent migration failures and ordering", () => {
       ["169.254.0.9", "http://169.254.0.9"],
       ["0.0.0.0:11434", "http://0.0.0.0:11434"],
       ["host.docker.internal:11434", "http://host.docker.internal:11434"],
-      ["gpu-box.local:8000/v1", "http://gpu-box.local:8000/v1"],
-      ["ollama:11434", "http://ollama:11434"],
       ["[::1]:8080", "http://[::1]:8080"],
+      // Names that only look internal may be HTTPS-only gateways: https.
+      ["gpu-box.local:8000/v1", "https://gpu-box.local:8000/v1"],
+      ["llm.corp.internal/v1", "https://llm.corp.internal/v1"],
+      ["ollama:11434", "https://ollama:11434"],
+      ["ai-proxy:443/v1", "https://ai-proxy:443/v1"],
+      // :443 means TLS, even on a private address.
+      ["10.0.0.5:443/v1", "https://10.0.0.5:443/v1"],
       // Public hosts keep https, explicit port or not.
       ["172.32.0.1", "https://172.32.0.1"],
       ["8.8.8.8:8443", "https://8.8.8.8:8443"],

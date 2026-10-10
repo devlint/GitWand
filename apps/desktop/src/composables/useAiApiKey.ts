@@ -92,11 +92,12 @@ function removeLegacyFromStorage(): void {
 }
 
 /**
- * True for a host that is reached over plain http in practice: loopback,
- * private (RFC 1918), link-local, CGNAT and unspecified IPv4 addresses, IPv6
- * loopback / ULA / link-local, `localhost`, `*.local`, `*.internal`
- * (`host.docker.internal`) and single-label names (a Docker service name
- * such as `ollama`).
+ * True for a host that can only be on this machine or its private network:
+ * loopback, private (RFC 1918), link-local, CGNAT and unspecified IPv4
+ * literals, IPv6 loopback / ULA / link-local literals, `localhost` and
+ * `host.docker.internal`. Names that merely look internal (`*.local`,
+ * `*.internal`, single-label) are not: an HTTPS-only corporate gateway can
+ * live there, and guessing http would send the key to it in clear.
  */
 function isLocalHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[|\]$/g, "");
@@ -107,16 +108,15 @@ function isLocalHost(host: string): boolean {
       || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
   }
   if (h.includes(":")) return h === "::1" || /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
-  return h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local")
-    || h.endsWith(".internal") || !h.includes(".");
+  return h === "localhost" || h === "host.docker.internal";
 }
 
 /**
  * The endpoint a legacy key was used with, made usable for the binding:
  * as is when it is an http(s) URL, with a scheme added when it lacks one
  * (`localhost:8080/v1` — which the old webview `fetch` could never reach
- * anyway): `http://` for a local or private host (`isLocalHost`), `https://`
- * otherwise. Empty means the Anthropic default. Null when nothing sensible
+ * anyway): `http://` for a loopback / private address (`isLocalHost`) on
+ * any port but 443, `https://` otherwise. Empty means the Anthropic default. Null when nothing sensible
  * can be made of it.
  */
 export function repairLegacyEndpoint(raw: unknown): string | null {
@@ -124,13 +124,15 @@ export function repairLegacyEndpoint(raw: unknown): string | null {
   if (!t) return DEFAULT_ENDPOINT;
   if (endpointOrigin(t)) return t;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return null; // another scheme: leave it
-  let host: string;
+  let parsed: URL;
   try {
-    host = new URL(`http://${t}`).hostname;
+    parsed = new URL(`http://${t}`);
   } catch {
     return null;
   }
-  const fixed = (isLocalHost(host) ? "http://" : "https://") + t;
+  // An explicit :443 means TLS whatever the host.
+  const http = isLocalHost(parsed.hostname) && parsed.port !== "443";
+  const fixed = (http ? "http://" : "https://") + t;
   return endpointOrigin(fixed) ? fixed : null;
 }
 

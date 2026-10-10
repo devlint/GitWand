@@ -58,14 +58,14 @@ export async function detectClaudeCli(): Promise<ClaudeCliInfo> {
  * @param systemPrompt Optional system-level instructions (prepended as a
  *                     `# System` section since `claude -p` has no separate
  *                     system channel).
- * @param cwd Optional working directory for the CLI process.
+ * The CLI runs in a private neutral directory chosen by the backend, never
+ * in the repository (its config could run commands): there is no cwd.
  * @param outputFormat "text" (default) or "json".
  * @returns Raw stdout from the CLI.
  */
 export async function claudeCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   outputFormat: "text" | "json" = "text",
   model?: string,
   effort?: string,
@@ -74,7 +74,6 @@ export async function claudeCliPrompt(
     return tauriInvoke<string>("claude_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       outputFormat,
       model,
       effort,
@@ -83,7 +82,7 @@ export async function claudeCliPrompt(
   const res = await devFetch(`${DEV_SERVER}/api/claude-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, outputFormat, model, effort }),
+    body: JSON.stringify({ prompt, systemPrompt, outputFormat, model, effort }),
   });
   if (!res.ok) {
     let msg = `claude CLI error ${res.status}`;
@@ -140,7 +139,6 @@ export async function detectCodexCli(): Promise<CodexCliInfo> {
 export async function codexCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   model?: string,
   effort?: string,
 ): Promise<string> {
@@ -148,7 +146,6 @@ export async function codexCliPrompt(
     return tauriInvoke<string>("codex_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       model,
       effort,
     }, IPC_TIMEOUT.NONE);
@@ -156,7 +153,7 @@ export async function codexCliPrompt(
   const res = await devFetch(`${DEV_SERVER}/api/codex-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model, effort }),
+    body: JSON.stringify({ prompt, systemPrompt, model, effort }),
   });
   if (!res.ok) {
     let msg = `codex CLI error ${res.status}`;
@@ -248,21 +245,19 @@ export async function detectOpencodeCli(): Promise<OpencodeCliInfo> {
 export async function opencodeCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   model?: string,
 ): Promise<string> {
   if (isTauri()) {
     return tauriInvoke<string>("opencode_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       model,
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/opencode-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model }),
+    body: JSON.stringify({ prompt, systemPrompt, model }),
   });
   if (!res.ok) {
     let msg = `opencode CLI error ${res.status}`;
@@ -343,7 +338,6 @@ export async function detectCopilotCli(): Promise<CopilotCliInfo> {
 export async function copilotCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   model?: string,
   effort?: string,
 ): Promise<string> {
@@ -351,7 +345,6 @@ export async function copilotCliPrompt(
     return tauriInvoke<string>("copilot_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       model,
       effort,
     }, IPC_TIMEOUT.NONE);
@@ -359,7 +352,7 @@ export async function copilotCliPrompt(
   const res = await devFetch(`${DEV_SERVER}/api/copilot-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model, effort }),
+    body: JSON.stringify({ prompt, systemPrompt, model, effort }),
   });
   if (!res.ok) {
     let msg = `copilot CLI error ${res.status}`;
@@ -440,21 +433,19 @@ export async function detectAntigravityCli(): Promise<AntigravityCliInfo> {
 export async function antigravityCliPrompt(
   prompt: string,
   systemPrompt?: string,
-  cwd?: string,
   model?: string,
 ): Promise<string> {
   if (isTauri()) {
     return tauriInvoke<string>("antigravity_cli_prompt", {
       prompt,
       systemPrompt,
-      cwd,
       model,
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/antigravity-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model }),
+    body: JSON.stringify({ prompt, systemPrompt, model }),
   });
   if (!res.ok) {
     let msg = `antigravity CLI error ${res.status}`;
