@@ -58,7 +58,7 @@ export async function detectClaudeCli(): Promise<ClaudeCliInfo> {
  * @param systemPrompt Optional system-level instructions (prepended as a
  *                     `# System` section since `claude -p` has no separate
  *                     system channel).
- * The CLI runs in a private neutral directory chosen by the backend, never
+ * The CLI runs in a fresh private directory chosen by the backend, never
  * in the repository (its config could run commands): there is no cwd.
  * @param outputFormat "text" (default) or "json".
  * @returns Raw stdout from the CLI.

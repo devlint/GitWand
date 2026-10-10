@@ -95,7 +95,7 @@ function removeLegacyFromStorage(): void {
  * True for a host that can only be on this machine or its private network:
  * loopback, private (RFC 1918), link-local, CGNAT and unspecified IPv4
  * literals, IPv6 loopback / ULA / link-local literals, `localhost` and
- * `host.docker.internal`. Names that merely look internal (`*.local`,
+ * `*.localhost` (RFC 6761: always loopback), and `host.docker.internal`. Names that merely look internal (`*.local`,
  * `*.internal`, single-label) are not: an HTTPS-only corporate gateway can
  * live there, and guessing http would send the key to it in clear.
  */
@@ -108,7 +108,8 @@ function isLocalHost(host: string): boolean {
       || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
   }
   if (h.includes(":")) return h === "::1" || /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
-  return h === "localhost" || h === "host.docker.internal";
+  // `*.localhost` always resolves to loopback (RFC 6761).
+  return h === "localhost" || h.endsWith(".localhost") || h === "host.docker.internal";
 }
 
 /**
