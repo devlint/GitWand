@@ -75,11 +75,13 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
     <!-- Header -->
     <div class="help-header">
       <div class="help-header__left">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-          <circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.4" />
-          <path d="M10 13.5v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-          <path d="M10 6.5c1.1 0 2 .9 2 2s-.9 1.5-2 1.5V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <span class="bm-title-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+            <circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.4" />
+            <path d="M10 13.5v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            <path d="M10 6.5c1.1 0 2 .9 2 2s-.9 1.5-2 1.5V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>
         <span class="help-header__title">{{ t('help.title') }}</span>
       </div>
       <button
@@ -308,8 +310,8 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 }
 
 .help-header__title {
-  font-size: var(--font-size-md, 14px);
-  font-weight: var(--font-weight-semibold, 600);
+  font-size: var(--font-size-2xl, 20px);
+  font-weight: var(--font-weight-bold, 700);
   color: var(--color-text);
 }
 
