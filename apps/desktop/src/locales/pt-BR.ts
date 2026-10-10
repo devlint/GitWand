@@ -511,6 +511,8 @@ const ptBR: Locale = {
     previewMerge: "Pré-visualizar merge",
     topContributor: "Mais commits nesta branch: {0} ({1})",
     aiHint: "Gera um nome de branch com IA, com base nas suas alterações em andamento.",
+    createWithAi: "Criar com IA",
+    createWithAiHint: "Cria uma nova branch e muda para ela, com nome gerado pela IA a partir das suas alterações não commitadas.",
     switchRefusedDirty: "Troca recusada: há alterações não commitadas.",
     switchConfirmDirty: "Alterações não commitadas serão perdidas. Continuar mesmo assim?",
     switchConfirmDirtyTitle: "Descartar alterações?",

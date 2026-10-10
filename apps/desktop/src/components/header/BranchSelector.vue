@@ -186,14 +186,48 @@ const {
   lastError: branchNameAiError,
 } = useBranchName();
 
-async function handleBranchNameAI() {
-  try {
-    const suggestion = await suggestBranchName(props.cwd, newBranchName.value);
-    if (suggestion) newBranchName.value = suggestion;
-  } catch {
-    // Surfaced via branchNameAiError ref in the template
-  }
+// ─── Create with AI (fire-and-forget) ────────────────────────────
+// The modal closes right away; the trigger chip shows a pulsing
+// "Generating" placeholder until the new branch becomes current.
+const aiCreatePending = ref(false);
+let aiCreateFallback: ReturnType<typeof setTimeout> | null = null;
+
+function endAiCreate() {
+  aiCreatePending.value = false;
+  if (aiCreateFallback) clearTimeout(aiCreateFallback);
+  aiCreateFallback = null;
 }
+
+// The placeholder holds until the header actually shows the new branch, so
+// the old name never flashes back between the AI reply and the refresh.
+watch(() => props.branchDisplay, () => {
+  if (aiCreatePending.value && !isGeneratingBranchName.value) endAiCreate();
+});
+
+async function handleBranchCreateAI() {
+  if (aiCreatePending.value) return;
+  const hint = newBranchName.value;
+  closePopover();
+  aiCreatePending.value = true;
+  let name: string;
+  try {
+    name = await suggestBranchName(props.cwd, hint);
+  } catch {
+    // Reopen the form with the hint kept; the error renders inside it.
+    endAiCreate();
+    newBranchName.value = hint;
+    showCreate.value = true;
+    return;
+  }
+  emit("createBranch", name);
+  // Creation can stop short (dirty-tree prompt, git error): don't leave the
+  // placeholder stuck if the branch never becomes current.
+  aiCreateFallback = setTimeout(endAiCreate, 4000);
+}
+
+onUnmounted(() => {
+  if (aiCreateFallback) clearTimeout(aiCreateFallback);
+});
 
 function togglePopover() {
   showPopover.value = !showPopover.value;
@@ -222,6 +256,7 @@ function closePopover() {
 
 function openCreate() {
   newBranchName.value = "";
+  branchNameAiError.value = null;
   showCreate.value = true;
 }
 
@@ -584,17 +619,17 @@ onUnmounted(() => {
       When stats are absent, the chip collapses to a single line via
       the `branch-trigger--with-stats` modifier being dropped.
     -->
-    <div class="branch-trigger-group">
+    <div class="branch-trigger-group" :class="{ 'branch-trigger-group--ai': ai.isAvailable.value }">
     <button
       class="branch-trigger"
       :class="{
-        'branch-trigger--loading': isSwitchingBranch,
+        'branch-trigger--loading': isSwitchingBranch || aiCreatePending,
         'branch-trigger--with-stats': hasRepoStats,
       }"
       :title="branchDisplay"
       @click="togglePopover"
     >
-      <svg v-if="isSwitchingBranch" class="btn-spinner branch-trigger__icon" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <svg v-if="isSwitchingBranch || aiCreatePending" class="btn-spinner branch-trigger__icon" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
         <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3" />
         <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" />
       </svg>
@@ -613,7 +648,10 @@ onUnmounted(() => {
             <circle cx="11.5" cy="8.5" r="2.5" />
             <rect x="7.5" y="8" width="1" height="6" />
           </svg>
-          <span class="branch-trigger__name mono">{{ branchDisplay }}</span>
+          <Transition name="bs-name-fade" mode="out-in">
+            <span v-if="aiCreatePending" key="ai" class="branch-trigger__name branch-trigger__name--generating mono">{{ t('common.generating') }}…</span>
+            <span v-else key="name" class="branch-trigger__name mono">{{ branchDisplay }}</span>
+          </Transition>
           <span
             v-if="hasRepoStats"
             class="branch-trigger__changes-dot"
@@ -646,10 +684,22 @@ onUnmounted(() => {
       </svg>
     </button>
       <!-- Fused "new branch" button, sits flush to the right of the trigger -->
-      <button class="branch-add-btn" v-tooltip="t('branches.create')" :aria-label="t('branches.create')" @click="openCreate">
+      <button class="branch-add-btn" :disabled="aiCreatePending" v-tooltip="t('branches.create')" :aria-label="t('branches.create')" @click="openCreate">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
         </svg>
+      </button>
+      <!-- Create with AI — same segment as the new-branch modal's split -->
+      <button
+        v-if="ai.isAvailable.value"
+        type="button"
+        class="bs-create-ai"
+        :disabled="aiCreatePending || isGeneratingBranchName"
+        :aria-label="t('branches.createWithAi')"
+        v-tooltip="t('branches.createWithAiHint')"
+        @click="handleBranchCreateAI"
+      >
+        <span class="bs-create-ai__label">{{ t('common.ai') }}</span>
       </button>
     </div>
 
@@ -962,18 +1012,29 @@ onUnmounted(() => {
     >
       <BranchNameField
         v-model="newBranchName"
-        :ai-available="ai.isAvailable.value"
-        :suggesting="isGeneratingBranchName"
         :error="branchNameAiError ?? ''"
-        @suggest="handleBranchNameAI"
         @submit="handleBranchCreate"
       />
 
       <template #footer>
         <button class="bm-btn bm-btn--ghost" @click="cancelCreate">{{ t('common.cancel') }}</button>
-        <button class="bm-btn bm-btn--primary" :disabled="!newBranchName.trim()" @click="handleBranchCreate">
-          {{ t('common.create') }}
-        </button>
+        <!-- Split: plain create on the left, create-with-AI segment on the right -->
+        <div class="bs-create-split" :class="{ 'bs-create-split--ai': ai.isAvailable.value }">
+          <button class="bm-btn bm-btn--primary" :disabled="!newBranchName.trim()" @click="handleBranchCreate">
+            {{ t('common.create') }}
+          </button>
+          <button
+            v-if="ai.isAvailable.value"
+            type="button"
+            class="bs-create-ai"
+            :disabled="isGeneratingBranchName"
+            :aria-label="t('branches.createWithAi')"
+            v-tooltip="t('branches.createWithAi')"
+            @click="handleBranchCreateAI"
+          >
+            <span class="bs-create-ai__label">{{ t('common.ai') }}</span>
+          </button>
+        </div>
       </template>
     </BaseModal>
   </div>
@@ -1006,6 +1067,9 @@ onUnmounted(() => {
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   cursor: pointer;
   transition: background var(--transition-base), color var(--transition-base);
+}
+.branch-trigger-group--ai .branch-add-btn {
+  border-radius: 0;
 }
 .branch-add-btn:hover {
   background: var(--color-border);
@@ -1082,6 +1146,74 @@ onUnmounted(() => {
   white-space: nowrap;
   min-width: 0;
   max-width: 240px;
+}
+
+/* "Create with AI" placeholder: breathes while the name is generated. */
+.branch-trigger__name--generating {
+  color: var(--color-ai);
+  animation: bs-generating-pulse 1.4s ease-in-out infinite;
+}
+@keyframes bs-generating-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.bs-name-fade-enter-active,
+.bs-name-fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.bs-name-fade-enter-from,
+.bs-name-fade-leave-to {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .branch-trigger__name--generating { animation: none; }
+}
+
+/* New-branch modal: [Create | AI] split. Same AI segment skin as the commit
+   summary's AI button (.commit-ai-btn in RepoSidebar). */
+.bs-create-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.bs-create-split--ai > .bm-btn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.bs-create-ai {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-3);
+  margin-left: -1px;
+  background:
+    linear-gradient(var(--color-bg-secondary), var(--color-bg-secondary)) padding-box,
+    linear-gradient(135deg, var(--color-ai) 0%, #c084fc 50%, var(--color-ai) 100%) border-box;
+  color: var(--color-text);
+  border: 1px solid transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  cursor: pointer;
+  transition: background var(--transition-hover), color var(--transition-hover);
+}
+.bs-create-ai:hover:not(:disabled) {
+  color: var(--color-ai-text);
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+.bs-create-ai:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.bs-create-ai__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
+.branch-add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .branch-trigger__changes-dot {

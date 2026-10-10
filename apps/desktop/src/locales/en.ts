@@ -522,6 +522,8 @@ const en = {
     previewMerge: "Preview merge",
     topContributor: "Most commits on this branch: {0} ({1})",
     aiHint: "Generate a branch name with AI, based on your WIP changes.",
+    createWithAi: "Create with AI",
+    createWithAiHint: "Create and switch to a new branch, named by AI from your uncommitted changes.",
     switchRefusedDirty: "Switch refused: uncommitted changes are present.",
     switchConfirmDirty: "Uncommitted changes will be lost. Continue anyway?",
     switchConfirmDirtyTitle: "Discard changes?",

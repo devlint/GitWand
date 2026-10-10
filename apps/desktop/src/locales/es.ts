@@ -510,6 +510,8 @@ const es: Locale = {
     previewMerge: "Previsualizar merge",
     topContributor: "Más commits en esta rama: {0} ({1})",
     aiHint: "Genera un nombre de rama con IA, según tus cambios en curso.",
+    createWithAi: "Crear con IA",
+    createWithAiHint: "Crea una rama nueva y cambia a ella; la IA la nombra a partir de tus cambios sin confirmar.",
     switchRefusedDirty: "Cambio rechazado: hay cambios sin confirmar.",
     switchConfirmDirty: "Los cambios sin confirmar se perderán. ¿Continuar de todos modos?",
     switchConfirmDirtyTitle: "¿Descartar cambios?",

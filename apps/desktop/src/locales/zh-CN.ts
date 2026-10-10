@@ -510,6 +510,8 @@ const zhCN: Locale = {
     previewMerge: "预览合并",
     topContributor: "此分支提交最多：{0}（{1} 次）",
     aiHint: "根据当前工作区改动用 AI 生成分支名称。",
+    createWithAi: "用 AI 创建",
+    createWithAiHint: "创建并切换到新分支，由 AI 根据未提交的改动命名。",
     switchRefusedDirty: "切换被拒绝：存在未提交的更改。",
     switchConfirmDirty: "未提交的更改将会丢失。仍要继续吗？",
     switchConfirmDirtyTitle: "放弃更改？",
