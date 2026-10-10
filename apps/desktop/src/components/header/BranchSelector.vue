@@ -186,13 +186,35 @@ const {
   lastError: branchNameAiError,
 } = useBranchName();
 
-async function handleBranchNameAI() {
-  try {
-    const suggestion = await suggestBranchName(props.cwd, newBranchName.value);
-    if (suggestion) newBranchName.value = suggestion;
-  } catch {
-    // Surfaced via branchNameAiError ref in the template
+// ─── Create with AI (fire-and-forget) ────────────────────────────
+// The modal closes right away; the trigger chip shows a pulsing
+// "Generating" placeholder until the new branch is created and checked out.
+const aiCreatePending = ref(false);
+
+// createBranch holds isSwitchingBranch through its refresh, so the header
+// already shows the new branch by the time the flag drops.
+watch(() => props.isSwitchingBranch, (busy) => {
+  if (!busy && !isGeneratingBranchName.value) aiCreatePending.value = false;
+});
+
+async function handleBranchCreateAI() {
+  if (aiCreatePending.value) return;
+  const hint = newBranchName.value;
+  closePopover();
+  aiCreatePending.value = true;
+  const name = await suggestBranchName(props.cwd, hint).catch(() => null);
+  if (!name) {
+    // Reopen the form with the hint kept; the error renders inside it.
+    aiCreatePending.value = false;
+    newBranchName.value = hint;
+    showCreate.value = true;
+    return;
   }
+  emit("createBranch", name);
+  // createBranch raises isSwitchingBranch before its first await. If it didn't
+  // (dirty-tree prompt, refusal), there's nothing to wait for.
+  await nextTick();
+  if (!props.isSwitchingBranch) aiCreatePending.value = false;
 }
 
 function togglePopover() {
@@ -222,6 +244,7 @@ function closePopover() {
 
 function openCreate() {
   newBranchName.value = "";
+  branchNameAiError.value = null;
   showCreate.value = true;
 }
 
@@ -565,13 +588,50 @@ function onDocClick(e: MouseEvent) {
   }
 }
 
+// ─── Animated trigger width ──────────────────────────────────────
+// A width that follows its content can't be CSS-transitioned (auto → auto),
+// so the trigger always carries an explicit px width: whenever its content
+// changes (branch name, "Generating…" placeholder, stats line), measure the
+// natural width and move the explicit width there — the CSS transition
+// animates the change. A MutationObserver (not a watch) catches the swap
+// the out-in name <Transition> performs only after its leave finishes.
+const triggerEl = ref<HTMLElement | null>(null);
+let triggerObserver: MutationObserver | null = null;
+
+function syncTriggerWidth(animate: boolean) {
+  const el = triggerEl.value;
+  if (!el) return;
+  const from = el.getBoundingClientRect().width;
+  el.style.transition = "none";
+  el.style.width = "";
+  const to = el.getBoundingClientRect().width;
+  // Same width (e.g. "3 modified" → "4 modified"): skip the reflow below.
+  if (animate && Math.abs(to - from) < 0.5) {
+    el.style.width = `${from}px`;
+    el.style.transition = "";
+    return;
+  }
+  el.style.width = `${animate ? from : to}px`;
+  void el.offsetWidth; // commit the start width before re-enabling the transition
+  el.style.transition = "";
+  if (animate) el.style.width = `${to}px`;
+}
+
 onMounted(() => {
   document.addEventListener("click", onDocClick, true);
   window.addEventListener("resize", onWindowResize);
+  syncTriggerWidth(false);
+  // The first measure can predate the webfont; re-measure once it's in.
+  void document.fonts?.ready.then(() => syncTriggerWidth(false));
+  if (triggerEl.value) {
+    triggerObserver = new MutationObserver(() => syncTriggerWidth(true));
+    triggerObserver.observe(triggerEl.value, { childList: true, characterData: true, subtree: true });
+  }
 });
 onUnmounted(() => {
   document.removeEventListener("click", onDocClick, true);
   window.removeEventListener("resize", onWindowResize);
+  triggerObserver?.disconnect();
 });
 </script>
 
@@ -586,15 +646,16 @@ onUnmounted(() => {
     -->
     <div class="branch-trigger-group">
     <button
+      ref="triggerEl"
       class="branch-trigger"
       :class="{
-        'branch-trigger--loading': isSwitchingBranch,
+        'branch-trigger--loading': isSwitchingBranch || aiCreatePending,
         'branch-trigger--with-stats': hasRepoStats,
       }"
       :title="branchDisplay"
       @click="togglePopover"
     >
-      <svg v-if="isSwitchingBranch" class="btn-spinner branch-trigger__icon" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <svg v-if="isSwitchingBranch || aiCreatePending" class="btn-spinner branch-trigger__icon" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
         <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3" />
         <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" />
       </svg>
@@ -613,7 +674,10 @@ onUnmounted(() => {
             <circle cx="11.5" cy="8.5" r="2.5" />
             <rect x="7.5" y="8" width="1" height="6" />
           </svg>
-          <span class="branch-trigger__name mono">{{ branchDisplay }}</span>
+          <Transition name="bs-name-fade" mode="out-in">
+            <span v-if="aiCreatePending" key="ai" class="branch-trigger__name branch-trigger__name--generating mono ai-loading">{{ t('common.generating') }}…</span>
+            <span v-else key="name" class="branch-trigger__name mono">{{ branchDisplay }}</span>
+          </Transition>
           <span
             v-if="hasRepoStats"
             class="branch-trigger__changes-dot"
@@ -646,10 +710,22 @@ onUnmounted(() => {
       </svg>
     </button>
       <!-- Fused "new branch" button, sits flush to the right of the trigger -->
-      <button class="branch-add-btn" v-tooltip="t('branches.create')" :aria-label="t('branches.create')" @click="openCreate">
+      <button class="branch-add-btn" :disabled="aiCreatePending" v-tooltip="t('branches.create')" :aria-label="t('branches.create')" @click="openCreate">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
         </svg>
+      </button>
+      <!-- Create with AI — same segment as the new-branch modal's split -->
+      <button
+        v-if="ai.isAvailable.value"
+        type="button"
+        class="bs-create-ai"
+        :disabled="aiCreatePending"
+        :aria-label="t('branches.createWithAi')"
+        v-tooltip="t('branches.createWithAiHint')"
+        @click="handleBranchCreateAI"
+      >
+        {{ t('common.ai') }}
       </button>
     </div>
 
@@ -962,18 +1038,28 @@ onUnmounted(() => {
     >
       <BranchNameField
         v-model="newBranchName"
-        :ai-available="ai.isAvailable.value"
-        :suggesting="isGeneratingBranchName"
         :error="branchNameAiError ?? ''"
-        @suggest="handleBranchNameAI"
         @submit="handleBranchCreate"
       />
 
       <template #footer>
         <button class="bm-btn bm-btn--ghost" @click="cancelCreate">{{ t('common.cancel') }}</button>
-        <button class="bm-btn bm-btn--primary" :disabled="!newBranchName.trim()" @click="handleBranchCreate">
-          {{ t('common.create') }}
-        </button>
+        <!-- Split: plain create on the left, create-with-AI segment on the right -->
+        <div class="bs-create-split">
+          <button class="bm-btn bm-btn--primary" :disabled="!newBranchName.trim()" @click="handleBranchCreate">
+            {{ t('common.create') }}
+          </button>
+          <button
+            v-if="ai.isAvailable.value"
+            type="button"
+            class="bs-create-ai"
+            :aria-label="t('branches.createWithAi')"
+            v-tooltip="t('branches.createWithAi')"
+            @click="handleBranchCreateAI"
+          >
+            {{ t('common.ai') }}
+          </button>
+        </div>
       </template>
     </BaseModal>
   </div>
@@ -1007,6 +1093,10 @@ onUnmounted(() => {
   cursor: pointer;
   transition: background var(--transition-base), color var(--transition-base);
 }
+/* Squared off when the AI segment follows it. */
+.branch-add-btn:not(:last-child) {
+  border-radius: 0;
+}
 .branch-add-btn:hover {
   background: var(--color-border);
   color: var(--color-text);
@@ -1022,7 +1112,7 @@ onUnmounted(() => {
   border-radius: var(--radius-md);
   color: var(--color-text);
   background: var(--color-bg-tertiary);
-  transition: background var(--transition-base), color var(--transition-base);
+  transition: background var(--transition-base), color var(--transition-base), width 0.5s ease;
   cursor: pointer;
   max-width: 320px;
   min-width: 0;
@@ -1084,6 +1174,74 @@ onUnmounted(() => {
   max-width: 240px;
 }
 
+/* "Create with AI" placeholder; the pulse comes from the global .ai-loading. */
+.branch-trigger__name--generating {
+  color: var(--color-ai);
+}
+.bs-name-fade-enter-active,
+.bs-name-fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.bs-name-fade-enter-from,
+.bs-name-fade-leave-to {
+  opacity: 0;
+}
+
+/* AI segment, shared by the header ([branch][+][AI]) and the new-branch
+   modal's [Create | AI] split: the trigger's gray fill, a border that starts
+   in that gray on the left and blends into the AI gradient, and a soft
+   divider, so it merges with the plain part next to it. */
+.bs-create-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.bs-create-split > .bm-btn:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.bs-create-ai {
+  /* Fill color; the border gradient starts from it too. Variants only set this. */
+  --bs-ai-fill: var(--color-bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-3);
+  background:
+    linear-gradient(var(--bs-ai-fill), var(--bs-ai-fill)) padding-box,
+    linear-gradient(90deg, var(--bs-ai-fill) 0%, var(--color-ai) 55%, #c084fc 100%) border-box;
+  color: var(--color-text);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  border: 1px solid transparent;
+  /* Divider like the "+" button's left edge, but lighter: the button gray
+     with 30% of that edge's --color-bg mixed in. Hover included. */
+  border-left: 1px solid color-mix(in srgb, var(--color-bg) 30%, var(--color-bg-tertiary));
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  cursor: pointer;
+  transition: background var(--transition-hover), color var(--transition-hover);
+}
+/* In the modal: dark like the footer's Cancel button (transparent over
+   --color-bg), with the border fading in from that same dark. */
+.bs-create-split > .bs-create-ai {
+  --bs-ai-fill: var(--color-bg);
+  padding: 0 var(--space-4);
+}
+/* Hover like the trigger and "+": lighter gray fill, gradient border kept. */
+.bs-create-ai:hover:not(:disabled) {
+  --bs-ai-fill: var(--color-border);
+}
+.bs-create-ai:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.branch-add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .branch-trigger__changes-dot {
   width: 8px;
   height: 8px;
@@ -1132,6 +1290,8 @@ onUnmounted(() => {
   opacity: 0.5;
   flex-shrink: 0;
   align-self: center;
+  /* Stays on the right edge while the width animates past the content. */
+  margin-left: auto;
 }
 .branch-chevron--open { transform: rotate(180deg); }
 

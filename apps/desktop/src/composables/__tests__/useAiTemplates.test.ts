@@ -21,12 +21,13 @@ import {
 } from "../useAiTemplates";
 import {
   applyLang,
+  applyLangStrict,
   BUILTIN_PRESETS,
   DEFAULT_TEMPLATE_ID,
   DEFAULT_TEMPLATE_PROMPTS,
   LEGACY_RELEASE_NOTES_RULES_HEADER,
 } from "../aiTemplateDefaults";
-import { loadSettings, saveSettings } from "../useSettings";
+import { loadSettings, saveSettings, useSettings } from "../useSettings";
 
 const CWD = "/repos/alpha";
 
@@ -218,5 +219,33 @@ describe("repo path keys", () => {
     const after = loadSettings();
     expect(Object.keys(after.aiTemplateLangByRepo)).toEqual(["/repos/gamma"]);
     expect(getActiveTemplateId("pr", "/repos/gamma/")).toBeNull();
+  });
+});
+
+describe("per-repo picks survive a save of the shared settings ref", () => {
+  // The AI button menu writes the language and template straight to
+  // localStorage; components that persist the shared `useSettings().settings`
+  // ref (dock, terminal, file explorer…) must not write a stale copy over them.
+  it("keeps the language and template picked from the menu", () => {
+    const { settings, saveSettings: saveShared } = useSettings();
+    setTemplateLang("commit", CWD, "es");
+    setActiveTemplate("commit", CWD, "__builtin_detailed");
+
+    settings.value.dockIconsOnly = !settings.value.dockIconsOnly;
+    saveShared(settings.value);
+
+    expect(getTemplateLang("commit", CWD)).toBe("es");
+    expect(getActiveTemplateId("commit", CWD)).toBe("__builtin_detailed");
+  });
+});
+
+describe("applyLangStrict", () => {
+  it("fills the ${lang} placeholder like applyLang", () => {
+    expect(applyLangStrict("Write in ${lang}.", "Spanish")).toBe("Write in Spanish.");
+  });
+
+  it("appends the language to a template written without the placeholder", () => {
+    expect(applyLangStrict("Write a commit message.\n", "Spanish"))
+      .toBe("Write a commit message.\n\nWrite the output in Spanish.");
   });
 });

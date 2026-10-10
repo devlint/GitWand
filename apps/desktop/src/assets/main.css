@@ -24,6 +24,11 @@
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
 
+  /* Detail line under an item's name (profile / AI template lists and menus):
+     between muted and full text. Resolved per theme, since <html> carries
+     both :root and [data-theme]. */
+  --color-text-meta: color-mix(in srgb, var(--color-text) 35%, var(--color-text-muted));
+
   --line-height-tight: 1.2;
   --line-height-snug: 1.35;
   --line-height-normal: 1.5;
@@ -486,6 +491,60 @@ button:focus-visible,
 .btn.btn--ai.btn--ai-solid:hover:not(:disabled) {
   filter: brightness(1.08);
   color: var(--color-ai-text);
+}
+
+/*
+ * AI split button — one gradient frame shared by its segments (main button,
+ * "ctx", template chevron). The frame is the wrapper's background; the 1px
+ * padding and the 1px gaps between segments draw the border. Segments keep
+ * their own .btn--ai look minus the border: drawing a gradient border per
+ * segment restarted the gradient at each seam and left the narrow middle
+ * segment looking borderless.
+ *
+ * Usage: <div class="ai-split"><button class="btn btn--ai">…</button>…</div>
+ * Hosts size every segment with one rule (`.host > :deep(.btn.btn--ai)`:
+ * height, vertical padding, font), 2px shorter than a lone button since the
+ * frame adds 1px above and below, then set each segment's horizontal padding.
+ * Never borders or radii.
+ */
+.ai-split {
+  display: inline-flex;
+  gap: 1px;
+  padding: 1px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, var(--color-ai) 0%, #c084fc 50%, var(--color-ai) 100%);
+  box-shadow: 0 4px 12px -4px var(--color-ai-soft);
+}
+.ai-split > .btn.btn--ai {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--color-bg-secondary);
+}
+.ai-split > .btn.btn--ai:first-child {
+  border-radius: calc(var(--radius-sm) - 1px) 0 0 calc(var(--radius-sm) - 1px);
+}
+.ai-split > .btn.btn--ai:last-child {
+  border-radius: 0 calc(var(--radius-sm) - 1px) calc(var(--radius-sm) - 1px) 0;
+}
+.ai-split > .btn.btn--ai:hover:not(:disabled) {
+  color: var(--color-ai-text);
+  transform: none;
+  box-shadow: none;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
+}
+/* The "ctx" segment (AiContextButton): narrow, icon only. */
+.ai-split > .aic-btn {
+  padding-left: 7px;
+  padding-right: 7px;
+}
+/* Dim the content, not the segment: segment opacity would let the frame's
+   gradient show through it. */
+.ai-split > .btn.btn--ai:disabled {
+  opacity: 1;
+}
+.ai-split > .btn.btn--ai:disabled > * {
+  opacity: 0.45;
 }
 
 /*

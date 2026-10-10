@@ -1490,6 +1490,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
   async function createBranch(name: string): Promise<boolean> {
     if (!folderPath.value) return false;
+    // Same busy flag as switchBranch: creating checks the new branch out.
+    isSwitchingBranch.value = true;
     try {
       await gitCreateBranch(folderPath.value, name, true);
       // Force: the new branch ref sits on the current HEAD, so the log's
@@ -1500,6 +1502,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     } catch (err: any) {
       error.value = `create branch: ${err?.message ?? err}`;
       return false;
+    } finally {
+      isSwitchingBranch.value = false;
     }
   }
 

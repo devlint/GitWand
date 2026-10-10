@@ -33,6 +33,8 @@ import { usePrDescription } from "../composables/usePrDescription";
 import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 import AiSparkle from "./AiSparkle.vue";
 import AiTemplateMenu from "./AiTemplateMenu.vue";
+import AiContextButton from "./AiContextButton.vue";
+import { getAiExtraContext } from "../composables/useAiExtraContext";
 
 const { t } = useI18n();
 
@@ -142,12 +144,20 @@ const editorBody = computed({
 });
 const editorHtml = computed(() => renderMarkdown(editorBody.value, mdOpts.value));
 
+/** Extra-context scope of the "ctx" segment: one context per PR. */
+function aiCtxScope(prNumber: number): string {
+  return `pr-update:${prNumber}`;
+}
+
 async function updateDescriptionWithAI() {
   const detail = p.prDetail.value;
   if (!detail) return;
   // Same per-repo output language as PR creation.
   try {
-    await prDescription.update(p.cwd.value, detail, { locale: getTemplateLang("pr", p.cwd.value) });
+    await prDescription.update(p.cwd.value, detail, {
+      locale: getTemplateLang("pr", p.cwd.value),
+      extraContext: getAiExtraContext(aiCtxScope(detail.number), p.cwd.value),
+    });
     descriptionTab.value = "formatted";
   } catch {
     // updateError is set by the composable and rendered below.
@@ -1021,12 +1031,12 @@ function submitRequestReviewers() {
                 </svg>
                 </button>
               </span>
-              <div v-if="canUpdateDescription && !bodyEditor" class="pdv-desc-ai-split">
+              <div v-if="canUpdateDescription && !bodyEditor" class="pdv-desc-ai-split ai-split">
                 <button
                   type="button"
-                  class="btn btn--ai pdv-desc-ai pdv-desc-ai-main"
+                  class="btn btn--ai pdv-desc-ai"
                   :disabled="isAiUpdating"
-                  :title="t('pr.detail.aiUpdateHint')"
+                  v-tooltip="t('pr.detail.aiUpdateHint')"
                   @click="updateDescriptionWithAI"
                 >
                   <span v-if="isAiUpdating" class="pdv-desc-ai-label ai-loading">
@@ -1039,6 +1049,12 @@ function submitRequestReviewers() {
                     <span v-if="activePrTemplate" class="pdv-desc-ai-tpl">· {{ activePrTemplate.name }}</span>
                   </span>
                 </button>
+                <AiContextButton
+                  :scope="aiCtxScope(p.prDetail.value.number)"
+                  :cwd="p.cwd.value"
+                  :disabled="isAiUpdating"
+                  button-class="btn btn--ai"
+                />
                 <AiTemplateMenu
                   kind="pr"
                   :cwd="p.cwd.value"
@@ -2505,45 +2521,32 @@ function submitRequestReviewers() {
   overflow: hidden;
 }
 
-/* AI description update */
-/* Same compact, square-cornered split button as the PR create form's AI
-   button. The chevron and its template menu live in AiTemplateMenu, styled
-   from here via :deep(). */
+/* AI description update — split button: frame, seams, radii and the ctx
+   segment come from .ai-split in main.css. One rule sizes every segment,
+   including the ctx (AiContextButton) and chevron (AiTemplateMenu) ones. */
 .pdv-desc-ai-split {
-  display: inline-flex;
   margin-right: auto;
 }
-.btn.btn--ai.pdv-desc-ai {
-  min-height: 26px;
-  /* Narrower left side: the sparkle glyph carries its own inset. */
-  padding: 4px 12px 4px 8px;
+.pdv-desc-ai-split > :deep(.btn.btn--ai) {
+  min-height: 24px;
+  padding-top: 3px;
+  padding-bottom: 3px;
   font-size: var(--font-size-sm);
-  border-radius: var(--radius-sm);
   color: var(--color-text);
+}
+.btn.btn--ai.pdv-desc-ai {
+  /* Narrower left side: the sparkle glyph carries its own inset. */
+  padding-left: 8px;
+  padding-right: 12px;
 }
 .pdv-desc-ai-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.btn.btn--ai.pdv-desc-ai-main {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
 .pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-chevron) {
-  min-height: 26px;
-  padding: 4px 8px;
-  margin-left: -1px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-}
-.pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-chevron:hover:not(:disabled)) {
-  color: var(--color-ai-text);
-  transform: none;
-  background:
-    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
-    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .pdv-desc-ai-tpl {
   max-width: 140px;
@@ -2551,13 +2554,6 @@ function submitRequestReviewers() {
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.7;
-}
-.btn.btn--ai.pdv-desc-ai:hover:not(:disabled) {
-  color: var(--color-ai-text);
-  transform: none;
-  background:
-    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
-    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
 }
 .pdv-desc-body--draft {
   border-color: var(--color-accent);

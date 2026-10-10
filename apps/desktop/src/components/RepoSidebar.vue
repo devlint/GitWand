@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
-import { TOGGLE_GIT_TREE_KEY, COMMIT_MESSAGE_SINK_KEY } from "../composables/branchPickerBridge";
+import { TOGGLE_GIT_TREE_KEY, COMMIT_MESSAGE_SINK_KEY, OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
 import { gitRemoteInfo, getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
 import PrListSidebar from "./PrListSidebar.vue";
@@ -488,7 +488,7 @@ const openRepoLabel = computed<string>(() => {
 
 // ─── AI commit message generation ─────────────────────────
 const ai = useAIProvider();
-const { isGenerating, lastError: aiError, generate: generateCommitMsg, transform: transformCommitMsg } = useCommitMessage();
+const { isGenerating, lastError: aiError, generate: generateCommitMsg, translate: translateCommitMsg } = useCommitMessage();
 // ─── AI template (commit kind) ────────────────────────────
 // Picked from the AI chevron menu (AiTemplateMenu); applied at generation.
 const { activePreset } = useAiPromptPresets(() => props.cwd);
@@ -497,8 +497,54 @@ const { activePreset } = useAiPromptPresets(() => props.cwd);
 
 const { identities, activeIdentity, repoOverrideId, globalDefault, setRepoOverride } = useIdentity(() => props.cwd);
 const identityMenuOpen = ref(false);
+const identityBtn = ref<HTMLButtonElement | null>(null);
+/** Fixed position of the teleported menu, under the button's right edge. */
+const identityMenuPos = ref({ top: 0, right: 0 });
 
 function closeIdentityMenu() { identityMenuOpen.value = false; }
+
+/**
+ * The menu is teleported to <body> with fixed positioning: inside the sidebar
+ * it was clipped by the scrolling commit rail and drawn under the file list.
+ */
+function toggleIdentityMenu() {
+  if (identityMenuOpen.value) return closeIdentityMenu();
+  const rect = identityBtn.value?.getBoundingClientRect();
+  if (!rect) return;
+  identityMenuPos.value = { top: rect.bottom + 4, right: window.innerWidth - rect.right };
+  identityMenuOpen.value = true;
+}
+
+/** Fixed-positioned: any outside scroll or resize would detach it from the button. */
+function onIdentityMenuScroll(e: Event) {
+  if ((e.target as Element | null)?.closest?.(".commit-identity-menu")) return;
+  closeIdentityMenu();
+}
+function onIdentityMenuKey(e: KeyboardEvent) {
+  if (e.key === "Escape") closeIdentityMenu();
+}
+/** Dismiss listeners live only while the menu is open, whatever closes it. */
+function listenIdentityMenu(on: boolean) {
+  if (on) {
+    window.addEventListener("scroll", onIdentityMenuScroll, true);
+    window.addEventListener("resize", closeIdentityMenu);
+    window.addEventListener("keydown", onIdentityMenuKey);
+  } else {
+    window.removeEventListener("scroll", onIdentityMenuScroll, true);
+    window.removeEventListener("resize", closeIdentityMenu);
+    window.removeEventListener("keydown", onIdentityMenuKey);
+  }
+}
+watch(identityMenuOpen, listenIdentityMenu);
+onUnmounted(() => listenIdentityMenu(false));
+
+const openSettings = inject(OPEN_SETTINGS_KEY, undefined);
+
+/** Open Settings → Git, scrolled to the identities section. */
+function manageIdentities() {
+  closeIdentityMenu();
+  openSettings?.("git", "identities");
+}
 
 /** The choice is remembered for this repo only; null = follow the global default. */
 function setIdentityFromMenu(id: string | null) {
@@ -587,10 +633,10 @@ function buildTrailers(): string {
   return lines.join("\n");
 }
 
-/** Close AI menu and identity/template menus when clicking outside */
+/** Close the identity / template / branch menus when clicking outside */
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
-  if (!target.closest(".commit-identity")) {
+  if (!target.closest(".commit-identity") && !target.closest(".commit-identity-menu")) {
     identityMenuOpen.value = false;
   }
   if (!target.closest(".commit-template-wrapper")) {
@@ -645,18 +691,14 @@ async function onGenerateCommitMessage() {
   }
 }
 
-/** Rewrite actions of the AI menu: regenerate, or transform the current message. */
-async function onAiAction(action: "regenerate" | "shorten" | "detail" | "changeLang", targetLocale?: string) {
+/** Language picked in the AI menu while a message exists: translate it. */
+async function onAiTranslate(targetLocale: string) {
   if (isGenerating.value) return;
-  if (action === "regenerate") {
-    await onGenerateCommitMessage();
-    return;
-  }
   const currentMsg = [props.commitSummary, props.commitDescription].filter(Boolean).join("\n");
   if (!currentMsg.trim()) return;
   const cwd = props.cwd;
   try {
-    const msg = await transformCommitMsg(action, currentMsg, targetLocale, cwd);
+    const msg = await translateCommitMsg(currentMsg, targetLocale, cwd);
     applyMessage(cwd, msg);
   } catch {
     // aiError is set by the composable.
@@ -749,7 +791,7 @@ const ccCanScrollRight = ref(false);
 function updateCcScroll() {
   const el = ccTypesEl.value;
   if (!el) return;
-  ccCanScrollLeft.value = el.scrollLeft > 0;
+  ccCanScrollLeft.value = el.scrollLeft > 1;
   ccCanScrollRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
 }
 
@@ -757,13 +799,22 @@ function scrollCcTypes(dir: -1 | 1) {
   const el = ccTypesEl.value;
   if (!el) return;
   el.scrollLeft = dir === 1 ? el.scrollWidth : 0;
-  ccCanScrollLeft.value = dir === 1;
-  ccCanScrollRight.value = dir === -1;
 }
 
+// Keep arrows in sync with trackpad/wheel scrolling and sidebar resizes,
+// not just arrow clicks.
+let ccResizeObserver: ResizeObserver | null = null;
 watch(ccTypesEl, (el) => {
-  if (el) nextTick(updateCcScroll);
+  ccResizeObserver?.disconnect();
+  ccResizeObserver = null;
+  if (!el) return;
+  nextTick(updateCcScroll);
+  if (typeof ResizeObserver !== "undefined") {
+    ccResizeObserver = new ResizeObserver(updateCcScroll);
+    ccResizeObserver.observe(el);
+  }
 });
+onUnmounted(() => ccResizeObserver?.disconnect());
 
 /** The active type prefix extracted from the current summary, or "" if none. */
 const activePrefix = computed(() => {
@@ -1412,21 +1463,77 @@ function formatActivityDate(dateStr: string): string {
 
     <!-- Commit panel — fixed at bottom, always visible in changes view -->
     <div class="commit-panel" v-if="showPane('commit', 'changes')">
-      <!-- Conventional Commits type picker -->
-      <div class="cc-types-wrapper">
-        <button v-show="ccCanScrollLeft" class="cc-scroll-btn cc-scroll-btn--left" @click="scrollCcTypes(-1)" tabindex="-1">‹</button>
-        <div class="cc-types" ref="ccTypesEl" role="group" :aria-label="t('sidebar.ccTypesTitle')"
-          :class="{ 'cc-types--fade-left': ccCanScrollLeft, 'cc-types--fade-right': ccCanScrollRight }">
-          <button
-            v-for="type in CC_TYPES"
-            :key="type"
-            class="cc-chip"
-            :class="{ 'cc-chip--active': activePrefix === type }"
-            @click="setCommitType(type)"
-            v-tooltip="t(`sidebar.ccType_${type}`)"
-          >{{ type }}</button>
+      <!-- Top row: Conventional Commits type picker + identity selector -->
+      <div class="commit-top-row">
+        <div class="cc-types-wrapper">
+          <button v-show="ccCanScrollLeft" class="cc-scroll-btn cc-scroll-btn--left" @click="scrollCcTypes(-1)" tabindex="-1">‹</button>
+          <div class="cc-types" ref="ccTypesEl" role="group" @scroll.passive="updateCcScroll" :aria-label="t('sidebar.ccTypesTitle')"
+            :class="{ 'cc-types--fade-left': ccCanScrollLeft, 'cc-types--fade-right': ccCanScrollRight }">
+            <button
+              v-for="type in CC_TYPES"
+              :key="type"
+              class="cc-chip"
+              :class="{ 'cc-chip--active': activePrefix === type }"
+              @click="setCommitType(type)"
+              v-tooltip="t(`sidebar.ccType_${type}`)"
+            >{{ type }}</button>
+          </div>
+          <button v-show="ccCanScrollRight" class="cc-scroll-btn cc-scroll-btn--right" @click="scrollCcTypes(1)" tabindex="-1">›</button>
         </div>
-        <button v-show="ccCanScrollRight" class="cc-scroll-btn cc-scroll-btn--right" @click="scrollCcTypes(1)" tabindex="-1">›</button>
+        <!-- Identity selector (v2.12) — shown only when profiles exist -->
+        <div v-if="identities.length > 0" class="commit-identity">
+          <button ref="identityBtn" class="commit-identity-btn" @click.stop="toggleIdentityMenu">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+              <circle cx="8" cy="6" r="3"/>
+              <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke-linecap="round"/>
+            </svg>
+            <span class="commit-identity-name">{{ activeIdentity ? activeIdentity.label : t('commit.identityDefault') }}</span>
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+              <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <Teleport to="body">
+            <div
+              v-if="identityMenuOpen"
+              class="commit-identity-menu"
+              :style="{ top: `${identityMenuPos.top}px`, right: `${identityMenuPos.right}px` }"
+            >
+              <div
+                class="commit-identity-item"
+                :class="{ 'commit-identity-item--active': !repoOverrideId }"
+                @click="setIdentityFromMenu(null)"
+              >
+                <div class="commit-identity-item-info">
+                  <span class="commit-identity-item-label">{{ t('commit.identityFollowDefault') }}</span>
+                  <span class="commit-identity-item-meta">{{ globalDefault ? globalDefault.label : t('commit.identityDefault') }}</span>
+                </div>
+                <span class="commit-identity-check"><svg v-if="!repoOverrideId" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <div
+                v-for="p in identities"
+                :key="p.id"
+                class="commit-identity-item"
+                :class="{ 'commit-identity-item--active': repoOverrideId === p.id }"
+                @click="setIdentityFromMenu(p.id)"
+              >
+                <div class="commit-identity-item-info">
+                  <span class="commit-identity-item-label">{{ p.label }}</span>
+                  <span class="commit-identity-item-meta mono">{{ p.gitName }} &lt;{{ p.gitEmail }}&gt;</span>
+                </div>
+                <span class="commit-identity-check"><svg v-if="repoOverrideId === p.id" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+              <template v-if="openSettings">
+                <div class="commit-identity-sep" role="separator"></div>
+                <div class="commit-identity-item commit-identity-manage" @click="manageIdentities">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+                    <path d="M2 4h12M2 8h8M2 12h10" stroke-linecap="round"/><circle cx="13" cy="12" r="2"/>
+                  </svg>
+                  <span class="commit-identity-item-label">{{ t('commit.identityManage') }}</span>
+                </div>
+              </template>
+            </div>
+          </Teleport>
+        </div>
       </div>
       <div class="commit-summary-row">
         <!-- Template slash autocomplete dropdown -->
@@ -1473,8 +1580,8 @@ function formatActivityDate(dateStr: string): string {
             :disabled="isGenerating"
             placement="above"
             chevron-class="commit-ai-chevron"
-            :rewrite="{ canRegenerate: repoStats.staged > 0, hasSummary: !!commitSummary }"
-            @rewrite="onAiAction"
+            :translatable="!!commitSummary"
+            @translate="onAiTranslate"
           />
         </div>
         <!-- Template picker button -->
@@ -1556,46 +1663,6 @@ function formatActivityDate(dateStr: string): string {
           />
         </template>
       </div>
-      <!-- Identity selector (v2.12) — shown only when profiles exist -->
-      <div v-if="identities.length > 0" class="commit-identity">
-        <button class="commit-identity-btn" @click.stop="identityMenuOpen = !identityMenuOpen">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
-            <circle cx="8" cy="6" r="3"/>
-            <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke-linecap="round"/>
-          </svg>
-          <span class="commit-identity-name">{{ activeIdentity ? activeIdentity.label : t('commit.identityDefault') }}</span>
-          <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
-            <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-        <div v-if="identityMenuOpen" class="commit-identity-menu">
-          <div
-            class="commit-identity-item"
-            :class="{ 'commit-identity-item--active': !repoOverrideId }"
-            @click="setIdentityFromMenu(null)"
-          >
-            <div class="commit-identity-item-info">
-              <span class="commit-identity-item-label">{{ t('commit.identityFollowDefault') }}</span>
-              <span class="commit-identity-item-meta">{{ globalDefault ? globalDefault.label : t('commit.identityDefault') }}</span>
-            </div>
-            <svg v-if="!repoOverrideId" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
-          <div
-            v-for="p in identities"
-            :key="p.id"
-            class="commit-identity-item"
-            :class="{ 'commit-identity-item--active': repoOverrideId === p.id }"
-            @click="setIdentityFromMenu(p.id)"
-          >
-            <div class="commit-identity-item-info">
-              <span class="commit-identity-item-label">{{ p.label }}</span>
-              <span class="commit-identity-item-meta mono">{{ p.gitName }} &lt;{{ p.gitEmail }}&gt;</span>
-            </div>
-            <svg v-if="repoOverrideId === p.id" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
-        </div>
-      </div>
-
       <div class="commit-actions">
         <button
           v-if="(secretFindingsCount ?? 0) > 0"
@@ -2473,10 +2540,19 @@ function formatActivityDate(dateStr: string): string {
 }
 
 /* ─── Conventional Commits type chips ───────────────────── */
+/* Chips take the remaining width; the identity selector sits at the right. */
+.commit-top-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .cc-types-wrapper {
   position: relative;
   display: flex;
   align-items: center;
+  flex: 1;
+  min-width: 0;
 }
 
 .cc-types {
@@ -3263,6 +3339,7 @@ function formatActivityDate(dateStr: string): string {
   position: relative;
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .commit-identity-btn {
@@ -3272,17 +3349,20 @@ function formatActivityDate(dateStr: string): string {
   padding: 3px var(--space-3);
   font-size: 11px;
   font-weight: 500;
-  color: var(--color-text-subtle);
-  background: var(--color-bg-tertiary);
+  /* Input background, slightly muted text: a grey-filled button with muted
+     text read as disabled. */
+  color: color-mix(in srgb, var(--color-text) 60%, var(--color-text-muted));
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   cursor: pointer;
   max-width: 160px;
-  transition: background var(--transition-hover), color var(--transition-hover);
+  transition: background var(--transition-hover), border-color var(--transition-hover), color var(--transition-hover);
 }
 
 .commit-identity-btn:hover {
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-accent);
   color: var(--color-text);
 }
 
@@ -3298,11 +3378,10 @@ function formatActivityDate(dateStr: string): string {
   text-overflow: ellipsis;
 }
 
+/* Teleported to <body> (see toggleIdentityMenu); top/right set inline. */
 .commit-identity-menu {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  z-index: 200;
+  position: fixed;
+  z-index: 1000;
   min-width: 240px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -3322,6 +3401,29 @@ function formatActivityDate(dateStr: string): string {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition-hover);
+}
+
+/* Pushed to the right edge; fixed width so it never shifts the label. */
+.commit-identity-check {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 12px;
+  margin-left: auto;
+  color: var(--color-accent);
+}
+
+.commit-identity-sep {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--color-border);
+}
+
+.commit-identity-manage {
+  color: var(--color-text-muted);
+}
+
+.commit-identity-manage:hover {
+  color: var(--color-text);
 }
 
 .commit-identity-item:hover {
@@ -3344,14 +3446,14 @@ function formatActivityDate(dateStr: string): string {
 }
 
 .commit-identity-item-label {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text);
 }
 
 .commit-identity-item-meta {
   font-size: 11px;
-  color: var(--color-text-subtle);
+  color: var(--color-text-meta);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

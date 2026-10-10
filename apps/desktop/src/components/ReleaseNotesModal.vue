@@ -11,6 +11,8 @@ import {
 } from "../composables/useReleaseNotes";
 import BaseModal from "./BaseModal.vue";
 import AiTemplateMenu from "./AiTemplateMenu.vue";
+import AiContextButton from "./AiContextButton.vue";
+import { getAiExtraContext } from "../composables/useAiExtraContext";
 import AiSparkle from "./AiSparkle.vue";
 import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 
@@ -110,9 +112,15 @@ onMounted(async () => {
   }
 });
 
+/** Extra-context scope of the "ctx" segment (see useAiExtraContext). */
+const AI_CTX_SCOPE = "releaseNotes";
+
 function runGenerate() {
   copied.value = false;
-  void generateDraft(props.cwd, { locale: getTemplateLang("releaseNotes", props.cwd) });
+  void generateDraft(props.cwd, {
+    locale: getTemplateLang("releaseNotes", props.cwd),
+    extraContext: getAiExtraContext(AI_CTX_SCOPE, props.cwd),
+  });
 }
 
 async function copy() {
@@ -165,11 +173,12 @@ async function copy() {
           </optgroup>
         </select>
       </label>
-      <div class="rn-split">
+      <div class="rn-split ai-split">
         <button
           type="button"
-          class="btn btn--ai rn-ai-btn rn-split-main"
+          class="btn btn--ai rn-ai-btn"
           :disabled="isGenerating || !draft.from.trim() || !draft.to.trim()"
+          v-tooltip="t('dashboard.releaseNotesGenerateHint')"
           @click="runGenerate"
         >
           <span v-if="isGenerating" class="rn-ai-label ai-loading">
@@ -182,11 +191,17 @@ async function copy() {
             <span v-if="activeTemplate" class="rn-active-tpl">· {{ activeTemplate.name }}</span>
           </span>
         </button>
+        <AiContextButton
+          :scope="AI_CTX_SCOPE"
+          :cwd="cwd"
+          :disabled="isGenerating"
+          button-class="btn btn--ai"
+        />
         <AiTemplateMenu
           kind="releaseNotes"
           :cwd="cwd"
           :disabled="isGenerating"
-          chevron-class="btn btn--ai rn-ai-btn rn-split-chevron"
+          chevron-class="btn btn--ai rn-split-chevron"
           @manage="emit('close')"
         />
       </div>
@@ -274,36 +289,28 @@ select.rn-input {
 }
 
 /* Generate split button — the PR view's AI button (.btn--ai + sparkle),
-   taller to line up with the ref selects. The chevron lives in
-   AiTemplateMenu, styled from here via :deep(). */
+   taller to line up with the ref selects (32px with the frame). Frame, seams,
+   radii and the ctx segment come from .ai-split in main.css. One rule sizes
+   every segment, including the ctx (AiContextButton) and chevron
+   (AiTemplateMenu) ones. */
 .rn-split {
-  display: inline-flex;
   margin-left: auto;
 }
-.rn-split :deep(.btn.btn--ai.rn-ai-btn) {
-  height: 32px;
-  min-height: 32px;
-  padding: 0 12px;
+.rn-split > :deep(.btn.btn--ai) {
+  height: 30px;
+  min-height: 30px;
+  padding-top: 0;
+  padding-bottom: 0;
   font-size: var(--font-size-sm);
-  border-radius: var(--radius-sm);
   color: var(--color-text);
 }
-.rn-split :deep(.btn.btn--ai.rn-ai-btn:hover:not(:disabled)) {
-  color: var(--color-ai-text);
-  transform: none;
-  background:
-    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
-    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
-}
-.rn-split .btn.btn--ai.rn-split-main {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+.btn.btn--ai.rn-ai-btn {
+  padding-left: 12px;
+  padding-right: 12px;
 }
 .rn-split :deep(.btn.btn--ai.rn-split-chevron) {
-  padding: 0 8px;
-  margin-left: -1px;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .rn-ai-label {
   display: inline-flex;

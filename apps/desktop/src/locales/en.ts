@@ -264,10 +264,6 @@ const en = {
     trailerRbLabel: "Reviewed by",
     trailerRbHelp: "Adds \u201cReviewed-by: name\u201d to the commit. Records who reviewed and approved this change. Appears in the git history for traceability.",
     aiGenerateTooltip: "Generate message with AI",
-    aiRegenerate: "Regenerate",
-    aiShorten: "Shorten",
-    aiDetail: "Add detail",
-    aiChangeLang: "Change language",
     aiGeneratingTooltip: "Generating\u2026",
     // Empty
     cleanTree: "Working tree clean",
@@ -345,6 +341,7 @@ const en = {
     releaseNotesFrom: "From",
     releaseNotesTo: "To",
     releaseNotesGenerate: "Generate",
+    releaseNotesGenerateHint: "Generate release notes with AI from the commits between the two refs",
     releaseNotesPlaceholder: "The changelog will appear here once generated.",
     releaseNotesCopy: "Copy",
     releaseNotesCopied: "Copied \u2713",
@@ -480,6 +477,7 @@ const en = {
     // v2.12 identity selector
     identityDefault: "Global config",
     identityFollowDefault: "Use default",
+    identityManage: "Manage profiles…",
   },
 
   // ─── Branch badges + context menu (v2.12) ───────────────
@@ -524,6 +522,8 @@ const en = {
     previewMerge: "Preview merge",
     topContributor: "Most commits on this branch: {0} ({1})",
     aiHint: "Generate a branch name with AI, based on your WIP changes.",
+    createWithAi: "Create with AI",
+    createWithAiHint: "Create and switch to a new branch, named by AI from your uncommitted changes.",
     switchRefusedDirty: "Switch refused: uncommitted changes are present.",
     switchConfirmDirty: "Uncommitted changes will be lost. Continue anyway?",
     switchConfirmDirtyTitle: "Discard changes?",
@@ -1351,6 +1351,12 @@ const en = {
       langOverrideNote: "You can override the language in the template itself — write it instead of ${lang}.",
       langDefaultNote: "Default for projects where no language was picked from the AI button's menu.",
       perProjectNote: "Template and language are remembered for this project only.",
+      ctxTitle: "Extra context",
+      ctxTooltip: "Add context to the template's prompt",
+      ctxTooltipSet: "Context added — click to edit",
+      ctxHint: "Added to the selected template's prompt for this generation. Kept until you close the app.",
+      ctxPlaceholder: "e.g. This PR also fixes #128. Mention the migration step for self-hosted users.",
+      ctxClear: "Clear",
       prFormatHint: "Keep asking for a JSON object with \"title\" and \"body\" keys — otherwise the first line becomes the title and the rest the description.",
       picker: "AI template",
       language: "Language",

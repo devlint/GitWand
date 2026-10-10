@@ -1,11 +1,11 @@
-import { reactive } from "vue";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
-import { localeLabels, type SupportedLocale } from "../locales";
+import { localeToAiLanguage } from "./prAiLocale";
 import { t } from "./useI18n";
 import { normaliseCwd } from "./useSettings";
+import { getReleaseNotesDraft, releaseNotesGeneratingCwds as generatingCwds } from "./releaseNotesState";
 import { getActiveTemplate } from "./useAiTemplates";
-import { applyLang, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
+import { applyLang, applyLangStrict, DEFAULT_TEMPLATE_PROMPTS, withExtraContext } from "./aiTemplateDefaults";
 
 
 /**
@@ -28,32 +28,12 @@ export interface ReleaseNotesOptions {
   locale?: string;
   /** Max characters of commit dump kept (default 24k). */
   maxCommitsChars?: number;
-}
-
-function localeToEnglishName(code: string): string {
-  const map: Record<string, string> = {
-    fr: "French",
-    en: "English",
-    es: "Spanish",
-    de: "German",
-    it: "Italian",
-    pt: "Portuguese",
-    ja: "Japanese",
-    ko: "Korean",
-    zh: "Chinese",
-    nl: "Dutch",
-    ru: "Russian",
-    ar: "Arabic",
-    pl: "Polish",
-    sv: "Swedish",
-    da: "Danish",
-    nb: "Norwegian",
-  };
-  return map[code] ?? localeLabels[code as SupportedLocale] ?? code;
+  /** Extra context from the user, appended to the prompt (the "ctx" button). */
+  extraContext?: string;
 }
 
 function buildSystemPrompt(locale: string, firstRelease = false): string {
-  const lang = localeToEnglishName(locale);
+  const lang = localeToAiLanguage(locale);
 
   if (firstRelease) {
     // The project has never been released. Frame this as an inaugural
@@ -161,32 +141,7 @@ export async function latestTag(cwd: string): Promise<string> {
   }
 }
 
-/**
- * Per-repo state of the release-notes modal. Lives at module level so closing
- * the modal keeps the refs and the generated text, and a generation started
- * before closing still lands here when it finishes.
- */
-export interface ReleaseNotesDraft {
-  from: string;
-  to: string;
-  markdown: string;
-  error: string | null;
-}
-
-const drafts = reactive(new Map<string, ReleaseNotesDraft>());
-const generatingCwds = reactive(new Set<string>());
-
-/** The repo's draft, created empty on first access. `from === ""` means not initialised yet. */
-export function getReleaseNotesDraft(cwd: string): ReleaseNotesDraft {
-  const key = normaliseCwd(cwd);
-  if (!drafts.has(key)) drafts.set(key, { from: "", to: "HEAD", markdown: "", error: null });
-  return drafts.get(key)!;
-}
-
-/** True while the repo's draft is being generated. */
-export function isGeneratingReleaseNotes(cwd: string | null | undefined): boolean {
-  return !!cwd && generatingCwds.has(normaliseCwd(cwd));
-}
+export { getReleaseNotesDraft, isGeneratingReleaseNotes, type ReleaseNotesDraft } from "./releaseNotesState";
 
 export function useReleaseNotes() {
   const ai = useAIProvider();
@@ -238,12 +193,14 @@ export function useReleaseNotes() {
     // first-release variant, so the user prompt flags that case instead.
     const template = getActiveTemplate("releaseNotes", cwd);
     const systemPrompt = template
-      ? applyLang(template.systemPrompt, localeToEnglishName(locale))
+      ? applyLangStrict(template.systemPrompt, localeToAiLanguage(locale))
       : buildSystemPrompt(locale, fromProjectStart);
     let userPrompt = buildUserPrompt(fromRef, toRef, commits);
     if (template && fromProjectStart) {
       userPrompt += "\nThis is the project's very first release: there is no previous version to compare against.";
     }
+
+    userPrompt = withExtraContext(userPrompt, options.extraContext);
 
     const raw = await ai.rawPrompt(systemPrompt, userPrompt);
     if (!raw) {

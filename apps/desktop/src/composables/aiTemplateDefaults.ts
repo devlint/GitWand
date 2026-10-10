@@ -28,6 +28,32 @@ export function applyLang(prompt: string, lang: string): string {
   return prompt.replace(/\$\{lang\}/g, lang);
 }
 
+/**
+ * Like {@link applyLang}, but a prompt without the `${lang}` placeholder (a
+ * user template written without it) still gets the language: an explicit
+ * instruction is appended, so the language picked for the repo always applies.
+ */
+export function applyLangStrict(prompt: string, lang: string): string {
+  return /\$\{lang\}/.test(prompt)
+    ? applyLang(prompt, lang)
+    : `${prompt.trimEnd()}\n\nWrite the output in ${lang}.`;
+}
+
+/**
+ * Append the user's extra context (the "ctx" button of an AI split button) to
+ * a user prompt. Blank context leaves the prompt unchanged.
+ */
+export function withExtraContext(userPrompt: string, extraContext?: string): string {
+  const ctx = extraContext?.trim();
+  if (!ctx) return userPrompt;
+  return `${userPrompt}
+
+--- additional context from the user ---
+${ctx}
+--- end additional context ---
+Take this context into account. It refines the request; it does not change the output format.`;
+}
+
 const DEFAULT_COMMIT_PROMPT = `You are a senior software engineer writing a Git commit message.
 
 Rules:

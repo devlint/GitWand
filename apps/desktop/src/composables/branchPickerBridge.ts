@@ -34,8 +34,16 @@ export const TOGGLE_GIT_TREE_KEY: InjectionKey<() => void> = Symbol("toggleGitTr
 export type SettingsTabTarget =
   | "general" | "dock" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "aiTemplates";
 
-/** Open the Settings panel, optionally on a specific tab (e.g. from the PR sidebar). */
-export const OPEN_SETTINGS_KEY: InjectionKey<(tab?: SettingsTabTarget) => void> = Symbol("openSettings");
+/** Section of a Settings tab that {@link OPEN_SETTINGS_KEY} can scroll to. */
+export type SettingsSectionTarget = "identities";
+
+/**
+ * Open the Settings panel, optionally on a specific tab (e.g. from the PR
+ * sidebar) and scrolled to one of its sections (e.g. the commit panel's
+ * "Manage profiles…").
+ */
+export const OPEN_SETTINGS_KEY: InjectionKey<(tab?: SettingsTabTarget, section?: SettingsSectionTarget) => void> =
+  Symbol("openSettings");
 
 
 /**
