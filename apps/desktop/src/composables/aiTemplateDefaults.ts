@@ -39,6 +39,21 @@ export function applyLangStrict(prompt: string, lang: string): string {
     : `${prompt.trimEnd()}\n\nWrite the output in ${lang}.`;
 }
 
+/**
+ * Append the user's extra context (the "ctx" button of an AI split button) to
+ * a user prompt. Blank context leaves the prompt unchanged.
+ */
+export function withExtraContext(userPrompt: string, extraContext?: string): string {
+  const ctx = extraContext?.trim();
+  if (!ctx) return userPrompt;
+  return `${userPrompt}
+
+--- additional context from the user ---
+${ctx}
+--- end additional context ---
+Take this context into account. It refines the request; it does not change the output format.`;
+}
+
 const DEFAULT_COMMIT_PROMPT = `You are a senior software engineer writing a Git commit message.
 
 Rules:

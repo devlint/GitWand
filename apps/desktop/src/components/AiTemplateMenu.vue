@@ -143,7 +143,7 @@ onUnmounted(close);
     class="atm-chevron"
     :class="chevronClass"
     :disabled="disabled"
-    :title="t('settings.aiTemplates.picker')"
+    v-tooltip="t('settings.aiTemplates.picker')"
     :aria-label="t('settings.aiTemplates.picker')"
     :aria-expanded="open"
     aria-haspopup="menu"

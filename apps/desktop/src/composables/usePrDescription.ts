@@ -4,7 +4,7 @@ import { useAIProvider } from "./useAIProvider";
 import { localeLabels, type SupportedLocale } from "../locales";
 import { t } from "./useI18n";
 import { maskMedia, restoreMedia } from "../utils/prBodyMedia";
-import { applyLang, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
+import { applyLang, DEFAULT_TEMPLATE_PROMPTS, withExtraContext } from "./aiTemplateDefaults";
 import { getActiveTemplate } from "./useAiTemplates";
 
 /**
@@ -26,6 +26,8 @@ export interface PrDescriptionOptions {
   maxStatChars?: number;
   /** Max number of commit messages kept (default 40). */
   maxCommits?: number;
+  /** Extra context from the user, appended to the prompt (the "ctx" button). */
+  extraContext?: string;
 }
 
 function localeToEnglishName(code: string): string {
@@ -317,7 +319,10 @@ export function usePrDescription() {
       );
 
       const systemPrompt = buildSystemPrompt(cwd, locale);
-      const userPrompt = buildUserPrompt(headBranch, baseBranch, commits, diffstat);
+      const userPrompt = withExtraContext(
+        buildUserPrompt(headBranch, baseBranch, commits, diffstat),
+        options.extraContext,
+      );
 
       const raw = await ai.rawPrompt(systemPrompt, userPrompt);
       if (!raw) {
@@ -398,7 +403,10 @@ export function usePrDescription() {
       const masked = maskMedia(pr.body ?? "");
       const raw = await ai.rawPrompt(
         buildUpdateSystemPrompt(cwd, locale),
-        buildUpdateUserPrompt(pr.branch, pr.base, masked.text, commits, diffstat),
+        withExtraContext(
+          buildUpdateUserPrompt(pr.branch, pr.base, masked.text, commits, diffstat),
+          options.extraContext,
+        ),
       );
       const text = unwrapMarkdown(raw ?? "");
       if (!text) {

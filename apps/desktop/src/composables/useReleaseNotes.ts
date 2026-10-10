@@ -5,7 +5,7 @@ import { localeLabels, type SupportedLocale } from "../locales";
 import { t } from "./useI18n";
 import { normaliseCwd } from "./useSettings";
 import { getActiveTemplate } from "./useAiTemplates";
-import { applyLang, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
+import { applyLang, DEFAULT_TEMPLATE_PROMPTS, withExtraContext } from "./aiTemplateDefaults";
 
 
 /**
@@ -28,6 +28,8 @@ export interface ReleaseNotesOptions {
   locale?: string;
   /** Max characters of commit dump kept (default 24k). */
   maxCommitsChars?: number;
+  /** Extra context from the user, appended to the prompt (the "ctx" button). */
+  extraContext?: string;
 }
 
 function localeToEnglishName(code: string): string {
@@ -244,6 +246,8 @@ export function useReleaseNotes() {
     if (template && fromProjectStart) {
       userPrompt += "\nThis is the project's very first release: there is no previous version to compare against.";
     }
+
+    userPrompt = withExtraContext(userPrompt, options.extraContext);
 
     const raw = await ai.rawPrompt(systemPrompt, userPrompt);
     if (!raw) {

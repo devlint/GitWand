@@ -11,6 +11,8 @@ import {
 } from "../composables/useReleaseNotes";
 import BaseModal from "./BaseModal.vue";
 import AiTemplateMenu from "./AiTemplateMenu.vue";
+import AiContextButton from "./AiContextButton.vue";
+import { getAiExtraContext } from "../composables/useAiExtraContext";
 import AiSparkle from "./AiSparkle.vue";
 import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 
@@ -112,7 +114,10 @@ onMounted(async () => {
 
 function runGenerate() {
   copied.value = false;
-  void generateDraft(props.cwd, { locale: getTemplateLang("releaseNotes", props.cwd) });
+  void generateDraft(props.cwd, {
+    locale: getTemplateLang("releaseNotes", props.cwd),
+    extraContext: getAiExtraContext("releaseNotes", props.cwd),
+  });
 }
 
 async function copy() {
@@ -170,6 +175,7 @@ async function copy() {
           type="button"
           class="btn btn--ai rn-ai-btn rn-split-main"
           :disabled="isGenerating || !draft.from.trim() || !draft.to.trim()"
+          v-tooltip="t('dashboard.releaseNotesGenerateHint')"
           @click="runGenerate"
         >
           <span v-if="isGenerating" class="rn-ai-label ai-loading">
@@ -182,6 +188,12 @@ async function copy() {
             <span v-if="activeTemplate" class="rn-active-tpl">· {{ activeTemplate.name }}</span>
           </span>
         </button>
+        <AiContextButton
+          scope="releaseNotes"
+          :cwd="cwd"
+          :disabled="isGenerating"
+          button-class="btn btn--ai rn-ai-btn rn-split-chevron rn-split-ctx"
+        />
         <AiTemplateMenu
           kind="releaseNotes"
           :cwd="cwd"
@@ -304,6 +316,12 @@ select.rn-input {
   margin-left: -1px;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
+}
+/* "ctx" sits between the main button and the chevron: square on both sides. */
+.rn-split :deep(.btn.btn--ai.rn-split-ctx) {
+  border-radius: 0;
+  padding-left: 7px;
+  padding-right: 7px;
 }
 .rn-ai-label {
   display: inline-flex;

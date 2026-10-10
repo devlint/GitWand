@@ -23,6 +23,8 @@ import { usePrDescription } from "../composables/usePrDescription";
 import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 import AiSparkle from "./AiSparkle.vue";
 import AiTemplateMenu from "./AiTemplateMenu.vue";
+import AiContextButton from "./AiContextButton.vue";
+import { getAiExtraContext } from "../composables/useAiExtraContext";
 
 const props = defineProps<{
   currentBranch: string;
@@ -58,7 +60,7 @@ async function generateWithAI() {
       cwd,
       props.currentBranch,
       p.newPrBase.value,
-      { locale: prLang },
+      { locale: prLang, extraContext: getAiExtraContext("pr-create", cwd) },
     );
     if (p.cwd.value !== cwd) return;
     if (result.title) p.newPrTitle.value = result.title;
@@ -587,7 +589,7 @@ function removeReviewer(name: string) {
               type="button"
               class="btn btn--ai pcv-ai-btn pcv-ai-main"
               :disabled="isGeneratingPrDescription || baseIsSameAsHead"
-              :title="t('pr.create.aiHint')"
+              v-tooltip="t('pr.create.aiHint')"
               @click="generateWithAI"
             >
               <span v-if="isGeneratingPrDescription" class="pcv-ai-label ai-loading">
@@ -600,6 +602,12 @@ function removeReviewer(name: string) {
                 <span v-if="activePrTemplate" class="pcv-ai-active-tpl">· {{ activePrTemplate.name }}</span>
               </span>
             </button>
+            <AiContextButton
+              scope="pr-create"
+              :cwd="cwd"
+              :disabled="isGeneratingPrDescription"
+              button-class="btn btn--ai pcv-ai-chevron pcv-ai-ctx"
+            />
             <AiTemplateMenu
               kind="pr"
               :cwd="cwd"
@@ -1247,6 +1255,12 @@ function removeReviewer(name: string) {
   background:
     linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
     linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+/* "ctx" sits between the main button and the chevron: square on both sides. */
+.pcv-ai-split :deep(.btn.btn--ai.pcv-ai-ctx) {
+  border-radius: 0;
+  padding-left: 7px;
+  padding-right: 7px;
 }
 .pcv-ai-active-tpl {
   max-width: 140px;

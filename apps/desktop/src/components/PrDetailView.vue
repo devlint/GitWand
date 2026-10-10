@@ -33,6 +33,8 @@ import { usePrDescription } from "../composables/usePrDescription";
 import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 import AiSparkle from "./AiSparkle.vue";
 import AiTemplateMenu from "./AiTemplateMenu.vue";
+import AiContextButton from "./AiContextButton.vue";
+import { getAiExtraContext } from "../composables/useAiExtraContext";
 
 const { t } = useI18n();
 
@@ -147,7 +149,10 @@ async function updateDescriptionWithAI() {
   if (!detail) return;
   // Same per-repo output language as PR creation.
   try {
-    await prDescription.update(p.cwd.value, detail, { locale: getTemplateLang("pr", p.cwd.value) });
+    await prDescription.update(p.cwd.value, detail, {
+      locale: getTemplateLang("pr", p.cwd.value),
+      extraContext: getAiExtraContext(`pr-update:${detail.number}`, p.cwd.value),
+    });
     descriptionTab.value = "formatted";
   } catch {
     // updateError is set by the composable and rendered below.
@@ -1026,7 +1031,7 @@ function submitRequestReviewers() {
                   type="button"
                   class="btn btn--ai pdv-desc-ai pdv-desc-ai-main"
                   :disabled="isAiUpdating"
-                  :title="t('pr.detail.aiUpdateHint')"
+                  v-tooltip="t('pr.detail.aiUpdateHint')"
                   @click="updateDescriptionWithAI"
                 >
                   <span v-if="isAiUpdating" class="pdv-desc-ai-label ai-loading">
@@ -1039,6 +1044,12 @@ function submitRequestReviewers() {
                     <span v-if="activePrTemplate" class="pdv-desc-ai-tpl">· {{ activePrTemplate.name }}</span>
                   </span>
                 </button>
+                <AiContextButton
+                  :scope="`pr-update:${p.prDetail.value.number}`"
+                  :cwd="p.cwd.value"
+                  :disabled="isAiUpdating"
+                  button-class="btn btn--ai pdv-desc-ai-chevron pdv-desc-ai-ctx"
+                />
                 <AiTemplateMenu
                   kind="pr"
                   :cwd="p.cwd.value"
@@ -2544,6 +2555,12 @@ function submitRequestReviewers() {
   background:
     linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
     linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+/* "ctx" sits between the main button and the chevron: square on both sides. */
+.pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-ctx) {
+  border-radius: 0;
+  padding-left: 7px;
+  padding-right: 7px;
 }
 .pdv-desc-ai-tpl {
   max-width: 140px;
