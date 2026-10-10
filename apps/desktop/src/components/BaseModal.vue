@@ -286,8 +286,8 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .base-modal--screen .base-modal__title {
-  font-size: var(--font-size-2xl, 20px);
-  font-weight: var(--font-weight-bold, 700);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
 }
 
 @keyframes bm-slide-in {

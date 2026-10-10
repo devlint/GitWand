@@ -76,10 +76,10 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
     <div class="help-header">
       <div class="help-header__left">
         <span class="bm-title-icon" aria-hidden="true">
-          <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-            <circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.4" />
-            <path d="M10 13.5v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-            <path d="M10 6.5c1.1 0 2 .9 2 2s-.9 1.5-2 1.5V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="10" cy="10" r="8.5" />
+            <path d="M10 13.5v.5" stroke-width="1.8" />
+            <path d="M10 6.5c1.1 0 2 .9 2 2s-.9 1.5-2 1.5V11" />
           </svg>
         </span>
         <span class="help-header__title">{{ t('help.title') }}</span>
@@ -305,14 +305,12 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 .help-header__left {
   display: flex;
   align-items: center;
-  gap: var(--space-3, 8px);
-  color: var(--color-text-muted);
+  gap: var(--space-4);
 }
 
 .help-header__title {
-  font-size: var(--font-size-2xl, 20px);
-  font-weight: var(--font-weight-bold, 700);
-  color: var(--color-text);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
 }
 
 .help-close {
