@@ -1169,8 +1169,10 @@ onUnmounted(() => {
   .branch-trigger__name--generating { animation: none; }
 }
 
-/* New-branch modal: [Create | AI] split. Same AI segment skin as the commit
-   summary's AI button (.commit-ai-btn in RepoSidebar). */
+/* AI segment, shared by the header ([branch][+][AI]) and the new-branch
+   modal's [Create | AI] split: the trigger's gray fill, a border that starts
+   in that gray on the left and blends into the AI gradient, and a soft
+   divider, so it merges with the plain part next to it. */
 .bs-create-split {
   display: inline-flex;
   align-items: stretch;
@@ -1184,21 +1186,31 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   padding: 0 var(--space-3);
-  margin-left: -1px;
   background:
-    linear-gradient(var(--color-bg-secondary), var(--color-bg-secondary)) padding-box,
-    linear-gradient(135deg, var(--color-ai) 0%, #c084fc 50%, var(--color-ai) 100%) border-box;
+    linear-gradient(var(--color-bg-tertiary), var(--color-bg-tertiary)) padding-box,
+    linear-gradient(90deg, var(--color-bg-tertiary) 0%, var(--color-ai) 55%, #c084fc 100%) border-box;
   color: var(--color-text);
   border: 1px solid transparent;
+  /* Divider like the "+" button's left edge, but lighter: the button gray
+     with 30% of that edge's --color-bg mixed in. Hover included. */
+  border-left: 1px solid color-mix(in srgb, var(--color-bg) 30%, var(--color-bg-tertiary));
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   cursor: pointer;
   transition: background var(--transition-hover), color var(--transition-hover);
 }
-.bs-create-ai:hover:not(:disabled) {
-  color: var(--color-ai-text);
+/* In the modal: dark like the footer's Cancel button (transparent over
+   --color-bg), with the border fading in from that same dark. */
+.bs-create-split > .bs-create-ai {
+  padding: 0 var(--space-4);
   background:
-    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
-    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+    linear-gradient(var(--color-bg), var(--color-bg)) padding-box,
+    linear-gradient(90deg, var(--color-bg) 0%, var(--color-ai) 55%, #c084fc 100%) border-box;
+}
+/* Hover like the trigger and "+": lighter gray fill, gradient border kept. */
+.bs-create-ai:hover:not(:disabled) {
+  background:
+    linear-gradient(var(--color-border), var(--color-border)) padding-box,
+    linear-gradient(90deg, var(--color-border) 0%, var(--color-ai) 55%, #c084fc 100%) border-box;
 }
 .bs-create-ai:disabled {
   opacity: 0.35;
