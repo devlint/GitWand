@@ -1,7 +1,7 @@
 import { ref } from "vue";
 import type { ConflictHunk } from "@gitwand/core";
 import { useAIProvider } from "./useAIProvider";
-import { localeLabels, type SupportedLocale } from "../locales";
+import { localeToAiLanguage } from "./prAiLocale";
 import { t } from "./useI18n";
 
 /**
@@ -24,18 +24,8 @@ export interface HunkExplainOptions {
   maxSideChars?: number;
 }
 
-function localeToEnglishName(code: string): string {
-  const map: Record<string, string> = {
-    fr: "French", en: "English", es: "Spanish", de: "German",
-    it: "Italian", pt: "Portuguese", ja: "Japanese", ko: "Korean",
-    zh: "Chinese", nl: "Dutch", ru: "Russian", ar: "Arabic",
-    pl: "Polish", sv: "Swedish", da: "Danish", nb: "Norwegian",
-  };
-  return map[code] ?? localeLabels[code as SupportedLocale] ?? code;
-}
-
 function buildSystemPrompt(locale: string): string {
-  const lang = localeToEnglishName(locale);
+  const lang = localeToAiLanguage(locale);
   return `You are a senior engineer explaining a Git merge conflict to a
 teammate who is about to resolve it.
 
@@ -140,7 +130,7 @@ export function useHunkExplanation() {
         throw new Error(t("errors.noAiProvider"));
       }
 
-      const lang = localeToEnglishName(locale);
+      const lang = localeToAiLanguage(locale);
       const systemPrompt = buildSystemPrompt(locale);
       const userPrompt = buildUserPrompt(hunk, filePath, maxSideChars, lang);
 

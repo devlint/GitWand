@@ -711,7 +711,8 @@ export function saveSettings(s: AppSettings): void {
   // component (dock, terminal, file explorer…) would write that stale copy
   // back and silently drop their changes — e.g. the per-repo AI language and
   // template picked from the commit AI menu.
-  if (toRaw(s) !== toRaw(_settings.value)) _settings.value = stripAiApiKey({ ...s });
+  // Merged in place: only the keys whose value changed notify their readers.
+  if (toRaw(s) !== toRaw(_settings.value)) Object.assign(_settings.value, stripAiApiKey({ ...s }));
 }
 
 // ─── Singleton reactive ref ───────────────────────────────

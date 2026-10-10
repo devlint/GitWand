@@ -1,4 +1,4 @@
-import { ref, type InjectionKey, type Ref } from "vue";
+import type { InjectionKey, Ref } from "vue";
 
 /**
  * Counter-bump bridges between the native macOS menu (or any other
@@ -34,16 +34,16 @@ export const TOGGLE_GIT_TREE_KEY: InjectionKey<() => void> = Symbol("toggleGitTr
 export type SettingsTabTarget =
   | "general" | "dock" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "aiTemplates";
 
-/** Open the Settings panel, optionally on a specific tab (e.g. from the PR sidebar). */
-export const OPEN_SETTINGS_KEY: InjectionKey<(tab?: SettingsTabTarget) => void> = Symbol("openSettings");
+/** Section of a Settings tab that {@link OPEN_SETTINGS_KEY} can scroll to. */
+export type SettingsSectionTarget = "identities";
 
 /**
- * Section of a Settings tab to scroll to when the panel opens. Set by a caller
- * right before it opens Settings (e.g. the commit panel's "Manage profiles");
- * SettingsPanel consumes and clears it on mount.
+ * Open the Settings panel, optionally on a specific tab (e.g. from the PR
+ * sidebar) and scrolled to one of its sections (e.g. the commit panel's
+ * "Manage profiles…").
  */
-export type SettingsSectionTarget = "identities";
-export const requestedSettingsSection = ref<SettingsSectionTarget | null>(null);
+export const OPEN_SETTINGS_KEY: InjectionKey<(tab?: SettingsTabTarget, section?: SettingsSectionTarget) => void> =
+  Symbol("openSettings");
 
 
 /**

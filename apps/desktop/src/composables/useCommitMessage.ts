@@ -1,7 +1,7 @@
 import { ref } from "vue";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
-import { localeLabels, type SupportedLocale } from "../locales";
+import { localeToAiLanguage } from "./prAiLocale";
 import { t } from "./useI18n";
 import { applyLang, applyLangStrict, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
 
@@ -28,41 +28,22 @@ export interface CommitMessageOptions {
   systemPromptOverride?: string;
 }
 
-export type CommitMessageAction = "changeLang";
-
-/** Map locale codes to their English name for prompts. Falls back to the locale label or code itself. */
-function localeToEnglishName(code: string): string {
-  const map: Record<string, string> = {
-    fr: "French", en: "English", es: "Spanish", de: "German",
-    "pt-BR": "Brazilian Portuguese", "zh-CN": "Simplified Chinese",
-    it: "Italian", pt: "Portuguese", ja: "Japanese", ko: "Korean",
-    zh: "Chinese", nl: "Dutch", ru: "Russian", ar: "Arabic",
-    pl: "Polish", sv: "Swedish", da: "Danish", nb: "Norwegian",
-  };
-  return map[code] ?? localeLabels[code as SupportedLocale] ?? code;
-}
-
-function buildTransformPrompt(action: CommitMessageAction, currentMessage: string, targetLocale?: string): { system: string; user: string } {
-  const base = `You are a senior software engineer editing a Git commit message.
+function buildTranslatePrompt(currentMessage: string, targetLocale: string): { system: string; user: string } {
+  const lang = localeToAiLanguage(targetLocale);
+  return {
+    system: `You are a senior software engineer editing a Git commit message.
 Rules:
 1. Follow Conventional Commits: "<type>(<optional scope>): <subject>".
 2. Subject line MUST be 72 characters or less, imperative mood, no trailing period.
 3. Do not include trailers (Co-Authored-By, Signed-off-by…) — the user adds those separately.
-4. Output ONLY the raw commit message — no code fences, no explanations.`;
-
-  switch (action) {
-    case "changeLang": {
-      const lang = localeToEnglishName(targetLocale ?? "en");
-      return {
-        system: `${base}\n5. Translate the commit message to ${lang}. Keep the type/scope prefix as-is (they stay in English). Translate only the subject text and body.`,
-        user: `Translate this commit message to ${lang}:\n\n${currentMessage}`,
-      };
-    }
-  }
+4. Output ONLY the raw commit message — no code fences, no explanations.
+5. Translate the commit message to ${lang}. Keep the type/scope prefix as-is (they stay in English). Translate only the subject text and body.`,
+    user: `Translate this commit message to ${lang}:\n\n${currentMessage}`,
+  };
 }
 
 function buildSystemPrompt(locale: string): string {
-  return applyLang(DEFAULT_TEMPLATE_PROMPTS.commit, localeToEnglishName(locale));
+  return applyLang(DEFAULT_TEMPLATE_PROMPTS.commit, localeToAiLanguage(locale));
 }
 
 function buildUserPrompt(diff: string, status: string): string {
@@ -89,7 +70,7 @@ function cleanMessage(raw: string | undefined | null): string {
 }
 
 const isGenerating = ref(false);
-/** Repo the in-flight generation/transform belongs to (null when unknown). */
+/** Repo the in-flight generation/translation belongs to (null when unknown). */
 const generatingCwd = ref<string | null>(null);
 const lastError = ref<string | null>(null);
 const lastMessage = ref<string | null>(null);
@@ -163,7 +144,7 @@ export function useCommitMessage() {
       // layers by piggybacking on the existing provider config.
       // Apply preset override if provided, otherwise use the default prompt.
       // The ${lang} placeholder in preset prompts is substituted at this point.
-      const lang = localeToEnglishName(locale);
+      const lang = localeToAiLanguage(locale);
       const systemPrompt = systemPromptOverride
         ? applyLangStrict(systemPromptOverride, lang)
         : buildSystemPrompt(locale);
@@ -187,13 +168,10 @@ export function useCommitMessage() {
     }
   }
 
-  /**
-   * Transform an existing commit message (currently: translate it).
-   */
-  async function transform(
-    action: CommitMessageAction,
+  /** Translate an existing commit message into `targetLocale`. */
+  async function translate(
     currentMessage: string,
-    targetLocale?: string,
+    targetLocale: string,
     cwd?: string,
   ): Promise<string> {
     isGenerating.value = true;
@@ -208,7 +186,7 @@ export function useCommitMessage() {
         throw new Error(t("errors.noMessageToTransform"));
       }
 
-      const { system, user } = buildTransformPrompt(action, currentMessage, targetLocale);
+      const { system, user } = buildTranslatePrompt(currentMessage, targetLocale);
       const raw = await ai.rawPrompt(system, user);
       if (!raw) throw new Error(t("errors.emptyAiResponse"));
 
@@ -231,6 +209,6 @@ export function useCommitMessage() {
     lastError,
     lastMessage,
     generate,
-    transform,
+    translate,
   };
 }

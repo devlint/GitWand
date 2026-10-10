@@ -140,6 +140,7 @@ import {
   TOGGLE_GIT_TREE_KEY,
   OPEN_SETTINGS_KEY,
   COMMIT_MESSAGE_SINK_KEY,
+  type SettingsSectionTarget,
 } from "./composables/branchPickerBridge";
 import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange, type ScratchWorktree } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
@@ -517,7 +518,11 @@ provide(UNDO_POPOVER_REQUEST_KEY, undoPopoverRequest);
 provide(LOG_FOCUS_SEARCH_KEY, logFocusRequest);
 provide(LAUNCHPAD_OPEN_REQUEST_KEY, launchpadOpenRequest);
 provide(TOGGLE_GIT_TREE_KEY, () => { showGitTree.value = !showGitTree.value; });
-provide(OPEN_SETTINGS_KEY, (tab) => { settingsInitialTab.value = tab; showSettings.value = true; });
+provide(OPEN_SETTINGS_KEY, (tab, section) => {
+  settingsInitialTab.value = tab;
+  settingsInitialSection.value = section;
+  showSettings.value = true;
+});
 provide(COMMIT_MESSAGE_SINK_KEY, (cwd, summary, description) => {
   if (cwd !== (repoFolderPath.value ?? "")) return;
   commitSummary.value = summary;
@@ -2157,6 +2162,8 @@ function onPaletteSelectCommit(hash: string) {
 // ─── Settings panel ─────────────────────────────────────
 const showSettings = ref(false);
 const settingsInitialTab = ref<"general" | "dock" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "aiTemplates" | undefined>(undefined);
+/** Section to scroll to; only OPEN_SETTINGS_KEY sets it, closing clears it. */
+const settingsInitialSection = ref<SettingsSectionTarget | undefined>(undefined);
 
 // ─── Error log (in-memory ring buffer, feeds SettingsPanel Logs tab) ─
 // Uses the useLogs() singleton composable — no localStorage persistence so a
@@ -3855,6 +3862,7 @@ async function applyGitConfig() {
 
 function onSettingsClose() {
   showSettings.value = false;
+  settingsInitialSection.value = undefined;
   refreshSettings();
   applyGitConfig();
   // v2.5 — `.gitwandrc.llmFallback` may have been edited in the AI tab.
@@ -4922,7 +4930,7 @@ onUnmounted(() => {
     <HelpView v-if="showHelp" @close="showHelp = false" />
 
     <!-- Settings panel -->
-    <SettingsPanel v-if="showSettings" :error-log="logEntries" :initial-tab="settingsInitialTab"
+    <SettingsPanel v-if="showSettings" :error-log="logEntries" :initial-tab="settingsInitialTab" :initial-section="settingsInitialSection"
       :cwd="repoFolderPath ?? undefined" @close="onSettingsClose" @update:commit-signature="onCommitSignatureChange"
       @update:diff-mode="onDiffModeChange" @update:pull-mode="onPullModeChange" @update:font-size="onFontSizeChange"
       @update:tab-size="onTabSizeChange" @clear-logs="clearErrorLog"

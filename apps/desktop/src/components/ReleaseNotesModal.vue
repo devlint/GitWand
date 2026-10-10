@@ -112,11 +112,14 @@ onMounted(async () => {
   }
 });
 
+/** Extra-context scope of the "ctx" segment (see useAiExtraContext). */
+const AI_CTX_SCOPE = "releaseNotes";
+
 function runGenerate() {
   copied.value = false;
   void generateDraft(props.cwd, {
     locale: getTemplateLang("releaseNotes", props.cwd),
-    extraContext: getAiExtraContext("releaseNotes", props.cwd),
+    extraContext: getAiExtraContext(AI_CTX_SCOPE, props.cwd),
   });
 }
 
@@ -173,7 +176,7 @@ async function copy() {
       <div class="rn-split ai-split">
         <button
           type="button"
-          class="btn btn--ai rn-ai-btn rn-split-main"
+          class="btn btn--ai rn-ai-btn"
           :disabled="isGenerating || !draft.from.trim() || !draft.to.trim()"
           v-tooltip="t('dashboard.releaseNotesGenerateHint')"
           @click="runGenerate"
@@ -189,16 +192,16 @@ async function copy() {
           </span>
         </button>
         <AiContextButton
-          scope="releaseNotes"
+          :scope="AI_CTX_SCOPE"
           :cwd="cwd"
           :disabled="isGenerating"
-          button-class="btn btn--ai rn-ai-btn rn-split-chevron rn-split-ctx"
+          button-class="btn btn--ai"
         />
         <AiTemplateMenu
           kind="releaseNotes"
           :cwd="cwd"
           :disabled="isGenerating"
-          chevron-class="btn btn--ai rn-ai-btn rn-split-chevron"
+          chevron-class="btn btn--ai rn-split-chevron"
           @manage="emit('close')"
         />
       </div>
@@ -286,25 +289,28 @@ select.rn-input {
 }
 
 /* Generate split button — the PR view's AI button (.btn--ai + sparkle),
-   taller to line up with the ref selects (32px with the frame). Frame, seams
-   and radii: .ai-split in main.css. The ctx segment and the chevron live in
-   AiContextButton / AiTemplateMenu, sized from here via :deep(). */
+   taller to line up with the ref selects (32px with the frame). Frame, seams,
+   radii and the ctx segment come from .ai-split in main.css. One rule sizes
+   every segment, including the ctx (AiContextButton) and chevron
+   (AiTemplateMenu) ones. */
 .rn-split {
   margin-left: auto;
 }
-.rn-split :deep(.btn.btn--ai.rn-ai-btn) {
+.rn-split > :deep(.btn.btn--ai) {
   height: 30px;
   min-height: 30px;
-  padding: 0 12px;
+  padding-top: 0;
+  padding-bottom: 0;
   font-size: var(--font-size-sm);
   color: var(--color-text);
 }
-.rn-split :deep(.btn.btn--ai.rn-split-chevron) {
-  padding: 0 8px;
+.btn.btn--ai.rn-ai-btn {
+  padding-left: 12px;
+  padding-right: 12px;
 }
-.rn-split :deep(.btn.btn--ai.rn-split-ctx) {
-  padding-left: 7px;
-  padding-right: 7px;
+.rn-split :deep(.btn.btn--ai.rn-split-chevron) {
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .rn-ai-label {
   display: inline-flex;

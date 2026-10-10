@@ -98,7 +98,7 @@ import {
 } from "../composables/useAIProvider";
 import { useLogs, type LogEntry } from "../composables/useLogs";
 import { useIdentity } from "../composables/useIdentity";
-import { requestedSettingsSection } from "../composables/branchPickerBridge";
+import type { SettingsSectionTarget } from "../composables/branchPickerBridge";
 import { useCommitTemplates } from "../composables/useCommitTemplates";
 import {
   AI_TEMPLATE_KINDS,
@@ -132,6 +132,8 @@ const props = defineProps<{
   errorLog?: LogEntry[];
   /** Open directly on this tab (e.g. "logs" when clicking the error badge) */
   initialTab?: "general" | "dock" | "dashboard" | "git" | "editor" | "terminal" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "aiTemplates";
+  /** Scroll to this section of the initial tab once open (e.g. "identities") */
+  initialSection?: SettingsSectionTarget;
   /** Current repo path (for Hooks tab) */
   cwd?: string;
 }>();
@@ -438,8 +440,9 @@ function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   // Identities are written by useIdentity, possibly elsewhere (the commit
   // menu) while this panel is open: never write back a stale copy. Same for
   // the per-repo AI template / language picked from the AI button menus.
-  syncIdentityFields();
-  syncAiTemplateSettings();
+  const fresh = loadSettings();
+  syncIdentityFields(fresh);
+  syncAiTemplateSettings(fresh);
   saveSettings(settings.value);
   // Keep the shared reactive settings (read by AppDock and friends) in sync so
   // changes like dock order / position apply live, not only on panel close.
@@ -1336,13 +1339,11 @@ function onLlmFallbackMinModeChange(val: MinMode) {
   llmFallback.value.minMode = val;
 }
 
-/** Section the opener asked to land on (see requestedSettingsSection). */
+/** Target of `initialSection: "identities"`. */
 const identitiesSection = ref<HTMLElement | null>(null);
 
 onMounted(() => {
-  const section = requestedSettingsSection.value;
-  requestedSettingsSection.value = null;
-  if (section === "identities") {
+  if (props.initialSection === "identities") {
     nextTick(() => identitiesSection.value?.scrollIntoView({ block: "start" }));
   }
   // The non-immediate `activeSettingsTab` watcher above does not fire for the
@@ -1381,8 +1382,7 @@ const {
  * useIdentity() writes straight to localStorage; mirror its fields into the
  * panel's local copy so the next updateSetting() does not write them back stale.
  */
-function syncIdentityFields() {
-  const fresh = loadSettings();
+function syncIdentityFields(fresh = loadSettings()) {
   settings.value.identities = fresh.identities;
   settings.value.activeIdentityId = fresh.activeIdentityId;
   settings.value.identityOverrideByRepo = fresh.identityOverrideByRepo;
@@ -1571,8 +1571,7 @@ function duplicateViewedAiTemplate() {
  * into this panel's own copy so a later updateSetting() doesn't persist a
  * stale list over them.
  */
-function syncAiTemplateSettings() {
-  const fresh = loadSettings();
+function syncAiTemplateSettings(fresh = loadSettings()) {
   settings.value.aiPromptPresets = fresh.aiPromptPresets;
   settings.value.activePresetIdByRepo = fresh.activePresetIdByRepo;
   settings.value.prTemplates = fresh.prTemplates;
@@ -4663,19 +4662,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
   background: var(--color-bg-secondary);
 }
 
-.sp-group__row:hover /* Identity and AI template rows: same look as the commit panel's profile
-   menu (RepoSidebar) and the AI template menu (AiTemplateMenu). */
-.sp-profile-name {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-}
-
-.sp-profile-meta {
-  font-size: 11px;
-  color: color-mix(in srgb, var(--color-text) 35%, var(--color-text-muted));
-}
-
-.sp-group__row-aside {
+.sp-group__row:hover .sp-group__row-aside {
   opacity: 1;
 }
 
@@ -4699,6 +4686,18 @@ function openAiTemplateKind(kind: AiTemplateKind) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Identity and AI template rows: same look as the commit panel's profile
+   menu (RepoSidebar) and the AI template menu (AiTemplateMenu). */
+.sp-profile-name {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sp-profile-meta {
+  font-size: 11px;
+  color: var(--color-text-meta);
 }
 
 .sp-group__row-aside {

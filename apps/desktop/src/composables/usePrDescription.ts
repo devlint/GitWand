@@ -1,10 +1,10 @@
 import { ref } from "vue";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
-import { localeLabels, type SupportedLocale } from "../locales";
+import { localeToAiLanguage } from "./prAiLocale";
 import { t } from "./useI18n";
 import { maskMedia, restoreMedia } from "../utils/prBodyMedia";
-import { applyLang, DEFAULT_TEMPLATE_PROMPTS, withExtraContext } from "./aiTemplateDefaults";
+import { applyLang, applyLangStrict, DEFAULT_TEMPLATE_PROMPTS, withExtraContext } from "./aiTemplateDefaults";
 import { getActiveTemplate } from "./useAiTemplates";
 
 /**
@@ -30,25 +30,16 @@ export interface PrDescriptionOptions {
   extraContext?: string;
 }
 
-function localeToEnglishName(code: string): string {
-  const map: Record<string, string> = {
-    fr: "French", en: "English", es: "Spanish", de: "German",
-    it: "Italian", pt: "Portuguese", ja: "Japanese", ko: "Korean",
-    zh: "Chinese", nl: "Dutch", ru: "Russian", ar: "Arabic",
-    pl: "Polish", sv: "Swedish", da: "Danish", nb: "Norwegian",
-  };
-  return map[code] ?? localeLabels[code as SupportedLocale] ?? code;
-}
-
 /**
  * The system prompt: the repo's active PR template if one is selected,
- * otherwise the default prompt. `${lang}` is substituted either way.
+ * otherwise the default prompt. `${lang}` is substituted, or the language
+ * appended when a user template lacks the placeholder.
  */
 function buildSystemPrompt(cwd: string, locale: string): string {
   const template = getActiveTemplate("pr", cwd);
-  return applyLang(
+  return applyLangStrict(
     template?.systemPrompt ?? DEFAULT_TEMPLATE_PROMPTS.pr,
-    localeToEnglishName(locale),
+    localeToAiLanguage(locale),
   );
 }
 
@@ -71,7 +62,7 @@ Write the PR description.`;
 }
 
 function buildUpdateSystemPrompt(cwd: string, locale: string): string {
-  const lang = localeToEnglishName(locale);
+  const lang = localeToAiLanguage(locale);
   const template = getActiveTemplate("pr", cwd);
   return `You are a senior engineer updating the description of an existing
 GitHub Pull Request so it reflects the latest state of the branch.

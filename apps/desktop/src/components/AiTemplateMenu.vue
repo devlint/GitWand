@@ -324,7 +324,7 @@ onUnmounted(close);
 }
 .atm-desc {
   font-size: 11px;
-  color: color-mix(in srgb, var(--color-text) 35%, var(--color-text-muted));
+  color: var(--color-text-meta);
 }
 .atm-menu .atm-sep {
   height: 1px;

@@ -24,6 +24,11 @@
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
 
+  /* Detail line under an item's name (profile / AI template lists and menus):
+     between muted and full text. Resolved per theme, since <html> carries
+     both :root and [data-theme]. */
+  --color-text-meta: color-mix(in srgb, var(--color-text) 35%, var(--color-text-muted));
+
   --line-height-tight: 1.2;
   --line-height-snug: 1.35;
   --line-height-normal: 1.5;
@@ -497,8 +502,10 @@ button:focus-visible,
  * segment looking borderless.
  *
  * Usage: <div class="ai-split"><button class="btn btn--ai">…</button>…</div>
- * Hosts set sizes (height, padding, font) on the segments, never borders or
- * radii.
+ * Hosts size every segment with one rule (`.host > :deep(.btn.btn--ai)`:
+ * height, vertical padding, font), 2px shorter than a lone button since the
+ * frame adds 1px above and below, then set each segment's horizontal padding.
+ * Never borders or radii.
  */
 .ai-split {
   display: inline-flex;
@@ -525,6 +532,11 @@ button:focus-visible,
   transform: none;
   box-shadow: none;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
+}
+/* The "ctx" segment (AiContextButton): narrow, icon only. */
+.ai-split > .aic-btn {
+  padding-left: 7px;
+  padding-right: 7px;
 }
 /* Dim the content, not the segment: segment opacity would let the frame's
    gradient show through it. */

@@ -1,11 +1,11 @@
 import { reactive } from "vue";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
-import { localeLabels, type SupportedLocale } from "../locales";
+import { localeToAiLanguage } from "./prAiLocale";
 import { t } from "./useI18n";
 import { normaliseCwd } from "./useSettings";
 import { getActiveTemplate } from "./useAiTemplates";
-import { applyLang, DEFAULT_TEMPLATE_PROMPTS, withExtraContext } from "./aiTemplateDefaults";
+import { applyLang, applyLangStrict, DEFAULT_TEMPLATE_PROMPTS, withExtraContext } from "./aiTemplateDefaults";
 
 
 /**
@@ -32,30 +32,8 @@ export interface ReleaseNotesOptions {
   extraContext?: string;
 }
 
-function localeToEnglishName(code: string): string {
-  const map: Record<string, string> = {
-    fr: "French",
-    en: "English",
-    es: "Spanish",
-    de: "German",
-    it: "Italian",
-    pt: "Portuguese",
-    ja: "Japanese",
-    ko: "Korean",
-    zh: "Chinese",
-    nl: "Dutch",
-    ru: "Russian",
-    ar: "Arabic",
-    pl: "Polish",
-    sv: "Swedish",
-    da: "Danish",
-    nb: "Norwegian",
-  };
-  return map[code] ?? localeLabels[code as SupportedLocale] ?? code;
-}
-
 function buildSystemPrompt(locale: string, firstRelease = false): string {
-  const lang = localeToEnglishName(locale);
+  const lang = localeToAiLanguage(locale);
 
   if (firstRelease) {
     // The project has never been released. Frame this as an inaugural
@@ -240,7 +218,7 @@ export function useReleaseNotes() {
     // first-release variant, so the user prompt flags that case instead.
     const template = getActiveTemplate("releaseNotes", cwd);
     const systemPrompt = template
-      ? applyLang(template.systemPrompt, localeToEnglishName(locale))
+      ? applyLangStrict(template.systemPrompt, localeToAiLanguage(locale))
       : buildSystemPrompt(locale, fromProjectStart);
     let userPrompt = buildUserPrompt(fromRef, toRef, commits);
     if (template && fromProjectStart) {

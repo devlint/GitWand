@@ -45,6 +45,9 @@ const {
 // Active AI template (picked from the AI split button), shown on the button.
 const { activeTemplate: activePrTemplate } = useAiTemplates("pr", () => props.cwd);
 
+/** Extra-context scope of the "ctx" segment (see useAiExtraContext). */
+const AI_CTX_SCOPE = "pr-create";
+
 async function generateWithAI() {
   const hasContent = p.newPrTitle.value.trim() || p.newPrBody.value.trim();
   if (hasContent && !confirm(t("pr.create.aiReplaceConfirm"))) return;
@@ -60,7 +63,7 @@ async function generateWithAI() {
       cwd,
       props.currentBranch,
       p.newPrBase.value,
-      { locale: prLang, extraContext: getAiExtraContext("pr-create", cwd) },
+      { locale: prLang, extraContext: getAiExtraContext(AI_CTX_SCOPE, cwd) },
     );
     if (p.cwd.value !== cwd) return;
     if (result.title) p.newPrTitle.value = result.title;
@@ -587,7 +590,7 @@ function removeReviewer(name: string) {
           <div v-if="ai.isAvailable.value" class="pcv-ai-split ai-split">
             <button
               type="button"
-              class="btn btn--ai pcv-ai-btn pcv-ai-main"
+              class="btn btn--ai pcv-ai-btn"
               :disabled="isGeneratingPrDescription || baseIsSameAsHead"
               v-tooltip="t('pr.create.aiHint')"
               @click="generateWithAI"
@@ -603,10 +606,10 @@ function removeReviewer(name: string) {
               </span>
             </button>
             <AiContextButton
-              scope="pr-create"
+              :scope="AI_CTX_SCOPE"
               :cwd="cwd"
               :disabled="isGeneratingPrDescription"
-              button-class="btn btn--ai pcv-ai-chevron pcv-ai-ctx"
+              button-class="btn btn--ai"
             />
             <AiTemplateMenu
               kind="pr"
@@ -1217,28 +1220,26 @@ function removeReviewer(name: string) {
 }
 
 /* ─── AI generate button (matches dashboard .panel-link-ai) ─────────────── */
-.btn.btn--ai.pcv-ai-btn {
-  min-height: 24px;
-  padding: 3px 12px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text);
-}
-/* AI split button (frame, seams and radii: .ai-split in main.css). The ctx
-   segment and the chevron live in AiContextButton / AiTemplateMenu, sized
-   from here via :deep(). Segments are 2px shorter than a lone button: the
-   frame adds 1px above and below. */
+/* AI split button: frame, seams, radii and the ctx segment come from
+   .ai-split in main.css. One rule sizes every segment, including the ctx
+   (AiContextButton) and chevron (AiTemplateMenu) ones. */
 .pcv-ai-split {
   margin-left: auto;
 }
-.pcv-ai-split :deep(.btn.btn--ai.pcv-ai-chevron) {
+.pcv-ai-split > :deep(.btn.btn--ai) {
   min-height: 24px;
-  padding: 3px 8px;
+  padding-top: 3px;
+  padding-bottom: 3px;
   font-size: var(--font-size-sm);
   color: var(--color-text);
 }
-.pcv-ai-split :deep(.btn.btn--ai.pcv-ai-ctx) {
-  padding-left: 7px;
-  padding-right: 7px;
+.btn.btn--ai.pcv-ai-btn {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.pcv-ai-split :deep(.btn.btn--ai.pcv-ai-chevron) {
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .pcv-ai-active-tpl {
   max-width: 140px;

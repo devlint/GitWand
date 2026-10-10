@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
-import { TOGGLE_GIT_TREE_KEY, COMMIT_MESSAGE_SINK_KEY, OPEN_SETTINGS_KEY, requestedSettingsSection } from "../composables/branchPickerBridge";
+import { TOGGLE_GIT_TREE_KEY, COMMIT_MESSAGE_SINK_KEY, OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
 import { gitRemoteInfo, getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
 import PrListSidebar from "./PrListSidebar.vue";
@@ -488,7 +488,7 @@ const openRepoLabel = computed<string>(() => {
 
 // ─── AI commit message generation ─────────────────────────
 const ai = useAIProvider();
-const { isGenerating, lastError: aiError, generate: generateCommitMsg, transform: transformCommitMsg } = useCommitMessage();
+const { isGenerating, lastError: aiError, generate: generateCommitMsg, translate: translateCommitMsg } = useCommitMessage();
 // ─── AI template (commit kind) ────────────────────────────
 // Picked from the AI chevron menu (AiTemplateMenu); applied at generation.
 const { activePreset } = useAiPromptPresets(() => props.cwd);
@@ -517,26 +517,33 @@ function toggleIdentityMenu() {
 
 /** Fixed-positioned: any outside scroll or resize would detach it from the button. */
 function onIdentityMenuScroll(e: Event) {
-  if (!identityMenuOpen.value) return;
   if ((e.target as Element | null)?.closest?.(".commit-identity-menu")) return;
   closeIdentityMenu();
 }
-onMounted(() => {
-  window.addEventListener("scroll", onIdentityMenuScroll, true);
-  window.addEventListener("resize", closeIdentityMenu);
-});
-onUnmounted(() => {
-  window.removeEventListener("scroll", onIdentityMenuScroll, true);
-  window.removeEventListener("resize", closeIdentityMenu);
-});
+function onIdentityMenuKey(e: KeyboardEvent) {
+  if (e.key === "Escape") closeIdentityMenu();
+}
+/** Dismiss listeners live only while the menu is open, whatever closes it. */
+function listenIdentityMenu(on: boolean) {
+  if (on) {
+    window.addEventListener("scroll", onIdentityMenuScroll, true);
+    window.addEventListener("resize", closeIdentityMenu);
+    window.addEventListener("keydown", onIdentityMenuKey);
+  } else {
+    window.removeEventListener("scroll", onIdentityMenuScroll, true);
+    window.removeEventListener("resize", closeIdentityMenu);
+    window.removeEventListener("keydown", onIdentityMenuKey);
+  }
+}
+watch(identityMenuOpen, listenIdentityMenu);
+onUnmounted(() => listenIdentityMenu(false));
 
 const openSettings = inject(OPEN_SETTINGS_KEY, undefined);
 
 /** Open Settings → Git, scrolled to the identities section. */
 function manageIdentities() {
   closeIdentityMenu();
-  requestedSettingsSection.value = "identities";
-  openSettings?.("git");
+  openSettings?.("git", "identities");
 }
 
 /** The choice is remembered for this repo only; null = follow the global default. */
@@ -626,7 +633,7 @@ function buildTrailers(): string {
   return lines.join("\n");
 }
 
-/** Close AI menu and identity/template menus when clicking outside */
+/** Close the identity / template / branch menus when clicking outside */
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
   if (!target.closest(".commit-identity") && !target.closest(".commit-identity-menu")) {
@@ -691,7 +698,7 @@ async function onAiTranslate(targetLocale: string) {
   if (!currentMsg.trim()) return;
   const cwd = props.cwd;
   try {
-    const msg = await transformCommitMsg("changeLang", currentMsg, targetLocale, cwd);
+    const msg = await translateCommitMsg(currentMsg, targetLocale, cwd);
     applyMessage(cwd, msg);
   } catch {
     // aiError is set by the composable.
@@ -3437,7 +3444,7 @@ function formatActivityDate(dateStr: string): string {
 
 .commit-identity-item-meta {
   font-size: 11px;
-  color: color-mix(in srgb, var(--color-text) 35%, var(--color-text-muted));
+  color: var(--color-text-meta);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

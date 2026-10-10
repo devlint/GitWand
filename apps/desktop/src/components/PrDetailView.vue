@@ -144,6 +144,11 @@ const editorBody = computed({
 });
 const editorHtml = computed(() => renderMarkdown(editorBody.value, mdOpts.value));
 
+/** Extra-context scope of the "ctx" segment: one context per PR. */
+function aiCtxScope(prNumber: number): string {
+  return `pr-update:${prNumber}`;
+}
+
 async function updateDescriptionWithAI() {
   const detail = p.prDetail.value;
   if (!detail) return;
@@ -151,7 +156,7 @@ async function updateDescriptionWithAI() {
   try {
     await prDescription.update(p.cwd.value, detail, {
       locale: getTemplateLang("pr", p.cwd.value),
-      extraContext: getAiExtraContext(`pr-update:${detail.number}`, p.cwd.value),
+      extraContext: getAiExtraContext(aiCtxScope(detail.number), p.cwd.value),
     });
     descriptionTab.value = "formatted";
   } catch {
@@ -1029,7 +1034,7 @@ function submitRequestReviewers() {
               <div v-if="canUpdateDescription && !bodyEditor" class="pdv-desc-ai-split ai-split">
                 <button
                   type="button"
-                  class="btn btn--ai pdv-desc-ai pdv-desc-ai-main"
+                  class="btn btn--ai pdv-desc-ai"
                   :disabled="isAiUpdating"
                   v-tooltip="t('pr.detail.aiUpdateHint')"
                   @click="updateDescriptionWithAI"
@@ -1045,10 +1050,10 @@ function submitRequestReviewers() {
                   </span>
                 </button>
                 <AiContextButton
-                  :scope="`pr-update:${p.prDetail.value.number}`"
+                  :scope="aiCtxScope(p.prDetail.value.number)"
                   :cwd="p.cwd.value"
                   :disabled="isAiUpdating"
-                  button-class="btn btn--ai pdv-desc-ai-chevron pdv-desc-ai-ctx"
+                  button-class="btn btn--ai"
                 />
                 <AiTemplateMenu
                   kind="pr"
@@ -2516,21 +2521,23 @@ function submitRequestReviewers() {
   overflow: hidden;
 }
 
-/* AI description update */
-/* Same compact, square-cornered split button as the PR create form's AI
-   button. The chevron and its template menu live in AiTemplateMenu, styled
-   from here via :deep(). */
-/* AI split button (frame, seams and radii: .ai-split in main.css). Segments
-   are 2px shorter than a lone button: the frame adds 1px above and below. */
+/* AI description update — split button: frame, seams, radii and the ctx
+   segment come from .ai-split in main.css. One rule sizes every segment,
+   including the ctx (AiContextButton) and chevron (AiTemplateMenu) ones. */
 .pdv-desc-ai-split {
   margin-right: auto;
 }
-.btn.btn--ai.pdv-desc-ai {
+.pdv-desc-ai-split > :deep(.btn.btn--ai) {
   min-height: 24px;
-  /* Narrower left side: the sparkle glyph carries its own inset. */
-  padding: 3px 12px 3px 8px;
+  padding-top: 3px;
+  padding-bottom: 3px;
   font-size: var(--font-size-sm);
   color: var(--color-text);
+}
+.btn.btn--ai.pdv-desc-ai {
+  /* Narrower left side: the sparkle glyph carries its own inset. */
+  padding-left: 8px;
+  padding-right: 12px;
 }
 .pdv-desc-ai-label {
   display: inline-flex;
@@ -2538,14 +2545,8 @@ function submitRequestReviewers() {
   gap: 6px;
 }
 .pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-chevron) {
-  min-height: 24px;
-  padding: 3px 8px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text);
-}
-.pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-ctx) {
-  padding-left: 7px;
-  padding-right: 7px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .pdv-desc-ai-tpl {
   max-width: 140px;

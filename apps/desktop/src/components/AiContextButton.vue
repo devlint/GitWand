@@ -102,7 +102,7 @@ onUnmounted(close);
     <textarea
       ref="textarea"
       v-model="draft"
-      class="aic-textarea"
+      class="input aic-textarea"
       rows="8"
       :placeholder="t('settings.aiTemplates.ctxPlaceholder')"
       @keydown="onTextareaKey"
@@ -136,23 +136,11 @@ onUnmounted(close);
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
+/* Look and focus ring from the global .input. */
 .aic-textarea {
-  width: 100%;
   box-sizing: border-box;
-  padding: var(--space-3);
-  font-family: inherit;
-  font-size: var(--font-size-base);
   line-height: 1.45;
-  color: var(--color-text);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
   resize: vertical;
-}
-.aic-textarea:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 /* Clear sits on the left, away from Save. */
 .aic-clear {
