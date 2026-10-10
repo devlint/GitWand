@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.1] - 2026-10-10
+
 ### Added
 - **Each project remembers its own commit identity (#246).** The identity profile used for commits was a single global choice, to be switched by hand from one project to the next. Each repository now keeps its own choice, set from the commit menu or Settings → Git, and falls back to the global default otherwise. It applies to the commit only (`-c user.name/email`), without touching the repository's git config, including commits made by custom automations and under `pnpm dev:web`. A profile's GPG key now goes with its name and email (`-c user.signingkey`): signing a commit with the profile's email and the global key made forges show it as Unverified. Amend, split, merge, revert and cherry-pick still use git's own config.
 - **Update a PR's description with AI, and edit its title and description in place (#234).** The PR detail view gains an "Update with AI" action that drafts a new description from the PR's commits and diff, using the PR template and language picked for that repository. The draft opens in a Preview / Raw editor, and nothing reaches the forge until you apply it. Pencil buttons edit the title and the description by hand. Saving goes through each forge's API: GitHub, GitLab, Bitbucket, Gitea and Azure DevOps. On a fork, the edit targets the base repository, where the PR list reads its PRs. Images, videos and `<picture>` blocks in the old description are masked before the model sees the text and restored afterwards, so the model cannot drop or rewrite them. Fenced and inline code is left untouched. A draft and its error belong to the PR they were generated for, and switching PRs does not discard or misplace them. The manual edit buttons are hidden while a draft is generating, and a background refresh no longer closes an editor you are typing in. The diffstat given to the model is taken from the merge base, so commits that landed on the base branch since the PR opened are no longer described as part of it.
@@ -1641,7 +1643,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.12.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.12.1...HEAD
+[3.12.1]: https://github.com/devlint/GitWand/compare/v3.12.0...v3.12.1
 [3.12.0]: https://github.com/devlint/GitWand/compare/v3.11.2...v3.12.0
 [3.11.2]: https://github.com/devlint/GitWand/compare/v3.11.1...v3.11.2
 [3.11.1]: https://github.com/devlint/GitWand/compare/v3.11.0...v3.11.1

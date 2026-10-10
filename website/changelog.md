@@ -5,6 +5,48 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.12.1 — October 2026
+
+### Merging an AI task back never loses work
+
+Merging an AI task back used to lay the task's files over your checkout. If `main` had moved since the task started, that quietly undid what `main` had gained, deleted files it had added and overwrote your uncommitted edits, with no snapshot to go back to. Merge-back now squash-merges the task branch, and only when it is safe: your checkout is not mid-merge or mid-rebase, the task has no unresolved conflict, your current commit is in the task's history, and you are still on the branch the task started from (or one that contains its starting point). Otherwise it refuses and says what to do, usually merging your branch into the task first. The merge applies as a whole or not at all, so it never overwrites an uncommitted edit, an untracked or ignored file, or a file swapped for a folder, and a Time Machine snapshot is taken first, once a dry run has shown git will accept it.
+
+Closing the task's terminal now really stops the agent: the whole process group gets a hangup, a moment to save, then is killed, so no leftover subprocess keeps writing to the task while it is being merged. And if the task's folder can't be removed afterwards, a locked worktree or a file held open on Windows, the merge still counts: the task closes and a notice tells you to delete the leftover folder by hand. Keeping the agent's individual commits comes with Agent Workspaces.
+
+### AI agents are kept at arm's length
+
+AI agents read diffs and PR descriptions written by other people, so GitWand now treats what they might be told to do as hostile. Claude Code, Codex, opencode, Copilot and Antigravity start from an empty environment: your forge tokens never reach them, only what their own provider and setup need. Each run happens in a fresh private folder that is deleted afterwards, never inside your repository, so a cloned repository can't slip them hooks, plugins or MCP servers, and nothing one run leaves behind reaches the next. Claude Code runs with no tools at all, Codex read-only, opencode without shell, edits or web access, and the prompt goes in through stdin rather than the process list.
+
+The Anthropic or OpenAI-compatible API key moves from the webview's storage to your system keychain. The webview never sees it again: requests go through the app's backend, which only attaches the key to the endpoint it was entered for. Your existing key moves over on first launch.
+
+Privacy gets its own settings. Images in PR descriptions, comments and READMEs no longer load from whatever host their author picked, which could tell that host when you read them: a "Show images" button reveals them for that PR, or for that project on a README. Gravatar lookups are off unless you turn them on, and the anonymous launch event can be switched off, or disabled machine-wide with `DO_NOT_TRACK=1`. File reads and writes now stay inside git repositories.
+
+### Settings take the whole window
+
+Settings is no longer a modal. It fills the window like Help, with the same left menu and a readable content column, and every tab opens with a title and a one-line description. The AI template kinds (commit message, pull request, release notes) get their own entries in the menu. Help now shares the same layout.
+
+### Each project remembers who you are
+
+If you keep several commit identities, Perso and Pro say, each repository now remembers its own choice instead of following one global setting you had to flip by hand. It applies to the commit only, without touching the repository's git config, and a profile's GPG key now travels with its name and email, so commits no longer show as Unverified on GitHub or GitLab.
+
+### Work in progress is a row of the Git Tree
+
+The WIP tab that v3.12.0 glued to the Git Tree is gone, and so is the "Hide WIP when clean" setting. Your uncommitted changes are a row at the top of the graph, shown only when there are any. Selecting it turns the right rail into the files and commit pane, and a diff opens only once you pick a file, as when browsing a commit. The row previews the commit summary you are writing, or shows that the AI is drafting one, and AI-written commit messages and PR descriptions now survive navigating away while they generate.
+
+### AI that edits your PRs, and listens to your settings
+
+A PR's description can now be redrafted by the AI from its commits and diff, with the repository's template and language, in an editor where nothing reaches the forge until you apply it. Titles and descriptions can also be edited by hand, on GitHub, GitLab, Bitbucket, Gitea and Azure DevOps. Images and videos in the old description are kept out of the model's reach and put back untouched.
+
+The reasoning effort set in Settings was never actually passed to the AI CLIs; now it is. The model pickers list Codex, Copilot and Antigravity models instead of a free-text field. Commit messages, PR descriptions and release notes share one template system and one picker, with an output language you choose per kind and per repository, and release notes keep their draft when you close the window.
+
+### Smaller things, and fixes
+
+After rebasing a branch you had already pushed, the main action becomes Force Push instead of Sync, and the push refuses if someone else pushed in the meantime. The header fits narrow windows in every language, collapsing its secondary actions to icons one at a time. Tooltips across the sidebar, the graph and the dock are the app's own, wrapping long text. Discarding the Changes section no longer throws away the staged half of a partially staged file. The terminal shows the agents' logos, and Ctrl+F no longer reaches the program running in it.
+
+In the Git Tree, merge edges curve into the merged branch, one highlight spans the graph and the commit row, light mode keeps its colours, the lane column stops twitching, and tags, branches, stashes and rebases refresh it at once. A stash's untracked files show in its diff. Continue no longer looks dead on an unresolved rebase conflict, a branch whose upstream was force-pushed updates cleanly, and long diff lines wrap. The dock's icon-only buttons are square again.
+
+Two dependency alerts are closed: `shell-quote`, used only by a development tool, and the MCP SDK, whose affected OAuth client GitWand's server does not use.
+
 ## v3.12.0 — October 2026
 
 ### A terminal of our own

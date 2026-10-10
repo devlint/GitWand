@@ -25,7 +25,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.12.0'
+const LATEST = '3.12.1'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -101,7 +101,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Natif (sans Electron)",
     mcRow4: "Serveur MCP pour agents",
     agentsCta: "Découvrir IA & agents →",
-    heroAnnounce: "Nouveau dans la v3.12 — un terminal maison, rapide même sans GPU",
+    heroAnnounce: "Nouveau dans la v3.12 — agents IA tenus à distance, merge-back qui ne perd plus rien",
     heroPoint1: "8 patterns déterministes — zéro pari sur ton code",
     heroPoint2: "100 % local — ton code ne quitte jamais ta machine",
     heroPoint3: "Un seul moteur — Desktop, CLI, VS Code & agents IA",
@@ -201,7 +201,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Native (no Electron)",
     mcRow4: "MCP server for agents",
     agentsCta: "Explore AI & agents →",
-    heroAnnounce: "New in v3.12 — a built-in terminal, fast even without a GPU",
+    heroAnnounce: "New in v3.12 — AI agents kept at arm's length, a merge-back that never loses work",
     heroPoint1: "8 deterministic patterns — zero gambling with your code",
     heroPoint2: "100% local — your code never leaves your machine",
     heroPoint3: "One engine — Desktop, CLI, VS Code & AI agents",
@@ -301,7 +301,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sin Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA y agentes →",
-    heroAnnounce: "Nuevo en la v3.12 — un terminal propio, rápido incluso sin GPU",
+    heroAnnounce: "Nuevo en la v3.12 — agentes de IA a distancia, un merge-back que ya no pierde nada",
     heroPoint1: "8 patrones deterministas — cero apuestas con tu código",
     heroPoint2: "100 % local — tu código nunca sale de tu máquina",
     heroPoint3: "Un solo motor — Desktop, CLI, VS Code y agentes de IA",
@@ -401,7 +401,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sem Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA e agentes →",
-    heroAnnounce: "Novidade na v3.12 — um terminal próprio, rápido mesmo sem GPU",
+    heroAnnounce: "Novidade na v3.12 — agentes de IA à distância, um merge-back que não perde mais nada",
     heroPoint1: "8 padrões deterministas — zero aposta com seu código",
     heroPoint2: "100 % local — seu código nunca sai da sua máquina",
     heroPoint3: "Um único motor — Desktop, CLI, VS Code e agentes de IA",
@@ -501,7 +501,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "原生（无 Electron）",
     mcRow4: "面向代理的 MCP 服务器",
     agentsCta: "探索 AI 与代理 →",
-    heroAnnounce: "v3.12 新功能 — 自研终端渲染器，没有 GPU 也流畅",
+    heroAnnounce: "v3.12 新功能 — AI 代理受到隔离，合并回主分支不再丢失工作",
     heroPoint1: "8 种确定性模式 — 绝不拿你的代码赌运气",
     heroPoint2: "100% 本地运行 — 代码永不离开你的机器",
     heroPoint3: "一个引擎 — 桌面端、CLI、VS Code 与 AI 代理",
@@ -587,7 +587,7 @@ const t = computed(() => i18n[locale.value])
 // `t` sert les sections historiques, `nt` les nouvelles.
 const NC: Record<Locale, any> = {
   en: {
-    badge: 'v3.12 — a built-in terminal, fast even without a GPU',
+    badge: 'v3.12 — AI agents kept at arm\'s length, a merge-back that never loses work',
     h1a: 'The merge ends', h1b: 'without you', h1c: '.',
     sub: 'Eight deterministic patterns classify every hunk, settle the ones that carried no decision, and hand you back only what deserves your attention. Native, local, MIT.',
     cta: 'Download GitWand',
@@ -639,7 +639,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   fr: {
-    badge: 'v3.12 — un terminal maison, rapide même sans GPU',
+    badge: 'v3.12 — agents IA tenus à distance, merge-back qui ne perd plus rien',
     h1a: 'Le merge se termine', h1b: 'sans toi', h1c: '.',
     sub: 'Huit patterns déterministes classent chaque hunk, règlent ceux qui ne demandaient aucune décision, et te laissent uniquement ce qui vaut ton attention. Natif, local, MIT.',
     cta: 'Télécharger GitWand',
@@ -691,7 +691,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   es: {
-    badge: 'v3.12 — un terminal propio, rápido incluso sin GPU',
+    badge: 'v3.12 — agentes de IA a distancia, un merge-back que ya no pierde nada',
     h1a: 'El merge termina', h1b: 'sin ti', h1c: '.',
     sub: 'Ocho patrones deterministas clasifican cada hunk, resuelven los que no exigían ninguna decisión y te devuelven solo lo que merece tu atención. Nativo, local, MIT.',
     cta: 'Descargar GitWand',
@@ -743,7 +743,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'pt-BR': {
-    badge: 'v3.12 — um terminal próprio, rápido mesmo sem GPU',
+    badge: 'v3.12 — agentes de IA à distância, um merge-back que não perde mais nada',
     h1a: 'O merge termina', h1b: 'sem você', h1c: '.',
     sub: 'Oito padrões determinísticos classificam cada hunk, resolvem os que não exigiam decisão nenhuma e devolvem só o que merece a sua atenção. Nativo, local, MIT.',
     cta: 'Baixar o GitWand',
@@ -795,7 +795,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'zh-CN': {
-    badge: 'v3.12 — 自研终端渲染器，没有 GPU 也流畅',
+    badge: 'v3.12 — AI 代理受到隔离，合并回主分支不再丢失工作',
     h1a: '合并结束时', h1b: '不必再找你', h1c: '。',
     sub: '八种确定性模式为每个 hunk 分类，自动处理那些本就无需决策的部分，只把值得你关注的留给你。原生、本地、MIT。',
     cta: '下载 GitWand',
