@@ -163,6 +163,13 @@
   -webkit-backdrop-filter: blur(14px);
 }
 .VPNavBarMenuLink { font-size: 13.5px; }
+/* Sans sidebar, la barre de nav s'aligne sur la colonne de contenu
+   (--nc-measure moins le padding 24px des sections) au lieu de la largeur
+   VitePress par défaut (1376px). */
+@media (min-width: 768px) {
+  .VPNavBar:not(.has-sidebar) .wrapper { padding: 0 24px; }
+}
+.VPNavBar:not(.has-sidebar) .container { max-width: calc(var(--nc-measure) - 48px); }
 
 /* ── Pages marketing : pleine largeur ── */
 .VPPage:has(.gw-landing),
