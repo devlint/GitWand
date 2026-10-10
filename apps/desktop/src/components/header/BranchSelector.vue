@@ -600,13 +600,44 @@ function onDocClick(e: MouseEvent) {
   }
 }
 
+// ─── Animated trigger width ──────────────────────────────────────
+// A width that follows its content can't be CSS-transitioned (auto → auto),
+// so the trigger always carries an explicit px width: whenever its content
+// changes (branch name, "Generating…" placeholder, stats line), measure the
+// natural width and move the explicit width there — the CSS transition
+// animates the change. A MutationObserver (not a watch) catches the swap
+// the out-in name <Transition> performs only after its leave finishes.
+const triggerEl = ref<HTMLElement | null>(null);
+let triggerObserver: MutationObserver | null = null;
+
+function syncTriggerWidth(animate: boolean) {
+  const el = triggerEl.value;
+  if (!el) return;
+  const from = el.getBoundingClientRect().width;
+  el.style.transition = "none";
+  el.style.width = "";
+  const to = el.getBoundingClientRect().width;
+  el.style.width = `${animate ? from : to}px`;
+  void el.offsetWidth; // commit the start width before re-enabling the transition
+  el.style.transition = "";
+  if (animate) el.style.width = `${to}px`;
+}
+
 onMounted(() => {
   document.addEventListener("click", onDocClick, true);
   window.addEventListener("resize", onWindowResize);
+  syncTriggerWidth(false);
+  // The first measure can predate the webfont; re-measure once it's in.
+  void document.fonts?.ready.then(() => syncTriggerWidth(false));
+  if (triggerEl.value) {
+    triggerObserver = new MutationObserver(() => syncTriggerWidth(true));
+    triggerObserver.observe(triggerEl.value, { childList: true, characterData: true, subtree: true });
+  }
 });
 onUnmounted(() => {
   document.removeEventListener("click", onDocClick, true);
   window.removeEventListener("resize", onWindowResize);
+  triggerObserver?.disconnect();
 });
 </script>
 
@@ -621,6 +652,7 @@ onUnmounted(() => {
     -->
     <div class="branch-trigger-group" :class="{ 'branch-trigger-group--ai': ai.isAvailable.value }">
     <button
+      ref="triggerEl"
       class="branch-trigger"
       :class="{
         'branch-trigger--loading': isSwitchingBranch || aiCreatePending,
@@ -1086,7 +1118,7 @@ onUnmounted(() => {
   border-radius: var(--radius-md);
   color: var(--color-text);
   background: var(--color-bg-tertiary);
-  transition: background var(--transition-base), color var(--transition-base);
+  transition: background var(--transition-base), color var(--transition-base), width 0.5s ease;
   cursor: pointer;
   max-width: 320px;
   min-width: 0;
@@ -1276,6 +1308,8 @@ onUnmounted(() => {
   opacity: 0.5;
   flex-shrink: 0;
   align-self: center;
+  /* Stays on the right edge while the width animates past the content. */
+  margin-left: auto;
 }
 .branch-chevron--open { transform: rotate(180deg); }
 
