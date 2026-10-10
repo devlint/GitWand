@@ -489,6 +489,53 @@ button:focus-visible,
 }
 
 /*
+ * AI split button — one gradient frame shared by its segments (main button,
+ * "ctx", template chevron). The frame is the wrapper's background; the 1px
+ * padding and the 1px gaps between segments draw the border. Segments keep
+ * their own .btn--ai look minus the border: drawing a gradient border per
+ * segment restarted the gradient at each seam and left the narrow middle
+ * segment looking borderless.
+ *
+ * Usage: <div class="ai-split"><button class="btn btn--ai">…</button>…</div>
+ * Hosts set sizes (height, padding, font) on the segments, never borders or
+ * radii.
+ */
+.ai-split {
+  display: inline-flex;
+  gap: 1px;
+  padding: 1px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, var(--color-ai) 0%, #c084fc 50%, var(--color-ai) 100%);
+  box-shadow: 0 4px 12px -4px var(--color-ai-soft);
+}
+.ai-split > .btn.btn--ai {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--color-bg-secondary);
+}
+.ai-split > .btn.btn--ai:first-child {
+  border-radius: calc(var(--radius-sm) - 1px) 0 0 calc(var(--radius-sm) - 1px);
+}
+.ai-split > .btn.btn--ai:last-child {
+  border-radius: 0 calc(var(--radius-sm) - 1px) calc(var(--radius-sm) - 1px) 0;
+}
+.ai-split > .btn.btn--ai:hover:not(:disabled) {
+  color: var(--color-ai-text);
+  transform: none;
+  box-shadow: none;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
+}
+/* Dim the content, not the segment: segment opacity would let the frame's
+   gradient show through it. */
+.ai-split > .btn.btn--ai:disabled {
+  opacity: 1;
+}
+.ai-split > .btn.btn--ai:disabled > * {
+  opacity: 0.45;
+}
+
+/*
  * Modal backdrop — tinted + blurred so overlays register as modal
  * even on dark themes (where `rgba(0,0,0,0.6)` is imperceptible).
  *

@@ -1026,7 +1026,7 @@ function submitRequestReviewers() {
                 </svg>
                 </button>
               </span>
-              <div v-if="canUpdateDescription && !bodyEditor" class="pdv-desc-ai-split">
+              <div v-if="canUpdateDescription && !bodyEditor" class="pdv-desc-ai-split ai-split">
                 <button
                   type="button"
                   class="btn btn--ai pdv-desc-ai pdv-desc-ai-main"
@@ -2520,16 +2520,16 @@ function submitRequestReviewers() {
 /* Same compact, square-cornered split button as the PR create form's AI
    button. The chevron and its template menu live in AiTemplateMenu, styled
    from here via :deep(). */
+/* AI split button (frame, seams and radii: .ai-split in main.css). Segments
+   are 2px shorter than a lone button: the frame adds 1px above and below. */
 .pdv-desc-ai-split {
-  display: inline-flex;
   margin-right: auto;
 }
 .btn.btn--ai.pdv-desc-ai {
-  min-height: 26px;
+  min-height: 24px;
   /* Narrower left side: the sparkle glyph carries its own inset. */
-  padding: 4px 12px 4px 8px;
+  padding: 3px 12px 3px 8px;
   font-size: var(--font-size-sm);
-  border-radius: var(--radius-sm);
   color: var(--color-text);
 }
 .pdv-desc-ai-label {
@@ -2537,28 +2537,13 @@ function submitRequestReviewers() {
   align-items: center;
   gap: 6px;
 }
-.btn.btn--ai.pdv-desc-ai-main {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
 .pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-chevron) {
-  min-height: 26px;
-  padding: 4px 8px;
-  margin-left: -1px;
+  min-height: 24px;
+  padding: 3px 8px;
   font-size: var(--font-size-sm);
   color: var(--color-text);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
-.pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-chevron:hover:not(:disabled)) {
-  color: var(--color-ai-text);
-  transform: none;
-  background:
-    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
-    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
-}
-/* "ctx" sits between the main button and the chevron: square on both sides. */
 .pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-ctx) {
-  border-radius: 0;
   padding-left: 7px;
   padding-right: 7px;
 }
@@ -2568,13 +2553,6 @@ function submitRequestReviewers() {
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.7;
-}
-.btn.btn--ai.pdv-desc-ai:hover:not(:disabled) {
-  color: var(--color-ai-text);
-  transform: none;
-  background:
-    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
-    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
 }
 .pdv-desc-body--draft {
   border-color: var(--color-accent);

@@ -584,7 +584,7 @@ function removeReviewer(name: string) {
       <section class="pcv-section">
         <div class="pcv-label-row">
           <label class="pcv-label" for="pcv-title-input">{{ t("pr.create.titleLabel") }}</label>
-          <div v-if="ai.isAvailable.value" class="pcv-ai-split">
+          <div v-if="ai.isAvailable.value" class="pcv-ai-split ai-split">
             <button
               type="button"
               class="btn btn--ai pcv-ai-btn pcv-ai-main"
@@ -1218,47 +1218,25 @@ function removeReviewer(name: string) {
 
 /* ─── AI generate button (matches dashboard .panel-link-ai) ─────────────── */
 .btn.btn--ai.pcv-ai-btn {
-  min-height: 26px;
-  padding: 4px 12px;
+  min-height: 24px;
+  padding: 3px 12px;
   font-size: var(--font-size-sm);
-  border-radius: var(--radius-sm);
   color: var(--color-text);
 }
-.btn.btn--ai.pcv-ai-btn:hover:not(:disabled) {
-  color: var(--color-ai-text);
-  transform: none;
-  background:
-    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
-    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
-}
-/* AI split button — mirrors the commit summary's AI button. The chevron and
-   its template menu live in AiTemplateMenu, styled from here via :deep(). */
+/* AI split button (frame, seams and radii: .ai-split in main.css). The ctx
+   segment and the chevron live in AiContextButton / AiTemplateMenu, sized
+   from here via :deep(). Segments are 2px shorter than a lone button: the
+   frame adds 1px above and below. */
 .pcv-ai-split {
-  display: inline-flex;
   margin-left: auto;
 }
-.btn.btn--ai.pcv-ai-main {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
 .pcv-ai-split :deep(.btn.btn--ai.pcv-ai-chevron) {
-  min-height: 26px;
-  padding: 4px 8px;
-  margin-left: -1px;
+  min-height: 24px;
+  padding: 3px 8px;
   font-size: var(--font-size-sm);
   color: var(--color-text);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
-.pcv-ai-split :deep(.btn.btn--ai.pcv-ai-chevron:hover:not(:disabled)) {
-  color: var(--color-ai-text);
-  transform: none;
-  background:
-    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
-    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
-}
-/* "ctx" sits between the main button and the chevron: square on both sides. */
 .pcv-ai-split :deep(.btn.btn--ai.pcv-ai-ctx) {
-  border-radius: 0;
   padding-left: 7px;
   padding-right: 7px;
 }

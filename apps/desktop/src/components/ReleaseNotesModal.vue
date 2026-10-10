@@ -170,7 +170,7 @@ async function copy() {
           </optgroup>
         </select>
       </label>
-      <div class="rn-split">
+      <div class="rn-split ai-split">
         <button
           type="button"
           class="btn btn--ai rn-ai-btn rn-split-main"
@@ -286,40 +286,23 @@ select.rn-input {
 }
 
 /* Generate split button — the PR view's AI button (.btn--ai + sparkle),
-   taller to line up with the ref selects. The chevron lives in
-   AiTemplateMenu, styled from here via :deep(). */
+   taller to line up with the ref selects (32px with the frame). Frame, seams
+   and radii: .ai-split in main.css. The ctx segment and the chevron live in
+   AiContextButton / AiTemplateMenu, sized from here via :deep(). */
 .rn-split {
-  display: inline-flex;
   margin-left: auto;
 }
 .rn-split :deep(.btn.btn--ai.rn-ai-btn) {
-  height: 32px;
-  min-height: 32px;
+  height: 30px;
+  min-height: 30px;
   padding: 0 12px;
   font-size: var(--font-size-sm);
-  border-radius: var(--radius-sm);
   color: var(--color-text);
-}
-.rn-split :deep(.btn.btn--ai.rn-ai-btn:hover:not(:disabled)) {
-  color: var(--color-ai-text);
-  transform: none;
-  background:
-    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
-    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
-}
-.rn-split .btn.btn--ai.rn-split-main {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
 }
 .rn-split :deep(.btn.btn--ai.rn-split-chevron) {
   padding: 0 8px;
-  margin-left: -1px;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
 }
-/* "ctx" sits between the main button and the chevron: square on both sides. */
 .rn-split :deep(.btn.btn--ai.rn-split-ctx) {
-  border-radius: 0;
   padding-left: 7px;
   padding-right: 7px;
 }
