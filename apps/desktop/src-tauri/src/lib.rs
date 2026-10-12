@@ -692,6 +692,15 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            // Tag the window title in dev builds so a `tauri dev` window can be
+            // told apart from an installed GitWand. Compiled out of release builds.
+            #[cfg(debug_assertions)]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(title) = window.title() {
+                    let _ = window.set_title(&format!("{} (DEV)", title));
+                }
+            }
+
             // Register Cmd+Shift+G (macOS) / Ctrl+Shift+G (Linux/Windows)
             // to bring GitWand to the foreground from anywhere.
             // Non-fatal: another process may already own the hotkey (e.g. a
