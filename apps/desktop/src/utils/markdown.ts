@@ -230,6 +230,16 @@ function isFenceClose(line: string, fence: string): boolean {
   return !!m && m[2][0] === fence[0] && m[2].length >= fence.length && isBlank(m[3]);
 }
 
+/**
+ * Fence still open after `line` (`null` when none), given the one open before.
+ * Lets block scanners know when they're inside code, where lazy paragraph
+ * continuation never applies.
+ */
+function fenceAfter(line: string, fence: string | null): string | null {
+  if (fence) return isFenceClose(line, fence) ? null : fence;
+  return isFenceOpen(line)?.[2] ?? null;
+}
+
 /** True when `line` starts a block that ends a paragraph / lazy continuation. */
 function interruptsParagraph(line: string): boolean {
   if (isFenceOpen(line) || RE_ATX.test(line) || RE_HR.test(line) || RE_BQ.test(line)) return true;
@@ -362,15 +372,17 @@ function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
     // Blockquote (with lazy paragraph continuation).
     if (RE_BQ.test(line)) {
       const inner: string[] = [];
+      let fence: string | null = null;
       while (i < lines.length) {
         const q = RE_BQ.exec(lines[i]);
         if (q) {
           inner.push(q[1]);
         } else {
           const prev = inner[inner.length - 1];
-          if (isBlank(lines[i]) || prev === undefined || isBlank(prev) || interruptsParagraph(lines[i])) break;
+          if (fence || isBlank(lines[i]) || prev === undefined || isBlank(prev) || interruptsParagraph(lines[i])) break;
           inner.push(lines[i]);
         }
+        fence = fenceAfter(inner[inner.length - 1], fence);
         i++;
       }
       out += `<blockquote class="md-blockquote">\n${renderNested(inner, ctx, false)}</blockquote>\n`;
@@ -466,6 +478,8 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
   const items: string[][] = [];
   let cur: string[] = [];
   let offset = 0;
+  // Fence open in the current item's content, if any.
+  let fence: string | null = null;
   let i = start;
   while (i < lines.length) {
     const l = lines[i];
@@ -477,6 +491,7 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
       if (i > start) items.push(cur);
       cur = [mk.empty ? "" : l.slice(mk.offset)];
       offset = mk.offset;
+      fence = null;
     } else if (isBlank(l)) {
       // An empty item followed by a blank line ends the list.
       if (cur.length === 1 && cur[0] === "") break;
@@ -485,9 +500,10 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
       cur.push(l.slice(offset));
     } else {
       const prev = cur[cur.length - 1];
-      if (prev === undefined || isBlank(prev) || mk || interruptsParagraph(l)) break;
+      if (fence || prev === undefined || isBlank(prev) || mk || interruptsParagraph(l)) break;
       cur.push(l); // lazy paragraph continuation
     }
+    fence = fenceAfter(cur[cur.length - 1], fence);
     i++;
   }
   items.push(cur);

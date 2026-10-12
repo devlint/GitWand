@@ -53,6 +53,15 @@ describe("markdownToHtml — blocks", () => {
     expect(md("- a\n  - b\n\n  tail")).toContain("<p>tail</p>");
   });
 
+  it("never lazily continues a fenced code block in a blockquote or list item", () => {
+    expect(md("> ```\n> code\nlazy")).toBe(
+      '<blockquote class="md-blockquote">\n<pre class="md-code-block"><code>code\n</code></pre>\n</blockquote>\n<p>lazy</p>\n',
+    );
+    expect(md("- ```\n  code\nlazy")).toMatch(/<\/ul>\n<p>lazy<\/p>\n$/);
+    // A closed fence doesn't block lazy continuation of a later paragraph.
+    expect(md("> ```\n> x\n> ```\n> para\nlazy")).toContain("<p>para\nlazy</p>");
+  });
+
   it("ends a list when another marker type starts", () => {
     expect(md("- a\n1. b")).toBe("<ul>\n<li>a</li>\n</ul>\n<ol>\n<li>b</li>\n</ol>\n");
   });
