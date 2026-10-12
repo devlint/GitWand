@@ -148,6 +148,24 @@ describe("markdownToHtml — inline", () => {
     expect(md("<me@e.com>")).toBe('<p><a href="mailto:me@e.com" class="md-link">me@e.com</a></p>\n');
   });
 
+  it("linkifies bare emails like GitHub, but not bare domains", () => {
+    expect(md("mail a.b+c@e.co.uk.")).toBe(
+      '<p>mail <a href="mailto:a.b+c@e.co.uk" class="md-link">a.b+c@e.co.uk</a>.</p>\n',
+    );
+    expect(md("@user and a@b and a@b.c-")).toBe("<p>@user and a@b and a@b.c-</p>\n");
+    // Not inside link text or code spans.
+    expect(md("[a@b.com](/p) `c@d.com`")).toBe(
+      '<p><a href="/p" class="md-link">a@b.com</a> <code class="md-inline-code">c@d.com</code></p>\n',
+    );
+    // Narrower than markdown-it's fuzzy linkify, on purpose: GitHub doesn't link these either.
+    expect(md("see example.com")).toBe("<p>see example.com</p>\n");
+  });
+
+  it("keeps an unbalanced trailing ] or ) out of a bare URL", () => {
+    expect(md("[see https://a.com]")).toBe('<p>[see <a href="https://a.com" class="md-link">https://a.com</a>]</p>\n');
+    expect(md("https://a.com/x[1]")).toContain('href="https://a.com/x[1]"');
+  });
+
   it("refuses javascript:, vbscript: and non-image data: link targets", () => {
     for (const src of ["[x](javascript:alert(1))", "<javascript:alert(1)>", "[x](data:text/html,a)", "[x](VBScript:a)"]) {
       expect(md(src), src).not.toContain("href=");

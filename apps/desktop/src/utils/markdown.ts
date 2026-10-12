@@ -6,7 +6,7 @@
  * emphasis / strong / `~~strike~~`, inline + fenced + indented code,
  * blockquotes, nested ordered / unordered lists (tight and loose), task
  * lists, GFM tables, horizontal rules, inline + reference + auto links,
- * bare-URL linkify, images, raw HTML blocks and inline tags, backslash
+ * bare-URL and email linkify (GFM autolinks — no fuzzy bare domains), images, raw HTML blocks and inline tags, backslash
  * escapes and entities.
  *
  * The output is NOT safe on its own: raw HTML from the source is passed
@@ -625,13 +625,16 @@ const RE_PUNCT = /[\p{P}\p{S}]/u;
  * here too (at a word boundary) so ordinary `h` / `w` letters are copied in
  * bulk instead of stopping the scan.
  */
-const RE_SPECIAL = /[\\`*_~![\]<&\n]|(?<![\w/.:@-])(?:https?:\/\/|www\.)/gi;
+const RE_SPECIAL = /[\\`*_~![\]<&\n@]|(?<![\w/.:@-])(?:https?:\/\/|www\.)/gi;
 const RE_INLINE_HTML = new RegExp(`${OPEN_TAG}|${CLOSE_TAG}|<!--(?!>|->)[\\s\\S]*?-->`, "y");
 const RE_ENTITY = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/y;
 const RE_AUTOLINK = /<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*)>/y;
 const RE_EMAIL =
   /<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)>/y;
 const RE_LINKIFY = /(?:https?:\/\/[^\s<>]+|www\.[a-zA-Z0-9-]+\.[^\s<>]+)/iy;
+/** Bare email, GFM extended autolink: local part (already in the text run) and domain after `@`. */
+const RE_EMAIL_LOCAL_CHAR = /[a-zA-Z0-9.+-]/;
+const RE_EMAIL_DOMAIN = /[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)+/y;
 /** Punctuation trimmed off the end of a bare URL (`see https://x.com.`). */
 const RE_TRAIL_PUNCT = /[.,:;!?'"*_~]+$/;
 
@@ -857,6 +860,25 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
       continue;
     }
 
+    // Bare email (GFM): the local part was copied into `text` already.
+    if (c === "@" && !inLink && rawAnchors === 0) {
+      // Read back from `src`, not `text` (slicing the concatenated run on
+      // every `@` is quadratic): these characters are never special or
+      // escaped, so they are exactly the tail of `text`. Capped at RFC 5321's 64.
+      let start = i;
+      while (start > 0 && i - start < 64 && RE_EMAIL_LOCAL_CHAR.test(src[start - 1])) start--;
+      const local = src.slice(start, i);
+      RE_EMAIL_DOMAIN.lastIndex = i + 1;
+      const domain = local && RE_EMAIL_DOMAIN.exec(src)?.[0];
+      if (domain && !/[-_]$/.test(domain)) {
+        text = text.slice(0, -local.length);
+        const addr = `${local}@${domain}`;
+        push(anchor("mailto:" + addr, esc(addr)));
+        i += 1 + domain.length;
+        continue;
+      }
+    }
+
     if (c === "&") {
       RE_ENTITY.lastIndex = i;
       const m = RE_ENTITY.exec(src);
@@ -884,8 +906,12 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
       const m = RE_LINKIFY.exec(src);
       if (m) {
         let url = m[0].replace(RE_TRAIL_PUNCT, "");
-        // Drop a trailing `)` that closes a paren opened outside the URL.
-        while (url.endsWith(")") && (url.match(/\(/g)?.length ?? 0) < (url.match(/\)/g)?.length ?? 0)) {
+        // Drop a trailing `)` / `]` that closes a bracket opened outside the URL.
+        const unbalanced = (o: RegExp, c: RegExp) => (url.match(o)?.length ?? 0) < (url.match(c)?.length ?? 0);
+        while (
+          (url.endsWith(")") && unbalanced(/\(/g, /\)/g)) ||
+          (url.endsWith("]") && unbalanced(/\[/g, /\]/g))
+        ) {
           url = url.slice(0, -1).replace(RE_TRAIL_PUNCT, "");
         }
         const href = /^www\./i.test(url) ? "http://" + url : url;
