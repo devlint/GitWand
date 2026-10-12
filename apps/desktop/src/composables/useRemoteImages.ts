@@ -57,7 +57,7 @@ export function useRepoRemoteImages(cwd: Ref<string | null | undefined>) {
 
 /**
  * Comment body → whether rendering it withholds a remote image. Rendering is
- * markdown-it + DOMPurify, too costly to redo for every comment of the file
+ * markdown + DOMPurify, too costly to redo for every comment of the file
  * on each recompute; the answer depends on the body alone (rendered without
  * consent, global setting off), so it is cached by body. Bounded: dropped wholesale when full.
  */

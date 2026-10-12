@@ -286,7 +286,7 @@ function insertCodeBlock() {
 
 // ─── Markdown preview ───────────────────────────────────
 // Markdown rendering is delegated to the shared `useSafeHtml` composable
-// (markdown-it + DOMPurify). We only add the component-specific empty
+// (`utils/markdown.ts` + DOMPurify). We only add the component-specific empty
 // state here. The rendered HTML is fed to `v-html` via `safeHtml()`,
 // which also re-sanitizes for defense in depth.
 // Remote images in the preview wait for "Show images", like a PR's
