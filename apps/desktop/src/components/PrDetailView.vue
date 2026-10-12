@@ -35,6 +35,7 @@ import AiSparkle from "./AiSparkle.vue";
 import AiTemplateMenu from "./AiTemplateMenu.vue";
 import AiContextButton from "./AiContextButton.vue";
 import { getAiExtraContext } from "../composables/useAiExtraContext";
+import { nestReplies, type CommentWithReplies } from "../utils/prCommentThreads";
 
 const { t } = useI18n();
 
@@ -302,7 +303,8 @@ function reviewStateMeta(state: string): { label: string; cls: string } {
   }
 }
 
-type TimelineComment = (typeof sortedComments.value)[number] & { kind: "comment" };
+type SortedComment = (typeof sortedComments.value)[number];
+type TimelineComment = CommentWithReplies<SortedComment> & { kind: "comment" };
 type TimelineReview = {
   kind: "review";
   id: number;
@@ -323,7 +325,9 @@ type TimelineItem = TimelineComment | TimelineReview;
  * hidden in a separate block.
  */
 const timeline = computed<TimelineItem[]>(() => {
-  const comments: TimelineItem[] = sortedComments.value.map((c) => ({ ...c, kind: "comment" as const }));
+  // Inline replies sit under the review comment that opened their thread
+  // (rendered as sub-messages), so only thread roots join the timeline.
+  const comments: TimelineItem[] = nestReplies(sortedComments.value).map((c) => ({ ...c, kind: "comment" as const }));
   // PENDING reviews (unsubmitted drafts) are excluded; COMMENTED reviews with an
   // empty body carry no standalone signal (their inline notes live in the
   // comments thread). `bodyHtml` is rendered once, like `sortedComments`.
@@ -358,7 +362,13 @@ const timeline = computed<TimelineItem[]>(() => {
 const descriptionHtml = computed(() => renderMarkdown(p.prDetail.value?.body, mdOpts.value));
 const descriptionImagesBlocked = computed(() => hasBlockedRemoteImages(descriptionHtml.value));
 const timelineImagesBlocked = computed(() =>
-  timeline.value.some((item) => hasBlockedRemoteImages(item.bodyHtml)),
+  timeline.value.some((item) =>
+    hasBlockedRemoteImages(item.bodyHtml)
+    || (item.kind === "comment" && item.replies.some((r) => hasBlockedRemoteImages(r.bodyHtml)))),
+);
+/** Conversation entries including nested replies — the section's count badge. */
+const timelineCount = computed(() =>
+  timeline.value.reduce((n, item) => n + 1 + (item.kind === "comment" ? item.replies.length : 0), 0),
 );
 // The inline review threads of the file shown in the Files tab render through
 // PrCommentThread, which follows `prImagesShown` (provided above). Offer the
@@ -1161,7 +1171,7 @@ function submitRequestReviewers() {
           <section v-if="timeline.length" class="pdv-section pdv-section--comments">
             <h2 class="pdv-section-label">
               {{ t('pr.detail.statComments') }}
-              <span class="pdv-section-count">{{ timeline.length }}</span>
+              <span class="pdv-section-count">{{ timelineCount }}</span>
             </h2>
             <!-- One button per PR: skip it here when the description shows it. -->
             <RemoteImagesNotice
@@ -1217,37 +1227,44 @@ function submitRequestReviewers() {
                     :forge-name="p.forge.value.name"
                   />
                 </li>
-                <!-- Inline / issue comment -->
+                <!-- Inline / issue comment; replies of its review thread nest under it -->
                 <li v-else :key="`comment-${item.path}#${item.id}`" class="pdv-comment">
-                  <div class="pdv-comment-head">
-                    <Avatar class="pdv-comment-avatar" :name="item.author" :url="forgeAvatarUrl(p.forge.value.name, item.author)" />
-                    <span class="pdv-comment-author">{{ item.author }}</span>
-                    <span v-if="item.resolved" class="pdv-comment-resolved">✓ {{ t('pr.detail.commentResolved') }}</span>
-                    <button
-                      v-if="commentHref(item)"
-                      type="button"
-                      class="pdv-comment-goto"
-                      :title="t('pr.detail.commentGoto')"
-                      @click="openInBrowser(commentHref(item))"
-                    >
-                      {{ t('pr.detail.commentGoto') }}
-                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7 9" />
-                      </svg>
-                    </button>
-                    <span v-if="item.path" class="pdv-comment-anchor">{{ item.path.split('/').pop() }}<template v-if="item.line">:{{ item.line }}</template></span>
-                    <span class="pdv-comment-time" :title="item.created_at">{{ commentTimeAgo(item.created_at) }}</span>
+                  <div
+                    v-for="(c, i) in [item, ...item.replies]"
+                    :key="c.id"
+                    class="pdv-comment-entry"
+                    :class="{ 'pdv-comment-entry--reply': i > 0 }"
+                  >
+                    <div class="pdv-comment-head">
+                      <Avatar class="pdv-comment-avatar" :name="c.author" :url="forgeAvatarUrl(p.forge.value.name, c.author)" />
+                      <span class="pdv-comment-author">{{ c.author }}</span>
+                      <span v-if="i === 0 && c.resolved" class="pdv-comment-resolved">✓ {{ t('pr.detail.commentResolved') }}</span>
+                      <button
+                        v-if="commentHref(c)"
+                        type="button"
+                        class="pdv-comment-goto"
+                        :title="t('pr.detail.commentGoto')"
+                        @click="openInBrowser(commentHref(c))"
+                      >
+                        {{ t('pr.detail.commentGoto') }}
+                        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7 9" />
+                        </svg>
+                      </button>
+                      <span v-if="i === 0 && c.path" class="pdv-comment-anchor">{{ c.path.split('/').pop() }}<template v-if="c.line">:{{ c.line }}</template></span>
+                      <span class="pdv-comment-time" :title="c.created_at">{{ commentTimeAgo(c.created_at) }}</span>
+                    </div>
+                    <div class="pdv-comment-body" @click="onMarkdownLinkClick" v-html="c.bodyHtml" />
+                    <PrReactions
+                      v-if="p.selectedPr.value"
+                      :cwd="p.cwd.value"
+                      :pr-number="p.selectedPr.value.number"
+                      :target-type="c.path ? 'review_comment' : 'issue_comment'"
+                      :target-id="c.id"
+                      :current-user="p.currentUser.value"
+                      :forge-name="p.forge.value.name"
+                    />
                   </div>
-                  <div class="pdv-comment-body" @click="onMarkdownLinkClick" v-html="item.bodyHtml" />
-                  <PrReactions
-                    v-if="p.selectedPr.value"
-                    :cwd="p.cwd.value"
-                    :pr-number="p.selectedPr.value.number"
-                    :target-type="item.path ? 'review_comment' : 'issue_comment'"
-                    :target-id="item.id"
-                    :current-user="p.currentUser.value"
-                    :forge-name="p.forge.value.name"
-                  />
                 </li>
               </template>
             </ul>
@@ -2232,6 +2249,18 @@ function submitRequestReviewers() {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+}
+
+/* Replies of a review thread: indented sub-messages under the root comment,
+   tied to it by a left rule. */
+.pdv-comment-entry--reply {
+  margin-top: var(--space-7);
+  margin-left: 0;
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-border);
+}
+.pdv-comment-entry--reply:last-child {
+  margin-bottom: var(--space-4);
 }
 
 .pdv-comment-head {
