@@ -819,7 +819,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     prAnnotations.value = [];
     annotationsLoaded.value = false;
     checksLoaded.value = false;
+    checksLoading.value = false;
     issueCommentsLoaded.value = false;
+    issueCommentsLoading.value = false;
     fileCountLoaded.value = false;
     prDiffFiles.value = [];
     diffIndex.value = [];
@@ -921,30 +923,40 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   async function loadChecks() {
     if (!selectedPr.value || checksLoaded.value || checksLoading.value) return;
+    const number = selectedPr.value.number;
     checksLoading.value = true;
     try {
-      prChecks.value = await forge.value.getCIChecks(cwd.value, selectedPr.value.number);
+      const checks = await forge.value.getCIChecks(cwd.value, number);
+      // Stale response: the user moved to another PR — don't write PR A's
+      // checks into PR B's refs (or cache key via persistDetailCache).
+      if (selectedPr.value?.number !== number) return;
+      prChecks.value = checks;
       checksLoaded.value = true;
       persistDetailCache();
     } catch {
-      checksLoaded.value = true; // non-fatal — checks tab simply stays empty
+      if (selectedPr.value?.number === number) checksLoaded.value = true; // non-fatal — checks tab simply stays empty
     } finally {
-      checksLoading.value = false;
+      // `resetDetail()` already cleared the flag for the new PR, whose own
+      // flight may now be in progress — leave it alone.
+      if (selectedPr.value?.number === number) checksLoading.value = false;
     }
   }
 
   async function loadIssueComments() {
     if (!selectedPr.value || issueCommentsLoaded.value || issueCommentsLoading.value) return;
+    const number = selectedPr.value.number;
     issueCommentsLoading.value = true;
     try {
-      prIssueComments.value =
-        (await forge.value.listIssueComments?.(cwd.value, selectedPr.value.number)) ?? [];
+      const comments = (await forge.value.listIssueComments?.(cwd.value, number)) ?? [];
+      // Same stale-response guard as `loadChecks` / `fetchDetailBundle`.
+      if (selectedPr.value?.number !== number) return;
+      prIssueComments.value = comments;
       issueCommentsLoaded.value = true;
       persistDetailCache();
     } catch {
-      issueCommentsLoaded.value = true;
+      if (selectedPr.value?.number === number) issueCommentsLoaded.value = true;
     } finally {
-      issueCommentsLoading.value = false;
+      if (selectedPr.value?.number === number) issueCommentsLoading.value = false;
     }
   }
 

@@ -76,6 +76,27 @@ describe("usePrPanel — slim detail revalidation (A3)", () => {
     expect(ghPrIssueComments).toHaveBeenCalledTimes(2);
   });
 
+  it("a stale issue-comments response never lands on the next PR", async () => {
+    let resolveA!: (v: unknown) => void;
+    ghPrIssueComments.mockImplementation((_cwd: unknown, n: unknown) =>
+      n === 1
+        ? new Promise((r) => { resolveA = r; })
+        : Promise.resolve([{ id: 2, body: "from B" }]),
+    );
+    const p = usePrPanel(ref("/repo"));
+    await p.selectPr({ number: 1 } as any);
+    await Promise.resolve();
+    expect(ghPrIssueComments).toHaveBeenCalledTimes(1); // A in flight
+
+    await p.selectPr({ number: 2 } as any);
+    await Promise.resolve();
+    expect(ghPrIssueComments).toHaveBeenCalledTimes(2); // B not blocked by A's flight
+
+    resolveA([{ id: 1, body: "from A" }]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(p.prIssueComments.value).toEqual([{ id: 2, body: "from B" }]);
+  });
+
   it("switching to the checks tab loads CI checks exactly once", async () => {
     const p = usePrPanel(ref("/repo"));
     await p.selectPr({ number: 1 } as any);
