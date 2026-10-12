@@ -4253,7 +4253,7 @@ async function handleRequest(req, res) {
         // Passed as a single argv element (no shell) — `mainName` can come
         // from a user-configured setting, so it must never be interpolated
         // into a shell string.
-        const format = `%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:${mainName})\x1f%(symref)`;
+        const format = `%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:${mainName})\x1f%(symref)\x1f%(refname)`;
         const branchResult = spawnSync(GIT, ["branch", "-a", `--format=${format}`], {
           cwd: resolvedCwd,
           encoding: "utf-8",
@@ -4293,7 +4293,12 @@ async function handleRequest(req, res) {
             if (part.startsWith("behind ")) behind = parseInt(part.substring(7)) || 0;
           }
 
-          const isRemote = name.startsWith("origin/") || name.startsWith("remotes/");
+          // Classify from the full refname so branches of any remote (not only
+          // "origin") are flagged remote. KEEP IN SYNC with ops.rs.
+          const fullRef = (parts[7] || "").trim();
+          const isRemote = fullRef
+            ? fullRef.startsWith("refs/remotes/")
+            : name.startsWith("origin/") || name.startsWith("remotes/");
           const cleanName = name.startsWith("remotes/") ? name.slice(8) : name;
 
           mainCounts.set(cleanName, mainCount);

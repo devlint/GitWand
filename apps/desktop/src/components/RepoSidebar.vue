@@ -954,8 +954,11 @@ function onBranchCtxUnarchive() {
 const branchToDelete = computed(() => {
   if (!branchCtx.value.branchName || !props.branches) return null;
   const name = branchCtx.value.branchName;
-  // In sidebar, we don't have an explicit 'type', but we can check if it starts with origin/
-  const isRemote = name.startsWith("origin/") || name.startsWith("remotes/");
+  // Trust the backend's isRemote flag (covers every remote, not only "origin");
+  // fall back to the prefix heuristic when the name isn't in the list.
+  const isRemote = props.branches.some((b) => b.name === name)
+    ? !props.branches.some((b) => b.name === name && !b.isRemote)
+    : name.startsWith("origin/") || name.startsWith("remotes/");
 
   if (!isRemote) {
     const local = props.branches.find((b) => b.name === name && !b.isRemote);

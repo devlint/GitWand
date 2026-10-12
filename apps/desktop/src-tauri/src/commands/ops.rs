@@ -1069,7 +1069,7 @@ pub(crate) async fn git_branches(
             // KEEP IN SYNC with the same format/parse in dev-server.mjs
             // (handleRequest branch listing). Field order is positional — any
             // field add/reorder must be mirrored there and in the parser below.
-            &format!("--format=%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:{})\x1f%(symref)", main_name),
+            &format!("--format=%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:{})\x1f%(symref)\x1f%(refname)", main_name),
         ])
         .current_dir(&cwd)
         .output()
@@ -1153,7 +1153,12 @@ pub(crate) async fn git_branches(
             continue;
         }
 
-        let is_remote = name.starts_with("origin/") || name.starts_with("remotes/");
+        // Classify from the full refname so branches of any remote (not only
+        // "origin") are flagged remote; fall back to the old prefix heuristic.
+        let is_remote = match parts.get(7).map(|r| r.trim()) {
+            Some(full) if !full.is_empty() => full.starts_with("refs/remotes/"),
+            _ => name.starts_with("origin/") || name.starts_with("remotes/"),
+        };
         let clean_name = if name.starts_with("remotes/") {
             name.strip_prefix("remotes/").unwrap_or(&name).to_string()
         } else {
@@ -5620,6 +5625,27 @@ mod default_branch_setting_tests {
             branches.iter().map(|b| &b.name).collect::<Vec<_>>()
         );
         assert!(branches.iter().any(|b| b.is_remote && b.name == "origin/trunk"));
+
+        let _ = std::fs::remove_dir_all(&bare);
+    }
+
+    #[test]
+    fn git_branches_flags_non_origin_remote_branches_as_remote() {
+        let repo = TempRepo::new_trunk();
+        let bare = make_bare_remote("gitwand-upstream-remote-bare");
+        repo.git_ok(&["remote", "add", "upstream", bare.to_str().unwrap()]);
+        repo.git_ok(&["push", "-q", "upstream", "trunk"]);
+        repo.git_ok(&["fetch", "-q", "upstream"]);
+
+        let branches = tauri::async_runtime::block_on(git_branches(repo.cwd(), None))
+            .expect("git_branches must succeed");
+        let up = branches
+            .iter()
+            .find(|b| b.name == "upstream/trunk")
+            .expect("upstream/trunk listed");
+        assert!(up.is_remote, "branch of a non-origin remote must be flagged remote");
+        let local = branches.iter().find(|b| b.name == "trunk").expect("trunk listed");
+        assert!(!local.is_remote);
 
         let _ = std::fs::remove_dir_all(&bare);
     }
