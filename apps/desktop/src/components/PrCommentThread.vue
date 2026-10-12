@@ -287,6 +287,8 @@ function timeAgo(dateStr: string): string {
   line-height: 1.5;
   word-break: break-word;
 }
+/* Breathing room between a comment's body and its reaction row. */
+.pct-body + .prt-reactions { margin-top: var(--space-7); }
 
 /* Markdown rendered content */
 .pct-body :deep(p) { margin-bottom: 12px; }

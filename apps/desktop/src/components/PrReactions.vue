@@ -156,8 +156,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
       <button
         class="prt-add-btn"
         :title="t('pr.reactions.addReaction')"
+        :aria-label="t('pr.reactions.addReaction')"
         @click.stop="showPicker = !showPicker"
-      >+</button>
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+          <path d="M5 1v8M1 5h8" />
+        </svg>
+      </button>
       <div v-if="showPicker" class="prt-picker">
         <button
           v-for="c in PICKER_ORDER"
@@ -186,7 +191,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   gap: 2px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 2px 8px;
   font-size: 12px;
   cursor: pointer;
@@ -218,13 +223,14 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   justify-content: center;
   width: 26px;
   height: 22px;
+  padding: 0;
   background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-text) 40%, var(--color-border));
+  border-radius: var(--radius-sm);
   font-size: 14px;
   cursor: pointer;
-  color: var(--color-text-muted);
-  transition: background 0.1s, color 0.1s;
+  color: var(--color-text);
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
   line-height: 1;
 }
 .prt-add-btn:hover {

@@ -2356,6 +2356,8 @@ function submitRequestReviewers() {
   line-height: 1.5;
   word-break: break-word;
 }
+/* Breathing room between a comment's body and its reaction row. */
+.pdv-comment-body + .prt-reactions { margin-top: var(--space-7); }
 .pdv-comment-body :deep(p) { margin-bottom: var(--space-5); }
 .pdv-comment-body :deep(p:last-child) { margin-bottom: 0; }
 .pdv-comment-body :deep(h1),
