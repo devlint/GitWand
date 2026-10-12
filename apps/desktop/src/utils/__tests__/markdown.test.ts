@@ -44,10 +44,16 @@ describe("markdownToHtml — blocks", () => {
     expect(md("- a\n1. b")).toBe("<ul>\n<li>a</li>\n</ul>\n<ol>\n<li>b</li>\n</ol>\n");
   });
 
-  it("renders task list items with md-check classes", () => {
+  it("renders task list items with md-check classes and a state glyph", () => {
     const out = md("- [ ] todo\n- [x] done");
-    expect(out).toContain('<li class="md-check">todo</li>');
-    expect(out).toContain('<li class="md-check md-checked">done</li>');
+    expect(out).toContain('<li class="md-check"><span class="md-check-box">☐</span> todo</li>');
+    expect(out).toContain('<li class="md-check md-checked"><span class="md-check-box">☑</span> done</li>');
+  });
+
+  it("puts the task glyph inside the paragraph of a loose item", () => {
+    const out = md("- [x] a\n\n- [ ] b");
+    expect(out).toContain('<li class="md-check md-checked">\n<p><span class="md-check-box">☑</span> a</p>');
+    expect(out).toContain('<li class="md-check">\n<p><span class="md-check-box">☐</span> b</p>');
   });
 
   it("renders GFM tables, padding short rows and honouring escaped pipes", () => {

@@ -704,6 +704,12 @@ button:focus-visible,
 [data-theme="light"] .wd-del { background: rgba(239, 68, 68, 0.2); }
 [data-theme="light"] .wd-ins { background: rgba(34, 197, 94, 0.2); }
 
+/* ─── Markdown task lists (utils/markdown.ts) ──────────────── */
+/* Shared: task lists render in the README, PR bodies, comments and previews. */
+li.md-check { list-style: none; }
+.md-check-box { color: var(--color-text-muted); }
+.md-checked > .md-check-box { color: var(--color-success); }
+
 /* ─── Dropdown menu (tab bar "+" menu, terminal "+" menu) ───── */
 /* Look only: each component positions its menu and adds its own variants. */
 .gw-menu {

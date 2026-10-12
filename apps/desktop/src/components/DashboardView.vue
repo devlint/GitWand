@@ -2535,17 +2535,8 @@ watch(
 }
 
 .readme-formatted :deep(.md-check) {
-  list-style: none;
   margin-left: calc(-1 * var(--space-7));
   padding-left: 0;
-}
-.readme-formatted :deep(.md-check::before) {
-  content: "☐ ";
-  color: var(--color-text-muted);
-}
-.readme-formatted :deep(.md-checked::before) {
-  content: "☑ ";
-  color: var(--color-success);
 }
 
 .readme-formatted :deep(.md-img),

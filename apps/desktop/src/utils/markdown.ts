@@ -16,7 +16,7 @@
  *
  * Elements carry the `md-*` classes the app's stylesheets target
  * (`md-code-block`, `md-inline-code`, `md-link`, `md-table`, `md-blockquote`,
- * `md-hr`, `md-check` / `md-checked`), and headings get a slug `id` so
+ * `md-hr`, `md-check` / `md-checked` / `md-check-box`), and headings get a slug `id` so
  * in-page `#anchor` links resolve.
  */
 
@@ -443,12 +443,19 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
   let html = `<${tag}${startAttr}>\n`;
   for (const item of items) {
     let cls = "";
+    let box = "";
     const task = /^\[([ xX])\](?:[ \t]+|$)/.exec(item[0]);
     if (task) {
-      cls = task[1] === " " ? ' class="md-check"' : ' class="md-check md-checked"';
+      const checked = task[1] !== " ";
+      cls = checked ? ' class="md-check md-checked"' : ' class="md-check"';
+      // The state lives in the HTML itself, not in a stylesheet: the body is
+      // rendered in many panes and DOMPurify strips <input>.
+      box = `<span class="md-check-box">${checked ? "☑" : "☐"}</span> `;
       item[0] = item[0].slice(task[0].length);
     }
-    const inner = renderNested(item, ctx, !loose);
+    let inner = renderNested(item, ctx, !loose);
+    // Keep the box on the text's line: inside the first <p> of a loose item.
+    inner = inner.startsWith("<p>") ? "<p>" + box + inner.slice(3) : box + inner;
     html += `<li${cls}>${loose ? "\n" + inner : inner.replace(/\n$/, "")}</li>\n`;
   }
   return { html: html + `</${tag}>\n`, next: i };
