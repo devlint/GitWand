@@ -1088,7 +1088,8 @@ onUnmounted(() => {
   padding: 0 2px 0 0;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
-  border-left: 1px solid var(--color-bg);
+  /* Softened divider: 40% of --color-bg over the button gray. */
+  border-left: 1px solid color-mix(in srgb, var(--color-bg) 40%, var(--color-bg-tertiary));
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   cursor: pointer;
   transition: background var(--transition-base), color var(--transition-base);
@@ -1205,7 +1206,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-4);
   background:
     linear-gradient(var(--bs-ai-fill), var(--bs-ai-fill)) padding-box,
     linear-gradient(
@@ -1220,9 +1221,9 @@ onUnmounted(() => {
   letter-spacing: 0.06em;
   line-height: 1;
   border: 1px solid transparent;
-  /* Divider like the "+" button's left edge, but lighter: the button gray
-     with 30% of that edge's --color-bg mixed in. Hover included. */
-  border-left: 1px solid color-mix(in srgb, var(--color-bg) 30%, var(--color-bg-tertiary));
+  /* Same divider as the "+" button's left edge: the button gray
+     with 40% of that edge's --color-bg mixed in. Hover included. */
+  border-left: 1px solid color-mix(in srgb, var(--color-bg) 40%, var(--color-bg-tertiary));
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   cursor: pointer;
   transition: background var(--transition-hover), color var(--transition-hover);
@@ -1240,6 +1241,12 @@ onUnmounted(() => {
 .bs-create-ai:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+/* Light theme: --color-bg is lighter than the button gray, so the mixed
+   dividers vanish. Use a gray tint instead. */
+:root[data-theme="light"] .branch-add-btn,
+:root[data-theme="light"] .bs-create-ai {
+  border-left-color: color-mix(in srgb, var(--color-border-strong) 20%, var(--color-bg-tertiary));
 }
 
 .branch-add-btn:disabled {
