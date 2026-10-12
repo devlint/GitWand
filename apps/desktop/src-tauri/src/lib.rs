@@ -713,7 +713,10 @@ pub fn run() {
                     }
                 },
             ) {
-                eprintln!("[gitwand] global shortcut CmdOrCtrl+Shift+G not registered: {}", e);
+                eprintln!(
+                    "[gitwand] global shortcut CmdOrCtrl+Shift+G not registered: {}",
+                    e
+                );
             }
 
             // Anonymous launch telemetry via Aptabase — fire-and-forget.
