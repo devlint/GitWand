@@ -920,13 +920,14 @@ interface BranchCtxMenu {
   x: number;
   y: number;
   branchName: string;
+  isRemote: boolean;
 }
-const branchCtx = ref<BranchCtxMenu>({ visible: false, x: 0, y: 0, branchName: "" });
+const branchCtx = ref<BranchCtxMenu>({ visible: false, x: 0, y: 0, branchName: "", isRemote: false });
 
-function openBranchCtx(e: MouseEvent, name: string) {
+function openBranchCtx(e: MouseEvent, b: GitBranch) {
   e.preventDefault();
   e.stopPropagation();
-  branchCtx.value = { visible: true, x: e.clientX, y: e.clientY, branchName: name };
+  branchCtx.value = { visible: true, x: e.clientX, y: e.clientY, branchName: b.name, isRemote: b.isRemote };
 }
 
 function closeBranchCtx() { branchCtx.value.visible = false; }
@@ -954,11 +955,7 @@ function onBranchCtxUnarchive() {
 const branchToDelete = computed(() => {
   if (!branchCtx.value.branchName || !props.branches) return null;
   const name = branchCtx.value.branchName;
-  // Trust the backend's isRemote flag (covers every remote, not only "origin");
-  // fall back to the prefix heuristic when the name isn't in the list.
-  const isRemote = props.branches.some((b) => b.name === name)
-    ? !props.branches.some((b) => b.name === name && !b.isRemote)
-    : name.startsWith("origin/") || name.startsWith("remotes/");
+  const isRemote = branchCtx.value.isRemote;
 
   if (!isRemote) {
     const local = props.branches.find((b) => b.name === name && !b.isRemote);
@@ -1776,7 +1773,7 @@ function formatActivityDate(dateStr: string): string {
             class="branch-item"
             :class="{ 'branch-item--current': b.isCurrent }"
             @click="emit('changeView', 'graph')"
-            @contextmenu="openBranchCtx($event, b.name)"
+            @contextmenu="openBranchCtx($event, b)"
             :title="b.name"
           >
             <span class="branch-name mono">{{ b.name }}</span>
@@ -1790,7 +1787,7 @@ function formatActivityDate(dateStr: string): string {
             </span>
             <button
               class="branch-ctx-trigger"
-              @click.stop="openBranchCtx($event, b.name)"
+              @click.stop="openBranchCtx($event, b)"
               :aria-label="t('branch.moreActions')"
             >⋯</button>
           </div>
@@ -1818,7 +1815,7 @@ function formatActivityDate(dateStr: string): string {
             v-for="b in archivedBranches"
             :key="b.name"
             class="branch-item branch-item--archived"
-            @contextmenu="openBranchCtx($event, b.name)"
+            @contextmenu="openBranchCtx($event, b)"
             :title="b.name"
           >
             <span class="branch-name mono">{{ b.name }}</span>
@@ -1828,7 +1825,7 @@ function formatActivityDate(dateStr: string): string {
             </span>
             <button
               class="branch-ctx-trigger"
-              @click.stop="openBranchCtx($event, b.name)"
+              @click.stop="openBranchCtx($event, b)"
               :aria-label="t('branch.moreActions')"
             >⋯</button>
           </div>

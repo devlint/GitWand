@@ -1069,7 +1069,7 @@ pub(crate) async fn git_branches(
             // KEEP IN SYNC with the same format/parse in dev-server.mjs
             // (handleRequest branch listing). Field order is positional — any
             // field add/reorder must be mirrored there and in the parser below.
-            &format!("--format=%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:{})\x1f%(symref)\x1f%(refname)", main_name),
+            &format!("--format=%(HEAD)%(refname)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:{})\x1f%(symref)", main_name),
         ])
         .current_dir(&cwd)
         .output()
@@ -1098,7 +1098,7 @@ pub(crate) async fn git_branches(
             continue;
         }
 
-        let name = parts[0].to_string();
+        let full_ref = parts[0];
         let upstream = if parts[1].is_empty() {
             None
         } else {
@@ -1144,25 +1144,16 @@ pub(crate) async fn git_branches(
             0
         };
 
-        // Skip symbolic refs (`refs/remotes/<remote>/HEAD`). `refname:short`
-        // renders them as the bare remote name ("origin"), which doesn't match
-        // the "origin/" prefix check below and would otherwise surface as a
-        // phantom *local* branch named "origin" (e.g. in the PR base picker).
-        let is_symref = parts.len() > 6 && !parts[6].trim().is_empty();
-        if is_symref || name.contains("HEAD ->") || name == "origin/HEAD" {
+        // Skip symbolic refs (`refs/remotes/<remote>/HEAD`) — not branches.
+        if parts.get(6).is_some_and(|s| !s.is_empty()) {
             continue;
         }
 
-        // Classify from the full refname so branches of any remote (not only
-        // "origin") are flagged remote; fall back to the old prefix heuristic.
-        let is_remote = match parts.get(7).map(|r| r.trim()) {
-            Some(full) if !full.is_empty() => full.starts_with("refs/remotes/"),
-            _ => name.starts_with("origin/") || name.starts_with("remotes/"),
-        };
-        let clean_name = if name.starts_with("remotes/") {
-            name.strip_prefix("remotes/").unwrap_or(&name).to_string()
-        } else {
-            name.clone()
+        // Classify from the full refname (any remote, not only "origin") and
+        // strip it to the display name: refs/heads/x → x, refs/remotes/o/x → o/x.
+        let (clean_name, is_remote) = match full_ref.strip_prefix("refs/remotes/") {
+            Some(n) => (n.to_string(), true),
+            None => (full_ref.strip_prefix("refs/heads/").unwrap_or(full_ref).to_string(), false),
         };
 
         main_counts.insert(clean_name.clone(), main_count);
