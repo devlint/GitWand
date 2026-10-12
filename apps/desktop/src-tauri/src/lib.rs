@@ -694,9 +694,11 @@ pub fn run() {
         .setup(|app| {
             // Register Cmd+Shift+G (macOS) / Ctrl+Shift+G (Linux/Windows)
             // to bring GitWand to the foreground from anywhere.
+            // Non-fatal: another process may already own the hotkey (e.g. a
+            // prod GitWand running next to `tauri dev`, or an unrelated app).
             use tauri_plugin_global_shortcut::ShortcutState;
             let handle = app.handle().clone();
-            app.global_shortcut().on_shortcut(
+            if let Err(e) = app.global_shortcut().on_shortcut(
                 "CmdOrCtrl+Shift+G",
                 move |_app, _shortcut, event| {
                     if event.state == ShortcutState::Pressed {
@@ -710,7 +712,9 @@ pub fn run() {
                         let _ = handle.emit("global-shortcut-activate", ());
                     }
                 },
-            )?;
+            ) {
+                eprintln!("[gitwand] global shortcut CmdOrCtrl+Shift+G not registered: {}", e);
+            }
 
             // Anonymous launch telemetry via Aptabase — fire-and-forget.
             // Replaced Umami: Umami Cloud filters non-browser User-Agents and
