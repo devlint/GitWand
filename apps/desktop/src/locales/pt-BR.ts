@@ -1025,6 +1025,9 @@ const ptBR: Locale = {
       suggestionLabel: "\u{1F4A1} Sugestão",
       resolveThread: "Resolver conversa",
       unresolveThread: "Reabrir conversa",
+      copyLink: "Copiar link",
+      linkCopied: "Link copiado",
+      deleteConfirm: "Excluir este comentário?",
     },
     reactions: {
       addReaction: "Adicionar reação",

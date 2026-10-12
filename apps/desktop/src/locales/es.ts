@@ -1024,6 +1024,9 @@ const es: Locale = {
       suggestionLabel: "\u{1F4A1} Sugerencia",
       resolveThread: "Resolver conversación",
       unresolveThread: "Reabrir conversación",
+      copyLink: "Copiar enlace",
+      linkCopied: "Enlace copiado",
+      deleteConfirm: "¿Eliminar este comentario?",
     },
     reactions: {
       addReaction: "Añadir reacción",

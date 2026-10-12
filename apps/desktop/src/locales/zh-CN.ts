@@ -1030,6 +1030,9 @@ const zhCN: Locale = {
       suggestionLabel: "\u{1F4A1} 建议",
       resolveThread: "解决对话",
       unresolveThread: "重新打开对话",
+      copyLink: "复制链接",
+      linkCopied: "链接已复制",
+      deleteConfirm: "删除此评论？",
     },
     reactions: {
       addReaction: "添加反应",

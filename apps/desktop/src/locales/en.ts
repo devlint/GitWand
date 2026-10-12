@@ -1040,6 +1040,9 @@ const en = {
       suggestionLabel: "\u{1F4A1} Suggestion",
       resolveThread: "Resolve conversation",
       unresolveThread: "Unresolve conversation",
+      copyLink: "Copy link",
+      linkCopied: "Link copied",
+      deleteConfirm: "Delete this comment?",
     },
     reactions: {
       addReaction: "Add reaction",

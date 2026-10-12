@@ -1305,12 +1305,15 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     } catch (err: any) { error.value = err.message; }
   }
 
-  async function handleReplyComment(inReplyToId: number, body: string) {
-    if (!selectedPr.value) return;
+  /** Resolves `true` once the reply is posted and the list refreshed, `false`
+   *  on failure (surfaced via `error`) — lets the caller keep the draft. */
+  async function handleReplyComment(inReplyToId: number, body: string): Promise<boolean> {
+    if (!selectedPr.value) return false;
     try {
       await forge.value.createComment(cwd.value, selectedPr.value.number, { body, in_reply_to_id: inReplyToId });
       await refreshComments();
-    } catch (err: any) { error.value = err.message; }
+      return true;
+    } catch (err: any) { error.value = err.message; return false; }
   }
 
   /** True when the active forge supports editing a review comment (F2) — the
@@ -1325,15 +1328,16 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  unsupported rather than surfaced as an error banner. `forgeSupports*`
    *  hides the action before this can even be called, so this guard is
    *  defense-in-depth, not the primary UX. */
-  async function handleEditComment(id: number, body: string) {
+  async function handleEditComment(id: number, body: string): Promise<boolean> {
     try {
       await forge.value.updateComment(cwd.value, id, body, selectedPr.value?.number);
       const idx = prComments.value.findIndex((c) => c.id === id);
       if (idx !== -1) prComments.value[idx] = { ...prComments.value[idx], body, updated_at: new Date().toISOString() };
       persistDetailCache();
+      return true;
     } catch (err: any) {
-      if (err instanceof ForgeNotImplementedError) return;
-      error.value = err.message;
+      if (!(err instanceof ForgeNotImplementedError)) error.value = err.message;
+      return false;
     }
   }
 
