@@ -629,13 +629,13 @@ fn get_or_create_install_id() -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Linux renders with the GPU. Setups where WebKitGTK can't get an EGL
-    // context (VMs, older Mesa, some native-Wayland sessions — #135, #139) can
-    // still launch by exporting `WEBKIT_DISABLE_COMPOSITING_MODE=1`,
-    // `LIBGL_ALWAYS_SOFTWARE=1` and/or `GDK_BACKEND=x11` themselves; we no
-    // longer force software rendering on everyone, which made every scroll
-    // repaint on the CPU.
-    //
-    // The one thing we do turn off is WebKitGTK's DMA-BUF renderer: on NVIDIA
+    // display abort at startup (#135, #139); a launch sentinel detects that and
+    // switches the next launch to software rendering. Deprecation note and
+    // details in commands/render_fallback.rs.
+    #[cfg(target_os = "linux")]
+    commands::render_fallback::prepare_launch();
+
+    // WebKitGTK's DMA-BUF renderer is always turned off, GPU or not: on NVIDIA
     // under Wayland it kills the process at startup with `Error 71 (Protocol
     // error) dispatching to Wayland display`. Rendering stays on the GPU; only
     // the hand-off of finished frames goes through shared memory. Tried and
@@ -975,6 +975,8 @@ pub fn run() {
             commands::ai_http::ai_http_request,
             commands::telemetry::telemetry_get_state,
             commands::telemetry::telemetry_set_enabled,
+            commands::render_fallback::software_rendering_get_state,
+            commands::render_fallback::software_rendering_set_enabled,
             // ── Bitbucket Cloud REST v2 ──
             commands::bitbucket::bb_list_prs,
             commands::bitbucket::bb_list_issues,
@@ -1050,6 +1052,10 @@ pub fn run() {
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 commands::watcher::stop_all_for_webview(webview.label());
+            }
+            // The webview came up: this launch got past the EGL abort.
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                commands::render_fallback::launch_succeeded();
             }
         })
         .on_window_event(|window, event| {

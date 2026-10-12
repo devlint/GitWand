@@ -119,7 +119,7 @@ import {
   refreshSettings as refreshSharedSettings,
   settingsRevision,
 } from "../composables/useSettings";
-import { gitCommitTemplatePath, openExternalUrl, aiHttpRequest, telemetryGetState, telemetrySetEnabled } from "../utils/backend";
+import { gitCommitTemplatePath, openExternalUrl, aiHttpRequest, telemetryGetState, telemetrySetEnabled, softwareRenderingGetState, softwareRenderingSetEnabled } from "../utils/backend";
 import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings, normalizeEndpointSetting } from "../composables/useAiApiKey";
 export type { AIProvider };
 
@@ -836,6 +836,29 @@ async function onTelemetryChange(enabled: boolean) {
     await telemetrySetEnabled(enabled);
   } catch {
     telemetryEnabled.value = !enabled;
+  }
+}
+
+// Linux software rendering — read before the webview exists, so it lives in
+// the backend like telemetry. Applies at the next launch.
+const softwareRenderingSupported = ref(false);
+const softwareRendering = ref(false);
+const softwareRenderingAuto = ref(false);
+softwareRenderingGetState()
+  .then((st) => {
+    softwareRenderingSupported.value = st.supported;
+    softwareRendering.value = st.enabled;
+    softwareRenderingAuto.value = st.auto_enabled;
+  })
+  .catch(() => { /* backend unavailable — keep the row hidden */ });
+
+async function onSoftwareRenderingChange(enabled: boolean) {
+  softwareRendering.value = enabled;
+  softwareRenderingAuto.value = false;
+  try {
+    await softwareRenderingSetEnabled(enabled);
+  } catch {
+    softwareRendering.value = !enabled;
   }
 }
 
@@ -1868,6 +1891,16 @@ function openAiTemplateKind(kind: AiTemplateKind) {
               <span>{{ t('settings.telemetryEnabled') }}</span>
             </label>
             <span class="sp-hint">{{ telemetryForcedOff ? t('settings.telemetryForcedOff') : t('settings.telemetryEnabledHint') }}</span>
+          </div>
+
+          <div v-if="softwareRenderingSupported" class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-software-rendering">
+              <input id="setting-software-rendering" type="checkbox" class="sp-checkbox"
+                :checked="softwareRendering"
+                @change="onSoftwareRenderingChange(($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.softwareRendering') }}</span>
+            </label>
+            <span class="sp-hint">{{ softwareRenderingAuto ? t('settings.softwareRenderingAuto') : t('settings.softwareRenderingHint') }}</span>
           </div>
         </template>
 

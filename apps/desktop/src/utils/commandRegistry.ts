@@ -181,6 +181,8 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   snapshot_list: { route: "/api/snapshot-list" },
   snapshot_prune: { route: "/api/snapshot-prune" },
   snapshot_restore: { route: "/api/snapshot-restore" },
+  software_rendering_get_state: { route: "/api/software-rendering" },
+  software_rendering_set_enabled: { route: "/api/software-rendering" },
   telemetry_get_state: { route: "/api/telemetry-state" },
   telemetry_set_enabled: { route: "/api/telemetry-state" },
   terminal_close: { route: "/api/terminal-close" },

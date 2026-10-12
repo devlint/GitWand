@@ -621,3 +621,29 @@ export async function telemetrySetEnabled(enabled: boolean): Promise<void> {
     body: JSON.stringify({ enabled }),
   });
 }
+
+// ─── Linux software-rendering fallback ────────────────────
+
+export interface SoftwareRenderingState {
+  /** Only Linux has the fallback; hide the setting elsewhere. */
+  supported: boolean;
+  enabled: boolean;
+  /** Turned on after a launch that died during startup, not by the user. */
+  auto_enabled: boolean;
+}
+
+export async function softwareRenderingGetState(): Promise<SoftwareRenderingState> {
+  if (isTauri()) return tauriInvoke<SoftwareRenderingState>("software_rendering_get_state");
+  const res = await devFetch(`${DEV_SERVER}/api/software-rendering`);
+  return (await res.json()) as SoftwareRenderingState;
+}
+
+/** Takes effect at the next launch. */
+export async function softwareRenderingSetEnabled(enabled: boolean): Promise<void> {
+  if (isTauri()) return tauriInvoke<void>("software_rendering_set_enabled", { enabled });
+  await devFetch(`${DEV_SERVER}/api/software-rendering`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}

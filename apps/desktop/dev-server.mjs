@@ -721,6 +721,8 @@ function parseAiEndpoint(raw) {
 const devAiKeyInfo = () => (devAiApiKey ? { hint: aiKeyHint(devAiApiKey), origin: devAiApiKeyOrigin } : null);
 /** dev:web stand-in for the telemetry opt-out marker. */
 let devTelemetryEnabled = true;
+/** dev:web stand-in for the software-rendering marker. */
+let devSoftwareRendering = false;
 /** Masked hint of a key — mirrors `key_hint` in commands/ai_http.rs. */
 function aiKeyHint(key) {
   if (!key) return null;
@@ -5896,6 +5898,22 @@ async function handleRequest(req, res) {
       const forced = ["DO_NOT_TRACK", "GITWAND_NO_TELEMETRY"].some((k) =>
         ["1", "true", "yes"].includes(String(process.env[k] ?? "").trim().toLowerCase()));
       return jsonResponse(req, res, { enabled: devTelemetryEnabled, forced_off_by_env: forced });
+    }
+
+    // GET/POST /api/software-rendering — mirrors software_rendering_get_state /
+    // software_rendering_set_enabled. dev:web has no webview to switch; the
+    // toggle is kept in memory so the Settings UI can be exercised.
+    if (url.pathname === "/api/software-rendering") {
+      if (req.method === "POST") {
+        const { enabled } = await readBody(req);
+        devSoftwareRendering = enabled === true;
+        return jsonResponse(req, res, { ok: true });
+      }
+      return jsonResponse(req, res, {
+        supported: process.platform === "linux",
+        enabled: devSoftwareRendering,
+        auto_enabled: false,
+      });
     }
 
     // GET /api/claude-cli-detect
