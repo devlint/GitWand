@@ -119,8 +119,39 @@ function normalizeUrl(url: string): string {
   }
 }
 
+/**
+ * Named entities decoded in link destinations / titles. Not the full HTML5
+ * table (2k+ names, and this module has no DOM to borrow one from): the
+ * markup escapes plus ASCII punctuation, which is what HTML-escaped URLs
+ * actually carry. Any other name is kept verbatim, as text.
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&", AMP: "&", lt: "<", LT: "<", gt: ">", GT: ">", quot: '"', QUOT: '"',
+  apos: "'", nbsp: "\u00a0", excl: "!", num: "#", dollar: "$", percnt: "%",
+  lpar: "(", rpar: ")", ast: "*", plus: "+", comma: ",", period: ".", sol: "/",
+  colon: ":", semi: ";", equals: "=", quest: "?", commat: "@", lsqb: "[",
+  rsqb: "]", bsol: "\\", lowbar: "_", grave: "`", lcub: "{", rcub: "}", verbar: "|",
+};
+
+function decodeEntity(ent: string): string {
+  if (ent[1] !== "#") return NAMED_ENTITIES[ent.slice(1, -1)] ?? ent;
+  const hex = ent[2] === "x" || ent[2] === "X";
+  const cp = parseInt(ent.slice(hex ? 3 : 2, -1), hex ? 16 : 10);
+  // CommonMark: NUL, surrogates and out-of-range code points become U+FFFD.
+  return cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) ? "\ufffd" : String.fromCodePoint(cp);
+}
+
+/**
+ * Backslash escapes and entity references, in one pass so `\\&amp;` stays a
+ * literal `&amp;`. For link destinations, titles and fence info strings —
+ * the spots where CommonMark decodes them — so `?a=1&amp;b=2` becomes
+ * `?a=1&b=2` before URL validation and `esc`, instead of `&amp;amp;`.
+ */
 function unescapeMd(s: string): string {
-  return s.replace(/\\([!-/:-@[-`{-~])/g, "$1");
+  return s.replace(
+    /\\([!-/:-@[-`{-~])|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g,
+    (ent, punct: string | undefined) => punct ?? decodeEntity(ent),
+  );
 }
 
 // ─── Block structure ───────────────────────────────────────────────
@@ -223,7 +254,8 @@ function collectRefs(lines: string[], refs: Map<string, LinkRef>): string[] {
       if (m) {
         const label = normalizeLabel(m[1]);
         if (label && !refs.has(label)) {
-          refs.set(label, { href: unescapeMd(m[2]), title: m[3] ?? m[4] ?? m[5] });
+          const title = m[3] ?? m[4] ?? m[5];
+          refs.set(label, { href: unescapeMd(m[2]), title: title === undefined ? undefined : unescapeMd(title) });
         }
         continue;
       }

@@ -96,6 +96,21 @@ describe("markdownToHtml — inline", () => {
     );
   });
 
+  it("decodes entities in link / image destinations and titles instead of double-escaping", () => {
+    expect(md('[x](https://a.com/?a=1&amp;b=2 "Q&amp;A")')).toBe(
+      '<p><a href="https://a.com/?a=1&amp;b=2" title="Q&amp;A" class="md-link">x</a></p>\n',
+    );
+    expect(md("![i](/i.png?w=1&#38;h=2)")).toContain('<img src="/i.png?w=1&amp;h=2"');
+    expect(md('[r]\n\n[r]: /p?a&amp;b "T&#x26;U"')).toContain('<a href="/p?a&amp;b" title="T&amp;U"');
+    // A backslash-escaped `&` is literal, unknown names stay verbatim.
+    expect(md("[x](/p?\\&amp;q)")).toContain('href="/p?&amp;amp;q"');
+    expect(md("[x](/p?&bogus;)")).toContain('href="/p?&amp;bogus;"');
+    // Decoding happens before the scheme check.
+    for (const src of ["[x](javascript&colon;alert(1))", "[x](&#106;avascript:alert(1))"]) {
+      expect(md(src), src).not.toContain("href=");
+    }
+  });
+
   it("linkifies bare URLs and autolinks, trimming trailing punctuation", () => {
     expect(md("see https://e.com/a.")).toBe('<p>see <a href="https://e.com/a" class="md-link">https://e.com/a</a>.</p>\n');
     expect(md("(www.e.com)")).toBe('<p>(<a href="http://www.e.com" class="md-link">www.e.com</a>)</p>\n');
