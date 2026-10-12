@@ -271,11 +271,12 @@ export interface ForgeProvider {
   dismissReview?(cwd: string, prNumber: number, reviewId: number, message?: string): Promise<void>;
 
   /**
-   * Resolve or unresolve the review thread opened by `root` ("Resolve
-   * conversation"). Optional — same unsupported-hides-the-action contract as
-   * `dismissReview`. Only GitHub implements it for now.
+   * Resolve or unresolve a review thread by its forge id
+   * (`PrReviewComment.thread_id`, "Resolve conversation"). Optional — same
+   * unsupported-hides-the-action contract as `dismissReview`. Only GitHub
+   * implements it for now.
    */
-  setThreadResolved?(cwd: string, prNumber: number, root: PrReviewComment, resolved: boolean): Promise<void>;
+  setThreadResolved?(cwd: string, threadId: string, resolved: boolean): Promise<void>;
 
   /** Request reviewers on an existing PR/MR (B4, v3.6.0). Optional — same
    *  unsupported-hides-the-action contract as `dismissReview`. */

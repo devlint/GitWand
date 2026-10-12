@@ -1065,7 +1065,7 @@ async function githubGraphql(token, query, variables) {
   return json.data;
 }
 
-const PORT =parseInt(process.argv.find((_, i, a) => a[i - 1] === "--port") ?? "3001", 10);
+const PORT = parseInt(process.argv.find((_, i, a) => a[i - 1] === "--port") ?? "3001", 10);
 
 /**
  * Allow-listed origins for CORS.

@@ -888,11 +888,9 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
     }
 
     if (c === "\n") {
-      let spaces = 0;
-      while (text.endsWith(" ")) {
-        text = text.slice(0, -1);
-        spaces++;
-      }
+      const trimmed = text.replace(/ +$/, "");
+      const spaces = text.length - trimmed.length;
+      text = trimmed;
       push(spaces >= 2 || ctx.breaks ? "<br>\n" : "\n");
       i++;
       while (src[i] === " ") i++;

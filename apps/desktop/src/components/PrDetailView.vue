@@ -2581,44 +2581,19 @@ function submitRequestReviewers() {
   color: var(--color-accent);
   border-color: var(--color-accent);
 }
-.pdv-thread-btn--primary {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-accent-text);
+/* Filled variants: each sets only its colours, the shared rule does the rest. */
+.pdv-thread-btn--primary { --pdv-btn-bg: var(--color-accent); --pdv-btn-fg: var(--color-accent-text); }
+.pdv-thread-btn--reply { --pdv-btn-bg: var(--color-accent); }
+.pdv-thread-btn--resolve { --pdv-btn-bg: color-mix(in srgb, var(--color-success) 80%, black); }
+.pdv-thread-btn--danger { --pdv-btn-bg: var(--color-danger, #ef4444); }
+.pdv-thread-btn:is(.pdv-thread-btn--primary, .pdv-thread-btn--reply, .pdv-thread-btn--resolve, .pdv-thread-btn--danger),
+.pdv-thread-btn:is(.pdv-thread-btn--primary, .pdv-thread-btn--reply, .pdv-thread-btn--resolve, .pdv-thread-btn--danger):hover:not(:disabled) {
+  background: var(--pdv-btn-bg);
+  border-color: var(--pdv-btn-bg);
+  color: var(--pdv-btn-fg, #ffffff);
   font-weight: var(--font-weight-semibold);
 }
-.pdv-thread-btn--primary:hover:not(:disabled) {
-  color: var(--color-accent-text);
-  filter: brightness(1.1);
-}
-.pdv-thread-btn--reply {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: #ffffff;
-}
-.pdv-thread-btn--resolve {
-  background: color-mix(in srgb, var(--color-success) 80%, black);
-  border-color: color-mix(in srgb, var(--color-success) 80%, black);
-  color: #ffffff;
-}
-.pdv-thread-btn--reply,
-.pdv-thread-btn--resolve {
-  font-weight: var(--font-weight-semibold);
-}
-.pdv-thread-btn--reply:hover:not(:disabled),
-.pdv-thread-btn--resolve:hover:not(:disabled) {
-  color: #ffffff;
-  filter: brightness(1.1);
-}
-.pdv-thread-btn--danger {
-  background: var(--color-danger, #ef4444);
-  border-color: var(--color-danger, #ef4444);
-  color: #ffffff;
-  font-weight: var(--font-weight-semibold);
-}
-.pdv-thread-btn--danger:hover:not(:disabled) {
-  color: #ffffff;
-  border-color: var(--color-danger, #ef4444);
+.pdv-thread-btn:is(.pdv-thread-btn--primary, .pdv-thread-btn--reply, .pdv-thread-btn--resolve, .pdv-thread-btn--danger):hover:not(:disabled) {
   filter: brightness(1.1);
 }
 .pdv-thread-btn:disabled {

@@ -14,6 +14,23 @@ interface ThreadableComment {
 export type CommentWithReplies<T> = T & { replies: T[] };
 
 /**
+ * Walk `in_reply_to_id` up from `c` to the oldest ancestor present in `byId`.
+ * Stops at a missing parent or a cycle; returns `c` itself when it has no
+ * reachable parent.
+ */
+function rootOf<T extends ThreadableComment>(c: T, byId: Map<number, T>): T {
+  const seen = new Set<number>([c.id]);
+  let cur = c;
+  while (cur.in_reply_to_id != null) {
+    const parent = byId.get(cur.in_reply_to_id);
+    if (!parent || seen.has(parent.id)) break;
+    seen.add(parent.id);
+    cur = parent;
+  }
+  return cur;
+}
+
+/**
  * Nest every reply under its thread root, keeping input order for both the
  * roots and each root's replies (pass the comments oldest-first).
  *
@@ -27,24 +44,12 @@ export function nestReplies<T extends ThreadableComment>(comments: T[]): Comment
   const reviewById = new Map<number, T>();
   for (const c of comments) if (c.path) reviewById.set(c.id, c);
 
-  function rootOf(c: T): T | null {
-    const seen = new Set<number>([c.id]);
-    let cur = c;
-    while (cur.in_reply_to_id != null) {
-      const parent = reviewById.get(cur.in_reply_to_id);
-      if (!parent || seen.has(parent.id)) return cur === c ? null : cur;
-      seen.add(parent.id);
-      cur = parent;
-    }
-    return cur === c ? null : cur;
-  }
-
   const out: CommentWithReplies<T>[] = [];
   const byRootId = new Map<number, CommentWithReplies<T>>();
   const pending: Array<[number, T]> = [];
   for (const c of comments) {
-    const root = c.path && c.in_reply_to_id != null ? rootOf(c) : null;
-    if (root) {
+    const root = c.path && c.in_reply_to_id != null ? rootOf(c, reviewById) : c;
+    if (root !== c) {
       pending.push([root.id, c]);
       continue;
     }
@@ -79,14 +84,7 @@ export function withThreadState<T extends ThreadableComment & { resolved?: boole
   const byRoot = new Map(threads.map((t) => [t.root_comment_id, t]));
   const byId = new Map(comments.map((c) => [c.id, c]));
   return comments.map((c) => {
-    const seen = new Set<number>();
-    let cur: T | undefined = c;
-    while (cur && !seen.has(cur.id)) {
-      const thread = byRoot.get(cur.id);
-      if (thread) return { ...c, thread_id: thread.thread_id, resolved: thread.resolved };
-      seen.add(cur.id);
-      cur = cur.in_reply_to_id != null ? byId.get(cur.in_reply_to_id) : undefined;
-    }
-    return c;
+    const thread = byRoot.get(rootOf(c, byId).id);
+    return thread ? { ...c, thread_id: thread.thread_id, resolved: thread.resolved } : c;
   });
 }

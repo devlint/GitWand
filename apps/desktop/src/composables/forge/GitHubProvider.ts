@@ -176,9 +176,8 @@ export class GitHubProvider implements ForgeProvider {
     return withThreadState(comments, threads);
   }
 
-  setThreadResolved(cwd: string, _prNumber: number, root: PrReviewComment, resolved: boolean): Promise<void> {
-    if (!root.thread_id) return Promise.reject(new Error("Unknown review thread"));
-    return ghSetReviewThreadResolved(cwd, root.thread_id, resolved);
+  setThreadResolved(cwd: string, threadId: string, resolved: boolean): Promise<void> {
+    return ghSetReviewThreadResolved(cwd, threadId, resolved);
   }
 
   listIssueComments(cwd: string, prNumber: number): Promise<PrReviewComment[]> {

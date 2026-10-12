@@ -924,39 +924,41 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   async function loadChecks() {
     if (!selectedPr.value || checksLoaded.value || checksLoading.value) return;
     const number = selectedPr.value.number;
+    const current = () => selectedPr.value?.number === number;
     checksLoading.value = true;
     try {
       const checks = await forge.value.getCIChecks(cwd.value, number);
       // Stale response: the user moved to another PR — don't write PR A's
       // checks into PR B's refs (or cache key via persistDetailCache).
-      if (selectedPr.value?.number !== number) return;
+      if (!current()) return;
       prChecks.value = checks;
       checksLoaded.value = true;
       persistDetailCache();
     } catch {
-      if (selectedPr.value?.number === number) checksLoaded.value = true; // non-fatal — checks tab simply stays empty
+      if (current()) checksLoaded.value = true; // non-fatal — checks tab simply stays empty
     } finally {
       // `resetDetail()` already cleared the flag for the new PR, whose own
       // flight may now be in progress — leave it alone.
-      if (selectedPr.value?.number === number) checksLoading.value = false;
+      if (current()) checksLoading.value = false;
     }
   }
 
   async function loadIssueComments() {
     if (!selectedPr.value || issueCommentsLoaded.value || issueCommentsLoading.value) return;
     const number = selectedPr.value.number;
+    const current = () => selectedPr.value?.number === number;
     issueCommentsLoading.value = true;
     try {
       const comments = (await forge.value.listIssueComments?.(cwd.value, number)) ?? [];
       // Same stale-response guard as `loadChecks` / `fetchDetailBundle`.
-      if (selectedPr.value?.number !== number) return;
+      if (!current()) return;
       prIssueComments.value = comments;
       issueCommentsLoaded.value = true;
       persistDetailCache();
     } catch {
-      if (selectedPr.value?.number === number) issueCommentsLoaded.value = true;
+      if (current()) issueCommentsLoaded.value = true;
     } finally {
-      if (selectedPr.value?.number === number) issueCommentsLoading.value = false;
+      if (current()) issueCommentsLoading.value = false;
     }
   }
 
@@ -1305,13 +1307,16 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     } catch (err: any) { error.value = err.message; }
   }
 
-  /** Resolves `true` once the reply is posted and the list refreshed, `false`
-   *  on failure (surfaced via `error`) — lets the caller keep the draft. */
+  /** Resolves `true` once the reply is posted and appended, `false` on
+   *  failure (surfaced via `error`) — lets the caller keep the draft. The
+   *  reply inherits its parent's thread state, so no refetch is needed. */
   async function handleReplyComment(inReplyToId: number, body: string): Promise<boolean> {
     if (!selectedPr.value) return false;
     try {
-      await forge.value.createComment(cwd.value, selectedPr.value.number, { body, in_reply_to_id: inReplyToId });
-      await refreshComments();
+      const reply = await forge.value.createComment(cwd.value, selectedPr.value.number, { body, in_reply_to_id: inReplyToId });
+      const parent = prComments.value.find((c) => c.id === inReplyToId);
+      prComments.value = [...prComments.value, { ...reply, thread_id: parent?.thread_id, resolved: parent?.resolved }];
+      persistDetailCache();
       return true;
     } catch (err: any) { error.value = err.message; return false; }
   }
@@ -1442,11 +1447,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  timeline reflects it without refetching. Same unsupported-is-silent
    *  contract as `handleDismissReview`. */
   async function handleSetThreadResolved(root: PrReviewComment, resolved: boolean) {
-    if (!selectedPr.value || !forge.value.setThreadResolved || !root.thread_id) return;
+    const threadId = root.thread_id;
+    if (!forge.value.setThreadResolved || !threadId) return;
     try {
-      await forge.value.setThreadResolved(cwd.value, selectedPr.value.number, root, resolved);
+      await forge.value.setThreadResolved(cwd.value, threadId, resolved);
       prComments.value = prComments.value.map((c) =>
-        c.thread_id === root.thread_id ? { ...c, resolved } : c,
+        c.thread_id === threadId ? { ...c, resolved } : c,
       );
       persistDetailCache();
     } catch (err: any) {
