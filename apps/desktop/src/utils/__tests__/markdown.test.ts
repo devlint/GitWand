@@ -40,6 +40,19 @@ describe("markdownToHtml — blocks", () => {
     expect(md("3. a\n\n4. b")).toBe('<ol start="3">\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ol>\n');
   });
 
+  it("treats a continuation paragraph indented past the item offset as loose", () => {
+    expect(md("* a\n\n    more text")).toBe("<ul>\n<li>\n<p>a</p>\n<p>more text</p>\n</li>\n</ul>\n");
+    expect(md("- a\n\n  - b")).toBe("<ul>\n<li>\n<p>a</p>\n<ul>\n<li>b</li>\n</ul>\n</li>\n</ul>\n");
+  });
+
+  it("ignores blank lines inside a nested list when judging the outer one", () => {
+    // Blank between nested siblings, and inside a doubly-nested item.
+    expect(md("- a\n  - b\n\n  - c\n- d")).toMatch(/^<ul>\n<li>a\n<ul>/);
+    expect(md("- a\n  - b\n    - c\n\n      more\n- d")).toMatch(/^<ul>\n<li>a\n<ul>/);
+    // …but a paragraph back at the outer item's level after the nested list is loose.
+    expect(md("- a\n  - b\n\n  tail")).toContain("<p>tail</p>");
+  });
+
   it("ends a list when another marker type starts", () => {
     expect(md("- a\n1. b")).toBe("<ul>\n<li>a</li>\n</ul>\n<ol>\n<li>b</li>\n</ol>\n");
   });

@@ -505,11 +505,28 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
     }
     if (trailing && k < items.length - 1) loose = true;
     let inFence = false;
+    // Content column of the nested list item the scan is in, or -1. Lines
+    // indented to it (and sibling markers) belong to that nested list.
+    let nested = -1;
     for (let j = 0; j < item.length && !loose; j++) {
-      if (isFenceOpen(item[j]) || (inFence && RE_FENCE.test(item[j]))) inFence = !inFence;
-      if (inFence || !isBlank(item[j]) || j === 0) continue;
-      const nextLine = item.slice(j + 1).find((l) => !isBlank(l));
-      if (nextLine !== undefined && indentOf(nextLine) < 2) loose = true;
+      const l = item[j];
+      if (isFenceOpen(l) || (inFence && RE_FENCE.test(l))) inFence = !inFence;
+      if (inFence) continue;
+      if (!isBlank(l)) {
+        const mk = listMarker(l);
+        // Deeper markers are inside the nested item already: keep its column.
+        if (mk && (nested < 0 || indentOf(l) < nested)) nested = mk.offset;
+        else if (!mk && nested >= 0 && indentOf(l) < nested && isBlank(item[j - 1])) nested = -1;
+        continue;
+      }
+      if (j === 0) continue;
+      let after = j + 1;
+      while (after < item.length && isBlank(item[after])) after++;
+      if (after === item.length) break;
+      const next = item[after];
+      // Loose only when the blank separates two direct children of the item.
+      if (nested < 0 || (indentOf(next) < nested && !listMarker(next))) loose = true;
+      j = after - 1;
     }
   }
 
