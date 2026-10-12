@@ -52,7 +52,7 @@ describe("usePrPanel — slim detail revalidation (A3)", () => {
     gitFileCount.mockReset().mockResolvedValue(0);
   });
 
-  it("selectPr issues exactly the 3 hot-path calls, not checks/issueComments/fileCount", async () => {
+  it("selectPr issues the 3 hot-path calls, not checks/fileCount", async () => {
     const p = usePrPanel(ref("/repo"));
     await p.selectPr({ number: 1 } as any);
 
@@ -60,8 +60,20 @@ describe("usePrPanel — slim detail revalidation (A3)", () => {
     expect(ghPrComments).toHaveBeenCalledTimes(1);
     expect(ghPrListReviews).toHaveBeenCalledTimes(1);
     expect(ghPrChecks).not.toHaveBeenCalled();
-    expect(ghPrIssueComments).not.toHaveBeenCalled();
     expect(gitFileCount).not.toHaveBeenCalled();
+  });
+
+  it("selecting a PR on the info tab loads its issue comments", async () => {
+    const p = usePrPanel(ref("/repo"));
+    await p.selectPr({ number: 1 } as any);
+    await Promise.resolve();
+    expect(p.detailTab.value).toBe("info");
+    expect(ghPrIssueComments).toHaveBeenCalledTimes(1);
+
+    // Switching PR while still on "info": the tab never changes, the PR does.
+    await p.selectPr({ number: 2 } as any);
+    await Promise.resolve();
+    expect(ghPrIssueComments).toHaveBeenCalledTimes(2);
   });
 
   it("switching to the checks tab loads CI checks exactly once", async () => {

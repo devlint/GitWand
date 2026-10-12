@@ -1068,7 +1068,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     cwd, selectedPr, prDetail, detailTab, loadDiff, diffIndex, annotationsByFile,
   });
 
-  watch(detailTab, async (tab) => {
+  // Keyed on the PR too: `resetDetail()` forces the tab back to "info", so
+  // opening a PR while already on "info" would never change `detailTab` and
+  // the info tab's lazy loaders (issue comments, summary) would never fire.
+  watch([detailTab, () => selectedPr.value?.number], async ([tab]) => {
     if (tab === "diff") {
       loadDiff();
       loadAnnotations();
