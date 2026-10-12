@@ -59,3 +59,34 @@ export function nestReplies<T extends ThreadableComment>(comments: T[]): Comment
   }
   return out;
 }
+
+interface ThreadState {
+  thread_id: string;
+  root_comment_id: number;
+  resolved: boolean;
+}
+
+/**
+ * Stamp each review comment with its thread's id and resolution state, found
+ * by walking `in_reply_to_id` up to the comment that opened the thread.
+ * Comments outside every known thread are returned unchanged.
+ */
+export function withThreadState<T extends ThreadableComment & { resolved?: boolean; thread_id?: string }>(
+  comments: T[],
+  threads: ThreadState[],
+): T[] {
+  if (!threads.length) return comments;
+  const byRoot = new Map(threads.map((t) => [t.root_comment_id, t]));
+  const byId = new Map(comments.map((c) => [c.id, c]));
+  return comments.map((c) => {
+    const seen = new Set<number>();
+    let cur: T | undefined = c;
+    while (cur && !seen.has(cur.id)) {
+      const thread = byRoot.get(cur.id);
+      if (thread) return { ...c, thread_id: thread.thread_id, resolved: thread.resolved };
+      seen.add(cur.id);
+      cur = cur.in_reply_to_id != null ? byId.get(cur.in_reply_to_id) : undefined;
+    }
+    return c;
+  });
+}

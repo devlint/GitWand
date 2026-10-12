@@ -28,6 +28,8 @@ import {
   ghDisableAutoMerge,
   ghCheckoutPr,
   ghPrComments,
+  ghPrReviewThreads,
+  ghSetReviewThreadResolved,
   ghPrIssueComments,
   ghPrCreateComment,
   ghPrUpdateComment,
@@ -43,6 +45,7 @@ import {
   ghPrEdit,
   ghListIssues,
 } from "../../utils/backend";
+import { withThreadState } from "../../utils/prCommentThreads";
 
 import type {
   ForgeProvider,
@@ -163,8 +166,19 @@ export class GitHubProvider implements ForgeProvider {
 
   // ── Comments ──────────────────────────────────────────────────────────────
 
-  listComments(cwd: string, prNumber: number): Promise<PrReviewComment[]> {
-    return ghPrComments(cwd, prNumber);
+  async listComments(cwd: string, prNumber: number): Promise<PrReviewComment[]> {
+    // REST comments carry no thread state; overlay it from GraphQL. Best-effort:
+    // without it the comments still list, just without resolve affordances.
+    const [comments, threads] = await Promise.all([
+      ghPrComments(cwd, prNumber),
+      ghPrReviewThreads(cwd, prNumber).catch(() => []),
+    ]);
+    return withThreadState(comments, threads);
+  }
+
+  setThreadResolved(cwd: string, _prNumber: number, root: PrReviewComment, resolved: boolean): Promise<void> {
+    if (!root.thread_id) return Promise.reject(new Error("Unknown review thread"));
+    return ghSetReviewThreadResolved(cwd, root.thread_id, resolved);
   }
 
   listIssueComments(cwd: string, prNumber: number): Promise<PrReviewComment[]> {

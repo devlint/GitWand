@@ -1038,6 +1038,8 @@ const en = {
       replyPlaceholder: "Reply\u2026 (Ctrl+Enter to send)",
       applySuggestion: "\u2705 Apply suggestion",
       suggestionLabel: "\u{1F4A1} Suggestion",
+      resolveThread: "Resolve conversation",
+      unresolveThread: "Unresolve conversation",
     },
     reactions: {
       addReaction: "Add reaction",

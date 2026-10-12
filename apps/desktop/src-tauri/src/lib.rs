@@ -824,6 +824,8 @@ pub fn run() {
             commands::gh::gh_pr_ready,
             commands::gh::gh_pr_edit,
             commands::gh::gh_dismiss_review,
+            commands::gh::gh_pr_review_threads,
+            commands::gh::gh_set_review_thread_resolved,
             commands::gh::gh_request_reviewers,
             commands::gh::gh_fork_info,
             commands::github_api::github_device_start,

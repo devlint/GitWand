@@ -1050,7 +1050,20 @@ async function githubFetch(path, token, accept = "application/vnd.github+json") 
   });
 }
 
-const PORT = parseInt(process.argv.find((_, i, a) => a[i - 1] === "--port") ?? "3001", 10);
+/** Run a GitHub GraphQL operation; returns `data`, throws on the first `errors[]` entry. */
+async function githubGraphql(token, query, variables) {
+  const resp = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+  });
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+  if (json.errors?.length) throw new Error(`GraphQL error: ${json.errors[0].message}`);
+  return json.data;
+}
+
+const PORT =parseInt(process.argv.find((_, i, a) => a[i - 1] === "--port") ?? "3001", 10);
 
 /**
  * Allow-listed origins for CORS.
@@ -6587,6 +6600,54 @@ async function handleRequest(req, res) {
         return jsonResponse(req, res, { ok: true });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-pr-review-threads?cwd=&number=  → [{ thread_id, root_comment_id, resolved }]
+    if (url.pathname === "/api/gh-pr-review-threads" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = await resolvePrNwo(resolve(cwd), number, token);
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const [owner, name] = nwo.split("/");
+        const query = "query($owner: String!, $name: String!, $n: Int!, $after: String) { repository(owner: $owner, name: $name) { pullRequest(number: $n) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id isResolved comments(first: 1) { nodes { databaseId } } } } } } }";
+        const out = [];
+        let after = null;
+        for (let page = 0; page < 20; page++) {
+          const data = await githubGraphql(token, query, { owner, name, n: Number(number), after });
+          const threads = data?.repository?.pullRequest?.reviewThreads;
+          for (const t of threads?.nodes ?? []) {
+            const root = t.comments?.nodes?.[0]?.databaseId;
+            if (root == null) continue;
+            out.push({ thread_id: t.id, root_comment_id: root, resolved: !!t.isResolved });
+          }
+          if (!threads?.pageInfo?.hasNextPage) break;
+          after = threads.pageInfo.endCursor;
+        }
+        return jsonResponse(req, res, out);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-set-review-thread-resolved  { cwd, threadId, resolved }
+    if (url.pathname === "/api/gh-set-review-thread-resolved" && req.method === "POST") {
+      try {
+        const { threadId, resolved } = await readBody(req);
+        if (!threadId) return jsonResponse(req, res, { error: "Missing threadId" }, 400);
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const mutation = resolved
+          ? "mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }"
+          : "mutation($id: ID!) { unresolveReviewThread(input: { threadId: $id }) { thread { id } } }";
+        await githubGraphql(token, mutation, { id: threadId });
+        return jsonResponse(req, res, { ok: true });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
       }
     }
 

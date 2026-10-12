@@ -1031,6 +1031,8 @@ const fr: Locale = {
       replyPlaceholder: "Répondre\u2026 (Ctrl+Enter pour envoyer)",
       applySuggestion: "\u2705 Appliquer la suggestion",
       suggestionLabel: "\u{1F4A1} Suggestion",
+      resolveThread: "Résoudre la conversation",
+      unresolveThread: "Rouvrir la conversation",
     },
     reactions: {
       addReaction: "Ajouter une r\u00e9action",

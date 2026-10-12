@@ -1028,6 +1028,8 @@ const zhCN: Locale = {
       replyPlaceholder: "回复…（Ctrl+Enter 发送）",
       applySuggestion: "\u2705 应用建议",
       suggestionLabel: "\u{1F4A1} 建议",
+      resolveThread: "解决对话",
+      unresolveThread: "重新打开对话",
     },
     reactions: {
       addReaction: "添加反应",

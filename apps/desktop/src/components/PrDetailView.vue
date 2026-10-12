@@ -510,6 +510,39 @@ function commentTimeAgo(dateStr: string): string {
   return formatRelativeAge(dateStr, t);
 }
 
+// ─── Thread reply box (Conversation tab) ───────────────────
+// One box open at a time, keyed by the id of the comment that opened the thread.
+const replyingTo = ref<number | null>(null);
+const replyDraft = ref("");
+const replySending = ref(false);
+let replyBox: HTMLTextAreaElement | null = null;
+function setReplyBox(el: unknown) {
+  replyBox = el instanceof HTMLTextAreaElement ? el : null;
+}
+
+function openThreadReply(rootId: number) {
+  replyingTo.value = rootId;
+  replyDraft.value = "";
+  nextTick(() => replyBox?.focus());
+}
+
+function cancelThreadReply() {
+  replyingTo.value = null;
+  replyDraft.value = "";
+}
+
+async function submitThreadReply(rootId: number) {
+  const body = replyDraft.value.trim();
+  if (!body || replySending.value) return;
+  replySending.value = true;
+  try {
+    await p.handleReplyComment(rootId, body);
+    cancelThreadReply();
+  } finally {
+    replySending.value = false;
+  }
+}
+
 // ─── Reviews admin: dismiss + request reviewers (B4) ───────
 const reviewerCandidates = ref<ReviewerCandidate[]>([]);
 const requestReviewersInput = ref("");
@@ -1264,6 +1297,39 @@ function submitRequestReviewers() {
                       :current-user="p.currentUser.value"
                       :forge-name="p.forge.value.name"
                     />
+                  </div>
+                  <!-- Review threads: reply at the bottom + resolve conversation -->
+                  <div v-if="item.path" class="pdv-thread-footer">
+                    <div v-if="replyingTo === item.id" class="pdv-thread-compose">
+                      <textarea
+                        :ref="setReplyBox"
+                        v-model="replyDraft"
+                        class="pdv-thread-textarea"
+                        rows="3"
+                        :placeholder="t('pr.comment.replyPlaceholder')"
+                        @keydown.ctrl.enter.prevent="submitThreadReply(item.id)"
+                        @keydown.meta.enter.prevent="submitThreadReply(item.id)"
+                        @keydown.escape="cancelThreadReply"
+                      />
+                      <div class="pdv-thread-actions pdv-thread-actions--end">
+                        <button type="button" class="pdv-thread-btn" @click="cancelThreadReply">{{ t('pr.comment.cancel') }}</button>
+                        <button
+                          type="button"
+                          class="pdv-thread-btn pdv-thread-btn--primary"
+                          :disabled="!replyDraft.trim() || replySending"
+                          @click="submitThreadReply(item.id)"
+                        >{{ t('pr.comment.replyShort') }}</button>
+                      </div>
+                    </div>
+                    <div v-else class="pdv-thread-actions">
+                      <button type="button" class="pdv-thread-btn" @click="openThreadReply(item.id)">{{ t('pr.comment.replyShort') }}</button>
+                      <button
+                        v-if="p.forgeSupportsResolveThread.value && item.thread_id"
+                        type="button"
+                        class="pdv-thread-btn"
+                        @click="p.handleSetThreadResolved(item, !item.resolved)"
+                      >{{ item.resolved ? t('pr.comment.unresolveThread') : t('pr.comment.resolveThread') }}</button>
+                    </div>
                   </div>
                 </li>
               </template>
@@ -2259,6 +2325,66 @@ function submitRequestReviewers() {
   padding-left: var(--space-4);
   border-left: 2px solid var(--color-border);
 }
+/* Reply box + resolve action closing a review thread. */
+.pdv-thread-footer {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+.pdv-thread-compose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pdv-thread-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  resize: vertical;
+}
+.pdv-thread-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.pdv-thread-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+.pdv-thread-actions--end { justify-content: flex-end; }
+.pdv-thread-btn {
+  padding: var(--space-2) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.pdv-thread-btn:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.pdv-thread-btn--primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: var(--font-weight-semibold);
+}
+.pdv-thread-btn--primary:hover:not(:disabled) {
+  color: var(--color-accent-text);
+  filter: brightness(1.1);
+}
+.pdv-thread-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .pdv-comment-entry--reply:last-child {
   margin-bottom: var(--space-4);
 }

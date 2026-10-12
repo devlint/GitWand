@@ -1023,6 +1023,8 @@ const ptBR: Locale = {
       replyPlaceholder: "Responder… (Ctrl+Enter para enviar)",
       applySuggestion: "\u2705 Aplicar sugestão",
       suggestionLabel: "\u{1F4A1} Sugestão",
+      resolveThread: "Resolver conversa",
+      unresolveThread: "Reabrir conversa",
     },
     reactions: {
       addReaction: "Adicionar reação",

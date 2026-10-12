@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nestReplies } from "../prCommentThreads";
+import { nestReplies, withThreadState } from "../prCommentThreads";
 
 function c(id: number, inReplyTo: number | null = null, path = "src/a.ts") {
   return { id, path, in_reply_to_id: inReplyTo };
@@ -33,5 +33,24 @@ describe("nestReplies", () => {
       [1, [4]],
       [2, [3, 5]],
     ]);
+  });
+});
+
+describe("withThreadState", () => {
+  const thread = { thread_id: "T1", root_comment_id: 1, resolved: true };
+
+  it("stamps the root and its replies with the thread id and state", () => {
+    const out = withThreadState([c(1), c(2, 1), c(3, 2), c(4)], [thread]);
+    expect(out.map((x) => [x.id, (x as any).thread_id, (x as any).resolved])).toEqual([
+      [1, "T1", true],
+      [2, "T1", true],
+      [3, "T1", true],
+      [4, undefined, undefined],
+    ]);
+  });
+
+  it("returns the comments untouched when no thread is known", () => {
+    const list = [c(1)];
+    expect(withThreadState(list, [])).toBe(list);
   });
 });

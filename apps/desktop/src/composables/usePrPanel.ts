@@ -1430,6 +1430,27 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
   }
 
+  /** True when the active forge can resolve review threads. */
+  const forgeSupportsResolveThread = computed(() => typeof forge.value.setThreadResolved === "function");
+
+  /** Resolve / unresolve the review thread opened by `root` ("Resolve
+   *  conversation"). Every comment of the thread is updated in place, so the
+   *  timeline reflects it without refetching. Same unsupported-is-silent
+   *  contract as `handleDismissReview`. */
+  async function handleSetThreadResolved(root: PrReviewComment, resolved: boolean) {
+    if (!selectedPr.value || !forge.value.setThreadResolved || !root.thread_id) return;
+    try {
+      await forge.value.setThreadResolved(cwd.value, selectedPr.value.number, root, resolved);
+      prComments.value = prComments.value.map((c) =>
+        c.thread_id === root.thread_id ? { ...c, resolved } : c,
+      );
+      persistDetailCache();
+    } catch (err: any) {
+      if (err instanceof ForgeNotImplementedError) return;
+      error.value = err.message;
+    }
+  }
+
   /** Request reviewers on the open PR (B4). Same unsupported-is-silent
    *  contract as `handleDismissReview`. */
   async function handleRequestReviewers(logins: string[]) {
@@ -1723,6 +1744,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     handleCreateComment, handleReplyComment, handleEditComment,
     handleDeleteComment, handleApplySuggestion, handleAddToReview, handleSubmitReview,
     handleDismissReview, handleRequestReviewers, forgeSupportsDismissReview, forgeSupportsRequestReviewers,
+    handleSetThreadResolved, forgeSupportsResolveThread,
     forgeSupportsCommentEdit, forgeSupportsCommentDelete,
     loadConflictPreview, loadHotspots, loadFileHistory,
     // Helpers

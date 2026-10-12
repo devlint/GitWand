@@ -1022,6 +1022,8 @@ const es: Locale = {
       replyPlaceholder: "Responder… (Ctrl+Enter para enviar)",
       applySuggestion: "\u2705 Aplicar sugerencia",
       suggestionLabel: "\u{1F4A1} Sugerencia",
+      resolveThread: "Resolver conversación",
+      unresolveThread: "Reabrir conversación",
     },
     reactions: {
       addReaction: "Añadir reacción",

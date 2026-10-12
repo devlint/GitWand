@@ -960,6 +960,42 @@ pub(crate) async fn gh_dismiss_review(
     .map_err(|e| e.to_string())?
 }
 
+/// Token for the GraphQL-only review-thread commands: the GitWand token when
+/// configured, else the `gh` CLI's own.
+fn review_thread_token() -> Result<String, String> {
+    github_api::settings_github_token()
+        .or_else(gh_auth_token)
+        .ok_or_else(|| {
+            "GitHub authentication required (gh auth login or a token in Settings)".to_string()
+        })
+}
+
+/// List a PR's review threads with their resolution state.
+#[tauri::command]
+pub(crate) async fn gh_pr_review_threads(
+    cwd: String,
+    number: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        github_api::gql_pr_review_threads(&cwd, number, &review_thread_token()?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Resolve or unresolve a PR review thread ("Resolve conversation").
+#[tauri::command]
+pub(crate) async fn gh_set_review_thread_resolved(
+    thread_id: String,
+    resolved: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        github_api::gql_set_review_thread_resolved(&thread_id, resolved, &review_thread_token()?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn gh_request_reviewers_inner(cwd: String, number: i64, logins: Vec<String>) -> Result<(), String> {
     if let Some(tok) = github_api::settings_github_token() {
         return github_api::rest_request_reviewers(&cwd, number, &logins, &tok);

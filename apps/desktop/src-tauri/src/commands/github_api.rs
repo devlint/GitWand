@@ -1458,6 +1458,81 @@ pub(crate) fn rest_dismiss_review(
     Ok(())
 }
 
+/// List a PR's review threads (GraphQL-only: REST has no thread concept).
+/// Each entry maps the REST id of the comment that opened the thread to the
+/// thread's node id and resolution state:
+/// `{ thread_id, root_comment_id, resolved }`.
+pub(crate) fn gql_pr_review_threads(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+    let (owner, name) = repo
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid repo slug: {}", repo))?;
+    let query = "query($owner: String!, $name: String!, $n: Int!, $after: String) { repository(owner: $owner, name: $name) { pullRequest(number: $n) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id isResolved comments(first: 1) { nodes { databaseId } } } } } } }";
+    let mut out = Vec::new();
+    let mut after = serde_json::Value::Null;
+    // 20 pages × 100 threads — far beyond any reviewable PR; bounds a runaway loop.
+    for _ in 0..20 {
+        let v = graphql(
+            token,
+            query,
+            serde_json::json!({ "owner": owner, "name": name, "n": number, "after": after }),
+        )?;
+        let threads = v
+            .pointer("/data/repository/pullRequest/reviewThreads")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        for t in threads
+            .get("nodes")
+            .and_then(|n| n.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let Some(root) = t
+                .pointer("/comments/nodes/0/databaseId")
+                .and_then(|x| x.as_i64())
+            else {
+                continue;
+            };
+            out.push(serde_json::json!({
+                "thread_id": js(t, "id"),
+                "root_comment_id": root,
+                "resolved": t.get("isResolved").and_then(|b| b.as_bool()).unwrap_or(false),
+            }));
+        }
+        let has_next = threads
+            .pointer("/pageInfo/hasNextPage")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false);
+        if !has_next {
+            break;
+        }
+        after = threads
+            .pointer("/pageInfo/endCursor")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+    }
+    Ok(out)
+}
+
+/// Resolve or unresolve a PR review thread by its GraphQL node id.
+pub(crate) fn gql_set_review_thread_resolved(
+    thread_id: &str,
+    resolved: bool,
+    token: &str,
+) -> Result<(), String> {
+    let query = if resolved {
+        "mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }"
+    } else {
+        "mutation($id: ID!) { unresolveReviewThread(input: { threadId: $id }) { thread { id } } }"
+    };
+    graphql(token, query, serde_json::json!({ "id": thread_id }))?;
+    Ok(())
+}
+
 /// Request reviewers on an existing PR (B4, v3.6.0).
 pub(crate) fn rest_request_reviewers(
     cwd: &str,
