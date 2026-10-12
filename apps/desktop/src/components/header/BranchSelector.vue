@@ -1079,6 +1079,18 @@ onUnmounted(() => {
   min-width: 0;
 }
 
+/* Left divider of the split "+" and AI segments: the button gray with 40%
+   of --color-bg mixed in. In light theme --color-bg is lighter than that
+   gray, so the mix would vanish; tint with --color-border-strong instead. */
+.branch-add-btn,
+.bs-create-ai {
+  --bs-split-divider: color-mix(in srgb, var(--color-bg) 40%, var(--color-bg-tertiary));
+}
+:root[data-theme="light"] .branch-add-btn,
+:root[data-theme="light"] .bs-create-ai {
+  --bs-split-divider: color-mix(in srgb, var(--color-border-strong) 20%, var(--color-bg-tertiary));
+}
+
 .branch-add-btn {
   display: flex;
   align-items: center;
@@ -1088,8 +1100,7 @@ onUnmounted(() => {
   padding: 0 2px 0 0;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
-  /* Softened divider: 40% of --color-bg over the button gray. */
-  border-left: 1px solid color-mix(in srgb, var(--color-bg) 40%, var(--color-bg-tertiary));
+  border-left: 1px solid var(--bs-split-divider);
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   cursor: pointer;
   transition: background var(--transition-base), color var(--transition-base);
@@ -1221,9 +1232,7 @@ onUnmounted(() => {
   letter-spacing: 0.06em;
   line-height: 1;
   border: 1px solid transparent;
-  /* Same divider as the "+" button's left edge: the button gray
-     with 40% of that edge's --color-bg mixed in. Hover included. */
-  border-left: 1px solid color-mix(in srgb, var(--color-bg) 40%, var(--color-bg-tertiary));
+  border-left: 1px solid var(--bs-split-divider);
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   cursor: pointer;
   transition: background var(--transition-hover), color var(--transition-hover);
@@ -1232,7 +1241,6 @@ onUnmounted(() => {
    --color-bg), with the border fading in from that same dark. */
 .bs-create-split > .bs-create-ai {
   --bs-ai-fill: var(--color-bg);
-  padding: 0 var(--space-4);
 }
 /* Hover like the trigger and "+": lighter gray fill, gradient border kept. */
 .bs-create-ai:hover:not(:disabled) {
@@ -1241,12 +1249,6 @@ onUnmounted(() => {
 .bs-create-ai:disabled {
   opacity: 0.35;
   cursor: not-allowed;
-}
-/* Light theme: --color-bg is lighter than the button gray, so the mixed
-   dividers vanish. Use a gray tint instead. */
-:root[data-theme="light"] .branch-add-btn,
-:root[data-theme="light"] .bs-create-ai {
-  border-left-color: color-mix(in srgb, var(--color-border-strong) 20%, var(--color-bg-tertiary));
 }
 
 .branch-add-btn:disabled {
