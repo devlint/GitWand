@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "../composables/useI18n";
+import ModalCloseButton from "./ModalCloseButton.vue";
 import { focusableWithin, nextTrapTarget } from "../utils/focusTrap";
 
 type ModalSize = "sm" | "md" | "lg" | "xl" | "full" | "2x" | "screen";
@@ -180,17 +181,7 @@ onUnmounted(() => {
             </div>
           </slot>
           <slot name="header-actions" />
-          <button
-            v-if="!hideClose"
-            class="base-modal__close"
-            type="button"
-            @click="requestClose"
-            :aria-label="t('common.close')"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
-            </svg>
-          </button>
+          <ModalCloseButton v-if="!hideClose" @click="requestClose" />
         </header>
 
         <!-- Optional toolbar slot between header and body -->
@@ -334,29 +325,6 @@ onUnmounted(() => {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
   line-height: 1.35;
-}
-
-.base-modal__close {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-.base-modal__close:hover {
-  color: var(--color-text);
-  background: var(--color-bg-tertiary);
-}
-.base-modal__close:focus-visible {
-  outline: 2px solid var(--color-focus-ring);
-  outline-offset: 2px;
 }
 
 /* ─── Toolbar (optional strip between header and body) ─ */

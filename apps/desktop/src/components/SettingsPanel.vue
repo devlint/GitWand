@@ -4094,11 +4094,40 @@ function openAiTemplateKind(kind: AiTemplateKind) {
   padding-left: var(--space-6);
 }
 
+/* Drawn by hand: the native WebKitGTK checkbox misplaces its check mark
+   (pushed to the top-right corner) once resized to 16px. */
 .sp-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
   width: 16px;
   height: 16px;
-  accent-color: var(--color-accent);
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-bg) center / 12px 12px no-repeat;
   cursor: pointer;
+  transition: background-color var(--transition-hover), border-color var(--transition-hover);
+}
+
+.sp-checkbox:hover:not(:disabled) {
+  border-color: var(--color-accent);
+}
+
+.sp-checkbox:checked {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2 5 8.6 9.5 3.6'/%3E%3C/svg%3E");
+}
+
+.sp-checkbox:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.sp-checkbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .sp-hint {

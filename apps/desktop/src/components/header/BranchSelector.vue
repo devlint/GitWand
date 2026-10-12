@@ -1208,7 +1208,12 @@ onUnmounted(() => {
   padding: 0 var(--space-3);
   background:
     linear-gradient(var(--bs-ai-fill), var(--bs-ai-fill)) padding-box,
-    linear-gradient(90deg, var(--bs-ai-fill) 0%, var(--color-ai) 55%, #c084fc 100%) border-box;
+    linear-gradient(
+      90deg,
+      var(--bs-ai-fill) 0%,
+      color-mix(in srgb, var(--color-ai) 40%, var(--bs-ai-fill)) 55%,
+      color-mix(in srgb, #c084fc 40%, var(--bs-ai-fill)) 100%
+    ) border-box;
   color: var(--color-text);
   font-size: 10px;
   font-weight: 700;

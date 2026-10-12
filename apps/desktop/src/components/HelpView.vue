@@ -13,6 +13,7 @@
  */
 import { computed, ref } from "vue";
 import { useI18n } from "../composables/useI18n";
+import ModalCloseButton from "./ModalCloseButton.vue";
 import type { LocaleKey } from "../locales";
 
 const { t } = useI18n();
@@ -84,16 +85,11 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
         </span>
         <span class="help-header__title">{{ t('help.title') }}</span>
       </div>
-      <button
-        class="help-close"
-        :aria-label="t('help.close')"
+      <ModalCloseButton
+        :label="t('help.close')"
         :title="t('help.close')"
         @click="emit('close')"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-        </svg>
-      </button>
+      />
     </div>
 
     <div class="help-body">
@@ -311,23 +307,6 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
 .help-header__title {
   font-size: var(--font-size-2xl);
   font-weight: var(--font-weight-bold);
-}
-
-.help-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md, 6px);
-  background: transparent;
-  color: var(--color-text-muted);
-  transition: background var(--transition-base), color var(--transition-base);
-  cursor: pointer;
-}
-.help-close:hover {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
 }
 
 /* ─── Body layout ────────────────────────────────────────── */

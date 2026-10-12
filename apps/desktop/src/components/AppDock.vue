@@ -808,13 +808,18 @@ onBeforeUnmount(() => {
   justify-content: center;
   min-width: 18px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 5px 1px;
   border-radius: 9px;
   background: var(--color-accent);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
-  line-height: 0;
+  font-variant-numeric: tabular-nums;
+  /* line-height: 0 centered the font's ascent/descent box, not the digits,
+     so the number sat off-center. 1 keeps a real line box; text-box trims it
+     to cap height → baseline where supported, centering the glyphs exactly. */
+  line-height: 1;
+  text-box: trim-both cap alphabetic;
 }
 
 /* Handle right-click menu. */
