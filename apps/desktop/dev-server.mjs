@@ -4253,7 +4253,7 @@ async function handleRequest(req, res) {
         // Passed as a single argv element (no shell) — `mainName` can come
         // from a user-configured setting, so it must never be interpolated
         // into a shell string.
-        const format = `%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:${mainName})`;
+        const format = `%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:${mainName})\x1f%(symref)`;
         const branchResult = spawnSync(GIT, ["branch", "-a", `--format=${format}`], {
           cwd: resolvedCwd,
           encoding: "utf-8",
@@ -4281,7 +4281,11 @@ async function handleRequest(req, res) {
           const lastCommitDate = parts[4] || "";
           const mainCount = parseInt((parts[5] || "0").split(/\s+/)[0], 10) || 0;
 
-          if (name.includes("HEAD ->") || name === "origin/HEAD") continue;
+          // Skip symbolic refs (`refs/remotes/<remote>/HEAD`) — `refname:short`
+          // renders them as the bare remote name ("origin"), which would
+          // otherwise surface as a phantom local branch. KEEP IN SYNC with ops.rs.
+          const isSymref = (parts[6] || "").trim() !== "";
+          if (isSymref || name.includes("HEAD ->") || name === "origin/HEAD") continue;
 
           let ahead = 0, behind = 0;
           for (const part of trackInfo.split(", ")) {

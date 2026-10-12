@@ -1069,7 +1069,7 @@ pub(crate) async fn git_branches(
             // KEEP IN SYNC with the same format/parse in dev-server.mjs
             // (handleRequest branch listing). Field order is positional — any
             // field add/reorder must be mirrored there and in the parser below.
-            &format!("--format=%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:{})", main_name),
+            &format!("--format=%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:{})\x1f%(symref)", main_name),
         ])
         .current_dir(&cwd)
         .output()
@@ -1144,7 +1144,12 @@ pub(crate) async fn git_branches(
             0
         };
 
-        if name.contains("HEAD ->") || name == "origin/HEAD" {
+        // Skip symbolic refs (`refs/remotes/<remote>/HEAD`). `refname:short`
+        // renders them as the bare remote name ("origin"), which doesn't match
+        // the "origin/" prefix check below and would otherwise surface as a
+        // phantom *local* branch named "origin" (e.g. in the PR base picker).
+        let is_symref = parts.len() > 6 && !parts[6].trim().is_empty();
+        if is_symref || name.contains("HEAD ->") || name == "origin/HEAD" {
             continue;
         }
 
@@ -5593,6 +5598,28 @@ mod default_branch_setting_tests {
             .find(|b| b.name == "feature")
             .expect("feature branch present");
         assert_eq!(feature.main_commit_count, 1);
+
+        let _ = std::fs::remove_dir_all(&bare);
+    }
+
+    #[test]
+    fn git_branches_skips_remote_head_symref() {
+        let repo = TempRepo::new_trunk();
+        let bare = make_bare_remote("gitwand-remote-head-bare");
+        repo.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        repo.git_ok(&["push", "-q", "-u", "origin", "trunk"]);
+        // Creates refs/remotes/origin/HEAD -> origin/trunk, which
+        // `%(refname:short)` renders as the bare "origin".
+        repo.git_ok(&["remote", "set-head", "origin", "trunk"]);
+
+        let branches = tauri::async_runtime::block_on(git_branches(repo.cwd(), None))
+            .expect("git_branches must succeed");
+        assert!(
+            !branches.iter().any(|b| b.name == "origin" || b.name == "origin/HEAD"),
+            "remote HEAD symref must not be listed as a branch: {:?}",
+            branches.iter().map(|b| &b.name).collect::<Vec<_>>()
+        );
+        assert!(branches.iter().any(|b| b.is_remote && b.name == "origin/trunk"));
 
         let _ = std::fs::remove_dir_all(&bare);
     }
