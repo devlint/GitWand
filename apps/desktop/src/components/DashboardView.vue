@@ -2359,6 +2359,11 @@ watch(
      aren't clipped at the card boundary. The outer dashboard scroll
      handles vertical overflow. */
   overflow: visible;
+  /* No drop shadow on this card only: a long README makes it tens of
+     thousands of px tall, and WebKitGTK repaints the `.card` shadow over its
+     full height on every scroll frame — measured ~78 ms/frame with it, 16 ms
+     without. (`contain: paint` would clip the deliberate overflow above.) */
+  box-shadow: none;
 }
 
 .readme-tabs {
