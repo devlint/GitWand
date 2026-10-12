@@ -1322,11 +1322,12 @@ function submitRequestReviewers() {
                       </div>
                     </div>
                     <div v-else class="pdv-thread-actions">
-                      <button type="button" class="pdv-thread-btn" @click="openThreadReply(item.id)">{{ t('pr.comment.replyShort') }}</button>
+                      <button type="button" class="pdv-thread-btn pdv-thread-btn--reply" @click="openThreadReply(item.id)">{{ t('pr.comment.replyShort') }}</button>
                       <button
                         v-if="p.forgeSupportsResolveThread.value && item.thread_id"
                         type="button"
                         class="pdv-thread-btn"
+                        :class="{ 'pdv-thread-btn--resolve': !item.resolved }"
                         @click="p.handleSetThreadResolved(item, !item.resolved)"
                       >{{ item.resolved ? t('pr.comment.unresolveThread') : t('pr.comment.resolveThread') }}</button>
                     </div>
@@ -2378,6 +2379,25 @@ function submitRequestReviewers() {
 }
 .pdv-thread-btn--primary:hover:not(:disabled) {
   color: var(--color-accent-text);
+  filter: brightness(1.1);
+}
+.pdv-thread-btn--reply {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #ffffff;
+}
+.pdv-thread-btn--resolve {
+  background: color-mix(in srgb, var(--color-success) 80%, black);
+  border-color: color-mix(in srgb, var(--color-success) 80%, black);
+  color: #ffffff;
+}
+.pdv-thread-btn--reply,
+.pdv-thread-btn--resolve {
+  font-weight: var(--font-weight-semibold);
+}
+.pdv-thread-btn--reply:hover:not(:disabled),
+.pdv-thread-btn--resolve:hover:not(:disabled) {
+  color: #ffffff;
   filter: brightness(1.1);
 }
 .pdv-thread-btn:disabled {
