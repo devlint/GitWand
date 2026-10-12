@@ -10,6 +10,8 @@
  * The same delete+add pair in SBS and inline mode now computes LCS once.
  */
 
+import { escapeHtml } from "./escapeHtml";
+
 export interface DiffSegment {
   type: "equal" | "delete" | "insert";
   text: string;
@@ -166,10 +168,3 @@ export function segmentsToHtml(segments: DiffSegment[]): string {
     .join("");
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}

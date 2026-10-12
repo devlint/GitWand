@@ -20,6 +20,9 @@
  * in-page `#anchor` links resolve.
  */
 
+import { escapeHtml as esc } from "./escapeHtml";
+import { isSafeUrl } from "./urlSafety";
+
 export interface MarkdownOptions {
   /** Render a single newline inside a paragraph as `<br>` (GitHub comments). */
   breaks?: boolean;
@@ -53,12 +56,6 @@ export function markdownToHtml(src: string, options: MarkdownOptions = {}): stri
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────
-
-const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => ESC[c]);
-}
 
 /** Strip tags and decode the entities `esc` produces — for alt text and slugs. */
 function plainText(html: string): string {
@@ -120,19 +117,6 @@ function normalizeUrl(url: string): string {
   } catch {
     return url;
   }
-}
-
-/**
- * Refuse script-bearing schemes, same policy as markdown-it: no
- * `javascript:` / `vbscript:` / `file:`, and `data:` only for raster images.
- * DOMPurify re-checks downstream; this keeps such links from rendering at all.
- */
-function isSafeUrl(url: string): boolean {
-  // eslint-disable-next-line no-control-regex
-  const s = url.replace(/[\u0000-\u0020]/g, "").toLowerCase();
-  if (/^(javascript|vbscript|file):/.test(s)) return false;
-  if (/^data:/.test(s)) return /^data:image\/(gif|png|jpeg|webp);/.test(s);
-  return true;
 }
 
 function unescapeMd(s: string): string {
@@ -521,7 +505,12 @@ interface Delim {
 type Tok = string | Delim;
 
 const RE_PUNCT = /[\p{P}\p{S}]/u;
-const RE_SPECIAL = /[\\`*_~![\]<&\nhHwW]/g;
+/**
+ * Next character the inline scanner must act on. Bare-URL starts are matched
+ * here too (at a word boundary) so ordinary `h` / `w` letters are copied in
+ * bulk instead of stopping the scan.
+ */
+const RE_SPECIAL = /[\\`*_~![\]<&\n]|(?<![\w/.:@-])(?:https?:\/\/|www\.)/gi;
 const RE_INLINE_HTML = new RegExp(`${OPEN_TAG}|${CLOSE_TAG}|<!--(?!>|->)[\\s\\S]*?-->`, "y");
 const RE_ENTITY = /&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/y;
 const RE_AUTOLINK = /<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*)>/y;
@@ -735,7 +724,7 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
       RE_EMAIL.lastIndex = i;
       RE_INLINE_HTML.lastIndex = i;
       let m: RegExpExecArray | null;
-      if ((m = RE_AUTOLINK.exec(src)) && isSafeUrl(m[1])) {
+      if ((m = RE_AUTOLINK.exec(src)) && isSafeUrl(m[1], "link")) {
         push(inLink ? esc(m[1]) : anchor(m[1], esc(m[1])));
         i += m[0].length;
       } else if ((m = RE_EMAIL.exec(src))) {
@@ -773,8 +762,9 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
       continue;
     }
 
-    // h / w: bare URL linkify, only at a word boundary and outside links.
-    if (!inLink && rawAnchors === 0 && (i === 0 || !/[\w/.:@-]/.test(src[i - 1]))) {
+    // Start of a bare URL (RE_SPECIAL checked the word boundary): linkify
+    // it unless we're already inside a link.
+    if (!inLink && rawAnchors === 0) {
       RE_LINKIFY.lastIndex = i;
       const m = RE_LINKIFY.exec(src);
       if (m) {
@@ -784,7 +774,7 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
           url = url.slice(0, -1).replace(RE_TRAIL_PUNCT, "");
         }
         const href = /^www\./i.test(url) ? "http://" + url : url;
-        if (isSafeUrl(href)) {
+        if (isSafeUrl(href, "link")) {
           push(anchor(href, esc(url)));
           i += url.length;
           continue;
@@ -832,7 +822,7 @@ function parseLink(src: string, p: number, image: boolean, ctx: Ctx): { html: st
     target = ctx.refs.get(normalizeLabel(refLabel));
     if (!target) return null;
   }
-  if (!isSafeUrl(target.href)) return null;
+  if (!isSafeUrl(target.href, image ? "image" : "link")) return null;
 
   if (image) {
     const alt = plainText(renderInline(label, ctx, true));

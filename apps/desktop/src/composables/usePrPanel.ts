@@ -37,6 +37,7 @@ import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
 import { ForgeNotImplementedError, CURSOR_WEB_BASE, forgeSupportsPRs } from "./forge/types";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { whenIdle } from "../utils/idleSchedule";
+import { escapeHtml } from "../utils/escapeHtml";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
 import { formatRelativeAge } from "../utils/relativeTime";
@@ -1494,8 +1495,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
 
   function renderBody(body: string): string {
-    return body
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    return escapeHtml(body)
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/`(.+?)`/g, '<code class="pr-code">$1</code>')
       .replace(/\n/g, "<br />");

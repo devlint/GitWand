@@ -31,6 +31,7 @@
 import DOMPurify from "dompurify";
 import { openExternalUrl } from "../utils/backend";
 import { markdownToHtml } from "../utils/markdown";
+import { isSafeUrl, normalizeUrlText } from "../utils/urlSafety";
 import { useSettings } from "./useSettings";
 import { t } from "./useI18n";
 
@@ -108,17 +109,6 @@ const ALLOWED_ATTR = [
 ];
 
 /**
- * What the WHATWG URL parser ignores before parsing an attribute value:
- * leading / trailing C0 controls and spaces, and ASCII tab / newline anywhere.
- * `h&#9;ttps://host/x` (the entity decodes to a tab) is therefore a plain
- * `https://host/x` to the browser, and must be one to us too.
- */
-function normalizeUrlText(raw: string): string {
-  // eslint-disable-next-line no-control-regex
-  return raw.replace(/[\t\n\r]/g, "").replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "");
-}
-
-/**
  * Bases that stand in for the document while classifying an image URL. Both
  * are special schemes, as the webview's own is on Windows (http): there `\\host`
  * and `/\\host` are network paths. Two of them because `scheme:host/x` is
@@ -146,16 +136,14 @@ function isRemoteImageSrc(src: string): boolean {
 }
 
 /**
- * Tighten `<a>` targets and `img`/`a` protocols. DOMPurify already blocks
- * `javascript:` by default, but we also explicitly forbid `data:` outside
- * of a short whitelist of image mime types to keep the attack surface small.
+ * Tighten `<a>` targets and `img`/`a` protocols with the same policy the
+ * markdown renderer applies (`utils/urlSafety.ts`). DOMPurify already blocks
+ * `javascript:` by default; this also covers `file:` and non-image `data:`.
  */
 function hardenLinksAndImages(node: Element) {
   if (node.tagName === "A") {
-    const href = node.getAttribute("href") ?? "";
-    if (/^\s*javascript:/i.test(href) || /^\s*vbscript:/i.test(href)) {
-      node.removeAttribute("href");
-    }
+    const href = node.getAttribute("href");
+    if (href !== null && !isSafeUrl(href, "link")) node.removeAttribute("href");
     // Open external links in a new OS window; the webview doesn't have
     // target="_blank" semantics without `rel="noopener"`.
     if (node.getAttribute("target") === "_blank") {
@@ -166,12 +154,10 @@ function hardenLinksAndImages(node: Element) {
     const src = node.getAttribute("src") ?? "";
     // Decide on what the browser will actually fetch, not on the raw text.
     const norm = normalizeUrlText(src);
-    if (/^javascript:/i.test(norm)) {
+    if (!isSafeUrl(norm, "image")) {
       node.removeAttribute("src");
     } else if (/^data:/i.test(norm)) {
-      if (!/^data:image\/(png|jpeg|gif|webp|svg\+xml);/i.test(norm)) {
-        node.removeAttribute("src");
-      }
+      // Inline image: nothing is fetched, so the remote-image rule doesn't apply.
     } else if (src && isRemoteImageSrc(norm) && !remoteImagesAllowed()) {
       // Remote image, not allowed: keep a visible placeholder (alt text) and
       // the URL in a title so the reader knows what was withheld.

@@ -24,6 +24,7 @@ import markdown from "highlight.js/lib/languages/markdown";
 import yaml from "highlight.js/lib/languages/yaml";
 import diff from "highlight.js/lib/languages/diff";
 import plaintext from "highlight.js/lib/languages/plaintext";
+import { escapeHtml } from "./escapeHtml";
 
 hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("typescript", typescript);
@@ -206,10 +207,3 @@ export function highlightLine(content: string, language: string | null): string 
   }
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}

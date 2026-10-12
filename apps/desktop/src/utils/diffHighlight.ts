@@ -6,6 +6,8 @@
  * around the tokens that differ.
  */
 
+import { escapeHtml as esc } from "./escapeHtml";
+
 /** Tokenize a line into words + whitespace, preserving everything. */
 function tokenize(line: string): string[] {
   return line.match(/\S+|\s+/g) ?? [line];
@@ -57,13 +59,6 @@ function lcsTokens(a: string[], b: string[]): { aIdx: Set<number>; bIdx: Set<num
   return { aIdx, bIdx };
 }
 
-/** Escape HTML special chars. */
-function esc(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
 
 /**
  * Given two lines, return HTML for `source` where differing tokens

@@ -17,6 +17,7 @@ import {
 } from "./emulator";
 import { keyToSequence } from "./keys";
 import nerdSymbolsUrl from "../../assets/fonts/SymbolsNerdFontMono-Regular.woff2?url";
+import { escapeHtml } from "../escapeHtml";
 
 export interface DomTerminalOptions {
   fontSize?: number;
@@ -110,10 +111,6 @@ function cssToHex(css: string): string | null {
   const m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?/.exec(css);
   if (!m || (m[4] !== undefined && Number(m[4]) === 0)) return null;
   return "#" + [m[1], m[2], m[3]].map((v) => Number(v).toString(16).padStart(2, "0")).join("");
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
 }
 
 interface CellStyle {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { safeHtml } from "../composables/useSafeHtml";
+import { escapeHtml } from "../utils/escapeHtml";
 import {
   ghListPrs,
   ghCreatePr,
@@ -512,8 +513,7 @@ const checksUrl = computed(() => {
 
 
 function renderBody(body: string): string {
-  return body
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  return escapeHtml(body)
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/`(.+?)`/g, '<code class="pr-code">$1</code>')
     .replace(/\n/g, "<br />");
