@@ -266,8 +266,41 @@ function collectRefs(lines: string[], refs: Map<string, LinkRef>): string[] {
   return out;
 }
 
+/**
+ * Whether a paragraph is inside an HTML comment after `line`, given whether
+ * it was before. Ignores the empty `<!-->` / `<!--->` forms and code spans
+ * (per line — a span crossing a newline is not seen).
+ */
+function inCommentAfter(line: string, inComment: boolean): boolean {
+  const s = line.includes("`") ? line.replace(/(`+)[^`]*?\1/g, "") : line;
+  let i = 0;
+  for (;;) {
+    if (inComment) {
+      const close = s.indexOf("-->", i);
+      if (close < 0) return true;
+      i = close + 3;
+      inComment = false;
+    } else {
+      const open = s.indexOf("<!--", i);
+      if (open < 0) return false;
+      i = open + 4;
+      inComment = !(s.startsWith(">", i) || s.startsWith("->", i));
+    }
+  }
+}
+
+/** Index of the first line at or after `from` holding a `-->`, or -1. */
+function nextCommentClose(lines: string[], from: number, lastClose: number): number {
+  if (from > lastClose) return -1;
+  for (let j = from; j <= lastClose; j++) if (lines[j].includes("-->")) return j;
+  return -1;
+}
+
 function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
   if (ctx.depth > MAX_NESTING) return `<p>${esc(lines.join("\n"))}</p>\n`;
+  // Bounds the `-->` lookahead: past it, an open comment cannot close.
+  let commentClose = lines.length - 1;
+  while (commentClose >= 0 && !lines[commentClose].includes("-->")) commentClose--;
   let out = "";
   let i = 0;
   while (i < lines.length) {
@@ -377,11 +410,20 @@ function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
 
     // Paragraph, possibly turned into a setext heading.
     const para: string[] = [line];
+    let inComment = inCommentAfter(line, false);
     let setext = 0;
     i++;
     while (i < lines.length) {
       const l = lines[i];
-      if (isBlank(l)) break;
+      if (isBlank(l)) {
+        // A comment opened mid-paragraph hides everything up to its `-->`,
+        // blank lines included — READMEs use them to hide whole sections.
+        const close = inComment ? nextCommentClose(lines, i, commentClose) : -1;
+        if (close < 0) break;
+        for (; i <= close; i++) para.push(lines[i]);
+        inComment = inCommentAfter(lines[close].slice(lines[close].indexOf("-->") + 3), false);
+        continue;
+      }
       const st = RE_SETEXT.exec(l);
       if (st) {
         setext = st[1][0] === "=" ? 1 : 2;
@@ -390,6 +432,7 @@ function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
       }
       if (interruptsParagraph(l) || isTableStart(lines, i)) break;
       para.push(l);
+      inComment = inCommentAfter(l, inComment);
       i++;
     }
     const content = para.map((l) => l.replace(/^[ \t]+/, "")).join("\n").replace(/[ \t]+$/, "");

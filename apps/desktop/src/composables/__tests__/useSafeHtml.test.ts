@@ -265,6 +265,13 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
     expect(out).toContain("&lt;!-- code --&gt;");
   });
 
+  it("drops a mid-paragraph comment spanning blank lines (README section hiding)", () => {
+    const out = renderMarkdown("text <!-- start\n\nhidden\n\nend --> more");
+    expect(out).not.toContain("hidden");
+    expect(out).toContain("text");
+    expect(out).toContain("more");
+  });
+
   it("returns empty string for nullish input", () => {
     expect(renderMarkdown(null)).toBe("");
     expect(renderMarkdown(undefined)).toBe("");

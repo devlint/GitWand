@@ -111,6 +111,15 @@ describe("markdownToHtml — inline", () => {
     }
   });
 
+  it("hides a mid-paragraph comment that spans blank lines", () => {
+    expect(md("text <!-- start\n\nhidden\n\nend --> more\n\nnext")).toBe(
+      "<p>text <!-- start\n\nhidden\n\nend --> more</p>\n<p>next</p>\n",
+    );
+    // Unclosed, or opened inside a code span: blank lines still split.
+    expect(md("a <!-- open\n\nb")).toBe("<p>a &lt;!-- open</p>\n<p>b</p>\n");
+    expect(md("`<!--` a\n\nb -->")).toBe("<p><code class=\"md-inline-code\">&lt;!--</code> a</p>\n<p>b --&gt;</p>\n");
+  });
+
   it("linkifies bare URLs and autolinks, trimming trailing punctuation", () => {
     expect(md("see https://e.com/a.")).toBe('<p>see <a href="https://e.com/a" class="md-link">https://e.com/a</a>.</p>\n');
     expect(md("(www.e.com)")).toBe('<p>(<a href="http://www.e.com" class="md-link">www.e.com</a>)</p>\n');
