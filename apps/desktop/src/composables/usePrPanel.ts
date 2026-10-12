@@ -1327,7 +1327,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  defense-in-depth, not the primary UX. */
   async function handleEditComment(id: number, body: string) {
     try {
-      await forge.value.updateComment(cwd.value, id, body);
+      await forge.value.updateComment(cwd.value, id, body, selectedPr.value?.number);
       const idx = prComments.value.findIndex((c) => c.id === id);
       if (idx !== -1) prComments.value[idx] = { ...prComments.value[idx], body, updated_at: new Date().toISOString() };
       persistDetailCache();
@@ -1339,7 +1339,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   async function handleDeleteComment(id: number) {
     try {
-      await forge.value.deleteComment(cwd.value, id);
+      await forge.value.deleteComment(cwd.value, id, selectedPr.value?.number);
       prComments.value = prComments.value.filter((c) => c.id !== id && c.in_reply_to_id !== id);
       if (prDetail.value && prDetail.value.reviewComments > 0) prDetail.value.reviewComments--;
       persistDetailCache();

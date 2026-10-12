@@ -189,14 +189,13 @@ export class GitHubProvider implements ForgeProvider {
     return ghPrCreateComment(cwd, prNumber, params);
   }
 
-  updateComment(cwd: string, commentId: number, body: string, _prNumber?: number): Promise<void> {
-    // _prNumber is ignored on GitHub — the comment_id is globally unique.
-    return ghPrUpdateComment(cwd, commentId, body);
+  updateComment(cwd: string, commentId: number, body: string, prNumber?: number): Promise<void> {
+    // prNumber resolves the repo the PR lives in (upstream, for a fork).
+    return ghPrUpdateComment(cwd, commentId, body, prNumber);
   }
 
-  deleteComment(cwd: string, commentId: number, _prNumber?: number): Promise<void> {
-    // _prNumber is ignored on GitHub — the comment_id is globally unique.
-    return ghPrDeleteComment(cwd, commentId);
+  deleteComment(cwd: string, commentId: number, prNumber?: number): Promise<void> {
+    return ghPrDeleteComment(cwd, commentId, prNumber);
   }
 
   // ── Reviews ───────────────────────────────────────────────────────────────

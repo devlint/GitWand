@@ -5417,7 +5417,7 @@ async function handleRequest(req, res) {
         const pr = await prResp.json();
         const commit_id = pr.head?.sha;
         const payload = in_reply_to_id
-          ? { body: commentBody, in_reply_to_id }
+          ? { body: commentBody, in_reply_to: in_reply_to_id }
           : { body: commentBody, commit_id, path: filePath, line: line ?? 1, side: side ?? "RIGHT",
               ...(start_line ? { start_line, start_side: start_side ?? "RIGHT" } : {}) };
         const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${number}/comments`, {

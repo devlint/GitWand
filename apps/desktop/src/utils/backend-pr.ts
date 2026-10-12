@@ -1002,6 +1002,7 @@ export async function ghPrCreateComment(
   prNumber: number,
   params: CreatePrCommentParams,
 ): Promise<PrReviewComment> {
+  if (isTauri()) return tauriInvoke<PrReviewComment>("gh_pr_create_comment", { cwd, number: prNumber, params });
   const res = await devFetch(`${DEV_SERVER}/api/gh-pr-comment`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1013,12 +1014,19 @@ export async function ghPrCreateComment(
   return raw as PrReviewComment;
 }
 
-/** Edit the body of an existing review comment. */
+/** Edit the body of an existing review comment. `prNumber` locates the repo
+ *  the PR lives in (the upstream, for a fork) — required on desktop. */
 export async function ghPrUpdateComment(
   cwd: string,
   commentId: number,
   body: string,
+  prNumber?: number,
 ): Promise<void> {
+  if (isTauri()) {
+    if (prNumber == null) throw new Error("ghPrUpdateComment requires the PR number");
+    await tauriInvoke("gh_pr_update_comment", { cwd, number: prNumber, commentId, body });
+    return;
+  }
   const res = await devFetch(`${DEV_SERVER}/api/gh-pr-comment?id=${commentId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -1027,8 +1035,13 @@ export async function ghPrUpdateComment(
   if (!res.ok) throw new Error(`update comment failed: ${res.status}`);
 }
 
-/** Delete a review comment. */
-export async function ghPrDeleteComment(cwd: string, commentId: number): Promise<void> {
+/** Delete a review comment. `prNumber`: same contract as `ghPrUpdateComment`. */
+export async function ghPrDeleteComment(cwd: string, commentId: number, prNumber?: number): Promise<void> {
+  if (isTauri()) {
+    if (prNumber == null) throw new Error("ghPrDeleteComment requires the PR number");
+    await tauriInvoke("gh_pr_delete_comment", { cwd, number: prNumber, commentId });
+    return;
+  }
   const res = await fetch(
     `${DEV_SERVER}/api/gh-pr-comment?cwd=${encodeURIComponent(cwd)}&id=${commentId}`,
     { method: "DELETE" },

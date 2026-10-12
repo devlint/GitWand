@@ -1046,6 +1046,75 @@ pub(crate) fn rest_pr_issue_comments(
     Ok(map_comments(&v, true))
 }
 
+/// Create an inline review comment, or a reply when `params.in_reply_to_id`
+/// is set. `params` is the frontend `CreatePrCommentParams` object; a new
+/// thread is anchored to the PR head commit, as GitHub requires.
+pub(crate) fn rest_pr_create_comment(
+    cwd: &str,
+    number: i64,
+    params: &serde_json::Value,
+    token: &str,
+) -> Result<serde_json::Value, String> {
+    let (repo, pr) = get_pr_json(cwd, number, token)?;
+    let body = js(params, "body");
+    if body.trim().is_empty() {
+        return Err("Comment body is empty".to_string());
+    }
+    // REST names the reply target `in_reply_to`, not `in_reply_to_id`.
+    let payload = match params.get("in_reply_to_id").and_then(|v| v.as_i64()) {
+        Some(reply_to) => serde_json::json!({ "body": body, "in_reply_to": reply_to }),
+        None => {
+            let mut p = serde_json::json!({
+                "body": body,
+                "commit_id": jnested(&pr, "head", "sha"),
+                "path": js(params, "path"),
+                "line": params.get("line").and_then(|v| v.as_i64()).unwrap_or(1),
+                "side": params.get("side").and_then(|v| v.as_str()).unwrap_or("RIGHT"),
+            });
+            if let Some(start) = params.get("start_line").and_then(|v| v.as_i64()) {
+                p["start_line"] = start.into();
+                p["start_side"] = params
+                    .get("start_side")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("RIGHT")
+                    .into();
+            }
+            p
+        }
+    };
+    let url = format!("{}/repos/{}/pulls/{}/comments", API_BASE, repo, number);
+    let v = api_json("POST", &url, token, Some(&payload.to_string()))?;
+    Ok(map_comment(&v, false))
+}
+
+/// Edit the body of an inline review comment.
+pub(crate) fn rest_pr_update_comment(
+    cwd: &str,
+    number: i64,
+    comment_id: i64,
+    body: &str,
+    token: &str,
+) -> Result<(), String> {
+    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+    let url = format!("{}/repos/{}/pulls/comments/{}", API_BASE, repo, comment_id);
+    let payload = serde_json::json!({ "body": body });
+    api_json("PATCH", &url, token, Some(&payload.to_string()))?;
+    Ok(())
+}
+
+/// Delete an inline review comment.
+pub(crate) fn rest_pr_delete_comment(
+    cwd: &str,
+    number: i64,
+    comment_id: i64,
+    token: &str,
+) -> Result<(), String> {
+    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+    let url = format!("{}/repos/{}/pulls/comments/{}", API_BASE, repo, comment_id);
+    api_json("DELETE", &url, token, None)?;
+    Ok(())
+}
+
 // ─── Issues (REST) ───────────────────────────────────────────────────────────
 //
 // Issues live in `origin` (they are never cross-fork like PRs), so the `nwo` is
