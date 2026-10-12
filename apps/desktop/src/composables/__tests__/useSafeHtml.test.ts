@@ -258,6 +258,13 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
     expect(out).not.toContain("<br>");
   });
 
+  it("drops HTML comments but keeps them inside code", () => {
+    const out = renderMarkdown("a <!-- hidden --> b\n\n<!-- block -->\n\n`<!-- code -->`");
+    expect(out).not.toContain("hidden");
+    expect(out).not.toContain("block");
+    expect(out).toContain("&lt;!-- code --&gt;");
+  });
+
   it("returns empty string for nullish input", () => {
     expect(renderMarkdown(null)).toBe("");
     expect(renderMarkdown(undefined)).toBe("");

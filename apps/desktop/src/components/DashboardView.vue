@@ -838,12 +838,9 @@ function formatDate(dateStr: string): string {
 // that block is run through the standard markdown renderer.
 function renderReadme(md: string, allowRemoteImages: boolean): string {
   const { headerHtml, rest } = extractReadmeHeader(md);
-  // Strip HTML comments early — READMEs often use them as section
-  // dividers, and we don't want them rendered as text.
-  const cleaned = rest.replace(/<!--[\s\S]*?-->/g, "");
   // READMEs soft-wrap single newlines (GitHub behaviour) — disable `breaks` so
   // wrapped prose isn't broken up with spurious <br> tags.
-  return headerHtml + renderMarkdown(cleaned, { breaks: false, allowRemoteImages });
+  return headerHtml + renderMarkdown(rest, { breaks: false, allowRemoteImages });
 }
 
 // Remote images in the README (badges, screenshots) are withheld unless the
@@ -2362,10 +2359,6 @@ watch(
      aren't clipped at the card boundary. The outer dashboard scroll
      handles vertical overflow. */
   overflow: visible;
-  /* No drop shadow: the global `.card` one gets repainted over the card's
-     full height (tens of thousands of px for a long README) on every scroll
-     frame — measured on WebKitGTK at ~78 ms/frame with it, 16 ms without. */
-  box-shadow: none;
 }
 
 .readme-tabs {

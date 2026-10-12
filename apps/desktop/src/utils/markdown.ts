@@ -33,12 +33,21 @@ interface LinkRef {
 interface Ctx {
   refs: Map<string, LinkRef>;
   breaks: boolean;
+  /** Current blockquote / list nesting level. */
+  depth: number;
 }
+
+/**
+ * Deepest blockquote / list nesting rendered as structure; anything deeper
+ * becomes plain text. Bounds recursion (a long `> > > …` line would
+ * otherwise overflow the stack) and the per-level line copying.
+ */
+const MAX_NESTING = 50;
 
 /** Render markdown to (unsanitized) HTML. */
 export function markdownToHtml(src: string, options: MarkdownOptions = {}): string {
   const text = src.replace(/\r\n?/g, "\n").replace(/\u0000/g, "\uFFFD");
-  const ctx: Ctx = { refs: new Map(), breaks: options.breaks ?? true };
+  const ctx: Ctx = { refs: new Map(), breaks: options.breaks ?? true, depth: 0 };
   const lines = collectRefs(text.split("\n").map(expandTabs), ctx.refs);
   return renderBlocks(lines, ctx, false);
 }
@@ -65,15 +74,14 @@ function plainText(html: string): string {
  * Lowercase, strip non-word characters, collapse whitespace / dashes. Kept
  * identical to the previous renderer so existing `#anchor` links still land.
  */
-export function slugifyHeading(text: string): string {
+function slugifyHeading(text: string): string {
   return text
     .toLowerCase()
     .replace(/<[^>]+>/g, "")
     .replace(/[^\w\s-]/g, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .trim();
+    .replace(/^-|-$/g, "");
 }
 
 /** Expand tabs in leading whitespace to 4-column stops. */
@@ -201,6 +209,12 @@ function isFenceOpen(line: string): RegExpExecArray | null {
   return m;
 }
 
+/** True when `line` closes a fence opened with `fence` (e.g. "```"). */
+function isFenceClose(line: string, fence: string): boolean {
+  const m = RE_FENCE.exec(line);
+  return !!m && m[2][0] === fence[0] && m[2].length >= fence.length && isBlank(m[3]);
+}
+
 /** True when `line` starts a block that ends a paragraph / lazy continuation. */
 function interruptsParagraph(line: string): boolean {
   if (isFenceOpen(line) || RE_ATX.test(line) || RE_HR.test(line) || RE_BQ.test(line)) return true;
@@ -215,11 +229,11 @@ function collectRefs(lines: string[], refs: Map<string, LinkRef>): string[] {
   let fence: string | null = null;
   let prevBlank = true;
   for (const line of lines) {
-    const f = RE_FENCE.exec(line);
+    const open: RegExpExecArray | null = fence ? null : isFenceOpen(line);
     if (fence) {
-      if (f && f[2][0] === fence[0] && f[2].length >= fence.length && isBlank(f[3])) fence = null;
-    } else if (isFenceOpen(line)) {
-      fence = f![2];
+      if (isFenceClose(line, fence)) fence = null;
+    } else if (open) {
+      fence = open[2];
     } else if (prevBlank) {
       const m = RE_REF_DEF.exec(line);
       if (m) {
@@ -237,6 +251,7 @@ function collectRefs(lines: string[], refs: Map<string, LinkRef>): string[] {
 }
 
 function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
+  if (ctx.depth > MAX_NESTING) return `<p>${esc(lines.join("\n"))}</p>\n`;
   let out = "";
   let i = 0;
   while (i < lines.length) {
@@ -263,12 +278,11 @@ function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
     if (fm) {
       const indent = fm[1].length;
       const fence = fm[2];
-      const lang = unescapeMd(fm[3].trim().split(/\s+/)[0] ?? "");
+      const lang = unescapeMd(fm[3].trim().split(/\s+/)[0]);
       const body: string[] = [];
       i++;
       while (i < lines.length) {
-        const close = RE_FENCE.exec(lines[i]);
-        if (close && close[2][0] === fence[0] && close[2].length >= fence.length && isBlank(close[3])) {
+        if (isFenceClose(lines[i], fence)) {
           i++;
           break;
         }
@@ -310,7 +324,7 @@ function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
         }
         i++;
       }
-      out += `<blockquote class="md-blockquote">\n${renderBlocks(inner, ctx, false)}</blockquote>\n`;
+      out += `<blockquote class="md-blockquote">\n${renderNested(inner, ctx, false)}</blockquote>\n`;
       continue;
     }
 
@@ -373,6 +387,15 @@ function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
   return out;
 }
 
+function renderNested(lines: string[], ctx: Ctx, tight: boolean): string {
+  ctx.depth++;
+  try {
+    return renderBlocks(lines, ctx, tight);
+  } finally {
+    ctx.depth--;
+  }
+}
+
 function renderHeading(level: number, src: string, ctx: Ctx): string {
   const html = renderInline(src.trim(), ctx, false);
   const slug = slugifyHeading(plainText(html));
@@ -393,7 +416,7 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
       (i === start || indentOf(l) < offset) && !(i > start && RE_HR.test(l));
     if (isNewItem) {
       if (i > start) items.push(cur);
-      cur = [mk.empty ? "" : l.slice(Math.min(mk.offset, l.length))];
+      cur = [mk.empty ? "" : l.slice(mk.offset)];
       offset = mk.offset;
     } else if (isBlank(l)) {
       // An empty item followed by a blank line ends the list.
@@ -441,7 +464,7 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
       cls = task[1] === " " ? ' class="md-check"' : ' class="md-check md-checked"';
       item[0] = item[0].slice(task[0].length);
     }
-    const inner = renderBlocks(item, ctx, !loose);
+    const inner = renderNested(item, ctx, !loose);
     html += `<li${cls}>${loose ? "\n" + inner : inner.replace(/\n$/, "")}</li>\n`;
   }
   return { html: html + `</${tag}>\n`, next: i };
@@ -505,6 +528,8 @@ const RE_AUTOLINK = /<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*)>/y;
 const RE_EMAIL =
   /<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)>/y;
 const RE_LINKIFY = /(?:https?:\/\/[^\s<>]+|www\.[a-zA-Z0-9-]+\.[^\s<>]+)/iy;
+/** Punctuation trimmed off the end of a bare URL (`see https://x.com.`). */
+const RE_TRAIL_PUNCT = /[.,:;!?'"*_~]+$/;
 
 function flanking(ch: string, before: string, after: string): { canOpen: boolean; canClose: boolean } {
   const wsB = /\s/.test(before);
@@ -517,8 +542,11 @@ function flanking(ch: string, before: string, after: string): { canOpen: boolean
   return { canOpen: left, canClose: right };
 }
 
-/** Index just past the code span closing the backtick run at `i`, or -1. */
-function codeSpanEnd(src: string, i: number): { contentEnd: number; end: number } | null {
+/**
+ * Bounds of the code span opened by the backtick run at `i`, or `null` when
+ * no run of the same length closes it.
+ */
+function codeSpanEnd(src: string, i: number): { contentStart: number; contentEnd: number; end: number } | null {
   let j = i;
   while (src[j] === "`") j++;
   const run = j - i;
@@ -528,7 +556,7 @@ function codeSpanEnd(src: string, i: number): { contentEnd: number; end: number 
     if (p < 0) return null;
     let q = p;
     while (src[q] === "`") q++;
-    if (q - p === run) return { contentEnd: p, end: q };
+    if (q - p === run) return { contentStart: j, contentEnd: p, end: q };
     k = q;
   }
 }
@@ -584,8 +612,8 @@ function parseInlineDest(src: string, p: number): { href: string; title?: string
         continue;
       }
       if (/\s/.test(c)) break;
-      if (c === "(") depth++;
-      else if (c === ")" && depth-- === 0) break;
+      if (c === "(" && ++depth > 32) return null; // bounds `[a]([a]([a](…`
+      if (c === ")" && depth-- === 0) break;
       i++;
     }
     href = src.slice(s, i);
@@ -607,8 +635,13 @@ function parseInlineDest(src: string, p: number): { href: string; title?: string
   return { href: unescapeMd(href), title, end: i + 1 };
 }
 
-function linkAttrs(href: string, title?: string): string {
-  return `href="${esc(normalizeUrl(href))}"${title ? ` title="${esc(title)}"` : ""}`;
+function titleAttr(title?: string): string {
+  return title ? ` title="${esc(title)}"` : "";
+}
+
+/** `<a>` for a validated target; `html` is the already-rendered link text. */
+function anchor(href: string, html: string, title?: string): string {
+  return `<a href="${esc(normalizeUrl(href))}"${titleAttr(title)} class="md-link">${html}</a>`;
 }
 
 function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
@@ -625,6 +658,8 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
   let rawAnchors = 0;
   let i = 0;
   const n = src.length;
+  // Without this, every unclosed `<!--` rescans to the end of the input.
+  const lastCommentEnd = src.lastIndexOf("-->");
 
   while (i < n) {
     RE_SPECIAL.lastIndex = i;
@@ -653,15 +688,15 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
 
     if (c === "`") {
       const span = codeSpanEnd(src, i);
-      let j = i;
-      while (src[j] === "`") j++;
       if (!span) {
+        let j = i;
+        while (src[j] === "`") j++;
         text += src.slice(i, j);
         i = j;
         continue;
       }
-      let code = src.slice(j, span.contentEnd).replace(/\n/g, " ");
-      if (code.length > 2 && code[0] === " " && code[code.length - 1] === " " && code.trim()) code = code.slice(1, -1);
+      let code = src.slice(span.contentStart, span.contentEnd).replace(/\n/g, " ");
+      if (code[0] === " " && code[code.length - 1] === " " && code.trim()) code = code.slice(1, -1);
       push(`<code class="md-inline-code">${esc(code)}</code>`);
       i = span.end;
       continue;
@@ -701,12 +736,12 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
       RE_INLINE_HTML.lastIndex = i;
       let m: RegExpExecArray | null;
       if ((m = RE_AUTOLINK.exec(src)) && isSafeUrl(m[1])) {
-        push(inLink ? esc(m[1]) : `<a ${linkAttrs(m[1])} class="md-link">${esc(m[1])}</a>`);
+        push(inLink ? esc(m[1]) : anchor(m[1], esc(m[1])));
         i += m[0].length;
       } else if ((m = RE_EMAIL.exec(src))) {
-        push(inLink ? esc(m[1]) : `<a ${linkAttrs("mailto:" + m[1])} class="md-link">${esc(m[1])}</a>`);
+        push(inLink ? esc(m[1]) : anchor("mailto:" + m[1], esc(m[1])));
         i += m[0].length;
-      } else if ((m = RE_INLINE_HTML.exec(src))) {
+      } else if ((src.startsWith("<!--", i) ? i < lastCommentEnd : true) && (m = RE_INLINE_HTML.exec(src))) {
         if (/^<a[\s>]/i.test(m[0])) rawAnchors++;
         else if (/^<\/a\s*>/i.test(m[0])) rawAnchors = Math.max(0, rawAnchors - 1);
         push(m[0]);
@@ -743,14 +778,14 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
       RE_LINKIFY.lastIndex = i;
       const m = RE_LINKIFY.exec(src);
       if (m) {
-        let url = m[0].replace(/[.,:;!?'"*_~]+$/, "");
+        let url = m[0].replace(RE_TRAIL_PUNCT, "");
         // Drop a trailing `)` that closes a paren opened outside the URL.
         while (url.endsWith(")") && (url.match(/\(/g)?.length ?? 0) < (url.match(/\)/g)?.length ?? 0)) {
-          url = url.slice(0, -1).replace(/[.,:;!?'"*_~]+$/, "");
+          url = url.slice(0, -1).replace(RE_TRAIL_PUNCT, "");
         }
         const href = /^www\./i.test(url) ? "http://" + url : url;
         if (isSafeUrl(href)) {
-          push(`<a ${linkAttrs(href)} class="md-link">${esc(url)}</a>`);
+          push(anchor(href, esc(url)));
           i += url.length;
           continue;
         }
@@ -801,21 +836,29 @@ function parseLink(src: string, p: number, image: boolean, ctx: Ctx): { html: st
 
   if (image) {
     const alt = plainText(renderInline(label, ctx, true));
-    const title = target.title ? ` title="${esc(target.title)}"` : "";
-    return { html: `<img src="${esc(normalizeUrl(target.href))}" alt="${esc(alt)}"${title}>`, end };
+    return { html: `<img src="${esc(normalizeUrl(target.href))}" alt="${esc(alt)}"${titleAttr(target.title)}>`, end };
   }
-  return { html: `<a ${linkAttrs(target.href, target.title)} class="md-link">${renderInline(label, ctx, true)}</a>`, end };
+  return { html: anchor(target.href, renderInline(label, ctx, true), target.title), end };
 }
 
-/** CommonMark "process emphasis", reduced to what `*`, `_` and `~~` need. */
+/**
+ * CommonMark "process emphasis", reduced to what `*`, `_` and `~~` need.
+ * `prev` links each delimiter to the previous one still in play, so matched
+ * ranges drop out in O(1); `bottom` remembers, per closer kind, below which
+ * index no opener can exist — together they keep this linear.
+ */
 function resolveEmphasis(toks: Tok[]): void {
   const delims = toks.filter((t): t is Delim => typeof t !== "string");
+  const prev = delims.map((_, k) => k - 1);
+  const bottom = new Map<string, number>();
   for (let ci = 0; ci < delims.length; ci++) {
     const closer = delims[ci];
     if (!closer.canClose) continue;
+    const key = `${closer.ch}${closer.canOpen ? 1 : 0}${closer.orig % 3}`;
     while (closer.n > 0) {
-      let oi = ci - 1;
-      for (; oi >= 0; oi--) {
+      const floor = bottom.get(key) ?? -1;
+      let oi = prev[ci];
+      for (; oi > floor; oi = prev[oi]) {
         const o = delims[oi];
         if (o.ch !== closer.ch || !o.canOpen || o.n === 0) continue;
         if (closer.ch === "~") break;
@@ -825,7 +868,10 @@ function resolveEmphasis(toks: Tok[]): void {
         }
         break;
       }
-      if (oi < 0) break;
+      if (oi <= floor) {
+        bottom.set(key, ci - 1);
+        break;
+      }
       const opener = delims[oi];
       const use = closer.ch === "~" ? 2 : opener.n >= 2 && closer.n >= 2 ? 2 : 1;
       const tag = closer.ch === "~" ? "s" : use === 2 ? "strong" : "em";
@@ -833,8 +879,9 @@ function resolveEmphasis(toks: Tok[]): void {
       closer.n -= use;
       opener.openTags.unshift(`<${tag}>`);
       closer.closeTags.push(`</${tag}>`);
-      // Delimiters between the pair can no longer match across it.
-      for (let k = oi + 1; k < ci; k++) delims[k].canOpen = delims[k].canClose = false;
+      // Delimiters between the pair (and a spent opener) can no longer match.
+      prev[ci] = opener.n > 0 ? oi : prev[oi];
     }
+    if (closer.n === 0 && ci + 1 < delims.length) prev[ci + 1] = prev[ci];
   }
 }

@@ -117,6 +117,15 @@ describe("markdownToHtml — inline", () => {
     md("[".repeat(20000));
     md("![".repeat(20000));
     md("*a ".repeat(20000));
+    md("a* ".repeat(30000));
+    md("[a](".repeat(15000));
+    md("a <!-- ".repeat(15000));
     expect(performance.now() - t).toBeLessThan(1000);
+  });
+
+  it("flattens nesting past the cap instead of overflowing the stack", () => {
+    const out = md("> ".repeat(3000) + "x");
+    expect(out.match(/<blockquote/g)?.length).toBeLessThanOrEqual(51);
+    expect(out).toContain("x");
   });
 });

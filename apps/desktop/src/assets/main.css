@@ -585,7 +585,9 @@ button:focus-visible,
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-xs);
+  /* No drop shadow: cards can hold content tens of thousands of px tall (the
+     dashboard README), and WebKitGTK repaints a shadow over the box's full
+     height on every scroll frame — measured ~78 ms/frame with it, 16 without. */
 }
 .card--hero {
   background: var(--color-surface-inverse);
