@@ -1153,7 +1153,13 @@ pub(crate) async fn git_branches(
         // strip it to the display name: refs/heads/x → x, refs/remotes/o/x → o/x.
         let (clean_name, is_remote) = match full_ref.strip_prefix("refs/remotes/") {
             Some(n) => (n.to_string(), true),
-            None => (full_ref.strip_prefix("refs/heads/").unwrap_or(full_ref).to_string(), false),
+            None => (
+                full_ref
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(full_ref)
+                    .to_string(),
+                false,
+            ),
         };
 
         main_counts.insert(clean_name.clone(), main_count);
@@ -5611,11 +5617,15 @@ mod default_branch_setting_tests {
         let branches = tauri::async_runtime::block_on(git_branches(repo.cwd(), None))
             .expect("git_branches must succeed");
         assert!(
-            !branches.iter().any(|b| b.name == "origin" || b.name == "origin/HEAD"),
+            !branches
+                .iter()
+                .any(|b| b.name == "origin" || b.name == "origin/HEAD"),
             "remote HEAD symref must not be listed as a branch: {:?}",
             branches.iter().map(|b| &b.name).collect::<Vec<_>>()
         );
-        assert!(branches.iter().any(|b| b.is_remote && b.name == "origin/trunk"));
+        assert!(branches
+            .iter()
+            .any(|b| b.is_remote && b.name == "origin/trunk"));
 
         let _ = std::fs::remove_dir_all(&bare);
     }
@@ -5634,8 +5644,14 @@ mod default_branch_setting_tests {
             .iter()
             .find(|b| b.name == "upstream/trunk")
             .expect("upstream/trunk listed");
-        assert!(up.is_remote, "branch of a non-origin remote must be flagged remote");
-        let local = branches.iter().find(|b| b.name == "trunk").expect("trunk listed");
+        assert!(
+            up.is_remote,
+            "branch of a non-origin remote must be flagged remote"
+        );
+        let local = branches
+            .iter()
+            .find(|b| b.name == "trunk")
+            .expect("trunk listed");
         assert!(!local.is_remote);
 
         let _ = std::fs::remove_dir_all(&bare);
