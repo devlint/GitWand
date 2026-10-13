@@ -7,18 +7,35 @@
  * "Update branch" path (`--ff-only`) minus the stash. Anything else is left
  * alone and the toolbar tooltip names the single condition holding it back.
  *
- * Two layers:
+ * Three layers:
  *   - `evaluateAutoFastForward` — pure verdict over a facts snapshot. The
  *     blocking order lives here and nowhere else.
+ *   - `factsFromStatus` — the same facts derived from state the app already
+ *     holds (git status + operation state). Drives the tooltip on every status
+ *     change without spawning a single process (the 2 s polling tick must stay
+ *     spawn-free).
  *   - `checkAutoFastForward` / `runAutoFastForward` — read the facts from the
  *     repository (never from cached UI state: it can be stale by the time a
  *     fetch ends) and, only when ready, run `git merge --ff-only @{upstream}`.
+ *     Only reached after a fetch, and only when the status already says
+ *     "ready"; the Rust command re-checks again under the repo lock.
+ *
+ * `useAutoFastForward` wires them: a reactive tooltip block, and a serialized
+ * `requestRun` that never drops a request and never runs two fast-forwards
+ * concurrently.
  *
  * Untracked files never block on their own; if the fast-forward would
  * overwrite one, git refuses and that refusal is reported as `gitRefused`.
  */
 
-import { gitExec, gitFastForwardToUpstream, gitRepoState } from "../utils/backend";
+import { computed, ref, type ComputedRef } from "vue";
+import {
+  gitExec,
+  gitFastForwardToUpstream,
+  gitRepoState,
+  type GitStatus,
+  type RepoOperationState,
+} from "../utils/backend";
 
 // ─── Verdict ────────────────────────────────────────────────
 
@@ -141,7 +158,33 @@ export async function readAutoFfFacts(cwd: string, ctx: AutoFfContext): Promise<
   };
 }
 
-/** Read-only: facts + verdict, nothing is modified. Drives the tooltip. */
+/** Branch names git status reports for a detached HEAD (libgit2 / CLI v2). */
+const DETACHED_BRANCH_NAMES = new Set(["HEAD", "(detached)", "(detached HEAD)", "unknown", ""]);
+
+/**
+ * Facts from already-loaded state — no process is spawned. Advisory only:
+ * a bisect is invisible here, and the status may lag the disk by one poll.
+ * The git-backed check (`readAutoFfFacts`) and the Rust command catch both.
+ */
+export function factsFromStatus(
+  status: GitStatus,
+  operation: Pick<RepoOperationState, "state" | "hasConflict"> | null,
+  ctx: AutoFfContext,
+): AutoFfFacts {
+  const op = operation && operation.state !== "clean" ? operation.state : null;
+  return {
+    detached: DETACHED_BRANCH_NAMES.has(status.branch),
+    hasUpstream: !!status.remote,
+    ahead: status.ahead,
+    behind: status.behind,
+    operation: op,
+    busy: ctx.busy,
+    conflicts: status.conflicted.length > 0 || !!operation?.hasConflict,
+    trackedEdits: status.staged.length > 0 || status.unstaged.length > 0,
+  };
+}
+
+/** Read-only: facts + verdict, nothing is modified. */
 export async function checkAutoFastForward(
   cwd: string,
   ctx: AutoFfContext,
@@ -193,4 +236,109 @@ export async function runAutoFastForward(cwd: string, ctx: AutoFfContext): Promi
 
 function firstLine(text: string): string {
   return (text ?? "").trim().split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
+}
+
+// ─── Composable ─────────────────────────────────────────────
+
+export interface AutoFfBlock {
+  reason: AutoFfBlockReason;
+  detail?: string;
+}
+
+export interface UseAutoFastForwardOptions {
+  enabled: () => boolean;
+  cwd: () => string | null | undefined;
+  status: () => GitStatus | null | undefined;
+  operation: () => Pick<RepoOperationState, "state" | "hasConflict"> | null | undefined;
+  /** The app runs its own git operation (push, pull, merge, commit, switch…). */
+  busy: () => boolean;
+  /** A fetch is streaming; only blocks an actual run, not the tooltip. */
+  fetching?: () => boolean;
+  /** Called after a successful fast-forward (refresh the view, toast…). */
+  onFastForwarded?: (outcome: { count: number; branch: string }) => Promise<void> | void;
+  /** Injection point for tests. */
+  run?: typeof runAutoFastForward;
+}
+
+export interface UseAutoFastForward {
+  /** Why a behind branch is held back, for the sync-button tooltip; or null. */
+  autoFfBlock: ComputedRef<AutoFfBlock | null>;
+  /** Status-derived verdict (no process spawned), null when off / no status. */
+  statusVerdict: ComputedRef<AutoFfVerdict | null>;
+  /**
+   * Fast-forward if the branch is purely behind. Call after a fetch. A request
+   * made while a pass is in flight is not dropped: one more pass runs right
+   * after the current one ends. Two passes never overlap.
+   */
+  requestRun: () => Promise<void>;
+}
+
+export function useAutoFastForward(opts: UseAutoFastForwardOptions): UseAutoFastForward {
+  const run = opts.run ?? runAutoFastForward;
+  /** What the last git-backed pass reported, for what status cannot see. */
+  const lastRun = ref<{ cwd: string; block: AutoFfBlock } | null>(null);
+
+  const statusVerdict = computed<AutoFfVerdict | null>(() => {
+    if (!opts.enabled()) return null;
+    const status = opts.status();
+    if (!status) return null;
+    return evaluateAutoFastForward(factsFromStatus(status, opts.operation() ?? null, { busy: opts.busy() }));
+  });
+
+  const autoFfBlock = computed<AutoFfBlock | null>(() => {
+    const v = statusVerdict.value;
+    if (!v || v.kind === "idle") return null;
+    if (v.kind === "blocked") return { reason: v.reason };
+    // Status says "ready": surface what only git could see (a refusal, a
+    // bisect…). "busy" is transient app state, already re-read live above.
+    const last = lastRun.value;
+    if (last && last.cwd === opts.cwd() && last.block.reason !== "busy") return last.block;
+    return null;
+  });
+
+  let running = false;
+  let pending = false;
+
+  async function passOnce(): Promise<void> {
+    const cwd = opts.cwd();
+    if (!opts.enabled() || !cwd) return;
+    // Cheap gate from already-loaded state: only spawn git when the status
+    // (freshly reloaded by the fetch) says there is something to do.
+    if (statusVerdict.value?.kind !== "ready") {
+      if (lastRun.value?.cwd !== cwd || statusVerdict.value?.kind === "idle") lastRun.value = null;
+      return;
+    }
+    const outcome = await run(cwd, { busy: opts.busy() || !!opts.fetching?.() });
+    if (cwd !== opts.cwd()) return; // tab switched meanwhile
+    if (outcome.kind === "fastForwarded") {
+      lastRun.value = null;
+      await opts.onFastForwarded?.({ count: outcome.count, branch: outcome.branch });
+    } else if (outcome.kind === "blocked") {
+      lastRun.value = { cwd, block: { reason: outcome.reason, detail: outcome.detail } };
+    } else {
+      lastRun.value = null;
+    }
+  }
+
+  async function requestRun(): Promise<void> {
+    if (running) {
+      pending = true;
+      return;
+    }
+    running = true;
+    try {
+      do {
+        pending = false;
+        try {
+          await passOnce();
+        } catch (err) {
+          console.warn("[GitWand] auto fast-forward pass failed:", err);
+        }
+      } while (pending);
+    } finally {
+      running = false;
+    }
+  }
+
+  return { autoFfBlock, statusVerdict, requestRun };
 }

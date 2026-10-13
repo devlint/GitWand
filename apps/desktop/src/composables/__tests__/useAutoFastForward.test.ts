@@ -54,11 +54,17 @@ vi.mock("../../utils/backend", () => ({
   }),
 }));
 
+import { nextTick, ref } from "vue";
+import * as backendMod from "../../utils/backend";
+import type { GitStatus, RepoOperationState } from "../../utils/backend";
 import {
   evaluateAutoFastForward,
   checkAutoFastForward,
   runAutoFastForward,
+  factsFromStatus,
+  useAutoFastForward,
   type AutoFfFacts,
+  type AutoFfOutcome,
 } from "../useAutoFastForward";
 
 // ─── pure verdict ────────────────────────────────────────────
@@ -114,6 +120,155 @@ describe("evaluateAutoFastForward", () => {
       if (reason === "conflicts") facts.conflicts = false;
       if (reason === "localCommits") facts.ahead = 0;
     }
+  });
+});
+
+// ─── status-derived verdict (no process spawned) ─────────────
+
+function status(patch: Partial<GitStatus> = {}): GitStatus {
+  return {
+    branch: "main", remote: "origin/main", remoteBranchExists: true,
+    ahead: 0, behind: 2, mainCommitCount: 0, pushRemote: null, aheadPush: 0,
+    staged: [], unstaged: [], untracked: [], conflicted: [],
+    ...patch,
+  };
+}
+const fc = (path: string) => ({ path, status: "modified" }) as unknown as GitStatus["staged"][number];
+
+function clearBackendCalls() {
+  vi.mocked(backendMod.gitExec).mockClear();
+  vi.mocked(backendMod.gitRepoState).mockClear();
+  vi.mocked(backendMod.gitFastForwardToUpstream).mockClear();
+}
+function backendCallCount() {
+  return vi.mocked(backendMod.gitExec).mock.calls.length
+    + vi.mocked(backendMod.gitRepoState).mock.calls.length
+    + vi.mocked(backendMod.gitFastForwardToUpstream).mock.calls.length;
+}
+
+describe("factsFromStatus", () => {
+  const noOp = null;
+  const cases: Array<[string, GitStatus, Pick<RepoOperationState, "state" | "hasConflict"> | null, string]> = [
+    ["purely behind", status(), noOp, "ready"],
+    ["up to date", status({ behind: 0 }), noOp, "idle"],
+    ["untracked only", status({ untracked: ["x"] }), noOp, "ready"],
+    ["detached (libgit2)", status({ branch: "HEAD", remote: null, behind: 0 }), noOp, "detached"],
+    ["detached (CLI)", status({ branch: "(detached)", remote: null, behind: 0 }), noOp, "detached"],
+    ["no upstream", status({ remote: null }), noOp, "noUpstream"],
+    ["operation", status(), { state: "merge", hasConflict: false }, "operation"],
+    ["conflicted path", status({ conflicted: ["f"] }), noOp, "conflicts"],
+    ["operation conflict flag", status(), { state: "clean", hasConflict: true }, "conflicts"],
+    ["local commits", status({ ahead: 1 }), noOp, "localCommits"],
+    ["staged", status({ staged: [fc("f")] }), noOp, "trackedEdits"],
+    ["unstaged", status({ unstaged: [fc("f")] }), noOp, "trackedEdits"],
+  ];
+  for (const [label, st, op, expected] of cases) {
+    it(`${label} -> ${expected}`, () => {
+      const v = evaluateAutoFastForward(factsFromStatus(st, op, { busy: false }));
+      expect(v.kind === "blocked" ? v.reason : v.kind).toBe(expected);
+    });
+  }
+  it("busy -> busy", () => {
+    expect(evaluateAutoFastForward(factsFromStatus(status(), null, { busy: true })))
+      .toEqual({ kind: "blocked", reason: "busy" });
+  });
+});
+
+describe("useAutoFastForward", () => {
+  function harness(initial: Partial<GitStatus> = {}) {
+    const st = ref<GitStatus | null>(status(initial));
+    const enabled = ref(true);
+    const busy = ref(false);
+    const run = vi.fn<typeof runAutoFastForward>();
+    const onFastForwarded = vi.fn();
+    const ff = useAutoFastForward({
+      enabled: () => enabled.value,
+      cwd: () => "/repo",
+      status: () => st.value,
+      operation: () => null,
+      busy: () => busy.value,
+      onFastForwarded,
+      run,
+    });
+    return { st, enabled, busy, run, onFastForwarded, ff };
+  }
+
+  it("tooltip verdict follows status changes without any backend call", async () => {
+    clearBackendCalls();
+    const { st, ff } = harness();
+    expect(ff.autoFfBlock.value).toBeNull();
+    st.value = status({ unstaged: [fc("f")] });
+    await nextTick();
+    expect(ff.autoFfBlock.value).toEqual({ reason: "trackedEdits" });
+    st.value = status({ ahead: 1 });
+    await nextTick();
+    expect(ff.autoFfBlock.value).toEqual({ reason: "localCommits" });
+    st.value = status({ behind: 0 });
+    await nextTick();
+    expect(ff.autoFfBlock.value).toBeNull();
+    expect(backendCallCount()).toBe(0);
+  });
+
+  it("disabled -> no block, no run", async () => {
+    const { enabled, run, ff } = harness({ unstaged: [fc("f")] });
+    enabled.value = false;
+    expect(ff.autoFfBlock.value).toBeNull();
+    await ff.requestRun();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("a run is not attempted when the status already says no", async () => {
+    const { run, ff } = harness({ ahead: 1 });
+    await ff.requestRun();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("a run requested while a pass is in flight still runs, after it, never concurrently", async () => {
+    const { run, onFastForwarded, ff } = harness();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const releases: Array<(o: AutoFfOutcome) => void> = [];
+    run.mockImplementation(() => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      return new Promise<AutoFfOutcome>((resolve) => {
+        releases.push((o) => { inFlight--; resolve(o); });
+      });
+    });
+
+    const first = ff.requestRun();
+    await Promise.resolve();
+    expect(run).toHaveBeenCalledTimes(1);
+    // Second (and third) request lands while the first pass is in flight.
+    const second = ff.requestRun();
+    const third = ff.requestRun();
+    await second;
+    await third;
+    expect(run).toHaveBeenCalledTimes(1);
+
+    releases[0]({ kind: "blocked", reason: "busy" });
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    releases[1]({ kind: "fastForwarded", count: 2, branch: "main" });
+    await first;
+    expect(run).toHaveBeenCalledTimes(2); // coalesced, not one per request
+    expect(maxInFlight).toBe(1);
+    expect(onFastForwarded).toHaveBeenCalledWith({ count: 2, branch: "main" });
+  });
+
+  it("a git refusal stays in the tooltip while the status looks ready", async () => {
+    const { st, run, ff } = harness();
+    run.mockResolvedValue({ kind: "blocked", reason: "gitRefused", detail: "index.lock exists" });
+    await ff.requestRun();
+    expect(ff.autoFfBlock.value).toEqual({ reason: "gitRefused", detail: "index.lock exists" });
+    // A status-visible reason outranks it…
+    st.value = status({ unstaged: [fc("f")] });
+    await nextTick();
+    expect(ff.autoFfBlock.value).toEqual({ reason: "trackedEdits" });
+    // …and a successful pass clears it.
+    st.value = status();
+    run.mockResolvedValue({ kind: "fastForwarded", count: 2, branch: "main" });
+    await ff.requestRun();
+    expect(ff.autoFfBlock.value).toBeNull();
   });
 });
 
