@@ -306,6 +306,22 @@ function nextCommentClose(lines: string[], from: number, lastClose: number): num
   return -1;
 }
 
+/**
+ * At blank line `i` inside an open HTML comment, the index of the line that
+ * closes it, or -1 (not in a comment, or never closed). A comment opened
+ * mid-paragraph hides everything up to its `-->`, blank lines included —
+ * READMEs use that to hide whole sections. `lastClose` (the last line holding
+ * a `-->`) bounds the lookahead so an unclosed comment can't make it quadratic.
+ */
+function commentSpanEnd(lines: string[], i: number, inComment: boolean, lastClose: number): number {
+  return inComment && isBlank(lines[i]) ? nextCommentClose(lines, i, lastClose) : -1;
+}
+
+/** Whether a comment is open after the line that closed the previous one. */
+function inCommentAfterClose(line: string): boolean {
+  return inCommentAfter(line.slice(line.indexOf("-->") + 3), false);
+}
+
 function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
   if (ctx.depth > MAX_NESTING) return `<p>${esc(lines.join("\n"))}</p>\n`;
   // Bounds the `-->` lookahead: past it, an open comment cannot close.
@@ -392,7 +408,7 @@ function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
     // List.
     const first = listMarker(line);
     if (first) {
-      const res = renderList(lines, i, first, ctx);
+      const res = renderList(lines, i, first, ctx, commentClose);
       out += res.html;
       i = res.next;
       continue;
@@ -428,12 +444,10 @@ function renderBlocks(lines: string[], ctx: Ctx, tight: boolean): string {
     while (i < lines.length) {
       const l = lines[i];
       if (isBlank(l)) {
-        // A comment opened mid-paragraph hides everything up to its `-->`,
-        // blank lines included — READMEs use them to hide whole sections.
-        const close = inComment ? nextCommentClose(lines, i, commentClose) : -1;
+        const close = commentSpanEnd(lines, i, inComment, commentClose);
         if (close < 0) break;
         for (; i <= close; i++) para.push(lines[i]);
-        inComment = inCommentAfter(lines[close].slice(lines[close].indexOf("-->") + 3), false);
+        inComment = inCommentAfterClose(lines[close]);
         continue;
       }
       const st = RE_SETEXT.exec(l);
@@ -474,27 +488,30 @@ function renderHeading(level: number, src: string, ctx: Ctx): string {
   return `<h${level}${id}>${html}</h${level}>\n`;
 }
 
-function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx): { html: string; next: number } {
+function renderList(
+  lines: string[],
+  start: number,
+  first: ListMarker,
+  ctx: Ctx,
+  commentClose: number,
+): { html: string; next: number } {
   const items: string[][] = [];
   let cur: string[] = [];
   let offset = 0;
   // Fence open in the current item's content, if any.
   let fence: string | null = null;
-  // Whether the current item's text is inside an HTML comment, and the last
-  // line that can close one (bounds the lookahead, as in renderBlocks).
+  // Whether the current item's text is inside an HTML comment.
   let inComment = false;
-  let commentClose = lines.length - 1;
-  while (commentClose >= start && !lines[commentClose].includes("-->")) commentClose--;
   let i = start;
   while (i < lines.length) {
     const l = lines[i];
-    // A comment opened in the item hides everything up to its `-->`, blank
-    // and unindented lines included: keep them in the item, where the
-    // paragraph builder drops the whole range (as for a top-level paragraph).
-    const close = inComment && !fence ? nextCommentClose(lines, i, commentClose) : -1;
+    // Same rule as a top-level paragraph: from a blank line, keep the rest of
+    // the comment (unindented lines too) in the item, where the paragraph
+    // builder drops the whole range instead of the item ending here.
+    const close = fence ? -1 : commentSpanEnd(lines, i, inComment, commentClose);
     if (close >= 0) {
       for (; i <= close; i++) cur.push(lines[i].slice(Math.min(offset, indentOf(lines[i]))));
-      inComment = inCommentAfter(lines[close].slice(lines[close].indexOf("-->") + 3), false);
+      inComment = inCommentAfterClose(lines[close]);
       continue;
     }
     const mk = listMarker(l);
@@ -539,15 +556,20 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
     // Content column of the nested list item the scan is in, or -1. Lines
     // indented to it (and sibling markers) belong to that nested list.
     let nested = -1;
+    // Blank lines hidden inside an HTML comment don't separate anything — but
+    // only a comment closed within the item hides them (as in renderBlocks).
+    let itemClose = item.length - 1;
+    while (itemClose >= 0 && !item[itemClose].includes("-->")) itemClose--;
     let inItemComment = false;
     for (let j = 0; j < item.length && !loose; j++) {
       const l = item[j];
+      if (inItemComment) {
+        inItemComment = inCommentAfter(l, true);
+        continue;
+      }
       if (isFenceOpen(l) || (inFence && RE_FENCE.test(l))) inFence = !inFence;
       if (inFence) continue;
-      // Blank lines hidden inside an HTML comment don't separate anything.
-      const wasInComment = inItemComment;
-      inItemComment = inCommentAfter(l, inItemComment);
-      if (wasInComment) continue;
+      inItemComment = j < itemClose && inCommentAfter(l, false);
       if (!isBlank(l)) {
         const mk = listMarker(l);
         // Deeper markers are inside the nested item already: keep its column.
@@ -656,10 +678,11 @@ const RE_LINKIFY = /(?:https?:\/\/[^\s<>]+|www\.[a-zA-Z0-9-]+\.[^\s<>]+)/iy;
  * Bare email, GFM extended autolink: local part (already in the text run) and
  * domain after `@`. The last label must be alphabetic, as a TLD is: otherwise
  * package specs like `vue@3.5.42` or `@types/node@25.9.5` — all over
- * Dependabot/Renovate PR bodies — would become mailto links.
+ * Dependabot/Renovate PR bodies — would become mailto links. A numeric first
+ * label is refused too, for prereleases like `pkg@1.0.0-alpha.beta`.
  */
 const RE_EMAIL_LOCAL_CHAR = /[a-zA-Z0-9.+-]/;
-const RE_EMAIL_DOMAIN = /(?:[a-zA-Z0-9_-]+\.)+[a-zA-Z]{2,}(?![a-zA-Z0-9_-])/y;
+const RE_EMAIL_DOMAIN = /(?![0-9]+\.)(?:[a-zA-Z0-9_-]+\.)+[a-zA-Z]{2,}(?![a-zA-Z0-9_-])/y;
 /** Punctuation trimmed off the end of a bare URL (`see https://x.com.`). */
 const RE_TRAIL_PUNCT = /[.,:;!?'"*_~]+$/;
 
@@ -895,7 +918,7 @@ function renderInline(src: string, ctx: Ctx, inLink: boolean): string {
       const local = src.slice(start, i);
       RE_EMAIL_DOMAIN.lastIndex = i + 1;
       const domain = local && RE_EMAIL_DOMAIN.exec(src)?.[0];
-      if (domain && !/[-_]$/.test(domain)) {
+      if (domain) {
         text = text.slice(0, -local.length);
         const addr = `${local}@${domain}`;
         push(anchor("mailto:" + addr, esc(addr)));

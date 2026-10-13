@@ -168,6 +168,15 @@ describe("markdownToHtml — inline", () => {
     );
     // Unclosed: the item still ends at the blank line, nothing is swallowed.
     expect(md("- item <!-- open\n\nafter")).toContain("<p>after</p>");
+    // Without a blank line, list markers inside the comment still start items.
+    expect(md("- a <!-- note\n- b\n- c -->")).toBe(
+      "<ul>\n<li>a &lt;!-- note</li>\n<li>b</li>\n<li>c --&gt;</li>\n</ul>\n",
+    );
+    // Unclosed: the blank line still separates two paragraphs, so the list is loose.
+    expect(md("- a <!-- open\n\n  second\n- b")).toContain("<p>second</p>");
+    // A fence line inside a comment does not hide the blank line after the
+    // comment from the looseness check.
+    expect(md("- a <!--\n  ```\n  -->\n\n  para")).toMatch(/^<ul>\n<li>\n<p>a/);
     // Inside a fence, `<!--` is code, not a comment.
     expect(md("- ```\n  <!--\n  ```\n\nafter -->")).toContain("<p>after --&gt;</p>");
   });
@@ -178,6 +187,7 @@ describe("markdownToHtml — inline", () => {
       "<p>bump vue@3.5.42 and @types/node@25.9.5</p>\n",
     );
     expect(md("pkg@1.0.0-beta.1")).toBe("<p>pkg@1.0.0-beta.1</p>\n");
+    expect(md("pkg@1.0.0-alpha.beta")).toBe("<p>pkg@1.0.0-alpha.beta</p>\n");
     expect(md("ops@team.example.io")).toContain('href="mailto:ops@team.example.io"');
   });
 
