@@ -867,8 +867,15 @@ fn gh_pr_ready_inner(cwd: String, number: i64) -> Result<(), String> {
     if let Some(tok) = github_api::settings_github_token() {
         return github_api::rest_pr_ready(&cwd, number, &tok);
     }
+    // On a fork the PR number comes from the upstream's list, so name the repo
+    // explicitly (as `gh_pr_edit_inner` does) rather than rely on gh's default.
+    let mut args = vec!["pr".to_string(), "ready".to_string(), number.to_string()];
+    if let Some(upstream) = gh_fork_upstream(&cwd) {
+        args.push("--repo".to_string());
+        args.push(upstream);
+    }
     let output = hidden_cmd("gh")
-        .args(["pr", "ready", &number.to_string()])
+        .args(&args)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run gh pr ready: {}", e))?;
