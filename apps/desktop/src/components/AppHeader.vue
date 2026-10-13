@@ -104,6 +104,8 @@ const props = defineProps<{
   isFetching?: boolean;
   /** 0-100 while a user-initiated fetch streams progress; 0 otherwise (v3.10.0). */
   fetchPercent?: number;
+  /** Why the opt-in auto fast-forward is holding back a behind branch, or null. */
+  autoFfBlock?: { reason: string; detail?: string } | null;
   /** True when the device has no network connectivity. */
   isOffline?: boolean;
   // Branch popover
@@ -536,6 +538,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             :force-push-preferred="forcePushPreferred"
             :is-fetching="isFetching ?? false"
             :fetch-percent="fetchPercent ?? 0"
+            :auto-ff-block="autoFfBlock ?? null"
             :can-push="canPush"
             :can-pull="canPull"
             :is-offline="isOffline"

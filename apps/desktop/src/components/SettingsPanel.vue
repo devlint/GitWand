@@ -278,6 +278,8 @@ interface Settings {
   snapshotAiLabels: boolean;
   /** Live Repo (v3.10.0): subscribe to filesystem events instead of polling. */
   liveRepoWatcher: boolean;
+  /** Opt-in: fast-forward a purely-behind current branch after the background fetch. */
+  autoFastForward: boolean;
   /** Load remote images in rendered markdown (off: tracking pixels). */
   allowRemoteImages: boolean;
   /** README remote-image consent per project (normaliseCwd keys). */
@@ -384,6 +386,7 @@ const defaultSettings: Settings = {
   snapshotMaxCount: 200,
   snapshotAiLabels: false,
   liveRepoWatcher: true,
+  autoFastForward: false,
   allowRemoteImages: false,
   remoteImagesByRepo: {},
   gravatarEnabled: false,
@@ -2214,6 +2217,17 @@ function openAiTemplateKind(kind: AiTemplateKind) {
               <span>{{ t('settings.liveRepoWatcher') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.liveRepoWatcherHint') }}</span>
+          </div>
+
+          <!-- Auto fast-forward after fetch -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-auto-fast-forward">
+              <input id="setting-auto-fast-forward" type="checkbox" class="sp-checkbox"
+                :checked="settings.autoFastForward"
+                @change="updateSetting('autoFastForward', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.autoFastForward') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.autoFastForwardHint') }}</span>
           </div>
 
           <!-- Blame diff algorithm -->

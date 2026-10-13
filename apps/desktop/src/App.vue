@@ -106,6 +106,7 @@ import { useNetworkStatus } from "./composables/useNetworkStatus";
 import { useConnectivity } from "./composables/useConnectivity";
 import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
+import { checkAutoFastForward, runAutoFastForward, type AutoFfBlockReason } from "./composables/useAutoFastForward";
 import { useRepoWatcher } from "./composables/useRepoWatcher";
 import { useTrackedIgnored, shouldRecheckTrackedIgnored } from "./composables/useTrackedIgnored";
 import { useWatcherRefreshQueue } from "./composables/useWatcherRefreshQueue";
@@ -3911,6 +3912,56 @@ const scheduler = useScheduler({
 });
 const { triggerReleaseNotesIfEnabled } = scheduler;
 
+// ─── Opt-in auto fast-forward after fetch ─────────────────────────────
+// Off by default. "run" (fetch tick) fast-forwards a purely-behind branch;
+// "check" (status refresh) only re-evaluates so the sync-button tooltip keeps
+// naming the condition that holds it back. Never opens a modal: a refusal is
+// only reported in the tooltip.
+const autoFfBlock = ref<{ reason: AutoFfBlockReason; detail?: string } | null>(null);
+let autoFfRunning = false;
+
+async function autoFastForwardPass(mode: "run" | "check") {
+  const cwd = repoFolderPath.value;
+  if (!settings.value.autoFastForward || !cwd || autoFfRunning) {
+    if (!settings.value.autoFastForward) autoFfBlock.value = null;
+    return;
+  }
+  autoFfRunning = true;
+  try {
+    const ctx = {
+      busy:
+        isPushing.value || isPulling.value || isMerging.value || isCommitting.value ||
+        isSwitchingBranch.value || (mode === "run" && isFetching.value),
+    };
+    if (mode === "check") {
+      const { verdict } = await checkAutoFastForward(cwd, ctx);
+      autoFfBlock.value = verdict.kind === "blocked" ? { reason: verdict.reason } : null;
+      return;
+    }
+    const outcome = await runAutoFastForward(cwd, ctx);
+    if (cwd !== repoFolderPath.value) return; // tab switched meanwhile
+    if (outcome.kind === "fastForwarded") {
+      autoFfBlock.value = null;
+      await repoRefresh(true);
+      showDetailToast(t("syncAction.autoFfDone", outcome.branch, outcome.count), null);
+    } else if (outcome.kind === "blocked") {
+      autoFfBlock.value = { reason: outcome.reason, detail: outcome.detail };
+    } else {
+      autoFfBlock.value = null;
+    }
+  } finally {
+    autoFfRunning = false;
+  }
+}
+
+watch(
+  () => [repoStatus.value, settings.value.autoFastForward] as const,
+  () => {
+    if (behindCount.value > 0) void autoFastForwardPass("check");
+    else autoFfBlock.value = null;
+  },
+);
+
 // ─── Consolidated poller (§2.1) — single 2s interval replacing 5 independent polls ──
 const poller = useRepoPoller({
   onStatusChange: async (cwd) => {
@@ -3928,6 +3979,7 @@ const poller = useRepoPoller({
   },
   onFetchTick: async (cwd) => {
     await doFetch();
+    await autoFastForwardPass("run");
   },
   onNightlyTick: async () => {
     await scheduler.onNightlyTick();
@@ -4374,7 +4426,7 @@ onUnmounted(() => {
       :main-commit-count="mainCommitCount" :push-remote="pushRemote"
       :ahead-push-count="aheadPushCount" :is-pushing="isPushing" :is-pulling="isPulling"
       :force-push-preferred="forcePushPreferred" :is-fetching="isFetching" :fetch-percent="fetchPercent"
-      :cwd="repoFolderPath ?? ''" :branches="branches" :worktree-branches="worktreeBranches" :branches-loading="branchesLoading"
+      :auto-ff-block="autoFfBlock" :cwd="repoFolderPath ?? ''" :branches="branches" :worktree-branches="worktreeBranches" :branches-loading="branchesLoading"
       :is-switching-branch="isSwitchingBranch" :is-merging="isMerging" :tabs="repoTabs" :active-tab-id="activeTabId"
       :active-repo-path="activeRepoPath" :load-worktrees="loadProjectWorktrees"
       :worktree-project-paths="worktreeProjectPaths"

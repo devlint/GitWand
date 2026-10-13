@@ -464,6 +464,12 @@ export interface AppSettings {
    */
   liveRepoWatcher: boolean;
   /**
+   * Opt-in: after the 30 s background fetch, fast-forward the current branch
+   * when it is purely behind its upstream (no local commits, no tracked edits,
+   * no operation in progress). Never merges, rebases or stashes. Off by default.
+   */
+  autoFastForward: boolean;
+  /**
    * Load images from remote hosts in rendered markdown (PR bodies, comments,
    * READMEs). Off by default: an image URL in someone else's PR is a tracking
    * pixel that learns your IP and when you read it.
@@ -587,6 +593,7 @@ export const defaultAppSettings: AppSettings = {
   snapshotMaxCount:                  200,
   snapshotAiLabels:                  false,
   liveRepoWatcher:                   true,
+  autoFastForward:                   false,
   allowRemoteImages:                 false,
   remoteImagesByRepo:                {},
   gravatarEnabled:                   false,

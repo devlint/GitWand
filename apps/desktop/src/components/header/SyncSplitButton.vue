@@ -24,6 +24,8 @@ const props = defineProps<{
   isFetching: boolean;
   /** 0-100 while a user-initiated fetch streams progress; 0 otherwise (v3.10.0). */
   fetchPercent?: number;
+  /** Why the opt-in auto fast-forward is holding back a behind branch, or null. */
+  autoFfBlock?: { reason: string; detail?: string } | null;
   canPush: boolean;
   canPull: boolean;
   /** Fork / triangular workflow: push remote when it differs from upstream. */
@@ -178,9 +180,39 @@ onUnmounted(() => {
 const primaryTitle = computed(() => {
   if (props.isOffline) return t("syncAction.tooltipOffline");
   const a = action.value;
-  if (a.state === "clean") return t("syncAction.tooltipClean");
-  if (a.state === "diverged") return t("syncAction.tooltipDiverged");
-  return primaryLabel.value;
+  const base =
+    a.state === "clean" ? t("syncAction.tooltipClean")
+    : a.state === "diverged" ? t("syncAction.tooltipDiverged")
+    : primaryLabel.value;
+  const note = autoFfNote.value;
+  return note && props.behindCount > 0 ? `${base}\n${note}` : base;
+});
+
+// Why auto fast-forward is paused (only passed while the setting is on and the
+// branch is behind): the single first-failing condition, never a list.
+const AUTO_FF_REASON_KEYS: Record<string, LocaleKey> = {
+  detached: "syncAction.autoFfDetached",
+  noUpstream: "syncAction.autoFfNoUpstream",
+  operation: "syncAction.autoFfOperation",
+  busy: "syncAction.autoFfBusy",
+  conflicts: "syncAction.autoFfConflicts",
+  localCommits: "syncAction.autoFfLocalCommits",
+  trackedEdits: "syncAction.autoFfTrackedEdits",
+};
+const autoFfNote = computed(() => {
+  const b = props.autoFfBlock;
+  if (!b) return "";
+  let reason: string;
+  if (b.reason === "gitRefused") {
+    reason = b.detail
+      ? t("syncAction.autoFfGitRefused", b.detail)
+      : t("syncAction.autoFfGitRefusedPlain");
+  } else {
+    const key = AUTO_FF_REASON_KEYS[b.reason];
+    if (!key) return "";
+    reason = t(key);
+  }
+  return t("syncAction.autoFfBlocked", reason);
 });
 </script>
 
