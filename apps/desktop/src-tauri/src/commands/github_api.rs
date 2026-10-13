@@ -1541,8 +1541,8 @@ pub(crate) fn rest_merge_pr(
     let url = format!("{}/repos/{}/pulls/{}/merge", API_BASE, repo, number);
     api_json("PUT", &url, token, Some(&payload.to_string()))?;
 
-    // Best-effort branch deletion (mirrors `gh pr merge --delete-branch`),
-    // in the repo the head branch lives in (the fork, for a fork PR).
+    // Best-effort branch deletion (mirrors `gh pr merge --delete-branch`,
+    // which leaves a fork PR's branch alone).
     if let Some((head_repo, branch)) = cleanup {
         let ref_url = format!("{}/repos/{}/git/refs/heads/{}", API_BASE, head_repo, branch);
         let _ = api_json("DELETE", &ref_url, token, None);
@@ -1552,20 +1552,23 @@ pub(crate) fn rest_merge_pr(
 
 /// The `(repo, branch)` whose ref a post-merge cleanup should delete.
 ///
-/// A PR's head branch lives in `head.repo`, which for a fork PR is the fork,
-/// not the base repo the merge ran against. Deleting `head.ref` in the base
-/// repo would remove an unrelated upstream branch that happens to share the
-/// fork branch's name. `head.repo` is null when the fork was deleted: there
-/// is then nothing of ours to clean up, so return `None`.
+/// Only a same-repo PR is cleaned up, like `gh pr merge --delete-branch`.
+/// A fork PR's head branch lives in the fork: deleting `head.ref` in the
+/// base repo would remove an unrelated upstream branch that shares its name,
+/// and deleting it in the fork would remove a contributor's branch whenever
+/// the token can push there. `head.repo` is null when the fork was deleted.
 fn head_branch_to_delete(pr: &serde_json::Value) -> Option<(String, String)> {
+    let full_name = |side: &str| {
+        pr.get(side)
+            .and_then(|h| h.get("repo"))
+            .and_then(|r| r.get("full_name"))
+            .and_then(|n| n.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
     let branch = jnested(pr, "head", "ref");
-    let head_repo = pr
-        .get("head")
-        .and_then(|h| h.get("repo"))
-        .and_then(|r| r.get("full_name"))
-        .and_then(|n| n.as_str())
-        .unwrap_or("");
-    if branch.is_empty() || head_repo.is_empty() {
+    let head_repo = full_name("head");
+    if branch.is_empty() || head_repo.is_empty() || head_repo != full_name("base") {
         return None;
     }
     Some((head_repo.to_string(), branch))
@@ -2388,6 +2391,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(got.unwrap(), "me/proj");
     }
+
     // Regression: after merging a fork PR, `rest_merge_pr` deleted `head.ref`
     // in the base repo, removing an unrelated same-named upstream branch.
     #[test]
@@ -2403,15 +2407,12 @@ mod tests {
     }
 
     #[test]
-    fn head_branch_to_delete_is_the_fork_for_a_fork_pr() {
+    fn head_branch_to_delete_leaves_a_fork_pr_alone() {
         let pr = serde_json::json!({
             "base": { "repo": { "full_name": "upstream/proj" } },
-            "head": { "ref": "main", "repo": { "full_name": "me/proj" } }
+            "head": { "ref": "feature", "repo": { "full_name": "me/proj" } }
         });
-        assert_eq!(
-            head_branch_to_delete(&pr),
-            Some(("me/proj".to_string(), "main".to_string()))
-        );
+        assert_eq!(head_branch_to_delete(&pr), None);
     }
 
     #[test]
