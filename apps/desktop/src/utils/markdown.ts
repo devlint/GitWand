@@ -632,9 +632,14 @@ const RE_AUTOLINK = /<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*)>/y;
 const RE_EMAIL =
   /<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)>/y;
 const RE_LINKIFY = /(?:https?:\/\/[^\s<>]+|www\.[a-zA-Z0-9-]+\.[^\s<>]+)/iy;
-/** Bare email, GFM extended autolink: local part (already in the text run) and domain after `@`. */
+/**
+ * Bare email, GFM extended autolink: local part (already in the text run) and
+ * domain after `@`. The last label must be alphabetic, as a TLD is: otherwise
+ * package specs like `vue@3.5.42` or `@types/node@25.9.5` — all over
+ * Dependabot/Renovate PR bodies — would become mailto links.
+ */
 const RE_EMAIL_LOCAL_CHAR = /[a-zA-Z0-9.+-]/;
-const RE_EMAIL_DOMAIN = /[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)+/y;
+const RE_EMAIL_DOMAIN = /(?:[a-zA-Z0-9_-]+\.)+[a-zA-Z]{2,}(?![a-zA-Z0-9_-])/y;
 /** Punctuation trimmed off the end of a bare URL (`see https://x.com.`). */
 const RE_TRAIL_PUNCT = /[.,:;!?'"*_~]+$/;
 

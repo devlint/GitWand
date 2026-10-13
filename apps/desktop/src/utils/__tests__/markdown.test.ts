@@ -161,6 +161,15 @@ describe("markdownToHtml — inline", () => {
     expect(md("see example.com")).toBe("<p>see example.com</p>\n");
   });
 
+  it("does not linkify package@version specs as emails", () => {
+    // Dependabot/Renovate PR bodies: the "domain" ends in a numeric label, not a TLD.
+    expect(md("bump vue@3.5.42 and @types/node@25.9.5")).toBe(
+      "<p>bump vue@3.5.42 and @types/node@25.9.5</p>\n",
+    );
+    expect(md("pkg@1.0.0-beta.1")).toBe("<p>pkg@1.0.0-beta.1</p>\n");
+    expect(md("ops@team.example.io")).toContain('href="mailto:ops@team.example.io"');
+  });
+
   it("keeps an unbalanced trailing ] or ) out of a bare URL", () => {
     expect(md("[see https://a.com]")).toBe('<p>[see <a href="https://a.com" class="md-link">https://a.com</a>]</p>\n');
     expect(md("https://a.com/x[1]")).toContain('href="https://a.com/x[1]"');
