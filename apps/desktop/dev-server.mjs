@@ -7928,7 +7928,12 @@ async function handleRequest(req, res) {
       if (!flag) return jsonResponse(req, res, { error: `Unknown reset mode: ${mode}` }, 400);
       try {
         const snapshot = snapshotBefore(resolve(cwd), snapshotsEnabled, "reset", `Reset ${mode} to ${sha}`);
-        execFileSync(GIT, ["reset", flag, sha], { cwd: resolve(cwd), stdio: ["ignore", "pipe", "pipe"] });
+        execFileSync(GIT, ["reset", flag, sha], {
+          cwd: resolve(cwd),
+          stdio: ["ignore", "pipe", "pipe"],
+          // resetKeepBlockedFiles matches git's English wording; pin the locale.
+          env: { ...process.env, LC_ALL: "C", LANGUAGE: "" },
+        });
         return jsonResponse(req, res, { ok: true, snapshot });
       } catch (err) {
         const stderr = err.stderr?.toString() || "";

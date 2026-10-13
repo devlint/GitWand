@@ -1700,6 +1700,9 @@ pub(crate) async fn git_reset_to_commit(
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["reset", flag, &sha])
+        // The stderr parser matches git's English wording, so pin the locale.
+        .env("LC_ALL", "C")
+        .env("LANGUAGE", "")
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to reset: {}", e))?;
