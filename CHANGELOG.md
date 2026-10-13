@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **The AI review summary is generated once per PR head (#257).** Concurrent requests for the same PR used to start one generation each; they now share it.
 - **GitWand starts even when its global shortcut is taken (#256).** If another app already owned Cmd/Ctrl+Shift+G, GitWand aborted during startup. It now starts without the shortcut and logs why.
+- **`non_overlapping` no longer writes lines twice when both branches added them.** With `diff3` markers — what `git merge-file --diff3`, the desktop merge preview and the benchmark produce — lines added identically on both sides sat inside the hunk on each side, and the merge kept both copies, auto-applied. Lines identical at the start and end of both sides are now taken out of the merge, as `zdiff3` does, and an insertion that repeats lines of the neighbouring edit from the other branch is left for review.
 
 ## [3.12.2] - 2026-10-11
 

@@ -263,3 +263,88 @@ describe("non_overlapping : cas qui ne doivent pas matcher", () => {
     expect(result.hunks[0].type).toBe("same_change");
   });
 });
+
+// ─── Régression : lignes ajoutées par les deux branches ──────
+
+describe("non_overlapping : les deux branches ajoutent les mêmes lignes", () => {
+  // Même conflit écrit en diff3 (lignes communes dans le hunk) et en zdiff3
+  // (Git les a sorties du hunk). Le diff3 dupliquait `region` et `verbose`.
+  const diff3 = [
+    `export const config = {`,
+    `<<<<<<< HEAD`,
+    `  timeout: 5000,`,
+    `  retries: 3,`,
+    `  region: "eu-west-1",`,
+    `  verbose: true,`,
+    `||||||| 93f004a`,
+    `  timeout: 3000,`,
+    `  retries: 3,`,
+    `=======`,
+    `  timeout: 3000,`,
+    `  retries: 5,`,
+    `  region: "eu-west-1",`,
+    `  verbose: true,`,
+    `>>>>>>> feature`,
+    `};`,
+  ].join("\n");
+  const zdiff3 = [
+    `export const config = {`,
+    `<<<<<<< HEAD`,
+    `  timeout: 5000,`,
+    `  retries: 3,`,
+    `||||||| 93f004a`,
+    `  timeout: 3000,`,
+    `  retries: 3,`,
+    `=======`,
+    `  timeout: 3000,`,
+    `  retries: 5,`,
+    `>>>>>>> feature`,
+    `  region: "eu-west-1",`,
+    `  verbose: true,`,
+    `};`,
+  ].join("\n");
+  const expected = [
+    `export const config = {`,
+    `  timeout: 5000,`,
+    `  retries: 5,`,
+    `  region: "eu-west-1",`,
+    `  verbose: true,`,
+    `};`,
+  ].join("\n");
+
+  it("diff3 : n'écrit pas les lignes communes deux fois", () => {
+    const result = resolve(diff3, "src/config.ts");
+    expect(result.hunks[0].type).toBe("non_overlapping");
+    expect(result.mergedContent).toBe(expected);
+  });
+
+  it("zdiff3 : même résultat", () => {
+    expect(resolve(zdiff3, "src/config.ts").mergedContent).toBe(expected);
+  });
+
+  it("garde le contexte que la base partage avec les deux côtés", () => {
+    const input = [
+      `<<<<<<< ours`, `A`, `X`, `C`,
+      `||||||| base`, `A`, `B`, `C`,
+      `=======`, `A`, `B`, `Y`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "src/f.ts");
+    expect(result.hunks[0].type).toBe("non_overlapping");
+    expect(result.mergedContent).toBe(["A", "X", "Y"].join("\n"));
+  });
+
+  it("ne fusionne pas une insertion qui répète les lignes de l'edit voisin", () => {
+    // Les lignes communes ne sont pas en bord de hunk : la fusion produisait
+    // `R, V, E2, R, V, E1`.
+    const input = [
+      `<<<<<<< ours`, `x5`, `y3`, `R`, `V`, `E1`,
+      `||||||| base`, `x3`, `y3`,
+      `=======`, `x3`, `y5`, `R`, `V`, `E2`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "src/f.ts");
+    expect(result.hunks[0].type).not.toBe("non_overlapping");
+    expect(result.stats.autoResolved).toBe(0);
+  });
+});

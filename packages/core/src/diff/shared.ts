@@ -174,6 +174,81 @@ export function mergeNonOverlapping(
   ours: string[],
   theirs: string[],
 ): string[] | null {
+  // Lignes identiques en tête et en queue des deux côtés : on les sort de la
+  // zone à fusionner, comme le fait zdiff3. Sans ça, un hunk diff3 où les deux
+  // branches ajoutent les mêmes lignes les voit comme deux insertions
+  // distinctes, et le résultat les contient deux fois.
+  let prefix = 0;
+  while (
+    prefix < ours.length &&
+    prefix < theirs.length &&
+    ours[prefix] === theirs[prefix]
+  ) {
+    prefix++;
+  }
+  let suffix = 0;
+  while (
+    suffix < ours.length - prefix &&
+    suffix < theirs.length - prefix &&
+    ours[ours.length - 1 - suffix] === theirs[theirs.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+  if (prefix === 0 && suffix === 0) {
+    return mergeEdits(base, ours, theirs);
+  }
+
+  // La part de ces lignes que la base a aussi est du contexte inchangé : on la
+  // retire des trois versions. Le reste a été ajouté par les deux branches.
+  let basePrefix = 0;
+  while (
+    basePrefix < prefix &&
+    basePrefix < base.length &&
+    base[basePrefix] === ours[basePrefix]
+  ) {
+    basePrefix++;
+  }
+  let baseSuffix = 0;
+  while (
+    baseSuffix < suffix &&
+    baseSuffix < base.length - basePrefix &&
+    base[base.length - 1 - baseSuffix] === ours[ours.length - 1 - baseSuffix]
+  ) {
+    baseSuffix++;
+  }
+
+  const middle = mergeEdits(
+    base.slice(basePrefix, base.length - baseSuffix),
+    ours.slice(prefix, ours.length - suffix),
+    theirs.slice(prefix, theirs.length - suffix),
+  );
+  if (middle === null) return null;
+  return [
+    ...ours.slice(0, prefix),
+    ...middle,
+    ...ours.slice(ours.length - suffix),
+  ];
+}
+
+/**
+ * Une insertion pure posée juste après un edit de l'autre branche, alors que
+ * cet edit ajoute déjà certaines des mêmes lignes : l'ordre et le
+ * dédoublonnage sont ambigus, on laisse la décision à l'utilisateur.
+ */
+function duplicatesAtBoundary(a: Edit, b: Edit): boolean {
+  const insertion = a.baseStart === a.baseEnd ? a : b.baseStart === b.baseEnd ? b : null;
+  if (insertion === null) return false;
+  const other = insertion === a ? b : a;
+  if (insertion.baseStart !== other.baseEnd) return false;
+  const added = new Set(other.addedLines);
+  return insertion.addedLines.some((line) => added.has(line));
+}
+
+function mergeEdits(
+  base: string[],
+  ours: string[],
+  theirs: string[],
+): string[] | null {
   const oursDiff = computeDiff(base, ours);
   const theirsDiff = computeDiff(base, theirs);
 
@@ -183,7 +258,7 @@ export function mergeNonOverlapping(
   // Vérifier qu'aucun edit ne chevauche un edit de l'autre branche
   for (const oEdit of oursEdits) {
     for (const tEdit of theirsEdits) {
-      if (editsOverlap(oEdit, tEdit)) {
+      if (editsOverlap(oEdit, tEdit) || duplicatesAtBoundary(oEdit, tEdit)) {
         return null; // Overlap détecté → pas de résolution automatique
       }
     }
