@@ -467,6 +467,50 @@ fn bb_select_window(
         .collect()
 }
 
+/// Fetch the pages of `plan` in order with `fetch_page` and concatenate their
+/// `values`.
+///
+/// Only the first page is authoritative: its error propagates. Any later page
+/// can only be a continuation, and a page just past the end (the previous one
+/// was exactly full) may come back as an error such as a 404 — so an error, or
+/// a body without `values`, on a later page ends the loop and returns what was
+/// already collected. The loop also stops on a short page, and when a page has
+/// no `next` link (Bitbucket only sends `next` when another page exists).
+fn bb_collect_pages<F>(
+    plan: &BbPagePlan,
+    mut fetch_page: F,
+) -> Result<Vec<serde_json::Value>, String>
+where
+    F: FnMut(i64) -> Result<serde_json::Value, String>,
+{
+    let mut values: Vec<serde_json::Value> = Vec::new();
+    for page in plan.first_page..=plan.last_page {
+        let is_first = page == plan.first_page;
+        let resp = match fetch_page(page) {
+            Ok(resp) => resp,
+            Err(e) if is_first => return Err(e),
+            Err(_) => break,
+        };
+        let arr = match resp.get("values").and_then(|v| v.as_array()) {
+            Some(arr) => arr,
+            None if is_first => {
+                return Err("Unexpected Bitbucket response shape (missing 'values')".to_string())
+            }
+            None => break,
+        };
+        values.extend(arr.iter().cloned());
+        let short = (arr.len() as i64) < plan.page_size;
+        let has_next = resp
+            .get("next")
+            .and_then(|v| v.as_str())
+            .is_some_and(|n| !n.is_empty());
+        if short || !has_next {
+            break; // last page reached
+        }
+    }
+    Ok(values)
+}
+
 // ─── Tauri Commands ────────────────────────────────────────────────────────────
 
 /// List pull requests via Bitbucket REST API v2.
@@ -497,8 +541,7 @@ pub(crate) async fn bb_list_prs(
     // Fixed-size server pages: the server's skip is `(page - 1) * pagelen`, so
     // the page size must stay constant across every request. Fetch only the
     // pages that overlap [off, off + per_page), then window the concatenation.
-    let mut values: Vec<serde_json::Value> = Vec::new();
-    for page in plan.first_page..=plan.last_page {
+    let values = bb_collect_pages(&plan, |page| {
         let url = if st == "ALL" {
             format!(
                 "{}/pullrequests?state=OPEN&state=MERGED&state=DECLINED&pagelen={}&page={}",
@@ -515,17 +558,8 @@ pub(crate) async fn bb_list_prs(
                 page
             )
         };
-        let resp = bb_curl("GET", &url, None, &auth_config)?;
-        let arr = resp
-            .get("values")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| "Unexpected Bitbucket response shape (missing 'values')".to_string())?;
-        let short = (arr.len() as i64) < plan.page_size;
-        values.extend(arr.iter().cloned());
-        if short {
-            break; // last page reached
-        }
-    }
+        bb_curl("GET", &url, None, &auth_config)
+    })?;
     let values = bb_select_window(values, plan.skip, per_page);
 
     let mut prs: Vec<PullRequest> = values.iter().map(bb_pr_to_pr).collect();
@@ -1568,21 +1602,39 @@ mod bb_auto_merge_tests {
 
 #[cfg(test)]
 mod bb_page_plan_tests {
-    use super::{bb_page_plan, bb_select_window, BbPagePlan, BB_PAGE_SIZE};
+    use super::{bb_collect_pages, bb_page_plan, bb_select_window, BbPagePlan, BB_PAGE_SIZE};
+    use serde_json::json;
 
-    /// Simulate the server: items 0..total, fixed pages of the plan's page size.
+    /// Simulate the server: items 0..total in fixed pages of `page_size`, a
+    /// `next` link only when another page exists, and a 404 for a continuation
+    /// page past the end. The first page of a plan is answered with an empty
+    /// page even past the end: what Bitbucket does there is not this fix's
+    /// concern (its error propagates), only continuation pages are.
+    fn server_page(
+        page: i64,
+        first_page: i64,
+        page_size: i64,
+        total: i64,
+    ) -> Result<serde_json::Value, String> {
+        let start = (page - 1) * page_size;
+        if page > first_page && start >= total {
+            return Err("Bitbucket API error: HTTP 404".to_string());
+        }
+        let end = (start + page_size).min(total);
+        let items: Vec<i64> = (start..end.max(start)).collect();
+        let mut body = json!({ "values": items, "pagelen": page_size, "page": page });
+        if end < total {
+            body["next"] = json!(format!("https://api.example/?page={}", page + 1));
+        }
+        Ok(body)
+    }
+
     fn fetch(offset: i64, limit: i64, total: i64) -> Vec<i64> {
         let plan = bb_page_plan(offset, limit);
-        let mut got = Vec::new();
-        for page in plan.first_page..=plan.last_page {
-            let start = (page - 1) * plan.page_size;
-            let end = (start + plan.page_size).min(total);
-            let n = (end - start).max(0);
-            got.extend((start..start + n).map(|i| serde_json::json!(i)));
-            if n < plan.page_size {
-                break;
-            }
-        }
+        let got = bb_collect_pages(&plan, |page| {
+            server_page(page, plan.first_page, plan.page_size, total)
+        })
+        .expect("the first page never fails in the simulated server");
         bb_select_window(got, plan.skip, limit)
             .iter()
             .map(|v| v.as_i64().unwrap())
@@ -1674,5 +1726,72 @@ mod bb_page_plan_tests {
     #[test]
     fn degenerate_inputs_are_clamped() {
         assert_eq!(bb_page_plan(-5, 0), bb_page_plan(0, 1));
+    }
+
+    #[test]
+    fn window_spanning_two_pages_with_an_exactly_full_first_page_keeps_it() {
+        // offset 45, limit 10 → pages 1..=2 of 50; the list has exactly 50
+        // items, so page 2 is past the end. A server that answers it with an
+        // error must not drop the five valid items of page 1.
+        let plan = bb_page_plan(45, 10);
+        let mut requested = Vec::new();
+        let got = bb_collect_pages(&plan, |page| {
+            requested.push(page);
+            if page == 1 {
+                // Full page that (wrongly or not) still advertises `next`.
+                Ok(json!({ "values": (0..50).collect::<Vec<i64>>(), "next": "https://x/?page=2" }))
+            } else {
+                Err("Bitbucket API error: HTTP 404".to_string())
+            }
+        })
+        .unwrap();
+        assert_eq!(requested, vec![1, 2]);
+        let window: Vec<i64> = bb_select_window(got, plan.skip, 10)
+            .iter()
+            .map(|v| v.as_i64().unwrap())
+            .collect();
+        assert_eq!(window, (45..50).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_full_page_without_next_stops_without_requesting_more() {
+        let plan = bb_page_plan(45, 10);
+        let mut requested = Vec::new();
+        let got = bb_collect_pages(&plan, |page| {
+            requested.push(page);
+            Ok(json!({ "values": (0..50).collect::<Vec<i64>>() }))
+        })
+        .unwrap();
+        assert_eq!(requested, vec![1]);
+        assert_eq!(got.len(), 50);
+    }
+
+    #[test]
+    fn an_error_on_the_first_page_propagates() {
+        let plan = bb_page_plan(45, 10);
+        let err = bb_collect_pages(&plan, |_| Err("Bitbucket API error: HTTP 401".to_string()))
+            .unwrap_err();
+        assert_eq!(err, "Bitbucket API error: HTTP 401");
+
+        // Same when the first fetched page is not page 1.
+        let plan = bb_page_plan(95, 10);
+        assert_eq!(plan.first_page, 2);
+        assert!(bb_collect_pages(&plan, |_| Err("boom".to_string())).is_err());
+    }
+
+    #[test]
+    fn a_malformed_first_page_errors_but_a_malformed_later_page_ends_the_loop() {
+        let plan = bb_page_plan(45, 10);
+        assert!(bb_collect_pages(&plan, |_| Ok(json!({ "oops": true }))).is_err());
+
+        let got = bb_collect_pages(&plan, |page| {
+            if page == 1 {
+                Ok(json!({ "values": (0..50).collect::<Vec<i64>>(), "next": "n" }))
+            } else {
+                Ok(json!({ "oops": true }))
+            }
+        })
+        .unwrap();
+        assert_eq!(got.len(), 50);
     }
 }
