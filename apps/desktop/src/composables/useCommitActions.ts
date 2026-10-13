@@ -34,10 +34,34 @@ import { useBranchName } from "./useBranchName";
 
 // ─── Types ───────────────────────────────────────────────
 
+export type ResetMode = "soft" | "mixed" | "hard" | "keep";
+
+/** Matches RESET_KEEP_BLOCKED_PREFIX in src-tauri/src/commands/ops.rs and dev-server.mjs. */
+const RESET_KEEP_BLOCKED_PREFIX = "reset-keep-blocked:";
+
+/**
+ * Turn a reset failure into the message shown in the dialog. A `--keep`
+ * refusal (a local edit would be overwritten) becomes a translated sentence
+ * naming the blocking files; anything else keeps git's own text.
+ */
+export function describeResetError(err: unknown, t: (key: any, ...args: any[]) => string): string {
+  const raw: string = (err as any)?.message ?? String(err);
+  const at = raw.indexOf(RESET_KEEP_BLOCKED_PREFIX);
+  if (at === -1) return raw;
+  const files = raw
+    .slice(at + RESET_KEEP_BLOCKED_PREFIX.length)
+    .split("\n")
+    .map((f: string) => f.trim())
+    .filter(Boolean);
+  return files.length
+    ? t("commitCtx.resetKeepBlocked", files.join(", "))
+    : t("commitCtx.resetKeepBlockedGeneric");
+}
+
 export interface CommitActionModal {
   type: "checkout" | "reset" | "createBranch" | "tag" | "deleteBranch" | "deleteTag" | null;
   entry: GitLogEntry | null;
-  resetMode: "soft" | "mixed" | "hard";
+  resetMode: ResetMode;
   branchName: string;
   tagName: string;
   tagMessage: string;
@@ -233,7 +257,7 @@ export function useCommitActions(deps: Deps) {
 
   // ── Reset to commit ────────────────────────────────────
 
-  function handleResetToCommit(entry: GitLogEntry, mode?: "soft" | "mixed" | "hard") {
+  function handleResetToCommit(entry: GitLogEntry, mode?: ResetMode) {
     modal.value = { ...modal.value, type: "reset", entry, resetMode: mode || "mixed", error: "" };
     // If a mode was explicitly provided (e.g. from a context sub-menu),
     // we assume the user wants to trigger it immediately.
@@ -265,7 +289,7 @@ export function useCommitActions(deps: Deps) {
       loadBranches();
       deps.onReset?.();
     } catch (err: any) {
-      modal.value.error = err?.message ?? String(err);
+      modal.value.error = describeResetError(err, t);
     } finally {
       modal.value.busy = false;
     }

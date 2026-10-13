@@ -267,6 +267,30 @@ describe("parity on failure: stash and history commands", () => {
     expectSameRefusal(rust, node, rustDir, nodeDir);
   });
 
+  it("git_reset_to_commit --keep refuses a clobbering local edit identically, naming the file", async () => {
+    const build = () => {
+      const dir = baseRepo();
+      writeFileSync(join(dir, "file.txt"), "second\n");
+      git(dir, ["commit", "-am", "second"]);
+      writeFileSync(join(dir, "file.txt"), "local edit\n");
+      return dir;
+    };
+    const rustDir = build();
+    const nodeDir = build();
+
+    const rust = rustRun(rustDir, "git_reset_to_commit", { hash: "HEAD~1", mode: "keep" });
+    const node = await nodeRun(dev, "/api/git-reset-to-commit", {
+      cwd: nodeDir,
+      sha: "HEAD~1",
+      mode: "keep",
+      snapshotsEnabled: false,
+    });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+    expect(rust.error).toBe("reset-keep-blocked:file.txt");
+    expect(node.error).toBe("reset-keep-blocked:file.txt");
+  });
+
   it("git_discard refuses a path outside the repository identically", async () => {
     // This one is about a guard, not about git: safe_repo_path() is supposed to
     // refuse it (AGENTS.md § Security). A disagreement here is security-relevant.

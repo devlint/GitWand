@@ -1464,6 +1464,29 @@ function pruneSnapshots(cwd, maxAgeDays, maxCount) {
  * snapshot failure never blocks the operation the user asked for. Only an
  * explicit `false` opts out; `undefined` means "no opinion" and snapshots.
  */
+/**
+ * Paths named when `reset --keep` refused, or null when the failure is
+ * something else. Mirrors `reset_keep_blocked_files` in commands/ops.rs.
+ */
+function resetKeepBlockedFiles(stderr) {
+  const files = [];
+  let blocked = false;
+  let inList = false;
+  for (const line of stderr.split("\n")) {
+    const m = /^error: Entry '(.*)' /.exec(line);
+    if (m) { blocked = true; inList = false; files.push(m[1]); continue; }
+    if (
+      line.startsWith("error: Your local changes to the following files would be overwritten") ||
+      line.startsWith("error: The following untracked working tree files would be overwritten")
+    ) { blocked = true; inList = true; continue; }
+    if (inList) {
+      if (line.startsWith("\t")) files.push(line.slice(1));
+      else inList = false;
+    }
+  }
+  return blocked ? files : null;
+}
+
 function snapshotBefore(cwd, enabled, kind, label) {
   if (enabled === false) return null;
   try {
@@ -7900,13 +7923,20 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/git-reset-to-commit" && req.method === "POST") {
       const { cwd, sha, mode, snapshotsEnabled } = await readBody(req);
       if (!cwd || !sha) return jsonResponse(req, res, { error: "Missing cwd or sha" }, 400);
-      const flag = mode === "soft" ? "--soft" : mode === "hard" ? "--hard" : "--mixed";
+      const RESET_FLAGS = { soft: "--soft", mixed: "--mixed", hard: "--hard", keep: "--keep" };
+      const flag = RESET_FLAGS[mode];
+      if (!flag) return jsonResponse(req, res, { error: `Unknown reset mode: ${mode}` }, 400);
       try {
         const snapshot = snapshotBefore(resolve(cwd), snapshotsEnabled, "reset", `Reset ${mode} to ${sha}`);
-        execFileSync(GIT, ["reset", flag, sha], { cwd: resolve(cwd) });
+        execFileSync(GIT, ["reset", flag, sha], { cwd: resolve(cwd), stdio: ["ignore", "pipe", "pipe"] });
         return jsonResponse(req, res, { ok: true, snapshot });
       } catch (err) {
-        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+        const stderr = err.stderr?.toString() || "";
+        if (flag === "--keep") {
+          const files = resetKeepBlockedFiles(stderr);
+          if (files) return jsonResponse(req, res, { error: `reset-keep-blocked:${files.join("\n")}` }, 500);
+        }
+        return jsonResponse(req, res, { error: stderr || err.message }, 500);
       }
     }
 

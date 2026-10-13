@@ -1953,7 +1953,7 @@ export async function snapshotPrune(
  * affordance can target this exact point rather than "whatever is newest by
  * the time the user clicks".
  */
-export async function gitResetToCommit(cwd: string, sha: string, mode: "soft" | "mixed" | "hard", snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
+export async function gitResetToCommit(cwd: string, sha: string, mode: "soft" | "mixed" | "hard" | "keep", snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
   if (isTauri()) {
     return await tauriInvoke("git_reset_to_commit", { cwd, sha, mode, snapshotsEnabled });
   }

@@ -4973,7 +4973,7 @@ onUnmounted(() => {
       :subtitle="t('commitCtx.resetDesc', commitActionModal.entry?.hash ?? '')" size="sm" role="alertdialog"
       @close="closeCommitActionModal">
       <div class="cam-radio-group">
-        <label v-for="mode in (['soft', 'mixed', 'hard'] as const)" :key="mode" class="cam-radio">
+        <label v-for="mode in (['soft', 'mixed', 'keep', 'hard'] as const)" :key="mode" class="cam-radio">
           <input type="radio" name="resetMode" :value="mode" v-model="commitActionModal.resetMode" />
           <span class="cam-radio-label">
             <strong>--{{ mode }}</strong>

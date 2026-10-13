@@ -55,7 +55,7 @@ beforeEach(() => {
 });
 
 describe("useCommitActions — refresh after HEAD moves", () => {
-  it.each(["soft", "mixed", "hard"] as const)("reset --%s forces the log reload", async (mode) => {
+  it.each(["soft", "mixed", "keep", "hard"] as const)("reset --%s forces the log reload", async (mode) => {
     const { actions, repoRefresh } = makeActions();
     actions.handleResetToCommit(ENTRY, mode);
     await vi.waitFor(() => expect(repoRefresh).toHaveBeenCalled());

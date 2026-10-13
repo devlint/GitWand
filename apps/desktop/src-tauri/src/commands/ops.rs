@@ -1631,6 +1631,51 @@ pub(crate) async fn git_checkout_commit(
     Ok(snapshot)
 }
 
+/// Prefix of the error `git_reset_to_commit` returns when `--keep` refuses
+/// because a local edit would be overwritten. What follows is the blocking
+/// paths, one per line; the frontend turns it into a translated message.
+pub(crate) const RESET_KEEP_BLOCKED_PREFIX: &str = "reset-keep-blocked:";
+
+/// Paths git named when `reset --keep` refused, or None when the failure is
+/// something else. Understands both the `Entry '…' not uptodate` and the
+/// `Your local changes to the following files would be overwritten` forms.
+fn reset_keep_blocked_files(stderr: &str) -> Option<Vec<String>> {
+    let mut files: Vec<String> = Vec::new();
+    let mut blocked = false;
+    let mut in_list = false;
+    for line in stderr.lines() {
+        if let Some(rest) = line.strip_prefix("error: Entry '") {
+            if let Some(end) = rest.rfind("' ") {
+                blocked = true;
+                in_list = false;
+                files.push(rest[..end].to_string());
+                continue;
+            }
+        }
+        if line.starts_with("error: Your local changes to the following files would be overwritten")
+            || line.starts_with(
+                "error: The following untracked working tree files would be overwritten",
+            )
+        {
+            blocked = true;
+            in_list = true;
+            continue;
+        }
+        if in_list {
+            if let Some(path) = line.strip_prefix('\t') {
+                files.push(path.to_string());
+            } else {
+                in_list = false;
+            }
+        }
+    }
+    if blocked {
+        Some(files)
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn git_reset_to_commit(
     cwd: String,
@@ -1638,6 +1683,13 @@ pub(crate) async fn git_reset_to_commit(
     mode: String,
     snapshots_enabled: Option<bool>,
 ) -> Result<Option<crate::git::snapshot::SnapshotMeta>, String> {
+    let flag = match mode.as_str() {
+        "soft" => "--soft",
+        "mixed" => "--mixed",
+        "hard" => "--hard",
+        "keep" => "--keep",
+        other => return Err(format!("Unknown reset mode: {}", other)),
+    };
     let _repo = repo_lock::write(&cwd);
     let snapshot = snapshot_before(
         &cwd,
@@ -1645,11 +1697,6 @@ pub(crate) async fn git_reset_to_commit(
         "reset",
         &format!("Reset {} to {}", mode, sha),
     );
-    let flag = match mode.as_str() {
-        "soft" => "--soft",
-        "hard" => "--hard",
-        _ => "--mixed",
-    };
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["reset", flag, &sha])
@@ -1663,11 +1710,13 @@ pub(crate) async fn git_reset_to_commit(
         output.status.code().unwrap_or(-1),
     );
     if !output.status.success() {
-        return Err(format!(
-            "git reset {} failed: {}",
-            flag,
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if flag == "--keep" {
+            if let Some(files) = reset_keep_blocked_files(&stderr) {
+                return Err(format!("{}{}", RESET_KEEP_BLOCKED_PREFIX, files.join("\n")));
+            }
+        }
+        return Err(format!("git reset {} failed: {}", flag, stderr));
     }
     Ok(snapshot)
 }
@@ -5983,6 +6032,83 @@ mod snapshot_hook_tests {
 
         restore_snapshot_inner(&repo.cwd(), &snaps[0].id).unwrap();
         assert_eq!(repo.read("a.txt"), "v2\n");
+    }
+
+    #[test]
+    fn keep_reset_moves_head_and_preserves_unrelated_local_edit() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.write("b.txt", "b1\n");
+        repo.commit_all("c1");
+        repo.write("a.txt", "v2\n");
+        repo.commit_all("c2");
+        // Local edit on a file the reset does not touch.
+        repo.write("b.txt", "local edit\n");
+
+        tauri::async_runtime::block_on(git_reset_to_commit(
+            repo.cwd(),
+            "HEAD~1".to_string(),
+            "keep".to_string(),
+            Some(false),
+        ))
+        .expect("keep reset should succeed");
+
+        assert_eq!(repo.read("a.txt"), "v1\n");
+        assert_eq!(repo.read("b.txt"), "local edit\n");
+    }
+
+    #[test]
+    fn keep_reset_refuses_and_discards_nothing_when_an_edit_would_be_overwritten() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.commit_all("c1");
+        repo.write("a.txt", "v2\n");
+        repo.commit_all("c2");
+        repo.write("a.txt", "local edit\n");
+        let head_before = repo.git(&["rev-parse", "HEAD"]).stdout;
+
+        let err = tauri::async_runtime::block_on(git_reset_to_commit(
+            repo.cwd(),
+            "HEAD~1".to_string(),
+            "keep".to_string(),
+            Some(false),
+        ))
+        .expect_err("keep reset must refuse");
+
+        assert!(
+            err.starts_with(RESET_KEEP_BLOCKED_PREFIX),
+            "unexpected error: {err}"
+        );
+        assert!(err.contains("a.txt"), "must name the file: {err}");
+        assert_eq!(repo.read("a.txt"), "local edit\n");
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]).stdout, head_before);
+    }
+
+    #[test]
+    fn reset_rejects_an_unknown_mode() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.commit_all("c1");
+        let err = tauri::async_runtime::block_on(git_reset_to_commit(
+            repo.cwd(),
+            "HEAD".to_string(),
+            "bogus".to_string(),
+            Some(false),
+        ))
+        .expect_err("unknown mode must be refused");
+        assert!(err.contains("bogus"), "{err}");
+    }
+
+    #[test]
+    fn reset_keep_blocked_files_parses_git_stderr() {
+        let a = "error: Entry 'a.txt' not uptodate. Cannot merge.\nfatal: Could not reset index file to revision 'HEAD~1'.\n";
+        assert_eq!(reset_keep_blocked_files(a), Some(vec!["a.txt".to_string()]));
+        let b = "error: Your local changes to the following files would be overwritten by reset:\n\tx/y.txt\n\tz.txt\nPlease commit your changes or stash them before you reset.\nAborting\n";
+        assert_eq!(
+            reset_keep_blocked_files(b),
+            Some(vec!["x/y.txt".to_string(), "z.txt".to_string()])
+        );
+        assert_eq!(reset_keep_blocked_files("fatal: bad revision 'zz'\n"), None);
     }
 
     #[test]

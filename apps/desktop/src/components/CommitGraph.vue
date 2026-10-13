@@ -87,7 +87,7 @@ const emit = defineEmits<{
   "split-commit": [entry: GitLogEntry];
   "checkout-commit": [entry: GitLogEntry];
   "checkout-branch": [name: string, isRemote?: boolean];
-  "reset-to-commit": [entry: GitLogEntry, mode?: "soft" | "mixed" | "hard"];
+  "reset-to-commit": [entry: GitLogEntry, mode?: "soft" | "mixed" | "hard" | "keep"];
   "revert-commit": [entry: GitLogEntry];
   "create-branch-from-commit": [entry: GitLogEntry];
   "tag-commit": [entry: GitLogEntry];
@@ -286,7 +286,7 @@ function onRowDblClick(entry: GitLogEntry) {
   onBranchDblClick(branch);
 }
 
-function onCtxEmit(event: CommitEvent, mode?: "soft" | "mixed" | "hard", branchName?: string, branchType?: any) {
+function onCtxEmit(event: CommitEvent, mode?: "soft" | "mixed" | "hard" | "keep", branchName?: string, branchType?: any) {
   const entry = ctxMenu.value.entry;
   if (!entry) return;
   if (event === "reset-to-commit") {
@@ -2152,6 +2152,9 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           </li>
           <li class="commit-ctx-menu-item" role="menuitem" @click="onCtxEmit('reset-to-commit', 'mixed')">
             <span>{{ t('commitCtx.resetMixed') }}</span>
+          </li>
+          <li class="commit-ctx-menu-item" role="menuitem" @click="onCtxEmit('reset-to-commit', 'keep')">
+            <span>{{ t('commitCtx.resetKeep') }}</span>
           </li>
           <li class="commit-ctx-menu-item" role="menuitem" @click="onCtxEmit('reset-to-commit', 'hard')">
             <span>{{ t('commitCtx.resetHard') }}</span>
