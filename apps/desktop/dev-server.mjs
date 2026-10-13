@@ -3394,6 +3394,59 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/git-tracked-ignored?cwd=<path>
+    // Mirrors git_tracked_ignored (tracked_ignored.rs): tracked paths that match
+    // an ignore rule, capped at 500, with the uncapped total.
+    if (url.pathname === "/api/git-tracked-ignored" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        const out = execFileSync(
+          "git",
+          ["ls-files", "-z", "-c", "-i", "--exclude-standard"],
+          { cwd: resolve(cwd), encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 },
+        );
+        const all = out.split("\0").filter(Boolean);
+        const CAP = 500;
+        return jsonResponse(req, res, {
+          paths: all.slice(0, CAP),
+          total: all.length,
+          truncated: all.length > CAP,
+        });
+      } catch (err) {
+        const detail = err.stderr?.toString().trim() || err.message;
+        return jsonResponse(req, res, { error: `git ls-files failed: ${detail}` }, 500);
+      }
+    }
+
+    // POST /api/git-untrack-paths  { cwd, paths }
+    // Mirrors git_untrack_paths (tracked_ignored.rs): `git rm --cached` with the
+    // pathspecs on stdin, literal, tolerant of paths that are no longer tracked.
+    if (url.pathname === "/api/git-untrack-paths" && req.method === "POST") {
+      const { cwd, paths } = await readBody(req);
+      if (!cwd || !Array.isArray(paths)) return jsonResponse(req, res, { error: "Missing cwd or paths" }, 400);
+      if (paths.length === 0) return jsonResponse(req, res, { ok: true });
+      try {
+        const resolvedCwd = resolve(cwd);
+        for (const p of paths) {
+          safeRepoPath(resolvedCwd, p);
+          if (p.includes("\0")) throw new Error("path must not contain NUL");
+        }
+        execFileSync(
+          "git",
+          [
+            "--literal-pathspecs", "rm", "--cached", "--quiet", "--ignore-unmatch",
+            "--pathspec-from-file=-", "--pathspec-file-nul",
+          ],
+          { cwd: resolvedCwd, input: paths.map((p) => `${p}\0`).join(""), encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+        );
+        return jsonResponse(req, res, { ok: true });
+      } catch (err) {
+        const detail = err.stderr?.toString().trim() || err.message;
+        return jsonResponse(req, res, { error: `git rm --cached failed: ${detail}` }, 500);
+      }
+    }
+
     // POST /api/git-stage-patch  { cwd, patch }
     if (url.pathname === "/api/git-stage-patch" && req.method === "POST") {
       const { cwd, patch } = await readBody(req);

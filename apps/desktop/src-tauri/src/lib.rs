@@ -426,6 +426,26 @@ pub fn command_parity(
             tauri::async_runtime::block_on(commands::ops::git_unstage(s("cwd")?, vec![s("path")?]))
                 .map(parity_ok_marker)
         }
+        "git_tracked_ignored" => tauri::async_runtime::block_on(
+            commands::tracked_ignored::git_tracked_ignored(s("cwd")?),
+        )
+        .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
+        "git_untrack_paths" => {
+            let paths: Vec<String> = args
+                .get("paths")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|p| p.as_str().map(str::to_string))
+                        .collect()
+                })
+                .ok_or_else(|| "missing required arg 'paths' for git_untrack_paths".to_string())?;
+            tauri::async_runtime::block_on(commands::tracked_ignored::git_untrack_paths(
+                s("cwd")?,
+                paths,
+            ))
+            .map(parity_ok_marker)
+        }
         "git_stage_patch" => {
             tauri::async_runtime::block_on(commands::ops::git_stage_patch(s("cwd")?, s("patch")?))
                 .map(parity_ok_marker)
@@ -752,6 +772,8 @@ pub fn run() {
             commands::read::git_log,
             commands::ops::git_stage,
             commands::ops::git_unstage,
+            commands::tracked_ignored::git_tracked_ignored,
+            commands::tracked_ignored::git_untrack_paths,
             commands::ops::git_stage_patch,
             commands::ops::git_unstage_patch,
             commands::ops::git_commit,

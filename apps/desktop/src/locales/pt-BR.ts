@@ -190,6 +190,24 @@ const ptBR: Locale = {
   },
 
   // ─── Sidebar / RepoSidebar ──────────────────────────────
+  trackedIgnored: {
+    noticeOne: "1 arquivo rastreado corresponde ao .gitignore",
+    noticeMany: "{0} arquivos rastreados correspondem ao .gitignore",
+    review: "Revisar",
+    dismiss: "Dispensar",
+    title: "Arquivos rastreados que correspondem ao .gitignore",
+    intro: "O Git rastreia estes arquivos mesmo que uma regra de ignorar os inclua, então a regra não tem efeito sobre eles.",
+    shown: "Mostrando {0} de {1} arquivos.",
+    selectAll: "Selecionar tudo",
+    selectedCount: "{0} selecionado(s)",
+    untrackSelected: "Parar de rastrear a seleção",
+    untrackAll: "Parar de rastrear tudo",
+    confirmTitle: "Parar de rastrear os arquivos?",
+    confirmBody: "{0} arquivo(s) serão removidos do índice do Git. Eles permanecem no disco. A remoção fica preparada (staged): faça commit para concluir.",
+    confirmBodyTruncated: "Somente os {0} arquivos listados deixam de ser rastreados. O aviso voltará para os demais.",
+    confirm: "Parar de rastrear",
+    failed: "Não foi possível parar de rastrear os arquivos: {0}",
+  },
   sidebar: {
     tabChanges: "Alterações",
     tabBranches: "Branches",

@@ -189,6 +189,24 @@ const es: Locale = {
   },
 
   // ─── Sidebar / RepoSidebar ──────────────────────────────
+  trackedIgnored: {
+    noticeOne: "1 archivo rastreado coincide con .gitignore",
+    noticeMany: "{0} archivos rastreados coinciden con .gitignore",
+    review: "Revisar",
+    dismiss: "Descartar",
+    title: "Archivos rastreados que coinciden con .gitignore",
+    intro: "Git rastrea estos archivos aunque una regla de ignorado los incluya, por lo que la regla no tiene efecto sobre ellos.",
+    shown: "Mostrando {0} de {1} archivos.",
+    selectAll: "Seleccionar todo",
+    selectedCount: "{0} seleccionado(s)",
+    untrackSelected: "Dejar de rastrear la selección",
+    untrackAll: "Dejar de rastrear todo",
+    confirmTitle: "¿Dejar de rastrear los archivos?",
+    confirmBody: "{0} archivo(s) se quitarán del índice de Git. Permanecen en el disco. La eliminación queda preparada (staged): haz commit para terminar.",
+    confirmBodyTruncated: "Solo se dejan de rastrear los {0} archivos listados. El aviso volverá para el resto.",
+    confirm: "Dejar de rastrear",
+    failed: "No se pudieron dejar de rastrear los archivos: {0}",
+  },
   sidebar: {
     tabChanges: "Cambios",
     tabBranches: "Ramas",

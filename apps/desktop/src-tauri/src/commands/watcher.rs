@@ -41,7 +41,9 @@ pub(crate) fn classify_path(rel: &str) -> Option<&'static str> {
         if inner == "index" {
             return Some("index");
         }
-        if inner == "config" {
+        // `info/exclude` is repo-local ignore rules; reported as "config" so
+        // the tracked-but-ignored check can re-run without a new kind.
+        if inner == "config" || inner == "info/exclude" {
             return Some("config");
         }
         if inner.starts_with("refs/") || inner == "packed-refs" {
@@ -517,6 +519,10 @@ mod tests {
         assert_eq!(classify_path(".git/HEAD"), Some("head"));
         assert_eq!(classify_path(".git/index"), Some("index"));
         assert_eq!(classify_path(".git/config"), Some("config"));
+        // `.git/info/exclude` is an ignore file: the tracked-but-ignored check
+        // listens for it. Its siblings stay noise.
+        assert_eq!(classify_path(".git/info/exclude"), Some("config"));
+        assert_eq!(classify_path(".git/info/refs"), None);
         assert_eq!(classify_path(".git/refs/heads/main"), Some("refs"));
         assert_eq!(classify_path(".git/packed-refs"), Some("refs"));
         assert_eq!(classify_path(".git/MERGE_HEAD"), Some("mergeState"));

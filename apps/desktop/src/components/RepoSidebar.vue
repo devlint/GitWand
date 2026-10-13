@@ -5,6 +5,7 @@ import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
 import { gitRemoteInfo, getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
 import PrListSidebar from "./PrListSidebar.vue";
 import ScopePicker from "./ScopePicker.vue";
+import TrackedIgnoredNotice from "./TrackedIgnoredNotice.vue";
 import { useI18n } from "../composables/useI18n";
 import Avatar from "./Avatar.vue";
 import { useCommitMessage } from "../composables/useCommitMessage";
@@ -1154,6 +1155,9 @@ function formatActivityDate(dateStr: string): string {
         </div>
       </div>
     </div>
+
+    <!-- Tracked files that now match .gitignore (self-hides when there are none) -->
+    <TrackedIgnoredNotice v-if="cwd && showPane('files', 'changes')" @refresh="emit('refresh')" />
 
     <!-- File sections -->
     <div class="sections" v-if="showPane('files', 'changes')">

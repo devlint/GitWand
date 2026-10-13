@@ -183,6 +183,24 @@ const fr: Locale = {
   },
 
   // ─── Sidebar / RepoSidebar ──────────────────────────────
+  trackedIgnored: {
+    noticeOne: "1 fichier suivi correspond à .gitignore",
+    noticeMany: "{0} fichiers suivis correspondent à .gitignore",
+    review: "Examiner",
+    dismiss: "Ignorer",
+    title: "Fichiers suivis correspondant à .gitignore",
+    intro: "Ces fichiers sont suivis par Git bien qu'une règle d'ignorance les concerne : la règle est donc sans effet sur eux.",
+    shown: "{0} fichiers affichés sur {1}.",
+    selectAll: "Tout sélectionner",
+    selectedCount: "{0} sélectionné(s)",
+    untrackSelected: "Ne plus suivre la sélection",
+    untrackAll: "Ne plus suivre tout",
+    confirmTitle: "Ne plus suivre ces fichiers ?",
+    confirmBody: "{0} fichier(s) seront retirés de l'index Git. Ils restent sur le disque. La suppression est indexée : validez-la par un commit pour terminer.",
+    confirmBodyTruncated: "Seuls les {0} fichiers listés sont retirés. L'avis reviendra pour les autres.",
+    confirm: "Ne plus suivre",
+    failed: "Impossible de retirer les fichiers du suivi : {0}",
+  },
   sidebar: {
     tabChanges: "Changements",
     tabBranches: "Branches",

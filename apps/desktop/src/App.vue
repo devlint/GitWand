@@ -107,6 +107,7 @@ import { useConnectivity } from "./composables/useConnectivity";
 import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
 import { useRepoWatcher } from "./composables/useRepoWatcher";
+import { useTrackedIgnored, shouldRecheckTrackedIgnored } from "./composables/useTrackedIgnored";
 import { useWatcherRefreshQueue } from "./composables/useWatcherRefreshQueue";
 import { useLaunchpadPoller } from "./composables/useLaunchpadPoller";
 import { useSecretsScanner } from "./composables/useSecretsScanner";
@@ -1668,7 +1669,7 @@ const repoSidebarListeners = {
   ),
   discardSection: (sectionKey: string, paths: string[]) => onDiscardSection(sectionKey, paths),
   addToGitignore: (path: string) => addToGitignore(path),
-  refresh: () => repoRefresh(),
+  refresh: () => { trackedIgnored.scheduleCheck(); return repoRefresh(); },
   openStash: () => { showStash.value = true; },
   openTags: () => { showTags.value = true; },
   openLaunchpad: () => handleLaunchpadShortcut(),
@@ -3939,6 +3940,9 @@ const poller = useRepoPoller({
 });
 watch(repoFolderPath, (p) => poller.setFolderPath(p), { immediate: true });
 
+const trackedIgnored = useTrackedIgnored();
+watch(repoFolderPath, (p) => { void trackedIgnored.check(p); }, { immediate: true });
+
 // ─── Live Repo watcher (v3.10.0) ─────────────────────────────────────
 // The watcher is the primary refresh driver; the poller above demotes itself
 // to a 15 s fallback while `healthy` is true. When the user has turned the
@@ -3971,6 +3975,14 @@ repoWatcher.on(["worktree", "index"], () => {
     await repoRefresh();
     if (viewMode.value === "history" || showGitTree.value) await loadLog();
   });
+});
+
+// Tracked files that match an ignore rule: re-checked on repo open, on a
+// manual refresh, and here when an ignore file (.gitignore at any level,
+// .git/info/exclude) or HEAD changes. Never on the status poll. The "config"
+// kind carries .git/info/exclude (see classify_path in watcher.rs).
+repoWatcher.on(["worktree", "config", "head"], (ev) => {
+  if (shouldRecheckTrackedIgnored(ev)) trackedIgnored.scheduleCheck();
 });
 
 repoWatcher.on(["head", "refs"], () => {

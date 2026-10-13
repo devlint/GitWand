@@ -801,6 +801,44 @@ export async function gitStage(cwd: string, paths: string[]): Promise<void> {
   if (!res.ok) throw new Error(`Failed to stage files: ${res.status}`);
 }
 
+/** Tracked paths that match an ignore rule (`git ls-files -ci --exclude-standard`). */
+export interface TrackedIgnored {
+  /** At most 500 repo-relative paths. */
+  paths: string[];
+  /** Uncapped number of matching tracked paths. */
+  total: number;
+  /** True when `paths` is shorter than `total`. */
+  truncated: boolean;
+}
+
+/**
+ * List tracked files that now match `.gitignore` / `.git/info/exclude`.
+ */
+export async function gitTrackedIgnored(cwd: string): Promise<TrackedIgnored> {
+  if (isTauri()) {
+    return tauriInvoke<TrackedIgnored>("git_tracked_ignored", { cwd });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/git-tracked-ignored?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`Failed to list tracked ignored files: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Untrack files (git rm --cached): they stay on disk, the removal is staged.
+ */
+export async function gitUntrackPaths(cwd: string, paths: string[]): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_untrack_paths", { cwd, paths });
+    return;
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/git-untrack-paths`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, paths }),
+  });
+  if (!res.ok) throw new Error(`Failed to untrack files: ${res.status}`);
+}
+
 /**
  * Unstage files (git reset HEAD).
  */

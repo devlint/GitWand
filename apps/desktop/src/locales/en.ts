@@ -190,6 +190,24 @@ const en = {
   },
 
   // ─── Sidebar / RepoSidebar ──────────────────────────────
+  trackedIgnored: {
+    noticeOne: "1 tracked file matches .gitignore",
+    noticeMany: "{0} tracked files match .gitignore",
+    review: "Review",
+    dismiss: "Dismiss",
+    title: "Tracked files matching .gitignore",
+    intro: "These files are tracked by Git even though an ignore rule matches them, so the rule has no effect on them.",
+    shown: "Showing {0} of {1} files.",
+    selectAll: "Select all",
+    selectedCount: "{0} selected",
+    untrackSelected: "Untrack selected",
+    untrackAll: "Untrack all",
+    confirmTitle: "Untrack files?",
+    confirmBody: "{0} file(s) will be removed from Git's index. They stay on disk. The removal is staged: commit it to finish.",
+    confirmBodyTruncated: "Only the {0} files listed are untracked. The notice will come back for the remaining ones.",
+    confirm: "Untrack",
+    failed: "Could not untrack the files: {0}",
+  },
   sidebar: {
     tabChanges: "Changes",
     tabBranches: "Branches",

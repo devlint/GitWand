@@ -20,5 +20,6 @@ pub(crate) mod secrets;
 pub(crate) mod snapshots;
 pub(crate) mod telemetry;
 pub(crate) mod terminal;
+pub(crate) mod tracked_ignored;
 pub(crate) mod watcher;
 pub(crate) mod workspace;
