@@ -66,14 +66,19 @@ fn launch_sentinel(dir: &Path) -> PathBuf {
 /// sentinel for this launch. Returns whether software rendering is on.
 ///
 /// The sentinel holds the PID of the launch that armed it. A sentinel whose
-/// process is still alive belongs to an instance that is still starting (two
-/// quick launches — there is no single-instance guard), not to a failed one.
+/// process is still a running GitWand belongs to an instance that is still
+/// starting (two quick launches — there is no single-instance guard), not to a
+/// failed one. Our own PID never counts: under a PID namespace every launch
+/// can get the same one.
 fn begin_launch(dir: &Path, pid: u32, is_alive: impl Fn(u32) -> bool) -> bool {
     let marker = software_marker(dir);
     let sentinel = launch_sentinel(dir);
     let _ = std::fs::create_dir_all(dir);
     if let Ok(content) = std::fs::read_to_string(&sentinel) {
-        let still_starting = content.trim().parse::<u32>().is_ok_and(&is_alive);
+        let still_starting = content
+            .trim()
+            .parse::<u32>()
+            .is_ok_and(|other| other != pid && is_alive(other));
         if !still_starting && !marker.exists() {
             eprintln!(
                 "[gitwand] previous launch did not finish starting; \
@@ -96,15 +101,20 @@ fn finish_launch(dir: &Path, pid: u32) {
     }
 }
 
+/// Whether `pid` is a running GitWand, not just any process: after a reboot
+/// or PID wrap, an aborted launch's PID can belong to another program.
+/// Compared by `comm` rather than `exe`, which differs between two AppImage
+/// instances (each mounts its own copy).
 #[cfg(target_os = "linux")]
-fn process_alive(pid: u32) -> bool {
-    Path::new("/proc").join(pid.to_string()).exists()
+fn gitwand_running(pid: u32) -> bool {
+    let comm = |p: &str| std::fs::read_to_string(format!("/proc/{p}/comm")).ok();
+    matches!((comm(&pid.to_string()), comm("self")), (Some(a), Some(b)) if a == b)
 }
 
 /// Called first thing in `run()`, before the webview exists.
 #[cfg(target_os = "linux")]
 pub(crate) fn prepare_launch() {
-    if !begin_launch(&state_dir(), std::process::id(), process_alive) {
+    if !begin_launch(&state_dir(), std::process::id(), gitwand_running) {
         return;
     }
     for (key, value) in SOFTWARE_ENV {
@@ -212,6 +222,16 @@ mod tests {
         assert!(launch_sentinel(&dir).exists());
         finish_launch(&dir, ME);
         assert!(!launch_sentinel(&dir).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn own_pid_in_sentinel_counts_as_failed() {
+        // PID namespaces: the aborted launch had the same PID as this one.
+        let dir = temp_dir("own-pid");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(launch_sentinel(&dir), ME.to_string()).unwrap();
+        assert!(begin_launch(&dir, ME, |_| true));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
