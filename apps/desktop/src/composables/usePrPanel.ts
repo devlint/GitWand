@@ -1316,6 +1316,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       const reply = await forge.value.createComment(cwd.value, selectedPr.value.number, { body, in_reply_to_id: inReplyToId });
       const parent = prComments.value.find((c) => c.id === inReplyToId);
       prComments.value = [...prComments.value, { ...reply, thread_id: parent?.thread_id, resolved: parent?.resolved }];
+      if (prDetail.value) prDetail.value.reviewComments++;
       persistDetailCache();
       return true;
     } catch (err: any) { error.value = err.message; return false; }
@@ -1349,7 +1350,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   async function handleDeleteComment(id: number) {
     try {
       await forge.value.deleteComment(cwd.value, id, selectedPr.value?.number);
-      prComments.value = prComments.value.filter((c) => c.id !== id && c.in_reply_to_id !== id);
+      // Only the comment itself: deleting a thread's root leaves its replies
+      // on the forge, where they show as top-level comments after a refetch
+      // (`nestReplies` keeps a reply whose root is gone top-level).
+      prComments.value = prComments.value.filter((c) => c.id !== id);
       if (prDetail.value && prDetail.value.reviewComments > 0) prDetail.value.reviewComments--;
       persistDetailCache();
     } catch (err: any) {
