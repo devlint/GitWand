@@ -418,6 +418,44 @@ impl OrElseEmpty for String {
     }
 }
 
+/// Bitbucket's maximum `pagelen` for pull requests.
+const BB_PAGE_SIZE: i64 = 50;
+
+/// Which fixed-size server pages cover the window `[offset, offset + limit)`,
+/// and how many leading items of the first page to drop.
+#[derive(Debug, PartialEq, Eq)]
+struct BbPagePlan {
+    first_page: i64,
+    last_page: i64,
+    skip: usize,
+}
+
+/// Bitbucket skips `(page - 1) * pagelen` items, so the page size must be the
+/// same on every request; inflating `pagelen` to reach an offset shifts the
+/// window (offset 25, limit 10 used to return items 35..45).
+fn bb_page_plan(offset: i64, limit: i64) -> BbPagePlan {
+    let off = offset.max(0);
+    let limit = limit.max(1);
+    BbPagePlan {
+        first_page: off / BB_PAGE_SIZE + 1,
+        last_page: (off + limit - 1) / BB_PAGE_SIZE + 1,
+        skip: (off % BB_PAGE_SIZE) as usize,
+    }
+}
+
+/// Drop `skip` leading items and keep at most `limit`.
+fn bb_select_window(
+    items: Vec<serde_json::Value>,
+    skip: usize,
+    limit: i64,
+) -> Vec<serde_json::Value> {
+    items
+        .into_iter()
+        .skip(skip)
+        .take(limit.max(0) as usize)
+        .collect()
+}
+
 // ─── Tauri Commands ────────────────────────────────────────────────────────────
 
 /// List pull requests via Bitbucket REST API v2.
@@ -441,40 +479,45 @@ pub(crate) async fn bb_list_prs(
         _ => "OPEN",
     };
 
-    let pagelen = limit.unwrap_or(10).max(1);
+    let per_page = limit.unwrap_or(10).max(1);
     let off = offset.unwrap_or(0).max(0);
-    // Bitbucket pages are 1-indexed; compute first page needed.
-    let page = (off / pagelen) + 1;
-    let extra = off % pagelen; // entries to skip within the page
+    let plan = bb_page_plan(off, per_page);
 
-    let url = if st == "ALL" {
-        format!(
-            "{}/pullrequests?state=OPEN&state=MERGED&state=DECLINED&pagelen={}&page={}",
-            repo_api(&workspace, &slug),
-            pagelen + extra,
-            page
-        )
-    } else {
-        format!(
-            "{}/pullrequests?state={}&pagelen={}&page={}",
-            repo_api(&workspace, &slug),
-            st,
-            pagelen + extra,
-            page
-        )
-    };
-
-    let resp = bb_curl("GET", &url, None, &auth_config)?;
-    let values = resp
-        .get("values")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| "Unexpected Bitbucket response shape (missing 'values')".to_string())?;
+    // Fixed-size server pages: the server's skip is `(page - 1) * pagelen`, so
+    // the page size must stay constant across every request. Fetch only the
+    // pages that overlap [off, off + per_page), then window the concatenation.
+    let mut values: Vec<serde_json::Value> = Vec::new();
+    for page in plan.first_page..=plan.last_page {
+        let url = if st == "ALL" {
+            format!(
+                "{}/pullrequests?state=OPEN&state=MERGED&state=DECLINED&pagelen={}&page={}",
+                repo_api(&workspace, &slug),
+                BB_PAGE_SIZE,
+                page
+            )
+        } else {
+            format!(
+                "{}/pullrequests?state={}&pagelen={}&page={}",
+                repo_api(&workspace, &slug),
+                st,
+                BB_PAGE_SIZE,
+                page
+            )
+        };
+        let resp = bb_curl("GET", &url, None, &auth_config)?;
+        let arr = resp
+            .get("values")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| "Unexpected Bitbucket response shape (missing 'values')".to_string())?;
+        let short = (arr.len() as i64) < BB_PAGE_SIZE;
+        values.extend(arr.iter().cloned());
+        if short {
+            break; // last page reached
+        }
+    }
+    let values = bb_select_window(values, plan.skip, per_page);
 
     let mut prs: Vec<PullRequest> = values.iter().map(bb_pr_to_pr).collect();
-    if extra > 0 {
-        let skip = (extra as usize).min(prs.len());
-        prs.drain(..skip);
-    }
 
     // Colour the sidebar dot from each PR's head-commit build statuses. The list
     // payload carries `source.commit.hash`, so resolve it per PR (no extra PR
@@ -1509,5 +1552,96 @@ mod bb_auto_merge_tests {
             reason.contains("Merging immediately still works"),
             "the message must say what DOES work, per the forgeUnsupported precedent"
         );
+    }
+}
+
+#[cfg(test)]
+mod bb_page_plan_tests {
+    use super::{bb_page_plan, bb_select_window, BbPagePlan, BB_PAGE_SIZE};
+
+    /// Simulate the server: items 0..total, fixed pages of BB_PAGE_SIZE.
+    fn fetch(offset: i64, limit: i64, total: i64) -> Vec<i64> {
+        let plan = bb_page_plan(offset, limit);
+        let mut got = Vec::new();
+        for page in plan.first_page..=plan.last_page {
+            let start = (page - 1) * BB_PAGE_SIZE;
+            let end = (start + BB_PAGE_SIZE).min(total);
+            let n = (end - start).max(0);
+            got.extend((start..start + n).map(|i| serde_json::json!(i)));
+            if n < BB_PAGE_SIZE {
+                break;
+            }
+        }
+        bb_select_window(got, plan.skip, limit)
+            .iter()
+            .map(|v| v.as_i64().unwrap())
+            .collect()
+    }
+
+    fn expect(offset: i64, limit: i64, total: i64) -> Vec<i64> {
+        (offset..(offset + limit).min(total)).collect()
+    }
+
+    #[test]
+    fn offset_zero() {
+        assert_eq!(
+            bb_page_plan(0, 10),
+            BbPagePlan {
+                first_page: 1,
+                last_page: 1,
+                skip: 0
+            }
+        );
+        assert_eq!(fetch(0, 10, 500), expect(0, 10, 500));
+    }
+
+    #[test]
+    fn offset_25_limit_10_is_the_reported_case() {
+        assert_eq!(fetch(25, 10, 500), (25..35).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn exact_multiples_of_the_limit_and_of_the_page_size() {
+        for (o, l) in [(10, 10), (20, 10), (50, 50), (100, 25)] {
+            assert_eq!(fetch(o, l, 500), expect(o, l, 500), "off {o} limit {l}");
+        }
+    }
+
+    #[test]
+    fn window_crossing_two_pages() {
+        let plan = bb_page_plan(45, 10);
+        assert_eq!((plan.first_page, plan.last_page, plan.skip), (1, 2, 45));
+        assert_eq!(fetch(45, 10, 500), (45..55).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn limit_larger_than_the_server_maximum_spans_pages() {
+        assert_eq!(fetch(10, 120, 500), expect(10, 120, 500));
+    }
+
+    #[test]
+    fn last_partial_page_and_past_the_end() {
+        assert_eq!(fetch(40, 20, 53), (40..53).collect::<Vec<_>>());
+        assert_eq!(fetch(60, 10, 53), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn every_window_matches_exactly() {
+        for total in [0, 1, 49, 50, 51, 99, 100, 101, 137] {
+            for off in 0..140 {
+                for limit in [1, 7, 10, 25, 50, 51, 120] {
+                    assert_eq!(
+                        fetch(off, limit, total),
+                        expect(off, limit, total),
+                        "total {total} off {off} limit {limit}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn degenerate_inputs_are_clamped() {
+        assert_eq!(bb_page_plan(-5, 0), bb_page_plan(0, 1));
     }
 }
