@@ -544,8 +544,10 @@ function cancelCommentEdit() {
 }
 async function saveCommentEdit() {
   const id = editingCommentId.value;
-  const body = editDraft.value.trim();
-  if (id == null || !body || editSaving.value) return;
+  // Markdown is whitespace-sensitive (indented code, trailing hard breaks):
+  // trim only to test for emptiness, save what the user typed.
+  const body = editDraft.value;
+  if (id == null || !body.trim() || editSaving.value) return;
   editSaving.value = true;
   try {
     if (await p.handleEditComment(id, body)) cancelCommentEdit();
@@ -595,8 +597,8 @@ function cancelThreadReply() {
 }
 
 async function submitThreadReply(rootId: number) {
-  const body = replyDraft.value.trim();
-  if (!body || replySending.value) return;
+  const body = replyDraft.value; // untrimmed, as in saveCommentEdit
+  if (!body.trim() || replySending.value) return;
   replySending.value = true;
   try {
     if (await p.handleReplyComment(rootId, body)) cancelThreadReply();
