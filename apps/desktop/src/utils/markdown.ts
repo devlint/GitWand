@@ -480,9 +480,23 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
   let offset = 0;
   // Fence open in the current item's content, if any.
   let fence: string | null = null;
+  // Whether the current item's text is inside an HTML comment, and the last
+  // line that can close one (bounds the lookahead, as in renderBlocks).
+  let inComment = false;
+  let commentClose = lines.length - 1;
+  while (commentClose >= start && !lines[commentClose].includes("-->")) commentClose--;
   let i = start;
   while (i < lines.length) {
     const l = lines[i];
+    // A comment opened in the item hides everything up to its `-->`, blank
+    // and unindented lines included: keep them in the item, where the
+    // paragraph builder drops the whole range (as for a top-level paragraph).
+    const close = inComment && !fence ? nextCommentClose(lines, i, commentClose) : -1;
+    if (close >= 0) {
+      for (; i <= close; i++) cur.push(lines[i].slice(Math.min(offset, indentOf(lines[i]))));
+      inComment = inCommentAfter(lines[close].slice(lines[close].indexOf("-->") + 3), false);
+      continue;
+    }
     const mk = listMarker(l);
     const isNewItem =
       mk && mk.ordered === first.ordered && mk.delim === first.delim &&
@@ -504,6 +518,7 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
       cur.push(l); // lazy paragraph continuation
     }
     fence = fenceAfter(cur[cur.length - 1], fence);
+    inComment = !fence && inCommentAfter(cur[cur.length - 1], isNewItem ? false : inComment);
     i++;
   }
   items.push(cur);
@@ -524,10 +539,15 @@ function renderList(lines: string[], start: number, first: ListMarker, ctx: Ctx)
     // Content column of the nested list item the scan is in, or -1. Lines
     // indented to it (and sibling markers) belong to that nested list.
     let nested = -1;
+    let inItemComment = false;
     for (let j = 0; j < item.length && !loose; j++) {
       const l = item[j];
       if (isFenceOpen(l) || (inFence && RE_FENCE.test(l))) inFence = !inFence;
       if (inFence) continue;
+      // Blank lines hidden inside an HTML comment don't separate anything.
+      const wasInComment = inItemComment;
+      inItemComment = inCommentAfter(l, inItemComment);
+      if (wasInComment) continue;
       if (!isBlank(l)) {
         const mk = listMarker(l);
         // Deeper markers are inside the nested item already: keep its column.

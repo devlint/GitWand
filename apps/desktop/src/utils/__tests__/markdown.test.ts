@@ -161,6 +161,17 @@ describe("markdownToHtml — inline", () => {
     expect(md("see example.com")).toBe("<p>see example.com</p>\n");
   });
 
+  it("hides a comment spanning blank lines inside a list item", () => {
+    // The comment stays one raw range (dropped by the sanitizer); the list stays tight.
+    expect(md("- item <!-- TODO\n\nhidden\n\n-->\n- next")).toBe(
+      "<ul>\n<li>item <!-- TODO\n\nhidden\n\n--></li>\n<li>next</li>\n</ul>\n",
+    );
+    // Unclosed: the item still ends at the blank line, nothing is swallowed.
+    expect(md("- item <!-- open\n\nafter")).toContain("<p>after</p>");
+    // Inside a fence, `<!--` is code, not a comment.
+    expect(md("- ```\n  <!--\n  ```\n\nafter -->")).toContain("<p>after --&gt;</p>");
+  });
+
   it("does not linkify package@version specs as emails", () => {
     // Dependabot/Renovate PR bodies: the "domain" ends in a numeric label, not a TLD.
     expect(md("bump vue@3.5.42 and @types/node@25.9.5")).toBe(

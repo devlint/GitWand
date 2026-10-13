@@ -102,6 +102,13 @@ describe("safeHtml — raw HTML sanitization", () => {
     expect(out).toContain("<th>A</th>");
   });
 
+  it("drops a comment spanning blank lines inside a list item", () => {
+    const out = renderMarkdown("- item <!-- TODO\n\nhidden\n\n-->\n- next");
+    expect(out).not.toContain("hidden");
+    expect(out).not.toContain("--&gt;");
+    expect(out).toContain("next");
+  });
+
   it("returns empty string for nullish input", () => {
     expect(safeHtml(null)).toBe("");
     expect(safeHtml(undefined)).toBe("");
