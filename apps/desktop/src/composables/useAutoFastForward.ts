@@ -18,7 +18,7 @@
  * overwrite one, git refuses and that refusal is reported as `gitRefused`.
  */
 
-import { gitExec, gitRepoState } from "../utils/backend";
+import { gitExec, gitFastForwardToUpstream, gitRepoState } from "../utils/backend";
 
 // ─── Verdict ────────────────────────────────────────────────
 
@@ -28,14 +28,25 @@ import { gitExec, gitRepoState } from "../utils/backend";
  * `gitRefused` is not evaluated up front, it is what git itself answers.
  */
 export type AutoFfBlockReason =
+  | "operation"
   | "detached"
   | "noUpstream"
-  | "operation"
   | "busy"
   | "conflicts"
   | "localCommits"
   | "trackedEdits"
   | "gitRefused";
+
+const BLOCK_REASONS = [
+  "operation",
+  "detached",
+  "noUpstream",
+  "busy",
+  "conflicts",
+  "localCommits",
+  "trackedEdits",
+  "gitRefused",
+] as const satisfies readonly AutoFfBlockReason[];
 
 export interface AutoFfFacts {
   detached: boolean;
@@ -60,10 +71,12 @@ export function evaluateAutoFastForward(f: AutoFfFacts): AutoFfVerdict {
   // A detached HEAD or a missing upstream has no meaningful "behind", so those
   // two are reported before the up-to-date check. The UI only surfaces a
   // reason when the branch is actually behind, so they stay silent there.
+  // An operation comes first: a rebase detaches HEAD, and the running rebase
+  // is the cause worth naming, not the "detached" it produces.
+  if (f.operation) return { kind: "blocked", reason: "operation" };
   if (f.detached) return { kind: "blocked", reason: "detached" };
   if (!f.hasUpstream) return { kind: "blocked", reason: "noUpstream" };
   if (f.behind <= 0) return { kind: "idle" };
-  if (f.operation) return { kind: "blocked", reason: "operation" };
   if (f.busy) return { kind: "blocked", reason: "busy" };
   if (f.conflicts) return { kind: "blocked", reason: "conflicts" };
   if (f.ahead > 0) return { kind: "blocked", reason: "localCommits" };
@@ -113,8 +126,8 @@ export async function readAutoFfFacts(cwd: string, ctx: AutoFfContext): Promise<
 
   let operation: string | null = null;
   if (repoState && repoState.state !== "clean") operation = repoState.state;
-  else if (repoState?.hasConflict) conflicts = true;
-  else if (bisect.exitCode === 0) operation = "bisect";
+  if (repoState?.hasConflict) conflicts = true;
+  if (!operation && bisect.exitCode === 0) operation = "bisect";
 
   return {
     detached: head.exitCode !== 0,
@@ -157,13 +170,22 @@ export async function runAutoFastForward(cwd: string, ctx: AutoFfContext): Promi
     if (verdict.kind === "idle") return { kind: "idle" };
     if (verdict.kind === "blocked") return { kind: "blocked", reason: verdict.reason };
 
-    const branchRes = await gitExec(cwd, ["symbolic-ref", "--short", "-q", "HEAD"]);
-    const branch = branchRes.stdout.trim();
-    const res = await gitExec(cwd, ["merge", "--ff-only", "--no-stat", "@{upstream}"]);
-    if (res.exitCode !== 0) {
-      return { kind: "blocked", reason: "gitRefused", detail: firstLine(res.stderr || res.stdout) };
+    // The backend re-checks every repo-side condition under the repo write
+    // lock, then runs `merge --ff-only`. The read above only avoids taking the
+    // lock when the answer is already "no" (and supplies the tooltip reason).
+    const res = await gitFastForwardToUpstream(cwd);
+    if (res.fastForwarded) {
+      return { kind: "fastForwarded", count: res.behind || facts.behind, branch: res.branch ?? "" };
     }
-    return { kind: "fastForwarded", count: facts.behind, branch };
+    if (res.reason === "upToDate") return { kind: "idle" };
+    const reason = (BLOCK_REASONS as readonly string[]).includes(res.reason ?? "")
+      ? (res.reason as AutoFfBlockReason)
+      : "gitRefused";
+    return {
+      kind: "blocked",
+      reason,
+      detail: reason === "gitRefused" ? firstLine(res.stderr ?? "") : undefined,
+    };
   } catch (err: any) {
     return { kind: "blocked", reason: "gitRefused", detail: firstLine(`${err?.message ?? err}`) };
   }

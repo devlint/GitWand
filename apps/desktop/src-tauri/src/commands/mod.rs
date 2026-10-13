@@ -12,6 +12,8 @@ pub(crate) mod gitlab;
 pub(crate) mod mcp_catalog;
 pub(crate) mod network;
 pub(crate) mod ops;
+#[cfg(test)]
+mod ops_fast_forward_tests;
 pub(crate) mod pr_edit;
 pub(crate) mod read;
 pub(crate) mod render_fallback;

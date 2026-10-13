@@ -3897,6 +3897,64 @@ async function handleRequest(req, res) {
       }
     }
 
+    // POST /api/git-fast-forward-to-upstream  { cwd }
+    // Mirror of the Rust `git_fast_forward_to_upstream`: re-check every repo-side
+    // condition in the same order, then `merge --ff-only --no-stat @{upstream}`.
+    // A refusal is a normal result ({ fastForwarded: false, reason }), not an error.
+    if (url.pathname === "/api/git-fast-forward-to-upstream" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const g = (args) => spawnSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
+        const refused = (reason, behind = 0) => jsonResponse(req, res, { fastForwarded: false, reason, behind });
+
+        const gd = g(["rev-parse", "--git-dir"]);
+        if (gd.status !== 0) return jsonResponse(req, res, { error: (gd.stderr || "").trim() || "not a git repository" }, 500);
+        const gitDir = isAbsolute(gd.stdout.trim()) ? gd.stdout.trim() : join(resolvedCwd, gd.stdout.trim());
+        if (["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"]
+          .some((f) => existsSync(join(gitDir, f)))) return refused("operation");
+
+        if (g(["symbolic-ref", "-q", "HEAD"]).status !== 0) return refused("detached");
+        const up = g(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
+        if (up.status !== 0 || !up.stdout.trim()) return refused("noUpstream");
+
+        const counts = g(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
+        let ahead = 0, behind = 0;
+        if (counts.status === 0) {
+          const [a, b] = counts.stdout.trim().split(/\s+/).map((n) => parseInt(n, 10) || 0);
+          ahead = a ?? 0;
+          behind = b ?? 0;
+        }
+        if (behind === 0) return refused("upToDate");
+
+        const st = g(["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=no"]);
+        let trackedEdits = st.status !== 0;
+        let conflicts = false;
+        for (const line of (st.stdout || "").split("\n")) {
+          if (line.length < 3) continue;
+          trackedEdits = true;
+          if (["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(line.slice(0, 2))) conflicts = true;
+        }
+        if (conflicts) return refused("conflicts", behind);
+        if (ahead > 0) return refused("localCommits", behind);
+        if (trackedEdits) return refused("trackedEdits", behind);
+
+        const br = g(["symbolic-ref", "--short", "-q", "HEAD"]).stdout.trim() || null;
+        const m = g(["merge", "--ff-only", "--no-stat", "@{upstream}"]);
+        if (m.status === 0) return jsonResponse(req, res, { fastForwarded: true, behind, branch: br });
+        return jsonResponse(req, res, {
+          fastForwarded: false,
+          reason: "gitRefused",
+          stderr: ((m.stderr || "").trim() || (m.stdout || "").trim()),
+          behind,
+          branch: br,
+        });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
     // POST /api/git-repo-state  { cwd }
     if (url.pathname === "/api/git-repo-state" && req.method === "POST") {
       const { cwd } = await readBody(req);

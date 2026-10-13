@@ -31,6 +31,16 @@ vi.mock("../../utils/backend", () => ({
     const r = spawnSync("git", args, { cwd, env: gitEnv(), encoding: "utf-8" });
     return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
   }),
+  // Stand-in for the Rust command, whose re-checks are covered by the Rust
+  // tests (ops_fast_forward_tests.rs): here it only performs the merge, so
+  // these tests exercise the TS gate in front of it and git's own refusals.
+  gitFastForwardToUpstream: vi.fn(async (cwd: string) => {
+    const r = spawnSync("git", ["merge", "--ff-only", "--no-stat", "@{upstream}"], { cwd, env: gitEnv(), encoding: "utf-8" });
+    const b = spawnSync("git", ["symbolic-ref", "--short", "-q", "HEAD"], { cwd, env: gitEnv(), encoding: "utf-8" });
+    return r.status === 0
+      ? { fastForwarded: true, behind: 0, branch: (b.stdout ?? "").trim() }
+      : { fastForwarded: false, reason: "gitRefused", stderr: r.stderr ?? "", behind: 0 };
+  }),
   gitRepoState: vi.fn(async (cwd: string) => {
     const gd = (a: string) =>
       join(cwd, execFileSync("git", ["rev-parse", "--git-path", a], { cwd, encoding: "utf-8" }).trim());
@@ -94,12 +104,12 @@ describe("evaluateAutoFastForward", () => {
       detached: true, hasUpstream: false, ahead: 3, behind: 2,
       operation: "rebase", busy: true, conflicts: true, trackedEdits: true,
     };
-    const order = ["detached", "noUpstream", "operation", "busy", "conflicts", "localCommits", "trackedEdits"];
+    const order = ["operation", "detached", "noUpstream", "busy", "conflicts", "localCommits", "trackedEdits"];
     for (const reason of order) {
       expect(evaluateAutoFastForward(facts)).toEqual({ kind: "blocked", reason });
+      if (reason === "operation") facts.operation = null;
       if (reason === "detached") facts.detached = false;
       if (reason === "noUpstream") facts.hasUpstream = true;
-      if (reason === "operation") facts.operation = null;
       if (reason === "busy") facts.busy = false;
       if (reason === "conflicts") facts.conflicts = false;
       if (reason === "localCommits") facts.ahead = 0;

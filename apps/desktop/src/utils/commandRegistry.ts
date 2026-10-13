@@ -103,6 +103,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   git_discard: { route: "/api/git-discard" },
   git_exec: { route: "/api/git-exec" },
   git_fetch: { route: "/api/git-fetch" },
+  git_fast_forward_to_upstream: { route: "/api/git-fast-forward-to-upstream" },
   git_file_diff: { route: "/api/git-file-diff" },
   git_file_log: { route: "/api/git-file-log" },
   git_file_log_pickaxe: { route: "/api/git-file-log-pickaxe" },

@@ -1060,6 +1060,34 @@ export async function gitPull(
   return res.json();
 }
 
+/** Result of `gitFastForwardToUpstream`. A refusal is a result, never a throw. */
+export interface FastForwardResult {
+  fastForwarded: boolean;
+  /** `operation | detached | noUpstream | conflicts | localCommits | trackedEdits | gitRefused | upToDate` */
+  reason?: string;
+  /** git's own message when it refused the fast-forward. */
+  stderr?: string;
+  /** Commits advanced by (or behind by, when refused). */
+  behind: number;
+  branch?: string | null;
+}
+
+/**
+ * Opt-in auto fast-forward: under the repo write lock, re-check every
+ * repo-side condition and only then `merge --ff-only @{upstream}`.
+ */
+export async function gitFastForwardToUpstream(cwd: string): Promise<FastForwardResult> {
+  if (isTauri()) {
+    return tauriInvoke<FastForwardResult>("git_fast_forward_to_upstream", { cwd });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/git-fast-forward-to-upstream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  return res.json();
+}
+
 /**
  * Fetch from remote (updates tracking info without merging). `onProgress`,
  * if given, receives live updates over a scoped IPC channel (v3.10.0) —

@@ -668,6 +668,173 @@ pub(crate) async fn git_pull(
     })
 }
 
+// ─── Auto fast-forward (opt-in, background) ────────────────────
+
+/// Outcome of `git_fast_forward_to_upstream`. `reason` uses the same keys as
+/// the TypeScript `AutoFfBlockReason` (`detached`, `noUpstream`, `operation`,
+/// `conflicts`, `localCommits`, `trackedEdits`, `gitRefused`) plus `upToDate`
+/// for "nothing to do". A refusal is a normal result, never an `Err`: the
+/// caller is a background action and must not raise a modal.
+#[derive(serde::Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FastForwardResult {
+    pub fast_forwarded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
+    /// Commits the branch advanced by (or was behind by when refused).
+    pub behind: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
+fn ff_refused(reason: &str, behind: u32) -> FastForwardResult {
+    FastForwardResult {
+        fast_forwarded: false,
+        reason: Some(reason.to_string()),
+        stderr: None,
+        behind,
+        branch: None,
+    }
+}
+
+/// Porcelain v1 XY codes of an unmerged path.
+const FF_UNMERGED: &[&str] = &["DD", "AU", "UD", "UA", "DU", "AA", "UU"];
+
+/// Re-check, then fast-forward. Caller holds the repo write lock.
+///
+/// Conditions are evaluated in a fixed order and the first failing one is the
+/// reported reason (same order as `evaluateAutoFastForward` in the frontend,
+/// minus `busy`, which only the frontend can know). The sole write is
+/// `merge --ff-only`: it cannot create a merge commit, rebase or stash.
+pub(crate) fn fast_forward_to_upstream_locked(cwd: &str) -> Result<FastForwardResult, String> {
+    let run = |args: &[&str]| -> Result<std::process::Output, String> {
+        git_cmd()
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .map_err(|e| format!("Failed to run git {}: {}", args.join(" "), e))
+    };
+
+    // An operation in progress: merge, rebase, cherry-pick, revert, bisect.
+    // Checked first: a rebase detaches HEAD, and "a rebase is running" is the
+    // cause worth naming, not the "detached" it produces.
+    let git_dir = resolve_git_dir(cwd)?;
+    if [
+        "rebase-merge",
+        "rebase-apply",
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "BISECT_LOG",
+    ]
+    .iter()
+    .any(|f| git_dir.join(f).exists())
+    {
+        return Ok(ff_refused("operation", 0));
+    }
+
+    if !run(&["symbolic-ref", "-q", "HEAD"])?.status.success() {
+        return Ok(ff_refused("detached", 0));
+    }
+    let up = run(&[
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        "@{upstream}",
+    ])?;
+    if !up.status.success() || String::from_utf8_lossy(&up.stdout).trim().is_empty() {
+        return Ok(ff_refused("noUpstream", 0));
+    }
+
+    let counts = run(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])?;
+    let (mut ahead, mut behind) = (0u32, 0u32);
+    if counts.status.success() {
+        let text = String::from_utf8_lossy(&counts.stdout).to_string();
+        let mut it = text
+            .split_whitespace()
+            .map(|n| n.parse::<u32>().unwrap_or(0));
+        ahead = it.next().unwrap_or(0);
+        behind = it.next().unwrap_or(0);
+    }
+    if behind == 0 {
+        return Ok(ff_refused("upToDate", 0));
+    }
+
+    // `--no-optional-locks`: this runs on a background tick and must not
+    // rewrite the index (see the note in useRepoPoller).
+    let status = run(&[
+        "--no-optional-locks",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=no",
+    ])?;
+    let status_out = String::from_utf8_lossy(&status.stdout).to_string();
+    let mut tracked_edits = !status.status.success(); // unreadable is not "clean"
+    let mut conflicts = false;
+    for line in status_out.lines().filter(|l| l.len() >= 3) {
+        tracked_edits = true;
+        if FF_UNMERGED.contains(&&line[..2]) {
+            conflicts = true;
+        }
+    }
+    if conflicts {
+        return Ok(ff_refused("conflicts", behind));
+    }
+    if ahead > 0 {
+        return Ok(ff_refused("localCommits", behind));
+    }
+    if tracked_edits {
+        return Ok(ff_refused("trackedEdits", behind));
+    }
+
+    let branch = run(&["symbolic-ref", "--short", "-q", "HEAD"])
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|b| !b.is_empty());
+    let merge = run(&["merge", "--ff-only", "--no-stat", "@{upstream}"])?;
+    if merge.status.success() {
+        return Ok(FastForwardResult {
+            fast_forwarded: true,
+            reason: None,
+            stderr: None,
+            behind,
+            branch,
+        });
+    }
+    let stderr = String::from_utf8_lossy(&merge.stderr).trim().to_string();
+    Ok(FastForwardResult {
+        fast_forwarded: false,
+        reason: Some("gitRefused".to_string()),
+        stderr: Some(if stderr.is_empty() {
+            String::from_utf8_lossy(&merge.stdout).trim().to_string()
+        } else {
+            stderr
+        }),
+        behind,
+        branch,
+    })
+}
+
+/// Opt-in auto fast-forward (background, after the periodic fetch).
+///
+/// Takes the repo write lock, re-checks every repo-side condition under it,
+/// and only then runs `git merge --ff-only --no-stat @{upstream}`. Holding the
+/// lock is the point: multi-step write commands (snapshot then reset, …)
+/// serialize on it, and a background merge must not interleave inside one.
+#[tauri::command]
+pub(crate) async fn git_fast_forward_to_upstream(cwd: String) -> Result<FastForwardResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let canon = safe_repo_path(cwd.trim(), ".").map_err(|e| format!("invalid cwd: {e}"))?;
+        let canon = canon.to_str().ok_or("cwd is not valid UTF-8")?.to_string();
+        let _repo = repo_lock::write(&cwd);
+        fast_forward_to_upstream_locked(&canon)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ─── Git rebase ────────────────────────────────────────────────
 
 /// Result of an operation action. `halted` is true when git did its work and

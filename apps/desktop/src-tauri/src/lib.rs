@@ -418,6 +418,10 @@ pub fn command_parity(
             Some(false),
         ))
         .map(|r| serde_json::json!({ "success": r.success, "message": r.message })),
+        "git_fast_forward_to_upstream" => {
+            tauri::async_runtime::block_on(commands::ops::git_fast_forward_to_upstream(s("cwd")?))
+                .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string()))
+        }
         "git_stage" => {
             tauri::async_runtime::block_on(commands::ops::git_stage(s("cwd")?, vec![s("path")?]))
                 .map(parity_ok_marker)
@@ -781,6 +785,7 @@ pub fn run() {
             commands::ops::git_split_commit,
             commands::ops::git_push,
             commands::ops::git_pull,
+            commands::ops::git_fast_forward_to_upstream,
             commands::ops::git_fetch,
             commands::ops::git_merge,
             commands::ops::git_operation_action,
