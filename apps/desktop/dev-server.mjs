@@ -221,6 +221,25 @@ const GLAB = resolveBin("glab");
 const GIT = resolveBin("git");
 
 /**
+ * Lexical check of a pathspec handed to `git rm --cached`. Mirrors
+ * `validate_pathspec` (commands/tracked_ignored.rs) - keep the two in sync.
+ * Not `safeRepoPath`: that one resolves symlinks, so a tracked link pointing
+ * outside the repo would fail the whole batch, though `git rm --cached` only
+ * touches the index entry. Non-empty, no NUL, not absolute, no `..`
+ * component; on Windows `\\` is a separator and a drive/UNC prefix absolute.
+ */
+function validateUntrackPathspec(p) {
+  if (typeof p !== "string" || !p.trim()) throw new Error("path must not be empty");
+  if (p.includes("\0")) throw new Error("path must not contain NUL");
+  const windows = process.platform === "win32";
+  const absolute = p.startsWith("/") || (windows && (p.startsWith("\\") || /^[A-Za-z]:/.test(p)));
+  if (absolute) throw new Error(`path must be relative to the repo (got: ${p})`);
+  if (p.split(windows ? /[\\/]/ : "/").includes("..")) {
+    throw new Error(`path must not contain \`..\` (got: ${p})`);
+  }
+}
+
+/**
  * Extract a percentage from a git progress line, e.g.
  * "Receiving objects:  56% (456/812), 1.2 MiB | 3.4 MiB/s". Mirrors the Rust
  * `extract_percent` helper in `commands/ops.rs` — keep the two in sync.
@@ -3402,7 +3421,7 @@ async function handleRequest(req, res) {
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       try {
         const out = execFileSync(
-          "git",
+          GIT,
           ["ls-files", "-z", "-c", "-i", "--exclude-standard"],
           { cwd: resolve(cwd), encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 },
         );
@@ -3428,12 +3447,12 @@ async function handleRequest(req, res) {
       if (paths.length === 0) return jsonResponse(req, res, { ok: true });
       try {
         const resolvedCwd = resolve(cwd);
-        for (const p of paths) {
-          safeRepoPath(resolvedCwd, p);
-          if (p.includes("\0")) throw new Error("path must not contain NUL");
-        }
+        // The repo itself goes through the shared guard; the pathspecs get the
+        // lexical check only (see validateUntrackPathspec).
+        safeRepoPath(resolvedCwd, ".");
+        for (const p of paths) validateUntrackPathspec(p);
         execFileSync(
-          "git",
+          GIT,
           [
             "--literal-pathspecs", "rm", "--cached", "--quiet", "--ignore-unmatch",
             "--pathspec-from-file=-", "--pathspec-file-nul",

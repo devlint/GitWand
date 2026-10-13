@@ -63,6 +63,44 @@ pub(crate) async fn git_tracked_ignored(cwd: String) -> Result<TrackedIgnored, S
     Ok(cap_paths(parse_nul_list(&output.stdout)))
 }
 
+/// Lexical check of a repo-relative pathspec handed to `git rm --cached`.
+///
+/// Deliberately NOT `safe_repo_path`: that one canonicalizes, so a tracked
+/// symlink pointing outside the repo (or a dangling one) would be refused and
+/// fail the whole batch, although `git rm --cached` only touches the index
+/// entry and never follows the link. The path never reaches the filesystem
+/// here, so a lexical test is the right one: non-empty, no NUL, not absolute
+/// and no `..` component. On Windows `\` is a separator too and a drive or
+/// UNC prefix counts as absolute; elsewhere `\` and `:` are ordinary file
+/// name characters git can track, so they are left alone.
+pub(crate) fn validate_pathspec(p: &str) -> Result<(), String> {
+    if p.trim().is_empty() {
+        return Err("path must not be empty".to_string());
+    }
+    if p.contains('\0') {
+        return Err("path must not contain NUL".to_string());
+    }
+    let windows = cfg!(windows);
+    let b = p.as_bytes();
+    let absolute = p.starts_with('/')
+        || std::path::Path::new(p).is_absolute()
+        || (windows
+            && (p.starts_with('\\')
+                || (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')));
+    if absolute {
+        return Err(format!("path must be relative to the repo (got: {})", p));
+    }
+    let dotdot = if windows {
+        p.split(['/', '\\']).any(|c| c == "..")
+    } else {
+        p.split('/').any(|c| c == "..")
+    };
+    if dotdot {
+        return Err(format!("path must not contain `..` (got: {})", p));
+    }
+    Ok(())
+}
+
 /// Untrack `paths` (`git rm --cached`): the files stay on disk, their removal
 /// is staged. Paths travel on stdin, NUL-separated, so a long list cannot hit
 /// the argv limit; `--literal-pathspecs` stops `*`, `?` or `[` in a file name
@@ -73,14 +111,11 @@ pub(crate) async fn git_untrack_paths(cwd: String, paths: Vec<String>) -> Result
     if paths.is_empty() {
         return Ok(());
     }
+    // The repo itself goes through the shared guard (absolute, resolves).
+    safe_repo_path(&cwd, ".")?;
     let mut stdin_buf: Vec<u8> = Vec::new();
     for p in &paths {
-        // The pathspec is handed to git, never to the filesystem, but the
-        // shared guard still rejects empty, absolute and `..` escapes.
-        safe_repo_path(&cwd, p)?;
-        if p.contains('\0') {
-            return Err("path must not contain NUL".to_string());
-        }
+        validate_pathspec(p)?;
         stdin_buf.extend_from_slice(p.as_bytes());
         stdin_buf.push(0);
     }
@@ -315,6 +350,108 @@ mod tests {
         assert!(run(git_untrack_paths(repo.cwd(), vec!["../etc/passwd".into()])).is_err());
         assert!(run(git_untrack_paths(repo.cwd(), vec!["".into()])).is_err());
         assert!(run(git_untrack_paths(repo.cwd(), vec![])).is_ok());
+    }
+
+    #[test]
+    fn validate_pathspec_is_lexical() {
+        for ok in [
+            "a.log",
+            "dir/b.log",
+            "a..b",
+            "..hidden",
+            "dir/...",
+            "[x]*?.log",
+            "é/ログ",
+        ] {
+            assert!(validate_pathspec(ok).is_ok(), "{ok:?} should pass");
+        }
+        for bad in [
+            "",
+            "   ",
+            "..",
+            "../x",
+            "dir/../../x",
+            "dir/..",
+            "/etc/passwd",
+            "/",
+            "a\0b",
+        ] {
+            assert!(validate_pathspec(bad).is_err(), "{bad:?} should fail");
+        }
+        if cfg!(windows) {
+            for bad in ["..\\x", "dir\\..\\x", "C:\\x", "C:x", "\\\\srv\\share"] {
+                assert!(validate_pathspec(bad).is_err(), "{bad:?} should fail");
+            }
+        } else {
+            // Ordinary file name characters off Windows.
+            assert!(validate_pathspec("a\\b").is_ok());
+            assert!(validate_pathspec("c:d").is_ok());
+        }
+    }
+
+    #[test]
+    fn untrack_rejects_absolute_and_parent_paths_without_touching_the_index() {
+        let repo = TempRepo::new();
+        repo.write("a.log", "l\n");
+        repo.commit_all("init");
+        repo.write(".gitignore", "*.log\n");
+        let abs = repo.0.join("a.log").to_string_lossy().to_string();
+        for bad in [abs, "../x".to_string(), "sub/../../x".to_string()] {
+            // The bad path rides with a good one: the batch fails as a whole.
+            let r = run(git_untrack_paths(
+                repo.cwd(),
+                vec!["a.log".into(), bad.clone()],
+            ));
+            assert!(r.is_err(), "{bad:?} should be refused");
+        }
+        assert_eq!(run(git_tracked_ignored(repo.cwd())).unwrap().total, 1);
+    }
+
+    #[test]
+    fn untrack_rejects_a_relative_or_missing_cwd() {
+        assert!(run(git_untrack_paths("relative/dir".into(), vec!["a".into()])).is_err());
+        assert!(run(git_untrack_paths(
+            "/definitely/not/a/gitwand/repo".into(),
+            vec!["a".into()]
+        ))
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untrack_accepts_a_tracked_symlink_pointing_outside_the_repo() {
+        let outside = TempRepo::new(); // just a directory outside `repo`
+        outside.write("target.txt", "t\n");
+        let repo = TempRepo::new();
+        repo.write("keep.txt", "k\n");
+        std::os::unix::fs::symlink(outside.0.join("target.txt"), repo.0.join("link.log")).unwrap();
+        std::os::unix::fs::symlink("/nonexistent/gitwand/dangling", repo.0.join("dangling.log"))
+            .unwrap();
+        repo.commit_all("init");
+        repo.write(".gitignore", "*.log\n");
+        let mut listed = run(git_tracked_ignored(repo.cwd())).unwrap().paths;
+        listed.sort();
+        assert_eq!(listed, vec!["dangling.log", "link.log"]);
+
+        run(git_untrack_paths(repo.cwd(), listed)).unwrap();
+
+        assert_eq!(run(git_tracked_ignored(repo.cwd())).unwrap().total, 0);
+        // The links are still there, the target untouched.
+        assert!(repo
+            .0
+            .join("link.log")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(repo.0.join("dangling.log").symlink_metadata().is_ok());
+        assert_eq!(
+            std::fs::read_to_string(outside.0.join("target.txt")).unwrap(),
+            "t\n"
+        );
+        let staged = repo.git(&["diff", "--cached", "--name-status", "-z"]);
+        assert!(staged.contains("D\0link.log\0"), "{staged:?}");
+        assert!(staged.contains("D\0dangling.log\0"), "{staged:?}");
     }
 
     #[test]

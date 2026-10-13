@@ -92,8 +92,18 @@ function clearDismissed(cwd: string) {
 const activeCwd = ref<string | null>(null);
 const info = ref<TrackedIgnored | null>(null);
 const dismissedSignature = ref<string | null>(null);
-const untracking = ref(false);
 const error = ref<string | null>(null);
+// Repos with a `git rm --cached` in flight. Per repo, so switching away while
+// one runs neither blocks the next repo's button nor leaks the spinner there.
+const untrackingIn = ref<ReadonlySet<string>>(new Set());
+const untracking = computed(() => !!activeCwd.value && untrackingIn.value.has(activeCwd.value));
+
+function setUntracking(cwd: string, on: boolean) {
+  const next = new Set(untrackingIn.value);
+  if (on) next.add(cwd);
+  else next.delete(cwd);
+  untrackingIn.value = next;
+}
 
 let generation = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -105,7 +115,11 @@ const visible = computed(
   () => !!info.value && info.value.total > 0 && signature.value !== dismissedSignature.value,
 );
 
-/** Run the check for `cwd` now (null clears the state). */
+/**
+ * Run the check for `cwd` now (null clears the state). `cwd` becomes the
+ * active repo: callers pass the repo the user is looking at. A response that
+ * lands after a newer check (same repo or another) is dropped.
+ */
 async function check(cwd: string | null): Promise<void> {
   const gen = ++generation;
   if (timer) {
@@ -158,21 +172,27 @@ function dismiss(): void {
 /**
  * Untrack `paths` in the active repo, then re-check. Resolves true on
  * success; on failure `error` carries the message and nothing is changed.
+ *
+ * The repo is captured before the await. If the user has switched repo by the
+ * time git answers, the result belongs to a repo no longer shown: no re-check
+ * (`check(cwd)` would make the old repo active again and show its notice in
+ * the new one) and no error banner. The old repo is checked afresh when it is
+ * reopened.
  */
 async function untrack(paths: string[]): Promise<boolean> {
   const cwd = activeCwd.value;
-  if (!cwd || paths.length === 0 || untracking.value) return false;
-  untracking.value = true;
+  if (!cwd || paths.length === 0 || untrackingIn.value.has(cwd)) return false;
+  setUntracking(cwd, true);
   error.value = null;
   try {
     await gitUntrackPaths(cwd, paths);
-    await check(cwd);
+    if (activeCwd.value === cwd) await check(cwd);
     return true;
   } catch (err: any) {
-    error.value = err?.message ?? String(err);
+    if (activeCwd.value === cwd) error.value = err?.message ?? String(err);
     return false;
   } finally {
-    untracking.value = false;
+    setUntracking(cwd, false);
   }
 }
 
@@ -184,7 +204,7 @@ function reset(): void {
   activeCwd.value = null;
   info.value = null;
   dismissedSignature.value = null;
-  untracking.value = false;
+  untrackingIn.value = new Set();
   error.value = null;
 }
 

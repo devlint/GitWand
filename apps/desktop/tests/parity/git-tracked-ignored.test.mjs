@@ -11,7 +11,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { assertParity } from "./harness.mjs";
@@ -102,18 +103,60 @@ describe("parity: git-tracked-ignored", () => {
     }
   });
 
-  it("refuses a path that escapes the repo on both backends", async () => {
-    const cwd = fixtureTrackedIgnored();
-    const r = runProbe("command-parity", {
-      command: "git_untrack_paths",
-      args: { cwd, paths: ["../outside.txt"] },
-    });
-    expect(r.ok).toBe(false);
-    const res = await dev.fetch("/api/git-untrack-paths", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cwd, paths: ["../outside.txt"] }),
-    });
-    expect(res.ok).toBe(false);
-  });
+  it.each([["../outside.txt"], ["sub/../../outside.txt"], ["/etc/passwd"]])(
+    "refuses %s on both backends",
+    async (bad) => {
+      const cwd = fixtureTrackedIgnored();
+      // Rides with a valid path: the batch is refused as a whole.
+      const paths = ["[x]-star.log", bad];
+      const r = runProbe("command-parity", {
+        command: "git_untrack_paths",
+        args: { cwd, paths },
+      });
+      expect(r.ok).toBe(false);
+      const res = await dev.fetch("/api/git-untrack-paths", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd, paths }),
+      });
+      expect(res.ok).toBe(false);
+      expect(git(cwd, ["diff", "--cached", "--name-only"])).toBe("");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "untracks a tracked symlink pointing outside the repo on both backends",
+    async () => {
+      const outside = mkdtempSync(join(tmpdir(), "gw-parity-outside-"));
+      writeFileSync(join(outside, "target.txt"), "t\n");
+      const build = () => {
+        const cwd = mkTempRepo("gw-parity-tracked-ignored-link-");
+        commitFile(cwd, "keep.txt", "k\n", "add keep", 0);
+        symlinkSync(join(outside, "target.txt"), join(cwd, "link.log"));
+        git(cwd, ["add", "link.log"]);
+        git(cwd, ["commit", "-qm", "add link"]);
+        writeFileSync(join(cwd, ".gitignore"), "*.log\n");
+        return cwd;
+      };
+      const rustRepo = build();
+      const r = runProbe("command-parity", {
+        command: "git_untrack_paths",
+        args: { cwd: rustRepo, paths: ["link.log"] },
+      });
+      expect(r.ok, String(r.error)).toBe(true);
+      const nodeRepo = build();
+      const res = await dev.fetch("/api/git-untrack-paths", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: nodeRepo, paths: ["link.log"] }),
+      });
+      expect(res.ok).toBe(true);
+      const staged = (cwd) => git(cwd, ["diff", "--cached", "--name-status", "-z"]);
+      expect(staged(rustRepo)).toBe("D\0link.log\0");
+      expect(staged(nodeRepo)).toBe(staged(rustRepo));
+      for (const cwd of [rustRepo, nodeRepo]) {
+        expect(lstatSync(join(cwd, "link.log")).isSymbolicLink()).toBe(true);
+      }
+    },
+  );
 });

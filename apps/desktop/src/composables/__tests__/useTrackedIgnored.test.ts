@@ -181,6 +181,131 @@ describe("useTrackedIgnored", () => {
     expect(api.untracking.value).toBe(false);
   });
 
+  /** A promise whose resolution the test controls. */
+  function deferred<T = unknown>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it("untrack finishing after a repo switch leaves the new repo's state alone", async () => {
+    gitTrackedIgnored.mockResolvedValue(info(["a.log"]));
+    await api.check("/repo-a");
+    const rm = deferred<void>();
+    gitUntrackPaths.mockReturnValueOnce(rm.promise);
+    const pending = api.untrack(["a.log"]);
+    expect(api.untracking.value).toBe(true);
+
+    // The user opens B while git is still working on A.
+    gitTrackedIgnored.mockResolvedValue(info(["b.log"]));
+    await api.check("/repo-b");
+    expect(api.untracking.value).toBe(false); // A's spinner is not B's
+    gitTrackedIgnored.mockClear();
+
+    rm.resolve();
+    expect(await pending).toBe(true);
+    expect(gitTrackedIgnored).not.toHaveBeenCalled(); // no check("/repo-a")
+    expect(api.info.value?.paths).toEqual(["b.log"]);
+    expect(api.visible.value).toBe(true);
+
+    // And B is still the active repo: a dismissal lands on B, not A.
+    api.dismiss();
+    expect(localStorage.getItem("gitwand:trackedIgnoredDismissed:/repo-b")).not.toBeNull();
+    expect(localStorage.getItem("gitwand:trackedIgnoredDismissed:/repo-a")).toBeNull();
+  });
+
+  it("untrack failing after a repo switch does not show A's error in B", async () => {
+    gitTrackedIgnored.mockResolvedValue(info(["a.log"]));
+    await api.check("/repo-a");
+    const rm = deferred<void>();
+    gitUntrackPaths.mockReturnValueOnce(rm.promise);
+    const pending = api.untrack(["a.log"]);
+    gitTrackedIgnored.mockResolvedValue(info(["b.log"]));
+    await api.check("/repo-b");
+    rm.reject(new Error("index.lock exists"));
+    expect(await pending).toBe(false);
+    expect(api.error.value).toBeNull();
+    expect(api.info.value?.paths).toEqual(["b.log"]);
+  });
+
+  it("an untrack running in A does not block one in B", async () => {
+    gitTrackedIgnored.mockResolvedValue(info(["a.log"]));
+    await api.check("/repo-a");
+    const rmA = deferred<void>();
+    gitUntrackPaths.mockReturnValueOnce(rmA.promise);
+    const pendingA = api.untrack(["a.log"]);
+    gitTrackedIgnored.mockResolvedValue(info(["b.log"]));
+    await api.check("/repo-b");
+    gitUntrackPaths.mockResolvedValueOnce(undefined);
+    gitTrackedIgnored.mockResolvedValue(info([]));
+    expect(await api.untrack(["b.log"])).toBe(true);
+    expect(gitUntrackPaths).toHaveBeenLastCalledWith("/repo-b", ["b.log"]);
+    rmA.resolve();
+    await pendingA;
+    expect(api.info.value?.total).toBe(0);
+  });
+
+  it("untrack resolving after switching away and back refreshes the repo", async () => {
+    gitTrackedIgnored.mockResolvedValue(info(["a.log"]));
+    await api.check("/repo-a");
+    const rm = deferred<void>();
+    gitUntrackPaths.mockReturnValueOnce(rm.promise);
+    const pending = api.untrack(["a.log"]);
+    gitTrackedIgnored.mockResolvedValue(info(["b.log"]));
+    await api.check("/repo-b");
+    gitTrackedIgnored.mockResolvedValue(info(["a.log"])); // A reopened before git finished
+    await api.check("/repo-a");
+    gitTrackedIgnored.mockResolvedValue(info([]));
+    rm.resolve();
+    await pending;
+    expect(api.info.value?.total).toBe(0);
+  });
+
+  it("a late check for the old repo does not overwrite a newer repo's result", async () => {
+    const slowA = deferred();
+    gitTrackedIgnored.mockReturnValueOnce(slowA.promise);
+    const pendingA = api.check("/repo-a");
+    gitTrackedIgnored.mockResolvedValueOnce(info(["b.log"]));
+    await api.check("/repo-b");
+    slowA.resolve(info(["a1.log", "a2.log"]));
+    await pendingA;
+    expect(api.info.value?.paths).toEqual(["b.log"]);
+    // A dismissal still targets B.
+    api.dismiss();
+    expect(localStorage.getItem("gitwand:trackedIgnoredDismissed:/repo-a")).toBeNull();
+  });
+
+  it("a late failure for the old repo does not clear the newer repo's notice", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const slowA = deferred();
+    gitTrackedIgnored.mockReturnValueOnce(slowA.promise);
+    const pendingA = api.check("/repo-a");
+    gitTrackedIgnored.mockResolvedValueOnce(info(["b.log"]));
+    await api.check("/repo-b");
+    slowA.reject(new Error("boom"));
+    await pendingA;
+    expect(api.visible.value).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("a scheduled check for the old repo is cancelled by a switch", async () => {
+    vi.useFakeTimers();
+    gitTrackedIgnored.mockResolvedValue(info(["a.log"]));
+    await api.check("/repo-a");
+    api.scheduleCheck();
+    gitTrackedIgnored.mockResolvedValue(info(["b.log"]));
+    await api.check("/repo-b");
+    gitTrackedIgnored.mockClear();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(gitTrackedIgnored).not.toHaveBeenCalled();
+    expect(api.info.value?.paths).toEqual(["b.log"]);
+  });
+
   it("scheduleCheck debounces bursts into one backend call", async () => {
     vi.useFakeTimers();
     gitTrackedIgnored.mockResolvedValue(info([]));
