@@ -15,11 +15,11 @@
 //! next to `install_id` (`<data_local_dir>/gitwand/`), because they must be
 //! read before the webview, and so localStorage, exists.
 //!
-//! DEPRECATION: this is a compatibility shim for older distro stacks
-//! (Ubuntu 22.04-era WebKitGTK/Mesa). Recent WebKitGTK (2.54 tested) no longer
-//! aborts without EGL — it falls back on its own. Remove this module, its
-//! commands and its Settings row once 22.04 is no longer a supported target
-//! (the release build host in `.github/workflows/release.yml` moves past it).
+//! DEPRECATION: this is a compatibility shim. Recent WebKitGTK (2.54 tested)
+//! no longer aborts without EGL — it falls back on its own. It is not tied to
+//! Ubuntu 22.04: #135 was reported on Ubuntu 26.04 and #139 on Mint 22, so
+//! dropping 22.04 as a build host does not retire it. Remove this module, its
+//! commands and its Settings row once the EGL abort is no longer reported.
 
 use std::path::{Path, PathBuf};
 
@@ -64,30 +64,47 @@ fn launch_sentinel(dir: &Path) -> PathBuf {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 /// Reads the previous launch's sentinel, records a failed start, and arms the
 /// sentinel for this launch. Returns whether software rendering is on.
-fn begin_launch(dir: &Path) -> bool {
+///
+/// The sentinel holds the PID of the launch that armed it. A sentinel whose
+/// process is still alive belongs to an instance that is still starting (two
+/// quick launches — there is no single-instance guard), not to a failed one.
+fn begin_launch(dir: &Path, pid: u32, is_alive: impl Fn(u32) -> bool) -> bool {
     let marker = software_marker(dir);
     let sentinel = launch_sentinel(dir);
     let _ = std::fs::create_dir_all(dir);
-    if sentinel.exists() && !marker.exists() {
-        eprintln!(
-            "[gitwand] previous launch did not finish starting; \
-             switching to software rendering (Settings → General to undo)"
-        );
-        let _ = std::fs::write(&marker, AUTO_MARKER);
+    if let Ok(content) = std::fs::read_to_string(&sentinel) {
+        let still_starting = content.trim().parse::<u32>().is_ok_and(&is_alive);
+        if !still_starting && !marker.exists() {
+            eprintln!(
+                "[gitwand] previous launch did not finish starting; \
+                 switching to software rendering (Settings → General to undo)"
+            );
+            let _ = std::fs::write(&marker, AUTO_MARKER);
+        }
     }
-    let _ = std::fs::write(&sentinel, b"");
+    let _ = std::fs::write(&sentinel, pid.to_string());
     marker.exists()
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn finish_launch(dir: &Path) {
-    let _ = std::fs::remove_file(launch_sentinel(dir));
+/// Clears the sentinel — only if it is still this launch's: a concurrent
+/// instance may have re-armed it since, and is not done starting yet.
+fn finish_launch(dir: &Path, pid: u32) {
+    let sentinel = launch_sentinel(dir);
+    if std::fs::read_to_string(&sentinel).is_ok_and(|c| c.trim() == pid.to_string()) {
+        let _ = std::fs::remove_file(sentinel);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_alive(pid: u32) -> bool {
+    Path::new("/proc").join(pid.to_string()).exists()
 }
 
 /// Called first thing in `run()`, before the webview exists.
 #[cfg(target_os = "linux")]
 pub(crate) fn prepare_launch() {
-    if !begin_launch(&state_dir()) {
+    if !begin_launch(&state_dir(), std::process::id(), process_alive) {
         return;
     }
     for (key, value) in SOFTWARE_ENV {
@@ -101,7 +118,7 @@ pub(crate) fn prepare_launch() {
 /// launch did not hit the EGL abort.
 pub(crate) fn launch_succeeded() {
     #[cfg(target_os = "linux")]
-    finish_launch(&state_dir());
+    finish_launch(&state_dir(), std::process::id());
 }
 
 #[derive(serde::Serialize)]
@@ -153,12 +170,19 @@ mod tests {
         dir
     }
 
+    const ME: u32 = 1000;
+    const OTHER: u32 = 2000;
+
+    fn dead(_: u32) -> bool {
+        false
+    }
+
     #[test]
     fn clean_launches_stay_on_gpu() {
         let dir = temp_dir("clean");
-        assert!(!begin_launch(&dir));
-        finish_launch(&dir);
-        assert!(!begin_launch(&dir));
+        assert!(!begin_launch(&dir, ME, dead));
+        finish_launch(&dir, ME);
+        assert!(!begin_launch(&dir, ME, dead));
         assert!(!software_marker(&dir).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -166,13 +190,37 @@ mod tests {
     #[test]
     fn failed_launch_switches_next_one_to_software() {
         let dir = temp_dir("failed");
-        assert!(!begin_launch(&dir));
+        assert!(!begin_launch(&dir, OTHER, dead));
         // No finish_launch: the process aborted during startup.
-        assert!(begin_launch(&dir));
+        assert!(begin_launch(&dir, ME, dead));
         assert_eq!(std::fs::read(software_marker(&dir)).unwrap(), AUTO_MARKER);
         // Sticks after a successful software launch.
-        finish_launch(&dir);
-        assert!(begin_launch(&dir));
+        finish_launch(&dir, ME);
+        assert!(begin_launch(&dir, ME, dead));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn concurrent_launch_is_not_a_failure() {
+        let dir = temp_dir("concurrent");
+        // OTHER is still starting when ME launches (double-click).
+        assert!(!begin_launch(&dir, OTHER, dead));
+        assert!(!begin_launch(&dir, ME, |pid| pid == OTHER));
+        assert!(!software_marker(&dir).exists());
+        // OTHER finishing must not clear ME's sentinel, which ME then clears.
+        finish_launch(&dir, OTHER);
+        assert!(launch_sentinel(&dir).exists());
+        finish_launch(&dir, ME);
+        assert!(!launch_sentinel(&dir).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_empty_sentinel_counts_as_failed() {
+        let dir = temp_dir("legacy");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(launch_sentinel(&dir), b"").unwrap();
+        assert!(begin_launch(&dir, ME, |_| true));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -181,8 +229,8 @@ mod tests {
         let dir = temp_dir("user");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(software_marker(&dir), b"").unwrap();
-        std::fs::write(launch_sentinel(&dir), b"").unwrap();
-        assert!(begin_launch(&dir));
+        std::fs::write(launch_sentinel(&dir), OTHER.to_string()).unwrap();
+        assert!(begin_launch(&dir, ME, dead));
         assert_eq!(std::fs::read(software_marker(&dir)).unwrap(), b"");
         let _ = std::fs::remove_dir_all(&dir);
     }
