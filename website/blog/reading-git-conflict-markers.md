@@ -164,7 +164,7 @@ Some patterns cannot be judged without a base, and declare it:
 
 When a hunk has no base section, those patterns are skipped, and the trace says so (`Base (diff3) unavailable: … requires diff3, skipped`). Others, like `same_change` (both sides identical) and `delete_no_change`, work with or without a base — though `delete_no_change` is scored lower without one, because "one side is empty" is weaker evidence than "one side is empty and the other equals the base". Anything that matches nothing lands in `complex`, which is never resolved automatically.
 
-Run the engine on the example above and the difference is concrete. The default-style hunk is classified `complex` and left for a person. The `zdiff3` hunk is classified `non_overlapping` and resolved to:
+Run the engine on the example above and the difference is concrete. The default-style hunk is classified `complex` and left for a person. The `diff3` and `zdiff3` hunks are both classified `non_overlapping` and resolved to:
 
 ```ts
 export const config = {
@@ -176,6 +176,8 @@ export const config = {
 ```
 
 Same conflict, same engine. The only difference is whether Git wrote down the ancestor.
+
+One correction, found while writing this article: up to GitWand 3.12.2, the `diff3` version kept the `region` and `verbose` lines twice. Both sides carry them inside the markers, and the merge treated them as two separate additions. The fix ([#259](https://github.com/devlint/GitWand/pull/259)) takes lines that open or close both sides out of the merge, as `zdiff3` does, and ships in the next release. Until then, `zdiff3` avoids it.
 
 Where the base comes from depends on how you run GitWand:
 
