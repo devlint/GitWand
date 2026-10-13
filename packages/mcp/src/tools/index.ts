@@ -1151,15 +1151,23 @@ async function toolResolvHunkLlm(cwd: string, args: Record<string, unknown>) {
   const candidateContent = candidateLines.join("\n");
 
   // ─── Validation ────────────────────────────────────────────────────────────
-  // Check 1: residual conflict markers
+  // Check 1: residual conflict markers in the LLM's ANSWER only. The rest of
+  // the file may legitimately still contain other, unresolved hunks.
   const RESIDUAL_MARKER_RE = /^(<{7}\s|>{7}\s|\|{7}\s|={7}$)/m;
-  const hasResidualMarkers = RESIDUAL_MARKER_RE.test(candidateContent);
+  const hasResidualMarkers = RESIDUAL_MARKER_RE.test(resolution);
 
-  // Check 2: syntax for JSON/YAML
+  // Check 2: syntax for JSON/YAML. A whole-file parse can only succeed once no
+  // markers remain anywhere in the candidate; otherwise skip it (and say so).
+  const otherHunksRemain = RESIDUAL_MARKER_RE.test(candidateContent);
   let syntaxError: string | null = null;
+  let syntaxCheckSkipped: string | null = null;
   if (!hasResidualMarkers) {
     if (/\.json(c)?$/i.test(file)) {
-      try { JSON.parse(candidateContent); } catch (e: any) { syntaxError = `JSON: ${e.message}`; }
+      if (otherHunksRemain) {
+        syntaxCheckSkipped = "JSON syntax check skipped: other conflict hunks (markers) remain in the file. It runs when the last hunk is resolved.";
+      } else {
+        try { JSON.parse(candidateContent); } catch (e: any) { syntaxError = `JSON: ${e.message}`; }
+      }
     } else if (/\.ya?ml$/i.test(file)) {
       // Simple presence check for YAML — full parse not available without yaml dep
       // (MCP package doesn't bundle yaml, but core does. Check basic structure.)
@@ -1207,6 +1215,7 @@ async function toolResolvHunkLlm(cwd: string, args: Record<string, unknown>) {
         minScore,
         hasResidualMarkers,
         syntaxError,
+        syntaxCheckSkipped,
         remainingConflicts: accepted ? remainingConflicts : null,
         message: accepted
           ? dryRun
