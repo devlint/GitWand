@@ -197,20 +197,33 @@ export function useReviewIntelligence(opts: UseReviewIntelligenceOptions) {
   // ─── AI PR summary (D1) ───────────────────────────────────
   const prSummary = ref<string>("");
   const prSummaryLoading = ref(false);
+  // The host's tab watcher and the headSha watcher below both call
+  // loadSummary on PR open, in the same flush: share one generation per key
+  // rather than paying for two LLM requests.
+  let summaryInFlight: { key: string; promise: Promise<void> } | null = null;
 
-  async function loadSummary(force = false) {
-    if (!settings.value.reviewAiSummary || !ai.isAvailable.value) return;
+  function loadSummary(force = false): Promise<void> {
+    if (!settings.value.reviewAiSummary || !ai.isAvailable.value) return Promise.resolve();
     const pr = opts.selectedPr.value;
     const headSha = opts.prDetail.value?.headSha;
-    if (!pr || !headSha) return;
+    if (!pr || !headSha) return Promise.resolve();
     const key = `${detailKey(opts.cwd.value, pr.number)}@${headSha}`;
     if (!force) {
       const cached = cache.getSummary(key);
       if (cached) {
         prSummary.value = cached;
-        return;
+        return Promise.resolve();
       }
+      if (summaryInFlight?.key === key) return summaryInFlight.promise;
     }
+    const promise = generateSummary(pr.number, key).finally(() => {
+      if (summaryInFlight?.promise === promise) summaryInFlight = null;
+    });
+    summaryInFlight = { key, promise };
+    return promise;
+  }
+
+  async function generateSummary(prNumber: number, key: string) {
     if (!opts.diffIndex.value.length) await opts.loadDiff();
     if (!opts.diffIndex.value.length) return;
     prSummaryLoading.value = true;
@@ -222,7 +235,7 @@ export function useReviewIntelligence(opts: UseReviewIntelligenceOptions) {
         files: opts.diffIndex.value,
         locale: locale.value,
       });
-      if (opts.selectedPr.value?.number !== pr.number) return;
+      if (opts.selectedPr.value?.number !== prNumber) return;
       prSummary.value = text;
       if (text) cache.setSummary(key, text);
     } finally {

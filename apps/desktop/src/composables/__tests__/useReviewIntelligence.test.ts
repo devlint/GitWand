@@ -152,6 +152,36 @@ describe("useReviewIntelligence — dismissal memory applies on a cache hit too 
   });
 });
 
+describe("useReviewIntelligence — AI summary is generated once per PR open", () => {
+  beforeEach(() => {
+    settingsRef.value = { reviewAiPreReview: false, reviewAiConfidenceThreshold: 0, reviewAiMaxFindings: 15, reviewAiSummary: true };
+    localStorage.clear();
+  });
+
+  it("concurrent loadSummary calls for the same PR head share one generation", async () => {
+    // Both the host's tab watcher and the headSha watcher call loadSummary
+    // in the same flush on PR open. Each generation starts by loading the
+    // diff, so the loadDiff count is the number of generations started.
+    const loadDiff = vi.fn(async () => {});
+    const intel = useReviewIntelligence({
+      cwd: ref("/repo"),
+      selectedPr: ref({ number: 7 } as any),
+      prDetail: ref({ headSha: "sha7" } as any),
+      detailTab: ref("info"),
+      loadDiff,
+      diffIndex: ref([]),
+      annotationsByFile: ref({}),
+    });
+
+    await Promise.all([intel.loadSummary(), intel.loadSummary()]);
+    expect(loadDiff).toHaveBeenCalledTimes(1);
+
+    // Once settled, a later call (e.g. after a re-push) starts a new one.
+    await intel.loadSummary();
+    expect(loadDiff).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("computeStaticFlags — regression parity with the pre-E2 aiFlags thresholds", () => {
   const t = (key: string, ...args: Array<string | number>) => {
     let s = key;
