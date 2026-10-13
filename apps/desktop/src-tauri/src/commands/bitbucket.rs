@@ -425,6 +425,8 @@ const BB_PAGE_SIZE: i64 = 50;
 /// and how many leading items of the first page to drop.
 #[derive(Debug, PartialEq, Eq)]
 struct BbPagePlan {
+    /// `pagelen` to send on every request of this plan.
+    page_size: i64,
     first_page: i64,
     last_page: i64,
     skip: usize,
@@ -436,10 +438,19 @@ struct BbPagePlan {
 fn bb_page_plan(offset: i64, limit: i64) -> BbPagePlan {
     let off = offset.max(0);
     let limit = limit.max(1);
+    // Common case: the window is page-aligned, so ask for exactly `limit`
+    // items in one page. Otherwise use the server maximum so the window spans
+    // as few pages as possible.
+    let page_size = if limit <= BB_PAGE_SIZE && off % limit == 0 {
+        limit
+    } else {
+        BB_PAGE_SIZE
+    };
     BbPagePlan {
-        first_page: off / BB_PAGE_SIZE + 1,
-        last_page: (off + limit - 1) / BB_PAGE_SIZE + 1,
-        skip: (off % BB_PAGE_SIZE) as usize,
+        page_size,
+        first_page: off / page_size + 1,
+        last_page: (off + limit - 1) / page_size + 1,
+        skip: (off % page_size) as usize,
     }
 }
 
@@ -492,7 +503,7 @@ pub(crate) async fn bb_list_prs(
             format!(
                 "{}/pullrequests?state=OPEN&state=MERGED&state=DECLINED&pagelen={}&page={}",
                 repo_api(&workspace, &slug),
-                BB_PAGE_SIZE,
+                plan.page_size,
                 page
             )
         } else {
@@ -500,7 +511,7 @@ pub(crate) async fn bb_list_prs(
                 "{}/pullrequests?state={}&pagelen={}&page={}",
                 repo_api(&workspace, &slug),
                 st,
-                BB_PAGE_SIZE,
+                plan.page_size,
                 page
             )
         };
@@ -509,7 +520,7 @@ pub(crate) async fn bb_list_prs(
             .get("values")
             .and_then(|v| v.as_array())
             .ok_or_else(|| "Unexpected Bitbucket response shape (missing 'values')".to_string())?;
-        let short = (arr.len() as i64) < BB_PAGE_SIZE;
+        let short = (arr.len() as i64) < plan.page_size;
         values.extend(arr.iter().cloned());
         if short {
             break; // last page reached
@@ -1559,16 +1570,16 @@ mod bb_auto_merge_tests {
 mod bb_page_plan_tests {
     use super::{bb_page_plan, bb_select_window, BbPagePlan, BB_PAGE_SIZE};
 
-    /// Simulate the server: items 0..total, fixed pages of BB_PAGE_SIZE.
+    /// Simulate the server: items 0..total, fixed pages of the plan's page size.
     fn fetch(offset: i64, limit: i64, total: i64) -> Vec<i64> {
         let plan = bb_page_plan(offset, limit);
         let mut got = Vec::new();
         for page in plan.first_page..=plan.last_page {
-            let start = (page - 1) * BB_PAGE_SIZE;
-            let end = (start + BB_PAGE_SIZE).min(total);
+            let start = (page - 1) * plan.page_size;
+            let end = (start + plan.page_size).min(total);
             let n = (end - start).max(0);
             got.extend((start..start + n).map(|i| serde_json::json!(i)));
-            if n < BB_PAGE_SIZE {
+            if n < plan.page_size {
                 break;
             }
         }
@@ -1587,6 +1598,7 @@ mod bb_page_plan_tests {
         assert_eq!(
             bb_page_plan(0, 10),
             BbPagePlan {
+                page_size: 10,
                 first_page: 1,
                 last_page: 1,
                 skip: 0
@@ -1610,7 +1622,10 @@ mod bb_page_plan_tests {
     #[test]
     fn window_crossing_two_pages() {
         let plan = bb_page_plan(45, 10);
-        assert_eq!((plan.first_page, plan.last_page, plan.skip), (1, 2, 45));
+        assert_eq!(
+            (plan.page_size, plan.first_page, plan.last_page, plan.skip),
+            (50, 1, 2, 45)
+        );
         assert_eq!(fetch(45, 10, 500), (45..55).collect::<Vec<_>>());
     }
 
@@ -1638,6 +1653,22 @@ mod bb_page_plan_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn aligned_windows_request_exactly_limit_in_one_page() {
+        for (o, l) in [(0, 10), (10, 10), (30, 10), (0, 50), (50, 50), (75, 25)] {
+            let plan = bb_page_plan(o, l);
+            assert_eq!(plan.page_size, l, "off {o} limit {l}");
+            assert_eq!((plan.first_page, plan.last_page), (o / l + 1, o / l + 1));
+            assert_eq!(plan.skip, 0);
+        }
+    }
+
+    #[test]
+    fn unaligned_or_oversized_windows_use_the_server_maximum() {
+        assert_eq!(bb_page_plan(25, 10).page_size, BB_PAGE_SIZE);
+        assert_eq!(bb_page_plan(0, 120).page_size, BB_PAGE_SIZE);
     }
 
     #[test]
