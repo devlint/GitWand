@@ -1459,12 +1459,6 @@ function pruneSnapshots(cwd, maxAgeDays, maxCount) {
 }
 
 /**
- * Mirror of `snapshot_before` in `src-tauri/src/commands/ops.rs`: capture a
- * restorable point before a destructive route runs. Best-effort, so a
- * snapshot failure never blocks the operation the user asked for. Only an
- * explicit `false` opts out; `undefined` means "no opinion" and snapshots.
- */
-/**
  * Paths named when `reset --keep` refused, or null when the failure is
  * something else. Mirrors `reset_keep_blocked_files` in commands/ops.rs.
  */
@@ -1487,6 +1481,12 @@ function resetKeepBlockedFiles(stderr) {
   return blocked ? files : null;
 }
 
+/**
+ * Mirror of `snapshot_before` in `src-tauri/src/commands/ops.rs`: capture a
+ * restorable point before a destructive route runs. Best-effort, so a
+ * snapshot failure never blocks the operation the user asked for. Only an
+ * explicit `false` opts out; `undefined` means "no opinion" and snapshots.
+ */
 function snapshotBefore(cwd, enabled, kind, label) {
   if (enabled === false) return null;
   try {
@@ -7931,8 +7931,9 @@ async function handleRequest(req, res) {
         execFileSync(GIT, ["reset", flag, sha], {
           cwd: resolve(cwd),
           stdio: ["ignore", "pipe", "pipe"],
-          // resetKeepBlockedFiles matches git's English wording; pin the locale.
-          env: { ...process.env, LC_ALL: "C", LANGUAGE: "" },
+          // resetKeepBlockedFiles matches git's English wording; pin the
+          // locale for --keep only, other modes keep translated messages.
+          env: flag === "--keep" ? { ...process.env, LC_ALL: "C", LANGUAGE: "" } : process.env,
         });
         return jsonResponse(req, res, { ok: true, snapshot });
       } catch (err) {

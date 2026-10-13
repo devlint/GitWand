@@ -1698,12 +1698,14 @@ pub(crate) async fn git_reset_to_commit(
         &format!("Reset {} to {}", mode, sha),
     );
     let _t0 = Instant::now();
-    let output = git_cmd()
-        .args(["reset", flag, &sha])
-        // The stderr parser matches git's English wording, so pin the locale.
-        .env("LC_ALL", "C")
-        .env("LANGUAGE", "")
-        .current_dir(&cwd)
+    let mut cmd = git_cmd();
+    cmd.args(["reset", flag, &sha]).current_dir(&cwd);
+    if flag == "--keep" {
+        // The --keep stderr parser matches git's English wording, so pin the
+        // locale there only; other modes keep the user's translated messages.
+        cmd.env("LC_ALL", "C").env("LANGUAGE", "");
+    }
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to reset: {}", e))?;
     record_cmd(
