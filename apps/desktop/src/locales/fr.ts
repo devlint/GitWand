@@ -413,7 +413,7 @@ const fr: Locale = {
     compareEmpty: "Sélectionnez deux commits pour comparer",
     compareTruncated: "Diff tronqué ({0}) : seul le début est affiché",
     compareFailed: "Impossible de comparer ces deux commits.",
-    compareBeyondHistory: "L'un de ces commits est plus ancien que l'historique chargé : le nom du fichier à ce moment-là est inconnu, son nom actuel a été utilisé. S'il a été renommé depuis, il est introuvable sous ce nom ou apparaît entièrement ajouté ou supprimé.",
+    compareNameUnknown: "Le nom du fichier à l'un de ces commits est inconnu (le commit est sans doute plus ancien que l'historique chargé) : son nom actuel a été utilisé. S'il a été renommé depuis, il est introuvable sous ce nom ou apparaît entièrement ajouté ou supprimé.",
     compareGoLog: "Aller au log",
     stageHunk: "Indexer ce bloc",
     stageSelected: "Indexer ({0})",

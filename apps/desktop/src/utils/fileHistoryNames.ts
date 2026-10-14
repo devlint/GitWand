@@ -23,7 +23,7 @@ function ownName(hash: string, history: readonly FileLogEntry[], extra: Lists): 
  *
  * A commit outside the loaded history (a line-range result older than what
  * was loaded) is not guessed at: `undefined`, and the backend uses the
- * current path. `isBeyondHistory` tells the caller so it can explain a
+ * current path. `isNameUnknown` tells the caller so it can explain a
  * "not found" that follows.
  */
 export function nameAtCommit(
@@ -48,13 +48,14 @@ export function nameAtCommit(
 
 /**
  * True when nothing loaded says what the file was called at `hash`: no entry
- * names it and it is not part of the loaded history. The compare then runs
- * with the current path, which a rename further back would not match.
+ * names it, and it is either outside the loaded history or an unnamed entry
+ * with no named neighbour. The compare then runs with the current path,
+ * which a rename further back would not match.
  */
-export function isBeyondHistory(
+export function isNameUnknown(
   hash: string,
   history: readonly FileLogEntry[],
   extra: Lists = [],
 ): boolean {
-  return ownName(hash, history, extra) === undefined && !history.some((e) => e.hashFull === hash);
+  return nameAtCommit(hash, history, extra) === undefined;
 }

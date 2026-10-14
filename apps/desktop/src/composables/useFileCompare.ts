@@ -1,6 +1,6 @@
 import { ref, type Ref } from "vue";
 import type { FileLogEntry, GitDiff } from "../utils/backend";
-import { isBeyondHistory, nameAtCommit } from "../utils/fileHistoryNames";
+import { isNameUnknown, nameAtCommit } from "../utils/fileHistoryNames";
 
 /** What a compare needs from the backend; injected so the logic is testable. */
 export type FileDiffLoader = (
@@ -12,7 +12,7 @@ export type FileDiffLoader = (
   toPath?: string,
 ) => Promise<GitDiff>;
 
-export interface UseFileCompareOptions {
+interface UseFileCompareOptions {
   cwd: Readonly<Ref<string | undefined | null>>;
   filePath: Readonly<Ref<string>>;
   /** The loaded `--follow` history, newest first. */
@@ -27,9 +27,9 @@ export interface UseFileCompareOptions {
  * the diff, and an error scoped to this tab (a failed compare must not take
  * down blame or the log).
  *
- * `beyondHistory` is set when a selected commit lies outside the loaded
- * history: its name there is unknown, so the backend was given the current
- * path, which a rename further back would not match. The view uses it to
+ * `nameUnknown` is set when nothing loaded names the file at a selected
+ * commit (typically one outside the loaded history): the backend was given
+ * the current path, which a rename further back would not match. The view uses it to
  * explain a "not found" — or an all-added / all-deleted diff — rather than
  * presenting either as the truth.
  */
@@ -39,7 +39,7 @@ export function useFileCompare(opts: UseFileCompareOptions) {
   const diff = ref<GitDiff | null>(null);
   const error = ref<string | null>(null);
   const loading = ref(false);
-  const beyondHistory = ref(false);
+  const nameUnknown = ref(false);
   // A reply for a selection (or file) that has since changed is dropped.
   let requestId = 0;
 
@@ -47,7 +47,7 @@ export function useFileCompare(opts: UseFileCompareOptions) {
     requestId++;
     diff.value = null;
     error.value = null;
-    beyondHistory.value = false;
+    nameUnknown.value = false;
     loading.value = false;
   }
 
@@ -65,7 +65,7 @@ export function useFileCompare(opts: UseFileCompareOptions) {
     const history = opts.history.value;
     const extra = opts.extra.value;
     const [a, b] = [from.value, to.value];
-    beyondHistory.value = isBeyondHistory(a, history, extra) || isBeyondHistory(b, history, extra);
+    nameUnknown.value = isNameUnknown(a, history, extra) || isNameUnknown(b, history, extra);
     loading.value = true;
     try {
       const result = await opts.getDiff(
@@ -85,22 +85,19 @@ export function useFileCompare(opts: UseFileCompareOptions) {
   }
 
   /** First click picks "from", second picks "to" and loads, a third starts over. */
-  function select(hash: string): boolean {
+  function select(hash: string) {
     if (!from.value) {
       from.value = hash;
       clearResult();
-      return false;
-    }
-    if (!to.value) {
+    } else if (!to.value) {
       to.value = hash;
       void load();
-      return true;
+    } else {
+      from.value = hash;
+      to.value = null;
+      clearResult();
     }
-    from.value = hash;
-    to.value = null;
-    clearResult();
-    return false;
   }
 
-  return { from, to, diff, error, loading, beyondHistory, select, load, reset };
+  return { from, to, diff, error, loading, nameUnknown, select, reset };
 }

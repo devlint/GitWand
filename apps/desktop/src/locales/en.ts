@@ -420,7 +420,7 @@ const en = {
     compareEmpty: "Select two commits to compare",
     compareTruncated: "Diff truncated ({0}): only the beginning is shown",
     compareFailed: "Could not compare these two commits.",
-    compareBeyondHistory: "One of these commits is older than the loaded history, so the file's name there is unknown and its current name was used. If the file was renamed since, it is not found under that name or shows as entirely added or deleted.",
+    compareNameUnknown: "The file's name at one of these commits is unknown (the commit is likely older than the loaded history), so its current name was used. If the file was renamed since, it is not found under that name or shows as entirely added or deleted.",
     compareGoLog: "Go to log",
     stageHunk: "Stage hunk",
     stageSelected: "Stage ({0})",

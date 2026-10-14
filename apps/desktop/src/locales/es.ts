@@ -408,7 +408,7 @@ const es: Locale = {
     compareEmpty: "Selecciona dos commits para comparar",
     compareTruncated: "Diff truncado ({0}): solo se muestra el principio",
     compareFailed: "No se pudieron comparar estos dos commits.",
-    compareBeyondHistory: "Uno de estos commits es anterior al historial cargado: se desconoce el nombre del archivo en ese momento y se usó su nombre actual. Si el archivo se renombró desde entonces, no se encuentra con ese nombre o aparece como totalmente añadido o eliminado.",
+    compareNameUnknown: "Se desconoce el nombre del archivo en uno de estos commits (probablemente es anterior al historial cargado), así que se usó su nombre actual. Si el archivo se renombró desde entonces, no se encuentra con ese nombre o aparece como totalmente añadido o eliminado.",
     compareGoLog: "Ir al historial",
     stageHunk: "Preparar hunk",
     stageSelected: "Preparar ({0})",

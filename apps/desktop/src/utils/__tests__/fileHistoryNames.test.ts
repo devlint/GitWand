@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FileLogEntry } from "../backend";
-import { isBeyondHistory, nameAtCommit } from "../fileHistoryNames";
+import { isNameUnknown, nameAtCommit } from "../fileHistoryNames";
 
 const e = (hashFull: string, path?: string): FileLogEntry => ({
   ...(path !== undefined ? { path } : {}),
@@ -49,14 +49,18 @@ describe("nameAtCommit", () => {
   });
 });
 
-describe("isBeyondHistory", () => {
+describe("isNameUnknown", () => {
   it("is false for anything the loaded history or a named result covers", () => {
-    expect(isBeyondHistory("merge", history)).toBe(false);
-    expect(isBeyondHistory("a1", history)).toBe(false);
-    expect(isBeyondHistory("p", history, [[e("p", "older.txt")]])).toBe(false);
+    expect(isNameUnknown("merge", history)).toBe(false);
+    expect(isNameUnknown("a1", history)).toBe(false);
+    expect(isNameUnknown("p", history, [[e("p", "older.txt")]])).toBe(false);
   });
 
   it("is true for an unnamed commit outside the loaded history", () => {
-    expect(isBeyondHistory("r-ancient", history, [[e("r-ancient")]])).toBe(true);
+    expect(isNameUnknown("r-ancient", history, [[e("r-ancient")]])).toBe(true);
+  });
+
+  it("is true for an unnamed commit in the history when no neighbour is named", () => {
+    expect(isNameUnknown("m", [e("m"), e("m2")])).toBe(true);
   });
 });

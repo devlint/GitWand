@@ -412,7 +412,7 @@ const zhCN: Locale = {
     compareEmpty: "选择两个提交以进行比较",
     compareTruncated: "差异已截断（{0}）：仅显示开头部分",
     compareFailed: "无法比较这两个提交。",
-    compareBeyondHistory: "其中一个提交早于已加载的历史记录，因此无法得知文件当时的名称，已使用其当前名称。如果文件之后被重命名，则会找不到该名称，或显示为整体新增或删除。",
+    compareNameUnknown: "无法得知文件在其中一个提交时的名称（该提交可能早于已加载的历史记录），因此使用了其当前名称。如果文件之后被重命名，则会找不到该名称，或显示为整体新增或删除。",
     compareGoLog: "前往日志",
     stageHunk: "暂存此段",
     stageSelected: "暂存 ({0})",

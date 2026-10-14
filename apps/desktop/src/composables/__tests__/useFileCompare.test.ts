@@ -51,7 +51,7 @@ describe("useFileCompare", () => {
     await tick();
     expect(c.diff.value?.path).toBe("new.txt");
     expect(c.error.value).toBeNull();
-    expect(c.beyondHistory.value).toBe(false);
+    expect(c.nameUnknown.value).toBe(false);
   });
 
   it("keeps a failure in its own error, cleared by the next selection", async () => {
@@ -72,7 +72,7 @@ describe("useFileCompare", () => {
     c.select("ancient");
     c.select("b");
     expect(loader.calls[0]![4]).toBeUndefined();
-    expect(c.beyondHistory.value).toBe(true);
+    expect(c.nameUnknown.value).toBe(true);
   });
 
   it("reset clears the selection and drops a reply still in flight", async () => {

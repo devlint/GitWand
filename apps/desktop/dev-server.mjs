@@ -4948,7 +4948,7 @@ async function handleRequest(req, res) {
         const out = spawnSync(GIT, [
           "-c", "diff.relative=false", "--literal-pathspecs", "log", "--follow", "--name-only", "-z", "-n", String(count),
           FILE_LOG_NAMED_FORMAT, "--", filePath,
-        ], { cwd: resolvedCwd, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+        ], { cwd: resolvedCwd, encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 }); // as git-author-line-stats: Rust has no cap
         // Same failure as the Rust command, never an empty history.
         if (out.error) return jsonResponse(req, res, { error: `git log failed: ${out.error.message}` }, 500);
         if (out.status !== 0) return jsonResponse(req, res, { error: `git log failed: ${out.stderr || ""}` }, 500);
@@ -4970,7 +4970,7 @@ async function handleRequest(req, res) {
         const out = spawnSync(GIT, [
           "-c", "diff.relative=false", "--literal-pathspecs", "log", "--follow", "--name-only", "-z", mode, search,
           FILE_LOG_NAMED_FORMAT, "--", filePath,
-        ], { cwd: resolve(cwd), encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+        ], { cwd: resolve(cwd), encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 });
         // Same failure as the Rust command, never an empty history.
         if (out.error) return jsonResponse(req, res, { error: `git log pickaxe failed: ${out.error.message}` }, 500);
         if (out.status !== 0) return jsonResponse(req, res, { error: `git log pickaxe failed: ${out.stderr || ""}` }, 500);
