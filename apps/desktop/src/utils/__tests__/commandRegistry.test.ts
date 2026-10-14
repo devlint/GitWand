@@ -17,6 +17,7 @@ import { COMMAND_REGISTRY } from "../commandRegistry";
 import {
   findInvokedCommands,
   findDevServerRoutes,
+  findRegisteredCommands,
 } from "../commandRegistryParse";
 
 const root = resolve(__dirname, "../../..");
@@ -58,6 +59,22 @@ describe("command registry", () => {
       `These commands are invoked but absent from commandRegistry.ts. Add an ` +
         `entry naming the dev-server route, or saying why the command cannot ` +
         `have one: ${missing.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("invokes only commands Rust registers in generate_handler!", () => {
+    // A route in dev-server.mjs is not a Rust command: `git_file_diff` had one,
+    // so `dev:web` worked while the desktop app's file-history compare failed
+    // on every call, because no `#[tauri::command]` of that name existed.
+    // No allowlist: every name the wrappers invoke is a command of ours (plugin
+    // commands go through their own JS APIs, not `tauriInvoke`).
+    const registered = new Set(findRegisteredCommands(read("src-tauri/src/lib.rs")));
+    const unregistered = invoked.filter((c) => !registered.has(c));
+    expect(
+      unregistered,
+      `These commands are invoked by the frontend but absent from ` +
+        `tauri::generate_handler! in src-tauri/src/lib.rs, so they fail in the ` +
+        `desktop app whatever dev:web says: ${unregistered.join(", ")}`,
     ).toEqual([]);
   });
 

@@ -4150,13 +4150,17 @@ async function handleRequest(req, res) {
       const fromHash = url.searchParams.get("from");
       const toHash = url.searchParams.get("to");
       if (!cwd || !filePath || !fromHash || !toHash) return jsonResponse(req, res, { error: "Missing params" }, 400);
+      // Mirrors `git_file_diff` (src-tauri/src/commands/read.rs): a revision
+      // starting with `-` would be read by git as an option.
+      if (fromHash.startsWith("-") || toHash.startsWith("-")) {
+        return jsonResponse(req, res, { error: "Invalid revision" }, 400);
+      }
       try {
         const resolvedCwd = resolve(cwd);
-        // Stream via spawn — explicit 10 MB cap can still be exceeded on
-        // large file rewrites between two distant commits.
-        const stdout = await gitSpawn(
-          ["diff", fromHash, toHash, "--", filePath],
-          resolvedCwd,
+        // Stream via spawn, then cap like the Rust side: a whole-file rewrite
+        // between two distant commits can be large.
+        const { text: stdout, truncatedFromBytes } = truncateDiffOutput(
+          await gitSpawnBytes(["diff", fromHash, toHash, "--", filePath], resolvedCwd),
         );
 
         const hunks = [];
@@ -4202,13 +4206,14 @@ async function handleRequest(req, res) {
         }
         if (currentHunk) hunks.push(currentHunk);
 
-        return jsonResponse(req, res, { path: filePath, hunks });
+        const body = { path: filePath, hunks };
+        if (truncatedFromBytes !== undefined) body.truncatedFromBytes = truncatedFromBytes;
+        return jsonResponse(req, res, body);
       } catch (err) {
-        // Empty diff if identical
-        if (err.status === 0 || (err.stdout && err.stdout.trim() === "")) {
-          return jsonResponse(req, res, { path: filePath, hunks: [] });
-        }
-        return jsonResponse(req, res, { path: filePath, hunks: [] });
+        // Identical revisions exit 0 with no output and never land here. A
+        // failure is a revision git cannot resolve: report it, as the Rust
+        // command does, rather than an empty diff that reads as "no changes".
+        return jsonResponse(req, res, { error: err.message }, 500);
       }
     }
 

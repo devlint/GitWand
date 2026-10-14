@@ -81,6 +81,43 @@ export function findDevServerRoutes(source: string): string[] {
 }
 
 /**
+ * The command names registered in `tauri::generate_handler![…]` (src-tauri's
+ * lib.rs), last path segment only: `commands::read::git_log` → `git_log`,
+ * which is the name `invoke()` resolves.
+ *
+ * Comments are dropped first, so a commented-out entry does not count as
+ * registered. An attribute (`#[cfg(…)] commands::x::y,`) is skipped and its
+ * command still counted: it is registered in the builds the attribute allows,
+ * and the guard is about names, not features. Returns `[]` when no macro is
+ * found; the caller's floor assertion is what notices that.
+ */
+export function findRegisteredCommands(libRs: string): string[] {
+  const noComments = libRs
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/[^\n]*/g, "");
+  const marker = "generate_handler![";
+  const start = noComments.indexOf(marker);
+  if (start === -1) return [];
+  let depth = 1;
+  let end = start + marker.length;
+  for (; end < noComments.length && depth > 0; end++) {
+    if (noComments[end] === "[") depth++;
+    else if (noComments[end] === "]") depth--;
+  }
+  const body = noComments
+    .slice(start + marker.length, end - 1)
+    .replace(/#\[[^\]]*\]/g, "");
+  const names = new Set<string>();
+  for (const entry of body.split(",")) {
+    const path = entry.trim();
+    if (!path) continue;
+    const name = path.split("::").pop()!.trim();
+    if (/^[a-z_][a-z0-9_]*$/.test(name)) names.add(name);
+  }
+  return [...names].sort();
+}
+
+/**
  * The `{ … }` block opened by the first brace at or after `from`, by brace
  * counting. Not a JS parser: a brace inside a string or comment would throw
  * the count off. dev-server.mjs's dispatcher bodies have balanced braces in

@@ -10,6 +10,7 @@
 //!   - `git_show` — multi-file diff for a single commit.
 //!   - `git_file_log` / `git_file_log_pickaxe` / `git_file_log_range` —
 //!     per-file history with --follow + pickaxe + -L line ranges.
+//!   - `git_file_diff` — one file's diff between two commits (history compare).
 //!   - `git_blame` — porcelain blame, capped at 10 000 entries.
 //!   - `preview_merge` — Phase 8.1 dry-run merge using `git merge-file`.
 //!   - `preview_rebase` / `preview_cherry_pick` — v2.20.0 Conflict Predictor
@@ -1511,6 +1512,73 @@ pub(crate) async fn git_file_log_range(
     Ok(parse_file_log_output(&String::from_utf8_lossy(
         &output.stdout,
     )))
+}
+
+// ─── File diff between two commits (time-travel compare) ─────
+
+/// A revision handed to git as a positional argument. Anything starting with
+/// `-` would be read as an option, so it is refused rather than passed on.
+fn validate_revision(name: &str, rev: &str) -> Result<(), String> {
+    if rev.trim().is_empty() {
+        return Err(format!("{} must not be empty", name));
+    }
+    if rev.starts_with('-') {
+        return Err(format!("invalid {}: {}", name, rev));
+    }
+    Ok(())
+}
+
+/// Diff of one file between two commits, for the "Compare" tab of the file
+/// history viewer. Mirrors `/api/git-file-diff` in dev-server.mjs: same
+/// `git diff <from> <to> -- <path>` invocation, same `{ path, hunks }` shape.
+///
+/// A file absent from `from_hash` (it was added later) comes back as a single
+/// all-addition hunk, absent from `to_hash` as an all-deletion one; that is
+/// git's own output, not a special case here. Identical revisions give no
+/// hunks. A revision git cannot resolve is an error, not an empty diff, so the
+/// viewer does not claim "no differences" for a comparison that never ran.
+#[tauri::command]
+pub(crate) async fn git_file_diff(
+    cwd: String,
+    path: String,
+    from_hash: String,
+    to_hash: String,
+) -> Result<GitDiff, String> {
+    validate_revision("fromHash", &from_hash)?;
+    validate_revision("toHash", &to_hash)?;
+    // The file may not exist in the working tree any more (deleted or renamed
+    // since); `safe_repo_path` accepts a missing path as long as it would stay
+    // inside the repo. git keeps getting `path` as given, after `--`.
+    safe_repo_path(&cwd, &path)?;
+    let _repo = repo_lock::read(&cwd);
+    let output = git_cmd()
+        .args(["diff", &from_hash, &to_hash, "--", &path])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git diff: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git diff failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    // Two distant commits can differ by a whole-file rewrite: same cap as the
+    // working-tree `git_diff`, so a huge diff does not stream over IPC whole.
+    let (stdout_slice, truncated_from_bytes) = truncate_diff_output(&output.stdout);
+    let stdout = String::from_utf8_lossy(stdout_slice);
+    let (hunks, _status) = parse_diff_hunks(&stdout);
+
+    Ok(GitDiff {
+        path,
+        hunks,
+        status: None,
+        old_path: None,
+        truncated_from_bytes,
+        is_directory: None,
+        new_files: None,
+        nested_repo: None,
+    })
 }
 
 /// Run `git blame --porcelain` on a file.
@@ -3914,5 +3982,254 @@ mod status_no_optional_locks_tests {
             "premise broken: a plain `git status` no longer refreshes the index \
              stat cache, so --no-optional-locks is no longer what prevents it"
         );
+    }
+}
+
+/// `git_file_diff`, the file history viewer's compare tab: the frontend
+/// invoked it for months while it did not exist on the Rust side, so the
+/// desktop app's compare always failed and only `dev:web` worked.
+#[cfg(test)]
+mod file_diff_tests {
+    use super::*;
+    use crate::git::cmd::git_binary;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    impl TempRepo {
+        fn new() -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "gitwand-file-diff-test-{}-{}-{}",
+                std::process::id(),
+                n,
+                nanos
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo {
+                path: dir.canonicalize().unwrap(),
+            };
+            repo.git(&["init", "-q", "-b", "main"]);
+            repo.git(&["config", "user.name", "Test"]);
+            repo.git(&["config", "user.email", "test@example.com"]);
+            repo.git(&["config", "commit.gpgsign", "false"]);
+            repo
+        }
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
+        fn git(&self, args: &[&str]) -> String {
+            let out = Command::new(git_binary())
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+        /// Write `rel` (or delete it when `content` is None), commit, return the hash.
+        fn commit(&self, rel: &str, content: Option<&str>, msg: &str) -> String {
+            let p = self.path.join(rel);
+            match content {
+                Some(c) => {
+                    if let Some(parent) = p.parent() {
+                        std::fs::create_dir_all(parent).unwrap();
+                    }
+                    std::fs::write(&p, c).unwrap();
+                }
+                None => std::fs::remove_file(&p).unwrap(),
+            }
+            self.git(&["add", "-A"]);
+            self.git(&["commit", "-q", "-m", msg]);
+            self.git(&["rev-parse", "HEAD"])
+        }
+    }
+
+    fn diff(repo: &TempRepo, path: &str, from: &str, to: &str) -> Result<GitDiff, String> {
+        tauri::async_runtime::block_on(git_file_diff(
+            repo.cwd(),
+            path.to_string(),
+            from.to_string(),
+            to.to_string(),
+        ))
+    }
+
+    type Line = (String, String, Option<i32>, Option<i32>);
+
+    /// (type, content, old_line_no, new_line_no) for every line of every hunk.
+    fn lines(d: &GitDiff) -> Vec<Line> {
+        d.hunks
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .map(|l| {
+                (
+                    l.r#type.clone(),
+                    l.content.clone(),
+                    l.old_line_no,
+                    l.new_line_no,
+                )
+            })
+            .collect()
+    }
+
+    fn line(t: &str, c: &str, old: Option<i32>, new: Option<i32>) -> Line {
+        (t.to_string(), c.to_string(), old, new)
+    }
+
+    #[test]
+    fn diffs_one_file_between_two_commits_with_line_numbers() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("one\ntwo\n\nthree\n"), "a");
+        repo.commit("other.txt", Some("noise\n"), "unrelated");
+        let b = repo.commit("f.txt", Some("one\nTWO\n\nthree\n"), "b");
+
+        let d = diff(&repo, "f.txt", &a, &b).unwrap();
+        assert_eq!(d.path, "f.txt");
+        assert_eq!(d.hunks.len(), 1);
+        let h = &d.hunks[0];
+        assert_eq!(
+            (h.old_start, h.old_count, h.new_start, h.new_count),
+            (1, 4, 1, 4)
+        );
+        // The blank source line is a real context line (" "), and nothing else
+        // is: no phantom context line from the output's trailing newline.
+        assert_eq!(
+            lines(&d),
+            vec![
+                line("context", "one", Some(1), Some(1)),
+                line("delete", "two", Some(2), None),
+                line("add", "TWO", None, Some(2)),
+                line("context", "", Some(3), Some(3)),
+                line("context", "three", Some(4), Some(4)),
+            ]
+        );
+        assert!(d.truncated_from_bytes.is_none());
+        assert!(d.status.is_none());
+    }
+
+    #[test]
+    fn only_the_requested_file_is_diffed() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        let b = repo.commit("other.txt", Some("changed\n"), "b");
+        let d = diff(&repo, "f.txt", &a, &b).unwrap();
+        assert!(d.hunks.is_empty(), "f.txt did not change between a and b");
+    }
+
+    #[test]
+    fn identical_revisions_give_no_hunks() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        let d = diff(&repo, "f.txt", &a, &a).unwrap();
+        assert!(d.hunks.is_empty());
+    }
+
+    #[test]
+    fn file_absent_at_the_older_revision_is_all_additions() {
+        let repo = TempRepo::new();
+        let root = repo.commit("seed.txt", Some("seed\n"), "root");
+        let b = repo.commit("f.txt", Some("l1\nl2\n"), "add f");
+        let d = diff(&repo, "f.txt", &root, &b).unwrap();
+        assert_eq!(
+            lines(&d),
+            vec![
+                line("add", "l1", None, Some(1)),
+                line("add", "l2", None, Some(2)),
+            ]
+        );
+        assert_eq!((d.hunks[0].old_start, d.hunks[0].old_count), (0, 0));
+    }
+
+    #[test]
+    fn file_deleted_since_and_missing_from_the_working_tree_still_diffs() {
+        let repo = TempRepo::new();
+        let a = repo.commit("gone/f.txt", Some("bye\n"), "add");
+        let b = repo.commit("gone/f.txt", None, "delete");
+        // Its whole directory is gone too, so the path resolves through no
+        // existing component below the repo root.
+        std::fs::remove_dir(repo.path.join("gone")).unwrap();
+        let d = diff(&repo, "gone/f.txt", &a, &b).unwrap();
+        assert_eq!(lines(&d), vec![line("delete", "bye", Some(1), None)]);
+    }
+
+    #[test]
+    fn accepts_short_hashes_and_refs() {
+        let repo = TempRepo::new();
+        repo.commit("f.txt", Some("1\n"), "a");
+        repo.commit("f.txt", Some("2\n"), "b");
+        let short = repo.git(&["rev-parse", "--short", "HEAD~1"]);
+        let d = diff(&repo, "f.txt", &short, "HEAD").unwrap();
+        assert_eq!(d.hunks.len(), 1);
+    }
+
+    #[test]
+    fn refuses_a_revision_that_git_would_read_as_an_option() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        for (from, to) in [("--output=/tmp/pwn", a.as_str()), (a.as_str(), "-R")] {
+            let err = diff(&repo, "f.txt", from, to).err().expect("refused");
+            assert!(err.contains("invalid"), "{err}");
+        }
+        assert!(diff(&repo, "f.txt", "", &a)
+            .err()
+            .expect("refused")
+            .contains("empty"));
+    }
+
+    #[test]
+    fn refuses_a_path_outside_the_repo() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        assert!(diff(&repo, "../escape.txt", &a, &a).is_err());
+    }
+
+    #[test]
+    fn an_unknown_revision_is_an_error_not_an_empty_diff() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        let err = diff(
+            &repo,
+            "f.txt",
+            &a,
+            "0000000000000000000000000000000000000bad",
+        )
+        .err()
+        .expect("refused");
+        assert!(err.contains("git diff failed"), "{err}");
+    }
+
+    #[test]
+    fn serializes_to_the_shape_the_frontend_wrapper_reads() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("a\n"), "a");
+        let b = repo.commit("f.txt", Some("b\n"), "b");
+        let v = serde_json::to_value(diff(&repo, "f.txt", &a, &b).unwrap()).unwrap();
+        let mut keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, vec!["hunks", "path"]);
+        assert_eq!(v["hunks"][0]["old_start"], 1);
+        let first = &v["hunks"][0]["lines"][0];
+        assert_eq!(first["type"], "delete");
+        assert_eq!(first["old_line_no"], 1);
+        assert!(first["new_line_no"].is_null());
     }
 }
