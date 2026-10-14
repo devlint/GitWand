@@ -4945,4 +4945,62 @@ mod file_diff_tests {
         assert_eq!(first["old_line_no"], 1);
         assert!(first["new_line_no"].is_null());
     }
+
+    // ── Hunk lines that look like file headers, blank context lines ──
+    //
+    // A removed `-- x` is the diff line `--- x`, an added `++x` is `+++x`;
+    // with `diff.suppressBlankEmpty=true` a blank context line is "". All of
+    // them belong to the hunk, in the plain and the blob-to-blob form alike.
+
+    const DASH_BEFORE: &str = "SELECT 1;\n-- x\n\nSELECT 2;\n--- x\nSELECT 3;\n";
+    const DASH_AFTER: &str = "SELECT 1;\n++x\n\nSELECT 2;\n+++ y\nSELECT 3;\n";
+
+    fn dash_lines() -> Vec<Line> {
+        vec![
+            line("context", "SELECT 1;", Some(1), Some(1)),
+            line("delete", "-- x", Some(2), None),
+            line("add", "++x", None, Some(2)),
+            line("context", "", Some(3), Some(3)),
+            line("context", "SELECT 2;", Some(4), Some(4)),
+            line("delete", "--- x", Some(5), None),
+            line("add", "+++ y", None, Some(5)),
+            line("context", "SELECT 3;", Some(6), Some(6)),
+        ]
+    }
+
+    #[test]
+    fn keeps_dash_dash_and_plus_plus_lines_and_a_suppressed_blank_line() {
+        for suppress in ["false", "true"] {
+            let repo = TempRepo::new();
+            repo.git(&["config", "diff.suppressBlankEmpty", suppress]);
+            let a = repo.commit("q.sql", Some(DASH_BEFORE), "a");
+            let b = repo.commit("q.sql", Some(DASH_AFTER), "b");
+            let d = diff(&repo, "q.sql", &a, &b).unwrap();
+            assert_eq!(d.hunks.len(), 1, "suppress={suppress}");
+            assert_eq!(lines(&d), dash_lines(), "suppress={suppress}");
+        }
+    }
+
+    #[test]
+    fn keeps_dash_dash_and_plus_plus_lines_across_a_rename_blob_to_blob() {
+        for suppress in ["false", "true"] {
+            let repo = TempRepo::new();
+            repo.git(&["config", "diff.suppressBlankEmpty", suppress]);
+            let a = repo.commit("old.sql", Some(DASH_BEFORE), "a");
+            repo.git(&["mv", "old.sql", "new.sql"]);
+            repo.git(&["commit", "-q", "-m", "rename"]);
+            let b = repo.commit("new.sql", Some(DASH_AFTER), "b");
+            let d = tauri::async_runtime::block_on(git_file_diff(
+                repo.cwd(),
+                "new.sql".to_string(),
+                a,
+                b,
+                Some("old.sql".to_string()),
+                Some("new.sql".to_string()),
+            ))
+            .unwrap();
+            assert_eq!(d.hunks.len(), 1, "suppress={suppress}");
+            assert_eq!(lines(&d), dash_lines(), "suppress={suppress}");
+        }
+    }
 }

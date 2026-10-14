@@ -401,3 +401,67 @@ describe("parity: git-file-log failures", () => {
     expect(body.error).toMatch(/^git log failed: /);
   });
 });
+
+// A removed `-- x` is the diff line `--- x`, an added `++x` is `+++x`; with
+// `diff.suppressBlankEmpty=true` a blank context line is "". Each belongs to
+// the hunk, in the plain pathspec form and in the blob-to-blob (renamed) one.
+describe("parity: git-file-diff, lines that look like headers", () => {
+  let dev;
+  beforeAll(async () => { dev = await startDevServer(); }, 15_000);
+  afterAll(async () => { await dev?.stop(); });
+
+  const BEFORE = "SELECT 1;\n-- x\n\nSELECT 2;\n--- x\nSELECT 3;\n";
+  const AFTER = "SELECT 1;\n++x\n\nSELECT 2;\n+++ y\nSELECT 3;\n";
+  const EXPECTED = [
+    ["context", "SELECT 1;", 1, 1],
+    ["delete", "-- x", 2, null],
+    ["add", "++x", null, 2],
+    ["context", "", 3, 3],
+    ["context", "SELECT 2;", 4, 4],
+    ["delete", "--- x", 5, null],
+    ["add", "+++ y", null, 5],
+    ["context", "SELECT 3;", 6, 6],
+  ];
+  const shape = (d) => d.hunks.flatMap((h) => h.lines).map((l) => [l.type, l.content, l.oldLineNo, l.newLineNo]);
+  const suppressBlank = (cwd) => execFileSync("git", ["-C", cwd, "config", "diff.suppressBlankEmpty", "true"]);
+
+  for (const suppress of [false, true]) {
+    const label = suppress ? "with diff.suppressBlankEmpty" : "default config";
+
+    it(`plain form keeps them (${label})`, async () => {
+      const cwd = mkTempRepo("gw-parity-file-diff-dash-");
+      if (suppress) suppressBlank(cwd);
+      commitFile(cwd, "q.sql", BEFORE, "a", 0);
+      commitFile(cwd, "q.sql", AFTER, "b", 1);
+      const [a, b] = [rev(cwd, "HEAD~1"), rev(cwd, "HEAD")];
+      if (suppress) {
+        const raw = execFileSync("git", ["-C", cwd, "diff", a, b, "--", "q.sql"], { encoding: "utf-8" });
+        expect(raw).toContain("\n+++x\n\n SELECT 2;"); // git really printed ""
+      }
+      const { rust, node } = await assertParity(dev, call(cwd, "q.sql", a, b));
+      for (const side of [rust, node]) {
+        expect(side.hunks).toHaveLength(1);
+        expect(shape(side)).toEqual(EXPECTED);
+      }
+    });
+
+    it(`blob-to-blob form across a rename keeps them (${label})`, async () => {
+      const cwd = mkTempRepo("gw-parity-file-diff-dash-rename-");
+      if (suppress) suppressBlank(cwd);
+      commitFile(cwd, "old.sql", BEFORE, "a", 0);
+      execFileSync("git", ["-C", cwd, "mv", "old.sql", "new.sql"]);
+      execFileSync("git", ["-C", cwd, "commit", "--quiet", "-m", "rename"]);
+      commitFile(cwd, "new.sql", AFTER, "b", 2);
+      const [a, b] = [rev(cwd, "HEAD~2"), rev(cwd, "HEAD")];
+      if (suppress) {
+        const raw = execFileSync("git", ["-C", cwd, "diff", `${a}:old.sql`, `${b}:new.sql`], { encoding: "utf-8" });
+        expect(raw).toContain("\n+++x\n\n SELECT 2;");
+      }
+      const { rust, node } = await assertParity(dev, call(cwd, "new.sql", a, b, "old.sql", "new.sql"));
+      for (const side of [rust, node]) {
+        expect(side.hunks).toHaveLength(1);
+        expect(shape(side)).toEqual(EXPECTED);
+      }
+    });
+  }
+});

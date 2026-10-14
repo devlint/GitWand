@@ -79,6 +79,30 @@ describe("hunk-body", () => {
     expect(classifyHunkLine(body, "--- a/next")).toBeNull();
   });
 
+  it("enforces the counts per side", () => {
+    const body = hunkBodyFromHeader("@@ -1,1 +1,2 @@");
+    expect(classifyHunkLine(body, "-a")).toBe("delete");
+    // Old side used up: neither a delete nor a context line fits.
+    expect(classifyHunkLine(body, "-b")).toBeNull();
+    expect(classifyHunkLine(body, " c")).toBeNull();
+    expect(classifyHunkLine(body, "")).toBeNull();
+    expect(classifyHunkLine(body, "+d")).toBe("add");
+    expect(classifyHunkLine(body, "+e")).toBe("add");
+    expect(classifyHunkLine(body, "+f")).toBeNull();
+  });
+
+  it("does not take a header for a deletion once the old side is used up (fails closed)", () => {
+    // A header that overcounts the new side, then the next file's headers
+    // with no `diff` line between: `--- a/b` is no deletion (old side done).
+    const diff = ["--- a/a", "+++ b/a", "@@ -1 +1,3 @@", "-x", "+y", "--- a/b", "@@ -1 +1 @@", "-p", "+q"].join("\n");
+    expect(classifyAll(diff)).toEqual([
+      ["delete", "x"],
+      ["add", "y"],
+      ["delete", "p"],
+      ["add", "q"],
+    ]);
+  });
+
   it("ignores \"\" outside a hunk", () => {
     expect(classifyHunkLine(noHunkBody(), "")).toBeNull();
     expect(classifyHunkLine(noHunkBody(), "+x")).toBeNull();

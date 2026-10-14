@@ -254,9 +254,40 @@ function devExtractPercent(line) {
 }
 
 /**
+ * `@gitwand/core`, imported once and cached. Node resolves it to
+ * `packages/core/dist`, which `pnpm dev:web` / `pnpm dev:server` build first
+ * (`build:core`); started any other way, a missing or stale dist would make
+ * every diff route answer a 500 with a cryptic resolution error, so it is
+ * checked here and reported with the fix. A failed load is not cached, so a
+ * build made after startup is picked up on the next request — but a stale
+ * dist that loaded fine is cached by Node until the dev-server restarts.
+ */
+const DEV_CORE_HELPERS = ["classifyHunkLine", "hunkBodyFromHeader", "noHunkBody", "parseHunkHeader", "scanSecrets"];
+let devCorePromise = null;
+function loadDevCore() {
+  if (devCorePromise) return devCorePromise;
+  devCorePromise = import("@gitwand/core").then(
+    (core) => {
+      const missing = DEV_CORE_HELPERS.filter((name) => typeof core[name] !== "function");
+      if (missing.length > 0) {
+        throw new Error(
+          `@gitwand/core is out of date (missing ${missing.join(", ")}): run \`pnpm --filter @gitwand/core build\`, then restart the dev-server`,
+        );
+      }
+      return core;
+    },
+    (err) => {
+      throw new Error(`@gitwand/core could not be loaded: run \`pnpm --filter @gitwand/core build\` (${err.message})`);
+    },
+  );
+  devCorePromise.catch(() => { devCorePromise = null; });
+  return devCorePromise;
+}
+
+/**
  * Parse one file's unified diff into hunks — the dev-server twin of Rust's
- * `parse_diff_hunks` (src-tauri/src/git/parse.rs). Hunk bodies come from
- * `@gitwand/core`'s hunk-body helpers (the TS twin of Rust's `HunkBody`):
+ * `parse_diff_hunks` (src-tauri/src/git/parse.rs). `core` is the module from
+ * `loadDevCore()`; its hunk-body helpers are the TS twin of Rust's `HunkBody`:
  * inside a hunk, bounded by its `@@` counts, a line is classified by its first
  * character only — a removed `-- note` is the diff line `--- note`, not a file
  * header — and a bare "" is a blank context line while both counts remain
@@ -265,8 +296,8 @@ function devExtractPercent(line) {
  * Returns `{ hunks, status }`, `status` being "added" when a `new file mode`
  * header was seen (Rust's `detected_status`).
  */
-async function devParseDiffHunks(text) {
-  const { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader } = await import("@gitwand/core");
+function devParseDiffHunks(core, text) {
+  const { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader } = core;
   const hunks = [];
   let status;
   let currentHunk = null;
@@ -3213,7 +3244,7 @@ async function handleRequest(req, res) {
         // omitted entirely when not detected (skip_serializing_if). The
         // phantom-context gotcha of issue #183 (AGENTS.md) is handled by the
         // bounded hunk body in devParseDiffHunks.
-        const { hunks, status } = await devParseDiffHunks(stdout);
+        const { hunks, status } = devParseDiffHunks(await loadDevCore(), stdout);
 
         return jsonResponse(req, res, {
           path,
@@ -3269,7 +3300,7 @@ async function handleRequest(req, res) {
         };
 
         const { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader, scanSecrets } =
-          await import("@gitwand/core");
+          await loadDevCore();
 
         // Remaining body of the current hunk (core's hunk-body helpers, the twin of Rust's
         // HunkBody): inside it an added `++ token` is the line `+++ token`, a hunk line —
@@ -4313,7 +4344,7 @@ async function handleRequest(req, res) {
         // Bounded hunk bodies: `--- x`/`+++ x` inside a hunk is content, and a
         // "" past the counts never becomes a phantom context line (which would
         // make `git apply` reject the patch). See devParseDiffHunks.
-        const { hunks } = await devParseDiffHunks(stdout);
+        const { hunks } = devParseDiffHunks(await loadDevCore(), stdout);
 
         const body = { path: filePath, hunks };
         if (truncatedFromBytes !== undefined) body.truncatedFromBytes = truncatedFromBytes;
@@ -4440,6 +4471,7 @@ async function handleRequest(req, res) {
           else if (sections.length > 0) sections[sections.length - 1].push(line);
         }
 
+        const core = await loadDevCore();
         const diffs = [];
         for (const section of sections) {
           const parts = section[0].split(" b/");
@@ -4460,7 +4492,7 @@ async function handleRequest(req, res) {
               oldPath = line.substring("rename from ".length);
             } else if (line.startsWith("rename to ") && !status) status = "renamed";
           }
-          const { hunks } = await devParseDiffHunks(section.join("\n"));
+          const { hunks } = devParseDiffHunks(core, section.join("\n"));
           diffs.push({
             path: parts[1],
             hunks,

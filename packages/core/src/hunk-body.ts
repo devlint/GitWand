@@ -93,17 +93,28 @@ export type HunkLineKind = "add" | "delete" | "context";
  * `line.slice(1)`, which is `""` for both `" "` and `""`.
  */
 export function classifyHunkLine(body: HunkBody, line: string): HunkLineKind | null {
-  const bounded = body.oldLeft > 0 || body.newLeft > 0;
-  if (!body.unbounded && !bounded) return null;
+  if (body.unbounded) {
+    // Combined diff: no usable counts, classified by first character only.
+    if (line.startsWith("+")) return "add";
+    if (line.startsWith("-")) return "delete";
+    if (line.startsWith(" ")) return "context";
+    return null;
+  }
+  // Strict counts: each kind needs room on the side(s) it consumes, so a hunk
+  // whose header undercounts its body ends there — a following `--- a/x`
+  // header is then read as a header (fails closed), not as a deletion.
   if (line.startsWith("+")) {
+    if (body.newLeft <= 0) return null;
     body.newLeft--;
     return "add";
   }
   if (line.startsWith("-")) {
+    if (body.oldLeft <= 0) return null;
     body.oldLeft--;
     return "delete";
   }
-  if (line.startsWith(" ") || (line === "" && body.oldLeft > 0 && body.newLeft > 0)) {
+  if (line.startsWith(" ") || line === "") {
+    if (body.oldLeft <= 0 || body.newLeft <= 0) return null;
     body.oldLeft--;
     body.newLeft--;
     return "context";

@@ -6,8 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/copy-grammars.mjs && vite",
-    "dev:server": "node dev-server.mjs",
-    "dev:web": "concurrently -k -n api,vite -c blue,green \"node dev-server.mjs\" \"node scripts/copy-grammars.mjs && vite\"",
+    "dev:server": "pnpm run build:core && node dev-server.mjs",
+    "dev:web": "pnpm run build:core && concurrently -k -n api,vite -c blue,green \"node dev-server.mjs\" \"node scripts/copy-grammars.mjs && vite\"",
+    "build:core": "pnpm --filter @gitwand/core build",
     "copy-grammars": "node scripts/copy-grammars.mjs",
     "build": "node scripts/copy-grammars.mjs && vue-tsc --noEmit && vite build",
     "preview": "vite preview",

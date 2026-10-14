@@ -141,11 +141,6 @@ impl HunkBody {
         Self::for_header(header, old_count, new_count)
     }
 
-    /// True while the header's line counts are not yet consumed.
-    pub(crate) fn active(&self) -> bool {
-        self.unbounded || self.old_left > 0 || self.new_left > 0
-    }
-
     /// Classify one body line and consume it from the counts. `None` once
     /// the body is exhausted, or for a line that is not a hunk line
     /// (`\ No newline at end of file`, or `""` when it cannot be context).
@@ -156,19 +151,40 @@ impl HunkBody {
     /// used up, it is ignored. The bound is what keeps this from creating
     /// phantom context lines (AGENTS.md "Diff Parsing"). Same rule as
     /// `classifyHunkLine` in packages/core/src/hunk-body.ts.
+    ///
+    /// Strict counts: an add needs a new-side line left, a delete an old-side
+    /// one, a context line both. A hunk whose header undercounts its body ends
+    /// there, so a following `--- a/x` header is read as a header (fails
+    /// closed), not as a deletion.
     pub(crate) fn classify(&mut self, line: &str) -> Option<HunkLineKind> {
-        if !self.active() {
-            return None;
+        if self.unbounded {
+            // Combined diff: no usable counts, first character only.
+            return if line.starts_with('+') {
+                Some(HunkLineKind::Add)
+            } else if line.starts_with('-') {
+                Some(HunkLineKind::Delete)
+            } else if line.starts_with(' ') {
+                Some(HunkLineKind::Context)
+            } else {
+                None
+            };
         }
         if line.starts_with('+') {
+            if self.new_left <= 0 {
+                return None;
+            }
             self.new_left -= 1;
             Some(HunkLineKind::Add)
         } else if line.starts_with('-') {
+            if self.old_left <= 0 {
+                return None;
+            }
             self.old_left -= 1;
             Some(HunkLineKind::Delete)
-        } else if line.starts_with(' ')
-            || (line.is_empty() && self.old_left > 0 && self.new_left > 0)
-        {
+        } else if line.starts_with(' ') || line.is_empty() {
+            if self.old_left <= 0 || self.new_left <= 0 {
+                return None;
+            }
             self.old_left -= 1;
             self.new_left -= 1;
             Some(HunkLineKind::Context)
@@ -2303,6 +2319,47 @@ mod diff_hunk_tests {
         assert_eq!(hunks[0].lines[1].old_line_no, Some(2));
         assert_eq!(hunks[0].lines[1].new_line_no, Some(2));
         assert_eq!(hunks[0].lines[3].old_line_no, Some(4));
+    }
+
+    #[test]
+    fn strict_counts_do_not_take_a_header_for_a_deletion_once_the_old_side_is_done() {
+        // The header overcounts the new side; the next file's `--- a/b`
+        // follows with no `diff --git` line. The old side is used up, so it
+        // is not a deletion (fails closed), and the next `@@` opens hunk 2.
+        let out = text(&[
+            "--- a/a",
+            "+++ b/a",
+            "@@ -1 +1,3 @@",
+            "-x",
+            "+y",
+            "--- a/b",
+            "@@ -1,2 +1,1 @@",
+            "-p",
+            "-q",
+            "+r",
+            "+s",
+        ]);
+        let (hunks, _) = parse_diff_hunks(&out);
+        assert_eq!(hunks.len(), 2);
+        assert_eq!(kinds(&hunks[0]), [("delete", "x"), ("add", "y")]);
+        // Second hunk: one add allowed — `+s` overflows and is dropped.
+        assert_eq!(
+            kinds(&hunks[1]),
+            [("delete", "p"), ("delete", "q"), ("add", "r")]
+        );
+    }
+
+    #[test]
+    fn strict_counts_per_side() {
+        let mut body = HunkBody::from_header("@@ -1,1 +1,2 @@");
+        assert_eq!(body.classify("-a"), Some(HunkLineKind::Delete));
+        // Old side used up: neither a delete nor a context line fits.
+        assert_eq!(body.classify("-b"), None);
+        assert_eq!(body.classify(" c"), None);
+        assert_eq!(body.classify(""), None);
+        assert_eq!(body.classify("+d"), Some(HunkLineKind::Add));
+        assert_eq!(body.classify("+e"), Some(HunkLineKind::Add));
+        assert_eq!(body.classify("+f"), None);
     }
 
     #[test]
