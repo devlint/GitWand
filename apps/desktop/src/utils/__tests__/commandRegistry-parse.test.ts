@@ -85,6 +85,17 @@ describe("findDevServerRoutes", () => {
     const src = `if (url.pathname.startsWith("/api/gitea-")) {\n  switch (url.pathname) {\n    case "/api/gitea-list-prs": {`;
     expect(findDevServerRoutes(src)).toEqual(["/api/gitea-list-prs"]);
   });
+
+  it("ignores a case label its dispatcher's prefix can never reach", () => {
+    // `/api/bb-list-prs` cannot get past a `/api/gitea-` guard: unreachable.
+    const src = `if (url.pathname.startsWith("/api/gitea-")) {\n  switch (url.pathname) {\n    case "/api/gitea-get-pr": { break; }\n    case "/api/bb-list-prs": { break; }\n  }\n}`;
+    expect(findDevServerRoutes(src)).toEqual(["/api/gitea-get-pr"]);
+  });
+
+  it("ignores a case label outside any dispatcher block", () => {
+    const src = `if (url.pathname.startsWith("/api/gitea-")) {\n  switch (url.pathname) {\n    case "/api/gitea-get-pr": { break; }\n  }\n}\nswitch (x) {\n  case "/api/gitea-orphan": break;\n}`;
+    expect(findDevServerRoutes(src)).toEqual(["/api/gitea-get-pr"]);
+  });
 });
 
 describe("the parser against the real sources", () => {
