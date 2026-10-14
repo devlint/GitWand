@@ -512,20 +512,23 @@ pub(crate) const FILE_LOG_NAMED_FORMAT: &str =
 pub(crate) fn parse_file_log_named(raw: &str) -> Vec<FileLogEntry> {
     let mut entries = Vec::new();
     for record in raw.split('\x01') {
-        let Some(end) = record.rfind('\x1e') else {
+        // The header ends at the first `\x1e` after the five field separators
+        // (the name that follows may itself hold a `\x1e`).
+        let Some(body_start) = record.match_indices('\x1f').nth(4).map(|(i, _)| i) else {
+            continue;
+        };
+        let Some(end) = record[body_start..].find('\x1e').map(|i| body_start + i) else {
             continue;
         };
         let fields: Vec<&str> = record[..end].splitn(6, '\x1f').collect();
-        if fields.len() < 5 {
-            continue;
-        }
-        // What follows the header: `\n` and/or NUL, then `name\0`. A merge
+        // Then git writes NUL, one `\n`, and the name up to NUL — exactly
+        // that, so a name that itself starts with `\n` survives. A merge
         // commit lists no name.
-        let path = record[end + 1..]
-            .split('\0')
-            .map(|t| t.trim_start_matches('\n'))
-            .find(|t| !t.is_empty())
-            .map(str::to_string);
+        let rest = &record[end + 1..];
+        let rest = rest.strip_prefix('\0').unwrap_or(rest);
+        let rest = rest.strip_prefix('\n').unwrap_or(rest);
+        let name = rest.split('\0').next().unwrap_or("");
+        let path = (!name.is_empty()).then(|| name.to_string());
         entries.push(FileLogEntry {
             path,
             hash_full: fields[0].trim().to_string(),

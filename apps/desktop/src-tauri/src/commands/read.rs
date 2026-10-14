@@ -1434,6 +1434,8 @@ pub(crate) async fn git_file_log(
             "log",
             "--follow",
             "--name-only",
+            // `diff.relative` would make the names relative to `cwd`.
+            "--no-relative",
             "-z",
             "-n",
             &n,
@@ -1474,6 +1476,7 @@ pub(crate) async fn git_file_log_pickaxe(
             "log",
             "--follow",
             "--name-only",
+            "--no-relative",
             "-z",
             flag,
             &search,
@@ -1526,61 +1529,136 @@ pub(crate) async fn git_file_log_range(
 // ─── File diff between two commits (time-travel compare) ─────
 
 /// A revision handed to git as a positional argument. Anything starting with
-/// `-` would be read as an option, so it is refused rather than passed on.
+/// `-` would be read as an option, and a control character (a newline above
+/// all) would split the `cat-file --batch-check` request below, so both are
+/// refused rather than passed on.
 fn validate_revision(name: &str, rev: &str) -> Result<(), String> {
     if rev.trim().is_empty() {
         return Err(format!("{} must not be empty", name));
     }
-    if rev.starts_with('-') {
+    if rev.starts_with('-') || rev.chars().any(|c| c.is_control()) {
         return Err(format!("invalid {}: {}", name, rev));
     }
     Ok(())
 }
 
-/// `rev` as a full commit hash, or an error naming it.
-fn resolve_commit(top: &Path, rev: &str) -> Result<String, String> {
-    let out = git_cmd()
-        .args([
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            &format!("{}^{{commit}}", rev),
-        ])
-        .current_dir(top)
-        .output()
-        .map_err(|e| format!("Failed to run git rev-parse: {}", e))?;
-    let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if !out.status.success() || hash.is_empty() {
-        return Err(format!("unknown revision: {}", rev));
+/// A `fromPath` / `toPath`: the file's name at a past commit, repo-root
+/// relative, as `git_file_log` reported it. git reads it as `<commit>:<path>`,
+/// never from today's working tree, so it is checked lexically — a directory
+/// that has since become a symlink out of the repo says nothing about what
+/// the commit held. Not empty, not absolute, no `..`, no NUL, not the root;
+/// `.` segments and repeated slashes are dropped.
+fn historical_path(name: &str, p: &str) -> Result<String, String> {
+    if p.contains('\0') {
+        return Err(format!("{} must not contain NUL", name));
     }
-    Ok(hash)
-}
-
-/// The type of the object at `<commit>:<path>` (`blob`, `tree`, …), or `None`
-/// when the path does not exist there. `path` is repo-root-relative and the
-/// command runs at the top level, so `<commit>:<path>` resolves from the root
-/// whatever directory the repository was opened from. The commit is a full
-/// hash and the path follows the first colon, so it is taken literally.
-fn object_type(top: &Path, commit: &str, path: &str) -> Option<String> {
-    let out = git_cmd()
-        .args(["cat-file", "-t", &format!("{}:{}", commit, path)])
-        .current_dir(top)
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-/// A `fromPath` / `toPath`: repo-root-relative, as `git_file_log` reports it.
-/// Same guard as `path` (inside the repo, never the root), normalised.
-fn root_relative_side_path(top: &Path, name: &str, p: &str) -> Result<String, String> {
-    let top_str = top.to_string_lossy();
-    let guarded = safe_repo_path(&top_str, p).map_err(|e| format!("{}: {}", name, e))?;
-    if guarded == top {
+    let bytes = p.as_bytes();
+    let drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    if p.starts_with('/') || p.starts_with('\\') || drive {
+        return Err(format!("{} must be relative to the repository root", name));
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    for seg in p.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => return Err(format!("{} must not contain `..`", name)),
+            s => parts.push(s),
+        }
+    }
+    if parts.is_empty() {
         return Err(format!("{} must not be the repository root", name));
     }
-    Ok(repo_relative_path(&top_str, top, p, &guarded))
+    Ok(parts.join("/"))
+}
+
+/// One `git cat-file --batch-check` answer: `(oid, type)`, or `None` for a
+/// `missing` / `ambiguous` object. A found object's line ends with its size,
+/// a missing one's with the word, whatever the echoed name contains.
+fn batch_check_line(line: &str) -> Option<(String, String)> {
+    if line.ends_with(" missing") || line.ends_with(" ambiguous") {
+        return None;
+    }
+    let mut it = line.split(' ');
+    match (it.next(), it.next()) {
+        (Some(oid), Some(kind)) => Some((oid.to_string(), kind.to_string())),
+        _ => None,
+    }
+}
+
+/// Resolve both revisions to commits and look up the file at each, in one
+/// `cat-file --batch-check` (`<rev>^{commit}` peels a tag; the `:<path>`
+/// after it is taken literally from the root). Returns the two commit
+/// hashes and the object type at each side (`None`: absent there).
+///
+/// A name holding a newline cannot travel in the line-based request; such a
+/// side is looked up on its own with `cat-file -t`.
+fn resolve_sides(
+    top: &str,
+    revs: [&str; 2],
+    names: [&str; 2],
+) -> Result<([String; 2], [Option<String>; 2]), String> {
+    let mut request = String::new();
+    for rev in revs {
+        request.push_str(&format!("{}^{{commit}}\n", rev));
+    }
+    for (i, name) in names.iter().enumerate() {
+        if !name.contains('\n') {
+            request.push_str(&format!("{}^{{commit}}:{}\n", revs[i], name));
+        }
+    }
+    let mut child = git_cmd()
+        .args(["cat-file", "--batch-check"])
+        .current_dir(top)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to run git cat-file: {}", e))?;
+    {
+        use std::io::Write;
+        let mut stdin = child.stdin.take().ok_or("git cat-file: no stdin")?;
+        stdin
+            .write_all(request.as_bytes())
+            .map_err(|e| format!("git cat-file: {}", e))?;
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("git cat-file failed: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git cat-file failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut lines = text.lines();
+
+    let mut commits: [String; 2] = Default::default();
+    for (i, rev) in revs.iter().enumerate() {
+        match lines.next().and_then(batch_check_line) {
+            Some((oid, kind)) if kind == "commit" => commits[i] = oid,
+            _ => return Err(format!("unknown revision: {}", rev)),
+        }
+    }
+    let mut types: [Option<String>; 2] = Default::default();
+    for (i, name) in names.iter().enumerate() {
+        types[i] = if name.contains('\n') {
+            let o = git_cmd()
+                .args(["cat-file", "-t", &format!("{}:{}", commits[i], name)])
+                .current_dir(top)
+                .output()
+                .map_err(|e| format!("Failed to run git cat-file: {}", e))?;
+            o.status
+                .success()
+                .then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        } else {
+            lines
+                .next()
+                .and_then(batch_check_line)
+                .map(|(_, kind)| kind)
+        };
+    }
+    Ok((commits, types))
 }
 
 /// Diff of one file between two commits, for the "Compare" tab of the file
@@ -1594,15 +1672,17 @@ fn root_relative_side_path(top: &Path, name: &str, p: &str) -> Result<String, St
 /// sides → `git diff <from> <to> -- <name>`; different names, both present →
 /// blob to blob, `git diff <from>:<old> <to>:<new>`, so the hunks are the
 /// content change rather than "everything added". A side where the file is
-/// absent makes it all additions or all deletions. A directory is refused:
-/// this is a single-file view. Identical revisions give no hunks; a revision
-/// git cannot resolve is an error, not an empty diff that would read as
-/// "no differences".
+/// absent makes it all additions or all deletions; absent from both is an
+/// error. A directory is refused: this is a single-file view. Identical
+/// revisions give no hunks; a revision git cannot resolve is an error, not an
+/// empty diff that would read as "no differences".
 ///
-/// Everything runs at the repository's top level with literal pathspecs (so
-/// `a[1].txt` is not a glob and `:x` is not magic), and the user's external
-/// diff, colour and textconv settings are switched off: the output is parsed,
-/// never shown as is.
+/// Three git processes: `rev-parse` for the top level and prefix, one
+/// `cat-file --batch-check` for both revisions and both names, the diff.
+/// Everything runs at the top level, from the path git prints (never a
+/// canonicalised one, which is a verbatim `\\?\` path on Windows), with
+/// literal pathspecs, and the user's external diff, colour and textconv
+/// settings switched off: the output is parsed, never shown as is.
 #[tauri::command]
 pub(crate) async fn git_file_diff(
     cwd: String,
@@ -1614,9 +1694,9 @@ pub(crate) async fn git_file_diff(
 ) -> Result<GitDiff, String> {
     validate_revision("fromHash", &from_hash)?;
     validate_revision("toHash", &to_hash)?;
-    // The file may not exist in the working tree any more (deleted or renamed
-    // since); `safe_repo_path` accepts a missing path as long as it would stay
-    // inside the repo. The response echoes `path` as given, like `git_diff`.
+    // `path` names the file today, relative to `cwd`: the same guard as
+    // `git_diff` (inside the repo, not its root; a missing file is fine). The
+    // response echoes it as given.
     let guarded = safe_repo_path(&cwd, &path)?;
     let root = Path::new(&cwd)
         .canonicalize()
@@ -1625,42 +1705,40 @@ pub(crate) async fn git_file_diff(
         return Err("path must not be the repository root".to_string());
     }
     let git_path = repo_relative_path(&cwd, &root, &path, &guarded);
+    let from_name = from_path
+        .as_deref()
+        .map(|p| historical_path("fromPath", p))
+        .transpose()?;
+    let to_name = to_path
+        .as_deref()
+        .map(|p| historical_path("toPath", p))
+        .transpose()?;
     let _repo = repo_lock::read(&cwd);
 
-    // `path` is relative to `cwd`, the names from the log to the top level.
-    let show = |arg: &str| -> Result<String, String> {
-        let out = git_cmd()
-            .args(["rev-parse", arg])
-            .current_dir(&cwd)
-            .output()
-            .map_err(|e| format!("Failed to run git rev-parse: {}", e))?;
-        if !out.status.success() {
-            return Err(format!(
-                "not a git repository: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ));
-        }
-        Ok(String::from_utf8_lossy(&out.stdout)
-            .trim_end_matches('\n')
-            .to_string())
-    };
-    let top = Path::new(&show("--show-toplevel")?)
-        .canonicalize()
-        .map_err(|e| format!("repository root does not resolve: {}", e))?;
-    let own_path = format!("{}{}", show("--show-prefix")?, git_path);
-    let from_name = match from_path.as_deref() {
-        Some(p) => root_relative_side_path(&top, "fromPath", p)?,
-        None => own_path.clone(),
-    };
-    let to_name = match to_path.as_deref() {
-        Some(p) => root_relative_side_path(&top, "toPath", p)?,
-        None => own_path,
-    };
+    // `path` is relative to `cwd`, the log's names to the top level.
+    let out = git_cmd()
+        .args(["rev-parse", "--show-toplevel", "--show-prefix"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git rev-parse: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "not a git repository: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut lines = text.split('\n');
+    let top = lines.next().unwrap_or_default().to_string();
+    let own_path = format!("{}{}", lines.next().unwrap_or_default(), git_path);
+    let from_name = from_name.unwrap_or_else(|| own_path.clone());
+    let to_name = to_name.unwrap_or(own_path);
 
-    let from = resolve_commit(&top, &from_hash)?;
-    let to = resolve_commit(&top, &to_hash)?;
-    let from_type = object_type(&top, &from, &from_name);
-    let to_type = object_type(&top, &to, &to_name);
+    let ([from, to], [from_type, to_type]) =
+        resolve_sides(&top, [&from_hash, &to_hash], [&from_name, &to_name])?;
+    if from_type.is_none() && to_type.is_none() {
+        return Err(format!("{} not found at either commit", path));
+    }
     if from_type.as_deref() == Some("tree") || to_type.as_deref() == Some("tree") {
         return Err(format!("{} is a directory, not a file", path));
     }
@@ -4540,18 +4618,154 @@ mod file_diff_tests {
     }
 
     #[test]
-    fn parses_the_named_log_with_or_without_a_newline_before_the_name() {
-        for gap in ["", "\n", "\0", "\n\0"] {
+    fn parses_the_named_log_exactly_as_git_writes_it() {
+        // git writes `\x1e`, NUL, one `\n`, the name, NUL. Only that one `\n`
+        // is the separator: a name may start with its own, or hold a `\x1e`.
+        let h = "a".repeat(40);
+        for name in ["new.txt", "\nstarts-with-newline", "has\x1eseparator"] {
             let raw = format!(
-                "\x01{h}\x1fabc\x1fA\x1f2024-01-01T00:00:00Z\x1fsubj\x1fbody\n\x1e{gap}new.txt\0\x01{h}\x1fabc\x1fA\x1fd\x1fmerge\x1f\x1e{gap}",
-                h = "a".repeat(40)
+                "\x01{h}\x1fabc\x1fA\x1f2024-01-01T00:00:00Z\x1fsubj\x1fbody\n\x1e\0\n{name}\0\x01{h}\x1fabc\x1fA\x1fd\x1fmerge\x1f\x1e\0"
             );
             let e = parse_file_log_named(&raw);
-            assert_eq!(e.len(), 2, "{gap:?}");
-            assert_eq!(e[0].path.as_deref(), Some("new.txt"), "{gap:?}");
+            assert_eq!(e.len(), 2, "{name:?}");
+            assert_eq!(e[0].path.as_deref(), Some(name), "{name:?}");
             assert_eq!(e[0].body, "body");
             assert_eq!(e[1].path, None, "a merge lists no name");
         }
+    }
+
+    #[test]
+    fn a_name_with_a_newline_and_a_separator_survives_log_and_diff() {
+        let repo = TempRepo::new();
+        let name = "\nodd\x1ename.txt";
+        let a = repo.commit(name, Some("a\n"), "a");
+        let b = repo.commit(name, Some("b\n"), "b");
+        let entries = log(repo.cwd(), name);
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.path.as_deref() == Some(name)));
+        // The newline keeps it out of the batch request: looked up on its own.
+        let d = compare(repo.cwd(), name, &a, &b);
+        assert_eq!(
+            lines(&d),
+            vec![
+                line("delete", "a", Some(1), None),
+                line("add", "b", None, Some(1))
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_relative_config_does_not_make_log_names_cwd_relative() {
+        let repo = TempRepo::new();
+        let a = repo.commit("sub/old.txt", Some("1\n2\n"), "a");
+        repo.git(&["mv", "sub/old.txt", "sub/new.txt"]);
+        repo.git(&["commit", "-q", "-m", "rename"]);
+        let b = repo.commit("sub/new.txt", Some("1\nTWO\n"), "b");
+        repo.git(&["config", "diff.relative", "true"]);
+        let sub = format!("{}/sub", repo.cwd());
+        let names: Vec<Option<String>> = log(sub.clone(), "new.txt")
+            .into_iter()
+            .map(|e| e.path)
+            .collect();
+        let s = |p: &str| Some(p.to_string());
+        assert_eq!(
+            names,
+            vec![s("sub/new.txt"), s("sub/new.txt"), s("sub/old.txt")]
+        );
+        assert_eq!(changed(&compare(sub, "new.txt", &a, &b)).len(), 2);
+    }
+
+    #[test]
+    fn a_historical_name_under_a_dir_that_is_now_a_symlink_out_is_still_read() {
+        // `assets/` held the file; it moved to the root and `assets` is now a
+        // symlink pointing outside the repo. The old name is a path inside a
+        // past commit, not on today's disk, so it must not be refused.
+        let repo = TempRepo::new();
+        let a = repo.commit("assets/logo.txt", Some("v1\n"), "a");
+        repo.git(&["mv", "assets/logo.txt", "logo.txt"]);
+        repo.git(&["commit", "-q", "-m", "move"]);
+        let b = repo.commit("logo.txt", Some("v2\n"), "b");
+        let outside = std::env::temp_dir().join(format!("gw-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&outside).unwrap();
+        let _ = std::fs::remove_dir_all(repo.path.join("assets"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, repo.path.join("assets")).unwrap();
+        let d = tauri::async_runtime::block_on(git_file_diff(
+            repo.cwd(),
+            "logo.txt".to_string(),
+            a,
+            b,
+            Some("assets/logo.txt".to_string()),
+            Some("logo.txt".to_string()),
+        ))
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&outside);
+        assert_eq!(
+            lines(&d),
+            vec![
+                line("delete", "v1", Some(1), None),
+                line("add", "v2", None, Some(1))
+            ]
+        );
+    }
+
+    #[test]
+    fn side_paths_are_checked_lexically() {
+        for (p, needle) in [
+            ("", "must not be the repository root"),
+            ("./", "must not be the repository root"),
+            ("/etc/passwd", "relative to the repository root"),
+            ("C:/x", "relative to the repository root"),
+            ("a/../b", "`..`"),
+            ("a\0b", "NUL"),
+        ] {
+            let err = historical_path("fromPath", p).expect_err(p);
+            assert!(err.contains(needle), "{p:?}: {err}");
+        }
+        assert_eq!(historical_path("toPath", "./a//b/./c").unwrap(), "a/b/c");
+    }
+
+    #[test]
+    fn a_file_absent_from_both_commits_is_an_error() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        let b = repo.commit("f.txt", Some("y\n"), "b");
+        let err = diff(&repo, "never.txt", &a, &b).err().expect("refused");
+        assert!(
+            err.contains("never.txt not found at either commit"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_control_character_in_a_revision_is_refused() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        let err = diff(&repo, "f.txt", &format!("{a}\nHEAD"), &a)
+            .err()
+            .expect("refused");
+        assert!(err.contains("invalid fromHash"), "{err}");
+    }
+
+    #[test]
+    fn names_which_revision_is_unknown() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        let err = diff(&repo, "f.txt", "nope", &a).err().expect("refused");
+        assert_eq!(err, "unknown revision: nope");
+        let err = diff(&repo, "f.txt", &a, "nada").err().expect("refused");
+        assert_eq!(err, "unknown revision: nada");
+    }
+
+    #[test]
+    fn batch_check_lines_parse() {
+        assert_eq!(
+            batch_check_line("abc123 blob 12"),
+            Some(("abc123".to_string(), "blob".to_string()))
+        );
+        assert_eq!(batch_check_line("HEAD:x missing"), None);
+        assert_eq!(batch_check_line("ab ambiguous"), None);
+        assert_eq!(batch_check_line(""), None);
     }
 
     // ── Paths are literal, normalised, and never the repo root ──

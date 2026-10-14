@@ -10,7 +10,7 @@
  */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { assertParity } from "./harness.mjs";
@@ -280,5 +280,102 @@ describe("parity: git-file-diff path handling", () => {
     const res = await dev.fetch(call(f.cwd, "f.txt", f.a, f.b, undefined, ".").httpPath);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe(probe.error);
+  });
+});
+
+describe("parity: git-file-diff, third pass", () => {
+  let dev;
+  beforeAll(async () => { dev = await startDevServer(); }, 15_000);
+  afterAll(async () => { await dev?.stop(); });
+
+  const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf-8" });
+  /** Commit `p` (any name: staged with a literal pathspec). */
+  const commit = (cwd, p, content, msg) => {
+    mkdirSync(dirname(join(cwd, p)), { recursive: true });
+    writeFileSync(join(cwd, p), content);
+    git(cwd, "--literal-pathspecs", "add", "--", p);
+    git(cwd, "commit", "--quiet", "-m", msg);
+    return rev(cwd, "HEAD");
+  };
+
+  /** Both backends refuse, with the same message. */
+  async function refusedAlike(c) {
+    const probe = runProbe(c.command, c.args);
+    expect(probe.ok).toBe(false);
+    const res = await dev.fetch(c.httpPath);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(probe.error);
+    return probe.error;
+  }
+
+  it("a file absent from both commits is an error on both sides", async () => {
+    const cwd = mkTempRepo("gw-parity-file-diff-absent-");
+    const a = commit(cwd, "f.txt", "x\n", "a");
+    const b = commit(cwd, "f.txt", "y\n", "b");
+    expect(await refusedAlike(call(cwd, "never.txt", a, b))).toBe("never.txt not found at either commit");
+  });
+
+  it("a control character in a revision is refused alike", async () => {
+    const cwd = mkTempRepo("gw-parity-file-diff-ctrl-");
+    const a = commit(cwd, "f.txt", "x\n", "a");
+    expect(await refusedAlike(call(cwd, "f.txt", `${a}\nHEAD`, a))).toContain("invalid fromHash");
+  });
+
+  it("the unknown revision is named alike, whichever side it is", async () => {
+    const cwd = mkTempRepo("gw-parity-file-diff-unknown-");
+    const a = commit(cwd, "f.txt", "x\n", "a");
+    expect(await refusedAlike(call(cwd, "f.txt", a, "nada"))).toBe("unknown revision: nada");
+  });
+
+  it("side paths are checked lexically, with the same messages", async () => {
+    const cwd = mkTempRepo("gw-parity-file-diff-lexical-");
+    const a = commit(cwd, "f.txt", "x\n", "a");
+    for (const p of ["../x", "/etc/passwd", "./"]) {
+      await refusedAlike(call(cwd, "f.txt", a, a, p));
+    }
+  });
+
+  it("an old name under a directory that is now a symlink out of the repo is still read", async () => {
+    const cwd = mkTempRepo("gw-parity-file-diff-symlink-");
+    const a = commit(cwd, "assets/logo.txt", "v1\n", "a");
+    git(cwd, "mv", "assets/logo.txt", "logo.txt");
+    git(cwd, "commit", "--quiet", "-m", "move");
+    const b = commit(cwd, "logo.txt", "v2\n", "b");
+    const outside = mkTempRepo("gw-parity-outside-");
+    rmSync(join(cwd, "assets"), { recursive: true, force: true });
+    symlinkSync(outside, join(cwd, "assets"));
+    const { node } = await compareLikeTheViewer(dev, cwd, "logo.txt", a, b);
+    expect(node.hunks.flatMap((h) => h.lines).map((l) => [l.type, l.content])).toEqual([
+      ["delete", "v1"],
+      ["add", "v2"],
+    ]);
+  });
+
+  it("diff.relative does not make the log's names relative to a subdirectory cwd", async () => {
+    const cwd = mkTempRepo("gw-parity-file-diff-relative-");
+    const a = commit(cwd, "sub/old.txt", "1\n2\n", "a");
+    git(cwd, "mv", "sub/old.txt", "sub/new.txt");
+    git(cwd, "commit", "--quiet", "-m", "rename");
+    const b = commit(cwd, "sub/new.txt", "1\nTWO\n", "b");
+    git(cwd, "config", "diff.relative", "true");
+    const sub = join(cwd, "sub");
+    const { node: log } = await assertParity(dev, logCall(sub, "new.txt"));
+    expect(log.map((e) => e.path)).toEqual(["sub/new.txt", "sub/new.txt", "sub/old.txt"]);
+    const { node } = await compareLikeTheViewer(dev, sub, "new.txt", a, b);
+    expect(node.hunks.length).toBe(1);
+  });
+
+  it("a name starting with a newline and holding a 0x1e survives log and diff", async () => {
+    const cwd = mkTempRepo("gw-parity-file-diff-oddname-");
+    const name = "\nodd\x1ename.txt";
+    const a = commit(cwd, name, "a\n", "a");
+    const b = commit(cwd, name, "b\n", "b");
+    const { node: log } = await assertParity(dev, logCall(cwd, name));
+    expect(log.map((e) => e.path)).toEqual([name, name]);
+    const { node } = await compareLikeTheViewer(dev, cwd, name, a, b);
+    expect(node.hunks.flatMap((h) => h.lines).map((l) => [l.type, l.content])).toEqual([
+      ["delete", "a"],
+      ["add", "b"],
+    ]);
   });
 });

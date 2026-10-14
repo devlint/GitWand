@@ -12,6 +12,7 @@ import { useAIProvider } from "../composables/useAIProvider";
 import { useBlameContext } from "../composables/useBlameContext";
 import AiSparkle from "./AiSparkle.vue";
 import { formatBytes } from "../composables/useFilePreview";
+import { nameAtCommit } from "../utils/fileHistoryNames";
 
 const { t, locale } = useI18n();
 const ai = useAIProvider();
@@ -263,16 +264,12 @@ function clearCompare() {
 }
 
 /**
- * The file's name at `hash`, as the `--follow` history reported it. Passing it
- * to the diff is what makes a comparison across a rename work; the backend
- * does not re-walk the history.
+ * The file's name at `hash`, from the `--follow` history (see
+ * `nameAtCommit`). Passing it to the diff is what makes a comparison across a
+ * rename work; the backend does not re-walk the history.
  */
 function pathAtCommit(hash: string): string | undefined {
-  for (const list of [fileLog.value, pickaxeResults.value, rangeLogResults.value]) {
-    const path = list?.find((e) => e.hashFull === hash)?.path;
-    if (path !== undefined) return path;
-  }
-  return undefined;
+  return nameAtCommit(hash, fileLog.value, [pickaxeResults.value, rangeLogResults.value]);
 }
 
 async function loadCompare() {
