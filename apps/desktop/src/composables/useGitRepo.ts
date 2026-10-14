@@ -914,6 +914,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           if (!viewChanged) refreshLoadedBranches();
         }
       } else {
+        // A forced reload consumed in a filtered view still means refs may
+        // have moved anywhere: the canonical view's cached history is stale.
+        if (forced) LOG_CACHE.delete(repo);
         // Same rows as held (an idle poll): keep the array so an in-flight
         // scroll page, fetched at a still-valid offset, isn't dropped.
         const unchanged =
@@ -1560,9 +1563,13 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
   async function loadBranches() {
     if (!folderPath.value) return;
+    const repo = folderPath.value;
     branchesLoading.value = true;
     try {
-      branches.value = await getGitBranches(folderPath.value, settings.value.defaultBranch);
+      const list = await getGitBranches(repo, settings.value.defaultBranch);
+      // A repo switch while this was in flight: don't show A's branches in B.
+      if (folderPath.value !== repo) return;
+      branches.value = list;
     } catch (err: any) {
       error.value = `branches: ${err?.message ?? err}`;
     } finally {
