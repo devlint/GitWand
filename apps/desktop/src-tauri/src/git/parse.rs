@@ -134,15 +134,28 @@ impl HunkBody {
         }
     }
 
+    /// Body for the hunk opened by the `@@` line `header`, its counts parsed
+    /// from it (`hunkBodyFromHeader` in packages/core).
+    pub(crate) fn from_header(header: &str) -> Self {
+        let (_, old_count, _, new_count) = parse_hunk_header(header);
+        Self::for_header(header, old_count, new_count)
+    }
+
     /// True while the header's line counts are not yet consumed.
     pub(crate) fn active(&self) -> bool {
         self.unbounded || self.old_left > 0 || self.new_left > 0
     }
 
     /// Classify one body line and consume it from the counts. `None` once
-    /// the body is exhausted, or for a line that is not an add/delete/context
-    /// line (`\ No newline at end of file`, or an empty string — which is
-    /// never context, see AGENTS.md).
+    /// the body is exhausted, or for a line that is not a hunk line
+    /// (`\ No newline at end of file`, or `""` when it cannot be context).
+    ///
+    /// Blank context lines: git writes one as `" "`, but as `""` with
+    /// `diff.suppressBlankEmpty=true`. While counts remain on BOTH sides, `""`
+    /// is therefore a context line; outside a hunk, or once either count is
+    /// used up, it is ignored. The bound is what keeps this from creating
+    /// phantom context lines (AGENTS.md "Diff Parsing"). Same rule as
+    /// `classifyHunkLine` in packages/core/src/hunk-body.ts.
     pub(crate) fn classify(&mut self, line: &str) -> Option<HunkLineKind> {
         if !self.active() {
             return None;
@@ -153,7 +166,9 @@ impl HunkBody {
         } else if line.starts_with('-') {
             self.old_left -= 1;
             Some(HunkLineKind::Delete)
-        } else if line.starts_with(' ') {
+        } else if line.starts_with(' ')
+            || (line.is_empty() && self.old_left > 0 && self.new_left > 0)
+        {
             self.old_left -= 1;
             self.new_left -= 1;
             Some(HunkLineKind::Context)
@@ -171,7 +186,8 @@ pub(crate) fn push_hunk_line(
     old_line_no: &mut i32,
     new_line_no: &mut i32,
 ) {
-    let content = line[1..].to_string();
+    // `""` is a (blank) context line too — see `HunkBody::classify`.
+    let content = line.get(1..).unwrap_or("").to_string();
     match kind {
         HunkLineKind::Add => {
             hunk.lines.push(DiffLine {
@@ -2269,9 +2285,30 @@ mod diff_hunk_tests {
     }
 
     #[test]
-    fn empty_line_is_never_context() {
-        let (hunks, _) = parse_diff_hunks(&text(&["@@ -1,2 +1,2 @@", " a", "", " b"]));
-        assert_eq!(kinds(&hunks[0]), [("context", "a"), ("context", "b")]);
+    fn empty_line_is_context_only_while_both_counts_remain() {
+        // `diff.suppressBlankEmpty=true` prints a blank context line as "".
+        let (hunks, _) =
+            parse_diff_hunks(&text(&["@@ -1,4 +1,2 @@", " a", "", "-x", "", "-y", ""]));
+        // " a" and "" exhaust the new side: the second "" cannot be context,
+        // and the trailing "" after the body is not a hunk line either.
+        assert_eq!(
+            kinds(&hunks[0]),
+            [
+                ("context", "a"),
+                ("context", ""),
+                ("delete", "x"),
+                ("delete", "y")
+            ]
+        );
+        assert_eq!(hunks[0].lines[1].old_line_no, Some(2));
+        assert_eq!(hunks[0].lines[1].new_line_no, Some(2));
+        assert_eq!(hunks[0].lines[3].old_line_no, Some(4));
+    }
+
+    #[test]
+    fn empty_line_outside_a_hunk_is_ignored() {
+        let (hunks, _) = parse_diff_hunks(&text(&["", "@@ -1 +1 @@", "-a", "+b", "", ""]));
+        assert_eq!(kinds(&hunks[0]), [("delete", "a"), ("add", "b")]);
     }
 
     #[test]

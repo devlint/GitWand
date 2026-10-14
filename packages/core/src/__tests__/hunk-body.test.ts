@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   classifyHunkLine,
-  hunkBodyActive,
   hunkBodyFor,
+  hunkBodyFromHeader,
   noHunkBody,
   parseHunkHeader,
   type HunkBody,
@@ -20,8 +20,7 @@ function classifyAll(diff: string): Array<[string, string]> {
     } else if (line.startsWith("diff ")) {
       body = noHunkBody();
     } else if (line.startsWith("@@")) {
-      const r = parseHunkHeader(line);
-      body = hunkBodyFor(line, r?.oldCount ?? 1, r?.newCount ?? 1);
+      body = hunkBodyFromHeader(line);
     }
   }
   return out;
@@ -67,24 +66,40 @@ describe("hunk-body", () => {
     ]);
   });
 
-  it("never treats an empty string as context, and closes once the counts are used up", () => {
-    const body = hunkBodyFor("@@ -1,1 +1,1 @@", 1, 1);
+  it("treats \"\" as a blank context line only while both counts remain", () => {
+    // `diff.suppressBlankEmpty=true` prints a blank context line as "".
+    const body = hunkBodyFromHeader("@@ -1,3 +1,1 @@");
+    expect(classifyHunkLine(body, "")).toBe("context");
+    // new side used up, old side has two left: "" cannot be context.
     expect(classifyHunkLine(body, "")).toBeNull();
-    expect(classifyHunkLine(body, " a")).toBe("context");
-    expect(hunkBodyActive(body)).toBe(false);
+    expect(classifyHunkLine(body, "-a")).toBe("delete");
+    expect(classifyHunkLine(body, "-b")).toBe("delete");
+    // body exhausted: "" and headers are not hunk lines.
+    expect(classifyHunkLine(body, "")).toBeNull();
     expect(classifyHunkLine(body, "--- a/next")).toBeNull();
+  });
+
+  it("ignores \"\" outside a hunk", () => {
+    expect(classifyHunkLine(noHunkBody(), "")).toBeNull();
+    expect(classifyHunkLine(noHunkBody(), "+x")).toBeNull();
+  });
+
+  it("hunkBodyFromHeader reads the counts from the header, 1 when omitted", () => {
+    expect(hunkBodyFromHeader("@@ -3,0 +4,2 @@ fn")).toEqual({ oldLeft: 0, newLeft: 2, unbounded: false });
+    expect(hunkBodyFromHeader("@@ -3 +4 @@")).toEqual({ oldLeft: 1, newLeft: 1, unbounded: false });
+    expect(hunkBodyFromHeader("@@@ -1,1 -1,1 +1,3 @@@").unbounded).toBe(true);
   });
 
   it("leaves a combined @@@ hunk open until the next diff line", () => {
     const body = hunkBodyFor("@@@ -1,1 -1,1 +1,3 @@@", 1, 1);
-    for (const l of ["++<<<<<<< HEAD", " +ours", "++======="]) {
+    for (const l of ["++<<<<<<< HEAD", " +ours", "++=======", "+ theirs"]) {
       expect(classifyHunkLine(body, l)).not.toBeNull();
     }
-    expect(hunkBodyActive(body)).toBe(true);
+    expect(classifyHunkLine(body, "")).toBeNull();
   });
 
   it("is exported from @gitwand/core", () => {
-    for (const name of ["parseHunkHeader", "noHunkBody", "hunkBodyFor", "hunkBodyActive", "classifyHunkLine"]) {
+    for (const name of ["parseHunkHeader", "noHunkBody", "hunkBodyFor", "hunkBodyFromHeader", "classifyHunkLine"]) {
       expect(core).toHaveProperty(name);
     }
   });

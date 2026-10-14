@@ -70,4 +70,32 @@ describe("parity: git-show", () => {
       expect(shape("new.sql")).toEqual([["add", "-- created"], ["add", "++ too"]]);
     }
   });
+
+  // `diff.suppressBlankEmpty=true` prints a blank context line as "": inside
+  // a hunk (counts left on both sides) it is a context line.
+  it("counts a suppressed blank context line, and the next file still parses", async () => {
+    const cwd = mkTempRepo("gw-parity-show-blank-");
+    execFileSync("git", ["-C", cwd, "config", "diff.suppressBlankEmpty", "true"]);
+    commitFile(cwd, "f.txt", "a\n\nb\n", "f", 0);
+    commitFile(cwd, "g.txt", "x\n", "g", 1);
+    writeFileSync(join(cwd, "f.txt"), "a\n\nB\n");
+    writeFileSync(join(cwd, "g.txt"), "y\n");
+    execFileSync("git", ["-C", cwd, "commit", "-q", "-am", "edit"]);
+
+    const { rust, node } = await assertParity(dev, {
+      command: "git-show",
+      args: { cwd, hash: "HEAD" },
+      httpPath: `/api/git-show?cwd=${encodeURIComponent(cwd)}&hash=HEAD`,
+    });
+    for (const side of [rust, node]) {
+      expect(side.map((d) => d.path)).toEqual(["f.txt", "g.txt"]);
+      expect(side[0].hunks[0].lines.map((l) => [l.type, l.content, l.oldLineNo, l.newLineNo])).toEqual([
+        ["context", "a", 1, 1],
+        ["context", "", 2, 2],
+        ["delete", "b", 3, null],
+        ["add", "B", null, 3],
+      ]);
+      expect(side[1].hunks[0].lines.map((l) => [l.type, l.content])).toEqual([["delete", "x"], ["add", "y"]]);
+    }
+  });
 });

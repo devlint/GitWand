@@ -7,7 +7,7 @@
  */
 
 import type { HistoryCommit } from "./types.js";
-import { classifyHunkLine, hunkBodyFor, noHunkBody, parseHunkHeader, type HunkBody } from "../hunk-body.js";
+import { classifyHunkLine, hunkBodyFromHeader, noHunkBody, type HunkBody } from "../hunk-body.js";
 
 export const LOG_FORMAT = "%x1e%H%x1f%an%x1f%as%x1f%s%x1f%b%x1f";
 
@@ -48,10 +48,7 @@ export function isPureMove(rangeDiff: string): boolean {
     else if (kind === "add") added.push(line.slice(1).trim());
     else if (kind === null) {
       if (line.startsWith("diff ")) body = noHunkBody();
-      else if (line.startsWith("@@")) {
-        const range = parseHunkHeader(line);
-        body = hunkBodyFor(line, range?.oldCount ?? 1, range?.newCount ?? 1);
-      }
+      else if (line.startsWith("@@")) body = hunkBodyFromHeader(line);
     }
   }
   if (removed.length === 0 || removed.length !== added.length) return false;

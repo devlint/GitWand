@@ -565,8 +565,7 @@ fn gl_diff_stats_from_files(files: &[serde_json::Value]) -> (i64, i64) {
                 Some(crate::git::HunkLineKind::Context) => {}
                 None => {
                     if line.starts_with("@@") {
-                        let (_, old_count, _, new_count) = crate::git::parse_hunk_header(line);
-                        body = crate::git::HunkBody::for_header(line, old_count, new_count);
+                        body = crate::git::HunkBody::from_header(line);
                     }
                 }
             }

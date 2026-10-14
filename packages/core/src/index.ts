@@ -50,7 +50,7 @@ export {
   parseHunkHeader,
   noHunkBody,
   hunkBodyFor,
-  hunkBodyActive,
+  hunkBodyFromHeader,
   classifyHunkLine,
   type HunkHeaderRange,
   type HunkBody,

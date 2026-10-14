@@ -194,6 +194,8 @@ const isContextLine = (line: string) => !line.startsWith('\\')
 
 Voir aussi la note globale dans `AGENTS.md` / mémoire projet sur ce sujet.
 
+Les parseurs de diff unifié doivent passer par `src/hunk-body.ts` (`classifyHunkLine`, `hunkBodyFromHeader`) : le hunk est borné par les comptes de son en-tête `@@`, ce qui distingue un `--- x` de contenu d'un en-tête de fichier, et rend sûr de traiter `''` comme contexte tant qu'il reste des lignes des deux côtés (`diff.suppressBlankEmpty`). Jumeau Rust : `HunkBody` dans `apps/desktop/src-tauri/src/git/parse.rs`.
+
 ---
 
 ## Tests (`__tests__/`)

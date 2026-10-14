@@ -15,8 +15,7 @@
 import type { GitDiff, DiffHunk } from "./backend";
 import {
   classifyHunkLine,
-  hunkBodyActive,
-  hunkBodyFor,
+  hunkBodyFromHeader,
   noHunkBody,
   parseHunkHeader,
   type HunkBody,
@@ -74,12 +73,12 @@ export function parseFileDiff(rawFileSlice: string): GitDiff {
   // is classified by its first character only: a removed `-- note` is the
   // diff line `--- note`, an added `++x` is `+++x`, and neither is a file
   // header. The `---`/`+++`/`index`… header skip below only runs outside it.
+  // A bare "" while both counts remain is a blank context line
+  // (`diff.suppressBlankEmpty`, or trailing-whitespace trimming by a forge).
   let body: HunkBody = noHunkBody();
   for (const line of lines) {
-    if (currentHunk && hunkBodyActive(body)) {
-      // A bare "" mid-hunk is a blank context line whose leading space was
-      // stripped (trailing-whitespace trimming on the way from a forge API).
-      const kind = classifyHunkLine(body, line === "" ? " " : line);
+    if (currentHunk) {
+      const kind = classifyHunkLine(body, line);
       if (kind === "add") {
         currentHunk.lines.push({ type: "add", content: line.substring(1), newLineNo: newLine++ });
         continue;
@@ -110,7 +109,7 @@ export function parseFileDiff(rawFileSlice: string): GitDiff {
       file.hunks.push(currentHunk);
       oldLine = range.oldStart;
       newLine = range.newStart;
-      body = hunkBodyFor(line, range.oldCount, range.newCount);
+      body = hunkBodyFromHeader(line);
     }
     // Anything else outside a hunk body ("\ No newline at end of file", a
     // line past the header's counts) is not a hunk line.

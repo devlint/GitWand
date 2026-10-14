@@ -461,9 +461,9 @@ fn extract_staged_added_lines(cwd: &str) -> Result<Vec<ScanFileInput>, String> {
         } else if line.starts_with("@@") {
             // "@@ -oldStart,oldCount +newStart,newCount @@" — only the new-side start matters,
             // since we only ever record `+` lines.
-            let (_, old_count, new_start, new_count) = parse_hunk_header(line);
+            let (_, _, new_start, _) = parse_hunk_header(line);
             new_line_no = new_start.max(0) as u32;
-            body = HunkBody::for_header(line, old_count, new_count);
+            body = HunkBody::from_header(line);
         }
     }
 

@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   classifyHunkLine,
-  hunkBodyFor,
+  hunkBodyFromHeader,
   noHunkBody,
   parseGitwandrc,
   parseHunkHeader,
@@ -94,7 +94,7 @@ export function extractStagedAddedLines(diffText: string): ScanFileInput[] {
     } else if (line.startsWith("@@")) {
       const range = parseHunkHeader(line);
       newLineNo = range ? range.newStart : 0;
-      body = hunkBodyFor(line, range?.oldCount ?? 1, range?.newCount ?? 1);
+      body = hunkBodyFromHeader(line);
     }
   }
   flush();

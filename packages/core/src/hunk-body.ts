@@ -12,8 +12,17 @@
  * first character only. Only once they are exhausted do `---`/`+++` mean
  * file headers again.
  *
- * Mirrors `HunkBody` in apps/desktop/src-tauri/src/git/parse.rs and
- * `devHunkBody` in apps/desktop/dev-server.mjs — keep the three in sync.
+ * Blank context lines: git normally writes one as `" "`, but with
+ * `diff.suppressBlankEmpty=true` (or a forge/API that trims trailing
+ * whitespace) it is `""`. Inside a bounded hunk — counts left on BOTH sides —
+ * `""` is therefore a context line and consumes one line of each count.
+ * Outside a hunk, or once either count is used up, `""` is ignored. The
+ * bound is what keeps this from creating phantom context lines: the
+ * AGENTS.md gotcha is about unbounded parsers that accept any line not
+ * starting with `\`.
+ *
+ * Mirrors `HunkBody` in apps/desktop/src-tauri/src/git/parse.rs — keep the
+ * two in sync (apps/desktop/dev-server.mjs uses this module).
  */
 
 /** Old/new start and count of a `@@` hunk header. */
@@ -59,27 +68,33 @@ export function noHunkBody(): HunkBody {
   return { oldLeft: 0, newLeft: 0, unbounded: false };
 }
 
-/** Body of the hunk opened by `header`, bounded by its counts. */
+/** Body of the hunk opened by `header`, bounded by the given counts. */
 export function hunkBodyFor(header: string, oldCount: number, newCount: number): HunkBody {
   if (header.startsWith("@@@")) return { oldLeft: 0, newLeft: 0, unbounded: true };
   return { oldLeft: Math.max(0, oldCount), newLeft: Math.max(0, newCount), unbounded: false };
 }
 
-/** True while the hunk's counts are not used up. */
-export function hunkBodyActive(body: HunkBody): boolean {
-  return body.unbounded || body.oldLeft > 0 || body.newLeft > 0;
+/**
+ * Body of the hunk opened by the `@@` line `header`, its counts parsed from
+ * it (1 each when unparsable, as for an omitted count).
+ */
+export function hunkBodyFromHeader(header: string): HunkBody {
+  const range = parseHunkHeader(header);
+  return hunkBodyFor(header, range?.oldCount ?? 1, range?.newCount ?? 1);
 }
 
 export type HunkLineKind = "add" | "delete" | "context";
 
 /**
  * Classify one line against `body` and consume it from the counts. Returns
- * null once the body is exhausted, or for a line that is not an
- * add/delete/context line (`\ No newline at end of file`, or an empty
- * string, which is never context — AGENTS.md "Diff Parsing").
+ * null once the body is exhausted, or for a line that is not a hunk line
+ * (`\ No newline at end of file`, or `""` when it cannot be a blank context
+ * line — see the module doc). A `"context"` line's content is
+ * `line.slice(1)`, which is `""` for both `" "` and `""`.
  */
 export function classifyHunkLine(body: HunkBody, line: string): HunkLineKind | null {
-  if (!hunkBodyActive(body)) return null;
+  const bounded = body.oldLeft > 0 || body.newLeft > 0;
+  if (!body.unbounded && !bounded) return null;
   if (line.startsWith("+")) {
     body.newLeft--;
     return "add";
@@ -88,7 +103,7 @@ export function classifyHunkLine(body: HunkBody, line: string): HunkLineKind | n
     body.oldLeft--;
     return "delete";
   }
-  if (line.startsWith(" ")) {
+  if (line.startsWith(" ") || (line === "" && body.oldLeft > 0 && body.newLeft > 0)) {
     body.oldLeft--;
     body.newLeft--;
     return "context";

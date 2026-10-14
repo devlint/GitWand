@@ -139,19 +139,42 @@ commit messages displayed as HTML, etc.) must be sanitized with `useSafeHtml.ts`
 
 ## Diff Parsing — Critical Gotcha
 
-When classifying lines in a git diff, detect context lines by checking for a
-leading space character.
+Classify hunk lines only inside a hunk body **bounded by the counts of its
+`@@ -a,b +c,d @@` header**, and classify them by their first character only.
 
 ```typescript
-// WRONG — empty strings pass this test and become phantom context lines
+// WRONG — unbounded: the empty strings that split("\n") leaves between
+// sections and after the last line pass this test and become phantom
+// context lines (then `git apply` rejects the rebuilt patch)
 if (!line.startsWith('\\')) { /* context line */ }
 
-// CORRECT
-if (line.startsWith(' ')) { /* context line */ }
+// WRONG — header filter applied inside a hunk: a removed `-- comment`
+// is the diff line `--- comment`, an added `++x` is `+++x`; both get dropped
+if (line.startsWith('---') || line.startsWith('+++')) continue;
+
+// CORRECT — use the shared hunk-body helpers
+const kind = classifyHunkLine(body, line); // "add" | "delete" | "context" | null
 ```
 
-This applies to both the TypeScript (`packages/core`) and Rust
-(`apps/desktop/src-tauri`) diff parsers. Both implementations must stay in sync.
+The rule, while the header's counts are not used up:
+
+- `+` → add, `-` → delete (whatever follows: `--- x` is content, not a header).
+- `' '` → context.
+- `""` → context **only while counts remain on both the old and new side**:
+  that is how git prints a blank context line with
+  `diff.suppressBlankEmpty=true` (and how some forges serve it).
+- anything else (`\ No newline at end of file`) is not a hunk line.
+
+Outside a body — before the first `@@`, after `diff --git`, or once the counts
+are exhausted — `---`/`+++` are file headers and `""` is ignored. The bound is
+what makes treating `""` as context safe; never accept `""` in an unbounded
+parser. A combined `@@@` hunk (`diff --cc`) has per-parent counts and stays
+open until the next `diff ` line.
+
+Shared implementations, which must stay in sync: `packages/core/src/hunk-body.ts`
+(`classifyHunkLine`, `hunkBodyFromHeader` — used by the desktop frontend, the CLI
+and `dev-server.mjs`) and `HunkBody` in `apps/desktop/src-tauri/src/git/parse.rs`
+(used by `parse_diff_hunks`, which `git_diff` and `git_show` share).
 
 ---
 

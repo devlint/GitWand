@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { classifyHunkLine, hunkBodyFor, noHunkBody, parseHunkHeader, type HunkBody } from "@gitwand/core";
+import { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader, type HunkBody } from "@gitwand/core";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 
@@ -90,9 +90,9 @@ export function parseDiffHunks(diffOutput: string): DiffHunk[] {
       currentFile = line.slice(6);
     } else if (line.startsWith("@@ ")) {
       // @@ -origStart,origCount +newStart,newCount @@
+      body = hunkBodyFromHeader(line);
       const range = parseHunkHeader(line);
       if (range) {
-        body = hunkBodyFor(line, range.oldCount, range.newCount);
         if (currentFile && range.oldCount > 0) {
           hunks.push({ filePath: currentFile, origStart: range.oldStart, origCount: range.oldCount });
         }

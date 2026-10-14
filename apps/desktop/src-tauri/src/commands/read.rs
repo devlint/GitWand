@@ -1263,116 +1263,68 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
         .map_err(|e| format!("Failed to run git show: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut diffs: Vec<GitDiff> = Vec::new();
-    let mut current_path: Option<String> = None;
-    let mut current_hunk: Option<DiffHunk> = None;
-    let mut old_line_no = 0;
-    let mut new_line_no = 0;
-    let mut current_hunks: Vec<DiffHunk> = Vec::new();
-    // Extended-header state tracked per file, captured before any @@ hunk and
-    // flushed alongside the file's hunks when the next `diff --git` appears.
-    let mut current_status: Option<String> = None;
-    let mut current_old_path: Option<String> = None;
-    // Remaining body of the current hunk, from its `@@` counts — inside it a
-    // `--- x`/`+++ x` line is content (a removed `-- x`), not a file header.
-    let mut body = HunkBody::default();
+    Ok(parse_multi_file_diff(&stdout))
+}
 
+/// Split a multi-file diff on its `diff --git` lines and parse each file
+/// section with the same `parse_diff_hunks` that `git_diff` uses, so the two
+/// commands cannot drift in hunk shaping or line classification. Splitting
+/// there is safe: every hunk line carries a `+`/`-`/` ` prefix (or is `""`),
+/// so none can start with `diff --git `.
+fn parse_multi_file_diff(stdout: &str) -> Vec<GitDiff> {
+    let mut sections: Vec<Vec<&str>> = Vec::new();
     for line in stdout.lines() {
-        if let Some(ref mut hunk) = current_hunk {
-            if let Some(kind) = body.classify(line) {
-                push_hunk_line(hunk, kind, line, &mut old_line_no, &mut new_line_no);
-                continue;
-            }
-        }
-
         if line.starts_with("diff --git ") {
-            body = HunkBody::default();
-            // Save previous file diff
-            if let Some(hunk) = current_hunk.take() {
-                current_hunks.push(hunk);
-            }
-            if let Some(path) = current_path.take() {
-                diffs.push(GitDiff {
-                    path,
-                    hunks: std::mem::take(&mut current_hunks),
-                    status: current_status.take(),
-                    old_path: current_old_path.take(),
-                    // P2.4 — multi-file commit diff parsing has no per-file
-                    // cap (the caller is `git_show`/`git_log_with_diff`,
-                    // not the polled `git_diff` that `pollStatus` re-fires).
-                    // Truncation is only meaningful for the per-file diff
-                    // command. Set None unconditionally here.
-                    truncated_from_bytes: None,
-                    // Directory entries only reach the single-file `git_diff`.
-                    is_directory: None,
-                    new_files: None,
-                    nested_repo: None,
-                });
-            }
-            current_status = None;
-            current_old_path = None;
-
-            // Extract file path from "diff --git a/path b/path"
-            let parts: Vec<&str> = line.split(" b/").collect();
-            if parts.len() >= 2 {
-                current_path = Some(parts[1].to_string());
-            }
-        } else if line.starts_with("new file mode") {
-            current_status = Some("added".to_string());
-        } else if line.starts_with("deleted file mode") {
-            current_status = Some("deleted".to_string());
-        } else if let Some(rest) = line.strip_prefix("rename from ") {
-            current_status = Some("renamed".to_string());
-            current_old_path = Some(rest.to_string());
-        } else if line.starts_with("rename to ") {
-            if current_status.is_none() {
-                current_status = Some("renamed".to_string());
-            }
-        } else if line.starts_with("@@") {
-            if let Some(hunk) = current_hunk.take() {
-                current_hunks.push(hunk);
-            }
-
-            let header = line.to_string();
-            let (old_start, old_count, new_start, new_count) = parse_hunk_header(line);
-            old_line_no = old_start;
-            new_line_no = new_start;
-            body = HunkBody::for_header(line, old_count, new_count);
-
-            current_hunk = Some(DiffHunk {
-                header,
-                old_start,
-                old_count,
-                new_start,
-                new_count,
-                lines: Vec::new(),
-            });
+            sections.push(vec![line]);
+        } else if let Some(section) = sections.last_mut() {
+            section.push(line);
         }
-        // Hunk lines were consumed at the top of the loop. Only a line that
-        // starts with a literal space is context: an empty string (blank
-        // separator, trailing EOF newline) must never become a phantom
-        // zero-length context line, or `git apply` rejects the rebuilt patch
-        // with "depends on old contents" (AGENTS.md "Diff Parsing").
     }
 
-    // Save last file diff
-    if let Some(hunk) = current_hunk.take() {
-        current_hunks.push(hunk);
-    }
-    if let Some(path) = current_path.take() {
+    let mut diffs: Vec<GitDiff> = Vec::new();
+    for section in sections {
+        // "diff --git a/path b/path"
+        let parts: Vec<&str> = section[0].split(" b/").collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let path = parts[1].to_string();
+
+        // Extended headers — only before the first hunk, where they cannot be
+        // confused with a hunk line.
+        let mut status: Option<String> = None;
+        let mut old_path: Option<String> = None;
+        for line in section.iter().skip(1).take_while(|l| !l.starts_with("@@")) {
+            if line.starts_with("new file mode") {
+                status = Some("added".to_string());
+            } else if line.starts_with("deleted file mode") {
+                status = Some("deleted".to_string());
+            } else if let Some(rest) = line.strip_prefix("rename from ") {
+                status = Some("renamed".to_string());
+                old_path = Some(rest.to_string());
+            } else if line.starts_with("rename to ") && status.is_none() {
+                status = Some("renamed".to_string());
+            }
+        }
+
+        let (hunks, _) = parse_diff_hunks(&section.join("\n"));
         diffs.push(GitDiff {
             path,
-            hunks: current_hunks,
-            status: current_status.take(),
-            old_path: current_old_path.take(),
-            truncated_from_bytes: None, // see P2.4 note above
+            hunks,
+            status,
+            old_path,
+            // P2.4 — multi-file commit diff parsing has no per-file cap (the
+            // caller is `git_show`, not the polled `git_diff` that
+            // `pollStatus` re-fires). Truncation is only meaningful for the
+            // per-file diff command.
+            truncated_from_bytes: None,
+            // Directory entries only reach the single-file `git_diff`.
             is_directory: None,
             new_files: None,
             nested_repo: None,
         });
     }
-
-    Ok(diffs)
+    diffs
 }
 
 // ─── File log (v1.9) — pickaxe + line-range ──────────────
@@ -3993,6 +3945,71 @@ mod pathspec_tests {
             );
             assert_eq!(shape(h), expected_sql_shape(), "staged={staged}");
         }
+    }
+
+    // With `diff.suppressBlankEmpty=true` git prints a blank context line as
+    // "" instead of " ". Inside a hunk it must still count as context, or the
+    // later line numbers shift and a rebuilt patch fails `git apply`.
+    const BLANK_BEFORE: &str = "a\n\nb\n";
+    const BLANK_AFTER: &str = "a\n\nB\n";
+
+    fn expected_blank_shape() -> Vec<(String, String, Option<i32>, Option<i32>)> {
+        [
+            ("context", "a", Some(1), Some(1)),
+            ("context", "", Some(2), Some(2)),
+            ("delete", "b", Some(3), None),
+            ("add", "B", None, Some(3)),
+        ]
+        .into_iter()
+        .map(|(t, c, o, n)| (t.to_string(), c.to_string(), o, n))
+        .collect()
+    }
+
+    #[test]
+    fn git_diff_counts_a_suppressed_blank_context_line() {
+        let repo = TempRepo::new();
+        repo.git(&["config", "diff.suppressBlankEmpty", "true"]);
+        repo.write("f.txt", BLANK_BEFORE);
+        repo.commit_all("init");
+        repo.write("f.txt", BLANK_AFTER);
+
+        // The CLI really prints "" here (the precondition of this test).
+        let raw = repo.git(&["diff", "--", "f.txt"]);
+        assert!(
+            String::from_utf8_lossy(&raw.stdout).contains("\n a\n\n-b\n"),
+            "git did not suppress the blank context line"
+        );
+
+        for staged in [false, true] {
+            if staged {
+                repo.git(&["add", "f.txt"]);
+            }
+            let d = diff(&repo, "f.txt", staged).expect("diff");
+            assert_eq!(d.hunks.len(), 1, "staged={staged}");
+            assert_eq!(
+                shape(&d.hunks[0]),
+                expected_blank_shape(),
+                "staged={staged}"
+            );
+        }
+    }
+
+    #[test]
+    fn git_show_counts_a_suppressed_blank_context_line() {
+        let repo = TempRepo::new();
+        repo.git(&["config", "diff.suppressBlankEmpty", "true"]);
+        repo.write("f.txt", BLANK_BEFORE);
+        repo.write("g.txt", "x\n");
+        repo.commit_all("init");
+        repo.write("f.txt", BLANK_AFTER);
+        repo.write("g.txt", "y\n");
+        repo.commit_all("edit");
+
+        let diffs = tauri::async_runtime::block_on(git_show(repo.cwd(), "HEAD".to_string()))
+            .expect("git show");
+        let paths: Vec<&str> = diffs.iter().map(|d| d.path.as_str()).collect();
+        assert_eq!(paths, ["f.txt", "g.txt"]);
+        assert_eq!(shape(&diffs[0].hunks[0]), expected_blank_shape());
     }
 
     #[test]

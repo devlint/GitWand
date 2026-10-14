@@ -342,6 +342,51 @@ describe("parity: git-diff", () => {
   });
 });
 
+// With `diff.suppressBlankEmpty=true` git prints a blank context line as ""
+// instead of " ". Rust and the dev-server used to drop it without consuming
+// a line of the hunk (the TS frontend parser kept it), so the two sides
+// disagreed and every later line number shifted.
+describe("parity: git-diff with diff.suppressBlankEmpty", () => {
+  /** @type {Awaited<ReturnType<typeof startDevServer>>} */
+  let dev;
+
+  beforeAll(async () => {
+    dev = await startDevServer();
+  }, 15_000);
+
+  afterAll(async () => {
+    await dev?.stop();
+  });
+
+  for (const staged of [false, true]) {
+    it(`counts the "" blank context line (${staged ? "staged" : "unstaged"})`, async () => {
+      const cwd = mkTempRepo("gw-parity-diff-blank-");
+      runGit(cwd, ["config", "diff.suppressBlankEmpty", "true"]);
+      commitFile(cwd, "f.txt", "a\n\nb\n", "init", 0);
+      writeFileSync(join(cwd, "f.txt"), "a\n\nB\n");
+      if (staged) runGit(cwd, ["add", "f.txt"]);
+      const raw = execFileSync("git", ["-C", cwd, "diff", ...(staged ? ["--cached"] : []), "--", "f.txt"], {
+        encoding: "utf-8",
+      });
+      expect(raw).toContain("\n a\n\n-b\n"); // git really printed ""
+
+      const { rust, node } = await assertParity(dev, {
+        command: "git-diff",
+        args: { cwd, path: "f.txt", staged },
+        httpPath: `/api/git-diff?cwd=${encodeURIComponent(cwd)}&path=f.txt&staged=${staged}`,
+      });
+      for (const side of [rust, node]) {
+        expect(side.hunks[0].lines.map((l) => [l.type, l.content, l.oldLineNo, l.newLineNo])).toEqual([
+          ["context", "a", 1, 1],
+          ["context", "", 2, 2],
+          ["delete", "b", 3, null],
+          ["add", "B", null, 3],
+        ]);
+      }
+    });
+  }
+});
+
 function runGit(cwd, args) {
   execFileSync("git", ["-C", cwd, ...args]);
 }

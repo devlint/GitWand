@@ -167,6 +167,30 @@ describe("parseFileDiff", () => {
   // A removed SQL comment `-- old` is the diff line `--- old`, an added `++x`
   // is `+++x`. They used to be skipped as `---`/`+++` file headers, leaving
   // the hunk with only its context lines and every later line number off.
+  // `diff.suppressBlankEmpty=true` prints a blank context line as "". It is
+  // context only while counts remain on both sides; past them it is ignored.
+  it('treats "" as context only while both hunk counts remain', () => {
+    const diff = [
+      "diff --git a/f.txt b/f.txt",
+      "--- a/f.txt",
+      "+++ b/f.txt",
+      "@@ -1,4 +1,2 @@",
+      " a",
+      "",
+      "-x",
+      "",
+      "-y",
+      "",
+      "",
+    ].join("\n");
+    expect(parseFileDiff(diff).hunks[0].lines).toEqual([
+      { type: "context", content: "a", oldLineNo: 1, newLineNo: 1 },
+      { type: "context", content: "", oldLineNo: 2, newLineNo: 2 },
+      { type: "delete", content: "x", oldLineNo: 3 },
+      { type: "delete", content: "y", oldLineNo: 4 },
+    ]);
+  });
+
   describe("hunk lines whose content starts with -- or ++", () => {
     const SQL_DIFF = [
       "diff --git a/q.sql b/q.sql",

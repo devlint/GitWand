@@ -254,51 +254,57 @@ function devExtractPercent(line) {
 }
 
 /**
- * Remaining body of a unified-diff hunk, from the counts of its `@@` header.
- * Mirrors Rust's `HunkBody` (src-tauri/src/git/parse.rs) — keep in sync.
+ * Parse one file's unified diff into hunks — the dev-server twin of Rust's
+ * `parse_diff_hunks` (src-tauri/src/git/parse.rs). Hunk bodies come from
+ * `@gitwand/core`'s hunk-body helpers (the TS twin of Rust's `HunkBody`):
+ * inside a hunk, bounded by its `@@` counts, a line is classified by its first
+ * character only — a removed `-- note` is the diff line `--- note`, not a file
+ * header — and a bare "" is a blank context line while both counts remain
+ * (`diff.suppressBlankEmpty`). Outside a hunk, "" and headers are skipped.
  *
- * While the body is active, a line is classified by its first character
- * only: a removed SQL comment `-- note` is the diff line `--- note`, an added
- * `++x` is `+++x`, and neither is a file header. Only once the counts are
- * used up do `---`/`+++` mean headers again. A combined `@@@` hunk (diff
- * --cc) has per-parent counts, so it stays open until the next `diff ` line.
+ * Returns `{ hunks, status }`, `status` being "added" when a `new file mode`
+ * header was seen (Rust's `detected_status`).
  */
-function devHunkBody(header, oldCount, newCount) {
-  if (header.startsWith("@@@")) return { oldLeft: 0, newLeft: 0, unbounded: true };
-  return { oldLeft: Math.max(0, oldCount), newLeft: Math.max(0, newCount), unbounded: false };
-}
+async function devParseDiffHunks(text) {
+  const { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader } = await import("@gitwand/core");
+  const hunks = [];
+  let status;
+  let currentHunk = null;
+  let body = noHunkBody();
+  let oldLineNo = 0;
+  let newLineNo = 0;
 
-/** No hunk open (before the first `@@`, or after `diff --git`). */
-function devNoHunkBody() {
-  return { oldLeft: 0, newLeft: 0, unbounded: false };
-}
-
-/**
- * Classify one line against `body` and consume it: "add" | "delete" |
- * "context", or null when the body is exhausted or the line is not a hunk
- * line (`\ No newline at end of file`, or "" — never context, AGENTS.md).
- */
-function devClassifyHunkLine(body, line) {
-  if (!(body.unbounded || body.oldLeft > 0 || body.newLeft > 0)) return null;
-  if (line.startsWith("+")) { body.newLeft--; return "add"; }
-  if (line.startsWith("-")) { body.oldLeft--; return "delete"; }
-  if (line.startsWith(" ")) { body.oldLeft--; body.newLeft--; return "context"; }
-  return null;
-}
-
-/** Append a line classified by `devClassifyHunkLine` to `hunk`; returns the advanced `[oldLineNo, newLineNo]`. */
-function devPushHunkLine(hunk, kind, line, oldLineNo, newLineNo) {
-  const content = line.substring(1);
-  if (kind === "add") {
-    hunk.lines.push({ type: "add", content, oldLineNo: null, newLineNo });
-    return [oldLineNo, newLineNo + 1];
+  for (const line of text.split("\n")) {
+    const kind = currentHunk ? classifyHunkLine(body, line) : null;
+    if (kind) {
+      const content = line.substring(1);
+      if (kind === "add") {
+        currentHunk.lines.push({ type: "add", content, oldLineNo: null, newLineNo });
+        newLineNo++;
+      } else if (kind === "delete") {
+        currentHunk.lines.push({ type: "delete", content, oldLineNo, newLineNo: null });
+        oldLineNo++;
+      } else {
+        currentHunk.lines.push({ type: "context", content, oldLineNo, newLineNo });
+        oldLineNo++;
+        newLineNo++;
+      }
+    } else if (line.startsWith("new file mode")) {
+      status = "added";
+    } else if (line.startsWith("@@")) {
+      if (currentHunk) hunks.push(currentHunk);
+      // Same fallback as Rust's parse_hunk_header for an unparsable header.
+      const range = parseHunkHeader(line) ?? { oldStart: 0, oldCount: 1, newStart: 0, newCount: 1 };
+      oldLineNo = range.oldStart;
+      newLineNo = range.newStart;
+      body = hunkBodyFromHeader(line);
+      currentHunk = { header: line, ...range, lines: [] };
+    } else if (line.startsWith("diff ")) {
+      body = noHunkBody();
+    }
   }
-  if (kind === "delete") {
-    hunk.lines.push({ type: "delete", content, oldLineNo, newLineNo: null });
-    return [oldLineNo + 1, newLineNo];
-  }
-  hunk.lines.push({ type: "context", content, oldLineNo, newLineNo });
-  return [oldLineNo + 1, newLineNo + 1];
+  if (currentHunk) hunks.push(currentHunk);
+  return { hunks, status };
 }
 
 /** Per-directory cap of `list_repo_dir` — mirrors MAX_REPO_DIR_ENTRIES in files.rs. */
@@ -3202,52 +3208,12 @@ async function handleRequest(req, res) {
           }
         }
 
-        const hunks = [];
-        let currentHunk = null;
-        let oldLineNo = 0;
-        let newLineNo = 0;
-        // Mirrors Rust's parse_diff_hunks: a "new file mode" line marks the
-        // diff as an addition. Matches the Rust GitDiff shape, which omits
-        // `status` entirely when not detected (skip_serializing_if).
-        let status;
-
-        // Mirrors Rust's parse_diff_hunks, `HunkBody` included: inside a hunk
-        // a `--- x`/`+++ x` line is content, not a file header.
-        let body = devNoHunkBody();
-        const lines = stdout.split("\n");
-        for (const line of lines) {
-          // Context lines start with a single space (devClassifyHunkLine).
-          // Testing `!startsWith("\\")` instead lets the empty string that
-          // `split("\n")` leaves after the trailing newline through, which
-          // appended a phantom context line to every diff, and the Rust
-          // parser never did. This is the gotcha AGENTS.md documents; drift
-          // found by tests/parity/git-diff (issue #183).
-          const kind = currentHunk ? devClassifyHunkLine(body, line) : null;
-          if (kind) {
-            [oldLineNo, newLineNo] = devPushHunkLine(currentHunk, kind, line, oldLineNo, newLineNo);
-          } else if (line.startsWith("new file mode")) {
-            status = "added";
-          } else if (line.startsWith("@@")) {
-            if (currentHunk) hunks.push(currentHunk);
-
-            const header = line;
-            const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-            const oldStart = match ? parseInt(match[1]) : 0;
-            const oldCount = match ? parseInt(match[2] || "1") : 1;
-            const newStart = match ? parseInt(match[3]) : 0;
-            const newCount = match ? parseInt(match[4] || "1") : 1;
-
-            oldLineNo = oldStart;
-            newLineNo = newStart;
-            body = devHunkBody(line, oldCount, newCount);
-
-            currentHunk = { header, oldStart, oldCount, newStart, newCount, lines: [] };
-          } else if (line.startsWith("diff ")) {
-            body = devNoHunkBody();
-          }
-        }
-
-        if (currentHunk) hunks.push(currentHunk);
+        // Mirrors Rust's parse_diff_hunks. A "new file mode" line marks the
+        // diff as an addition; like the Rust GitDiff shape, `status` is
+        // omitted entirely when not detected (skip_serializing_if). The
+        // phantom-context gotcha of issue #183 (AGENTS.md) is handled by the
+        // bounded hunk body in devParseDiffHunks.
+        const { hunks, status } = await devParseDiffHunks(stdout);
 
         return jsonResponse(req, res, {
           path,
@@ -3302,12 +3268,15 @@ async function handleRequest(req, res) {
           currentLines = [];
         };
 
-        // Remaining body of the current hunk (devHunkBody): inside it an added `++ token` is
-        // the line `+++ token`, a hunk line — neither dropped nor read as a `+++ b/<path>`
-        // header (AGENTS.md diff-parsing gotcha).
-        let body = devNoHunkBody();
+        const { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader, scanSecrets } =
+          await import("@gitwand/core");
+
+        // Remaining body of the current hunk (core's hunk-body helpers, the twin of Rust's
+        // HunkBody): inside it an added `++ token` is the line `+++ token`, a hunk line —
+        // neither dropped nor read as a `+++ b/<path>` header (AGENTS.md diff-parsing gotcha).
+        let body = noHunkBody();
         for (const line of stdout.split("\n")) {
-          const kind = devClassifyHunkLine(body, line);
+          const kind = classifyHunkLine(body, line);
           if (kind) {
             if (kind === "add") {
               if (currentPath !== null) {
@@ -3317,19 +3286,14 @@ async function handleRequest(req, res) {
             }
             // `-`-prefixed removed lines are irrelevant for the added-lines-only scan surface.
           } else if (line.startsWith("diff --git ")) {
-            body = devNoHunkBody();
+            body = noHunkBody();
             flush();
           } else if (line.startsWith("+++ ")) {
             const rest = line.slice("+++ ".length);
             currentPath = rest === "/dev/null" ? null : rest.replace(/^b\//, "");
           } else if (line.startsWith("@@")) {
-            const match = line.match(/@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-            newLineNo = match ? parseInt(match[2], 10) : 0;
-            body = devHunkBody(
-              line,
-              match ? parseInt(match[1] || "1", 10) : 1,
-              match ? parseInt(match[3] || "1", 10) : 1,
-            );
+            newLineNo = parseHunkHeader(line)?.newStart ?? 0;
+            body = hunkBodyFromHeader(line);
           }
         }
         flush();
@@ -3341,7 +3305,6 @@ async function handleRequest(req, res) {
           entropyThreshold: typeof config.entropyThreshold === "number" ? config.entropyThreshold : 0,
         };
 
-        const { scanSecrets } = await import("@gitwand/core");
         const findings = scanSecrets(files, scanConfig);
         return jsonResponse(req, res, findings);
       } catch (err) {
@@ -4347,39 +4310,10 @@ async function handleRequest(req, res) {
           await gitSpawnBytes(args, top),
         );
 
-        const hunks = [];
-        let currentHunk = null;
-        let oldLineNo = 0;
-        let newLineNo = 0;
-
-        // Inside a hunk, `--- x`/`+++ x` is content (see devHunkBody). Only
-        // a line starting with a space is context: the empty strings that
-        // split("\n") yields are NOT, or the phantom line corrupts the hunk
-        // counts and `git apply` rejects the patch. "\ No newline at end of
-        // file" and anything else that isn't a hunk line is skipped.
-        let body = devNoHunkBody();
-        const diffLines = stdout.split("\n");
-        for (const line of diffLines) {
-          const kind = currentHunk ? devClassifyHunkLine(body, line) : null;
-          if (kind) {
-            [oldLineNo, newLineNo] = devPushHunkLine(currentHunk, kind, line, oldLineNo, newLineNo);
-          } else if (line.startsWith("@@")) {
-            if (currentHunk) hunks.push(currentHunk);
-            const header = line;
-            const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-            const oldStart = match ? parseInt(match[1]) : 0;
-            const oldCount = match ? parseInt(match[2] || "1") : 1;
-            const newStart = match ? parseInt(match[3]) : 0;
-            const newCount = match ? parseInt(match[4] || "1") : 1;
-            oldLineNo = oldStart;
-            newLineNo = newStart;
-            body = devHunkBody(line, oldCount, newCount);
-            currentHunk = { header, oldStart, oldCount, newStart, newCount, lines: [] };
-          } else if (line.startsWith("diff ")) {
-            body = devNoHunkBody();
-          }
-        }
-        if (currentHunk) hunks.push(currentHunk);
+        // Bounded hunk bodies: `--- x`/`+++ x` inside a hunk is content, and a
+        // "" past the counts never becomes a phantom context line (which would
+        // make `git apply` reject the patch). See devParseDiffHunks.
+        const { hunks } = await devParseDiffHunks(stdout);
 
         const body = { path: filePath, hunks };
         if (truncatedFromBytes !== undefined) body.truncatedFromBytes = truncatedFromBytes;
@@ -4496,77 +4430,42 @@ async function handleRequest(req, res) {
           resolvedCwd,
         );
 
-        const diffs = [];
-        let currentPath = null;
-        let currentHunk = null;
-        let currentHunks = [];
-        let oldLineNo = 0;
-        let newLineNo = 0;
-        // File-level extended header state — see Rust `git_show` for rationale.
-        // The frontend's patchBuilder needs to know whether a file was added
-        // (uses /dev/null as source) or deleted (uses /dev/null as target) or
-        // the `git apply --cached` during a split will fail.
-        let currentStatus = null;
-        let currentOldPath = null;
-        // Remaining body of the current hunk — see devHunkBody / Rust HunkBody.
-        let body = devNoHunkBody();
-
+        // Mirrors Rust's `parse_multi_file_diff`: split on `diff --git` lines
+        // (no hunk line can start with one — each carries a +/-/space prefix
+        // or is ""), then parse each file section with devParseDiffHunks, the
+        // same parser as /api/git-diff.
+        const sections = [];
         for (const line of stdout.split("\n")) {
-          // Only a line starting with a space is context: the empty strings
-          // split("\n") yields are NOT (phantom line → `git apply` rejects the
-          // patch). "\ No newline…" and non-hunk lines fall through.
-          const kind = currentHunk ? devClassifyHunkLine(body, line) : null;
-          if (kind) {
-            [oldLineNo, newLineNo] = devPushHunkLine(currentHunk, kind, line, oldLineNo, newLineNo);
-          } else if (line.startsWith("diff --git ")) {
-            body = devNoHunkBody();
-            if (currentHunk) currentHunks.push(currentHunk);
-            currentHunk = null;
-            if (currentPath) {
-              diffs.push({
-                path: currentPath,
-                hunks: currentHunks,
-                ...(currentStatus ? { status: currentStatus } : {}),
-                ...(currentOldPath ? { oldPath: currentOldPath } : {}),
-              });
-              currentHunks = [];
-            }
-            currentStatus = null;
-            currentOldPath = null;
-            const parts = line.split(" b/");
-            currentPath = parts.length >= 2 ? parts[1] : null;
-          } else if (line.startsWith("new file mode")) {
-            currentStatus = "added";
-          } else if (line.startsWith("deleted file mode")) {
-            currentStatus = "deleted";
-          } else if (line.startsWith("rename from ")) {
-            currentStatus = "renamed";
-            currentOldPath = line.substring("rename from ".length);
-          } else if (line.startsWith("rename to ") && !currentStatus) {
-            currentStatus = "renamed";
-          } else if (line.startsWith("@@")) {
-            if (currentHunk) currentHunks.push(currentHunk);
-
-            const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-            const oldStart = match ? parseInt(match[1]) : 0;
-            const oldCount = match ? parseInt(match[2] || "1") : 1;
-            const newStart = match ? parseInt(match[3]) : 0;
-            const newCount = match ? parseInt(match[4] || "1") : 1;
-            oldLineNo = oldStart;
-            newLineNo = newStart;
-            body = devHunkBody(line, oldCount, newCount);
-
-            currentHunk = { header: line, oldStart, oldCount, newStart, newCount, lines: [] };
-          }
+          if (line.startsWith("diff --git ")) sections.push([line]);
+          else if (sections.length > 0) sections[sections.length - 1].push(line);
         }
 
-        if (currentHunk) currentHunks.push(currentHunk);
-        if (currentPath) {
+        const diffs = [];
+        for (const section of sections) {
+          const parts = section[0].split(" b/");
+          if (parts.length < 2) continue;
+          // File-level extended headers, only before the first hunk — see Rust
+          // `git_show`. The frontend's patchBuilder needs to know whether a
+          // file was added (uses /dev/null as source) or deleted (uses
+          // /dev/null as target) or the `git apply --cached` during a split
+          // will fail.
+          let status = null;
+          let oldPath = null;
+          for (const line of section.slice(1)) {
+            if (line.startsWith("@@")) break;
+            if (line.startsWith("new file mode")) status = "added";
+            else if (line.startsWith("deleted file mode")) status = "deleted";
+            else if (line.startsWith("rename from ")) {
+              status = "renamed";
+              oldPath = line.substring("rename from ".length);
+            } else if (line.startsWith("rename to ") && !status) status = "renamed";
+          }
+          const { hunks } = await devParseDiffHunks(section.join("\n"));
           diffs.push({
-            path: currentPath,
-            hunks: currentHunks,
-            ...(currentStatus ? { status: currentStatus } : {}),
-            ...(currentOldPath ? { oldPath: currentOldPath } : {}),
+            path: parts[1],
+            hunks,
+            ...(status ? { status } : {}),
+            ...(oldPath ? { oldPath } : {}),
           });
         }
 

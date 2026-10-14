@@ -6,7 +6,7 @@
  * summary) + commit titles, producing a short what/why/affected-areas
  * block for the Info tab. Cached by `detailKey@headSha` (`usePrCache`).
  */
-import { classifyHunkLine, hunkBodyFor, noHunkBody, parseHunkHeader, type HunkBody } from "@gitwand/core";
+import { classifyHunkLine, hunkBodyFromHeader, noHunkBody, type HunkBody } from "@gitwand/core";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { localeToAiLanguage } from "./prAiLocale";
@@ -53,10 +53,7 @@ function countChanges(raw: string): { additions: number; deletions: number } {
     else if (kind === "delete") deletions++;
     else if (kind === null) {
       if (line.startsWith("diff ")) body = noHunkBody();
-      else if (line.startsWith("@@")) {
-        const range = parseHunkHeader(line);
-        body = hunkBodyFor(line, range?.oldCount ?? 1, range?.newCount ?? 1);
-      }
+      else if (line.startsWith("@@")) body = hunkBodyFromHeader(line);
     }
   }
   return { additions, deletions };
