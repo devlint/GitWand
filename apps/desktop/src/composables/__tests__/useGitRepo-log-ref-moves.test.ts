@@ -19,7 +19,7 @@ import { join } from "node:path";
 vi.mock("../../utils/backend");
 
 import { useGitRepo } from "../useGitRepo";
-import { getGitLog, getGitRevCount, type GitLogEntry } from "../../utils/backend";
+import { getGitBranches, getGitLog, getGitRevCount, type GitLogEntry } from "../../utils/backend";
 
 const GIT_TEST_TIMEOUT_MS = 60_000;
 
@@ -108,9 +108,12 @@ function newRepo(n: number) {
 
 /** Optional one-shot gate on the next paged (`offset > 0`) git log call. */
 let pageGate: Promise<void> | null = null;
+/** Optional one-shot gate on the next first-page (`offset === 0`) git log call. */
+let firstPageGate: Promise<void> | null = null;
 
 beforeEach(() => {
   pageGate = null;
+  firstPageGate = null;
   vi.mocked(getGitLog).mockImplementation(async (cwd, count, all, _author, offset) => {
     // git runs now — against the repo as it is at call time — like the real
     // backend; only the result's delivery can be held back.
@@ -119,11 +122,36 @@ beforeEach(() => {
       const gate = pageGate;
       pageGate = null;
       await gate;
+    } else if ((offset ?? 0) === 0 && firstPageGate) {
+      const gate = firstPageGate;
+      firstPageGate = null;
+      await gate;
     }
     return result;
   });
   vi.mocked(getGitRevCount).mockImplementation(async (cwd) =>
     Number(git(cwd, ["rev-list", "--count", "--all"]).trim()),
+  );
+  vi.mocked(getGitBranches).mockReset();
+  vi.mocked(getGitBranches).mockImplementation(async (cwd) =>
+    git(cwd, ["for-each-ref", "refs/heads", "--format=%(refname:short) %(objectname)"])
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [name, tip] = line.split(" ");
+        return {
+          name,
+          isCurrent: false,
+          isRemote: false,
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          mainCommitCount: 0,
+          lastCommit: tip,
+          lastCommitDate: "",
+        };
+      }),
   );
 });
 
@@ -262,6 +290,101 @@ describe("loadLog follows ref moves that keep the top commit (#266)", () => {
       // The background prefetch then completes the log — still gapless.
       await vi.waitFor(() => expect(repo.logHasMore.value).toBe(false), { timeout: 10_000 });
       expect(repo.log.value.map((e) => e.hashFull)).toEqual(truth);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "drops an older loadLog result that lands after a newer one",
+    async () => {
+      const dir = newRepo(5);
+      git(dir, ["branch", "feature"]);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      const c3 = sha(dir, "c3");
+
+      // Poller tick: its git log ran before the reset but is delivered late.
+      let release!: () => void;
+      firstPageGate = new Promise<void>((r) => (release = r));
+      const older = repo.loadLog();
+
+      // Watcher: the reset happened, a newer loadLog applies it.
+      git(dir, ["reset", "-q", "--hard", c3]);
+      await repo.loadLog();
+      expect(refsOf(repo, c3)).toBe("HEAD -> main");
+
+      release();
+      await older;
+
+      expect(refsOf(repo, c3)).toBe("HEAD -> main");
+      expect(refsOf(repo, sha(dir, "c5"))).toBe("feature");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps a forced reload's semantics when a newer non-forced one supersedes it",
+    async () => {
+      const dir = newRepo(130);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      await vi.waitFor(() => expect(repo.logHasMore.value).toBe(false), { timeout: 10_000 });
+
+      // A ref lands deep in history, below the first page.
+      const c5 = sha(dir, "c5");
+      git(dir, ["branch", "deep", c5]);
+
+      let release!: () => void;
+      firstPageGate = new Promise<void>((r) => (release = r));
+      const forced = repo.loadLog(undefined, true);
+      await repo.loadLog(); // newer, not forced: the first page alone looks unchanged
+      release();
+      await forced;
+
+      await vi.waitFor(() => expect(repo.logHasMore.value).toBe(false), { timeout: 10_000 });
+      expect(refsOf(repo, c5)).toBe("deep");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "reloads an already-loaded branch list when a decoration change is detected, not on an idle poll",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      await repo.loadBranches();
+      expect(getGitBranches).toHaveBeenCalledTimes(1);
+
+      await repo.loadLog(); // idle poll
+      expect(getGitBranches).toHaveBeenCalledTimes(1);
+
+      const c2 = sha(dir, "c2");
+      git(dir, ["branch", "topic", c2]);
+      await repo.loadLog();
+
+      await vi.waitFor(() =>
+        expect(repo.branches.value.find((b) => b.name === "topic")?.lastCommit).toBe(c2),
+      );
+      expect(getGitBranches).toHaveBeenCalledTimes(2);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "leaves a never-loaded branch list alone (lazy branches)",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      git(dir, ["branch", "topic", sha(dir, "c2")]);
+      await repo.loadLog();
+
+      expect(getGitBranches).not.toHaveBeenCalled();
     },
     GIT_TEST_TIMEOUT_MS,
   );

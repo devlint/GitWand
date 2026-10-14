@@ -347,8 +347,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     branches.value = [];
     log.value = [];
     _logViewAnchor = null;
-    // A page in flight for the previous repo must not land in this one.
+    // A page in flight for the previous repo must not land in this one, nor
+    // its pending force carry over.
     _logGen++;
+    _logForcePending = false;
     logLoadingMore.value = false;
   });
 
@@ -714,6 +716,21 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // would leave a gap that prefetchAllPages then caches (#266). It drops its
   // page when this moved.
   let _logGen = 0;
+  // Bumped at each loadLog entry: only the latest request may apply its result.
+  let _logRequest = 0;
+  // Set by a forced loadLog until a request applies; a superseded forced
+  // reload thus hands its force to the request that supersedes it.
+  let _logForcePending = false;
+
+  /**
+   * The log just took changed rows: a ref may have moved, and the Git Tree
+   * resolves its labels against `branches` too. Reload them — only when they
+   * were already loaded (the list is lazy) — so the poller path, which never
+   * calls loadBranches itself, doesn't leave stale labels (#266).
+   */
+  function refreshLoadedBranches() {
+    if (branches.value.length > 0) void loadBranches();
+  }
 
   /** Replace the whole log and invalidate in-flight pagination against the old one. */
   function replaceLog(entries: GitLogEntry[]) {
@@ -806,6 +823,12 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     // Captured before the awaits: a repo switch while this fetch is in flight
     // must not apply (or invalidate the cache of) the new repo with this result.
     const repo = folderPath.value;
+    // Concurrent loadLog calls (poller + watcher) carry no ordering: an older
+    // result landing after a newer one would reinstate stale decorations.
+    const req = ++_logRequest;
+    if (force) _logForcePending = true;
+    const current = () =>
+      req === _logRequest && epoch === _logViewEpoch && folderPath.value === repo;
     try {
       const authorEmail =
         logAuthorFilter.value === "mine"
@@ -835,9 +858,13 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       );
       // Refresh the hidden-commit badge counts alongside the scoped log.
       await loadRevCounts();
-      // A newer view change or a repo switch superseded this fetch — its
-      // result is stale.
-      if (epoch !== _logViewEpoch || folderPath.value !== repo) return;
+      // A newer view change, a repo switch or a newer loadLog superseded this
+      // fetch — its result is stale.
+      if (!current()) return;
+      // A superseded forced reload hands its force to whichever request
+      // applies, so concurrent calls never lose it.
+      const forced = force || _logForcePending;
+      _logForcePending = false;
 
       if (isCanon) {
         const cached = LOG_CACHE.get(repo);
@@ -846,9 +873,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         // commit changing (reset main onto origin/main, a new branch on an
         // existing commit, checkout of a previous branch) must not be kept.
         const haveSamePage =
-          !force &&
+          !forced &&
           !viewChanged &&
-          log.value.length >= entries.length &&
           samePageDecorations(log.value, entries);
         if (haveSamePage) {
           // Poll while we already hold this page (or the full log / an in-flight
@@ -856,9 +882,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           // the prefetch if it was interrupted.
           if (logHasMore.value) void prefetchAllPages();
         } else if (
-          !force &&
+          !forced &&
           cached &&
-          cached.length >= entries.length &&
           samePageDecorations(cached, entries)
         ) {
           // Nothing moved since we cached the full history — restore instantly.
@@ -875,13 +900,18 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           // would — so the graph doesn't shrink under them. Only on an actual
           // change, never on an idle poll.
           const depth = forcedReloadDepth();
-          if (!force && !viewChanged && depth > pageSize) {
+          if (!viewChanged && depth > pageSize) {
             fresh = await getGitLog(repo, depth, true, undefined, 0);
-            if (epoch !== _logViewEpoch || folderPath.value !== repo) return;
+            if (!current()) {
+              // Superseded meanwhile: the newer request decides, keeping the force.
+              if (forced) _logForcePending = true;
+              return;
+            }
           }
           replaceLog(fresh);
           logHasMore.value = log.value.length < effectiveTotalCount();
           void prefetchAllPages();
+          if (!viewChanged) refreshLoadedBranches();
         }
       } else {
         // Same rows as held (an idle poll): keep the array so an in-flight
@@ -890,7 +920,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           !viewChanged &&
           log.value.length === entries.length &&
           samePageDecorations(log.value, entries);
-        if (!unchanged) replaceLog(entries);
+        if (!unchanged) {
+          replaceLog(entries);
+          if (!viewChanged) refreshLoadedBranches();
+        }
         // hasMore: in branch-only mode a full page is exactly `pageSize`. In
         // all-refs mode the backend appends stash start-points and filters the
         // `index on`/`untracked files on` pseudo-commits, so a full page returns

@@ -35,15 +35,32 @@ function pass(prev: { fp: string; pin: TrunkPin }, commits: GraphRow[], currentB
 const START = { fp: "", pin: EMPTY_PIN };
 
 describe("refsSignature", () => {
-  it("covers only decorated rows and splits at the prefix", () => {
+  it("hashes decorated rows and splits at the prefix", () => {
     const r = rows({ c5: "HEAD -> main", c2: "tag: v1" });
     const sig = refsSignature(r, 2);
-    expect(sig.full).toContain("c5");
-    expect(sig.full).toContain("c2");
-    expect(sig.prefix).toContain("c5");
-    expect(sig.prefix).not.toContain("c2");
+    // The prefix (c5, c4) equals the full signature of those two rows alone.
+    expect(sig.prefix).toBe(refsSignature(r.slice(0, 2), 2).full);
+    expect(sig.prefix).not.toBe(sig.full);
     expect(refsSignature(r, 99).prefix).toBe(sig.full);
-    expect(refsSignature(r, 0).prefix).toBe("");
+    expect(refsSignature(r, 0).prefix).toBe(refsSignature([], 0).full);
+    // Undecorated rows don't contribute.
+    expect(refsSignature(rows({ c5: "HEAD -> main" }), 5).full).toBe(
+      refsSignature(rows({ c5: "HEAD -> main" }, ["c5"]), 1).full,
+    );
+  });
+
+  it("changes when a ref moves, a ref is renamed or a row gets decorated", () => {
+    const base = refsSignature(rows({ c5: "HEAD -> main", c3: "feature" }), 5).full;
+    expect(refsSignature(rows({ c5: "HEAD -> main", c2: "feature" }), 5).full).not.toBe(base);
+    expect(refsSignature(rows({ c5: "HEAD -> main", c3: "feat" }), 5).full).not.toBe(base);
+    expect(refsSignature(rows({ c5: "HEAD -> main", c3: "feature", c1: "tag: v1" }), 5).full).not.toBe(base);
+    expect(refsSignature(rows({ c5: "HEAD -> main", c3: "feature" }), 5).full).toBe(base);
+  });
+
+  it("stays small with thousands of tags", () => {
+    const names = Array.from({ length: 5000 }, (_, i) => `h${i}`);
+    const refs = Object.fromEntries(names.map((h) => [h, `tag: v${h}`]));
+    expect(refsSignature(rows(refs, names), 5000).full.length).toBeLessThan(32);
   });
 });
 

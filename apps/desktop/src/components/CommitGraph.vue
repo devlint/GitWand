@@ -638,11 +638,7 @@ const layout = computed<DagLayout>(() => {
   const trunkForLayout =
     wipParent !== "" && wipParent === _pin.trunkHash ? "WIP" : _pin.trunkHash;
 
-  _cachedLayout = computeDagLayout(
-    commits,
-    trunkForLayout,
-    _pin.secondaryHashes.length > 0 ? _pin.secondaryHashes : undefined,
-  );
+  _cachedLayout = computeDagLayout(commits, trunkForLayout);
   return _cachedLayout;
 });
 

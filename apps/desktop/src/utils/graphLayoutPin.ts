@@ -23,22 +23,42 @@ export interface RefsSignature {
   prefix: string;
 }
 
+const FNV_OFFSET = 0x811c9dc5;
+const FNV_PRIME = 0x01000193;
+
+/** Fold a string into a running 32-bit FNV-1a hash. */
+function fnv1a(h: number, s: string): number {
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, FNV_PRIME);
+  }
+  return h;
+}
+
 /**
- * Signature of the rows' decorations, built in one pass. Only decorated rows
- * contribute (most rows carry no ref), each as its hash plus its `%D` string.
+ * Signature of the rows' decorations, built in one pass: a 32-bit FNV-1a hash
+ * over each decorated row's hash and `%D` string, plus the decorated-row
+ * count. Only decorated rows contribute (most rows carry no ref), and the
+ * result stays a few bytes however many tags the repo has.
  */
 export function refsSignature(rows: readonly GraphRow[], prefixLen: number): RefsSignature {
-  let sig = "";
+  let h = FNV_OFFSET;
+  let count = 0;
   let prefix = "";
   const n = rows.length;
   const cut = Math.min(prefixLen, n);
   for (let i = 0; i < n; i++) {
-    if (i === cut) prefix = sig;
+    if (i === cut) prefix = count + ":" + (h >>> 0);
     const refs = rows[i].refs;
-    if (refs) sig += rows[i].hashFull + "\x1f" + refs + "\x1e";
+    if (refs) {
+      h = fnv1a(fnv1a(fnv1a(h, rows[i].hashFull), "\x1f"), refs);
+      h = fnv1a(h, "\x1e");
+      count++;
+    }
   }
-  if (cut === n) prefix = sig;
-  return { full: sig, prefix };
+  const full = count + ":" + (h >>> 0);
+  if (cut === n) prefix = full;
+  return { full, prefix };
 }
 
 /** Layout fingerprint: bounds, current branch, WIP state and decorations. */
@@ -79,7 +99,6 @@ export interface TrunkPin {
   /** Real HEAD hash (top row, or the WIP node's parent) the pin was set under. */
   headHash: string;
   trunkHash: string | undefined;
-  secondaryHashes: string[];
   /** `refsSignature(...).full` of the rows the pin covers. */
   refsSig: string;
   /** Row count the pin covers. */
@@ -89,7 +108,6 @@ export interface TrunkPin {
 export const EMPTY_PIN: TrunkPin = {
   headHash: "",
   trunkHash: undefined,
-  secondaryHashes: [],
   refsSig: "",
   rowCount: 0,
 };
@@ -119,7 +137,6 @@ export function nextTrunkPin(
   return {
     headHash,
     trunkHash: findTrunkHash(rows),
-    secondaryHashes: [],
     refsSig: sig.full,
     rowCount: rows.length,
   };
