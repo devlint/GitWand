@@ -406,6 +406,7 @@ const es: Locale = {
     compareFrom: "{0} seleccionado — elige el segundo commit",
     compareSelect: "Seleccionar para comparar",
     compareEmpty: "Selecciona dos commits para comparar",
+    compareTruncated: "Diff truncado ({0}): solo se muestra el principio",
     compareGoLog: "Ir al historial",
     stageHunk: "Preparar hunk",
     stageSelected: "Preparar ({0})",

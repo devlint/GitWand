@@ -120,6 +120,28 @@ describe("findRegisteredCommands", () => {
     expect(findRegisteredCommands(src)).toEqual(["inside"]);
   });
 
+  it("is not fooled by comment markers inside a string above the macro", () => {
+    // `/*` in "src/*.rs" is not a comment opener: a naive strip would eat
+    // everything up to the next `*/`, macro included.
+    const src = `const GLOB: &str = "src/*.rs";\nlet url = "https://x";\ngenerate_handler![\n  commands::a::kept,\n]\n// later */`;
+    expect(findRegisteredCommands(src)).toEqual(["kept"]);
+  });
+
+  it("ignores the macro's name mentioned in a comment or a string", () => {
+    const src = `// see generate_handler![commands::a::in_comment]\nlet s = "generate_handler![in_string]";\ngenerate_handler![commands::a::real]`;
+    expect(findRegisteredCommands(src)).toEqual(["real"]);
+  });
+
+  it("skips an attribute whose arguments contain brackets", () => {
+    const src = `generate_handler![\n  #[cfg_attr(feature = "x", doc = "a [b] c")]\n  #[my_attr(list[0], nested[[1]])]\n  commands::a::gated,\n  commands::a::plain,\n]`;
+    expect(findRegisteredCommands(src)).toEqual(["gated", "plain"]);
+  });
+
+  it("does not take a lifetime for a char literal", () => {
+    const src = `fn f<'a>(x: &'a str) -> char { '[' }\ngenerate_handler![commands::a::kept]`;
+    expect(findRegisteredCommands(src)).toEqual(["kept"]);
+  });
+
   it("returns nothing when there is no macro", () => {
     expect(findRegisteredCommands("fn main() {}")).toEqual([]);
   });

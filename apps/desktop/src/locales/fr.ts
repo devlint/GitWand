@@ -411,6 +411,7 @@ const fr: Locale = {
     compareFrom: "{0} sélectionné — choisissez le second commit",
     compareSelect: "Sélectionner pour comparaison",
     compareEmpty: "Sélectionnez deux commits pour comparer",
+    compareTruncated: "Diff tronqué ({0}) : seul le début est affiché",
     compareGoLog: "Aller au log",
     stageHunk: "Indexer ce bloc",
     stageSelected: "Indexer ({0})",

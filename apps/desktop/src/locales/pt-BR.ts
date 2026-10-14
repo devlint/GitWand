@@ -407,6 +407,7 @@ const ptBR: Locale = {
     compareFrom: "{0} selecionado — escolha o segundo commit",
     compareSelect: "Selecionar para comparar",
     compareEmpty: "Selecione dois commits para comparar",
+    compareTruncated: "Diff truncado ({0}): apenas o início é exibido",
     compareGoLog: "Ir para o histórico",
     stageHunk: "Stage do hunk",
     stageSelected: "Stage ({0})",

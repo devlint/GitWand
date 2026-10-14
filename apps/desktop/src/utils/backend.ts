@@ -1416,6 +1416,7 @@ export async function getGitFileDiff(
   if (isTauri()) {
     const raw = await tauriInvoke<{
       path: string;
+      truncatedFromBytes?: number;
       hunks: Array<{
         header: string;
         old_start: number;
@@ -1433,6 +1434,8 @@ export async function getGitFileDiff(
 
     return {
       path: raw.path,
+      // Already camelCase on the wire (serde rename in types.rs), like git_diff.
+      truncatedFromBytes: raw.truncatedFromBytes,
       hunks: raw.hunks.map((h) => ({
         header: h.header,
         oldStart: h.old_start,
@@ -1451,7 +1454,10 @@ export async function getGitFileDiff(
 
   const qs = `?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}&from=${encodeURIComponent(fromHash)}&to=${encodeURIComponent(toHash)}`;
   const res = await devFetch(`${DEV_SERVER}/api/git-file-diff${qs}`);
-  if (!res.ok) throw new Error(`Failed to get file diff: ${res.status}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Failed to get file diff: ${res.status}`);
+  }
   return res.json();
 }
 

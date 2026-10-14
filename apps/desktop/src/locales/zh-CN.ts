@@ -410,6 +410,7 @@ const zhCN: Locale = {
     compareFrom: "已选 {0} — 请选择第二个提交",
     compareSelect: "选择用于比较",
     compareEmpty: "选择两个提交以进行比较",
+    compareTruncated: "差异已截断（{0}）：仅显示开头部分",
     compareGoLog: "前往日志",
     stageHunk: "暂存此段",
     stageSelected: "暂存 ({0})",

@@ -418,6 +418,7 @@ const en = {
     compareFrom: "{0} selected — pick the second commit",
     compareSelect: "Select for comparison",
     compareEmpty: "Select two commits to compare",
+    compareTruncated: "Diff truncated ({0}): only the beginning is shown",
     compareGoLog: "Go to log",
     stageHunk: "Stage hunk",
     stageSelected: "Stage ({0})",

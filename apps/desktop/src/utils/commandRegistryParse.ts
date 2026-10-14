@@ -85,28 +85,21 @@ export function findDevServerRoutes(source: string): string[] {
  * lib.rs), last path segment only: `commands::read::git_log` → `git_log`,
  * which is the name `invoke()` resolves.
  *
- * Comments are dropped first, so a commented-out entry does not count as
- * registered. An attribute (`#[cfg(…)] commands::x::y,`) is skipped and its
- * command still counted: it is registered in the builds the attribute allows,
- * and the guard is about names, not features. Returns `[]` when no macro is
- * found; the caller's floor assertion is what notices that.
+ * The source is lexed first (`stripRustCommentsAndStrings`), so a
+ * commented-out entry does not count as registered, and neither a `/*` inside
+ * a string nor the macro's name in a comment can derail the scan. An attribute
+ * (`#[cfg(…)] commands::x::y,`) is skipped by bracket matching and its command
+ * still counted: it is registered in the builds the attribute allows, and the
+ * guard is about names, not features. Returns `[]` when no macro is found;
+ * the caller's floor assertion is what notices that.
  */
 export function findRegisteredCommands(libRs: string): string[] {
-  const noComments = libRs
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/[^\n]*/g, "");
+  const code = stripRustCommentsAndStrings(libRs);
   const marker = "generate_handler![";
-  const start = noComments.indexOf(marker);
+  const start = code.indexOf(marker);
   if (start === -1) return [];
-  let depth = 1;
-  let end = start + marker.length;
-  for (; end < noComments.length && depth > 0; end++) {
-    if (noComments[end] === "[") depth++;
-    else if (noComments[end] === "]") depth--;
-  }
-  const body = noComments
-    .slice(start + marker.length, end - 1)
-    .replace(/#\[[^\]]*\]/g, "");
+  const open = start + marker.length - 1;
+  const body = withoutAttributes(code.slice(open + 1, matchingBracket(code, open)));
   const names = new Set<string>();
   for (const entry of body.split(",")) {
     const path = entry.trim();
@@ -115,6 +108,89 @@ export function findRegisteredCommands(libRs: string): string[] {
     if (/^[a-z_][a-z0-9_]*$/.test(name)) names.add(name);
   }
   return [...names].sort();
+}
+
+/** Index of the `]` closing the `[` at `open` (or the end of `s`). */
+function matchingBracket(s: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    if (s[i] === "[") depth++;
+    else if (s[i] === "]" && --depth === 0) return i;
+  }
+  return s.length;
+}
+
+/** `s` with every `#[…]` / `#![…]` attribute removed, brackets balanced. */
+function withoutAttributes(s: string): string {
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const open = s.startsWith("#[", i) ? i + 1 : s.startsWith("#![", i) ? i + 2 : -1;
+    if (open === -1) {
+      out += s[i];
+      continue;
+    }
+    i = matchingBracket(s, open);
+  }
+  return out;
+}
+
+/**
+ * Rust source with comments removed and string / char literals emptied
+ * (`"…"` → `""`), so what is left is code. Handles nested block comments,
+ * escapes, raw strings (`r#"…"#`, `br"…"`) and tells a char literal (`'['`)
+ * from a lifetime (`'a`). Not a full lexer: enough for the handler list.
+ */
+export function stripRustCommentsAndStrings(src: string): string {
+  let out = "";
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i]!;
+    const next = src[i + 1];
+    if (c === "/" && next === "/") {
+      while (i < n && src[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && next === "*") {
+      let depth = 0;
+      while (i < n) {
+        if (src.startsWith("/*", i)) { depth++; i += 2; }
+        else if (src.startsWith("*/", i)) { depth--; i += 2; if (depth === 0) break; }
+        else i++;
+      }
+      out += " ";
+      continue;
+    }
+    // Raw string: r"…", r#"…"#, br#"…"#. Only when `r` starts a token.
+    const raw = /^b?r(#*)"/.exec(src.slice(i, i + 260));
+    if (raw && !/[A-Za-z0-9_]/.test(src[i - 1] ?? "")) {
+      const close = `"${raw[1]}`;
+      const end = src.indexOf(close, i + raw[0].length);
+      i = end === -1 ? n : end + close.length;
+      out += '""';
+      continue;
+    }
+    if (c === '"') {
+      i++;
+      while (i < n && src[i] !== '"') i += src[i] === "\\" ? 2 : 1;
+      i++;
+      out += '""';
+      continue;
+    }
+    if (c === "'") {
+      // A char literal closes within a few characters ('x', '\n', '\u{1F600}');
+      // a lifetime ('a, 'static) never closes before an identifier ends.
+      const lit = /^'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|.)|[^\\'])'/.exec(src.slice(i, i + 12));
+      if (lit) {
+        i += lit[0].length;
+        out += "' '";
+        continue;
+      }
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 /**

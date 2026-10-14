@@ -201,6 +201,45 @@ function repoRelativePath(cwd, root, path, guarded) {
   return parts.join("/");
 }
 
+/**
+ * Mirrors `parse_follow_names` in src-tauri/src/commands/read.rs: what the
+ * file was called at each commit of `git log --follow --name-status -z
+ * --format=%x01%H`. Map of commit hash → path, or null where it was deleted.
+ */
+function parseFollowNames(raw) {
+  const map = new Map();
+  let commit = null;
+  let status = null;
+  let names = [];
+  let want = 0;
+  for (const field of raw.split("\0")) {
+    let token = field;
+    const i = field.indexOf("\x01");
+    if (i !== -1) {
+      const rest = field.slice(i + 1);
+      const hex = rest.match(/^[0-9a-fA-F]*/)[0];
+      commit = hex;
+      status = null;
+      want = 0;
+      token = rest.slice(hex.length);
+    }
+    token = token.replace(/^\n+/, "");
+    if (token === "") continue;
+    if (want === 0) {
+      status = token[0];
+      want = status === "R" || status === "C" ? 2 : 1;
+      names = [];
+      continue;
+    }
+    names.push(token);
+    want -= 1;
+    if (want === 0 && commit !== null && status !== null) {
+      map.set(commit, status === "D" ? null : names[names.length - 1]);
+    }
+  }
+  return map;
+}
+
 /** Resolve the full path to a CLI binary, checking Homebrew paths on macOS. */
 function resolveBin(name) {
   // Try common macOS Homebrew locations first
@@ -4149,18 +4188,68 @@ async function handleRequest(req, res) {
       const filePath = url.searchParams.get("path");
       const fromHash = url.searchParams.get("from");
       const toHash = url.searchParams.get("to");
-      if (!cwd || !filePath || !fromHash || !toHash) return jsonResponse(req, res, { error: "Missing params" }, 400);
-      // Mirrors `git_file_diff` (src-tauri/src/commands/read.rs): a revision
-      // starting with `-` would be read by git as an option.
-      if (fromHash.startsWith("-") || toHash.startsWith("-")) {
-        return jsonResponse(req, res, { error: "Invalid revision" }, 400);
+      if (!cwd || !filePath) return jsonResponse(req, res, { error: "Missing params" }, 400);
+      // Step for step `git_file_diff` (src-tauri/src/commands/read.rs), same
+      // messages: an empty revision, or one starting with `-` (git would read
+      // it as an option), is refused.
+      for (const [name, rev] of [["fromHash", fromHash], ["toHash", toHash]]) {
+        if (!rev || rev.trim() === "") return jsonResponse(req, res, { error: `${name} must not be empty` }, 400);
+        if (rev.startsWith("-")) return jsonResponse(req, res, { error: `invalid ${name}: ${rev}` }, 400);
+      }
+      let gitPath;
+      try {
+        const guarded = safeRepoPath(cwd, filePath);
+        const root = realpathSync.native(cwd);
+        if (guarded === root) throw new Error("path must not be the repository root");
+        gitPath = repoRelativePath(cwd, root, filePath, guarded);
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 400);
       }
       try {
         const resolvedCwd = resolve(cwd);
+        const git = (args) => spawnSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
+        const resolveCommit = (rev) => {
+          const r = git(["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
+          const hash = (r.stdout || "").trim();
+          if (r.status !== 0 || !hash) throw Object.assign(new Error(`unknown revision: ${rev}`), { status: 400 });
+          return hash;
+        };
+        // `<commit>:<path>` splits at the first colon, the commit is a full
+        // hash: the path is literal, colons and glob characters included.
+        const existsAt = (commit, p) => git(["cat-file", "-e", `${commit}:${p}`]).status === 0;
+        // The viewer's commits come from `git log --follow`, so either side may
+        // predate a rename: what was the file called at each commit?
+        let follow = null;
+        const pathAt = (commit) => {
+          if (existsAt(commit, gitPath)) return gitPath;
+          if (!follow) {
+            const r = git([
+              "--literal-pathspecs", "log", "--follow", "--name-status", "-z", "--no-color",
+              "--format=%x01%H", "HEAD", "--", gitPath,
+            ]);
+            follow = parseFollowNames(r.stdout || "");
+          }
+          const at = follow.get(commit);
+          return at && existsAt(commit, at) ? at : null;
+        };
+
+        const from = resolveCommit(fromHash);
+        const to = resolveCommit(toHash);
+        const fromPath = pathAt(from);
+        const toPath = pathAt(to);
+        // Literal pathspecs; external diff, colour and textconv off — the
+        // output is parsed, never shown as is.
+        const args = ["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--no-textconv"];
+        if (fromPath && toPath && fromPath !== toPath) {
+          // Renamed in between: blob to blob, so the hunks are the content change.
+          args.push(`${from}:${fromPath}`, `${to}:${toPath}`);
+        } else {
+          args.push(from, to, "--", fromPath ?? toPath ?? gitPath);
+        }
         // Stream via spawn, then cap like the Rust side: a whole-file rewrite
         // between two distant commits can be large.
         const { text: stdout, truncatedFromBytes } = truncateDiffOutput(
-          await gitSpawnBytes(["diff", fromHash, toHash, "--", filePath], resolvedCwd),
+          await gitSpawnBytes(args, resolvedCwd),
         );
 
         const hunks = [];
@@ -4210,10 +4299,10 @@ async function handleRequest(req, res) {
         if (truncatedFromBytes !== undefined) body.truncatedFromBytes = truncatedFromBytes;
         return jsonResponse(req, res, body);
       } catch (err) {
-        // Identical revisions exit 0 with no output and never land here. A
-        // failure is a revision git cannot resolve: report it, as the Rust
-        // command does, rather than an empty diff that reads as "no changes".
-        return jsonResponse(req, res, { error: err.message }, 500);
+        // Identical revisions exit 0 with no output and never land here. Report
+        // a failure (400 for a revision git cannot resolve), as the Rust command
+        // does, rather than an empty diff that reads as "no changes".
+        return jsonResponse(req, res, { error: err.message }, err.status ?? 500);
       }
     }
 

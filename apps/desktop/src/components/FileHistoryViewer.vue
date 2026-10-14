@@ -11,6 +11,7 @@ import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
 import { useAIProvider } from "../composables/useAIProvider";
 import { useBlameContext } from "../composables/useBlameContext";
 import AiSparkle from "./AiSparkle.vue";
+import { formatBytes } from "../composables/useFilePreview";
 
 const { t, locale } = useI18n();
 const ai = useAIProvider();
@@ -549,6 +550,9 @@ function shortHash(hash: string): string {
           <span class="fhv-compare-label fhv-compare-label--from">{{ shortHash(compareFrom) }}</span>
           <span class="muted">&rarr;</span>
           <span class="fhv-compare-label fhv-compare-label--to">{{ shortHash(compareTo) }}</span>
+        </div>
+        <div v-if="compareDiff.truncatedFromBytes" class="fhv-compare-truncated">
+          {{ t('diff.compareTruncated', formatBytes(compareDiff.truncatedFromBytes)) }}
         </div>
         <div class="fhv-compare-diff" v-if="compareDiff.hunks.length > 0">
           <div v-for="(hunkPairs, hIdx) in comparePairs" :key="hIdx" class="fhv-compare-hunk">
@@ -1095,6 +1099,16 @@ function shortHash(hash: string): string {
 .fhv-compare {
   flex: 1;
   overflow: auto;
+}
+
+/* Same look as CommitDiffViewer's `.cdv-truncated`. */
+.fhv-compare-truncated {
+  padding: 8px 16px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  text-align: center;
+  font-style: italic;
 }
 
 .fhv-compare-empty {

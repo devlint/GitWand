@@ -32,6 +32,7 @@
 
 use crate::git::*;
 use crate::types::*;
+use std::collections::HashMap;
 use std::path::{Component, Path};
 
 // ─── Git status ───────────────────────────────────────────
@@ -1528,15 +1529,144 @@ fn validate_revision(name: &str, rev: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Diff of one file between two commits, for the "Compare" tab of the file
-/// history viewer. Mirrors `/api/git-file-diff` in dev-server.mjs: same
-/// `git diff <from> <to> -- <path>` invocation, same `{ path, hunks }` shape.
+/// `rev` as a full commit hash, or an error naming it.
+fn resolve_commit(cwd: &str, rev: &str) -> Result<String, String> {
+    let out = git_cmd()
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{}^{{commit}}", rev),
+        ])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git rev-parse: {}", e))?;
+    let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || hash.is_empty() {
+        return Err(format!("unknown revision: {}", rev));
+    }
+    Ok(hash)
+}
+
+/// Whether `path` names an entry in `commit`'s tree. `<commit>:<path>` splits
+/// at the first colon and the commit is a full hash, so the path is taken
+/// literally, colons and glob characters included.
+fn exists_at(cwd: &str, commit: &str, path: &str) -> bool {
+    git_cmd()
+        .args(["cat-file", "-e", &format!("{}:{}", commit, path)])
+        .current_dir(cwd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// What the file was called at each commit of `git log --follow` from HEAD:
+/// commit hash → path, or `None` where that commit deleted it.
 ///
-/// A file absent from `from_hash` (it was added later) comes back as a single
-/// all-addition hunk, absent from `to_hash` as an all-deletion one; that is
-/// git's own output, not a special case here. Identical revisions give no
+/// Parses `git log --follow --name-status -z --format=%x01%H`: NUL-separated
+/// tokens, a commit announced by `\x01<hash>` (followed by newlines and,
+/// depending on the git version, its first status token in the same NUL
+/// field), then a status (`M`, `A`, `D`, `R<score>`, `C<score>`) and one name,
+/// or two for a rename or copy, of which the second is the name at that commit.
+fn parse_follow_names(raw: &str) -> HashMap<String, Option<String>> {
+    let mut map = HashMap::new();
+    let mut commit: Option<String> = None;
+    let mut status: Option<char> = None;
+    let mut names: Vec<String> = Vec::new();
+    let mut want = 0usize;
+    for field in raw.split('\0') {
+        let mut token = field;
+        if let Some(i) = field.find('\x01') {
+            let rest = &field[i + 1..];
+            let end = rest
+                .find(|c: char| !c.is_ascii_hexdigit())
+                .unwrap_or(rest.len());
+            commit = Some(rest[..end].to_string());
+            status = None;
+            want = 0;
+            token = &rest[end..];
+        }
+        let token = token.trim_start_matches('\n');
+        if token.is_empty() {
+            continue;
+        }
+        if want == 0 {
+            let kind = token.chars().next().unwrap_or('M');
+            status = Some(kind);
+            want = if kind == 'R' || kind == 'C' { 2 } else { 1 };
+            names.clear();
+            continue;
+        }
+        names.push(token.to_string());
+        want -= 1;
+        if want == 0 {
+            if let (Some(c), Some(kind)) = (&commit, status) {
+                let at = if kind == 'D' {
+                    None
+                } else {
+                    names.last().cloned()
+                };
+                map.insert(c.clone(), at);
+            }
+        }
+    }
+    map
+}
+
+/// The file's path at `commit`: `path` itself when it exists there, else the
+/// name `git log --follow` recorded for that commit (computed once, on the
+/// first commit that needs it). `None`: the file does not exist at `commit`.
+fn path_at(
+    cwd: &str,
+    commit: &str,
+    path: &str,
+    follow: &mut Option<HashMap<String, Option<String>>>,
+) -> Option<String> {
+    if exists_at(cwd, commit, path) {
+        return Some(path.to_string());
+    }
+    let names = follow.get_or_insert_with(|| {
+        git_cmd()
+            .args([
+                "--literal-pathspecs",
+                "log",
+                "--follow",
+                "--name-status",
+                "-z",
+                "--no-color",
+                "--format=%x01%H",
+                "HEAD",
+                "--",
+                path,
+            ])
+            .current_dir(cwd)
+            .output()
+            .map(|o| parse_follow_names(&String::from_utf8_lossy(&o.stdout)))
+            .unwrap_or_default()
+    });
+    names
+        .get(commit)
+        .cloned()
+        .flatten()
+        .filter(|p| exists_at(cwd, commit, p))
+}
+
+/// Diff of one file between two commits, for the "Compare" tab of the file
+/// history viewer. Mirrors `/api/git-file-diff` in dev-server.mjs, step for
+/// step, and returns the same `{ path, hunks }` shape.
+///
+/// The viewer's commits come from `git log --follow`, so either may predate a
+/// rename: the file's path is resolved at each commit. Same path on both
+/// sides → `git diff <from> <to> -- <path>`; renamed in between → a
+/// blob-to-blob `git diff <from>:<old> <to>:<new>`, so the hunks show the
+/// content change rather than "everything added". A file absent from one side
+/// comes back as all additions or all deletions. Identical revisions give no
 /// hunks. A revision git cannot resolve is an error, not an empty diff, so the
 /// viewer does not claim "no differences" for a comparison that never ran.
+///
+/// Pathspecs are literal (`a[1].txt` is not a glob, `:x` is not magic) and
+/// the user's external diff, colour and textconv settings are switched off:
+/// the output is parsed, never shown as is.
 #[tauri::command]
 pub(crate) async fn git_file_diff(
     cwd: String,
@@ -1548,11 +1678,43 @@ pub(crate) async fn git_file_diff(
     validate_revision("toHash", &to_hash)?;
     // The file may not exist in the working tree any more (deleted or renamed
     // since); `safe_repo_path` accepts a missing path as long as it would stay
-    // inside the repo. git keeps getting `path` as given, after `--`.
-    safe_repo_path(&cwd, &path)?;
+    // inside the repo. git gets the clean repo-relative form; the response
+    // echoes `path` as given, like `git_diff`.
+    let guarded = safe_repo_path(&cwd, &path)?;
+    let root = Path::new(&cwd)
+        .canonicalize()
+        .map_err(|e| format!("cwd does not resolve: {}", e))?;
+    if guarded == root {
+        return Err("path must not be the repository root".to_string());
+    }
+    let git_path = repo_relative_path(&cwd, &root, &path, &guarded);
     let _repo = repo_lock::read(&cwd);
-    let output = git_cmd()
-        .args(["diff", &from_hash, &to_hash, "--", &path])
+
+    let from = resolve_commit(&cwd, &from_hash)?;
+    let to = resolve_commit(&cwd, &to_hash)?;
+    let mut follow = None;
+    let from_path = path_at(&cwd, &from, &git_path, &mut follow);
+    let to_path = path_at(&cwd, &to, &git_path, &mut follow);
+
+    let mut cmd = git_cmd();
+    cmd.args([
+        "--literal-pathspecs",
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        "--no-textconv",
+    ]);
+    match (&from_path, &to_path) {
+        (Some(a), Some(b)) if a != b => {
+            cmd.arg(format!("{}:{}", from, a))
+                .arg(format!("{}:{}", to, b));
+        }
+        _ => {
+            let p = from_path.as_ref().or(to_path.as_ref()).unwrap_or(&git_path);
+            cmd.args([from.as_str(), to.as_str(), "--", p.as_str()]);
+        }
+    }
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git diff: {}", e))?;
@@ -4214,7 +4376,153 @@ mod file_diff_tests {
         )
         .err()
         .expect("refused");
-        assert!(err.contains("git diff failed"), "{err}");
+        assert!(err.contains("unknown revision"), "{err}");
+    }
+
+    // ── Renames: the viewer's commits come from `git log --follow` ──
+
+    /// `old.txt` edited twice, renamed to `new.txt`, edited again.
+    /// Returns (a1, a2, renamed, b).
+    fn renamed_history(repo: &TempRepo) -> (String, String, String, String) {
+        let a1 = repo.commit("old.txt", Some("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"), "a1");
+        let a2 = repo.commit("old.txt", Some("1\nTWO\n3\n4\n5\n6\n7\n8\n9\n10\n"), "a2");
+        repo.git(&["mv", "old.txt", "new.txt"]);
+        repo.git(&["commit", "-q", "-m", "rename"]);
+        let renamed = repo.git(&["rev-parse", "HEAD"]);
+        let b = repo.commit("new.txt", Some("1\nTWO\n3\n4\n5\n6\n7\n8\n9\nTEN\n"), "b");
+        (a1, a2, renamed, b)
+    }
+
+    #[test]
+    fn two_commits_both_before_a_rename_diff_the_old_name() {
+        let repo = TempRepo::new();
+        let (a1, a2, _, _) = renamed_history(&repo);
+        let d = diff(&repo, "new.txt", &a1, &a2).unwrap();
+        assert_eq!(d.path, "new.txt");
+        let changed: Vec<Line> = lines(&d).into_iter().filter(|l| l.0 != "context").collect();
+        assert_eq!(
+            changed,
+            vec![
+                line("delete", "2", Some(2), None),
+                line("add", "TWO", None, Some(2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn one_commit_on_each_side_of_a_rename_diffs_content_not_all_added() {
+        let repo = TempRepo::new();
+        let (a1, a2, renamed, b) = renamed_history(&repo);
+        let d = diff(&repo, "new.txt", &a2, &b).unwrap();
+        let changed: Vec<Line> = lines(&d).into_iter().filter(|l| l.0 != "context").collect();
+        assert_eq!(
+            changed,
+            vec![
+                line("delete", "10", Some(10), None),
+                line("add", "TEN", None, Some(10)),
+            ]
+        );
+        // A pure rename changes no line.
+        assert!(diff(&repo, "new.txt", &a2, &renamed)
+            .unwrap()
+            .hunks
+            .is_empty());
+        // And both edits show across the whole span.
+        let span = diff(&repo, "new.txt", &a1, &b).unwrap();
+        assert_eq!(lines(&span).iter().filter(|l| l.0 != "context").count(), 4);
+    }
+
+    #[test]
+    fn follow_names_parse_with_or_without_the_status_in_the_hash_field() {
+        let h1 = "a".repeat(40);
+        let h2 = "b".repeat(40);
+        let h3 = "c".repeat(40);
+        for sep in ["\n\n", "\n\n\0"] {
+            let raw = format!(
+                "\x01{h1}{sep}M\0new.txt\0\x01{h2}{sep}R087\0old.txt\0new.txt\0\x01{h3}{sep}D\0gone.txt\0"
+            );
+            let m = parse_follow_names(&raw);
+            assert_eq!(m.get(&h1), Some(&Some("new.txt".to_string())), "{sep:?}");
+            assert_eq!(m.get(&h2), Some(&Some("new.txt".to_string())), "{sep:?}");
+            assert_eq!(m.get(&h3), Some(&None), "{sep:?}");
+        }
+    }
+
+    // ── Paths are literal, normalised, and never the repo root ──
+
+    #[test]
+    fn a_glob_character_in_the_name_is_not_a_pattern() {
+        let repo = TempRepo::new();
+        repo.commit("a1.txt", Some("decoy\n"), "decoy");
+        let a = repo.commit("a[1].txt", Some("real\n"), "a");
+        repo.commit("a1.txt", Some("decoy changed\n"), "decoy edit");
+        let b = repo.commit("a[1].txt", Some("real changed\n"), "b");
+        let d = diff(&repo, "a[1].txt", &a, &b).unwrap();
+        assert_eq!(
+            lines(&d),
+            vec![
+                line("delete", "real", Some(1), None),
+                line("add", "real changed", None, Some(1)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_colon_prefixed_name_is_not_pathspec_magic() {
+        let repo = TempRepo::new();
+        repo.commit("x.txt", Some("decoy\n"), "decoy");
+        let a = repo.commit(":x.txt", Some("real\n"), "a");
+        repo.commit("x.txt", Some("decoy changed\n"), "decoy edit");
+        let b = repo.commit(":x.txt", Some("real changed\n"), "b");
+        let d = diff(&repo, ":x.txt", &a, &b).unwrap();
+        assert_eq!(
+            lines(&d),
+            vec![
+                line("delete", "real", Some(1), None),
+                line("add", "real changed", None, Some(1)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dot_slash_path_is_normalised_and_echoed_as_given() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        let b = repo.commit("f.txt", Some("y\n"), "b");
+        let d = diff(&repo, "./f.txt", &a, &b).unwrap();
+        assert_eq!(d.path, "./f.txt");
+        assert_eq!(d.hunks.len(), 1);
+    }
+
+    #[test]
+    fn refuses_the_repository_root() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        let b = repo.commit("f.txt", Some("y\n"), "b");
+        let err = diff(&repo, ".", &a, &b).err().expect("refused");
+        assert!(err.contains("repository root"), "{err}");
+    }
+
+    // ── User config must not change what is parsed ──
+
+    #[test]
+    fn ignores_external_diff_color_and_textconv_config() {
+        let repo = TempRepo::new();
+        repo.commit(".gitattributes", Some("*.txt diff=upper\n"), "attrs");
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        let b = repo.commit("f.txt", Some("y\n"), "b");
+        // Each of these alone breaks or rewrites a plain `git diff`.
+        repo.git(&["config", "diff.external", "false"]);
+        repo.git(&["config", "color.ui", "always"]);
+        repo.git(&["config", "diff.upper.textconv", "tr a-z A-Z"]);
+        let d = diff(&repo, "f.txt", &a, &b).unwrap();
+        assert_eq!(
+            lines(&d),
+            vec![
+                line("delete", "x", Some(1), None),
+                line("add", "y", None, Some(1)),
+            ]
+        );
     }
 
     #[test]
