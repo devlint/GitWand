@@ -69,6 +69,15 @@ describe("isPureMove", () => {
   it("is false for an empty diff", () => {
     expect(isPureMove("")).toBe(false);
   });
+  it("counts a removed line whose content starts with `-- a/` (diff line `--- a/…`)", () => {
+    // Removing `-- a/old` while adding `x`: a real edit. The `--- a/old`
+    // line is inside the hunk, so it is a deletion, not a file header.
+    const diff = "--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n--- a/old\n-x\n+x\n++++ b/new";
+    expect(isPureMove(diff)).toBe(false);
+    // …and a pure move of such a line is still a pure move.
+    const moved = "--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n--- a/old\n-x\n+x\n+-- a/old";
+    expect(isPureMove(moved)).toBe(true);
+  });
 });
 
 describe("history config helpers", () => {

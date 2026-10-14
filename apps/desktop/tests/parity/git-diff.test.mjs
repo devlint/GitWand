@@ -21,6 +21,7 @@
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { existsSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { assertParity } from "./harness.mjs";
 import { runProbe } from "./probe.mjs";
@@ -303,4 +304,44 @@ describe("parity: git-diff", () => {
       }
     });
   });
+
+  // A removed SQL comment `-- old` is the diff line `--- old`, an added `++x`
+  // is `+++x`. Both parsers used to drop them as `---`/`+++` file headers,
+  // returning the hunk with only its context lines.
+  describe("hunk lines whose content starts with -- or ++", () => {
+    const BEFORE = "SELECT 1;\n-- old comment\nSELECT 2;\n--- x\nSELECT 3;\n";
+    const AFTER = "SELECT 1;\n++x\nSELECT 2;\n+++ y\nSELECT 3;\n";
+    const EXPECTED = [
+      ["context", "SELECT 1;"],
+      ["delete", "-- old comment"],
+      ["add", "++x"],
+      ["context", "SELECT 2;"],
+      ["delete", "--- x"],
+      ["add", "+++ y"],
+      ["context", "SELECT 3;"],
+    ];
+
+    for (const staged of [false, true]) {
+      it(`are kept identically (${staged ? "staged" : "unstaged"})`, async () => {
+        const cwd = mkTempRepo("gw-parity-diff-dashdash-");
+        commitFile(cwd, "q.sql", BEFORE, "init", 0);
+        writeFileSync(join(cwd, "q.sql"), AFTER);
+        if (staged) runGit(cwd, ["add", "q.sql"]);
+        const { rust, node } = await assertParity(dev, {
+          command: "git-diff",
+          args: { cwd, path: "q.sql", staged },
+          httpPath: `/api/git-diff?cwd=${encodeURIComponent(cwd)}&path=q.sql&staged=${staged}`,
+        });
+        for (const side of [rust, node]) {
+          expect(side.hunks).toHaveLength(1);
+          expect(side.hunks[0].lines.map((l) => [l.type, l.content])).toEqual(EXPECTED);
+          expect(side.hunks[0].lines.at(-1)).toMatchObject({ oldLineNo: 5, newLineNo: 5 });
+        }
+      });
+    }
+  });
 });
+
+function runGit(cwd, args) {
+  execFileSync("git", ["-C", cwd, ...args]);
+}

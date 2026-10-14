@@ -235,6 +235,12 @@ pub fn git_diff_parity(cwd: String, path: String, staged: bool) -> Result<types:
     tauri::async_runtime::block_on(commands::read::git_diff(cwd, path, staged))
 }
 
+/// Parity entry point for `git_show` (multi-file commit diff). Same
+/// reasoning as `git_diff_parity`.
+pub fn git_show_parity(cwd: String, hash: String) -> Result<Vec<types::GitDiff>, String> {
+    tauri::async_runtime::block_on(commands::read::git_show(cwd, hash))
+}
+
 pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
     tauri::async_runtime::block_on(commands::ops::git_branches(cwd, None))
 }

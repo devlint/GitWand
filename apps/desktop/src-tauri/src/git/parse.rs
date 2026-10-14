@@ -54,14 +54,174 @@ pub(crate) fn rollup_status_checks(checks: &[GhPrStatusCheck]) -> String {
     }
 }
 
+/// Parse a unified-diff hunk header `@@ -a[,b] +c[,d] @@ …` into
+/// `(old_start, old_count, new_start, new_count)`. An omitted count means 1
+/// (unified-diff convention). Unparsable fields fall back to 0 / 1, the
+/// behavior of the inline parsers this helper replaced.
+pub(crate) fn parse_hunk_header(line: &str) -> (i32, i32, i32, i32) {
+    let mut old_start = 0;
+    let mut old_count = 1;
+    let mut new_start = 0;
+    let mut new_count = 1;
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() >= 3 {
+        let old_range = parts[1].strip_prefix('-').unwrap_or("0");
+        let new_range = parts[2].strip_prefix('+').unwrap_or("0");
+
+        if let Some(comma_idx) = old_range.find(',') {
+            old_start = old_range[..comma_idx].parse().unwrap_or(0);
+            old_count = old_range[comma_idx + 1..].parse().unwrap_or(1);
+        } else {
+            old_start = old_range.parse().unwrap_or(0);
+        }
+
+        if let Some(comma_idx) = new_range.find(',') {
+            new_start = new_range[..comma_idx].parse().unwrap_or(0);
+            new_count = new_range[comma_idx + 1..].parse().unwrap_or(1);
+        } else {
+            new_start = new_range.parse().unwrap_or(0);
+        }
+    }
+    (old_start, old_count, new_start, new_count)
+}
+
+/// Kind of a line inside a hunk body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HunkLineKind {
+    Add,
+    Delete,
+    Context,
+}
+
+/// Tracks how many old/new lines of the current hunk body are still
+/// expected, from the counts in its `@@` header.
+///
+/// This is what tells a file header (`--- a/x`, `+++ b/x`) apart from a hunk
+/// line whose *content* starts with `--` or `++` — a removed SQL comment
+/// `-- note` is the diff line `--- note`. While the body is active, a line is
+/// classified purely by its first character; only once the header's counts
+/// are used up do `---`/`+++` mean file headers again.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct HunkBody {
+    old_left: i32,
+    new_left: i32,
+    /// Combined-diff hunk (`@@@ … @@@`, from `diff --cc`): its header counts
+    /// are per parent and its lines carry one prefix column per parent, so
+    /// the counts cannot bound it. It lasts until the next `diff ` line.
+    unbounded: bool,
+}
+
+impl HunkBody {
+    pub(crate) fn new(old_count: i32, new_count: i32) -> Self {
+        Self {
+            old_left: old_count.max(0),
+            new_left: new_count.max(0),
+            unbounded: false,
+        }
+    }
+
+    /// Body for the hunk opened by `header`: counted for a regular `@@`
+    /// header, unbounded for a combined `@@@` one.
+    pub(crate) fn for_header(header: &str, old_count: i32, new_count: i32) -> Self {
+        if header.starts_with("@@@") {
+            Self {
+                old_left: 0,
+                new_left: 0,
+                unbounded: true,
+            }
+        } else {
+            Self::new(old_count, new_count)
+        }
+    }
+
+    /// True while the header's line counts are not yet consumed.
+    pub(crate) fn active(&self) -> bool {
+        self.unbounded || self.old_left > 0 || self.new_left > 0
+    }
+
+    /// Classify one body line and consume it from the counts. `None` once
+    /// the body is exhausted, or for a line that is not an add/delete/context
+    /// line (`\ No newline at end of file`, or an empty string — which is
+    /// never context, see AGENTS.md).
+    pub(crate) fn classify(&mut self, line: &str) -> Option<HunkLineKind> {
+        if !self.active() {
+            return None;
+        }
+        if line.starts_with('+') {
+            self.new_left -= 1;
+            Some(HunkLineKind::Add)
+        } else if line.starts_with('-') {
+            self.old_left -= 1;
+            Some(HunkLineKind::Delete)
+        } else if line.starts_with(' ') {
+            self.old_left -= 1;
+            self.new_left -= 1;
+            Some(HunkLineKind::Context)
+        } else {
+            None
+        }
+    }
+}
+
+/// Append one classified body line to `hunk`, advancing the line numbers.
+pub(crate) fn push_hunk_line(
+    hunk: &mut DiffHunk,
+    kind: HunkLineKind,
+    line: &str,
+    old_line_no: &mut i32,
+    new_line_no: &mut i32,
+) {
+    let content = line[1..].to_string();
+    match kind {
+        HunkLineKind::Add => {
+            hunk.lines.push(DiffLine {
+                r#type: "add".to_string(),
+                content,
+                old_line_no: None,
+                new_line_no: Some(*new_line_no),
+            });
+            *new_line_no += 1;
+        }
+        HunkLineKind::Delete => {
+            hunk.lines.push(DiffLine {
+                r#type: "delete".to_string(),
+                content,
+                old_line_no: Some(*old_line_no),
+                new_line_no: None,
+            });
+            *old_line_no += 1;
+        }
+        HunkLineKind::Context => {
+            hunk.lines.push(DiffLine {
+                r#type: "context".to_string(),
+                content,
+                old_line_no: Some(*old_line_no),
+                new_line_no: Some(*new_line_no),
+            });
+            *old_line_no += 1;
+            *new_line_no += 1;
+        }
+    }
+}
+
 pub(crate) fn parse_diff_hunks(stdout: &str) -> (Vec<DiffHunk>, Option<String>) {
     let mut hunks: Vec<DiffHunk> = Vec::new();
     let mut current_hunk: Option<DiffHunk> = None;
+    let mut body = HunkBody::default();
     let mut old_line_no = 0i32;
     let mut new_line_no = 0i32;
     let mut detected_status: Option<String> = None;
 
     for line in stdout.lines() {
+        // Inside a hunk body, classify by first character only: content may
+        // start with `--`/`++` (see `HunkBody`).
+        if let Some(ref mut hunk) = current_hunk {
+            if let Some(kind) = body.classify(line) {
+                push_hunk_line(hunk, kind, line, &mut old_line_no, &mut new_line_no);
+                continue;
+            }
+        }
+
         if line.starts_with("new file mode") {
             detected_status = Some("added".to_string());
             continue;
@@ -73,33 +233,10 @@ pub(crate) fn parse_diff_hunks(stdout: &str) -> (Vec<DiffHunk>, Option<String>) 
             }
 
             let header = line.to_string();
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            let mut old_start = 0;
-            let mut old_count = 1;
-            let mut new_start = 0;
-            let mut new_count = 1;
-
-            if parts.len() >= 3 {
-                let old_range = parts[1].strip_prefix('-').unwrap_or("0");
-                let new_range = parts[2].strip_prefix('+').unwrap_or("0");
-
-                if let Some(comma_idx) = old_range.find(',') {
-                    old_start = old_range[..comma_idx].parse().unwrap_or(0);
-                    old_count = old_range[comma_idx + 1..].parse().unwrap_or(1);
-                } else {
-                    old_start = old_range.parse().unwrap_or(0);
-                }
-
-                if let Some(comma_idx) = new_range.find(',') {
-                    new_start = new_range[..comma_idx].parse().unwrap_or(0);
-                    new_count = new_range[comma_idx + 1..].parse().unwrap_or(1);
-                } else {
-                    new_start = new_range.parse().unwrap_or(0);
-                }
-            }
-
+            let (old_start, old_count, new_start, new_count) = parse_hunk_header(line);
             old_line_no = old_start;
             new_line_no = new_start;
+            body = HunkBody::for_header(line, old_count, new_count);
 
             current_hunk = Some(DiffHunk {
                 header,
@@ -109,35 +246,13 @@ pub(crate) fn parse_diff_hunks(stdout: &str) -> (Vec<DiffHunk>, Option<String>) 
                 new_count,
                 lines: Vec::new(),
             });
-        } else if let Some(ref mut hunk) = current_hunk {
-            if line.starts_with('+') && !line.starts_with("+++") {
-                hunk.lines.push(DiffLine {
-                    r#type: "add".to_string(),
-                    content: line[1..].to_string(),
-                    old_line_no: None,
-                    new_line_no: Some(new_line_no),
-                });
-                new_line_no += 1;
-            } else if line.starts_with('-') && !line.starts_with("---") {
-                hunk.lines.push(DiffLine {
-                    r#type: "delete".to_string(),
-                    content: line[1..].to_string(),
-                    old_line_no: Some(old_line_no),
-                    new_line_no: None,
-                });
-                old_line_no += 1;
-            } else if let Some(stripped) = line.strip_prefix(' ') {
-                let content = stripped.to_string();
-                hunk.lines.push(DiffLine {
-                    r#type: "context".to_string(),
-                    content,
-                    old_line_no: Some(old_line_no),
-                    new_line_no: Some(new_line_no),
-                });
-                old_line_no += 1;
-                new_line_no += 1;
-            }
+        } else if line.starts_with("diff ") {
+            // A new file section: its `---`/`+++` headers are not part of
+            // the previous hunk, even if that hunk's counts were off.
+            body = HunkBody::default();
         }
+        // Anything else outside an active body (`--- a/x`, `+++ b/x`,
+        // `index …`, `\ No newline at end of file`) is not a hunk line.
     }
 
     if let Some(hunk) = current_hunk.take() {
@@ -2079,5 +2194,109 @@ mod remote_provider_tests {
             parse_remote_owner_repo("git@origin.cursor.com:acme/checkout.git"),
             ("acme".to_string(), "checkout".to_string())
         );
+    }
+}
+
+/// `parse_diff_hunks` must classify a hunk line by its first character only,
+/// bounded by the `@@` counts: a removed `-- x` (diff line `--- x`) or an
+/// added `++x` (diff line `+++x`) is content, not a file header.
+#[cfg(test)]
+mod diff_hunk_tests {
+    use super::*;
+
+    fn kinds(h: &DiffHunk) -> Vec<(&str, &str)> {
+        h.lines
+            .iter()
+            .map(|l| (l.r#type.as_str(), l.content.as_str()))
+            .collect()
+    }
+
+    fn text(lines: &[&str]) -> String {
+        let mut s = lines.join("\n");
+        s.push('\n');
+        s
+    }
+
+    #[test]
+    fn keeps_lines_starting_with_dash_dash_and_plus_plus() {
+        let out = text(&[
+            "diff --git a/q.sql b/q.sql",
+            "index 1..2 100644",
+            "--- a/q.sql",
+            "+++ b/q.sql",
+            "@@ -1,3 +1,3 @@",
+            " a",
+            "--- old comment",
+            "+++x",
+            " b",
+        ]);
+        let (hunks, _) = parse_diff_hunks(&out);
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(
+            kinds(&hunks[0]),
+            [
+                ("context", "a"),
+                ("delete", "-- old comment"),
+                ("add", "++x"),
+                ("context", "b"),
+            ]
+        );
+        assert_eq!(hunks[0].lines[3].old_line_no, Some(3));
+        assert_eq!(hunks[0].lines[3].new_line_no, Some(3));
+    }
+
+    #[test]
+    fn headers_of_a_following_file_are_not_hunk_lines() {
+        let out = text(&[
+            "diff --git a/a b/a",
+            "--- a/a",
+            "+++ b/a",
+            "@@ -1 +1 @@",
+            "-x",
+            "+y",
+            "\\ No newline at end of file",
+            "diff --git a/b b/b",
+            "--- a/b",
+            "+++ b/b",
+            "@@ -0,0 +1,2 @@",
+            "+--- c",
+            "++++ d",
+        ]);
+        let (hunks, _) = parse_diff_hunks(&out);
+        assert_eq!(hunks.len(), 2);
+        assert_eq!(kinds(&hunks[0]), [("delete", "x"), ("add", "y")]);
+        assert_eq!(kinds(&hunks[1]), [("add", "--- c"), ("add", "+++ d")]);
+    }
+
+    #[test]
+    fn empty_line_is_never_context() {
+        let (hunks, _) = parse_diff_hunks(&text(&["@@ -1,2 +1,2 @@", " a", "", " b"]));
+        assert_eq!(kinds(&hunks[0]), [("context", "a"), ("context", "b")]);
+    }
+
+    #[test]
+    fn combined_diff_hunk_is_not_cut_short_by_its_counts() {
+        // `diff --cc` headers carry one range per parent; the body is not
+        // bounded by them and lasts until the next `diff ` line.
+        let out = text(&[
+            "diff --cc f",
+            "--- a/f",
+            "+++ b/f",
+            "@@@ -1,1 -1,1 +1,5 @@@",
+            "++<<<<<<< HEAD",
+            " +ours",
+            "++=======",
+            "+ theirs",
+            "++>>>>>>> other",
+        ]);
+        let (hunks, _) = parse_diff_hunks(&out);
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].lines.len(), 5);
+    }
+
+    #[test]
+    fn header_without_counts_means_one_line() {
+        assert_eq!(parse_hunk_header("@@ -3 +4 @@ fn x"), (3, 1, 4, 1));
+        assert_eq!(parse_hunk_header("@@ -0,0 +1,2 @@"), (0, 0, 1, 2));
     }
 }
