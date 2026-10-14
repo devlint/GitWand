@@ -10,7 +10,8 @@
  */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { assertParity } from "./harness.mjs";
@@ -377,5 +378,26 @@ describe("parity: git-file-diff, third pass", () => {
       ["delete", "a"],
       ["add", "b"],
     ]);
+  });
+});
+
+describe("parity: git-file-log failures", () => {
+  let dev;
+  beforeAll(async () => { dev = await startDevServer(); }, 15_000);
+  afterAll(async () => { await dev?.stop(); });
+
+  it("a failing log is an error on both sides, never an empty history", async () => {
+    // A directory that is not a repository: git log exits non-zero.
+    const notARepo = realpathSync(mkdtempSync(join(tmpdir(), "gw-parity-not-a-repo-")));
+    const probe = runProbe("command-parity", {
+      command: "git_file_log",
+      args: { cwd: notARepo, path: "f.txt" },
+    });
+    expect(probe.ok).toBe(false);
+    const res = await dev.fetch(logCall(notARepo, "f.txt").httpPath);
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe(probe.error);
+    expect(body.error).toMatch(/^git log failed: /);
   });
 });

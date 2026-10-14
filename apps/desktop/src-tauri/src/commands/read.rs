@@ -1430,12 +1430,15 @@ pub(crate) async fn git_file_log(
     // one place a rename is resolved. Literal pathspec: `a[1].txt` is a name.
     let output = git_cmd()
         .args([
+            // `diff.relative` would make the names relative to `cwd`. Set
+            // as config, not `--no-relative`: that flag needs git 2.28, while
+            // an unknown config key is ignored by older git.
+            "-c",
+            "diff.relative=false",
             "--literal-pathspecs",
             "log",
             "--follow",
             "--name-only",
-            // `diff.relative` would make the names relative to `cwd`.
-            "--no-relative",
             "-z",
             "-n",
             &n,
@@ -1472,11 +1475,12 @@ pub(crate) async fn git_file_log_pickaxe(
     // be compared like any other history entry.
     let output = git_cmd()
         .args([
+            "-c",
+            "diff.relative=false",
             "--literal-pathspecs",
             "log",
             "--follow",
             "--name-only",
-            "--no-relative",
             "-z",
             flag,
             &search,

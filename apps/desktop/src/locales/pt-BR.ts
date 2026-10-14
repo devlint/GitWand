@@ -408,6 +408,8 @@ const ptBR: Locale = {
     compareSelect: "Selecionar para comparar",
     compareEmpty: "Selecione dois commits para comparar",
     compareTruncated: "Diff truncado ({0}): apenas o início é exibido",
+    compareFailed: "Não foi possível comparar estes dois commits.",
+    compareBeyondHistory: "Um destes commits é anterior ao histórico carregado: o nome do arquivo naquele momento é desconhecido e o nome atual foi usado. Se o arquivo foi renomeado desde então, ele não é encontrado com esse nome ou aparece como totalmente adicionado ou removido.",
     compareGoLog: "Ir para o histórico",
     stageHunk: "Stage do hunk",
     stageSelected: "Stage ({0})",

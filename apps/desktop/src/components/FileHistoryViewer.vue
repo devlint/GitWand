@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, toRef } from "vue";
 import type { BlameLine, FileLogEntry, GitDiff } from "../utils/backend";
 import Avatar from "./Avatar.vue";
 import { getGitBlame, getGitFileLog, getGitFileLogPickaxe, getGitFileLogRange, getGitFileDiff, type BlameAlgorithm, type PickaxeMode } from "../utils/backend";
@@ -12,7 +12,7 @@ import { useAIProvider } from "../composables/useAIProvider";
 import { useBlameContext } from "../composables/useBlameContext";
 import AiSparkle from "./AiSparkle.vue";
 import { formatBytes } from "../composables/useFilePreview";
-import { nameAtCommit } from "../utils/fileHistoryNames";
+import { useFileCompare } from "../composables/useFileCompare";
 
 const { t, locale } = useI18n();
 const ai = useAIProvider();
@@ -238,59 +238,49 @@ function isNewAuthorBlock(idx: number): boolean {
 }
 
 // ─── Time-travel diff ─────────────────────────────────
-const compareFrom = ref<string | null>(null);
-const compareTo = ref<string | null>(null);
-const compareDiff = ref<GitDiff | null>(null);
-const compareLoading = ref(false);
+// Selection, result and a Compare-scoped error live in `useFileCompare`: a
+// failed compare must leave blame and the log usable.
+const compare = useFileCompare({
+  cwd: toRef(props, "cwd"),
+  filePath: toRef(props, "filePath"),
+  history: fileLog,
+  extra: computed(() => [pickaxeResults.value, rangeLogResults.value]),
+  getDiff: getGitFileDiff,
+});
+const {
+  from: compareFrom,
+  to: compareTo,
+  diff: compareDiff,
+  error: compareError,
+  loading: compareLoading,
+  beyondHistory: compareBeyondHistory,
+} = compare;
 
 function selectForCompare(hash: string) {
-  if (!compareFrom.value) {
-    compareFrom.value = hash;
-  } else if (!compareTo.value) {
-    compareTo.value = hash;
-    loadCompare();
-  } else {
-    // Reset and start over
-    compareFrom.value = hash;
-    compareTo.value = null;
-    compareDiff.value = null;
-  }
+  compare.select(hash);
 }
 
 function clearCompare() {
-  compareFrom.value = null;
-  compareTo.value = null;
-  compareDiff.value = null;
+  compare.reset();
 }
 
-/**
- * The file's name at `hash`, from the `--follow` history (see
- * `nameAtCommit`). Passing it to the diff is what makes a comparison across a
- * rename work; the backend does not re-walk the history.
- */
-function pathAtCommit(hash: string): string | undefined {
-  return nameAtCommit(hash, fileLog.value, [pickaxeResults.value, rangeLogResults.value]);
-}
+// Show the Compare tab once there is something to see there: a diff or why
+// there is none.
+watch([compareDiff, compareError], ([d, e]) => {
+  if (d || e) activeTab.value = "compare";
+});
 
-async function loadCompare() {
-  if (!compareFrom.value || !compareTo.value || !props.cwd) return;
-  compareLoading.value = true;
-  try {
-    compareDiff.value = await getGitFileDiff(
-      props.cwd,
-      props.filePath,
-      compareFrom.value,
-      compareTo.value,
-      pathAtCommit(compareFrom.value),
-      pathAtCommit(compareTo.value),
-    );
-    activeTab.value = "compare";
-  } catch (err: any) {
-    error.value = err?.message || String(err);
-  } finally {
-    compareLoading.value = false;
-  }
-}
+// Another file: nothing selected or found for the previous one may feed its
+// compare (names from its history, a pending selection, a stale result).
+watch(
+  () => props.filePath,
+  () => {
+    compare.reset();
+    clearPickaxe();
+    clearRangeLog();
+    rangeLogError.value = null;
+  },
+);
 
 function isSelectedForCompare(hash: string): "from" | "to" | null {
   if (compareFrom.value === hash) return "from";
@@ -553,6 +543,12 @@ function shortHash(hash: string): string {
       <div v-if="compareLoading" class="fhv-loading">
         <span class="muted">{{ t('common.loading') }}</span>
       </div>
+      <div v-else-if="compareError" class="fhv-compare-empty fhv-compare-error" role="alert">
+        <span>{{ t('diff.compareFailed') }}</span>
+        <span v-if="compareBeyondHistory" class="muted">{{ t('diff.compareBeyondHistory') }}</span>
+        <span class="mono muted fhv-compare-error-detail">{{ compareError }}</span>
+        <button class="fhv-compare-go-log" @click="activeTab = 'log'">{{ t('diff.compareGoLog') }}</button>
+      </div>
       <div v-else-if="!compareDiff || !compareFrom || !compareTo" class="fhv-compare-empty">
         <span class="muted">{{ t('diff.compareEmpty') }}</span>
         <button class="fhv-compare-go-log" @click="activeTab = 'log'">{{ t('diff.compareGoLog') }}</button>
@@ -562,6 +558,9 @@ function shortHash(hash: string): string {
           <span class="fhv-compare-label fhv-compare-label--from">{{ shortHash(compareFrom) }}</span>
           <span class="muted">&rarr;</span>
           <span class="fhv-compare-label fhv-compare-label--to">{{ shortHash(compareTo) }}</span>
+        </div>
+        <div v-if="compareBeyondHistory" class="fhv-compare-truncated">
+          {{ t('diff.compareBeyondHistory') }}
         </div>
         <div v-if="compareDiff.truncatedFromBytes" class="fhv-compare-truncated">
           {{ t('diff.compareTruncated', formatBytes(compareDiff.truncatedFromBytes)) }}
@@ -1111,6 +1110,15 @@ function shortHash(hash: string): string {
 .fhv-compare {
   flex: 1;
   overflow: auto;
+}
+
+.fhv-compare-error {
+  text-align: center;
+}
+
+.fhv-compare-error-detail {
+  font-size: var(--text-xs);
+  word-break: break-word;
 }
 
 /* Same look as CommitDiffViewer's `.cdv-truncated`. */

@@ -4946,9 +4946,12 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         // Mirrors `git_file_log`: names included (`--name-only -z`), literal pathspec.
         const out = spawnSync(GIT, [
-          "--literal-pathspecs", "log", "--follow", "--name-only", "--no-relative", "-z", "-n", String(count),
+          "-c", "diff.relative=false", "--literal-pathspecs", "log", "--follow", "--name-only", "-z", "-n", String(count),
           FILE_LOG_NAMED_FORMAT, "--", filePath,
         ], { cwd: resolvedCwd, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+        // Same failure as the Rust command, never an empty history.
+        if (out.error) return jsonResponse(req, res, { error: `git log failed: ${out.error.message}` }, 500);
+        if (out.status !== 0) return jsonResponse(req, res, { error: `git log failed: ${out.stderr || ""}` }, 500);
         return jsonResponse(req, res, parseFileLogNamed(out.stdout || ""));
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
@@ -4965,9 +4968,12 @@ async function handleRequest(req, res) {
       try {
         // Mirrors `git_file_log_pickaxe`: same named output as the file log.
         const out = spawnSync(GIT, [
-          "--literal-pathspecs", "log", "--follow", "--name-only", "--no-relative", "-z", mode, search,
+          "-c", "diff.relative=false", "--literal-pathspecs", "log", "--follow", "--name-only", "-z", mode, search,
           FILE_LOG_NAMED_FORMAT, "--", filePath,
         ], { cwd: resolve(cwd), encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+        // Same failure as the Rust command, never an empty history.
+        if (out.error) return jsonResponse(req, res, { error: `git log pickaxe failed: ${out.error.message}` }, 500);
+        if (out.status !== 0) return jsonResponse(req, res, { error: `git log pickaxe failed: ${out.stderr || ""}` }, 500);
         return jsonResponse(req, res, parseFileLogNamed(out.stdout || ""));
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
