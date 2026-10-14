@@ -142,6 +142,16 @@ describe("findRegisteredCommands", () => {
     expect(findRegisteredCommands(src)).toEqual(["kept"]);
   });
 
+  it("lexes raw strings, escaped quotes and astral chars without losing the macro", () => {
+    const src = [
+      `let a = r#"has "quotes" and /* and generate_handler![x]"#;`,
+      `let b = br"/*";`,
+      `let c = '\\''; let d = '\\u{1F600}'; let e = '😀'; let f = "esc \\" /*";`,
+      `generate_handler![commands::a::kept, #![inner] commands::a::also]`,
+    ].join("\n");
+    expect(findRegisteredCommands(src)).toEqual(["also", "kept"]);
+  });
+
   it("returns nothing when there is no macro", () => {
     expect(findRegisteredCommands("fn main() {}")).toEqual([]);
   });

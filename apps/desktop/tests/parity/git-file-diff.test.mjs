@@ -10,8 +10,8 @@
  */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { assertParity } from "./harness.mjs";
 import { runProbe } from "./probe.mjs";
@@ -49,14 +49,34 @@ function fixtureFileHistory() {
   };
 }
 
-function call(cwd, path, fromHash, toHash) {
+function call(cwd, path, fromHash, toHash, fromPath, toPath) {
+  const params = new URLSearchParams({ cwd, path, from: fromHash, to: toHash });
+  const args = { cwd, path, fromHash, toHash };
+  if (fromPath !== undefined) { params.set("fromPath", fromPath); args.fromPath = fromPath; }
+  if (toPath !== undefined) { params.set("toPath", toPath); args.toPath = toPath; }
   return {
     command: "command-parity",
-    args: { command: "git_file_diff", args: { cwd, path, fromHash, toHash } },
-    httpPath:
-      `/api/git-file-diff?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}` +
-      `&from=${encodeURIComponent(fromHash)}&to=${encodeURIComponent(toHash)}`,
+    args: { command: "git_file_diff", args },
+    httpPath: `/api/git-file-diff?${params}`,
   };
+}
+
+function logCall(cwd, path) {
+  return {
+    command: "command-parity",
+    args: { command: "git_file_log", args: { cwd, path } },
+    httpPath: `/api/git-file-log?${new URLSearchParams({ cwd, path })}`,
+  };
+}
+
+/**
+ * What the viewer does: read the file log (asserting both backends agree on
+ * it, names included), then diff with the two entries' names.
+ */
+async function compareLikeTheViewer(dev, cwd, path, fromHash, toHash) {
+  const { node: log } = await assertParity(dev, logCall(cwd, path));
+  const name = (h) => log.find((e) => e.hashFull === h)?.path;
+  return assertParity(dev, call(cwd, path, fromHash, toHash, name(fromHash), name(toHash)));
 }
 
 describe("parity: git-file-diff", () => {
@@ -158,14 +178,35 @@ describe("parity: git-file-diff across a rename", () => {
     await dev?.stop();
   });
 
+  it("the file log names the file at each commit, old name before the rename", async () => {
+    const { node } = await assertParity(dev, logCall(r.cwd, "new.txt"));
+    expect(node.map((e) => [e.hashFull, e.path])).toEqual([
+      [r.b, "new.txt"],
+      [rev(r.cwd, "HEAD~1"), "new.txt"],
+      [r.a2, "old.txt"],
+      [r.a1, "old.txt"],
+    ]);
+  });
+
   it("two commits both before the rename diff the old name", async () => {
-    const { node } = await assertParity(dev, call(r.cwd, "new.txt", r.a1, r.a2));
+    const { node } = await compareLikeTheViewer(dev, r.cwd, "new.txt", r.a1, r.a2);
     expect(changed(node).map((l) => [l.type, l.content])).toEqual([["delete", "2"], ["add", "TWO"]]);
   });
 
   it("one commit on each side diffs the content, not 'everything added'", async () => {
-    const { node } = await assertParity(dev, call(r.cwd, "new.txt", r.a2, r.b));
+    const { node } = await compareLikeTheViewer(dev, r.cwd, "new.txt", r.a2, r.b);
     expect(changed(node).map((l) => [l.type, l.content])).toEqual([["delete", "10"], ["add", "TEN"]]);
+  });
+
+  it("opened from a subdirectory, the log's root-relative names still resolve", async () => {
+    const cwd = mkTempRepo("gw-parity-file-diff-subdir-");
+    commitFile(cwd, "sub/old.txt", "1\n2\n3\n", "a1", 0);
+    execFileSync("git", ["-C", cwd, "mv", "sub/old.txt", "sub/new.txt"]);
+    execFileSync("git", ["-C", cwd, "commit", "--quiet", "-m", "rename"]);
+    commitFile(cwd, "sub/new.txt", "1\n2\nTHREE\n", "b", 2);
+    const sub = join(cwd, "sub");
+    const { node } = await compareLikeTheViewer(dev, sub, "new.txt", rev(cwd, "HEAD~2"), rev(cwd, "HEAD"));
+    expect(changed(node).map((l) => [l.type, l.content])).toEqual([["delete", "3"], ["add", "THREE"]]);
   });
 });
 
@@ -179,6 +220,7 @@ describe("parity: git-file-diff path handling", () => {
     const cwd = mkTempRepo("gw-parity-file-diff-literal-");
     // `commitFile` stages with a pathspec, which would read `:x.txt` as magic.
     const commit = (p, content, msg) => {
+      mkdirSync(dirname(join(cwd, p)), { recursive: true });
       writeFileSync(join(cwd, p), content);
       execFileSync("git", ["-C", cwd, "--literal-pathspecs", "add", "--", p]);
       execFileSync("git", ["-C", cwd, "commit", "--quiet", "-m", msg]);
@@ -193,11 +235,18 @@ describe("parity: git-file-diff path handling", () => {
   for (const [name, decoy] of [["a[1].txt", "a1.txt"], [":x.txt", "x.txt"]]) {
     it(`"${name}" is a literal name, not a pathspec matching "${decoy}"`, async () => {
       const f = fixtureLiteral(name, decoy);
-      const { node } = await assertParity(dev, call(f.cwd, name, f.a, f.b));
+      const { node } = await compareLikeTheViewer(dev, f.cwd, name, f.a, f.b);
       expect(node.hunks.flatMap((x) => x.lines).map((l) => [l.type, l.content])).toEqual([
         ["delete", "real"],
         ["add", "real changed"],
       ]);
+    });
+
+    it(`the file log of "${name}" does not list "${decoy}"'s commits`, async () => {
+      const f = fixtureLiteral(name, decoy);
+      const { node } = await assertParity(dev, logCall(f.cwd, name));
+      expect(node.map((e) => e.message)).toEqual(["b", "a"]);
+      expect(node.every((e) => e.path === name)).toBe(true);
     });
   }
 
@@ -206,5 +255,30 @@ describe("parity: git-file-diff path handling", () => {
     const { node } = await assertParity(dev, call(f.cwd, "./f.txt", f.a, f.b));
     expect(node.path).toBe("./f.txt");
     expect(node.hunks.length).toBe(1);
+  });
+
+  it("both refuse a directory", async () => {
+    const f = fixtureLiteral("dir/f.txt", "g.txt");
+    const probe = runProbe("command-parity", {
+      command: "git_file_diff",
+      args: { cwd: f.cwd, path: "dir", fromHash: f.a, toHash: f.b },
+    });
+    expect(probe.ok).toBe(false);
+    const res = await dev.fetch(call(f.cwd, "dir", f.a, f.b).httpPath);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(probe.error);
+    expect(probe.error).toContain("directory");
+  });
+
+  it("both refuse a side path at the repository root", async () => {
+    const f = fixtureLiteral("f.txt", "g.txt");
+    const probe = runProbe("command-parity", {
+      command: "git_file_diff",
+      args: { cwd: f.cwd, path: "f.txt", fromHash: f.a, toHash: f.b, toPath: "." },
+    });
+    expect(probe.ok).toBe(false);
+    const res = await dev.fetch(call(f.cwd, "f.txt", f.a, f.b, undefined, ".").httpPath);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(probe.error);
   });
 });

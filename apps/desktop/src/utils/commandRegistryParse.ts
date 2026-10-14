@@ -122,16 +122,17 @@ function matchingBracket(s: string, open: number): number {
 
 /** `s` with every `#[…]` / `#![…]` attribute removed, brackets balanced. */
 function withoutAttributes(s: string): string {
-  let out = "";
-  for (let i = 0; i < s.length; i++) {
-    const open = s.startsWith("#[", i) ? i + 1 : s.startsWith("#![", i) ? i + 2 : -1;
-    if (open === -1) {
-      out += s[i];
-      continue;
-    }
+  const parts: string[] = [];
+  let copyFrom = 0;
+  for (let i = s.indexOf("#"); i !== -1; i = s.indexOf("#", i + 1)) {
+    const open = s[i + 1] === "[" ? i + 1 : s[i + 1] === "!" && s[i + 2] === "[" ? i + 2 : -1;
+    if (open === -1) continue;
+    parts.push(s.slice(copyFrom, i));
     i = matchingBracket(s, open);
+    copyFrom = i + 1;
   }
-  return out;
+  parts.push(s.slice(copyFrom));
+  return parts.join("");
 }
 
 /**
@@ -139,58 +140,91 @@ function withoutAttributes(s: string): string {
  * (`"…"` → `""`), so what is left is code. Handles nested block comments,
  * escapes, raw strings (`r#"…"#`, `br"…"`) and tells a char literal (`'['`)
  * from a lifetime (`'a`). Not a full lexer: enough for the handler list.
+ *
+ * One pass over character codes: code runs are copied as slices and only the
+ * literals and comments are replaced, so no per-character allocation.
  */
 export function stripRustCommentsAndStrings(src: string): string {
-  let out = "";
-  let i = 0;
+  const SLASH = 47, STAR = 42, NL = 10, DQUOTE = 34, SQUOTE = 39, BSLASH = 92, HASH = 35;
+  const isIdent = (code: number) =>
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
+  const parts: string[] = [];
   const n = src.length;
+  let copyFrom = 0;
+  let i = 0;
+  /** Replace src[i, end) with `replacement`, then continue at `end`. */
+  const replace = (end: number, replacement: string) => {
+    parts.push(src.slice(copyFrom, i), replacement);
+    i = Math.min(end, n);
+    copyFrom = i;
+  };
   while (i < n) {
-    const c = src[i]!;
-    const next = src[i + 1];
-    if (c === "/" && next === "/") {
-      while (i < n && src[i] !== "\n") i++;
+    const c = src.charCodeAt(i);
+    const next = src.charCodeAt(i + 1);
+    if (c === SLASH && next === SLASH) {
+      const end = src.indexOf("\n", i);
+      replace(end === -1 ? n : end, "");
       continue;
     }
-    if (c === "/" && next === "*") {
+    if (c === SLASH && next === STAR) {
       let depth = 0;
-      while (i < n) {
-        if (src.startsWith("/*", i)) { depth++; i += 2; }
-        else if (src.startsWith("*/", i)) { depth--; i += 2; if (depth === 0) break; }
-        else i++;
+      let j = i;
+      while (j < n) {
+        const a = src.charCodeAt(j);
+        const b = src.charCodeAt(j + 1);
+        if (a === SLASH && b === STAR) { depth++; j += 2; }
+        else if (a === STAR && b === SLASH) { depth--; j += 2; if (depth === 0) break; }
+        else j++;
       }
-      out += " ";
+      replace(j, " ");
       continue;
     }
-    // Raw string: r"…", r#"…"#, br#"…"#. Only when `r` starts a token.
-    const raw = /^b?r(#*)"/.exec(src.slice(i, i + 260));
-    if (raw && !/[A-Za-z0-9_]/.test(src[i - 1] ?? "")) {
-      const close = `"${raw[1]}`;
-      const end = src.indexOf(close, i + raw[0].length);
-      i = end === -1 ? n : end + close.length;
-      out += '""';
-      continue;
-    }
-    if (c === '"') {
-      i++;
-      while (i < n && src[i] !== '"') i += src[i] === "\\" ? 2 : 1;
-      i++;
-      out += '""';
-      continue;
-    }
-    if (c === "'") {
-      // A char literal closes within a few characters ('x', '\n', '\u{1F600}');
-      // a lifetime ('a, 'static) never closes before an identifier ends.
-      const lit = /^'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|.)|[^\\'])'/.exec(src.slice(i, i + 12));
-      if (lit) {
-        i += lit[0].length;
-        out += "' '";
+    // Raw string: r"…", r#"…"#, br#"…"#, only where `r`/`b` starts a token.
+    if ((c === 114 /* r */ || (c === 98 /* b */ && next === 114)) && !(i > 0 && isIdent(src.charCodeAt(i - 1)))) {
+      let j = c === 98 ? i + 2 : i + 1;
+      let hashes = 0;
+      while (src.charCodeAt(j) === HASH) { hashes++; j++; }
+      if (src.charCodeAt(j) === DQUOTE) {
+        let k = j + 1;
+        for (;;) {
+          k = src.indexOf('"', k);
+          if (k === -1) { k = n; break; }
+          let h = 0;
+          while (h < hashes && src.charCodeAt(k + 1 + h) === HASH) h++;
+          if (h === hashes) { k += 1 + hashes; break; }
+          k++;
+        }
+        replace(k, '""');
         continue;
       }
     }
-    out += c;
+    if (c === DQUOTE) {
+      let j = i + 1;
+      while (j < n && src.charCodeAt(j) !== DQUOTE) j += src.charCodeAt(j) === BSLASH ? 2 : 1;
+      replace(j + 1, '""');
+      continue;
+    }
+    if (c === SQUOTE) {
+      // A char literal closes within a few characters ('x', '\'', '\u{1F600}');
+      // a lifetime ('a, 'static) has no closing quote right after one char.
+      let close = -1;
+      if (next === BSLASH) {
+        // Skip the escaped character itself, then find the quote nearby.
+        const k = src.indexOf("'", i + 3);
+        if (k !== -1 && k - i <= 12) close = k;
+      } else if (next !== SQUOTE) {
+        const width = next >= 0xd800 && next <= 0xdbff ? 2 : 1;
+        if (src.charCodeAt(i + 1 + width) === SQUOTE) close = i + 1 + width;
+      }
+      if (close !== -1) {
+        replace(close + 1, "' '");
+        continue;
+      }
+    }
     i++;
   }
-  return out;
+  parts.push(src.slice(copyFrom));
+  return parts.join("");
 }
 
 /**

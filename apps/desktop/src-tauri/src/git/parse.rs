@@ -483,12 +483,57 @@ pub(crate) fn parse_file_log_output(raw: &str) -> Vec<FileLogEntry> {
             continue;
         }
         entries.push(FileLogEntry {
+            path: None,
             hash_full: parts[0].trim().to_string(),
             hash: parts[1].trim().to_string(),
             author: parts[2].trim().to_string(),
             date: parts[3].trim().to_string(),
             message: parts[4].trim().to_string(),
             body: parts
+                .get(5)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default(),
+        });
+    }
+    entries
+}
+
+/// `--format` for the `--follow` file logs, read by `parse_file_log_named`.
+/// Each commit opens with `\x01`, its fields are separated by `\x1f` and
+/// closed by `\x1e`; with `-z --name-only`, git then writes the file's name at
+/// that commit as a NUL-terminated token. Control characters, so neither a
+/// commit message nor a file name realistically contains them — NUL, the one
+/// separator a name could never hold, ends the name.
+pub(crate) const FILE_LOG_NAMED_FORMAT: &str =
+    "--format=%x01%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1f%b%x1e";
+
+/// Parse `git log --follow -z --name-only` run with `FILE_LOG_NAMED_FORMAT`.
+/// Mirrors `parseFileLogNamed` in dev-server.mjs.
+pub(crate) fn parse_file_log_named(raw: &str) -> Vec<FileLogEntry> {
+    let mut entries = Vec::new();
+    for record in raw.split('\x01') {
+        let Some(end) = record.rfind('\x1e') else {
+            continue;
+        };
+        let fields: Vec<&str> = record[..end].splitn(6, '\x1f').collect();
+        if fields.len() < 5 {
+            continue;
+        }
+        // What follows the header: `\n` and/or NUL, then `name\0`. A merge
+        // commit lists no name.
+        let path = record[end + 1..]
+            .split('\0')
+            .map(|t| t.trim_start_matches('\n'))
+            .find(|t| !t.is_empty())
+            .map(str::to_string);
+        entries.push(FileLogEntry {
+            path,
+            hash_full: fields[0].trim().to_string(),
+            hash: fields[1].trim().to_string(),
+            author: fields[2].trim().to_string(),
+            date: fields[3].trim().to_string(),
+            message: fields[4].trim().to_string(),
+            body: fields
                 .get(5)
                 .map(|s| s.trim().to_string())
                 .unwrap_or_default(),

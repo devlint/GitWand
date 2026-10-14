@@ -1348,6 +1348,12 @@ export async function getGitBlame(cwd: string, path: string, algorithm: BlameAlg
 // ─── Git file log ────────────────────────────────────────────
 
 export interface FileLogEntry {
+  /**
+   * The file's repo-root-relative name at this commit, from the `--follow`
+   * walk (the old name before a rename). Set by `getGitFileLog` and
+   * `getGitFileLogPickaxe`; absent from range results and merge commits.
+   */
+  path?: string;
   hashFull: string;
   hash: string;
   author: string;
@@ -1361,8 +1367,8 @@ export interface FileLogEntry {
  */
 export async function getGitFileLog(cwd: string, path: string, count = 50): Promise<FileLogEntry[]> {
   if (isTauri()) {
-    const raw = await tauriInvoke<Array<{ hash_full: string; hash: string; author: string; date: string; message: string; body: string }>>("git_file_log", { cwd, path, count });
-    return raw.map(r => ({ hashFull: r.hash_full, hash: r.hash, author: r.author, date: r.date, message: r.message, body: r.body }));
+    const raw = await tauriInvoke<Array<{ path?: string; hash_full: string; hash: string; author: string; date: string; message: string; body: string }>>("git_file_log", { cwd, path, count });
+    return raw.map(r => ({ ...(r.path !== undefined ? { path: r.path } : {}), hashFull: r.hash_full, hash: r.hash, author: r.author, date: r.date, message: r.message, body: r.body }));
   }
   const qs = `?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}&count=${count}`;
   const res = await devFetch(`${DEV_SERVER}/api/git-file-log${qs}`);
@@ -1378,8 +1384,8 @@ export type PickaxeMode = "S" | "G";
  */
 export async function getGitFileLogPickaxe(cwd: string, path: string, search: string, mode: PickaxeMode = "S"): Promise<FileLogEntry[]> {
   if (isTauri()) {
-    const raw = await tauriInvoke<Array<{ hash_full: string; hash: string; author: string; date: string; message: string; body: string }>>("git_file_log_pickaxe", { cwd, path, search, mode });
-    return raw.map(r => ({ hashFull: r.hash_full, hash: r.hash, author: r.author, date: r.date, message: r.message, body: r.body }));
+    const raw = await tauriInvoke<Array<{ path?: string; hash_full: string; hash: string; author: string; date: string; message: string; body: string }>>("git_file_log_pickaxe", { cwd, path, search, mode });
+    return raw.map(r => ({ ...(r.path !== undefined ? { path: r.path } : {}), hashFull: r.hash_full, hash: r.hash, author: r.author, date: r.date, message: r.message, body: r.body }));
   }
   const qs = `?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}&search=${encodeURIComponent(search)}&mode=${mode}`;
   const res = await devFetch(`${DEV_SERVER}/api/git-file-log-pickaxe${qs}`);
@@ -1406,12 +1412,18 @@ export async function getGitFileLogRange(cwd: string, path: string, startLine: n
 
 /**
  * Get diff for a specific file between two commits (time-travel diff).
+ *
+ * `fromPath` / `toPath`: the file's repo-root-relative name at each commit,
+ * as `getGitFileLog` reported it (`FileLogEntry.path`). They are how a rename
+ * between the two commits is followed; omitted, both default to `path`.
  */
 export async function getGitFileDiff(
   cwd: string,
   path: string,
   fromHash: string,
   toHash: string,
+  fromPath?: string,
+  toPath?: string,
 ): Promise<GitDiff> {
   if (isTauri()) {
     const raw = await tauriInvoke<{
@@ -1430,7 +1442,7 @@ export async function getGitFileDiff(
           new_line_no?: number;
         }>;
       }>;
-    }>("git_file_diff", { cwd, path, fromHash, toHash });
+    }>("git_file_diff", { cwd, path, fromHash, toHash, fromPath, toPath });
 
     return {
       path: raw.path,
@@ -1452,8 +1464,10 @@ export async function getGitFileDiff(
     };
   }
 
-  const qs = `?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}&from=${encodeURIComponent(fromHash)}&to=${encodeURIComponent(toHash)}`;
-  const res = await devFetch(`${DEV_SERVER}/api/git-file-diff${qs}`);
+  const params = new URLSearchParams({ cwd, path, from: fromHash, to: toHash });
+  if (fromPath !== undefined) params.set("fromPath", fromPath);
+  if (toPath !== undefined) params.set("toPath", toPath);
+  const res = await devFetch(`${DEV_SERVER}/api/git-file-diff?${params}`);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Failed to get file diff: ${res.status}`);

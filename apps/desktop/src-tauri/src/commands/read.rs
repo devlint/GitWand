@@ -32,7 +32,6 @@
 
 use crate::git::*;
 use crate::types::*;
-use std::collections::HashMap;
 use std::path::{Component, Path};
 
 // ─── Git status ───────────────────────────────────────────
@@ -1426,14 +1425,19 @@ pub(crate) async fn git_file_log(
 ) -> Result<Vec<FileLogEntry>, String> {
     let _repo = repo_lock::read(&cwd);
     let n = count.unwrap_or(50).to_string();
-    let fmt = "%H\n%h\n%an\n%aI\n%s\n%b\n---END---";
+    // `--name-only -z`: each entry also carries the file's name at that
+    // commit, which the history compare hands back to `git_file_diff` — the
+    // one place a rename is resolved. Literal pathspec: `a[1].txt` is a name.
     let output = git_cmd()
         .args([
+            "--literal-pathspecs",
             "log",
             "--follow",
+            "--name-only",
+            "-z",
             "-n",
             &n,
-            &format!("--format={}", fmt),
+            FILE_LOG_NAMED_FORMAT,
             "--",
             &path,
         ])
@@ -1446,7 +1450,7 @@ pub(crate) async fn git_file_log(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    Ok(parse_file_log_output(&String::from_utf8_lossy(
+    Ok(parse_file_log_named(&String::from_utf8_lossy(
         &output.stdout,
     )))
 }
@@ -1462,14 +1466,18 @@ pub(crate) async fn git_file_log_pickaxe(
 ) -> Result<Vec<FileLogEntry>, String> {
     let _repo = repo_lock::read(&cwd);
     let flag = if mode == "G" { "-G" } else { "-S" };
-    let fmt = "%H\n%h\n%an\n%aI\n%s\n%b\n---END---";
+    // Same output as `git_file_log`, names included, so a pickaxe result can
+    // be compared like any other history entry.
     let output = git_cmd()
         .args([
+            "--literal-pathspecs",
             "log",
             "--follow",
+            "--name-only",
+            "-z",
             flag,
             &search,
-            &format!("--format={}", fmt),
+            FILE_LOG_NAMED_FORMAT,
             "--",
             &path,
         ])
@@ -1482,7 +1490,7 @@ pub(crate) async fn git_file_log_pickaxe(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    Ok(parse_file_log_output(&String::from_utf8_lossy(
+    Ok(parse_file_log_named(&String::from_utf8_lossy(
         &output.stdout,
     )))
 }
@@ -1530,7 +1538,7 @@ fn validate_revision(name: &str, rev: &str) -> Result<(), String> {
 }
 
 /// `rev` as a full commit hash, or an error naming it.
-fn resolve_commit(cwd: &str, rev: &str) -> Result<String, String> {
+fn resolve_commit(top: &Path, rev: &str) -> Result<String, String> {
     let out = git_cmd()
         .args([
             "rev-parse",
@@ -1538,7 +1546,7 @@ fn resolve_commit(cwd: &str, rev: &str) -> Result<String, String> {
             "--quiet",
             &format!("{}^{{commit}}", rev),
         ])
-        .current_dir(cwd)
+        .current_dir(top)
         .output()
         .map_err(|e| format!("Failed to run git rev-parse: {}", e))?;
     let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -1548,138 +1556,67 @@ fn resolve_commit(cwd: &str, rev: &str) -> Result<String, String> {
     Ok(hash)
 }
 
-/// Whether `path` names an entry in `commit`'s tree. `<commit>:<path>` splits
-/// at the first colon and the commit is a full hash, so the path is taken
-/// literally, colons and glob characters included.
-fn exists_at(cwd: &str, commit: &str, path: &str) -> bool {
-    git_cmd()
-        .args(["cat-file", "-e", &format!("{}:{}", commit, path)])
-        .current_dir(cwd)
+/// The type of the object at `<commit>:<path>` (`blob`, `tree`, …), or `None`
+/// when the path does not exist there. `path` is repo-root-relative and the
+/// command runs at the top level, so `<commit>:<path>` resolves from the root
+/// whatever directory the repository was opened from. The commit is a full
+/// hash and the path follows the first colon, so it is taken literally.
+fn object_type(top: &Path, commit: &str, path: &str) -> Option<String> {
+    let out = git_cmd()
+        .args(["cat-file", "-t", &format!("{}:{}", commit, path)])
+        .current_dir(top)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// What the file was called at each commit of `git log --follow` from HEAD:
-/// commit hash → path, or `None` where that commit deleted it.
-///
-/// Parses `git log --follow --name-status -z --format=%x01%H`: NUL-separated
-/// tokens, a commit announced by `\x01<hash>` (followed by newlines and,
-/// depending on the git version, its first status token in the same NUL
-/// field), then a status (`M`, `A`, `D`, `R<score>`, `C<score>`) and one name,
-/// or two for a rename or copy, of which the second is the name at that commit.
-fn parse_follow_names(raw: &str) -> HashMap<String, Option<String>> {
-    let mut map = HashMap::new();
-    let mut commit: Option<String> = None;
-    let mut status: Option<char> = None;
-    let mut names: Vec<String> = Vec::new();
-    let mut want = 0usize;
-    for field in raw.split('\0') {
-        let mut token = field;
-        if let Some(i) = field.find('\x01') {
-            let rest = &field[i + 1..];
-            let end = rest
-                .find(|c: char| !c.is_ascii_hexdigit())
-                .unwrap_or(rest.len());
-            commit = Some(rest[..end].to_string());
-            status = None;
-            want = 0;
-            token = &rest[end..];
-        }
-        let token = token.trim_start_matches('\n');
-        if token.is_empty() {
-            continue;
-        }
-        if want == 0 {
-            let kind = token.chars().next().unwrap_or('M');
-            status = Some(kind);
-            want = if kind == 'R' || kind == 'C' { 2 } else { 1 };
-            names.clear();
-            continue;
-        }
-        names.push(token.to_string());
-        want -= 1;
-        if want == 0 {
-            if let (Some(c), Some(kind)) = (&commit, status) {
-                let at = if kind == 'D' {
-                    None
-                } else {
-                    names.last().cloned()
-                };
-                map.insert(c.clone(), at);
-            }
-        }
+/// A `fromPath` / `toPath`: repo-root-relative, as `git_file_log` reports it.
+/// Same guard as `path` (inside the repo, never the root), normalised.
+fn root_relative_side_path(top: &Path, name: &str, p: &str) -> Result<String, String> {
+    let top_str = top.to_string_lossy();
+    let guarded = safe_repo_path(&top_str, p).map_err(|e| format!("{}: {}", name, e))?;
+    if guarded == top {
+        return Err(format!("{} must not be the repository root", name));
     }
-    map
-}
-
-/// The file's path at `commit`: `path` itself when it exists there, else the
-/// name `git log --follow` recorded for that commit (computed once, on the
-/// first commit that needs it). `None`: the file does not exist at `commit`.
-fn path_at(
-    cwd: &str,
-    commit: &str,
-    path: &str,
-    follow: &mut Option<HashMap<String, Option<String>>>,
-) -> Option<String> {
-    if exists_at(cwd, commit, path) {
-        return Some(path.to_string());
-    }
-    let names = follow.get_or_insert_with(|| {
-        git_cmd()
-            .args([
-                "--literal-pathspecs",
-                "log",
-                "--follow",
-                "--name-status",
-                "-z",
-                "--no-color",
-                "--format=%x01%H",
-                "HEAD",
-                "--",
-                path,
-            ])
-            .current_dir(cwd)
-            .output()
-            .map(|o| parse_follow_names(&String::from_utf8_lossy(&o.stdout)))
-            .unwrap_or_default()
-    });
-    names
-        .get(commit)
-        .cloned()
-        .flatten()
-        .filter(|p| exists_at(cwd, commit, p))
+    Ok(repo_relative_path(&top_str, top, p, &guarded))
 }
 
 /// Diff of one file between two commits, for the "Compare" tab of the file
 /// history viewer. Mirrors `/api/git-file-diff` in dev-server.mjs, step for
 /// step, and returns the same `{ path, hunks }` shape.
 ///
-/// The viewer's commits come from `git log --follow`, so either may predate a
-/// rename: the file's path is resolved at each commit. Same path on both
-/// sides → `git diff <from> <to> -- <path>`; renamed in between → a
-/// blob-to-blob `git diff <from>:<old> <to>:<new>`, so the hunks show the
-/// content change rather than "everything added". A file absent from one side
-/// comes back as all additions or all deletions. Identical revisions give no
-/// hunks. A revision git cannot resolve is an error, not an empty diff, so the
-/// viewer does not claim "no differences" for a comparison that never ran.
+/// Renames are not resolved here. The viewer's commits come from
+/// `git_file_log`, whose `--follow` walk already says what the file was called
+/// at each commit; the viewer passes those names back as `from_path` /
+/// `to_path` (repo-root-relative, defaulting to `path`). Same name on both
+/// sides → `git diff <from> <to> -- <name>`; different names, both present →
+/// blob to blob, `git diff <from>:<old> <to>:<new>`, so the hunks are the
+/// content change rather than "everything added". A side where the file is
+/// absent makes it all additions or all deletions. A directory is refused:
+/// this is a single-file view. Identical revisions give no hunks; a revision
+/// git cannot resolve is an error, not an empty diff that would read as
+/// "no differences".
 ///
-/// Pathspecs are literal (`a[1].txt` is not a glob, `:x` is not magic) and
-/// the user's external diff, colour and textconv settings are switched off:
-/// the output is parsed, never shown as is.
+/// Everything runs at the repository's top level with literal pathspecs (so
+/// `a[1].txt` is not a glob and `:x` is not magic), and the user's external
+/// diff, colour and textconv settings are switched off: the output is parsed,
+/// never shown as is.
 #[tauri::command]
 pub(crate) async fn git_file_diff(
     cwd: String,
     path: String,
     from_hash: String,
     to_hash: String,
+    from_path: Option<String>,
+    to_path: Option<String>,
 ) -> Result<GitDiff, String> {
     validate_revision("fromHash", &from_hash)?;
     validate_revision("toHash", &to_hash)?;
     // The file may not exist in the working tree any more (deleted or renamed
     // since); `safe_repo_path` accepts a missing path as long as it would stay
-    // inside the repo. git gets the clean repo-relative form; the response
-    // echoes `path` as given, like `git_diff`.
+    // inside the repo. The response echoes `path` as given, like `git_diff`.
     let guarded = safe_repo_path(&cwd, &path)?;
     let root = Path::new(&cwd)
         .canonicalize()
@@ -1690,11 +1627,43 @@ pub(crate) async fn git_file_diff(
     let git_path = repo_relative_path(&cwd, &root, &path, &guarded);
     let _repo = repo_lock::read(&cwd);
 
-    let from = resolve_commit(&cwd, &from_hash)?;
-    let to = resolve_commit(&cwd, &to_hash)?;
-    let mut follow = None;
-    let from_path = path_at(&cwd, &from, &git_path, &mut follow);
-    let to_path = path_at(&cwd, &to, &git_path, &mut follow);
+    // `path` is relative to `cwd`, the names from the log to the top level.
+    let show = |arg: &str| -> Result<String, String> {
+        let out = git_cmd()
+            .args(["rev-parse", arg])
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("Failed to run git rev-parse: {}", e))?;
+        if !out.status.success() {
+            return Err(format!(
+                "not a git repository: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .trim_end_matches('\n')
+            .to_string())
+    };
+    let top = Path::new(&show("--show-toplevel")?)
+        .canonicalize()
+        .map_err(|e| format!("repository root does not resolve: {}", e))?;
+    let own_path = format!("{}{}", show("--show-prefix")?, git_path);
+    let from_name = match from_path.as_deref() {
+        Some(p) => root_relative_side_path(&top, "fromPath", p)?,
+        None => own_path.clone(),
+    };
+    let to_name = match to_path.as_deref() {
+        Some(p) => root_relative_side_path(&top, "toPath", p)?,
+        None => own_path,
+    };
+
+    let from = resolve_commit(&top, &from_hash)?;
+    let to = resolve_commit(&top, &to_hash)?;
+    let from_type = object_type(&top, &from, &from_name);
+    let to_type = object_type(&top, &to, &to_name);
+    if from_type.as_deref() == Some("tree") || to_type.as_deref() == Some("tree") {
+        return Err(format!("{} is a directory, not a file", path));
+    }
 
     let mut cmd = git_cmd();
     cmd.args([
@@ -1704,18 +1673,20 @@ pub(crate) async fn git_file_diff(
         "--no-color",
         "--no-textconv",
     ]);
-    match (&from_path, &to_path) {
-        (Some(a), Some(b)) if a != b => {
-            cmd.arg(format!("{}:{}", from, a))
-                .arg(format!("{}:{}", to, b));
-        }
-        _ => {
-            let p = from_path.as_ref().or(to_path.as_ref()).unwrap_or(&git_path);
-            cmd.args([from.as_str(), to.as_str(), "--", p.as_str()]);
-        }
+    if from_name != to_name && from_type.is_some() && to_type.is_some() {
+        cmd.arg(format!("{}:{}", from, from_name))
+            .arg(format!("{}:{}", to, to_name));
+    } else {
+        // One name, or only one side holds the file: a plain pathspec diff.
+        let name = if from_type.is_some() {
+            &from_name
+        } else {
+            &to_name
+        };
+        cmd.args([from.as_str(), to.as_str(), "--", name.as_str()]);
     }
     let output = cmd
-        .current_dir(&cwd)
+        .current_dir(&top)
         .output()
         .map_err(|e| format!("Failed to run git diff: {}", e))?;
     if !output.status.success() {
@@ -4232,6 +4203,8 @@ mod file_diff_tests {
             path.to_string(),
             from.to_string(),
             to.to_string(),
+            None,
+            None,
         ))
     }
 
@@ -4379,7 +4352,7 @@ mod file_diff_tests {
         assert!(err.contains("unknown revision"), "{err}");
     }
 
-    // ── Renames: the viewer's commits come from `git log --follow` ──
+    // ── Renames: resolved once, by `git_file_log`'s `--follow` walk ──
 
     /// `old.txt` edited twice, renamed to `new.txt`, edited again.
     /// Returns (a1, a2, renamed, b).
@@ -4393,15 +4366,88 @@ mod file_diff_tests {
         (a1, a2, renamed, b)
     }
 
+    fn log(cwd: String, path: &str) -> Vec<FileLogEntry> {
+        tauri::async_runtime::block_on(git_file_log(cwd, path.to_string(), None)).unwrap()
+    }
+
+    /// What the viewer does: the two entries' names from the file log.
+    fn compare(cwd: String, path: &str, from: &str, to: &str) -> GitDiff {
+        let entries = log(cwd.clone(), path);
+        let name = |h: &str| {
+            entries
+                .iter()
+                .find(|e| e.hash_full == h)
+                .and_then(|e| e.path.clone())
+        };
+        tauri::async_runtime::block_on(git_file_diff(
+            cwd,
+            path.to_string(),
+            from.to_string(),
+            to.to_string(),
+            name(from),
+            name(to),
+        ))
+        .unwrap()
+    }
+
+    fn changed(d: &GitDiff) -> Vec<Line> {
+        lines(d).into_iter().filter(|l| l.0 != "context").collect()
+    }
+
+    #[test]
+    fn the_file_log_reports_the_name_at_each_commit() {
+        let repo = TempRepo::new();
+        let (a1, a2, renamed, b) = renamed_history(&repo);
+        let names: Vec<(String, Option<String>)> = log(repo.cwd(), "new.txt")
+            .into_iter()
+            .map(|e| (e.hash_full, e.path))
+            .collect();
+        let s = |p: &str| Some(p.to_string());
+        assert_eq!(
+            names,
+            vec![
+                (b, s("new.txt")),
+                (renamed, s("new.txt")),
+                (a2, s("old.txt")),
+                (a1, s("old.txt")),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_file_log_keeps_its_other_fields() {
+        let repo = TempRepo::new();
+        repo.commit(
+            "f.txt",
+            Some("x\n"),
+            "subject line\n\nbody line one\nbody line two",
+        );
+        let e = &log(repo.cwd(), "f.txt")[0];
+        assert_eq!(e.message, "subject line");
+        assert_eq!(e.body, "body line one\nbody line two");
+        assert_eq!(e.author, "Test");
+        assert_eq!(e.hash_full.len(), 40);
+        assert!(e.hash_full.starts_with(&e.hash));
+    }
+
+    #[test]
+    fn the_file_log_pathspec_is_literal() {
+        let repo = TempRepo::new();
+        repo.commit("a1.txt", Some("decoy\n"), "decoy");
+        repo.commit("a[1].txt", Some("real\n"), "real");
+        let entries = log(repo.cwd(), "a[1].txt");
+        assert_eq!(entries.len(), 1, "a glob would also match a1.txt");
+        assert_eq!(entries[0].message, "real");
+    }
+
     #[test]
     fn two_commits_both_before_a_rename_diff_the_old_name() {
         let repo = TempRepo::new();
         let (a1, a2, _, _) = renamed_history(&repo);
-        let d = diff(&repo, "new.txt", &a1, &a2).unwrap();
+        let d = compare(repo.cwd(), "new.txt", &a1, &a2);
         assert_eq!(d.path, "new.txt");
-        let changed: Vec<Line> = lines(&d).into_iter().filter(|l| l.0 != "context").collect();
         assert_eq!(
-            changed,
+            changed(&d),
             vec![
                 line("delete", "2", Some(2), None),
                 line("add", "TWO", None, Some(2)),
@@ -4413,38 +4459,98 @@ mod file_diff_tests {
     fn one_commit_on_each_side_of_a_rename_diffs_content_not_all_added() {
         let repo = TempRepo::new();
         let (a1, a2, renamed, b) = renamed_history(&repo);
-        let d = diff(&repo, "new.txt", &a2, &b).unwrap();
-        let changed: Vec<Line> = lines(&d).into_iter().filter(|l| l.0 != "context").collect();
         assert_eq!(
-            changed,
+            changed(&compare(repo.cwd(), "new.txt", &a2, &b)),
             vec![
                 line("delete", "10", Some(10), None),
                 line("add", "TEN", None, Some(10)),
             ]
         );
         // A pure rename changes no line.
-        assert!(diff(&repo, "new.txt", &a2, &renamed)
-            .unwrap()
+        assert!(compare(repo.cwd(), "new.txt", &a2, &renamed)
             .hunks
             .is_empty());
         // And both edits show across the whole span.
-        let span = diff(&repo, "new.txt", &a1, &b).unwrap();
-        assert_eq!(lines(&span).iter().filter(|l| l.0 != "context").count(), 4);
+        assert_eq!(changed(&compare(repo.cwd(), "new.txt", &a1, &b)).len(), 4);
     }
 
     #[test]
-    fn follow_names_parse_with_or_without_the_status_in_the_hash_field() {
-        let h1 = "a".repeat(40);
-        let h2 = "b".repeat(40);
-        let h3 = "c".repeat(40);
-        for sep in ["\n\n", "\n\n\0"] {
+    fn opened_from_a_subdirectory_names_resolve_from_the_repo_root() {
+        let repo = TempRepo::new();
+        let a1 = repo.commit("sub/old.txt", Some("1\n2\n3\n"), "a1");
+        repo.git(&["mv", "sub/old.txt", "sub/new.txt"]);
+        repo.git(&["commit", "-q", "-m", "rename"]);
+        let b = repo.commit("sub/new.txt", Some("1\n2\nTHREE\n"), "b");
+        let sub = format!("{}/sub", repo.cwd());
+        // The log, run from `sub`, reports root-relative names.
+        let names: Vec<Option<String>> = log(sub.clone(), "new.txt")
+            .into_iter()
+            .map(|e| e.path)
+            .collect();
+        assert_eq!(names.last().unwrap().as_deref(), Some("sub/old.txt"));
+        assert_eq!(
+            changed(&compare(sub.clone(), "new.txt", &a1, &b)),
+            vec![
+                line("delete", "3", Some(3), None),
+                line("add", "THREE", None, Some(3)),
+            ]
+        );
+        // Without names, `path` is taken relative to `sub` as well.
+        let plain = tauri::async_runtime::block_on(git_file_diff(
+            sub,
+            "new.txt".to_string(),
+            "HEAD~1".to_string(),
+            "HEAD".to_string(),
+            None,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(changed(&plain).len(), 2);
+    }
+
+    #[test]
+    fn refuses_a_directory() {
+        let repo = TempRepo::new();
+        let a = repo.commit("dir/f.txt", Some("x\n"), "a");
+        let b = repo.commit("dir/f.txt", Some("y\n"), "b");
+        let err = diff(&repo, "dir", &a, &b).err().expect("refused");
+        assert!(err.contains("directory"), "{err}");
+    }
+
+    #[test]
+    fn refuses_side_paths_outside_the_repo_or_at_its_root() {
+        let repo = TempRepo::new();
+        let a = repo.commit("f.txt", Some("x\n"), "a");
+        for (from_path, to_path, needle) in [
+            (Some("../x"), None, "fromPath"),
+            (None, Some("."), "toPath must not be the repository root"),
+        ] {
+            let err = tauri::async_runtime::block_on(git_file_diff(
+                repo.cwd(),
+                "f.txt".to_string(),
+                a.clone(),
+                a.clone(),
+                from_path.map(str::to_string),
+                to_path.map(str::to_string),
+            ))
+            .err()
+            .expect("refused");
+            assert!(err.contains(needle), "{err}");
+        }
+    }
+
+    #[test]
+    fn parses_the_named_log_with_or_without_a_newline_before_the_name() {
+        for gap in ["", "\n", "\0", "\n\0"] {
             let raw = format!(
-                "\x01{h1}{sep}M\0new.txt\0\x01{h2}{sep}R087\0old.txt\0new.txt\0\x01{h3}{sep}D\0gone.txt\0"
+                "\x01{h}\x1fabc\x1fA\x1f2024-01-01T00:00:00Z\x1fsubj\x1fbody\n\x1e{gap}new.txt\0\x01{h}\x1fabc\x1fA\x1fd\x1fmerge\x1f\x1e{gap}",
+                h = "a".repeat(40)
             );
-            let m = parse_follow_names(&raw);
-            assert_eq!(m.get(&h1), Some(&Some("new.txt".to_string())), "{sep:?}");
-            assert_eq!(m.get(&h2), Some(&Some("new.txt".to_string())), "{sep:?}");
-            assert_eq!(m.get(&h3), Some(&None), "{sep:?}");
+            let e = parse_file_log_named(&raw);
+            assert_eq!(e.len(), 2, "{gap:?}");
+            assert_eq!(e[0].path.as_deref(), Some("new.txt"), "{gap:?}");
+            assert_eq!(e[0].body, "body");
+            assert_eq!(e[1].path, None, "a merge lists no name");
         }
     }
 

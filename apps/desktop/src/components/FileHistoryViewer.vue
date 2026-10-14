@@ -262,6 +262,19 @@ function clearCompare() {
   compareDiff.value = null;
 }
 
+/**
+ * The file's name at `hash`, as the `--follow` history reported it. Passing it
+ * to the diff is what makes a comparison across a rename work; the backend
+ * does not re-walk the history.
+ */
+function pathAtCommit(hash: string): string | undefined {
+  for (const list of [fileLog.value, pickaxeResults.value, rangeLogResults.value]) {
+    const path = list?.find((e) => e.hashFull === hash)?.path;
+    if (path !== undefined) return path;
+  }
+  return undefined;
+}
+
 async function loadCompare() {
   if (!compareFrom.value || !compareTo.value || !props.cwd) return;
   compareLoading.value = true;
@@ -271,6 +284,8 @@ async function loadCompare() {
       props.filePath,
       compareFrom.value,
       compareTo.value,
+      pathAtCommit(compareFrom.value),
+      pathAtCommit(compareTo.value),
     );
     activeTab.value = "compare";
   } catch (err: any) {
