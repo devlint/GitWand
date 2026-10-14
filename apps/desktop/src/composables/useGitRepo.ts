@@ -803,6 +803,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   async function loadLog(count?: number, force = false, viewChanged = false) {
     if (!folderPath.value) return;
     const epoch = _logViewEpoch;
+    // Captured before the awaits: a repo switch while this fetch is in flight
+    // must not apply (or invalidate the cache of) the new repo with this result.
+    const repo = folderPath.value;
     try {
       const authorEmail =
         logAuthorFilter.value === "mine"
@@ -822,7 +825,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           : LOG_PAGE
         : (count ?? Math.max(LOG_PAGE, log.value.length));
       const entries = await getGitLog(
-        folderPath.value,
+        repo,
         pageSize,
         !isCurrentBranchOnly, // all refs (false when branch-only)
         authorEmail,
@@ -832,11 +835,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       );
       // Refresh the hidden-commit badge counts alongside the scoped log.
       await loadRevCounts();
-      // A newer view change superseded this fetch — its result is stale.
-      if (epoch !== _logViewEpoch) return;
+      // A newer view change or a repo switch superseded this fetch — its
+      // result is stale.
+      if (epoch !== _logViewEpoch || folderPath.value !== repo) return;
 
       if (isCanon) {
-        const repo = folderPath.value;
         const cached = LOG_CACHE.get(repo);
         // The fast paths compare the fresh first page against what they would
         // keep, hashes AND decorations (#266): a ref moving without the top
