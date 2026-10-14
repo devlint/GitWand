@@ -53,9 +53,17 @@ export function findInvokedCommands(source: string): {
   return { commands: [...commands].sort(), dynamic };
 }
 
+/**
+ * Two declaration styles exist in dev-server.mjs: the usual
+ * `url.pathname === "/api/…"` test, and `case "/api/…":` labels inside a
+ * prefix dispatcher (`url.pathname.startsWith("/api/gitea-")` switches on the
+ * full path). Missing the second made every Gitea read route look absent.
+ */
 export function findDevServerRoutes(source: string): string[] {
   const routes = new Set<string>();
-  for (const m of source.matchAll(/url\.pathname === "(\/api\/[a-z0-9-]+)"/g)) {
+  for (const m of source.matchAll(
+    /(?:url\.pathname === |case )"(\/api\/[a-z0-9-]+)"/g,
+  )) {
     routes.add(m[1]!);
   }
   return [...routes].sort();

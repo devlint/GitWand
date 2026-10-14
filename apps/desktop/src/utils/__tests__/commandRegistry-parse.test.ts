@@ -79,6 +79,12 @@ describe("findDevServerRoutes", () => {
     const src = `url.pathname === "/api/git-stash"\nurl.pathname === "/api/git-stash"`;
     expect(findDevServerRoutes(src)).toEqual(["/api/git-stash"]);
   });
+
+  it("finds a case label inside a prefix dispatcher", () => {
+    // How dev-server.mjs declares the Gitea read routes.
+    const src = `if (url.pathname.startsWith("/api/gitea-")) {\n  switch (url.pathname) {\n    case "/api/gitea-list-prs": {`;
+    expect(findDevServerRoutes(src)).toEqual(["/api/gitea-list-prs"]);
+  });
 });
 
 describe("the parser against the real sources", () => {
