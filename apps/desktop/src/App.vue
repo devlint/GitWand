@@ -1823,6 +1823,8 @@ async function handleSwitchBranch(name: string, isRemote = false) {
         await gitResetToCommit(repoFolderPath.value, remote, "hard", settings.value.snapshotsEnabled);
         // Force the log: HEAD moved, but the all-refs log's top commit may not have.
         await repoRefresh(true);
+        // The branch's tip moved: refresh the list the graph labels from.
+        await loadBranches();
         return;
       } catch (err: any) {
         repoError.value = `reset: ${err.message}`;
@@ -4010,6 +4012,11 @@ repoWatcher.on(["head", "refs"], () => {
   watcherRefreshQueue.schedule("head-refs", async () => {
     await repoRefresh();
     await loadLog();
+    // The Git Tree resolves its labels against the branch list too: a ref
+    // moved outside the app (terminal reset, checkout, new branch) must
+    // refresh it, or the graph keeps stale labels (#266). Event-driven, not
+    // a poll tick.
+    await loadBranches();
   });
 });
 
