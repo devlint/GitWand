@@ -210,7 +210,7 @@ _Synthesis: none of the three addresses structured conflict-resolution AI (Stran
   - #263: the fr/es/pt-BR/zh-CN strings for the Keep mode were not read by a native speaker
 - **Follow-ups from #258 (command registry covers the forge wrappers)** (2026-10-14):
   - on a fork, dev-server `/api/gh-pr-comment` (POST, PATCH, DELETE) targets origin via `getRepoNwo`, while the Rust commands resolve the PR elsewhere; the PATCH and DELETE web branches of `ghPrUpdateComment` / `ghPrDeleteComment` do not even send the PR number. dev:web QA of review-comment edits on a fork is not representative
-  - 97 forge commands are registered as `GAP:` (all of Azure DevOps and Bitbucket PRs, GitLab MRs beyond auto-merge, Gitea writes) — dev:web cannot exercise them
+  - 97 forge commands are registered as `GAP:` (Azure DevOps and Bitbucket PRs, GitLab MRs beyond auto-merge and issues, Gitea beyond the 8 read routes, and some GitHub PR actions, reactions and auth flows) — dev:web cannot exercise them
   - `git_file_diff` is invoked by `getGitFileDiff` (FileHistoryViewer) but no Rust command of that name exists, so the time-travel file diff likely fails in the desktop app while working under dev:web
 - **Follow-ups from #257 (GPU-first rendering on Linux)** (2026-10-13):
   - the software fallback is untested on the setups it is for: only the #135 (Ubuntu 26.04, native Wayland) and #139 (Mint 22 `.deb`) reporters can confirm that the second launch recovers. Ask them once it ships
