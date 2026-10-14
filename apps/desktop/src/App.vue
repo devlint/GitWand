@@ -1822,6 +1822,7 @@ async function handleSwitchBranch(name: string, isRemote = false) {
       try {
         await gitResetToCommit(repoFolderPath.value, remote, "hard", settings.value.snapshotsEnabled);
         // Force the log: HEAD moved, but the all-refs log's top commit may not have.
+        // The forced log reload also refreshes the branch list (useGitRepo).
         await repoRefresh(true);
         return;
       } catch (err: any) {
@@ -4008,8 +4009,11 @@ repoWatcher.on(["worktree", "config", "head"], (ev) => {
 
 repoWatcher.on(["head", "refs"], () => {
   watcherRefreshQueue.schedule("head-refs", async () => {
-    await repoRefresh();
-    await loadLog();
+    // A head/refs event means decorations changed, possibly below the first
+    // page the non-forced compare can see (a branch moved deep in history, a
+    // tag on an old commit): force the log (#266). The forced reload also
+    // reloads an already-loaded branch list. Event-driven, not a poll tick.
+    await repoRefresh(true);
   });
 });
 

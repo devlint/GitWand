@@ -2,6 +2,7 @@
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { GitLogEntry, GitBranch } from "../utils/backend";
 import { buildLaneIndex, computeDagLayout, mergeLaneIsClear, parseRefs, type DagEdge, type DagLayout, type DagNode } from "../utils/dagLayout";
+import { EMPTY_PIN, TRUNK_NAMES, layoutFingerprint, nextTrunkPin, refsSignature, type TrunkPin } from "../utils/graphLayoutPin";
 import { useI18n } from "../composables/useI18n";
 import Avatar from "./Avatar.vue";
 import AiSparkle from "./AiSparkle.vue";
@@ -598,76 +599,46 @@ const displayCommits = computed(() => {
 });
 
 // ─── DAG layout ──────────────────────────────────────
-// R6 — fingerprint cache: we compare first/last hash + length.
-// When getGitLog() returns a new array with the same content
-// (e.g. after `.map()` in the parent), we avoid recomputing the
-// full O(N*L) layout.  Saves ~1-5 ms on every status poll tick.
+// R6 — fingerprint cache: bounds (count, first/last hash), current branch,
+// WIP state and the rows' decorations. When getGitLog() returns a new array
+// with the same content (e.g. after `.map()` in the parent), we avoid
+// recomputing the full O(N*L) layout. Decorations are part of it (#266): a ref
+// moving without the top commit changing must recompute lanes and colors.
 let _prevFingerprint = "";
 let _cachedLayout: DagLayout | null = null;
-const TRUNK_NAMES = new Set(["main", "master"]);
 
-// Stable pin config — locked per HEAD commit so that infinite-scroll appends
-// never change lanesAllocated or pinnedLane entries for already-rendered rows.
-// Reset only when the real HEAD hash changes (new commit, repo switch, refresh).
-let _pinHeadHash = "";
-let _pinTrunkHash: string | undefined = undefined;
-let _pinSecondaryHashes: string[] = [];
+// Stable pin config — kept across infinite-scroll appends so they never change
+// lanesAllocated or pinnedLane entries for already-rendered rows. Re-detected
+// when the real HEAD hash changes, rows go away, or a ref moves among the rows
+// the pin was set on (see nextTrunkPin in utils/graphLayoutPin.ts).
+let _pin: TrunkPin = EMPTY_PIN;
 
 const layout = computed<DagLayout>(() => {
   const commits = renderedCommits.value;
-  const n = commits.length;
   // Include currentBranch + hasChanges in fingerprint: branch change or WIP
   // state change must recompute layout even when commit hashes are identical.
   // We also include the parent of the WIP node (if present) to detect HEAD
   // movement that doesn't change the overall log bounds (v2.16).
   const wipParent = hasChanges.value && commits[0]?.hashFull === "WIP" ? commits[0].parents[0] : "";
-  const fp =
-    n + ":" + (commits[0]?.hashFull ?? "") + ":" + (commits[n - 1]?.hashFull ?? "") + ":" +
-    (props.currentBranch ?? "") + ":" + hasChanges.value + ":" + wipParent;
+  // One pass: decorations of every row, and of the rows the pin covers.
+  const sig = refsSignature(commits, _pin.rowCount);
+  const fp = layoutFingerprint(commits, props.currentBranch ?? "", hasChanges.value, wipParent, sig.full);
   if (fp === _prevFingerprint && _cachedLayout) return _cachedLayout;
   _prevFingerprint = fp;
 
   // Real HEAD hash: skip the virtual WIP node.
   const headHash = wipParent !== "" ? wipParent : (commits[0]?.hashFull ?? "");
-
-  if (headHash !== _pinHeadHash) {
-    // HEAD changed (new commit, repo switch, refresh) — re-detect pinned config.
-    _pinHeadHash = headHash;
-
-    // Trunk = the lineage to pin on lane 0 (far left).
-    // Priority 1: main / master (local or remote) — always lane 0 regardless of current branch.
-    let trunkHash: string | undefined;
-    for (const commit of commits) {
-      const refs = parseRefs(commit.refs);
-      // Include "ambiguous" so `origin/main` (a slash-containing name
-      // parseRefs() can't classify on its own, see #137) still matches here
-      // — TRUNK_NAMES.has(...) already strips any remote prefix below.
-      if (refs.some((r) =>
-        (r.type === "branch" || r.type === "remote" || r.type === "ambiguous") &&
-        TRUNK_NAMES.has(r.name.includes("/") ? r.name.split("/").pop()! : r.name)
-      )) {
-        trunkHash = commit.hashFull;
-        break;
-      }
-    }
-    _pinTrunkHash = trunkHash;
-    _pinSecondaryHashes = [];
-  }
-  // When only more commits are appended (infinite scroll), _pinTrunkHash and
-  // _pinSecondaryHashes are reused unchanged so lanesAllocated stays constant
-  // and existing commits never jump to different lanes.
+  // Trunk = the main/master lineage (local or remote) pinned on lane 0,
+  // regardless of the current branch.
+  _pin = nextTrunkPin(_pin, commits, headHash, sig);
 
   // WIP sitting directly on the trunk head (user is on main/master) starts the
   // trunk chain itself — otherwise lane 0 is pre-claimed by the trunk head and
   // the WIP node gets pushed onto a fresh lane beside it.
   const trunkForLayout =
-    wipParent !== "" && wipParent === _pinTrunkHash ? "WIP" : _pinTrunkHash;
+    wipParent !== "" && wipParent === _pin.trunkHash ? "WIP" : _pin.trunkHash;
 
-  _cachedLayout = computeDagLayout(
-    commits,
-    trunkForLayout,
-    _pinSecondaryHashes.length > 0 ? _pinSecondaryHashes : undefined,
-  );
+  _cachedLayout = computeDagLayout(commits, trunkForLayout);
   return _cachedLayout;
 });
 
