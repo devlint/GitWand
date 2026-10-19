@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **GitWand starts on a Windows without the Visual C++ Redistributable.** From v3.11.2 the Windows build imported `VCRUNTIME140.dll`, so on a clean machine the app quit at launch with `STATUS_DLL_NOT_FOUND`, and winget's validation rejected v3.11.2 to v3.12.3. The C runtime is now linked statically, and the release fails if the exe depends on it again.
+
 ## [3.12.3] - 2026-10-14
 
 ### Added

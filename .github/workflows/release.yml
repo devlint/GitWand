@@ -191,6 +191,26 @@ jobs:
           updaterJsonPreferNsis: true
           updaterJsonKeepUniversal: true
 
+      # v3.11.2 to v3.12.3 shipped an exe that imported VCRUNTIME140.dll and
+      # died at launch on a Windows without the VC++ Redistributable (winget's
+      # validation VM rejected them). src-tauri/.cargo/config.toml links the
+      # CRT statically; fail here, before winget, if the exe depends on it again.
+      - name: Check the Windows exe needs no VC++ runtime
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -Last 1
+          if (-not $dumpbin) { Write-Error "dumpbin.exe not found under $vs"; exit 1 }
+          $deps = & $dumpbin.FullName /nologo /dependents apps/desktop/src-tauri/target/release/gitwand-desktop.exe
+          if ($LASTEXITCODE -ne 0) { $deps; Write-Error "dumpbin failed"; exit 1 }
+          $deps
+          $crt = $deps | Select-String -Pattern '^\s*(vcruntime|msvcp|ucrtbase)[\w-]*\.dll\s*$'
+          if ($crt) {
+            Write-Error "gitwand-desktop.exe imports the VC++ runtime: $($crt.Line.Trim() -join ', ')"
+            exit 1
+          }
+
       # GitHub Releases API occasionally returns 500 on asset uploads,
       # especially when the matrix jobs upload in parallel. Re-upload any
       # asset that is missing from the release (idempotent, safe to retry).
