@@ -227,12 +227,22 @@ jobs:
           uploaded=$(gh release view "$TAG" --repo "$REPO" --json assets \
             --jq '[.assets[].name]' 2>/dev/null || echo '[]')
 
-          # Find all built artifacts for this platform
-          artifact_dir="apps/desktop/target/release/bundle"
-          [ -d "$artifact_dir" ] || exit 0
+          # Find all built artifacts for this platform. Cargo builds under
+          # src-tauri/target: release/bundle, or <triple>/release/bundle for
+          # an explicit --target (macOS universal-apple-darwin). The old
+          # apps/desktop/target path never existed, so this step was a no-op.
+          target_dir="apps/desktop/src-tauri/target"
+          if [ -z "$(find "$target_dir" -type d -path "*/release/bundle" -print -quit 2>/dev/null)" ]; then
+            echo "::error::no bundle directory under $target_dir"
+            exit 1
+          fi
 
-          # Walk every signable artifact (installers + .sig files)
-          find "$artifact_dir" \
+          # Walk every signable artifact (installers + .sig files). Skip the
+          # macOS updater archive's signature: tauri-action uploads it renamed
+          # (GitWand_universal.app.tar.gz.sig), so its on-disk name never
+          # matches and would be re-uploaded as a stray asset.
+          find "$target_dir" -path "*/release/bundle/*" \
+            -not -name "*.app.tar.gz.sig" \
             \( -name "*.deb" -o -name "*.AppImage" \
             -o -name "*.rpm" \
             -o -name "*.msi" -o -name "*.exe" -o -name "*.nsis" \
