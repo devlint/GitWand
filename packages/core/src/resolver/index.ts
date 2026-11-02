@@ -15,6 +15,7 @@
  */
 
 import type {
+  ClassifyInput,
   ConfidenceScore,
   ConflictHunk,
   ConflictType,
@@ -52,6 +53,7 @@ import { dispatchFormatAware } from "./format-dispatch.js";
 import { assembleResolution } from "./assemble.js";
 import { setLlmFallbackEnabled } from "../patterns/llm-proposed.js";
 import { setRefMergeEnabled } from "../patterns/refactoring-aware-merge.js";
+import complexPattern from "../patterns/complex.js";
 import { runLlmFallbackPhase } from "./llm-pipeline.js";
 
 /**
@@ -110,6 +112,33 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
           passed: true,
           reason: `The "${resolverUsed}" resolver produced a semantic merge; the hunk is no longer "complex".`,
         },
+      ],
+    },
+  };
+}
+
+/**
+ * Un résolveur format-aware a établi un vrai conflit (ex. imports : le même
+ * module importé sous deux formes). La classification textuelle — par exemple
+ * `insertion_at_boundary`, qui garderait les deux lignes — ne tient plus : le
+ * hunk devient `complex`, confiance nulle, comme tout conflit qui demande un humain.
+ */
+function reclassifyFormatConflict(hunk: ConflictHunk, resolverUsed: string, reason: string): ConflictHunk {
+  if (hunk.type === "complex") return hunk;
+  // `complex` ignore son entrée (score et texte fixes) ; endLine n'est pas porté par le hunk.
+  const input: ClassifyInput = { ...hunk, endLine: hunk.startLine };
+  return {
+    ...hunk,
+    type: "complex",
+    confidence: complexPattern.confidence(input),
+    explanation: complexPattern.explanation(input),
+    trace: {
+      ...hunk.trace,
+      selected: "complex",
+      summary: `Format-aware resolver "${resolverUsed}" found a genuine conflict — reclassified as complex.`,
+      steps: [
+        ...hunk.trace.steps,
+        { type: "complex" as ConflictType, passed: true, reason },
       ],
     },
   };
@@ -258,6 +287,9 @@ function resolveHunk(
     }
     if (dispatch.status === "rejected-policy") {
       return { hunk, lines: null, reason: dispatch.reason };
+    }
+    if (dispatch.status === "conflict") {
+      return { hunk: reclassifyFormatConflict(hunk, dispatch.resolverUsed, dispatch.reason), lines: null, reason: dispatch.reason };
     }
     // dispatch.status === "not-applicable" → on continue vers le moteur textuel.
     // `dispatch.note` porte la raison d'échec du résolveur spécialisé (pour

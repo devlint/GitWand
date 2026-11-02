@@ -155,3 +155,64 @@ describe("F5 — imports : deux modules différents ajoutés (diff2)", () => {
     expect(result.mergedContent).toContain("useRouter");
   });
 });
+
+// ─── Même module, formes incompatibles : jamais de repli textuel ─────────────
+// Régression : le résolveur imports refusait (null), le moteur textuel prenait
+// le relais et classait le hunk insertion_at_boundary — les deux lignes étaient
+// gardées et `useAuth` se retrouvait déclaré deux fois.
+
+describe("imports — même module sous deux formes (named vs default)", () => {
+  const input = [
+    `<<<<<<< ours`,
+    `import React from "react";`,
+    `import { useAuth } from "./auth";`,
+    `||||||| base`,
+    `import React from "react";`,
+    `=======`,
+    `import React from "react";`,
+    `import useAuth from "./auth";`,
+    `>>>>>>> theirs`,
+    `export const x = 1;`,
+  ].join("\n");
+
+  it("n'est pas auto-résolu", () => {
+    const result = resolve(input, "app.ts");
+    expect(result.stats.autoResolved).toBe(0);
+  });
+
+  it("est classé complex", () => {
+    const result = resolve(input, "app.ts");
+    expect(result.hunks[0].type).toBe("complex");
+  });
+
+  it("la raison cite le conflit d'import", () => {
+    const result = resolve(input, "app.ts");
+    expect(result.resolutions[0].resolutionReason).toMatch(/\[imports\].*'\.\/auth'/);
+  });
+
+  it("même chose dans l'autre sens (default côté ours)", () => {
+    const swapped = input
+      .replace(`import { useAuth } from "./auth";`, "__TMP__")
+      .replace(`import useAuth from "./auth";`, `import { useAuth } from "./auth";`)
+      .replace("__TMP__", `import useAuth from "./auth";`);
+    const result = resolve(swapped, "app.ts");
+    expect(result.stats.autoResolved).toBe(0);
+    expect(result.hunks[0].type).toBe("complex");
+  });
+
+  it("un bloc non-import laisse toujours la main au moteur textuel", () => {
+    const mixed = [
+      `<<<<<<< ours`,
+      `import React from "react";`,
+      `const a = 1;`,
+      `||||||| base`,
+      `import React from "react";`,
+      `=======`,
+      `import React from "react";`,
+      `const b = 2;`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(mixed, "app.ts");
+    expect(result.hunks[0].type).toBe("insertion_at_boundary");
+  });
+});

@@ -235,22 +235,40 @@ export function tryResolveDockerfileConflict(
   const oursStages = splitByStage(oursInstructions);
   const theirsStages = splitByStage(theirsInstructions);
 
-  // Indexer les stages theirs par alias FROM
-  const getStageKey = (stage: Instruction[]): string => {
-    const from = stage.find((i) => i.kind === "FROM");
-    return from?.key ?? from?.value ?? `__stage_${Math.random()}`;
+  // Clé d'appariement des stages : l'alias `AS x` s'il existe, sinon la
+  // position parmi les stages sans alias. Un stage sans FROM (hunk qui ne
+  // contient que des instructions du milieu d'un stage) compte comme un stage
+  // sans alias. Ne JAMAIS apparier par l'image : un FROM modifié des deux côtés
+  // (node:20 vs node:22) ne s'apparierait pas et les deux stages seraient gardés.
+  const stageKeys = (stages: Instruction[][]): string[] => {
+    let unaliased = 0;
+    return stages.map((stage) => {
+      const alias = stage.find((i) => i.kind === "FROM")?.key;
+      return alias !== undefined ? `alias:${alias}` : `#${unaliased++}`;
+    });
   };
+  const oursKeys = stageKeys(oursStages);
+  const theirsKeys = stageKeys(theirsStages);
+
+  // L'appariement par position n'a de sens que si les deux côtés ont le même
+  // nombre de stages sans alias. Sinon (stage ajouté d'un côté, alias ajouté ou
+  // retiré d'un côté) on ne sait pas qui correspond à qui : moteur textuel.
+  const countUnaliased = (keys: string[]) => keys.filter((k) => k.startsWith("#")).length;
+  if (countUnaliased(oursKeys) !== countUnaliased(theirsKeys)) {
+    return {
+      lines: null,
+      reason: "[dockerfile] The two sides do not have the same unaliased stages, so they cannot be paired; falling back to the textual engine.",
+    };
+  }
 
   const theirsStageMap = new Map<string, Instruction[]>();
-  for (const stage of theirsStages) {
-    theirsStageMap.set(getStageKey(stage), stage);
-  }
+  theirsStages.forEach((stage, idx) => theirsStageMap.set(theirsKeys[idx], stage));
 
   const resultLines: string[] = [];
   const seenStages = new Set<string>();
 
-  for (const oursStage of oursStages) {
-    const key = getStageKey(oursStage);
+  for (const [idx, oursStage] of oursStages.entries()) {
+    const key = oursKeys[idx];
     const theirsStage = theirsStageMap.get(key);
     seenStages.add(key);
 

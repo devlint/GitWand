@@ -135,3 +135,79 @@ describe("Dockerfile — préservation avec commentaires", () => {
     expect(result.mergedContent).toContain("NODE_ENV=production");
   });
 });
+
+// ─── Appariement des stages sans alias ───────────────────────────────────────
+// Régression : les stages étaient appariés par `alias ?? image` (et par une clé
+// aléatoire sans FROM). Sans alias, deux FROM différents ne s'appariaient pas et
+// les deux stages étaient gardés ; sans FROM dans le hunk, rien ne s'appariait.
+
+function dockerHunk(ours: string[], base: string[], theirs: string[], after: string[] = []): string {
+  return [
+    `<<<<<<< ours`, ...ours,
+    `||||||| base`, ...base,
+    `=======`, ...theirs,
+    `>>>>>>> theirs`, ...after,
+  ].join("\n");
+}
+
+describe("Dockerfile — stages sans alias appariés par position", () => {
+  it("hunk limité au FROM : une seule ligne FROM (prefer theirs)", () => {
+    const input = dockerHunk([`FROM node:20-alpine`], [`FROM node:18-alpine`], [`FROM node:22-alpine`], [`RUN npm ci`]);
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent?.match(/^FROM /gm)).toHaveLength(1);
+    expect(result.mergedContent).toContain("FROM node:22-alpine");
+    expect(result.mergedContent).not.toContain("node:20-alpine");
+  });
+
+  it("FROM + instructions : un seul stage, instructions des deux côtés", () => {
+    const input = dockerHunk(
+      [`FROM node:20-alpine`, `ENV A=1`],
+      [`FROM node:18-alpine`],
+      [`FROM node:22-alpine`, `ENV B=2`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent?.match(/^FROM /gm)).toHaveLength(1);
+    expect(result.mergedContent).toContain("ENV A=1");
+    expect(result.mergedContent).toContain("ENV B=2");
+  });
+
+  it("deux stages sans alias : appariés un à un", () => {
+    const input = dockerHunk(
+      [`FROM golang:1.21`, `RUN go build`, `FROM alpine:3.18`],
+      [`FROM golang:1.20`, `RUN go build`, `FROM alpine:3.17`],
+      [`FROM golang:1.22`, `RUN go build`, `FROM alpine:3.19`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent?.match(/^FROM /gm)).toHaveLength(2);
+    expect(result.mergedContent).toContain("FROM golang:1.22");
+    expect(result.mergedContent).toContain("FROM alpine:3.19");
+    expect(result.mergedContent?.match(/RUN go build/g)).toHaveLength(1);
+  });
+
+  it("hunk sans FROM : la même instruction n'est pas dupliquée", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV PORT=3000`], [`ENV PORT=8080`], [`ENV PORT=4000`], [`RUN npm ci`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent?.match(/ENV PORT=/g)).toHaveLength(1);
+    expect(result.mergedContent).toContain("ENV PORT=4000");
+  });
+
+  it("alias d'un côté seulement : pas de résolution automatique", () => {
+    const input = dockerHunk([`FROM node:20 AS build`], [`FROM node:18`], [`FROM node:22`]);
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(0);
+  });
+
+  it("nombre de stages sans alias différent : pas de résolution automatique", () => {
+    const input = dockerHunk(
+      [`FROM node:20`, `RUN npm ci`, `FROM nginx:1.25`],
+      [`FROM node:18`, `RUN npm ci`],
+      [`FROM node:22`, `RUN npm ci`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(0);
+  });
+});

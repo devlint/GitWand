@@ -155,6 +155,14 @@ export function extractImportSources(content: string): string[] {
 export interface ImportMergeResult {
   /** Lignes fusionnées (null = conflit non résolvable) */
   mergedLines: string[] | null;
+  /**
+   * `true` quand `mergedLines` est null parce que les deux côtés ont touché le
+   * même import de façons incompatibles — un vrai conflit, que le moteur
+   * textuel ne doit pas « résoudre » à son tour (il garderait les deux lignes).
+   * Absent quand le résolveur ne s'applique simplement pas (bloc non-import,
+   * ligne non parsable) : le moteur textuel peut alors prendre le relais.
+   */
+  conflict?: boolean;
   /** Description de la fusion */
   reason: string;
   /** Nombre d'imports fusionnés */
@@ -372,6 +380,7 @@ export function tryResolveImportConflict(
             unresolvedImports++;
             return {
               mergedLines: null,
+              conflict: true,
               reason: `Conflict on the named import '${ours.source}': the names cannot be merged.`,
               resolvedImports,
               unresolvedImports,
@@ -382,6 +391,7 @@ export function tryResolveImportConflict(
           unresolvedImports++;
           return {
             mergedLines: null,
+            conflict: true,
             reason: `Conflict on import '${ours.source}': incompatible kinds (${ours.kind} vs ${theirs.kind}).`,
             resolvedImports,
             unresolvedImports,
@@ -394,6 +404,7 @@ export function tryResolveImportConflict(
           unresolvedImports++;
           return {
             mergedLines: null,
+            conflict: true,
             reason: `Conflict on import '${ours.source}': incompatible kinds (${ours.kind} vs ${theirsSameSource.kind}).`,
             resolvedImports,
             unresolvedImports,
@@ -408,6 +419,7 @@ export function tryResolveImportConflict(
           unresolvedImports++;
           return {
             mergedLines: null,
+            conflict: true,
             reason: `Conflict on import '${theirs.source}': incompatible kinds (${oursSameSource.kind} vs ${theirs.kind}).`,
             resolvedImports,
             unresolvedImports,
@@ -436,6 +448,7 @@ export function tryResolveImportConflict(
         unresolvedImports++;
         return {
           mergedLines: null,
+          conflict: true,
           reason: `Conflict on import '${base.source}': ours deleted it, theirs modified it.`,
           resolvedImports,
           unresolvedImports,
@@ -451,6 +464,7 @@ export function tryResolveImportConflict(
         unresolvedImports++;
         return {
           mergedLines: null,
+          conflict: true,
           reason: `Conflict on import '${base.source}': theirs deleted it, ours modified it.`,
           resolvedImports,
           unresolvedImports,
@@ -482,6 +496,7 @@ export function tryResolveImportConflict(
         unresolvedImports++;
         return {
           mergedLines: null,
+          conflict: true,
           reason: `Conflict on the named imports from '${ours.source}'.`,
           resolvedImports,
           unresolvedImports,
@@ -491,6 +506,7 @@ export function tryResolveImportConflict(
       unresolvedImports++;
       return {
         mergedLines: null,
+        conflict: true,
         reason: `Conflict on import '${ours.source}': incompatible changes.`,
         resolvedImports,
         unresolvedImports,

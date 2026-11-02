@@ -125,6 +125,13 @@ export interface FormatResolveResult {
   // the file as machine-generated. It does not pass through tryFormatAwareResolve().
   resolverUsed: "json" | "markdown" | "yaml" | "imports" | "vue" | "css" | "lockfile-npm" | "lockfile-yarn" | "lockfile-pnpm" | "cargo" | "dotenv" | "dockerfile" | "structural" | "none";
   /**
+   * `true` quand `lines` est null parce que le résolveur a établi un vrai
+   * conflit sémantique (pas seulement « je ne sais pas faire »). L'orchestrateur
+   * classe alors le hunk `complex` au lieu de passer au moteur textuel, qui
+   * pourrait sinon appliquer une union textuellement plausible mais invalide.
+   */
+  conflict?: boolean;
+  /**
    * v2.3 — Portée de la résolution.
    *
    * - `"hunk"` (défaut implicite) : `lines` remplace uniquement le hunk courant.
@@ -437,6 +444,7 @@ export function tryFormatAwareResolve(
         lines: null,
         reason: `[imports] ${result.reason}`,
         resolverUsed: "imports",
+        ...(result.conflict ? { conflict: true } : {}),
       };
     }
     // Bloc non-import → pas de résolveur spécialisé pour TS/JS (fallback textuel)
