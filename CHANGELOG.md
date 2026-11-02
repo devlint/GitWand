@@ -8,8 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **Two imports of the same module are no longer both kept.** When one side added `import { useAuth } from "./auth"` and the other `import useAuth from "./auth"`, the imports resolver declined, and the hunk went on to the line patterns, which applied it as `insertion_at_boundary` with both lines: a duplicate binding the compiler rejects. A conflict the imports resolver identifies is now classified `complex` and left to you.
-- **The Dockerfile resolver no longer duplicates a stage or an instruction.** Stages without an `AS` alias were matched by their image, so a `FROM` changed on both sides (`node:20` against `node:22`) kept both lines and created a second stage; a hunk with no `FROM` at all matched nothing, so an `ENV PORT` changed on both sides came out twice. Unaliased stages are now matched by position. When the two sides do not have the same number of them, the hunk goes to the textual engine.
+- **Two imports of the same module are no longer both kept (#278).** When one side added `import { useAuth } from "./auth"` and the other `import useAuth from "./auth"`, the imports resolver declined, and the hunk went on to the line patterns, which applied it as `insertion_at_boundary` with both lines: a duplicate binding the compiler rejects. A conflict the imports resolver identifies is now classified `complex` and left to you.
+- **The Dockerfile resolver no longer duplicates a stage or an instruction (#278).** Stages without an `AS` alias were matched by their image, so a `FROM` changed on both sides (`node:20` against `node:22`) kept both lines and created a second stage; a hunk with no `FROM` at all matched nothing, so an `ENV PORT` changed on both sides came out twice. Unaliased stages are now matched by position. When the two sides do not have the same number of them, the hunk goes to the textual engine.
 
 ## [3.12.4] - 2026-10-19
 
