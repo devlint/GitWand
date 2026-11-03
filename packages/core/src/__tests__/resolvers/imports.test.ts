@@ -216,3 +216,50 @@ describe("imports — même module sous deux formes (named vs default)", () => {
     expect(result.hunks[0].type).toBe("insertion_at_boundary");
   });
 });
+
+// ─── Changement de forme d'un seul côté : pas un conflit ─────────────────────
+// Régression : un côté passe `{ x }` → `x` et l'autre garde l'import de base.
+// Le contrôle « même module, autre forme » se déclenchait quand même, et depuis
+// que ce conflit n'est plus repassé au moteur textuel, le hunk devenait complex.
+
+describe("imports — forme changée d'un seul côté", () => {
+  it("theirs change la forme, ours modifie un autre import : résolu", () => {
+    const input = [
+      `<<<<<<< ours`, `import A2 from "a";`, `import { x } from "b";`,
+      `||||||| base`, `import A from "a";`, `import { x } from "b";`,
+      `=======`, `import A from "a";`, `import x from "b";`,
+      `>>>>>>> theirs`, `export const y = 1;`,
+    ].join("\n");
+    const result = resolve(input, "app.ts");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain(`import A2 from "a";`);
+    expect(result.mergedContent).toContain(`import x from "b";`);
+    expect(result.mergedContent).not.toContain(`import { x } from "b";`);
+  });
+
+  it("ours change la forme, theirs ajoute un import : résolu", () => {
+    const input = [
+      `<<<<<<< ours`, `import x from "b";`,
+      `||||||| base`, `import { x } from "b";`,
+      `=======`, `import { x } from "b";`, `import C from "c";`,
+      `>>>>>>> theirs`, `export const y = 1;`,
+    ].join("\n");
+    const result = resolve(input, "app.ts");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain(`import x from "b";`);
+    expect(result.mergedContent).toContain(`import C from "c";`);
+    expect(result.mergedContent).not.toContain(`import { x } from "b";`);
+  });
+
+  it("les deux côtés changent la forme différemment : toujours complex", () => {
+    const input = [
+      `<<<<<<< ours`, `import * as x from "b";`,
+      `||||||| base`, `import { x } from "b";`,
+      `=======`, `import x from "b";`,
+      `>>>>>>> theirs`, `export const y = 1;`,
+    ].join("\n");
+    const result = resolve(input, "app.ts");
+    expect(result.stats.autoResolved).toBe(0);
+    expect(result.hunks[0].type).toBe("complex");
+  });
+});

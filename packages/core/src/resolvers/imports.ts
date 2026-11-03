@@ -351,6 +351,13 @@ export function tryResolveImportConflict(
   const oursBySource   = new Map(oursImports.map((s) => [s.source, s]));
   const theirsBySource = new Map(theirsImports.map((s) => [s.source, s]));
 
+  // Un import identique à la base n'a pas été touché par ce côté. Quand l'autre
+  // côté change la forme de ce même module (`{ x }` → `x`), c'est un changement
+  // d'un seul côté, pas un conflit : l'import de base disparaît (supprimé par
+  // l'autre côté, inchangé ici) et la nouvelle forme est gardée.
+  const isUntouchedBase = (s: ImportStatement): boolean =>
+    baseMap.get(importKey(s))?.raw === s.raw;
+
   // Ensemble de toutes les clés
   const allKeys = new Set([...baseMap.keys(), ...oursMap.keys(), ...theirsMap.keys()]);
 
@@ -400,7 +407,7 @@ export function tryResolveImportConflict(
       } else if (ours) {
         // Vérifier si theirs a un import du même module avec un kind incompatible
         const theirsSameSource = theirsBySource.get(ours.source);
-        if (theirsSameSource && theirsSameSource.kind !== ours.kind && ours.kind !== "named") {
+        if (theirsSameSource && theirsSameSource.kind !== ours.kind && ours.kind !== "named" && !isUntouchedBase(theirsSameSource)) {
           unresolvedImports++;
           return {
             mergedLines: null,
@@ -415,7 +422,7 @@ export function tryResolveImportConflict(
       } else if (theirs) {
         // Vérifier si ours a un import du même module avec un kind incompatible
         const oursSameSource = oursBySource.get(theirs.source);
-        if (oursSameSource && oursSameSource.kind !== theirs.kind && theirs.kind !== "named") {
+        if (oursSameSource && oursSameSource.kind !== theirs.kind && theirs.kind !== "named" && !isUntouchedBase(oursSameSource)) {
           unresolvedImports++;
           return {
             mergedLines: null,
