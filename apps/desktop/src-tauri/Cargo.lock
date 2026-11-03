@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "gitwand-desktop"
-version = "3.12.4"
+version = "3.12.5"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",

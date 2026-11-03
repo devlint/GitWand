@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.5] - 2026-11-03
+
 ### Fixed
 - **The Git Tree follows ref moves that keep the newest commit (#266, #267).** Resetting `main` onto `origin/main`, creating a branch on an existing commit, checking out a previous branch or moving `main` onto another branch's commit left stale labels, lanes and colors until a restart, because the log and graph layout caches were keyed on the top commit alone. The log now compares hashes and ref decorations, a ref change from the watcher forces one reload, and the graph's trunk pin is re-detected whenever refs change.
 - **Two imports of the same module are no longer both kept (#278).** When one side added `import { useAuth } from "./auth"` and the other `import useAuth from "./auth"`, the imports resolver declined, and the hunk went on to the line patterns, which applied it as `insertion_at_boundary` with both lines: a duplicate binding the compiler rejects. When both sides add an import of the same module that declares the same name, the hunk is now classified `complex` and left to you; two forms that bind different names (`import React` and `import { useState }`) are still both kept.
 - **The Dockerfile resolver no longer duplicates a stage or an instruction (#278).** Stages without an `AS` alias were matched by their image, so a `FROM` changed on both sides (`node:20` against `node:22`) kept both lines and created a second stage; a hunk with no `FROM` at all matched nothing, so an `ENV PORT` changed on both sides came out twice. Unaliased stages are now matched by position. When the two sides do not have the same number of them, the hunk goes to the textual engine. Within a stage, an instruction changed on one side only now keeps that change instead of the other side's base value.
+
+### Changed
+- **Dependency updates (#275, #276, #277).** rustls 0.23.46 in the desktop app (its HTTPS traffic), DOMPurify 3.4.17 (the sanitizer behind rendered markdown and PR descriptions), and Vite 6.4.5 for the desktop build.
 
 ## [3.12.4] - 2026-10-19
 
@@ -1699,6 +1704,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.12.4...HEAD
+[3.12.5]: https://github.com/devlint/GitWand/compare/v3.12.4...v3.12.5
 [3.12.4]: https://github.com/devlint/GitWand/compare/v3.12.3...v3.12.4
 [3.12.3]: https://github.com/devlint/GitWand/compare/v3.12.2...v3.12.3
 [3.12.2]: https://github.com/devlint/GitWand/compare/v3.12.1...v3.12.2

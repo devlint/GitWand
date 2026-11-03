@@ -1,6 +1,6 @@
 {
   "name": "gitwand-website",
-  "version": "3.12.4",
+  "version": "3.12.5",
   "private": true,
   "type": "module",
   "scripts": {

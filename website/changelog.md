@@ -5,6 +5,22 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.12.5 — November 2026
+
+### The Git Tree keeps up when branches move
+
+Some branch moves leave the newest commit where it was: resetting `main` back onto `origin/main` after pushing your work to a new branch, creating a branch on an older commit, checking out a branch you were on before, or moving `main` onto another branch's commit. The Git Tree used to miss them. Labels stayed on the wrong commits, a branch could seem to disappear and lanes kept their old colours until you restarted GitWand. The graph now checks where every branch and tag points, not just the newest commit, so all of these show up as soon as they happen, including when you run them from a terminal.
+
+### Fewer wrong merges in imports and Dockerfiles
+
+When one side imported `{ useAuth }` from a module and the other imported `useAuth` as its default, GitWand used to keep both lines, and the file declared `useAuth` twice. That case is now left to you. Two imports of the same module that declare different names, such as `import React` and `import { useState }`, are still merged automatically.
+
+In a Dockerfile, a base image changed on both sides (`node:20` against `node:22`) produced a second stage, and a change made on both sides to an `ENV` line came out twice. GitWand now matches stages by their name, or by their position when they have none, and checks each instruction against the common ancestor. A change made on one side only is kept. When stages or repeated instructions cannot be matched safely, GitWand leaves the conflict to the line-by-line engine rather than guess.
+
+### Up-to-date dependencies
+
+rustls, which carries the app's HTTPS traffic, DOMPurify, which cleans rendered Markdown, and Vite, which builds the app, are on their latest patch releases.
+
 ## v3.12.4 — October 2026
 
 ### GitWand starts on every Windows again

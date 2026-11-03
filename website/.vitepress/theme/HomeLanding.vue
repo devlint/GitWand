@@ -25,7 +25,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.12.4'
+const LATEST = '3.12.5'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -587,7 +587,7 @@ const t = computed(() => i18n[locale.value])
 // `t` sert les sections historiques, `nt` les nouvelles.
 const NC: Record<Locale, any> = {
   en: {
-    badge: 'v3.12 — reset --keep, auto fast-forward, diffs that keep every line',
+    badge: 'v3.12 — a Git Tree that follows every branch move, safer import and Dockerfile merges',
     h1a: 'The merge ends', h1b: 'without you', h1c: '.',
     sub: 'Eight deterministic patterns classify every hunk, settle the ones that carried no decision, and hand you back only what deserves your attention. Native, local, MIT.',
     cta: 'Download GitWand',
@@ -639,7 +639,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   fr: {
-    badge: 'v3.12 — reset --keep, fast-forward automatique, des diffs qui gardent chaque ligne',
+    badge: 'v3.12 — un arbre Git qui suit chaque déplacement de branche, des imports et Dockerfiles mieux fusionnés',
     h1a: 'Le merge se termine', h1b: 'sans toi', h1c: '.',
     sub: 'Huit patterns déterministes classent chaque hunk, règlent ceux qui ne demandaient aucune décision, et te laissent uniquement ce qui vaut ton attention. Natif, local, MIT.',
     cta: 'Télécharger GitWand',
@@ -691,7 +691,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   es: {
-    badge: 'v3.12 — reset --keep, fast-forward automático, diffs que conservan cada línea',
+    badge: 'v3.12 — un árbol Git que sigue cada movimiento de rama, imports y Dockerfiles mejor fusionados',
     h1a: 'El merge termina', h1b: 'sin ti', h1c: '.',
     sub: 'Ocho patrones deterministas clasifican cada hunk, resuelven los que no exigían ninguna decisión y te devuelven solo lo que merece tu atención. Nativo, local, MIT.',
     cta: 'Descargar GitWand',
@@ -743,7 +743,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'pt-BR': {
-    badge: 'v3.12 — reset --keep, fast-forward automático, diffs que mantêm cada linha',
+    badge: 'v3.12 — uma árvore Git que acompanha cada movimento de branch, imports e Dockerfiles mesclados com mais segurança',
     h1a: 'O merge termina', h1b: 'sem você', h1c: '.',
     sub: 'Oito padrões determinísticos classificam cada hunk, resolvem os que não exigiam decisão nenhuma e devolvem só o que merece a sua atenção. Nativo, local, MIT.',
     cta: 'Baixar o GitWand',
@@ -795,7 +795,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'zh-CN': {
-    badge: 'v3.12 — reset --keep、自动快进、不再丢行的 diff',
+    badge: 'v3.12 — Git 树跟随每次分支移动，导入与 Dockerfile 合并更可靠',
     h1a: '合并结束时', h1b: '不必再找你', h1c: '。',
     sub: '八种确定性模式为每个 hunk 分类，自动处理那些本就无需决策的部分，只把值得你关注的留给你。原生、本地、MIT。',
     cta: '下载 GitWand',
