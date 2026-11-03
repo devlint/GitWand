@@ -1348,10 +1348,10 @@ onMounted(() => {
         <div class="blog-teaser-header">
           <span class="blog-teaser-label">From the blog</span>
         </div>
-        <a href="/blog/trivial-conflicts-taxonomy" class="blog-teaser-card">
-          <div class="blog-teaser-meta">November 2, 2026 · 10 min read</div>
-          <h3 class="blog-teaser-title">The conflicts you resolve by hand that were never decisions: a taxonomy</h3>
-          <p class="blog-teaser-excerpt">Git gave up on the hunk; that does not mean there was a choice to make. A field guide to the shapes that only look like work, taken from the patterns GitWand's engine actually implements, with one example hunk per type, the check that makes each resolution safe, and where GitWand stops.</p>
+        <a href="/blog/rebase-vs-merge-conflicts" class="blog-teaser-card">
+          <div class="blog-teaser-meta">November 3, 2026 · 11 min read</div>
+          <h3 class="blog-teaser-title">Rebase or merge: which one gives you fewer conflicts?</h3>
+          <p class="blog-teaser-excerpt">A merge asks one three-way question about two end states; a rebase asks one per replayed commit, against a base that already contains your previous answers. Why that makes a rebase repeat some conflicts and skip others, three small reproducible scenarios with the stops counted, what git rerere actually removes, and how GitWand drives a paused rebase.</p>
           <span class="blog-teaser-cta">Read article →</span>
         </a>
       </div>

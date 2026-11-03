@@ -351,6 +351,7 @@ export default defineConfig({
           text: 'Blog',
           items: [
             { text: 'All articles', link: '/blog/' },
+            { text: 'Rebase or merge: fewer conflicts?', link: '/blog/rebase-vs-merge-conflicts' },
             { text: 'Trivial conflicts: a taxonomy', link: '/blog/trivial-conflicts-taxonomy' },
             { text: 'Reading a Git conflict marker', link: '/blog/reading-git-conflict-markers' },
             { text: 'Three outcomes, not two (v3.11)', link: '/blog/v3-11-three-outcomes-not-two' },
