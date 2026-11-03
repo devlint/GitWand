@@ -46,7 +46,7 @@ type FormatResult = { lines: string[] | null; reason: string };
 const DOCKERFILE_INSTRUCTIONS = new Set([
   "FROM", "RUN", "CMD", "LABEL", "EXPOSE", "ENV", "ADD", "COPY",
   "ENTRYPOINT", "VOLUME", "USER", "WORKDIR", "ARG", "ONBUILD",
-  "STOPSIGNAL", "HEALTHCHECK", "SHELL",
+  "STOPSIGNAL", "HEALTHCHECK", "SHELL", "MAINTAINER",
 ]);
 
 function parseDockerfileInstructions(lines: string[]): Instruction[] {
@@ -77,7 +77,8 @@ function parseDockerfileInstructions(lines: string[]): Instruction[] {
     if (DOCKERFILE_INSTRUCTIONS.has(firstWord)) {
       // Collecter les lignes de continuation (\)
       const rawLines = [line];
-      while (lines[i]?.endsWith("\\") && i + 1 < lines.length) {
+      // `\` suivi d'espaces ou d'un `\r` (CRLF) continue aussi la ligne.
+      while (/\\\s*$/.test(lines[i] ?? "") && i + 1 < lines.length) {
         i++;
         rawLines.push(lines[i]);
       }
@@ -124,17 +125,48 @@ function parseDockerfileInstructions(lines: string[]): Instruction[] {
 /**
  * Fusionne deux listes d'instructions d'un même stage Dockerfile.
  * Retourne les lignes fusionnées ou null si un conflit irréductible est détecté.
+ *
+ * `baseInstructions` (stage de base apparié, absent en diff2) : quand une
+ * instruction diffère entre les deux côtés et qu'un côté est resté égal à la
+ * base, c'est l'autre côté qui l'a changée — on garde son changement au lieu
+ * d'appliquer « prefer theirs », qui effaçait en silence une modification
+ * faite seulement côté ours. Seules les clés uniques dans le stage de base
+ * servent (plusieurs `RUN` partagent la clé `RUN` : ambigu).
  */
-function mergeStage(oursInstructions: Instruction[], theirsInstructions: Instruction[]): string[] | null {
+function mergeStage(
+  oursInstructions: Instruction[],
+  theirsInstructions: Instruction[],
+  baseInstructions?: Instruction[],
+): string[] | null {
   // Indexer theirs par (kind, key)
+  // Une clé répétée côté theirs (plusieurs `RUN`, deux `COPY` vers la même
+  // destination) ne garderait que la dernière instruction dans la map, et les
+  // précédentes seraient perdues : on laisse le moteur textuel. Les lignes
+  // vides et commentaires partagent aussi une clé mais ne portent pas de sens.
   const theirsMap = new Map<string, Instruction>();
   for (const instr of theirsInstructions) {
     const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
+    if (theirsMap.has(mapKey) && instr.kind !== "BLANK" && instr.kind !== "COMMENT") return null;
     theirsMap.set(mapKey, instr);
+  }
+
+  const baseRawByKey = new Map<string, string | null>();
+  for (const instr of baseInstructions ?? []) {
+    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
+    baseRawByKey.set(mapKey, baseRawByKey.has(mapKey) ? null : instr.raw.join("\n"));
   }
 
   const result: string[] = [];
   const seen = new Set<string>();
+
+  // Même garde côté ours : avec une clé répétée, la même instruction theirs
+  // serait appariée plusieurs fois (et sortirait en double).
+  const oursKeys = new Set<string>();
+  for (const instr of oursInstructions) {
+    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
+    if (oursKeys.has(mapKey) && instr.kind !== "BLANK" && instr.kind !== "COMMENT") return null;
+    oursKeys.add(mapKey);
+  }
 
   for (const oursInstr of oursInstructions) {
     const mapKey = oursInstr.key ? `${oursInstr.kind}:${oursInstr.key}` : oursInstr.kind;
@@ -155,6 +187,19 @@ function mergeStage(oursInstructions: Instruction[], theirsInstructions: Instruc
       // Identiques → inclure une fois
       result.push(...oursInstr.raw);
       continue;
+    }
+
+    // Changement d'un seul côté → le garder.
+    const baseRaw = baseRawByKey.get(mapKey);
+    if (typeof baseRaw === "string") {
+      if (baseRaw === theirsRaw) {
+        result.push(...oursInstr.raw);
+        continue;
+      }
+      if (baseRaw === oursRaw) {
+        result.push(...theirsInstr.raw);
+        continue;
+      }
     }
 
     // Conflit : stratégie par instruction
@@ -210,12 +255,21 @@ function mergeStage(oursInstructions: Instruction[], theirsInstructions: Instruc
  * Tente de résoudre un conflit dans un Dockerfile.
  */
 export function tryResolveDockerfileConflict(
-  _baseLines: string[],
+  baseLines: string[],
   oursLines: string[],
   theirsLines: string[],
 ): FormatResult {
   const oursInstructions = parseDockerfileInstructions(oursLines);
   const theirsInstructions = parseDockerfileInstructions(theirsLines);
+
+  // Une ligne qui n'est pas une instruction (suite d'un `\` commencé avant le
+  // hunk, corps de heredoc) n'a pas de clé fiable : moteur textuel.
+  if ([...oursInstructions, ...theirsInstructions].some((i) => i.kind === "OTHER")) {
+    return {
+      lines: null,
+      reason: "[dockerfile] The hunk contains lines that are not instructions (continuation or heredoc), falling back to the textual engine.",
+    };
+  }
 
   // Détecter les stages FROM…AS
   const splitByStage = (instructions: Instruction[]): Instruction[][] => {
@@ -235,22 +289,52 @@ export function tryResolveDockerfileConflict(
   const oursStages = splitByStage(oursInstructions);
   const theirsStages = splitByStage(theirsInstructions);
 
-  // Indexer les stages theirs par alias FROM
-  const getStageKey = (stage: Instruction[]): string => {
-    const from = stage.find((i) => i.kind === "FROM");
-    return from?.key ?? from?.value ?? `__stage_${Math.random()}`;
+  // Clé d'appariement des stages : l'alias `AS x` s'il existe, sinon la
+  // position parmi les stages sans alias. Un stage sans FROM (hunk qui ne
+  // contient que des instructions du milieu d'un stage) compte comme un stage
+  // sans alias. Ne JAMAIS apparier par l'image : un FROM modifié des deux côtés
+  // (node:20 vs node:22) ne s'apparierait pas et les deux stages seraient gardés.
+  const stageKeys = (stages: Instruction[][]): string[] => {
+    let unaliased = 0;
+    return stages.map((stage) => {
+      const alias = stage.find((i) => i.kind === "FROM")?.key;
+      return alias !== undefined ? `alias:${alias}` : `#${unaliased++}`;
+    });
   };
+  const oursKeys = stageKeys(oursStages);
+  const theirsKeys = stageKeys(theirsStages);
+
+  // L'appariement par position n'a de sens que si les deux côtés ont le même
+  // nombre de stages sans alias. Sinon (stage ajouté d'un côté, alias ajouté ou
+  // retiré d'un côté) on ne sait pas qui correspond à qui : moteur textuel.
+  const countUnaliased = (keys: string[]) => keys.filter((k) => k.startsWith("#")).length;
+  if (countUnaliased(oursKeys) !== countUnaliased(theirsKeys)) {
+    return {
+      lines: null,
+      reason: "[dockerfile] The two sides do not have the same unaliased stages, so they cannot be paired; falling back to the textual engine.",
+    };
+  }
 
   const theirsStageMap = new Map<string, Instruction[]>();
-  for (const stage of theirsStages) {
-    theirsStageMap.set(getStageKey(stage), stage);
+  theirsStages.forEach((stage, idx) => theirsStageMap.set(theirsKeys[idx], stage));
+
+  // Stages de base, appariés avec les mêmes clés — seulement si la base a le
+  // même nombre de stages sans alias (sinon la position ne dit rien) et n'est
+  // pas vide (diff2). Sans base, mergeStage garde « prefer theirs ».
+  const baseStageMap = new Map<string, Instruction[]>();
+  if (baseLines.length > 0) {
+    const baseStages = splitByStage(parseDockerfileInstructions(baseLines));
+    const baseKeys = stageKeys(baseStages);
+    if (countUnaliased(baseKeys) === countUnaliased(oursKeys)) {
+      baseStages.forEach((stage, idx) => baseStageMap.set(baseKeys[idx], stage));
+    }
   }
 
   const resultLines: string[] = [];
   const seenStages = new Set<string>();
 
-  for (const oursStage of oursStages) {
-    const key = getStageKey(oursStage);
+  for (const [idx, oursStage] of oursStages.entries()) {
+    const key = oursKeys[idx];
     const theirsStage = theirsStageMap.get(key);
     seenStages.add(key);
 
@@ -260,7 +344,7 @@ export function tryResolveDockerfileConflict(
       continue;
     }
 
-    const merged = mergeStage(oursStage, theirsStage);
+    const merged = mergeStage(oursStage, theirsStage, baseStageMap.get(key));
     if (!merged) {
       return {
         lines: null,
