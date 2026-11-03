@@ -85,9 +85,9 @@
   "devDependencies": {
     "@types/node": "^25.9.5",
     "@types/vscode": "^1.134.0",
-    "@vscode/vsce": "^3.9.2",
+    "@vscode/vsce": "^4.1.0",
     "esbuild": "^0.28.2",
-    "ovsx": "^1.1.1",
+    "ovsx": "^1.3.0",
     "typescript": "^5.9.3"
   },
   "license": "MIT"
