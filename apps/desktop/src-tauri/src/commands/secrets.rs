@@ -12,6 +12,7 @@
 use regex::Regex;
 
 use crate::git::cmd::git_cmd;
+use crate::git::{parse_hunk_header, HunkBody, HunkLineKind};
 use crate::types::{SecretFinding, SecretsScanConfig};
 
 /// Cap on returned findings — see apps/desktop/CLAUDE.md P6.4 "IPC payloads" rule.
@@ -425,9 +426,30 @@ fn extract_staged_added_lines(cwd: &str) -> Result<Vec<ScanFileInput>, String> {
     let mut current_path: Option<String> = None;
     let mut current_lines: Vec<ScanLine> = Vec::new();
     let mut new_line_no: u32 = 0;
+    // Remaining body of the current hunk, from its `@@` counts. Inside it a
+    // line is classified by its first character only: an added `++ token`
+    // is the diff line `+++ token`, which must neither be dropped nor be
+    // read as a `+++ b/<path>` header (AGENTS.md diff-parsing gotcha).
+    let mut body = HunkBody::default();
 
     for line in stdout.lines() {
+        if let Some(kind) = body.classify(line) {
+            if kind == HunkLineKind::Add {
+                if current_path.is_some() {
+                    current_lines.push(ScanLine {
+                        line: new_line_no,
+                        text: line[1..].to_string(),
+                    });
+                }
+                new_line_no += 1;
+            }
+            // `-` removed lines (and context, absent with --unified=0) are not
+            // part of the added-lines-only scan surface.
+            continue;
+        }
+
         if line.starts_with("diff --git ") {
+            body = HunkBody::default();
             flush(&mut files, &mut current_path, &mut current_lines);
         } else if let Some(rest) = line.strip_prefix("+++ ") {
             // "+++ b/<path>" for a file with new-side content, "+++ /dev/null" for a deletion.
@@ -439,28 +461,10 @@ fn extract_staged_added_lines(cwd: &str) -> Result<Vec<ScanFileInput>, String> {
         } else if line.starts_with("@@") {
             // "@@ -oldStart,oldCount +newStart,newCount @@" — only the new-side start matters,
             // since we only ever record `+` lines.
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                let new_range = parts[2].strip_prefix('+').unwrap_or("0");
-                new_line_no = if let Some(comma_idx) = new_range.find(',') {
-                    new_range[..comma_idx].parse().unwrap_or(0)
-                } else {
-                    new_range.parse().unwrap_or(0)
-                };
-            }
-        } else if line.starts_with('+') && !line.starts_with("+++") {
-            // A content added line starts with a single `+`; the file header is `+++ ` —
-            // distinguished above by parsing state, not by this check alone (AGENTS.md gotcha).
-            if current_path.is_some() {
-                current_lines.push(ScanLine {
-                    line: new_line_no,
-                    text: line[1..].to_string(),
-                });
-            }
-            new_line_no += 1;
+            let (_, _, new_start, _) = parse_hunk_header(line);
+            new_line_no = new_start.max(0) as u32;
+            body = HunkBody::from_header(line);
         }
-        // `-`-prefixed removed lines and (irrelevant here, since --unified=0) context lines are
-        // not part of the added-lines-only scan surface.
     }
 
     flush(&mut files, &mut current_path, &mut current_lines);
@@ -907,6 +911,37 @@ mod tests {
             assert_eq!(findings[0].file, "src/config.ts");
             assert_eq!(findings[0].line, 1);
             assert_ne!(findings[0].redacted_excerpt, "AKIAABCDEFGHIJKLMNOP");
+        }
+
+        #[test]
+        fn an_added_line_starting_with_plus_plus_is_scanned_under_its_own_path() {
+            // The added content `++ key …` is the diff line `+++ key …`: it is
+            // a hunk line, not a `+++ b/<path>` header, so it must be scanned
+            // (on line 2) and must not rename the file it belongs to.
+            let repo = TempRepo::new("plusplus");
+            repo.write("src/a.ts", "one\n");
+            repo.git(&["add", "src/a.ts"]);
+            repo.git(&["commit", "-q", "-m", "init"]);
+            repo.write(
+                "src/a.ts",
+                "one\n++ key = \"AKIAABCDEFGHIJKLMNOP\";\n++x\n-- note\n",
+            );
+            repo.write(
+                "src/b.ts",
+                "+ const k = \"sk_live_ABCDEFGHIJKLMNOPQRSTUVWX\";\n",
+            );
+            repo.git(&["add", "src/a.ts", "src/b.ts"]);
+
+            let mut findings = scan_staged(&repo.cwd(), &base_config()).unwrap();
+            findings.sort_by(|x, y| x.file.cmp(&y.file));
+
+            assert_eq!(findings.len(), 2, "{findings:?}");
+            assert_eq!(findings[0].pattern_id, "aws_access_key_id");
+            assert_eq!(findings[0].file, "src/a.ts");
+            assert_eq!(findings[0].line, 2);
+            assert_eq!(findings[1].pattern_id, "stripe_live_key");
+            assert_eq!(findings[1].file, "src/b.ts");
+            assert_eq!(findings[1].line, 1);
         }
 
         #[test]

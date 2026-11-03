@@ -24,6 +24,8 @@ export type FormatDispatchResult =
   | { status: "resolved"; lines: string[]; reason: string; resolverUsed: string }
   /** Le résolveur a résolu mais la politique rejette le résultat (ex: imports/non_overlapping off). */
   | { status: "rejected-policy"; reason: string }
+  /** Le résolveur a établi un vrai conflit sémantique — ne pas passer au moteur textuel. */
+  | { status: "conflict"; reason: string; resolverUsed: string }
   /** Aucun résolveur format-aware n'a traité ce hunk — continuer vers le moteur textuel. */
   | { status: "not-applicable"; note: string };
 
@@ -41,6 +43,10 @@ export function dispatchFormatAware(
   });
   if (formatResult.resolverUsed === "none") {
     return { status: "not-applicable", note: "" };
+  }
+
+  if (formatResult.lines === null && formatResult.conflict) {
+    return { status: "conflict", reason: formatResult.reason, resolverUsed: formatResult.resolverUsed };
   }
 
   if (formatResult.lines === null) {

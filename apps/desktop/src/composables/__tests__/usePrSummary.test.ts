@@ -17,11 +17,19 @@ import { usePrSummary, buildSummaryPrompt } from "../usePrSummary";
 describe("buildSummaryPrompt", () => {
   it("includes commit titles and a per-file +/- count", () => {
     const prompt = buildSummaryPrompt(
-      [{ path: "a.ts", raw: "+line1\n+line2\n-old" }],
+      [{ path: "a.ts", raw: "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1,2 @@\n+line1\n+line2\n-old" }],
       ["fix: handle null case"],
     );
     expect(prompt).toContain("fix: handle null case");
     expect(prompt).toContain("a.ts (+2/-1)");
+  });
+
+  it("counts hunk lines whose content starts with -- or ++, never the file headers", () => {
+    // A removed SQL comment `-- note` is the diff line `--- note`, an added
+    // `++x` is `+++x`: inside the hunk they are changes, not headers.
+    const raw = "diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- note\n+++x\n ctx\n";
+    const prompt = buildSummaryPrompt([{ path: "q.sql", raw }], ["x"]);
+    expect(prompt).toContain("q.sql (+1/-1)");
   });
 
   it("notes missing commit titles gracefully", () => {

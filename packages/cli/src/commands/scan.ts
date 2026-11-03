@@ -18,8 +18,13 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  classifyHunkLine,
+  hunkBodyFromHeader,
+  noHunkBody,
   parseGitwandrc,
+  parseHunkHeader,
   scanSecrets,
+  type HunkBody,
   type ScanFileInput,
   type SecretFinding,
   type SecretsScanConfig,
@@ -65,23 +70,32 @@ export function extractStagedAddedLines(diffText: string): ScanFileInput[] {
     currentLines = [];
   }
 
+  // Remaining body of the current hunk, from its `@@` counts: inside it an added `++ token`
+  // is the line `+++ token`, a hunk line — neither dropped nor read as a `+++ b/<path>` header.
+  let body: HunkBody = noHunkBody();
+
   for (const line of diffText.split("\n")) {
-    if (line.startsWith("diff --git ")) {
+    const kind = classifyHunkLine(body, line);
+    if (kind) {
+      if (kind === "add") {
+        if (currentPath !== null) {
+          currentLines.push({ line: newLineNo, text: line.slice(1) });
+        }
+        newLineNo++;
+      }
+      // `-`-prefixed removed lines are irrelevant for the added-lines-only scan surface.
+    } else if (line.startsWith("diff --git ")) {
+      body = noHunkBody();
       flush();
     } else if (line.startsWith("+++ ")) {
       // "+++ b/<path>" for a file with new-side content, "+++ /dev/null" for a deletion.
       const rest = line.slice(4);
       currentPath = rest === "/dev/null" ? null : rest.replace(/^b\//, "");
     } else if (line.startsWith("@@")) {
-      const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      newLineNo = match ? parseInt(match[1], 10) : 0;
-    } else if (line.startsWith("+") && !line.startsWith("+++")) {
-      if (currentPath !== null) {
-        currentLines.push({ line: newLineNo, text: line.slice(1) });
-      }
-      newLineNo++;
+      const range = parseHunkHeader(line);
+      newLineNo = range ? range.newStart : 0;
+      body = hunkBodyFromHeader(line);
     }
-    // `-`-prefixed removed lines are irrelevant for the added-lines-only scan surface.
   }
   flush();
 

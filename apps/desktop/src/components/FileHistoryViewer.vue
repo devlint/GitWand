@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, toRef } from "vue";
 import type { BlameLine, FileLogEntry, GitDiff } from "../utils/backend";
 import Avatar from "./Avatar.vue";
 import { getGitBlame, getGitFileLog, getGitFileLogPickaxe, getGitFileLogRange, getGitFileDiff, type BlameAlgorithm, type PickaxeMode } from "../utils/backend";
@@ -11,6 +11,9 @@ import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
 import { useAIProvider } from "../composables/useAIProvider";
 import { useBlameContext } from "../composables/useBlameContext";
 import AiSparkle from "./AiSparkle.vue";
+import { formatBytes } from "../composables/useFilePreview";
+import { useFileCompare } from "../composables/useFileCompare";
+import { useFileHistoryLists } from "../composables/useFileHistoryLists";
 
 const { t, locale } = useI18n();
 const ai = useAIProvider();
@@ -66,65 +69,49 @@ type Tab = "blame" | "log" | "compare";
 const activeTab = ref<Tab>("blame");
 
 const blameLines = ref<BlameLine[]>([]);
-const fileLog = ref<FileLogEntry[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
 /** Blame algorithm — initialised from settings, overridable inline without leaving the view. */
 const blameAlgo = ref<BlameAlgorithm>(loadSettings().blameAlgorithm ?? "histogram");
 
+// The per-file lists (log, pickaxe, line-range) and the generation token that
+// every async loader below checks before writing: a reply for the previous
+// file never lands in the current one.
+const lists = useFileHistoryLists({
+  cwd: toRef(props, "cwd"),
+  filePath: toRef(props, "filePath"),
+  loaders: { getPickaxe: getGitFileLogPickaxe, getRange: getGitFileLogRange },
+});
+const {
+  fileLog,
+  pickaxeResults,
+  pickaxeLoading,
+  pickaxeError,
+  rangeLogLines,
+  rangeLogResults,
+  rangeLogLoading,
+  rangeLogError,
+  clearRangeLog,
+} = lists;
+
 // ─── Pickaxe (Log tab search) ────────────────────────────
 const pickaxeQuery = ref("");
 const pickaxeMode = ref<PickaxeMode>("S");
-const pickaxeResults = ref<FileLogEntry[] | null>(null);
-const pickaxeLoading = ref(false);
-const pickaxeError = ref<string | null>(null);
 
-async function runPickaxe() {
-  const q = pickaxeQuery.value.trim();
-  if (!q || !props.cwd || !props.filePath) return;
-  pickaxeLoading.value = true;
-  pickaxeError.value = null;
-  try {
-    pickaxeResults.value = await getGitFileLogPickaxe(props.cwd, props.filePath, q, pickaxeMode.value);
-  } catch (err: any) {
-    pickaxeError.value = err?.message || String(err);
-  } finally {
-    pickaxeLoading.value = false;
-  }
+function runPickaxe() {
+  void lists.runPickaxe(pickaxeQuery.value, pickaxeMode.value);
 }
 
 function clearPickaxe() {
   pickaxeQuery.value = "";
-  pickaxeResults.value = null;
-  pickaxeError.value = null;
+  lists.clearPickaxe();
 }
 
 // ─── Line-range (Blame tab → switch to Log) ──────────────
-const rangeLogLines = ref<{ start: number; end: number } | null>(null);
-const rangeLogResults = ref<FileLogEntry[] | null>(null);
-const rangeLogLoading = ref(false);
-const rangeLogError = ref<string | null>(null);
-
-async function showRangeHistory(startLine: number, endLine: number) {
-  if (!props.cwd || !props.filePath) return;
-  rangeLogLines.value = { start: startLine, end: endLine };
-  rangeLogResults.value = null;
-  rangeLogError.value = null;
+function showRangeHistory(startLine: number, endLine: number) {
   activeTab.value = "log";   // switch to log tab to show results
-  rangeLogLoading.value = true;
-  try {
-    rangeLogResults.value = await getGitFileLogRange(props.cwd, props.filePath, startLine, endLine);
-  } catch (err: any) {
-    rangeLogError.value = err?.message || String(err);
-  } finally {
-    rangeLogLoading.value = false;
-  }
-}
-
-function clearRangeLog() {
-  rangeLogLines.value = null;
-  rangeLogResults.value = null;
+  void lists.showRangeHistory(startLine, endLine);
 }
 
 // The effective log to display in the Log tab:
@@ -153,24 +140,64 @@ function showRangeHistoryForBlock(idx: number) {
 
 async function loadBlame(path: string) {
   if (!path || !props.cwd) return;
+  const token = lists.token();
   loading.value = true;
   error.value = null;
   try {
-    blameLines.value = await getGitBlame(props.cwd, path, blameAlgo.value);
+    const blame = await getGitBlame(props.cwd, path, blameAlgo.value);
+    if (lists.isCurrent(token)) blameLines.value = blame;
   } catch (err: any) {
-    error.value = err?.message || String(err);
+    if (lists.isCurrent(token)) error.value = err?.message || String(err);
   } finally {
-    loading.value = false;
+    if (lists.isCurrent(token)) loading.value = false;
   }
 }
 
 // Reload blame when algorithm changes (file stays the same)
 watch(blameAlgo, () => { if (props.filePath) loadBlame(props.filePath); });
 
+// ─── Time-travel diff ─────────────────────────────────
+// Selection, result and a Compare-scoped error live in `useFileCompare`: a
+// failed compare must leave blame and the log usable.
+const compare = useFileCompare({
+  cwd: toRef(props, "cwd"),
+  filePath: toRef(props, "filePath"),
+  history: fileLog,
+  extra: computed(() => [pickaxeResults.value, rangeLogResults.value]),
+  getDiff: getGitFileDiff,
+});
+const {
+  from: compareFrom,
+  to: compareTo,
+  diff: compareDiff,
+  error: compareError,
+  loading: compareLoading,
+  nameUnknown: compareNameUnknown,
+} = compare;
+
+// The tab the user was on when the second commit was picked. A reply only
+// brings the Compare tab forward if they are still there.
+let compareStartedOn: Tab | null = null;
+
+function selectForCompare(hash: string) {
+  compareStartedOn = activeTab.value;
+  compare.select(hash);
+}
+
+watch([compareDiff, compareError], ([d, e]) => {
+  if ((d || e) && activeTab.value === compareStartedOn) activeTab.value = "compare";
+});
+
 // ─── Load data on filePath change ───────────────────────
 watch(
   () => props.filePath,
   async (path) => {
+    // A new file: every list, selection and reply in flight for the previous
+    // one is dropped, so none of it can feed this file's compare.
+    const token = lists.startFile();
+    compare.reset();
+    pickaxeQuery.value = "";
+    closeBlameExplain();
     if (!path || !props.cwd) return;
     loading.value = true;
     error.value = null;
@@ -179,12 +206,13 @@ watch(
         getGitBlame(props.cwd, path, blameAlgo.value),
         getGitFileLog(props.cwd, path),
       ]);
+      if (!lists.isCurrent(token)) return;
       blameLines.value = blame;
       fileLog.value = log;
     } catch (err: any) {
-      error.value = err?.message || String(err);
+      if (lists.isCurrent(token)) error.value = err?.message || String(err);
     } finally {
-      loading.value = false;
+      if (lists.isCurrent(token)) loading.value = false;
     }
   },
   { immediate: true },
@@ -233,50 +261,6 @@ function isNewAuthorBlock(idx: number): boolean {
   const prev = blameLines.value[idx - 1];
   const curr = blameLines.value[idx];
   return prev.hashFull !== curr.hashFull;
-}
-
-// ─── Time-travel diff ─────────────────────────────────
-const compareFrom = ref<string | null>(null);
-const compareTo = ref<string | null>(null);
-const compareDiff = ref<GitDiff | null>(null);
-const compareLoading = ref(false);
-
-function selectForCompare(hash: string) {
-  if (!compareFrom.value) {
-    compareFrom.value = hash;
-  } else if (!compareTo.value) {
-    compareTo.value = hash;
-    loadCompare();
-  } else {
-    // Reset and start over
-    compareFrom.value = hash;
-    compareTo.value = null;
-    compareDiff.value = null;
-  }
-}
-
-function clearCompare() {
-  compareFrom.value = null;
-  compareTo.value = null;
-  compareDiff.value = null;
-}
-
-async function loadCompare() {
-  if (!compareFrom.value || !compareTo.value || !props.cwd) return;
-  compareLoading.value = true;
-  try {
-    compareDiff.value = await getGitFileDiff(
-      props.cwd,
-      props.filePath,
-      compareFrom.value,
-      compareTo.value,
-    );
-    activeTab.value = "compare";
-  } catch (err: any) {
-    error.value = err?.message || String(err);
-  } finally {
-    compareLoading.value = false;
-  }
 }
 
 function isSelectedForCompare(hash: string): "from" | "to" | null {
@@ -494,7 +478,7 @@ function shortHash(hash: string): string {
       </div>
       <div class="fhv-compare-hint fhv-compare-hint--active" v-else-if="compareFrom && !compareTo">
         <span>{{ t('diff.compareFrom', shortHash(compareFrom)) }}</span>
-        <button class="fhv-compare-clear" @click="clearCompare">{{ t('common.cancel') }}</button>
+        <button class="fhv-compare-clear" @click="compare.reset()">{{ t('common.cancel') }}</button>
       </div>
 
       <div
@@ -540,6 +524,12 @@ function shortHash(hash: string): string {
       <div v-if="compareLoading" class="fhv-loading">
         <span class="muted">{{ t('common.loading') }}</span>
       </div>
+      <div v-else-if="compareError" class="fhv-compare-empty fhv-compare-error" role="alert">
+        <span>{{ t('diff.compareFailed') }}</span>
+        <span v-if="compareNameUnknown" class="muted">{{ t('diff.compareNameUnknown') }}</span>
+        <span class="mono muted fhv-compare-error-detail">{{ compareError }}</span>
+        <button class="fhv-compare-go-log" @click="activeTab = 'log'">{{ t('diff.compareGoLog') }}</button>
+      </div>
       <div v-else-if="!compareDiff || !compareFrom || !compareTo" class="fhv-compare-empty">
         <span class="muted">{{ t('diff.compareEmpty') }}</span>
         <button class="fhv-compare-go-log" @click="activeTab = 'log'">{{ t('diff.compareGoLog') }}</button>
@@ -549,6 +539,12 @@ function shortHash(hash: string): string {
           <span class="fhv-compare-label fhv-compare-label--from">{{ shortHash(compareFrom) }}</span>
           <span class="muted">&rarr;</span>
           <span class="fhv-compare-label fhv-compare-label--to">{{ shortHash(compareTo) }}</span>
+        </div>
+        <div v-if="compareNameUnknown" class="fhv-compare-truncated">
+          {{ t('diff.compareNameUnknown') }}
+        </div>
+        <div v-if="compareDiff.truncatedFromBytes" class="fhv-compare-truncated">
+          {{ t('diff.compareTruncated', formatBytes(compareDiff.truncatedFromBytes)) }}
         </div>
         <div class="fhv-compare-diff" v-if="compareDiff.hunks.length > 0">
           <div v-for="(hunkPairs, hIdx) in comparePairs" :key="hIdx" class="fhv-compare-hunk">
@@ -1095,6 +1091,25 @@ function shortHash(hash: string): string {
 .fhv-compare {
   flex: 1;
   overflow: auto;
+}
+
+.fhv-compare-error {
+  text-align: center;
+}
+
+.fhv-compare-error-detail {
+  font-size: var(--text-xs);
+  word-break: break-word;
+}
+
+/* Same look as CommitDiffViewer's `.cdv-truncated`. */
+.fhv-compare-truncated {
+  padding: 8px 16px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  text-align: center;
+  font-style: italic;
 }
 
 .fhv-compare-empty {

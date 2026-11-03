@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Two imports of the same module are no longer both kept (#278).** When one side added `import { useAuth } from "./auth"` and the other `import useAuth from "./auth"`, the imports resolver declined, and the hunk went on to the line patterns, which applied it as `insertion_at_boundary` with both lines: a duplicate binding the compiler rejects. When both sides add an import of the same module that declares the same name, the hunk is now classified `complex` and left to you; two forms that bind different names (`import React` and `import { useState }`) are still both kept.
+- **The Dockerfile resolver no longer duplicates a stage or an instruction (#278).** Stages without an `AS` alias were matched by their image, so a `FROM` changed on both sides (`node:20` against `node:22`) kept both lines and created a second stage; a hunk with no `FROM` at all matched nothing, so an `ENV PORT` changed on both sides came out twice. Unaliased stages are now matched by position. When the two sides do not have the same number of them, the hunk goes to the textual engine. Within a stage, an instruction changed on one side only now keeps that change instead of the other side's base value.
+
+## [3.12.4] - 2026-10-19
+
+### Added
+- **A security policy (#272).** `SECURITY.md` says how to report a vulnerability privately and which versions get security fixes (the latest release only).
+
+### Fixed
+- **GitWand starts on a Windows without the Visual C++ Redistributable (#273).** From v3.11.2 the Windows build imported `VCRUNTIME140.dll`, so on a clean machine the app quit at launch with `STATUS_DLL_NOT_FOUND`, and winget's validation rejected v3.11.2 to v3.12.3. The C runtime is now linked statically, and the release fails if the exe depends on it again.
+- **The release really re-uploads missing installers (#273).** The step that re-uploads an asset GitHub failed to store looked in a folder the build never writes to, so it never checked anything.
+
+## [3.12.3] - 2026-10-14
+
 ### Added
 - **Act on PR comments from the PR detail view (#257).** On GitHub, you can reply to a review thread, edit or delete your own comments, resolve or unresolve a conversation, and copy a comment's link. Deleting the comment that starts a thread keeps its replies, and edits and replies are saved exactly as typed.
 - **A Force software rendering setting on Linux (#257).** Settings → General can turn GPU rendering off for systems where GitWand does not start. It applies at the next launch.
@@ -25,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`gitwand_resolve_hunk_llm` accepts valid answers in files with several conflicts (#260).** The residual-marker check scanned the whole file, so the other, still unresolved hunks made every answer fail. It now checks the model's answer only, and the JSON syntax check is skipped (and reported as skipped) while other conflicts remain.
 - **The Bitbucket PR list returns the requested window for any offset (#261).** The server skips `(page - 1) × pagelen`, but the request inflated the page size and then skipped locally, so an offset that was not a multiple of the limit returned the wrong PRs (offset 25, limit 10 gave items 35–45). The page size is now constant across the requests of one window, and a failing page past the end no longer drops the PRs already fetched.
 - **PR write actions target the right PR on a fork (#262).** Mark ready, merge, auto-merge and request reviewers resolved the PR number in `origin` first, so on a fork with a same-numbered PR they acted on the fork's PR. They now use the base repo's PR, and `gh pr ready` gets `--repo`. After a merge, the head branch is deleted only for a same-repo PR, as `gh pr merge --delete-branch` does; a fork's branch is left alone.
+- **File history compare works in the desktop app (#269).** The Compare tab called a `git_file_diff` command that never existed in the Rust backend, so it failed on every call outside `dev:web`. The command now exists and follows renames: the file history returns the file's name at each commit and the compare diffs the two versions under those names. User diff settings (external diff tool, color, textconv) no longer change the output, file names are taken literally, and a failure shows inside the Compare tab instead of an empty "no differences" or a blocked panel. A test now checks that every command the frontend calls is registered in Rust.
+- **Diffs no longer drop lines that start with `--` or `++` (#270).** Every diff parser treated `---` and `+++` as file headers even inside a hunk, so a removed `-- comment` line (SQL, Lua) or an added `++x` line vanished from the diff and the line numbers after it shifted, in the working-tree diff, commit view, file history, PR panel and absorb. The secrets scan also took an added `++ token` line for a header and attributed the following lines to a file named `token`. Hunks are now bounded by the line counts in their `@@` header and classified by first character only, by one shared parser in Rust and one in `@gitwand/core` (used by the CLI and the desktop frontend). A blank context line printed as an empty line (`diff.suppressBlankEmpty`) is kept too.
 
 ## [3.12.2] - 2026-10-11
 
@@ -1680,7 +1697,10 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.12.1...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.12.4...HEAD
+[3.12.4]: https://github.com/devlint/GitWand/compare/v3.12.3...v3.12.4
+[3.12.3]: https://github.com/devlint/GitWand/compare/v3.12.2...v3.12.3
+[3.12.2]: https://github.com/devlint/GitWand/compare/v3.12.1...v3.12.2
 [3.12.1]: https://github.com/devlint/GitWand/compare/v3.12.0...v3.12.1
 [3.12.0]: https://github.com/devlint/GitWand/compare/v3.11.2...v3.12.0
 [3.11.2]: https://github.com/devlint/GitWand/compare/v3.11.1...v3.11.2

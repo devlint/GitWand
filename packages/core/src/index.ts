@@ -44,6 +44,18 @@ export { isChangelogFile } from "./resolver/validation.js";
 export { findEcosystem, REGEN_ECOSYSTEMS, type RegenEcosystem } from "./regenerate/registry.js";
 export { buildRegenerationPlan, type RegenerationPlan } from "./regenerate/plan.js";
 export { mergeNonOverlapping, computeDiff, lcs } from "./diff.js";
+// Unified-diff hunk bodies: tell `---`/`+++` file headers from hunk lines
+// whose content starts with `--`/`++`.
+export {
+  parseHunkHeader,
+  noHunkBody,
+  hunkBodyFor,
+  hunkBodyFromHeader,
+  classifyHunkLine,
+  type HunkHeaderRange,
+  type HunkBody,
+  type HunkLineKind,
+} from "./hunk-body.js";
 
 // v2.1 — nouveaux backends diff exposés
 export {

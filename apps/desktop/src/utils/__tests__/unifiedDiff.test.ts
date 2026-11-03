@@ -124,7 +124,10 @@ describe("parseFileDiff", () => {
         "index 111..222 100644",
         "--- a/a.ts",
         "+++ b/a.ts",
-        "@@ -1,2 +1,2 @@",
+        // Counts as git writes them: context a, blank, old|new a, blank.
+        // The parser now bounds a hunk by these counts (see the `--`/`++`
+        // tests below), so they must match the body.
+        "@@ -1,4 +1,4 @@",
         " context a",
         "",
         "-old a",
@@ -158,6 +161,80 @@ describe("parseFileDiff", () => {
       const slices = indexDiffFiles(diff);
       const actual = slices.map((s) => parseFileDiff(s.raw));
       expect(actual).toEqual(expected);
+    });
+  });
+
+  // A removed SQL comment `-- old` is the diff line `--- old`, an added `++x`
+  // is `+++x`. They used to be skipped as `---`/`+++` file headers, leaving
+  // the hunk with only its context lines and every later line number off.
+  // `diff.suppressBlankEmpty=true` prints a blank context line as "". It is
+  // context only while counts remain on both sides; past them it is ignored.
+  it('treats "" as context only while both hunk counts remain', () => {
+    const diff = [
+      "diff --git a/f.txt b/f.txt",
+      "--- a/f.txt",
+      "+++ b/f.txt",
+      "@@ -1,4 +1,2 @@",
+      " a",
+      "",
+      "-x",
+      "",
+      "-y",
+      "",
+      "",
+    ].join("\n");
+    expect(parseFileDiff(diff).hunks[0].lines).toEqual([
+      { type: "context", content: "a", oldLineNo: 1, newLineNo: 1 },
+      { type: "context", content: "", oldLineNo: 2, newLineNo: 2 },
+      { type: "delete", content: "x", oldLineNo: 3 },
+      { type: "delete", content: "y", oldLineNo: 4 },
+    ]);
+  });
+
+  describe("hunk lines whose content starts with -- or ++", () => {
+    const SQL_DIFF = [
+      "diff --git a/q.sql b/q.sql",
+      "index 111..222 100644",
+      "--- a/q.sql",
+      "+++ b/q.sql",
+      "@@ -1,5 +1,5 @@",
+      " SELECT 1;",
+      "--- old comment",
+      "+++x",
+      " SELECT 2;",
+      "---- x",
+      "++++ y",
+      " SELECT 3;",
+      "diff --git a/z.ts b/z.ts",
+      "index 333..444 100644",
+      "--- a/z.ts",
+      "+++ b/z.ts",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+      "\\ No newline at end of file",
+      "",
+    ].join("\n");
+
+    it("keeps them, with the right line numbers", () => {
+      const [sql, z] = parseUnifiedDiff(SQL_DIFF);
+      expect(sql.path).toBe("q.sql");
+      expect(sql.hunks).toHaveLength(1);
+      expect(sql.hunks[0].lines).toEqual([
+        { type: "context", content: "SELECT 1;", oldLineNo: 1, newLineNo: 1 },
+        { type: "delete", content: "-- old comment", oldLineNo: 2 },
+        { type: "add", content: "++x", newLineNo: 2 },
+        { type: "context", content: "SELECT 2;", oldLineNo: 3, newLineNo: 3 },
+        { type: "delete", content: "--- x", oldLineNo: 4 },
+        { type: "add", content: "+++ y", newLineNo: 4 },
+        { type: "context", content: "SELECT 3;", oldLineNo: 5, newLineNo: 5 },
+      ]);
+      // The next file's headers are still headers.
+      expect(z.path).toBe("z.ts");
+      expect(z.hunks[0].lines.map((l) => [l.type, l.content])).toEqual([
+        ["delete", "a"],
+        ["add", "b"],
+      ]);
     });
   });
 });

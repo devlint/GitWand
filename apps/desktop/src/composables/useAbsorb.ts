@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader, type HunkBody } from "@gitwand/core";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 
@@ -68,25 +69,32 @@ interface DiffHunk {
 
 /**
  * Parse `git diff` output to extract per-file hunk ranges.
+ *
+ * Hunk bodies are skipped by their `@@` counts: a removed `-- a/x` line is
+ * the diff line `--- a/x`, which must not be read as a file header (it used
+ * to reassign the following hunks to a file named `x`).
  */
-function parseDiffHunks(diffOutput: string): DiffHunk[] {
+export function parseDiffHunks(diffOutput: string): DiffHunk[] {
   const hunks: DiffHunk[] = [];
   let currentFile = "";
+  let body: HunkBody = noHunkBody();
 
   for (const line of diffOutput.split("\n")) {
-    // --- a/path or +++ b/path
-    if (line.startsWith("--- a/")) {
+    if (classifyHunkLine(body, line)) continue;
+    if (line.startsWith("diff ")) {
+      body = noHunkBody();
+    } else if (line.startsWith("--- a/")) {
+      // --- a/path or +++ b/path
       currentFile = line.slice(6);
     } else if (line.startsWith("+++ b/")) {
       currentFile = line.slice(6);
     } else if (line.startsWith("@@ ")) {
       // @@ -origStart,origCount +newStart,newCount @@
-      const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-      if (match && currentFile) {
-        const origStart = parseInt(match[1], 10);
-        const origCount = parseInt(match[2] ?? "1", 10);
-        if (origCount > 0) {
-          hunks.push({ filePath: currentFile, origStart, origCount });
+      body = hunkBodyFromHeader(line);
+      const range = parseHunkHeader(line);
+      if (range) {
+        if (currentFile && range.oldCount > 0) {
+          hunks.push({ filePath: currentFile, origStart: range.oldStart, origCount: range.oldCount });
         }
       }
     }

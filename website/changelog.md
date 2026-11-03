@@ -5,6 +5,44 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.12.4 — October 2026
+
+### GitWand starts on every Windows again
+
+Since v3.11.2, the Windows app quietly relied on Microsoft's Visual C++ runtime. Most developer machines have it installed, so it went unnoticed, but on a clean Windows GitWand closed the moment it opened, and winget refused to publish v3.11.2 to v3.12.3. The runtime is now built into the app, so nothing extra has to be installed, and every release now checks the Windows build for this dependency before it goes out.
+
+### A security policy
+
+GitWand now has a `SECURITY.md`: report a vulnerability privately by email rather than in a public issue. Security fixes go to the latest release.
+
+## v3.12.3 — October 2026
+
+### Three safer ways to move a branch
+
+Resetting to a commit gets a fourth mode, **Keep**, beside soft, mixed and hard. It drops the commits like hard but keeps your uncommitted edits, and if one of them sits in a file the reset would have to rewrite, git refuses and nothing changes. The message names the files.
+
+With the new *Auto fast-forward* setting (off by default), the background fetch moves your current branch forward when it is simply behind its upstream: no local commits, no tracked edits, no conflict, no operation in progress. It never merges or rebases, and when something holds it back the sync button's tooltip says what.
+
+And when a file you track now matches a `.gitignore` rule, so the rule silently has no effect on it, the sidebar tells you and offers to untrack it. The file stays on disk; the removal is staged for you to commit.
+
+### Diffs that keep every line
+
+A removed line starting with `--`, a SQL or Lua comment for instance, or an added line starting with `++`, used to vanish from diffs, and every line number after it shifted by one. That touched the working-tree diff, the commit view, file history, pull requests and absorb, and the secrets scan could even file the lines that followed under the wrong name. All of them now share one parser per language that reads each hunk exactly as long as its header says.
+
+The Compare tab of file history, which had never worked in the desktop app, now does, and it follows the file across renames.
+
+### Pull requests and Markdown
+
+On GitHub you can reply to a review thread, edit or delete your own comments, resolve a conversation and copy a comment's link without leaving the PR. Markdown in READMEs, descriptions and comments is now rendered by GitWand itself and scrolls noticeably faster. Mark ready, merge, auto-merge and review requests act on the right PR when you work from a fork. Bitbucket PR lists show the right page.
+
+### Linux uses the GPU again
+
+GitWand used to force software rendering on every Linux launch to dodge a WebKitGTK crash. It now renders with the GPU, switches to software rendering only after a launch that died before showing its window, and lets you turn it on yourself in Settings → General.
+
+### The engine, and other fixes
+
+When both branches added the same lines, the `non_overlapping` resolver could write them twice from `diff3` markers; it now removes the shared lines first, as `zdiff3` does. The MCP server's `gitwand_resolve_hunk_llm` stops rejecting good answers in files with several conflicts, GitWand starts even when another app owns its global shortcut, and the AI review summary is generated once per PR update, even when several views ask for it at the same time.
+
 ## v3.12.2 — October 2026
 
 ### AI listens to your language and model again

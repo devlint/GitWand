@@ -139,19 +139,59 @@ commit messages displayed as HTML, etc.) must be sanitized with `useSafeHtml.ts`
 
 ## Diff Parsing — Critical Gotcha
 
-When classifying lines in a git diff, detect context lines by checking for a
-leading space character.
+Classify hunk lines only inside a hunk body **bounded by the counts of its
+`@@ -a,b +c,d @@` header**, and classify them by their first character only.
 
 ```typescript
-// WRONG — empty strings pass this test and become phantom context lines
+// WRONG — unbounded: the empty strings that split("\n") leaves between
+// sections and after the last line pass this test and become phantom
+// context lines (then `git apply` rejects the rebuilt patch)
 if (!line.startsWith('\\')) { /* context line */ }
 
-// CORRECT
-if (line.startsWith(' ')) { /* context line */ }
+// WRONG — header filter applied inside a hunk: a removed `-- comment`
+// is the diff line `--- comment`, an added `++x` is `+++x`; both get dropped
+if (line.startsWith('---') || line.startsWith('+++')) continue;
+
+// CORRECT — use the shared hunk-body helpers
+const kind = classifyHunkLine(body, line); // "add" | "delete" | "context" | null
 ```
 
-This applies to both the TypeScript (`packages/core`) and Rust
-(`apps/desktop/src-tauri`) diff parsers. Both implementations must stay in sync.
+The rule, with strict per-side counts from the header:
+
+- `+` → add, while new-side lines remain; `-` → delete, while old-side lines
+  remain (whatever follows: `--- x` is content, not a header).
+- `' '` → context, while lines remain on **both** sides.
+- `""` → context under the same condition (both sides): that is how git
+  prints a blank context line with `diff.suppressBlankEmpty=true` (and how
+  some forges serve it).
+- anything else (`\ No newline at end of file`) is not a hunk line.
+
+A line whose side is used up is not a hunk line: a header that undercounts
+its body ends the hunk there, so a following `--- a/x` is read as a header
+(fail closed). Outside a body — before the first `@@`, after `diff --git`,
+or once the counts are exhausted — `---`/`+++` are file headers and `""` is
+ignored. The bound is what makes treating `""` as context safe; never accept
+`""` in an unbounded parser. A combined `@@@` hunk (`diff --cc`) has
+per-parent counts, is classified by first character only and stays open
+until the next `diff ` line.
+
+Shared implementations, which must stay in sync — do not write another parser:
+
+- **TypeScript**, `packages/core/src/hunk-body.ts` (`classifyHunkLine`,
+  `hunkBodyFromHeader`, `parseHunkHeader`, `noHunkBody`). Callers:
+  - core: `history/parse.ts` (`isPureMove`);
+  - CLI: `packages/cli/src/commands/scan.ts` (`extractStagedAddedLines`);
+  - desktop frontend: `utils/unifiedDiff.ts` (`parseFileDiff` /
+    `parseUnifiedDiff`, used by PR and commit review and `PullRequestPanel.vue`),
+    `composables/useAbsorb.ts`, `composables/usePrSummary.ts`;
+  - `apps/desktop/dev-server.mjs`: `devParseDiffHunks` for `/api/git-diff`,
+    `/api/git-file-diff`, `/api/git-show`, and `/api/scan-secrets` directly
+    (core loaded once by `loadDevCore`, from `packages/core/dist`).
+- **Rust**, `HunkBody` / `parse_hunk_header` / `parse_diff_hunks` in
+  `apps/desktop/src-tauri/src/git/parse.rs`. Callers: `git_diff`, `git_show`
+  (`parse_multi_file_diff`) and `git_file_diff` in `commands/read.rs`;
+  `extract_staged_added_lines` in `commands/secrets.rs`;
+  `gl_diff_stats_from_files` in `commands/gitlab.rs`.
 
 ---
 

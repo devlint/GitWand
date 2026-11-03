@@ -299,6 +299,12 @@ pub struct BlameLine {
 
 #[derive(Serialize)]
 pub struct FileLogEntry {
+    /// The file's path at this commit, repo-root-relative, as `git log
+    /// --follow --name-only` reports it: the old name before a rename.
+    /// Only the `--follow` logs (`git_file_log`, `git_file_log_pickaxe`) set
+    /// it; omitted elsewhere, so existing payloads are unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     pub hash_full: String,
     pub hash: String,
     pub author: String,

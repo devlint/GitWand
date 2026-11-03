@@ -554,14 +554,20 @@ fn gl_diff_stats_from_files(files: &[serde_json::Value]) -> (i64, i64) {
     let mut deletions = 0i64;
     for f in files {
         let diff = f.get("diff").and_then(|d| d.as_str()).unwrap_or("");
+        // Count only inside hunk bodies, bounded by their `@@` counts: a
+        // removed `-- x` line is `--- x` there, and must not be mistaken for
+        // a file header (nor a header outside a hunk for a change).
+        let mut body = crate::git::HunkBody::default();
         for line in diff.lines() {
-            if line.starts_with("+++") || line.starts_with("---") {
-                continue;
-            }
-            if line.starts_with('+') {
-                additions += 1;
-            } else if line.starts_with('-') {
-                deletions += 1;
+            match body.classify(line) {
+                Some(crate::git::HunkLineKind::Add) => additions += 1,
+                Some(crate::git::HunkLineKind::Delete) => deletions += 1,
+                Some(crate::git::HunkLineKind::Context) => {}
+                None => {
+                    if line.starts_with("@@") {
+                        body = crate::git::HunkBody::from_header(line);
+                    }
+                }
             }
         }
     }
@@ -2213,6 +2219,17 @@ mod gl_diff_stats_from_files_tests {
             "diff": "--- a/a.rs\n+++ b/a.rs\n@@ -1,1 +1,1 @@\n-old\n+new\n"
         })];
         assert_eq!(gl_diff_stats_from_files(&files), (1, 1));
+    }
+
+    #[test]
+    fn counts_hunk_lines_whose_content_starts_with_dash_dash_or_plus_plus() {
+        // A removed SQL comment `-- note` is the diff line `--- note`, an added
+        // `++x` is `+++x`: inside a hunk they are changes, not file headers.
+        let files = vec![json!({
+            "new_path": "q.sql",
+            "diff": "--- a/q.sql\n+++ b/q.sql\n@@ -1,3 +1,3 @@\n--- note\n+++x\n ctx\n---- y\n++++ z\n"
+        })];
+        assert_eq!(gl_diff_stats_from_files(&files), (2, 2));
     }
 
     #[test]

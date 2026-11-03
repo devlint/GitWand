@@ -121,3 +121,5 @@ if (!line.startsWith('\\')) { /* FAUX context line */ }
 ```
 
 Les chaînes vides (`''`) ne commencent pas par `\\`, donc `!startsWith('\\')` les classe à tort comme lignes de contexte. Toujours utiliser `startsWith(' ')`.
+
+Mieux : ne pas réécrire de parseur — utiliser `classifyHunkLine` / `hunkBodyFromHeader` de `@gitwand/core`, qui bornent le hunk par les comptes de son en-tête `@@` (un `--- x` dans un hunk est une ligne supprimée, pas un en-tête ; `''` n'y est du contexte que tant qu'il reste des lignes des deux côtés). Règle complète : AGENTS.md « Diff Parsing ».

@@ -191,6 +191,26 @@ jobs:
           updaterJsonPreferNsis: true
           updaterJsonKeepUniversal: true
 
+      # v3.11.2 to v3.12.3 shipped an exe that imported VCRUNTIME140.dll and
+      # died at launch on a Windows without the VC++ Redistributable (winget's
+      # validation VM rejected them). src-tauri/.cargo/config.toml links the
+      # CRT statically; fail here, before winget, if the exe depends on it again.
+      - name: Check the Windows exe needs no VC++ runtime
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -Last 1
+          if (-not $dumpbin) { Write-Error "dumpbin.exe not found under $vs"; exit 1 }
+          $deps = & $dumpbin.FullName /nologo /dependents apps/desktop/src-tauri/target/release/gitwand-desktop.exe
+          if ($LASTEXITCODE -ne 0) { $deps; Write-Error "dumpbin failed"; exit 1 }
+          $deps
+          $crt = $deps | Select-String -Pattern '^\s*(vcruntime|msvcp|ucrtbase)[\w-]*\.dll\s*$'
+          if ($crt) {
+            Write-Error "gitwand-desktop.exe imports the VC++ runtime: $($crt.Line.Trim() -join ', ')"
+            exit 1
+          }
+
       # GitHub Releases API occasionally returns 500 on asset uploads,
       # especially when the matrix jobs upload in parallel. Re-upload any
       # asset that is missing from the release (idempotent, safe to retry).
@@ -207,12 +227,22 @@ jobs:
           uploaded=$(gh release view "$TAG" --repo "$REPO" --json assets \
             --jq '[.assets[].name]' 2>/dev/null || echo '[]')
 
-          # Find all built artifacts for this platform
-          artifact_dir="apps/desktop/target/release/bundle"
-          [ -d "$artifact_dir" ] || exit 0
+          # Find all built artifacts for this platform. Cargo builds under
+          # src-tauri/target: release/bundle, or <triple>/release/bundle for
+          # an explicit --target (macOS universal-apple-darwin). The old
+          # apps/desktop/target path never existed, so this step was a no-op.
+          target_dir="apps/desktop/src-tauri/target"
+          if [ -z "$(find "$target_dir" -type d -path "*/release/bundle" -print -quit 2>/dev/null)" ]; then
+            echo "::error::no bundle directory under $target_dir"
+            exit 1
+          fi
 
-          # Walk every signable artifact (installers + .sig files)
-          find "$artifact_dir" \
+          # Walk every signable artifact (installers + .sig files). Skip the
+          # macOS updater archive's signature: tauri-action uploads it renamed
+          # (GitWand_universal.app.tar.gz.sig), so its on-disk name never
+          # matches and would be re-uploaded as a stray asset.
+          find "$target_dir" -path "*/release/bundle/*" \
+            -not -name "*.app.tar.gz.sig" \
             \( -name "*.deb" -o -name "*.AppImage" \
             -o -name "*.rpm" \
             -o -name "*.msi" -o -name "*.exe" -o -name "*.nsis" \

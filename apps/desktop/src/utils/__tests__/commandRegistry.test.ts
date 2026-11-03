@@ -10,28 +10,48 @@
  * `backend.ts`, which would pull in `window` and force jsdom for no reason.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { COMMAND_REGISTRY } from "../commandRegistry";
 import {
   findInvokedCommands,
   findDevServerRoutes,
+  findRegisteredCommands,
 } from "../commandRegistryParse";
 
 const root = resolve(__dirname, "../../..");
 const read = (p: string) => readFileSync(resolve(root, p), "utf-8");
 
-const frontendSource =
-  read("src/utils/backend.ts") +
-  "\n" +
-  read("src/utils/backend-core.ts") +
-  "\n" +
-  read("src/utils/backend-ai.ts");
+// Every IPC wrapper module, found by listing rather than naming: a fixed list
+// is how backend-pr.ts and the three forge files went unscanned (#258), and a
+// new `backend-<forge>.ts` must be covered without anyone remembering to.
+const wrapperFiles = readdirSync(resolve(root, "src/utils"))
+  .filter((f) => /^backend.*\.ts$/.test(f))
+  .sort();
+const frontendSource = wrapperFiles
+  .map((f) => read(`src/utils/${f}`))
+  .join("\n");
 const { commands: invoked, dynamic } = findInvokedCommands(frontendSource);
 const routes = new Set(findDevServerRoutes(read("dev-server.mjs")));
 
 describe("command registry", () => {
+  it("scans every backend wrapper module", () => {
+    // Guards the listing itself: a filter that silently matched nothing (or
+    // only backend.ts) would make every other assertion here vacuous.
+    for (const f of [
+      "backend.ts",
+      "backend-core.ts",
+      "backend-ai.ts",
+      "backend-pr.ts",
+      "backend-gitlab.ts",
+      "backend-gitea.ts",
+      "backend-bitbucket.ts",
+    ]) {
+      expect(wrapperFiles).toContain(f);
+    }
+  });
+
   it("has an entry for every command the frontend invokes", () => {
     const missing = invoked.filter((c) => !(c in COMMAND_REGISTRY));
     expect(
@@ -39,6 +59,22 @@ describe("command registry", () => {
       `These commands are invoked but absent from commandRegistry.ts. Add an ` +
         `entry naming the dev-server route, or saying why the command cannot ` +
         `have one: ${missing.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("invokes only commands Rust registers in generate_handler!", () => {
+    // A route in dev-server.mjs is not a Rust command: `git_file_diff` had one,
+    // so `dev:web` worked while the desktop app's file-history compare failed
+    // on every call, because no `#[tauri::command]` of that name existed.
+    // No allowlist: every name the wrappers invoke is a command of ours (plugin
+    // commands go through their own JS APIs, not `tauriInvoke`).
+    const registered = new Set(findRegisteredCommands(read("src-tauri/src/lib.rs")));
+    const unregistered = invoked.filter((c) => !registered.has(c));
+    expect(
+      unregistered,
+      `These commands are invoked by the frontend but absent from ` +
+        `tauri::generate_handler! in src-tauri/src/lib.rs, so they fail in the ` +
+        `desktop app whatever dev:web says: ${unregistered.join(", ")}`,
     ).toEqual([]);
   });
 

@@ -17,7 +17,7 @@
  *    if either engine's built-in default-ignore list drifts from the other, this fails.
  */
 
-import { describe, it, beforeAll, afterAll } from "vitest";
+import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
@@ -118,6 +118,24 @@ describe("parity: scan-secrets", () => {
       method: "POST",
       body: { cwd, config },
     });
+  });
+
+  it("an added line starting with ++ (diff line `+++ …`) is scanned under its own file", async () => {
+    // Neither a dropped line nor a `+++ b/<path>` header: the finding must be on
+    // src/a.ts line 2 on both engines, and src/b.ts must keep its own name.
+    const cwd = mkTempRepo("gw-secrets-plusplus-");
+    stageFile(cwd, "src/a.ts", 'one\n++ key = "AKIAABCDEFGHIJKLMNOP";\n-- note\n');
+    stageFile(cwd, "src/b.ts", '+ const t = "ghp_ABCDEFABCDEFABCDEFABCDEFABCDEFABCDEF";\n');
+
+    const { rust } = await assertParity(dev, {
+      command: "scan-secrets",
+      args: { cwd, config: BASE_CONFIG },
+      httpPath: "/api/scan-secrets",
+      method: "POST",
+      body: { cwd, config: BASE_CONFIG },
+    });
+    const where = rust.map((f) => `${f.file}:${f.line}`).sort();
+    expect(where).toEqual(["src/a.ts:2", "src/b.ts:1"]);
   });
 
   it("no staged changes → both engines return an empty array", async () => {

@@ -8,9 +8,15 @@ Application desktop GitWand. Combine un frontend Vue 3 (Vite 6) et un backend Ru
 
 **Mode web (sans Rust) :**
 ```bash
-pnpm dev:web    # Lance dev-server.mjs + Vite sur localhost:1420, mock backend
-pnpm dev:server # Lance uniquement le backend de dev (dev-server.mjs)
+pnpm dev:web    # Build packages/core, puis dev-server.mjs + Vite sur localhost:1420, mock backend
+pnpm dev:server # Build packages/core, puis uniquement le backend de dev (dev-server.mjs)
 ```
+
+`dev-server.mjs` importe `@gitwand/core` depuis `packages/core/dist` (parseur de diff
+partagé, scanner de secrets) : les deux scripts lancent d'abord `pnpm run build:core`
+(~4 s). Lancé autrement (`node dev-server.mjs`, harness de parité), un `dist` absent ou
+périmé fait répondre les routes de diff en 500 avec « run `pnpm --filter @gitwand/core
+build` » ; après un rebuild, redémarrer le dev-server (Node garde le module en cache).
 
 **Mode desktop complet (Rust requis) :**
 ```bash

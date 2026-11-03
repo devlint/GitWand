@@ -177,7 +177,7 @@ export const config = {
 
 Same conflict, same engine. The only difference is whether Git wrote down the ancestor.
 
-One correction, found while writing this article: up to GitWand 3.12.2, the `diff3` version kept the `region` and `verbose` lines twice. Both sides carry them inside the markers, and the merge treated them as two separate additions. The fix ([#259](https://github.com/devlint/GitWand/pull/259)) takes lines that open or close both sides out of the merge, as `zdiff3` does, and ships in the next release. Until then, `zdiff3` avoids it.
+One correction, found while writing this article: up to GitWand 3.12.2, the `diff3` version kept the `region` and `verbose` lines twice. Both sides carry them inside the markers, and the merge treated them as two separate additions. The fix ([#259](https://github.com/devlint/GitWand/pull/259)) takes lines that open or close both sides out of the merge, as `zdiff3` does, and ships in GitWand 3.12.3.
 
 Where the base comes from depends on how you run GitWand:
 

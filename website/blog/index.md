@@ -6,6 +6,18 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/rebase-vs-merge-conflicts" class="blog-card">
+    <div class="blog-meta">November 3, 2026 · 11 min read</div>
+    <h2 class="blog-title">Rebase or merge: which one gives you fewer conflicts?</h2>
+    <p class="blog-excerpt">A merge asks one three-way question about two end states; a rebase asks one per replayed commit, against a base that already contains your previous answers. That is why a rebase repeats a conflict exactly when <strong>your resolution differs from what the next commit expected</strong>, and why it can also skip one a merge cannot avoid. Three small reproducible scenarios with the stops counted, what <code>git rerere</code> removes (decisions, not pauses), and how GitWand drives a paused rebase: Continue, Skip, Abort, and an Auto-resolve loop that stops where you are needed.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
+  <a href="/blog/trivial-conflicts-taxonomy" class="blog-card">
+    <div class="blog-meta">November 2, 2026 · 10 min read</div>
+    <h2 class="blog-title">The conflicts you resolve by hand that were never decisions: a taxonomy</h2>
+    <p class="blog-excerpt">Git gave up on the hunk; that does not mean there was a choice to make. A field guide to the shapes that only look like work, taken from the patterns GitWand's engine actually implements: same change, one side changed, deletion against an untouched block, non-overlapping edits, whitespace, reordering, pure insertions, volatile values, imports and lockfiles. One example hunk per type, the one-sentence check that makes each resolution safe, and <strong>where GitWand stops</strong>, including one gap we found while writing it.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/reading-git-conflict-markers" class="blog-card">
     <div class="blog-meta">October 13, 2026 · 8 min read</div>
     <h2 class="blog-title">Reading a Git conflict marker: ours, theirs, base, diff3 and zdiff3</h2>

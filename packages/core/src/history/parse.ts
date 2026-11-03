@@ -7,6 +7,7 @@
  */
 
 import type { HistoryCommit } from "./types.js";
+import { classifyHunkLine, hunkBodyFromHeader, noHunkBody, type HunkBody } from "../hunk-body.js";
 
 export const LOG_FORMAT = "%x1e%H%x1f%an%x1f%as%x1f%s%x1f%b%x1f";
 
@@ -30,19 +31,25 @@ export function parseLog(stdout: string): HistoryCommit[] {
   return commits;
 }
 
-const HEADER_RE = /^(---|\+\+\+) (a\/|b\/|\/dev\/null)/;
-
 /**
  * True when a range patch removes and adds exactly the same lines (ignoring
  * surrounding whitespace): a move or a re-indent, with no semantic change.
+ *
+ * Only lines inside a hunk body count, bounded by the `@@` counts: a removed
+ * `-- a/x` is the diff line `--- a/x`, which is a change, not a file header.
  */
 export function isPureMove(rangeDiff: string): boolean {
   const removed: string[] = [];
   const added: string[] = [];
+  let body: HunkBody = noHunkBody();
   for (const line of rangeDiff.split("\n")) {
-    if (HEADER_RE.test(line)) continue;
-    if (line.startsWith("-")) removed.push(line.slice(1).trim());
-    else if (line.startsWith("+")) added.push(line.slice(1).trim());
+    const kind = classifyHunkLine(body, line);
+    if (kind === "delete") removed.push(line.slice(1).trim());
+    else if (kind === "add") added.push(line.slice(1).trim());
+    else if (kind === null) {
+      if (line.startsWith("diff ")) body = noHunkBody();
+      else if (line.startsWith("@@")) body = hunkBodyFromHeader(line);
+    }
   }
   if (removed.length === 0 || removed.length !== added.length) return false;
   const a = [...removed].sort();

@@ -119,6 +119,25 @@ describe("gitwand scan", { timeout: GIT_IO_TIMEOUT_MS }, () => {
     expect(parsed.findings).toEqual([]);
   });
 
+  it("scans an added line starting with ++ under its own file, on its own line number", async () => {
+    // The added content `++ key …` is the diff line `+++ key …`: a hunk line, not a
+    // `+++ b/<path>` header — it must be scanned and must not rename its file.
+    stageFile(repoDir, "src/a.ts", 'one\n++ key = "AKIAABCDEFGHIJKLMNOP";\n-- note\n');
+    stageFile(repoDir, "src/b.ts", '+ const k = "sk_live_ABCDEFGHIJKLMNOPQRSTUVWX";\n');
+
+    await cmdScan({ json: true });
+
+    const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    const findings = JSON.parse(output).findings as Array<{ patternId: string; file: string; line: number }>;
+    const shape = findings
+      .map((f) => [f.patternId, f.file, f.line])
+      .sort((x, y) => String(x[1]).localeCompare(String(y[1])));
+    expect(shape).toEqual([
+      ["aws_access_key_id", "src/a.ts", 2],
+      ["stripe_live_key", "src/b.ts", 1],
+    ]);
+  });
+
   it("does not flag a pnpm-lock.yaml integrity hash by default (D5)", async () => {
     stageFile(
       repoDir,

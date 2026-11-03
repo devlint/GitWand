@@ -41,8 +41,9 @@ export interface CommandRegistryEntry {
 }
 
 export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
-  // `cliPathOnly` below is **not exhaustive**. It marks the four commands whose
-  // Rust body branches on `settings_github_token()` directly. Others reach the
+  // `cliPathOnly` below is **not exhaustive**. It marks the commands whose Rust
+  // body (or its `_inner`) branches on `settings_github_token()` directly while
+  // the route shells out to `gh`. Others reach the
   // same branch through helpers (`gh_list_prs_inner` and friends), and finding
   // them means following call chains this audit did not undertake. Treat an
   // absent `cliPathOnly` on a forge command as "not checked", not as "agrees".
@@ -70,6 +71,20 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   check_remote_reachable: { route: "/api/check-remote-reachable" },
   detect_monorepo: { route: "/api/detect-monorepo" },
   folder_diff: { route: "/api/folder-diff" },
+  gh_check_annotations: { route: "/api/gh-check-annotations" },
+  gh_create_pr: { route: "/api/gh-create-pr" },
+  gh_current_user: { route: "/api/gh-current-user" },
+  gh_disable_auto_merge: {
+    route: "/api/gh-disable-auto-merge",
+    cliPathOnly:
+      "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
+  },
+  gh_dismiss_review: { route: "/api/gh-dismiss-review" },
+  gh_enable_auto_merge: {
+    route: "/api/gh-enable-auto-merge",
+    cliPathOnly:
+      "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
+  },
   gh_fork: { route: "/api/gh-fork" },
   gh_issue_comments: {
     route: "/api/gh-issue-comments",
@@ -82,6 +97,22 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
       "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
   },
   gh_list_issues: { route: "/api/gh-list-issues" },
+  gh_list_prs: { route: "/api/gh-list-prs" },
+  gh_merge_pr: {
+    route: "/api/gh-merge-pr",
+    cliPathOnly:
+      "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
+  },
+  gh_pr_checks: { route: "/api/gh-pr-checks" },
+  gh_pr_comments: { route: "/api/gh-pr-comments" },
+  gh_pr_count: { route: "/api/gh-pr-count" },
+  gh_pr_detail: { route: "/api/gh-pr-detail" },
+  gh_pr_diff: { route: "/api/gh-pr-diff" },
+  gh_pr_issue_comments: { route: "/api/gh-pr-issue-comments" },
+  gh_pr_review_threads: { route: "/api/gh-pr-review-threads" },
+  gh_pr_reviews: { route: "/api/gh-pr-reviews" },
+  gh_request_reviewers: { route: "/api/gh-request-reviewers" },
+  gh_set_review_thread_resolved: { route: "/api/gh-set-review-thread-resolved" },
   git_amend_commit: { route: "/api/git-amend-commit" },
   git_author_line_stats: { route: "/api/git-author-line-stats" },
   git_blame: { route: "/api/git-blame" },
@@ -161,11 +192,36 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   git_worktree_remove: { route: "/api/git-worktree-remove" },
   git_worktree_repair: { route: "/api/git-worktree-repair" },
   git_worktree_status_all: { route: "/api/git-worktree-status-all" },
+  // The Gitea read routes are `case` labels inside the `/api/gitea-` prefix
+  // dispatcher. They read the token from GITWAND_GITEA_TOKEN (and the base URL
+  // from GITWAND_GITEA_BASE) because the keychain the Rust commands use is out
+  // of a Node process's reach; past auth they mirror commands/gitea.rs.
+  gitea_current_user: { route: "/api/gitea-current-user" },
+  gitea_get_pr: { route: "/api/gitea-get-pr" },
+  gitea_list_issues: { route: "/api/gitea-list-issues" },
+  gitea_list_prs: { route: "/api/gitea-list-prs" },
+  gitea_pr_comments: { route: "/api/gitea-pr-comments" },
+  gitea_pr_count: { route: "/api/gitea-pr-count" },
+  gitea_pr_diff: { route: "/api/gitea-pr-diff" },
+  gitea_pr_status: { route: "/api/gitea-pr-status" },
+  // Mocks, not stand-ins: the device flow always "succeeds" as `dev-user` on
+  // the third poll, and the token check always answers false. They let the
+  // Settings UI be exercised; they do not exercise GitHub's OAuth endpoints.
+  github_device_poll: { route: "/api/github-device-poll" },
+  github_device_start: { route: "/api/github-device-start" },
+  github_token_present: { route: "/api/github-token-present" },
+  gl_disable_auto_merge: { route: "/api/gl-disable-auto-merge" },
+  gl_enable_auto_merge: { route: "/api/gl-enable-auto-merge" },
   gl_list_issues: { route: "/api/gl-list-issues" },
   list_dir: { route: "/api/list-dir" },
   list_repo_tree: { route: "/api/list-repo-tree" },
   list_repo_dir: { route: "/api/list-repo-dir" },
   path_exists: { route: "/api/path-exists" },
+  pr_files: {
+    route: "/api/pr-files",
+    cliPathOnly:
+      "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
+  },
   preview_cherry_pick: { route: "/api/preview-cherry-pick" },
   preview_merge: { route: "/api/preview-merge" },
   preview_rebase: { route: "/api/preview-rebase" },
@@ -219,6 +275,12 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
     cliPathOnly:
       "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
   },
+  gh_list_reviewer_candidates: { route: "/api/gh-reviewer-candidates" },
+  // One path, three methods: POST creates, PATCH edits, DELETE removes.
+  gh_pr_create_comment: { route: "/api/gh-pr-comment" },
+  gh_pr_delete_comment: { route: "/api/gh-pr-comment" },
+  gh_pr_update_comment: { route: "/api/gh-pr-comment" },
+  gh_pr_freshness_signal: { route: "/api/gh-pr-freshness" },
   git_add_to_gitignore: { route: "/api/git-gitignore" },
   // Not fetched: devWatchRepoOpen opens an EventSource on this path.
   watch_repo_start: { route: "/api/watch-repo" },
@@ -235,6 +297,25 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   shell_exec: {
     desktopOnly:
       "Runs the shell command the user authored in Settings, in their terminal. A dev-server has no terminal to attach it to.",
+  },
+  open_url: {
+    desktopOnly:
+      "Hands an http(s) URL to the OS browser because the Tauri webview ignores window.open. Under dev:web the wrapper calls window.open itself, so there is nothing for a route to do.",
+  },
+  // The keychain is what the Gitea routes work around with an environment
+  // token: a Node dev-server cannot read or write the OS credential store the
+  // packaged app uses.
+  delete_credential: {
+    desktopOnly:
+      "Deletes an entry from the OS keychain, which the Node dev-server cannot reach.",
+  },
+  get_credential: {
+    desktopOnly:
+      "Reads an entry from the OS keychain, which the Node dev-server cannot reach.",
+  },
+  set_credential: {
+    desktopOnly:
+      "Writes an entry to the OS keychain, which the Node dev-server cannot reach.",
   },
 
   // ─── Routes written to close a gap this audit found ───────────────────────
@@ -282,5 +363,424 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   mcp_uninstall_server: {
     desktopOnly:
       "GAP: writes MCP client config files by absolute path. Possible from Node, simply not implemented.",
+  },
+
+  // ─── GAPs in the forge wrappers (#258) ────────────────────────────────────
+  // backend-pr.ts, backend-gitlab.ts, backend-gitea.ts and backend-bitbucket.ts
+  // were outside the registry's scan until #258. Same reading as the block
+  // above: each could have a route and does not yet.
+
+  // ── GitHub ──
+  // backend-pr.ts gives each of these a web branch that returns an empty value
+  // or throws, and dev-server.mjs has no route — though the neighbouring gh-*
+  // routes show the gh CLI and REST API both work from Node.
+  gh_add_reaction: {
+    desktopOnly:
+      "GAP: no dev-server route for adding a reaction; the wrapper throws \"not supported in dev mode\".",
+  },
+  gh_branches: {
+    desktopOnly:
+      "GAP: no dev-server route for listing the remote's branches via the GitHub API; the wrapper returns an empty list.",
+  },
+  gh_checkout_pr: {
+    desktopOnly:
+      "GAP: no dev-server route for `gh pr checkout`; the wrapper throws, though Node runs the CLI as well as Rust does.",
+  },
+  gh_delete_reaction: {
+    desktopOnly:
+      "GAP: no dev-server route for removing a reaction; the wrapper throws \"not supported in dev mode\".",
+  },
+  gh_fork_info: {
+    desktopOnly:
+      "GAP: no dev-server route for fork detection; the wrapper always answers \"not a fork\", so fork-only UI never shows under dev:web.",
+  },
+  gh_list_reactions: {
+    desktopOnly:
+      "GAP: no dev-server route for listing reactions; the wrapper returns an empty list.",
+  },
+  gh_pr_edit: {
+    desktopOnly:
+      "GAP: no dev-server route for editing a PR's title or body; the wrapper throws \"requires Tauri\".",
+  },
+  gh_pr_ready: {
+    desktopOnly:
+      "GAP: no dev-server route for marking a draft PR ready; the wrapper throws \"requires Tauri\".",
+  },
+
+  // ── Azure DevOps ──
+  // backend-pr.ts throws AZURE_WEB_ONLY (or returns an empty value) for every
+  // one of these: there is no Azure mock in dev-server.mjs at all, unlike the
+  // GitHub device flow, which has one.
+  az_add_like: {
+    desktopOnly:
+      "GAP: no dev-server mock for liking an Azure DevOps PR comment.",
+  },
+  az_branches: {
+    desktopOnly:
+      "GAP: no dev-server mock for listing Azure DevOps branches.",
+  },
+  az_checkout_pr: {
+    desktopOnly:
+      "GAP: no dev-server mock for checking out an Azure DevOps PR locally.",
+  },
+  az_create_pr: {
+    desktopOnly:
+      "GAP: no dev-server mock for creating an Azure DevOps PR.",
+  },
+  az_current_user: {
+    desktopOnly:
+      "GAP: no dev-server mock for the signed-in Azure DevOps user.",
+  },
+  az_delete_like: {
+    desktopOnly:
+      "GAP: no dev-server mock for unliking an Azure DevOps PR comment.",
+  },
+  az_disable_auto_merge: {
+    desktopOnly:
+      "GAP: no dev-server mock for cancelling Azure DevOps auto-complete.",
+  },
+  az_enable_auto_merge: {
+    desktopOnly:
+      "GAP: no dev-server mock for setting Azure DevOps auto-complete.",
+  },
+  az_list_likes: {
+    desktopOnly:
+      "GAP: no dev-server mock for listing likes on an Azure DevOps PR comment.",
+  },
+  az_list_prs: {
+    desktopOnly:
+      "GAP: no dev-server mock for listing Azure DevOps PRs.",
+  },
+  az_merge_pr: {
+    desktopOnly:
+      "GAP: no dev-server mock for completing an Azure DevOps PR.",
+  },
+  az_pr_checks: {
+    desktopOnly:
+      "GAP: no dev-server mock for Azure DevOps PR policy and build checks.",
+  },
+  az_pr_comments: {
+    desktopOnly:
+      "GAP: no dev-server mock for Azure DevOps PR comment threads.",
+  },
+  az_pr_count: {
+    desktopOnly:
+      "GAP: no dev-server mock for counting Azure DevOps PRs.",
+  },
+  az_pr_create_comment: {
+    desktopOnly:
+      "GAP: no dev-server mock for posting an Azure DevOps PR comment.",
+  },
+  az_pr_detail: {
+    desktopOnly:
+      "GAP: no dev-server mock for Azure DevOps PR detail.",
+  },
+  az_pr_diff: {
+    desktopOnly:
+      "GAP: no dev-server mock for the Azure DevOps PR diff.",
+  },
+  az_pr_edit: {
+    desktopOnly:
+      "GAP: no dev-server mock for editing an Azure DevOps PR's title or description.",
+  },
+  az_pr_files: {
+    desktopOnly:
+      "GAP: no dev-server mock for the files an Azure DevOps PR changes.",
+  },
+  az_pr_ready: {
+    desktopOnly:
+      "GAP: no dev-server mock for publishing a draft Azure DevOps PR.",
+  },
+  az_pr_reviews: {
+    desktopOnly:
+      "GAP: no dev-server mock for Azure DevOps reviewer votes.",
+  },
+  az_reviewer_candidates: {
+    desktopOnly:
+      "GAP: no dev-server mock for Azure DevOps reviewer candidates.",
+  },
+  az_submit_review: {
+    desktopOnly:
+      "GAP: no dev-server mock for casting an Azure DevOps reviewer vote.",
+  },
+  azure_device_poll: {
+    desktopOnly:
+      "GAP: no dev-server mock for polling the Entra ID device flow, where the GitHub flow has one.",
+  },
+  azure_device_start: {
+    desktopOnly:
+      "GAP: no dev-server mock for starting the Entra ID device flow, where the GitHub flow has one.",
+  },
+  azure_sign_out: {
+    desktopOnly:
+      "GAP: no dev-server mock for Azure sign-out; the wrapper silently does nothing under dev:web.",
+  },
+  azure_token_present: {
+    desktopOnly:
+      "GAP: no dev-server mock for the Azure token check; the wrapper answers false, where GitHub has a route.",
+  },
+
+  // ── GitLab ──
+  // backend-gitlab.ts returns an empty value or throws "requires Tauri" for
+  // each of these, and dev-server.mjs serves no gl-* MR route beyond the two
+  // auto-merge ones. `gl_merge_mr` is the case AGENTS.md § IPC cites: its
+  // broken glab flag survived because nothing under dev:web ran it.
+  detect_glab: {
+    desktopOnly:
+      "GAP: no dev-server route for detecting the glab CLI; the wrapper answers false, so GitLab UI never shows under dev:web.",
+  },
+  gl_add_reaction: {
+    desktopOnly:
+      "GAP: no dev-server mock for adding an award emoji to a GitLab MR note.",
+  },
+  gl_approve_mr: {
+    desktopOnly:
+      "GAP: no dev-server mock for approving a GitLab MR.",
+  },
+  gl_branches: {
+    desktopOnly:
+      "GAP: no dev-server mock for listing GitLab branches.",
+  },
+  gl_checkout_mr: {
+    desktopOnly:
+      "GAP: no dev-server mock for `glab mr checkout`, which Node could run as well as Rust does.",
+  },
+  gl_convert_draft_to_ready: {
+    desktopOnly:
+      "GAP: no dev-server mock for marking a draft GitLab MR ready.",
+  },
+  gl_create_mr: {
+    desktopOnly:
+      "GAP: no dev-server mock for creating a GitLab MR.",
+  },
+  gl_current_user: {
+    desktopOnly:
+      "GAP: no dev-server mock for the authenticated GitLab user.",
+  },
+  gl_delete_reaction: {
+    desktopOnly:
+      "GAP: no dev-server mock for removing an award emoji from a GitLab MR note.",
+  },
+  gl_get_mr: {
+    desktopOnly:
+      "GAP: no dev-server mock for GitLab MR detail.",
+  },
+  gl_list_mrs: {
+    desktopOnly:
+      "GAP: no dev-server mock for listing GitLab MRs.",
+  },
+  gl_list_reactions: {
+    desktopOnly:
+      "GAP: no dev-server mock for listing award emoji on a GitLab MR note.",
+  },
+  gl_list_reviews: {
+    desktopOnly:
+      "GAP: no dev-server mock for GitLab MR approvals.",
+  },
+  gl_merge_mr: {
+    desktopOnly:
+      "GAP: no dev-server mock for merging a GitLab MR — the gap that let its broken glab flag ship.",
+  },
+  gl_mr_annotations: {
+    desktopOnly:
+      "GAP: no dev-server mock for GitLab pipeline job annotations.",
+  },
+  gl_mr_count: {
+    desktopOnly:
+      "GAP: no dev-server mock for counting GitLab MRs.",
+  },
+  gl_mr_create_discussion: {
+    desktopOnly:
+      "GAP: no dev-server mock for starting an inline GitLab MR discussion.",
+  },
+  gl_mr_create_note: {
+    desktopOnly:
+      "GAP: no dev-server mock for posting a GitLab MR note.",
+  },
+  gl_mr_delete_note: {
+    desktopOnly:
+      "GAP: no dev-server mock for deleting a GitLab MR note.",
+  },
+  gl_mr_diff: {
+    desktopOnly:
+      "GAP: no dev-server mock for the GitLab MR diff.",
+  },
+  gl_mr_diff_refs: {
+    desktopOnly:
+      "GAP: no dev-server mock for a GitLab MR's base, start and head SHAs.",
+  },
+  gl_mr_edit: {
+    desktopOnly:
+      "GAP: no dev-server mock for editing a GitLab MR's title or description.",
+  },
+  gl_mr_files: {
+    desktopOnly:
+      "GAP: no dev-server mock for the files a GitLab MR changes.",
+  },
+  gl_mr_notes: {
+    desktopOnly:
+      "GAP: no dev-server mock for GitLab MR notes.",
+  },
+  gl_mr_pipelines: {
+    desktopOnly:
+      "GAP: no dev-server mock for GitLab MR pipelines.",
+  },
+  gl_mr_update_note: {
+    desktopOnly:
+      "GAP: no dev-server mock for editing a GitLab MR note.",
+  },
+  gl_request_reviewers: {
+    desktopOnly:
+      "GAP: no dev-server mock for requesting GitLab MR reviewers.",
+  },
+  gl_reviewer_candidates: {
+    desktopOnly:
+      "GAP: no dev-server mock for GitLab reviewer candidates.",
+  },
+
+  // ── Gitea / Forgejo ──
+  // Only the eight reads above have routes. backend-gitea.ts labels everything
+  // else "Tauri only"; the `/api/gitea-` dispatcher's env-token approach would
+  // serve these as well.
+  gitea_branches: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for listing branches; the wrapper returns an empty list.",
+  },
+  gitea_checkout_pr: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for checking out a PR locally.",
+  },
+  gitea_convert_draft_to_ready: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for marking a draft PR ready.",
+  },
+  gitea_create_comment: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for posting a PR comment.",
+  },
+  gitea_create_pr: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for creating a PR.",
+  },
+  gitea_delete_comment: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for deleting a PR comment.",
+  },
+  gitea_list_reviews: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for PR reviews; the wrapper returns an empty list.",
+  },
+  gitea_merge_pr: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for merging a PR.",
+  },
+  gitea_pr_edit: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for editing a PR's title or body.",
+  },
+  gitea_pr_files: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for the files a PR changes; the wrapper returns an empty list.",
+  },
+  gitea_reviewer_candidates: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for reviewer candidates; the wrapper returns an empty list.",
+  },
+  gitea_update_comment: {
+    desktopOnly:
+      "GAP: no case in the /api/gitea- dispatcher for editing a PR comment.",
+  },
+  gitea_validate_token: {
+    desktopOnly:
+      "GAP: no dev-server route for validating a Gitea token against an instance before it is stored.",
+  },
+
+  // ── Bitbucket Cloud ──
+  // backend-bitbucket.ts has no web branch beyond an empty value or a "requires
+  // Tauri" throw, and dev-server.mjs serves only bb-list-issues. The Gitea
+  // dispatcher's environment-token pattern would carry over.
+  bb_approve_pr: {
+    desktopOnly:
+      "GAP: no dev-server mock for approving a Bitbucket PR.",
+  },
+  bb_branches: {
+    desktopOnly:
+      "GAP: no dev-server mock for listing Bitbucket branches.",
+  },
+  bb_checkout_pr: {
+    desktopOnly:
+      "GAP: no dev-server mock for checking out a Bitbucket PR locally.",
+  },
+  bb_convert_draft_to_ready: {
+    desktopOnly:
+      "GAP: no dev-server mock for marking a draft Bitbucket PR ready.",
+  },
+  bb_create_comment: {
+    desktopOnly:
+      "GAP: no dev-server mock for posting a Bitbucket PR comment.",
+  },
+  bb_create_pr: {
+    desktopOnly:
+      "GAP: no dev-server mock for creating a Bitbucket PR.",
+  },
+  bb_current_user: {
+    desktopOnly:
+      "GAP: no dev-server mock for the authenticated Bitbucket user.",
+  },
+  bb_delete_comment: {
+    desktopOnly:
+      "GAP: no dev-server mock for deleting a Bitbucket PR comment.",
+  },
+  bb_get_pr: {
+    desktopOnly:
+      "GAP: no dev-server mock for Bitbucket PR detail.",
+  },
+  bb_list_prs: {
+    desktopOnly:
+      "GAP: no dev-server mock for listing Bitbucket PRs.",
+  },
+  bb_list_reviews: {
+    desktopOnly:
+      "GAP: no dev-server mock for Bitbucket PR approvals.",
+  },
+  bb_merge_pr: {
+    desktopOnly:
+      "GAP: no dev-server mock for merging a Bitbucket PR.",
+  },
+  bb_pr_annotations: {
+    desktopOnly:
+      "GAP: no dev-server mock for Bitbucket Code Insights annotations.",
+  },
+  bb_pr_ci_checks: {
+    desktopOnly:
+      "GAP: no dev-server mock for Bitbucket PR build statuses.",
+  },
+  bb_pr_comments: {
+    desktopOnly:
+      "GAP: no dev-server mock for Bitbucket PR comments.",
+  },
+  bb_pr_count: {
+    desktopOnly:
+      "GAP: no dev-server mock for counting Bitbucket PRs.",
+  },
+  bb_pr_diff: {
+    desktopOnly:
+      "GAP: no dev-server mock for the Bitbucket PR diff.",
+  },
+  bb_pr_edit: {
+    desktopOnly:
+      "GAP: no dev-server mock for editing a Bitbucket PR's title or description.",
+  },
+  bb_pr_files: {
+    desktopOnly:
+      "GAP: no dev-server mock for the files a Bitbucket PR changes.",
+  },
+  bb_reviewer_candidates: {
+    desktopOnly:
+      "GAP: no dev-server mock for Bitbucket reviewer candidates.",
+  },
+  bb_update_comment: {
+    desktopOnly:
+      "GAP: no dev-server mock for editing a Bitbucket PR comment.",
   },
 };

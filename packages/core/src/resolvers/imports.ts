@@ -155,6 +155,17 @@ export function extractImportSources(content: string): string[] {
 export interface ImportMergeResult {
   /** Lignes fusionnées (null = conflit non résolvable) */
   mergedLines: string[] | null;
+  /**
+   * `true` quand `mergedLines` est null parce que les deux côtés ont AJOUTÉ un
+   * import du même module qui déclare le même nom local de façons
+   * incompatibles — un vrai conflit, que le moteur textuel ne doit pas
+   * « résoudre » à son tour (il garderait les deux lignes : liaison en double).
+   * Absent quand le résolveur ne s'applique simplement pas (bloc non-import,
+   * ligne non parsable, formes différentes sans nom commun) ou quand les deux
+   * côtés modifient la même ligne de base (le moteur textuel ne peut pas en
+   * faire une union) : le moteur textuel peut alors prendre le relais.
+   */
+  conflict?: boolean;
   /** Description de la fusion */
   reason: string;
   /** Nombre d'imports fusionnés */
@@ -169,6 +180,37 @@ export interface ImportMergeResult {
  */
 function importKey(stmt: ImportStatement): string {
   return `${stmt.kind}:${stmt.source}:${stmt.isType ? "type" : "value"}`;
+}
+
+/**
+ * Noms locaux déclarés par un import, ou `null` si on ne sait pas les lire
+ * (`require` : la liaison `const X =` n'est pas parsée).
+ * `{ a, b as c, type d }` → a, c, d ; `X` → X ; `X, { Y }` → X, Y ;
+ * `X, * as NS` → X, NS ; `* as NS` → NS ; side-effect et re-export → aucun.
+ */
+function localBindings(stmt: ImportStatement): string[] | null {
+  const fromSpecifier = (spec: string): string[] =>
+    spec
+      .split(",")
+      .map((s) => s.trim().replace(/^type\s+/, ""))
+      .filter(Boolean)
+      .map((s) => s.split(/\s+as\s+/).pop()!.trim());
+  switch (stmt.kind) {
+    case "named":
+      return fromSpecifier(stmt.names.join(","));
+    case "namespace":
+      return [...stmt.names];
+    case "default": {
+      // `X`, `X, { Y, Z as W }` ou `X, * as NS`
+      const spec = stmt.names[0] ?? "";
+      return fromSpecifier(spec.replace(/[{}]/g, "").replace(/\*\s+as\s+/, ""));
+    }
+    case "side-effect":
+    case "export":
+      return [];
+    default:
+      return null;
+  }
 }
 
 /**
@@ -343,6 +385,35 @@ export function tryResolveImportConflict(
   const oursBySource   = new Map(oursImports.map((s) => [s.source, s]));
   const theirsBySource = new Map(theirsImports.map((s) => [s.source, s]));
 
+  // Un import identique à la base n'a pas été touché par ce côté. Quand l'autre
+  // côté change la forme de ce même module (`{ x }` → `x`), c'est un changement
+  // d'un seul côté, pas un conflit : l'import de base disparaît (supprimé par
+  // l'autre côté, inchangé ici) et la nouvelle forme est gardée.
+  const isUntouchedBase = (s: ImportStatement): boolean =>
+    baseMap.get(importKey(s))?.raw === s.raw;
+
+  // Deux imports du même module sous des formes différentes ne sont un vrai
+  // conflit que s'ils déclarent le même nom local (`{ useAuth }` vs `useAuth`).
+  // `import React from "react"` + `import { useState } from "react"` coexistent :
+  // on se déclare alors non applicable, sans `conflict`, et le moteur textuel
+  // garde les deux lignes comme avant.
+  const bindingsCollide = (a: ImportStatement, b: ImportStatement): boolean => {
+    const la = localBindings(a);
+    const lb = localBindings(b);
+    if (la === null || lb === null) return true; // liaisons inconnues : prudence
+    return la.some((n) => lb.includes(n));
+  };
+  const kindMismatch = (a: ImportStatement, b: ImportStatement, source: string) => {
+    unresolvedImports++;
+    return {
+      mergedLines: null,
+      ...(bindingsCollide(a, b) ? { conflict: true } : {}),
+      reason: `Conflict on import '${source}': incompatible kinds (${a.kind} vs ${b.kind}).`,
+      resolvedImports,
+      unresolvedImports,
+    };
+  };
+
   // Ensemble de toutes les clés
   const allKeys = new Set([...baseMap.keys(), ...oursMap.keys(), ...theirsMap.keys()]);
 
@@ -372,6 +443,7 @@ export function tryResolveImportConflict(
             unresolvedImports++;
             return {
               mergedLines: null,
+              conflict: true,
               reason: `Conflict on the named import '${ours.source}': the names cannot be merged.`,
               resolvedImports,
               unresolvedImports,
@@ -379,39 +451,21 @@ export function tryResolveImportConflict(
           }
         } else {
           // Structures incompatibles (ex: default vs namespace) → conflit
-          unresolvedImports++;
-          return {
-            mergedLines: null,
-            reason: `Conflict on import '${ours.source}': incompatible kinds (${ours.kind} vs ${theirs.kind}).`,
-            resolvedImports,
-            unresolvedImports,
-          };
+          return kindMismatch(ours, theirs, ours.source);
         }
       } else if (ours) {
         // Vérifier si theirs a un import du même module avec un kind incompatible
         const theirsSameSource = theirsBySource.get(ours.source);
-        if (theirsSameSource && theirsSameSource.kind !== ours.kind && ours.kind !== "named") {
-          unresolvedImports++;
-          return {
-            mergedLines: null,
-            reason: `Conflict on import '${ours.source}': incompatible kinds (${ours.kind} vs ${theirsSameSource.kind}).`,
-            resolvedImports,
-            unresolvedImports,
-          };
+        if (theirsSameSource && theirsSameSource.kind !== ours.kind && ours.kind !== "named" && !isUntouchedBase(theirsSameSource)) {
+          return kindMismatch(ours, theirsSameSource, ours.source);
         }
         resultLines.push(ours.raw);
         resolvedImports++;
       } else if (theirs) {
         // Vérifier si ours a un import du même module avec un kind incompatible
         const oursSameSource = oursBySource.get(theirs.source);
-        if (oursSameSource && oursSameSource.kind !== theirs.kind && theirs.kind !== "named") {
-          unresolvedImports++;
-          return {
-            mergedLines: null,
-            reason: `Conflict on import '${theirs.source}': incompatible kinds (${oursSameSource.kind} vs ${theirs.kind}).`,
-            resolvedImports,
-            unresolvedImports,
-          };
+        if (oursSameSource && oursSameSource.kind !== theirs.kind && theirs.kind !== "named" && !isUntouchedBase(oursSameSource)) {
+          return kindMismatch(oursSameSource, theirs, theirs.source);
         }
         resultLines.push(theirs.raw);
         resolvedImports++;
