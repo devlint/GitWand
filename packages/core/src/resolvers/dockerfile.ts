@@ -138,9 +138,14 @@ function mergeStage(
   baseInstructions?: Instruction[],
 ): string[] | null {
   // Indexer theirs par (kind, key)
+  // Une clé répétée côté theirs (plusieurs `RUN`, deux `COPY` vers la même
+  // destination) ne garderait que la dernière instruction dans la map, et les
+  // précédentes seraient perdues : on laisse le moteur textuel. Les lignes
+  // vides et commentaires partagent aussi une clé mais ne portent pas de sens.
   const theirsMap = new Map<string, Instruction>();
   for (const instr of theirsInstructions) {
     const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
+    if (theirsMap.has(mapKey) && instr.kind !== "BLANK" && instr.kind !== "COMMENT") return null;
     theirsMap.set(mapKey, instr);
   }
 
@@ -246,6 +251,15 @@ export function tryResolveDockerfileConflict(
 ): FormatResult {
   const oursInstructions = parseDockerfileInstructions(oursLines);
   const theirsInstructions = parseDockerfileInstructions(theirsLines);
+
+  // Une ligne qui n'est pas une instruction (suite d'un `\` commencé avant le
+  // hunk, corps de heredoc) n'a pas de clé fiable : moteur textuel.
+  if ([...oursInstructions, ...theirsInstructions].some((i) => i.kind === "OTHER")) {
+    return {
+      lines: null,
+      reason: "[dockerfile] The hunk contains lines that are not instructions (continuation or heredoc), falling back to the textual engine.",
+    };
+  }
 
   // Détecter les stages FROM…AS
   const splitByStage = (instructions: Instruction[]): Instruction[][] => {

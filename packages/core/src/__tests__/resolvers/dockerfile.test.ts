@@ -248,3 +248,35 @@ describe("Dockerfile — la base départage les instructions", () => {
     expect(result.mergedContent).not.toContain("alpine:3.18");
   });
 });
+
+// ─── Clé répétée côté theirs : jamais d'instruction perdue ───────────────────
+describe("Dockerfile — instructions de même clé côté theirs", () => {
+  it("theirs ajoute un second RUN : RUN a n'est pas perdu", () => {
+    const input = dockerHunk(
+      [`FROM node:20 AS app`, `ENV A=2`, `RUN a`],
+      [`FROM node:20 AS app`, `ENV A=1`, `RUN a`],
+      [`FROM node:20 AS app`, `ENV A=1`, `RUN a`, `RUN b`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("RUN a");
+    expect(result.mergedContent).toContain("RUN b");
+    expect(result.mergedContent).toContain("ENV A=2");
+  });
+
+  it("theirs ajoute un COPY : le premier COPY n'est pas perdu (hunk sans FROM)", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV A=2`, `COPY a .`], [`ENV A=1`, `COPY a .`], [`ENV A=1`, `COPY a .`, `COPY b .`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    if (result.mergedContent) {
+      expect(result.mergedContent).toContain("COPY a .");
+      expect(result.mergedContent).toContain("COPY b .");
+    }
+  });
+
+  it("hunk au milieu d'une continuation `\\` : pas de fusion Dockerfile", () => {
+    const input = [`FROM node:20`, `RUN apt-get install \\`, dockerHunk([`    pkg-a \\`, `    pkg-b`], [`    pkg-a`], [`    pkg-a \\`, `    pkg-c`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.resolutions[0].resolutionReason ?? "").not.toMatch(/merged by stage/);
+    expect(result.mergedContent ?? "").not.toMatch(/pkg-c\n\s*pkg-c/);
+  });
+});
