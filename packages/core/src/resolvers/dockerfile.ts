@@ -46,7 +46,7 @@ type FormatResult = { lines: string[] | null; reason: string };
 const DOCKERFILE_INSTRUCTIONS = new Set([
   "FROM", "RUN", "CMD", "LABEL", "EXPOSE", "ENV", "ADD", "COPY",
   "ENTRYPOINT", "VOLUME", "USER", "WORKDIR", "ARG", "ONBUILD",
-  "STOPSIGNAL", "HEALTHCHECK", "SHELL",
+  "STOPSIGNAL", "HEALTHCHECK", "SHELL", "MAINTAINER",
 ]);
 
 function parseDockerfileInstructions(lines: string[]): Instruction[] {
@@ -77,7 +77,8 @@ function parseDockerfileInstructions(lines: string[]): Instruction[] {
     if (DOCKERFILE_INSTRUCTIONS.has(firstWord)) {
       // Collecter les lignes de continuation (\)
       const rawLines = [line];
-      while (lines[i]?.endsWith("\\") && i + 1 < lines.length) {
+      // `\` suivi d'espaces ou d'un `\r` (CRLF) continue aussi la ligne.
+      while (/\\\s*$/.test(lines[i] ?? "") && i + 1 < lines.length) {
         i++;
         rawLines.push(lines[i]);
       }
@@ -157,6 +158,15 @@ function mergeStage(
 
   const result: string[] = [];
   const seen = new Set<string>();
+
+  // Même garde côté ours : avec une clé répétée, la même instruction theirs
+  // serait appariée plusieurs fois (et sortirait en double).
+  const oursKeys = new Set<string>();
+  for (const instr of oursInstructions) {
+    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
+    if (oursKeys.has(mapKey) && instr.kind !== "BLANK" && instr.kind !== "COMMENT") return null;
+    oursKeys.add(mapKey);
+  }
 
   for (const oursInstr of oursInstructions) {
     const mapKey = oursInstr.key ? `${oursInstr.kind}:${oursInstr.key}` : oursInstr.kind;

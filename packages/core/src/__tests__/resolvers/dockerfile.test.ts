@@ -280,3 +280,38 @@ describe("Dockerfile — instructions de même clé côté theirs", () => {
     expect(result.mergedContent ?? "").not.toMatch(/pkg-c\n\s*pkg-c/);
   });
 });
+
+describe("Dockerfile — instructions de même clé côté ours", () => {
+  it("ours ajoute un RUN que theirs a aussi : jamais en double", () => {
+    const input = dockerHunk(
+      [`FROM node:20 AS app`, `ENV A=2`, `RUN npm ci`, `RUN npm run build`],
+      [`FROM node:20 AS app`, `ENV A=1`, `RUN npm ci`],
+      [`FROM node:20 AS app`, `ENV A=1`, `RUN npm run build`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.mergedContent?.match(/RUN npm run build/g) ?? []).not.toHaveLength(2);
+  });
+
+  it("ENV répété côté ours : aucune valeur perdue en silence", () => {
+    const input = dockerHunk(
+      [`FROM node:20 AS app`, `ENV PATH=p1`, `ENV PATH=p2`],
+      [`FROM node:20 AS app`, `ENV PATH=p1`],
+      [`FROM node:20 AS app`, `ENV PATH=p3`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.resolutions[0].resolutionReason ?? "").not.toMatch(/merged by stage/);
+  });
+
+  it("MAINTAINER est une instruction : la fusion par stage reste possible", () => {
+    const input = dockerHunk(
+      [`FROM node:20 AS app`, `MAINTAINER x`, `ENV A=2`],
+      [`FROM node:20 AS app`, `MAINTAINER x`, `ENV A=1`],
+      [`FROM node:20 AS app`, `MAINTAINER x`, `ENV A=1`, `EXPOSE 80`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("ENV A=2");
+    expect(result.mergedContent).toContain("EXPOSE 80");
+    expect(result.mergedContent?.match(/MAINTAINER x/g)).toHaveLength(1);
+  });
+});
