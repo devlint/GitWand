@@ -25,6 +25,10 @@ overrides:
   "proxy-addr@2": "^2.0.8" # critical, IPv4-mapped IPv6 trust bypass; via express → MCP SDK (#124)
   "qs@6": ">=6.15.2" # via express → MCP SDK (#16)
   "ip-address@10": "^10.7.1" # via express-rate-limit → MCP SDK (#5, #118, #119)
+  # zod is a peer of the MCP SDK (^3.25 || ^4.0): pnpm keeps the resolved peer
+  # on update, so Dependabot cannot move it. Not scoped by major: the SDK asks
+  # for "^3.25 || ^4.0", which a `zod@4` selector does not match.
+  zod: "^4.6.6" # memory exhaustion on oversized constrained collections (#162)
   "ws@8": ">=8.20.1" # CVE-2026-45736, via jsdom (#15)
   "brace-expansion@5": "^5.0.12" # via minimatch@10 → vsce (#14, #112, #114, #116)
   "brace-expansion@2": "^2.1.7" # via minimatch → vue-tsc, dev-only (#113, #115, #117)
