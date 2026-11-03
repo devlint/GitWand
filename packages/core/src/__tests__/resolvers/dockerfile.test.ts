@@ -211,3 +211,40 @@ describe("Dockerfile — stages sans alias appariés par position", () => {
     expect(result.stats.autoResolved).toBe(0);
   });
 });
+
+// ─── Changement d'un seul côté : jamais effacé par « prefer theirs » ─────────
+// Avec l'appariement par position, une modification faite seulement côté ours
+// (bump d'image, ENV) était remplacée par la valeur de base venue de theirs.
+
+describe("Dockerfile — la base départage les instructions", () => {
+  it("FROM changé côté ours seulement, ENV changé côté theirs : les deux gardés", () => {
+    const input = dockerHunk([`FROM node:20`, `ENV A=1`], [`FROM node:18`, `ENV A=1`], [`FROM node:18`, `ENV A=2`]);
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("FROM node:20");
+    expect(result.mergedContent).toContain("ENV A=2");
+    expect(result.mergedContent?.match(/^FROM /gm)).toHaveLength(1);
+  });
+
+  it("hunk sans FROM : ENV changé de chaque côté sur des clés différentes", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV PORT=3000`, `ENV B=1`], [`ENV PORT=8080`, `ENV B=1`], [`ENV PORT=8080`, `ENV B=2`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("ENV PORT=3000");
+    expect(result.mergedContent).toContain("ENV B=2");
+    expect(result.mergedContent).not.toContain("PORT=8080");
+  });
+
+  it("second stage bumpé côté ours seulement : bump gardé", () => {
+    const input = dockerHunk(
+      [`FROM golang:1.21`, `RUN go build`, `FROM alpine:3.19`],
+      [`FROM golang:1.21`, `RUN go build`, `FROM alpine:3.18`],
+      [`FROM debian:12`, `RUN go build`, `FROM alpine:3.18`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("FROM debian:12");
+    expect(result.mergedContent).toContain("FROM alpine:3.19");
+    expect(result.mergedContent).not.toContain("alpine:3.18");
+  });
+});

@@ -263,3 +263,60 @@ describe("imports — forme changée d'un seul côté", () => {
     expect(result.hunks[0].type).toBe("complex");
   });
 });
+
+// ─── Formes différentes sans nom commun : pas un conflit ─────────────────────
+// `import React from "react"` et `import { useState } from "react"` coexistent.
+// Seule une collision de nom local (ou une liaison illisible, `require`) est un
+// vrai conflit ; sinon le moteur textuel garde les deux lignes, comme sur main.
+
+describe("imports — même module, formes différentes, noms distincts", () => {
+  const hunk = (ours: string[], base: string[], theirs: string[]) => [
+    `<<<<<<< ours`, ...ours, `||||||| base`, ...base, `=======`, ...theirs, `>>>>>>> theirs`, `export const z = 1;`,
+  ].join("\n");
+
+  it("default d'un côté, named de l'autre : les deux gardés", () => {
+    const result = resolve(hunk(
+      [`import a from "a";`, `import React from "react";`],
+      [`import a from "a";`],
+      [`import a from "a";`, `import { useState } from "react";`],
+    ), "app.ts");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain(`import React from "react";`);
+    expect(result.mergedContent).toContain(`import { useState } from "react";`);
+  });
+
+  it("named modifié d'un côté, default ajouté de l'autre : les deux gardés", () => {
+    const result = resolve(hunk(
+      [`import { a, b } from "m";`],
+      [`import { a } from "m";`],
+      [`import { a } from "m";`, `import M from "m";`],
+    ), "app.ts");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain(`import { a, b } from "m";`);
+    expect(result.mergedContent).toContain(`import M from "m";`);
+  });
+
+  it("alias en collision (`{ x as useAuth }` vs `useAuth`) : complex", () => {
+    const result = resolve(hunk(
+      [`import { x as useAuth } from "./auth";`], [], [`import useAuth from "./auth";`],
+    ), "app.ts");
+    expect(result.stats.autoResolved).toBe(0);
+    expect(result.hunks[0].type).toBe("complex");
+  });
+
+  it("require contre import du même module : complex (liaison du require non lue)", () => {
+    const result = resolve(hunk(
+      [`const useAuth = require("./auth");`], [], [`import useAuth from "./auth";`],
+    ), "app.ts");
+    expect(result.stats.autoResolved).toBe(0);
+    expect(result.hunks[0].type).toBe("complex");
+  });
+
+  it("même import de base modifié des deux côtés : le moteur textuel garde la main", () => {
+    const result = resolve(hunk(
+      [`import B from "./a";`], [`import A from "./a";`], [`import A from "./a.js";`],
+    ), "app.ts");
+    expect(result.hunks[0].type).not.toBe("complex");
+    expect(result.mergedContent ?? "").not.toMatch(/import B from "\.\/a";\nimport A/);
+  });
+});

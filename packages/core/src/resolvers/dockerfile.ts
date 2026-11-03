@@ -124,13 +124,30 @@ function parseDockerfileInstructions(lines: string[]): Instruction[] {
 /**
  * Fusionne deux listes d'instructions d'un même stage Dockerfile.
  * Retourne les lignes fusionnées ou null si un conflit irréductible est détecté.
+ *
+ * `baseInstructions` (stage de base apparié, absent en diff2) : quand une
+ * instruction diffère entre les deux côtés et qu'un côté est resté égal à la
+ * base, c'est l'autre côté qui l'a changée — on garde son changement au lieu
+ * d'appliquer « prefer theirs », qui effaçait en silence une modification
+ * faite seulement côté ours. Seules les clés uniques dans le stage de base
+ * servent (plusieurs `RUN` partagent la clé `RUN` : ambigu).
  */
-function mergeStage(oursInstructions: Instruction[], theirsInstructions: Instruction[]): string[] | null {
+function mergeStage(
+  oursInstructions: Instruction[],
+  theirsInstructions: Instruction[],
+  baseInstructions?: Instruction[],
+): string[] | null {
   // Indexer theirs par (kind, key)
   const theirsMap = new Map<string, Instruction>();
   for (const instr of theirsInstructions) {
     const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
     theirsMap.set(mapKey, instr);
+  }
+
+  const baseRawByKey = new Map<string, string | null>();
+  for (const instr of baseInstructions ?? []) {
+    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
+    baseRawByKey.set(mapKey, baseRawByKey.has(mapKey) ? null : instr.raw.join("\n"));
   }
 
   const result: string[] = [];
@@ -155,6 +172,19 @@ function mergeStage(oursInstructions: Instruction[], theirsInstructions: Instruc
       // Identiques → inclure une fois
       result.push(...oursInstr.raw);
       continue;
+    }
+
+    // Changement d'un seul côté → le garder.
+    const baseRaw = baseRawByKey.get(mapKey);
+    if (typeof baseRaw === "string") {
+      if (baseRaw === theirsRaw) {
+        result.push(...oursInstr.raw);
+        continue;
+      }
+      if (baseRaw === oursRaw) {
+        result.push(...theirsInstr.raw);
+        continue;
+      }
     }
 
     // Conflit : stratégie par instruction
@@ -210,7 +240,7 @@ function mergeStage(oursInstructions: Instruction[], theirsInstructions: Instruc
  * Tente de résoudre un conflit dans un Dockerfile.
  */
 export function tryResolveDockerfileConflict(
-  _baseLines: string[],
+  baseLines: string[],
   oursLines: string[],
   theirsLines: string[],
 ): FormatResult {
@@ -264,6 +294,18 @@ export function tryResolveDockerfileConflict(
   const theirsStageMap = new Map<string, Instruction[]>();
   theirsStages.forEach((stage, idx) => theirsStageMap.set(theirsKeys[idx], stage));
 
+  // Stages de base, appariés avec les mêmes clés — seulement si la base a le
+  // même nombre de stages sans alias (sinon la position ne dit rien) et n'est
+  // pas vide (diff2). Sans base, mergeStage garde « prefer theirs ».
+  const baseStageMap = new Map<string, Instruction[]>();
+  if (baseLines.length > 0) {
+    const baseStages = splitByStage(parseDockerfileInstructions(baseLines));
+    const baseKeys = stageKeys(baseStages);
+    if (countUnaliased(baseKeys) === countUnaliased(oursKeys)) {
+      baseStages.forEach((stage, idx) => baseStageMap.set(baseKeys[idx], stage));
+    }
+  }
+
   const resultLines: string[] = [];
   const seenStages = new Set<string>();
 
@@ -278,7 +320,7 @@ export function tryResolveDockerfileConflict(
       continue;
     }
 
-    const merged = mergeStage(oursStage, theirsStage);
+    const merged = mergeStage(oursStage, theirsStage, baseStageMap.get(key));
     if (!merged) {
       return {
         lines: null,
