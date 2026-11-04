@@ -129,6 +129,13 @@ regex = "1"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Windows Job Objects (v3.13): a terminal session's whole process tree is
+# killed when it closes (Win32_Security: CreateJobObjectW takes security
+# attributes). Already in the graph (0.61, through tauri/tokio):
+# only the features are new.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
 [dev-dependencies]
 # tokio is already in the tree (tauri depends on it) — this entry only makes
 # it nameable from `#[cfg(test)]` code, so a test can build a runtime with a

@@ -27,11 +27,13 @@ struct PtyHandle {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     /// The session's working directory, canonical: what a worktree's
     /// processes are matched by.
-    #[allow(dead_code)] // read by worktree stopping (Task 3).
+    #[allow(dead_code)] // TASK4: used by worktree_stop_processes
     cwd: PathBuf,
     /// The leader's pid, which is also its session id on Unix.
-    #[allow(dead_code)] // read on Unix only, and by worktree stopping (Task 3).
     leader: Option<u32>,
+    /// Windows: the Job Object the session's tree runs in.
+    #[cfg(windows)]
+    job: Option<job::Job>,
 }
 
 fn sessions() -> &'static Mutex<HashMap<u64, PtyHandle>> {
@@ -286,6 +288,14 @@ pub(crate) fn spawn_session(
 
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     let leader = child.process_id();
+    #[cfg(windows)]
+    let job = leader.and_then(|pid| match job::Job::assign(pid) {
+        Ok(j) => Some(j),
+        Err(e) => {
+            eprintln!("[terminal] Job Object not set up, closing kills the leader only: {e}");
+            None
+        }
+    });
     let master_arc: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>> =
         Arc::new(Mutex::new(pair.master));
     let writer_arc: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(writer));
@@ -298,6 +308,8 @@ pub(crate) fn spawn_session(
             child,
             cwd: spec.cwd,
             leader,
+            #[cfg(windows)]
+            job,
         },
     );
 
@@ -461,6 +473,33 @@ pub(crate) async fn terminal_close(id: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// The open sessions whose working directory is `root` or inside it
+/// (component-wise).
+#[allow(dead_code)] // TASK4: used by worktree_stop_processes
+pub(crate) fn sessions_under(root: &std::path::Path) -> Vec<u64> {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut ids: Vec<u64> = lock_sessions()
+        .iter()
+        .filter(|(_, h)| h.cwd.starts_with(&root))
+        .map(|(id, _)| *id)
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// Closes these sessions like `terminal_close`, and returns their leaders'
+/// pids (their session ids on Unix).
+#[allow(dead_code)] // TASK4: used by worktree_stop_processes
+pub(crate) fn close_session_ids(ids: &[u64]) -> std::collections::HashSet<u32> {
+    let handles: Vec<PtyHandle> = {
+        let mut map = lock_sessions();
+        ids.iter().filter_map(|id| map.remove(id)).collect()
+    };
+    let leaders = handles.iter().filter_map(|h| h.leader).collect();
+    close_sessions(handles, true);
+    leaders
+}
+
 /// Tue toutes les sessions (appelé au quit de l'app, sur le thread de la
 /// boucle d'événements) : grâce SIGHUP courte (100 ms au total, pas par
 /// session), sans attendre les leaders ensuite.
@@ -474,23 +513,38 @@ pub(crate) fn terminal_close_all() {
 /// reads the scratch right after). SIGHUP first, as a terminal hanging up
 /// does, so shells save their history and agents their session; SIGKILL for
 /// whatever is left after a grace period. `wait_leaders` then waits for the
-/// leaders, bounded, for a process stuck in an uninterruptible syscall. On
-/// Windows only the leader is killed.
+/// leaders, bounded, for a process stuck in an uninterruptible syscall.
+///
+/// Unix: besides the groups, every process still in a leader's session is
+/// signalled one by one, which reaches the shell's background jobs (their
+/// own group) and an orphaned foreground job; only a process that called
+/// `setsid` itself escapes, and the worktree sweep catches it by cwd.
+/// Windows: the session's Job Object is terminated, which takes its whole
+/// tree; without one (assignment failed), only the leader is killed.
 fn close_sessions(mut handles: Vec<PtyHandle>, wait_leaders: bool) {
+    if handles.is_empty() {
+        return;
+    }
     #[cfg(unix)]
     {
         let groups: Vec<libc::pid_t> = handles.iter().flat_map(session_groups).collect();
+        let members = session_members(&handles);
         let grace = Duration::from_millis(if wait_leaders { 500 } else { 100 });
-        stop_groups(&groups, grace, || {
+        stop_groups(&groups, &members, grace, || {
             // Reap the leaders, so a zombie doesn't keep its group alive.
             for h in &mut handles {
                 let _ = h.child.try_wait();
             }
         });
     }
-    // Windows: the leader is all we kill. On Unix the group SIGKILL above
-    // already reached it.
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    for h in &mut handles {
+        if let Some(job) = &h.job {
+            job.terminate();
+        }
+        let _ = h.child.kill();
+    }
+    #[cfg(not(any(unix, windows)))]
     for h in &mut handles {
         let _ = h.child.kill();
     }
@@ -528,26 +582,81 @@ fn session_groups(h: &PtyHandle) -> Vec<libc::pid_t> {
     groups
 }
 
-/// SIGHUP `groups`, give them up to `grace` to empty, then SIGKILL the ones
-/// still populated. Every member counts, not only the leaders: an agent
-/// still saving its session after its shell exited gets the whole grace
-/// period. `reap` runs before each check, for the caller to reap its own
-/// children. An emptied group is not signalled again: its id is free for
-/// reuse once its leader is reaped.
+/// The processes still in the sessions' sessions, leaders excluded (their
+/// group already covers them). Never pid ≤ 1, GitWand itself or a member of
+/// GitWand's group.
 #[cfg(unix)]
-fn stop_groups(groups: &[libc::pid_t], grace: Duration, mut reap: impl FnMut()) {
+fn session_members(handles: &[PtyHandle]) -> Vec<libc::pid_t> {
+    let leaders: std::collections::HashSet<u32> = handles.iter().filter_map(|h| h.leader).collect();
+    if leaders.is_empty() {
+        return Vec::new();
+    }
+    let own = std::process::id();
+    // SAFETY: plain syscall.
+    let own_group = unsafe { libc::getpgrp() };
+    crate::process_tree::list_processes()
+        .into_iter()
+        .map(|p| p.pid)
+        .filter(|&pid| pid > 1 && pid != own && !leaders.contains(&pid))
+        .filter(|&pid| {
+            crate::process_tree::session_of(pid).is_some_and(|sid| leaders.contains(&sid))
+        })
+        .filter_map(|pid| libc::pid_t::try_from(pid).ok())
+        // SAFETY: plain syscall.
+        .filter(|&pid| unsafe { libc::getpgid(pid) } != own_group)
+        .collect()
+}
+
+/// SIGHUP `groups` and `pids`, give them up to `grace` to be gone, then
+/// SIGKILL what is left. Every group member counts, not only the leaders: an
+/// agent still saving its session after its shell exited gets the whole
+/// grace period. `reap` runs before each check, for the caller to reap its
+/// own children. An emptied group, or a pid gone, is not signalled again:
+/// its id is free for reuse.
+#[cfg(unix)]
+fn stop_groups(
+    groups: &[libc::pid_t],
+    pids: &[libc::pid_t],
+    grace: Duration,
+    mut reap: impl FnMut(),
+) {
     signal_groups(groups, libc::SIGHUP);
+    signal_pids(pids, libc::SIGHUP);
     let deadline = Instant::now() + grace;
     let mut alive: Vec<libc::pid_t> = groups.to_vec();
+    let mut alive_pids: Vec<libc::pid_t> = pids.to_vec();
     loop {
         reap();
         alive.retain(|&g| group_alive(g));
-        if alive.is_empty() || Instant::now() >= deadline {
+        alive_pids.retain(|&p| pid_alive(p));
+        if (alive.is_empty() && alive_pids.is_empty()) || Instant::now() >= deadline {
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
     signal_groups(&alive, libc::SIGKILL);
+    signal_pids(&alive_pids, libc::SIGKILL);
+}
+
+#[cfg(unix)]
+fn pid_alive(pid: libc::pid_t) -> bool {
+    // SAFETY: signal 0 only checks the pid exists. EPERM is a live process.
+    let probed = unsafe { libc::kill(pid, 0) };
+    probed == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+#[cfg(unix)]
+fn signal_pids(pids: &[libc::pid_t], signal: libc::c_int) {
+    let own = std::process::id() as libc::pid_t;
+    for &pid in pids {
+        // Never 0/-1 (groups, everyone), init or GitWand itself.
+        if pid > 1 && pid != own {
+            // SAFETY: plain syscall, no memory is shared with it.
+            unsafe {
+                libc::kill(pid, signal);
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -566,6 +675,87 @@ fn signal_groups(groups: &[libc::pid_t], signal: libc::c_int) {
         if pgid > 1 && pgid != unsafe { libc::getpgrp() } {
             unsafe {
                 libc::killpg(pgid, signal);
+            }
+        }
+    }
+}
+
+/// A Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: every process the
+/// session's leader starts stays in it, and terminating or closing it kills
+/// the whole tree, grandchildren included (spec §8).
+#[cfg(windows)]
+mod job {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+    };
+
+    pub(super) struct Job(HANDLE);
+
+    // SAFETY: a job handle is a kernel object reference, usable from any thread.
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+
+    impl Job {
+        /// Creates a kill-on-close job and puts `pid` in it.
+        pub(super) fn assign(pid: u32) -> Result<Job, String> {
+            // SAFETY: plain Win32 calls; every handle opened here is closed
+            // on each path (the job's by `Drop`).
+            unsafe {
+                let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if handle.is_null() {
+                    return Err(format!(
+                        "CreateJobObjectW: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+                let job = Job(handle);
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                if SetInformationJobObject(
+                    job.0,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const core::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                ) == 0
+                {
+                    return Err(format!(
+                        "SetInformationJobObject: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+                let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+                if process.is_null() {
+                    return Err(format!("OpenProcess: {}", std::io::Error::last_os_error()));
+                }
+                let assigned = AssignProcessToJobObject(job.0, process);
+                let err = std::io::Error::last_os_error();
+                CloseHandle(process);
+                if assigned == 0 {
+                    return Err(format!("AssignProcessToJobObject: {err}"));
+                }
+                Ok(job)
+            }
+        }
+
+        pub(super) fn terminate(&self) {
+            // SAFETY: the handle is open until `Drop`.
+            unsafe {
+                TerminateJobObject(self.0, 1);
+            }
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            // SAFETY: closed once, here. Kill-on-close ends what is left.
+            unsafe {
+                CloseHandle(self.0);
             }
         }
     }
@@ -692,6 +882,67 @@ mod tests {
         close_sessions(vec![handle], true);
     }
 
+    #[test]
+    fn close_kills_background_job_in_own_group() {
+        let dir = scratch_dir("bgjob");
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        let id = spawn_session(
+            spec(
+                &dir,
+                sh("set -m; sleep 300 & echo BG:$!; wait"),
+                HashMap::new(),
+            ),
+            Box::new(move |c| tx.send(c).is_ok()),
+            Box::new(|_| {}),
+        )
+        .unwrap();
+        let mut out = String::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let bg: libc::pid_t = loop {
+            if let Some(rest) = out.split("BG:").nth(1) {
+                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                if rest.len() > digits.len() && !digits.is_empty() {
+                    break digits.parse().unwrap();
+                }
+            }
+            assert!(Instant::now() < deadline, "no BG pid in {out:?}");
+            if let Ok(c) = rx.recv_timeout(Duration::from_millis(100)) {
+                out.push_str(&c);
+            }
+        };
+        let leader = lock_sessions().get(&id).unwrap().leader.unwrap() as libc::pid_t;
+        assert!(alive(bg));
+        // SAFETY: plain syscall.
+        assert_ne!(
+            unsafe { libc::getpgid(bg) },
+            leader,
+            "job control must move it"
+        );
+
+        let leaders = close_session_ids(&[id]);
+        assert!(leaders.contains(&(leader as u32)));
+        assert!(wait_gone(bg), "the background job must be stopped too");
+    }
+
+    #[test]
+    fn sessions_under_matches_by_cwd() {
+        let a = scratch_dir("under-a");
+        let ab = scratch_dir("under-a-b");
+        let open = |d: &std::path::Path| {
+            spawn_session(
+                spec(d, sh("sleep 30"), HashMap::new()),
+                Box::new(|_| true),
+                Box::new(|_| {}),
+            )
+            .unwrap()
+        };
+        let (ia, iab) = (open(&a), open(&ab));
+        assert_eq!(sessions_under(&a), vec![ia]);
+        assert_eq!(sessions_under(&ab), vec![iab]);
+        close_session_ids(&[ia, iab]);
+        assert!(sessions_under(&a).is_empty());
+    }
+
     fn wait_gone(pid: libc::pid_t) -> bool {
         // An orphan is reaped by init, asynchronously.
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -707,7 +958,7 @@ mod tests {
         let (mut leader, child) = spawn_group("(trap '' HUP; sleep 30) & echo $!; wait");
         let leader_pid = leader.id() as libc::pid_t;
 
-        stop_groups(&[leader_pid], Duration::from_millis(500), || {
+        stop_groups(&[leader_pid], &[], Duration::from_millis(500), || {
             let _ = leader.try_wait();
         });
         leader.wait().unwrap();
@@ -728,7 +979,7 @@ mod tests {
         let (mut leader, child) = spawn_group(&script);
         let leader_pid = leader.id() as libc::pid_t;
 
-        stop_groups(&[leader_pid], Duration::from_millis(500), || {
+        stop_groups(&[leader_pid], &[], Duration::from_millis(500), || {
             let _ = leader.try_wait();
         });
         let _ = leader.wait();
@@ -752,7 +1003,7 @@ mod tests {
         let leader_pid = leader.id() as libc::pid_t;
 
         let mut status = None;
-        stop_groups(&[leader_pid], Duration::from_millis(500), || {
+        stop_groups(&[leader_pid], &[], Duration::from_millis(500), || {
             if status.is_none() {
                 status = leader.try_wait().unwrap();
             }
