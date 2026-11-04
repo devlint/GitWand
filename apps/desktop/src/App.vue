@@ -145,7 +145,10 @@ import {
   COMMIT_MESSAGE_SINK_KEY,
   type SettingsSectionTarget,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange, type ScratchWorktree } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree } from "./utils/backend";
+import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorktreeCreation";
+import type { HookTrustDecision } from "./composables/useWorktreeHookTrust";
+import { describeBase } from "./utils/worktreeBase";
 import { useCommitActions } from "./composables/useCommitActions";
 import { useConflictEditorSelection } from "./composables/useConflictEditorSelection";
 
@@ -547,6 +550,9 @@ const {
 
 // ─── AI-task scratch worktrees (registry + worktree submenu) ──
 const aiTasks = useAiTasks();
+// v3.13: AI tasks now live on `task/<name>`, so the Git Tree knows them by
+// the registry rather than by the `gitwand-scratch-` prefix alone.
+const aiTaskBranches = computed(() => new Set(Object.values(aiTasks.tasks.value).map((task) => task.branch)));
 // v3.13 — trust prompt for a repository's worktree commands (asked by creation/removal).
 const hookTrust = useWorktreeHookTrust();
 
@@ -2207,6 +2213,111 @@ const showTerminal = ref(false);
 const termSessions = useTerminalSessions();
 const terminalPanelRef = ref<any>(null);
 
+/** Shows the terminal panel and waits for it to mount; false if it never does. */
+async function ensureTerminalPanel(): Promise<boolean> {
+  showTerminal.value = true;
+  // defineAsyncComponent needs multiple ticks to load; wait until ref is set.
+  if (terminalPanelRef.value) return true;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      // Guard against a chunk-load failure or JS error in the TerminalPanel
+      // dynamic import: if the component never mounts, the watch fires on
+      // nothing and the Promise hangs forever, leaving the UI frozen with
+      // showTerminal=true but nothing rendered.
+      const timer = setTimeout(() => {
+        stop();
+        reject(new Error("TerminalPanel mount timeout"));
+      }, 10_000);
+      const stop = watch(terminalPanelRef, val => {
+        if (val) { clearTimeout(timer); stop(); resolve(); }
+      });
+    });
+    return true;
+  } catch {
+    showTerminal.value = false;
+    return false;
+  }
+}
+
+// ─── v3.13 worktree setup tabs ───────────────────────────
+// A new worktree's `setup` runs in a read-only tab listed under `repoPath`;
+// it ends on a ✓/✗ line. Registered once: useWorktreeCreation calls it.
+const worktreeCreation = useWorktreeCreation();
+
+registerSetupRunner(async (repoPath, cwd, path, name, hash) => {
+  if (!(await ensureTerminalPanel())) throw new Error("TerminalPanel mount timeout");
+  let resolveExit!: (code: number | null) => void;
+  const exited = new Promise<number | null>((r) => (resolveExit = r));
+  let tabId = -1;
+  let pendingLine: string | null = null;
+  const write = (id: number, text: string) => terminalPanelRef.value?.writeChunk(id, text);
+  try {
+    const tab = await termSessions.openTab(
+      repoPath,
+      path,
+      (id, chunk) => {
+        write(id, chunk);
+        termSessions.notifyOutput(repoPath);
+      },
+      {
+        type: "setup",
+        title: t("worktree.setupTabTitle", name),
+        readOnly: true,
+        spawn: (onChunk, onExit) => worktreeRunHook(cwd, path, "setup", hash, { cols: 80, rows: 24, onExit }, onChunk),
+        onExit: (code) => {
+          const line = code === 0
+            ? `\r\n\x1b[32m✓ ${t("worktree.setupDone")}\x1b[0m\r\n`
+            : code === null
+              ? `\r\n\x1b[31m✗ ${t("worktree.setupStopped")}\x1b[0m\r\n`
+              : `\r\n\x1b[31m✗ ${t("worktree.setupFailedCode", code)}\x1b[0m\r\n`;
+          if (tabId >= 0) write(tabId, line);
+          else pendingLine = line;
+          resolveExit(code);
+        },
+      },
+    );
+    tabId = tab.id;
+    if (pendingLine) write(tabId, pendingLine);
+  } catch (err) {
+    repoError.value = t("worktree.setupStartFailed", String((err as { message?: string })?.message ?? err));
+    throw err;
+  }
+  return { code: await exited, tabId };
+});
+
+/** Include entries the service skipped, if any, as one toast. */
+function reportIncludeWarnings(created: CreatedWorktree) {
+  if (created.warnings.length === 0) return;
+  showDetailToast(
+    t("worktree.includeWarnings", created.warnings.map((w) => `${w.path} (${w.reason})`).join(", ")),
+    null,
+    6000,
+  );
+}
+
+/**
+ * A worktree created from the worktree manager: open it when asked
+ * (quick-create), then run its setup there, or under the current repo.
+ */
+async function onWorktreeCreated(payload: { cwd: string; created: CreatedWorktree; decision: HookTrustDecision; open: boolean }) {
+  reportIncludeWarnings(payload.created);
+  let repoPath = repoFolderPath.value ?? payload.cwd;
+  if (payload.open) {
+    openTab(payload.created.path);
+    showWorktrees.value = false;
+    pendingWorktreeBranch.value = undefined;
+    pendingQuickCreate.value = false;
+    repoPath = payload.created.path;
+  }
+  await worktreeCreation.runSetup(repoPath, payload.cwd, payload.created, payload.decision);
+}
+
+/** "Open the log" on a worktree card: focus its setup tab. */
+async function onOpenSetupLog(payload: { repoPath: string; tabId: number }) {
+  if (!(await ensureTerminalPanel())) return;
+  termSessions.setActive(payload.repoPath, payload.tabId);
+}
+
 async function openTerminalTab(cwd?: string, type?: TerminalTabType) {
   if (!repoFolderPath.value) return;
   // Capture the repo this tab belongs to at open time. The output callback
@@ -2215,28 +2326,7 @@ async function openTerminalTab(cwd?: string, type?: TerminalTabType) {
   // switches/closes the repo, and reading repoFolderPath.value at fire time
   // would refresh the wrong (or a closed/null) repo.
   const repoPath = repoFolderPath.value;
-  showTerminal.value = true;
-  // defineAsyncComponent needs multiple ticks to load; wait until ref is set.
-  if (!terminalPanelRef.value) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        // Guard against a chunk-load failure or JS error in the TerminalPanel
-        // dynamic import: if the component never mounts, the watch fires on
-        // nothing and the Promise hangs forever, leaving the UI frozen with
-        // showTerminal=true but nothing rendered.
-        const timer = setTimeout(() => {
-          stop();
-          reject(new Error("TerminalPanel mount timeout"));
-        }, 10_000);
-        const stop = watch(terminalPanelRef, val => {
-          if (val) { clearTimeout(timer); stop(); resolve(); }
-        });
-      });
-    } catch {
-      showTerminal.value = false;
-      return;
-    }
-  }
+  if (!(await ensureTerminalPanel())) return;
   const shell = settings.value.terminalShell || undefined;
   // `type` carries the agent identity ("claude"/"codex"); `shell` is always the
   // user's configured shell. openTab maps the type to a first-class agent spawn.
@@ -2346,16 +2436,35 @@ function reportAgentLaunchError(tabType: TerminalTabType, err: unknown) {
 const aiTaskNamePrompt = ref(false);
 const aiTaskNameBusy = ref(false);
 
+// v3.13: the base the task will start from, fetched while the user types.
+const aiTaskBase = ref<BaseResolution | null>(null);
+const aiTaskBaseLine = computed(() => {
+  if (!aiTaskBase.value) return t("worktree.baseResolving");
+  const line = describeBase(aiTaskBase.value);
+  return t(line.key, ...line.args);
+});
+
 function onNewAiTask() {
   if (!repoFolderPath.value || activeTabId.value === null) return;
   aiTaskNamePrompt.value = true;
+  aiTaskBase.value = null;
+  const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
+  const origin = projectTab?.path ?? repoFolderPath.value;
+  worktreeResolveBase(origin)
+    .then((info) => {
+      if (aiTaskNamePrompt.value) aiTaskBase.value = info.base;
+    })
+    .catch(() => {
+      /* creation resolves the base itself */
+    });
 }
 
 /**
- * v3.7.0 (Task 3) — the scratch-worktree creation sequence used by "New AI
- * task" (`confirmNewAiTask`): create -> register -> select -> open. Returns
- * `null` (without throwing) when there's no active project tab to base the
- * scratch on — the caller decides how to surface that.
+ * v3.7.0 (Task 3), v3.13 — the worktree creation sequence used by "New AI
+ * task" (`confirmNewAiTask`): create (through the worktree service, after
+ * the hook trust question) -> register -> select -> open. Returns `null`
+ * (without throwing) when there's no active project tab, or the user
+ * cancelled at the trust prompt.
  *
  * Commit Review's "Fix with agent" used to also call this (optionally
  * opening the agent in a scratch worktree), but that option was removed
@@ -2364,36 +2473,54 @@ function onNewAiTask() {
  * misinterprets the piped prompt. This function is no longer reachable from
  * Commit Review at all — only `confirmNewAiTask` calls it now.
  */
-async function createAiTaskScratchWorktree(name?: string): Promise<ScratchWorktree | null> {
+async function createAiTaskWorktree(name: string) {
   if (!repoFolderPath.value || activeTabId.value === null) return null;
-  // Always base the scratch on the active project's root, not whatever
+  // Always base the task on the active project's root, not whatever
   // worktree is currently selected, so AI tasks branch from the project.
   const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
   const origin = projectTab?.path ?? repoFolderPath.value;
-  const scratch = await scratchWorktreeCreate(origin, undefined, name || undefined);
+  const result = await worktreeCreation.create(origin, {
+    // A blank name keeps the historical timestamp naming.
+    name: name || String(Math.floor(Date.now() / 1000)),
+    // The base the dialog already fetched, so creation does not fetch again.
+    base: aiTaskBase.value?.base_ref,
+    kind: "task",
+  });
+  if (!result) return null;
+  const { created } = result;
   aiTasks.register({
-    path: scratch.path,
+    path: created.path,
     originCwd: origin,
-    branch: scratch.branch,
-    createdAt: scratch.created_at,
+    branch: created.branch,
+    createdAt: created.created_at,
   });
   void refreshWorktreeCount(origin);
-  // Switch the project's checkout to the new scratch worktree in place, then
-  // load it so a spawned agent terminal lands in the right cwd.
-  selectWorktree(activeTabId.value, scratch.path);
-  await openRepo(scratch.path);
-  return scratch;
+  // Switch the project's checkout to the new worktree in place, then load it
+  // so the setup tab and the agent terminal land in the right cwd.
+  selectWorktree(activeTabId.value, created.path);
+  await openRepo(created.path);
+  return { ...result, origin };
 }
 
-/** Create the AI-task scratch worktree once the user has named it. */
+/**
+ * Create the AI task once the user has named it, run its setup, then launch
+ * the agent: right away without setup (or when skipped), only after a
+ * successful one otherwise (spec §5.4).
+ */
 async function confirmNewAiTask(name: string) {
   if (!repoFolderPath.value || activeTabId.value === null) return;
   aiTaskNameBusy.value = true;
   try {
-    const scratch = await createAiTaskScratchWorktree(name);
+    const result = await createAiTaskWorktree(name);
     aiTaskNamePrompt.value = false;
-    if (!scratch) return;
-    await openTerminalTab(scratch.path, "claude");
+    if (!result) return;
+    reportIncludeWarnings(result.created);
+    const status = await worktreeCreation.runSetup(result.created.path, result.origin, result.created, result.decision);
+    if (status === "failed") {
+      repoError.value = t("aiTask.setupFailed", result.created.name);
+      return;
+    }
+    await openTerminalTab(result.created.path, "claude");
   } catch (err) {
     aiTaskNamePrompt.value = false;
     reportAgentLaunchError("claude", err);
@@ -2411,7 +2538,7 @@ async function confirmNewAiTask(name: string) {
  *
  * Always targets the CURRENT repo — deliberately scope-narrowed for PR2
  * (not a bug fix): this used to optionally open the agent in a fresh
- * scratch worktree via `createAiTaskScratchWorktree`, but manual QA against
+ * scratch worktree via `createAiTaskWorktree`, but manual QA against
  * real `claude`/`codex` CLIs found that a brand-new working directory
  * (exactly what a scratch worktree always is) hits a first-run "trust this
  * directory?" onboarding screen before the agent's normal input box exists.
@@ -2423,7 +2550,7 @@ async function confirmNewAiTask(name: string) {
  * scratch-worktree option is removed until there's a real fix — e.g.
  * pre-trusting the directory before launching the agent, or detecting the
  * onboarding screen before writing — tracked as a roadmap follow-up.
- * `createAiTaskScratchWorktree` itself is untouched and still used by the
+ * `createAiTaskWorktree` itself is untouched and still used by the
  * existing "New AI task" button (`confirmNewAiTask`).
  *
  * Verifier item #5 — manual QA performed via the dev-server's real
@@ -4589,7 +4716,7 @@ onUnmounted(() => {
 
                 <CommitGraph v-else class="graph-canvas"
                   :commits="repoLog" :selected-hash="viewMode === 'changes' ? 'WIP' : selectedCommitHash" :current-branch="repoStatus?.branch"
-                  :fork-point-sha="graphForkPointSha" :repo-stats="repoStats" :branches="branches" :worktree-branches="worktreeBranches" :stashes="stashes"
+                  :fork-point-sha="graphForkPointSha" :repo-stats="repoStats" :branches="branches" :worktree-branches="worktreeBranches" :ai-task-branches="aiTaskBranches" :stashes="stashes"
                   :submodule-changes="submoduleChanges"
                   :branch-prs="branchPrs"
                   :cwd="repoFolderPath ?? ''"
@@ -4779,7 +4906,7 @@ onUnmounted(() => {
       :error="hookTrust.error.value" :busy="hookTrust.busy.value" @answer="hookTrust.answer" />
 
     <!-- AI-task name prompt — names the scratch worktree after the task -->
-    <AiTaskNameModal v-if="aiTaskNamePrompt" :busy="aiTaskNameBusy" @cancel="aiTaskNamePrompt = false"
+    <AiTaskNameModal v-if="aiTaskNamePrompt" :busy="aiTaskNameBusy" :base-line="aiTaskBaseLine" @cancel="aiTaskNamePrompt = false"
       @create="confirmNewAiTask" />
 
     <!-- AI-task worktree removal — deletes / merges-back the scratch worktree -->
@@ -4808,7 +4935,8 @@ onUnmounted(() => {
       :suggested-branch="pendingWorktreeBranch" :open-quick-create="pendingQuickCreate"
       @close="showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false;"
       @load-branches="loadBranches"
-      @open-tab="(path) => { openTab(path); showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false; }" />
+      @open-tab="(path) => { openTab(path); showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false; }"
+      @created="onWorktreeCreated" @open-setup-log="onOpenSetupLog" />
 
     <!-- Release notes generator (shared modal, also on Dashboard + Tags panel) -->
     <ReleaseNotesModal v-if="showReleaseNotes && repoFolderPath" :cwd="repoFolderPath"

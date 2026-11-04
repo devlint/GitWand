@@ -2,11 +2,11 @@
 /**
  * AiTaskNameModal — prompt for the name of a new AI task.
  *
- * Shown before an AI task (a `gitwand-scratch-*` worktree) is created. The name
- * is slugified backend-side into the worktree/branch name
- * (`gitwand-scratch-<slug>`) so tasks are recognisable on disk and in the repo
- * tabs instead of an opaque timestamp. Leaving it blank falls back to the
- * timestamp naming.
+ * Shown before an AI task is created. The name is slugified backend-side
+ * into the worktree and branch names (`<repo>.worktrees/<slug>`, `task/<slug>`)
+ * so tasks are recognisable on disk and in the repo tabs. Leaving it blank
+ * falls back to a timestamp. `baseLine` says which base the task starts
+ * from (v3.13, spec §5.2).
  *
  * Pure presentational: the worktree creation lives in App.vue.
  */
@@ -17,6 +17,8 @@ import BaseModal from "./BaseModal.vue";
 const props = defineProps<{
   /** True while the worktree is being created — disables the inputs. */
   busy?: boolean;
+  /** Which base the task starts from, already translated. */
+  baseLine?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -66,6 +68,7 @@ onMounted(() => {
       @keydown.enter.prevent="onCreate"
     />
     <p class="atn-hint">{{ t('aiTask.nameHint') }}</p>
+    <p v-if="baseLine" class="atn-hint atn-base">{{ baseLine }}</p>
 
     <template #footer>
       <button class="bm-btn bm-btn--ghost" :disabled="busy" @click="emit('cancel')">

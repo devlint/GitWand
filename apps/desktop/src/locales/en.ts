@@ -2245,6 +2245,26 @@ const en = {
 
   // ─── Worktrees ──────────────────────────────────────────
   worktree: {
+    // v3.13 worktree service (setup, base)
+    setupTabTitle: "Setup · {0}",
+    setupDone: "Setup finished",
+    setupFailedCode: "Setup failed (exit code {0})",
+    setupStopped: "Setup stopped",
+    setupRunning: "Setup running…",
+    setupFailed: "Setup failed",
+    setupSkipped: "Setup skipped",
+    retrySetup: "Retry setup",
+    openLog: "Open the log",
+    openUrl: "Open",
+    baseFetched: "Based on {0}, fetched {1} s ago",
+    baseOffline: "Offline: based on {0}",
+    baseNoRemote: "No remote: based on {0}",
+    baseNoDefault: "Remote default branch unknown: based on {0}",
+    baseExplicit: "Based on {0}",
+    baseResolving: "Fetching the base…",
+    includeWarnings: "Some include entries were skipped: {0}",
+    formBaseDefault: "Fresh remote default branch",
+    setupStartFailed: "Setup could not start: {0}",
     title: "Worktrees",
     empty: "No worktrees yet. Create one to work on two branches simultaneously without switching.",
     main: "main",
@@ -2377,6 +2397,7 @@ const en = {
 
   // ─── AI task worktrees ──────────────────────────────────
   aiTask: {
+    setupFailed: "Setup failed for {0}. The agent was not launched: retry setup from the worktree manager, or launch it by hand.",
     badgeTooltip: "AI task worktree",
     nameTitle: "New AI task",
     nameBody: "Name this task. It names the isolated worktree so you can recognise it later.",
