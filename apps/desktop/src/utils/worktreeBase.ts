@@ -41,3 +41,12 @@ export function slugifyWorktreeName(name: string): string | null {
   slug = slug.slice(0, 63).replace(/-+$/, "");
   return slug || null;
 }
+
+/**
+ * The name an AI task is created with: the user's, unless nothing usable
+ * remains once slugged (blank, or no Latin letter or digit, e.g. "修复登录"),
+ * then the unix timestamp, as before v3.13.
+ */
+export function aiTaskName(name: string, nowMs: number = Date.now()): string {
+  return slugifyWorktreeName(name) ? name : String(Math.floor(nowMs / 1000));
+}

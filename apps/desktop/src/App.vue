@@ -148,7 +148,7 @@ import {
 import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree } from "./utils/backend";
 import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorktreeCreation";
 import type { HookTrustDecision } from "./composables/useWorktreeHookTrust";
-import { describeBase } from "./utils/worktreeBase";
+import { aiTaskName, describeBase } from "./utils/worktreeBase";
 import { useCommitActions } from "./composables/useCommitActions";
 import { useConflictEditorSelection } from "./composables/useConflictEditorSelection";
 
@@ -2480,8 +2480,9 @@ async function createAiTaskWorktree(name: string) {
   const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
   const origin = projectTab?.path ?? repoFolderPath.value;
   const result = await worktreeCreation.create(origin, {
-    // A blank name keeps the historical timestamp naming.
-    name: name || String(Math.floor(Date.now() / 1000)),
+    // A blank or unusable name (no Latin letter or digit) keeps the
+    // historical timestamp naming.
+    name: aiTaskName(name),
     // The base the dialog already fetched, so creation does not fetch again.
     base: aiTaskBase.value?.base_ref,
     kind: "task",

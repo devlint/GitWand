@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeBase, slugifyWorktreeName } from "../worktreeBase";
+import { aiTaskName, describeBase, slugifyWorktreeName } from "../worktreeBase";
 
 const b = (over: object) => ({
   base_ref: "origin/main",
@@ -29,5 +29,16 @@ describe("slugifyWorktreeName", () => {
     expect(slugifyWorktreeName("Fix/Login Bug!")).toBe("fix-login-bug");
     expect(slugifyWorktreeName("!!!")).toBeNull();
     expect(slugifyWorktreeName("a".repeat(80))).toHaveLength(63);
+  });
+});
+
+describe("aiTaskName", () => {
+  it("keeps a usable name", () => {
+    expect(aiTaskName("Fix login", 5_000)).toBe("Fix login");
+  });
+  it("falls back to the timestamp when nothing usable remains", () => {
+    expect(aiTaskName("", 5_000)).toBe("5");
+    expect(aiTaskName("修复登录", 7_900)).toBe("7");
+    expect(aiTaskName("!!!", 1_000)).toBe("1");
   });
 });
