@@ -3,11 +3,13 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use serde::Serialize;
 use tauri::ipc::Channel;
 
 use crate::git::safe_repo_path;
@@ -23,6 +25,13 @@ struct PtyHandle {
     /// Writer wrappé dans son propre Arc<Mutex> pour découpler les I/O du verrou du registre.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    /// The session's working directory, canonical: what a worktree's
+    /// processes are matched by.
+    #[allow(dead_code)] // read by worktree stopping (Task 3).
+    cwd: PathBuf,
+    /// The leader's pid, which is also its session id on Unix.
+    #[allow(dead_code)] // read on Unix only, and by worktree stopping (Task 3).
+    leader: Option<u32>,
 }
 
 fn sessions() -> &'static Mutex<HashMap<u64, PtyHandle>> {
@@ -95,63 +104,140 @@ fn login_flag(shell_path: &str) -> Option<&'static str> {
     }
 }
 
-#[tauri::command]
-pub(crate) fn terminal_open(
-    cwd: String,
-    shell: Option<String>,
-    agent: Option<String>,
-    cols: u16,
-    rows: u16,
-    on_output: Channel<String>,
-) -> Result<u64, String> {
-    // Validate and canonicalize cwd through the single audited guard (AGENTS.md:
-    // "every file-system operation on user-supplied paths must go through
-    // safe_repo_path()"). Using "." as the relative component mirrors the
-    // pattern in scratch.rs:canonical_cwd — safe_repo_path(cwd, ".") resolves
-    // and traversal-guards the directory itself, keeping this in sync with any
-    // future improvements to the shared guard.
-    let canon = safe_repo_path(cwd.trim(), ".").map_err(|e| format!("invalid cwd: {e}"))?;
-    if !canon.is_dir() {
-        return Err("cwd is not a directory".to_string());
-    }
+/// The only environment variables a caller may add to a session (spec §10.2).
+/// Anything else is refused: an added variable can then never bring back a
+/// secret `CLAUDE_AUTH_OVERRIDE_ENV` stripped.
+pub(crate) const WORKTREE_ENV_ALLOWLIST: [&str; 5] = [
+    "GITWAND_WORKTREE_NAME",
+    "GITWAND_WORKTREE_PATH",
+    "GITWAND_WORKTREE_BRANCH",
+    "GITWAND_WORKTREE_BASE",
+    "GITWAND_REPO_ROOT",
+];
 
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| format!("openpty failed: {e}"))?;
+/// What a session runs.
+#[allow(dead_code)] // `Command` is built by the worktree hook runner (v3.13 PR 3).
+pub(crate) enum SpawnKind {
+    /// An interactive shell: the override, or the user's default shell.
+    Shell(Option<String>),
+    /// A first-class agent CLI (`claude`, `codex`, …), resolved by name.
+    Agent(String),
+    /// A command line run by the user's shell (`$SHELL [-l] -c`, `cmd /C`).
+    /// Rust-internal: no IPC command takes one, so that repository commands
+    /// only run through the hook trust gate (`assert_hooks_trusted`).
+    Command {
+        command: String,
+        shell: Option<String>,
+    },
+}
+
+pub(crate) struct SpawnSpec {
+    /// Already validated and canonical (`safe_repo_path`).
+    pub cwd: PathBuf,
+    pub kind: SpawnKind,
+    /// Checked against `WORKTREE_ENV_ALLOWLIST`.
+    pub env: HashMap<String, String>,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Sent once on `terminal_open`'s `on_exit` channel (a separate channel, so
+/// `on_output` stays a plain stream of strings), after the last output
+/// chunk. `code` is `None` when the session was closed by GitWand, or the
+/// status could not be read.
+#[derive(Serialize, Clone, Debug)]
+pub struct TerminalExit {
+    pub code: Option<i32>,
+}
+
+/// Opens a PTY session and starts streaming its output. `on_chunk` gets each
+/// UTF-8 chunk and returns false once its consumer is gone; `on_exit` is
+/// called exactly once, after the last chunk.
+pub(crate) fn spawn_session(
+    spec: SpawnSpec,
+    mut on_chunk: Box<dyn FnMut(String) -> bool + Send>,
+    on_exit: Box<dyn FnOnce(Option<i32>) + Send>,
+) -> Result<u64, String> {
+    if let Some(key) = spec
+        .env
+        .keys()
+        .find(|k| !WORKTREE_ENV_ALLOWLIST.contains(&k.as_str()))
+    {
+        return Err(format!(
+            "environment variable not allowed for a terminal session: {key}"
+        ));
+    }
 
     // First-class agent vs shell resolution. Each agent is resolved via its
     // dedicated binary resolver (same logic as detect_*_cli) rather than
     // relying on the PTY's PATH, which may not include user-local install
     // paths (e.g. ~/.opencode/bin, ~/.claude/local, ~/.local/bin).
-    let agent_kind = agent.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let program = match agent_kind {
-        Some("claude") => super::ai::resolve_claude_binary()
-            .ok_or_else(|| "Binaire `claude` introuvable. Installez-le avec `npm install -g @anthropic-ai/claude-code`.".to_string())?,
-        Some("codex") => super::ai::resolve_codex_binary()
-            .ok_or_else(|| "Binaire `codex` introuvable. Installez-le avec `npm install -g @openai/codex`.".to_string())?,
-        Some("opencode") => super::ai::resolve_opencode_binary()
-            .ok_or_else(|| "Binaire `opencode` introuvable. Installez-le avec `npm install -g opencode-ai` ou via `curl -fsSL https://opencode.ai/install | bash`.".to_string())?,
-        Some("antigravity") => super::ai::resolve_antigravity_binary()
-            .ok_or_else(|| "Binaire `agy` introuvable. Installez-le avec `curl -fsSL https://antigravity.google/cli/install.sh | bash`.".to_string())?,
-        _ => resolve_shell(&shell),
-    };
-    let mut cmd = CommandBuilder::new(&program);
-    // Login shell sur Unix pour charger le profil utilisateur (PATH, aliases…).
-    // Seulement pour les shells qui acceptent `-l` (cf. login_flag) — sinon
-    // le PTY meurt avec `unknown option '-l'`. Un agent n'est jamais un login shell.
-    #[cfg(not(windows))]
-    if agent_kind.is_none() {
-        if let Some(flag) = login_flag(&program) {
-            cmd.arg(flag);
+    let mut cmd = match &spec.kind {
+        SpawnKind::Agent(agent) => {
+            let program = match agent.as_str() {
+                "claude" => super::ai::resolve_claude_binary()
+                    .ok_or_else(|| "Binaire `claude` introuvable. Installez-le avec `npm install -g @anthropic-ai/claude-code`.".to_string())?,
+                "codex" => super::ai::resolve_codex_binary()
+                    .ok_or_else(|| "Binaire `codex` introuvable. Installez-le avec `npm install -g @openai/codex`.".to_string())?,
+                "opencode" => super::ai::resolve_opencode_binary()
+                    .ok_or_else(|| "Binaire `opencode` introuvable. Installez-le avec `npm install -g opencode-ai` ou via `curl -fsSL https://opencode.ai/install | bash`.".to_string())?,
+                "antigravity" => super::ai::resolve_antigravity_binary()
+                    .ok_or_else(|| "Binaire `agy` introuvable. Installez-le avec `curl -fsSL https://antigravity.google/cli/install.sh | bash`.".to_string())?,
+                // Unknown agent names keep the historical behavior: a shell.
+                _ => return spawn_session(
+                    SpawnSpec { kind: SpawnKind::Shell(None), ..spec },
+                    on_chunk,
+                    on_exit,
+                ),
+            };
+            // An agent is never a login shell.
+            CommandBuilder::new(&program)
         }
-    }
-    cmd.cwd(&canon);
+        SpawnKind::Shell(shell) => {
+            let program = resolve_shell(shell);
+            #[allow(unused_mut)]
+            let mut cmd = CommandBuilder::new(&program);
+            // Login shell sur Unix pour charger le profil utilisateur (PATH, aliases…).
+            // Seulement pour les shells qui acceptent `-l` (cf. login_flag) — sinon
+            // le PTY meurt avec `unknown option '-l'`.
+            #[cfg(not(windows))]
+            if let Some(flag) = login_flag(&program) {
+                cmd.arg(flag);
+            }
+            cmd
+        }
+        SpawnKind::Command { command, shell } => {
+            #[cfg(windows)]
+            {
+                let _ = shell;
+                let mut cmd = CommandBuilder::new("cmd");
+                cmd.args(["/C", command.as_str()]);
+                cmd
+            }
+            #[cfg(not(windows))]
+            {
+                let program = resolve_shell(shell);
+                let mut cmd = CommandBuilder::new(&program);
+                if let Some(flag) = login_flag(&program) {
+                    cmd.arg(flag);
+                }
+                cmd.args(["-c", command.as_str()]);
+                cmd
+            }
+        }
+    };
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: spec.rows,
+            cols: spec.cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("openpty failed: {e}"))?;
+
+    cmd.cwd(&spec.cwd);
     // Strip GitWand's sensitive auth env vars before handing over an interactive
     // PTY. Mirrors strip_claude_auth_env (ai.rs) / claudeSpawnEnv (dev-server):
     // keeps API keys held by the GitWand process from leaking into the terminal,
@@ -167,11 +253,18 @@ pub(crate) fn terminal_open(
     if let Some(extra) = crate::git::macos_enriched_path() {
         cmd.env("PATH", extra);
     }
+    // Allow-listed above; applied after the stripping.
+    for (k, v) in &spec.env {
+        cmd.env(k, v);
+    }
 
     let mut child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("spawn shell failed: {e}"))?;
+    // Drop our copy of the slave, so the reader sees EOF once the child's
+    // side is closed.
+    drop(pair.slave);
 
     // Obtain the reader and writer BEFORE inserting into the registry. If either
     // step fails after spawn_command() succeeded we must kill the child — otherwise
@@ -192,6 +285,7 @@ pub(crate) fn terminal_open(
     };
 
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    let leader = child.process_id();
     let master_arc: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>> =
         Arc::new(Mutex::new(pair.master));
     let writer_arc: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(writer));
@@ -202,6 +296,8 @@ pub(crate) fn terminal_open(
             master: master_arc,
             writer: writer_arc,
             child,
+            cwd: spec.cwd,
+            leader,
         },
     );
 
@@ -235,22 +331,79 @@ pub(crate) fn terminal_open(
                     };
 
                     carry = remainder;
-                    if !chunk.is_empty() && on_output.send(chunk).is_err() {
+                    if !chunk.is_empty() && !on_chunk(chunk) {
                         break; // frontend parti
                     }
                 }
-                Err(_) => break,
+                Err(_) => break, // EIO on Linux once the slave side is closed
             }
         }
         // Flush any remaining carry bytes on EOF.
         if !carry.is_empty() {
-            let _ = on_output.send(String::from_utf8_lossy(&carry).to_string());
+            let _ = on_chunk(String::from_utf8_lossy(&carry).to_string());
         }
-        // Nettoyage : retirer la session du registre quand le PTY se ferme.
-        lock_sessions().remove(&id);
+        // Nettoyage : retirer la session du registre quand le PTY se ferme,
+        // puis lire le code de sortie du leader. Si `terminal_close` l'a déjà
+        // retirée, GitWand l'a arrêtée : pas de code.
+        let handle = lock_sessions().remove(&id);
+        let code = handle.and_then(|mut h| exit_code(&mut *h.child));
+        on_exit(code);
     });
 
     Ok(id)
+}
+
+/// The leader's exit code, waiting at most 2 s: the PTY reached EOF, so the
+/// leader has exited or is about to, unless a process it left behind closed
+/// the terminal last.
+fn exit_code(child: &mut (dyn portable_pty::Child + Send + Sync)) -> Option<i32> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status.exit_code() as i32),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            _ => return None,
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) fn terminal_open(
+    cwd: String,
+    shell: Option<String>,
+    agent: Option<String>,
+    cols: u16,
+    rows: u16,
+    on_output: Channel<String>,
+    on_exit: Channel<TerminalExit>,
+) -> Result<u64, String> {
+    // Validate and canonicalize cwd through the single audited guard (AGENTS.md:
+    // "every file-system operation on user-supplied paths must go through
+    // safe_repo_path()"). Using "." as the relative component mirrors the
+    // pattern in scratch.rs:canonical_cwd — safe_repo_path(cwd, ".") resolves
+    // and traversal-guards the directory itself, keeping this in sync with any
+    // future improvements to the shared guard.
+    let canon = safe_repo_path(cwd.trim(), ".").map_err(|e| format!("invalid cwd: {e}"))?;
+    if !canon.is_dir() {
+        return Err("cwd is not a directory".to_string());
+    }
+    let kind = match agent.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(a) => SpawnKind::Agent(a.to_string()),
+        None => SpawnKind::Shell(shell),
+    };
+    spawn_session(
+        SpawnSpec {
+            cwd: canon,
+            kind,
+            env: HashMap::new(),
+            cols,
+            rows,
+        },
+        Box::new(move |chunk| on_output.send(chunk).is_ok()),
+        Box::new(move |code| {
+            let _ = on_exit.send(TerminalExit { code });
+        }),
+    )
 }
 
 #[tauri::command]
@@ -446,6 +599,97 @@ mod tests {
         let child: libc::pid_t = line.trim().parse().unwrap();
         assert!(alive(child));
         (leader, child)
+    }
+
+    pub(crate) fn scratch_dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("gitwand-term-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    fn spec(cwd: &std::path::Path, kind: SpawnKind, env: HashMap<String, String>) -> SpawnSpec {
+        SpawnSpec {
+            cwd: cwd.to_path_buf(),
+            kind,
+            env,
+            cols: 80,
+            rows: 24,
+        }
+    }
+
+    fn sh(command: &str) -> SpawnKind {
+        SpawnKind::Command {
+            command: command.into(),
+            shell: Some("/bin/sh".into()),
+        }
+    }
+
+    /// Runs a session to its end: (all output, exit code).
+    fn run(name: &str, kind: SpawnKind, env: HashMap<String, String>) -> (String, Option<i32>) {
+        let dir = scratch_dir(name);
+        let out = Arc::new(Mutex::new(String::new()));
+        let sink = Arc::clone(&out);
+        let (tx, rx) = std::sync::mpsc::channel();
+        spawn_session(
+            spec(&dir, kind, env),
+            Box::new(move |c| {
+                sink.lock().unwrap().push_str(&c);
+                true
+            }),
+            Box::new(move |code| {
+                let _ = tx.send(code);
+            }),
+        )
+        .unwrap();
+        let code = rx.recv_timeout(Duration::from_secs(10)).expect("no exit");
+        let out = out.lock().unwrap().clone();
+        (out, code)
+    }
+
+    #[test]
+    fn command_exit_code_arrives_after_output() {
+        let (out, code) = run("exit3", sh("printf hello; exit 3"), HashMap::new());
+        assert!(out.contains("hello"), "output: {out:?}");
+        assert_eq!(code, Some(3));
+        let (_, code) = run("exit7", sh("exit 7"), HashMap::new());
+        assert_eq!(code, Some(7));
+    }
+
+    #[test]
+    fn command_sees_allowlisted_env() {
+        let env = HashMap::from([("GITWAND_WORKTREE_NAME".to_string(), "fix login".to_string())]);
+        let (out, code) = run("env", sh("printf %s \"$GITWAND_WORKTREE_NAME\""), env);
+        assert!(out.contains("fix login"), "output: {out:?}");
+        assert_eq!(code, Some(0));
+    }
+
+    #[test]
+    fn env_outside_allowlist_is_refused() {
+        let dir = scratch_dir("env-refused");
+        let env = HashMap::from([("ANTHROPIC_API_KEY".to_string(), "x".to_string())]);
+        let err = spawn_session(
+            spec(&dir, sh("true"), env),
+            Box::new(|_| true),
+            Box::new(|_| {}),
+        )
+        .unwrap_err();
+        assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
+    }
+
+    #[test]
+    fn session_records_canonical_cwd_and_leader() {
+        let dir = scratch_dir("leader");
+        let id = spawn_session(
+            spec(&dir, sh("sleep 5"), HashMap::new()),
+            Box::new(|_| true),
+            Box::new(|_| {}),
+        )
+        .unwrap();
+        let handle = lock_sessions().remove(&id).expect("session registered");
+        assert_eq!(handle.cwd, dir);
+        assert!(handle.leader.is_some());
+        close_sessions(vec![handle], true);
     }
 
     fn wait_gone(pid: libc::pid_t) -> bool {

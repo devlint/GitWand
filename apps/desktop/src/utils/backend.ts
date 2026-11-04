@@ -3629,13 +3629,22 @@ export async function agentSessionLaunch(cwd: string, tool: string): Promise<voi
  */
 export async function terminalOpen(
   cwd: string,
-  opts: { shell?: string; agent?: string; cols: number; rows: number },
+  opts: {
+    shell?: string;
+    agent?: string;
+    cols: number;
+    rows: number;
+    /** Called once, after the last output chunk. `null` when GitWand closed the session or the code is unknown. */
+    onExit?: (code: number | null) => void;
+  },
   onOutput: (chunk: string) => void,
 ): Promise<number> {
   if (isTauri()) {
     const { Channel } = await import("@tauri-apps/api/core");
     const channel = new Channel<string>();
     channel.onmessage = onOutput;
+    const exitChannel = new Channel<{ code: number | null }>();
+    exitChannel.onmessage = (msg) => opts.onExit?.(msg.code ?? null);
     return tauriInvoke<number>("terminal_open", {
       cwd,
       shell: opts.shell ?? null,
@@ -3643,6 +3652,7 @@ export async function terminalOpen(
       cols: opts.cols,
       rows: opts.rows,
       onOutput: channel,
+      onExit: exitChannel,
     });
   }
   // Dev mode : SSE. Le serveur renvoie l'id en premier message JSON, puis

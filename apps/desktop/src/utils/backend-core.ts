@@ -109,7 +109,13 @@ export const IPC_TIMEOUT = {
  */
 export async function devTerminalOpen(
   cwd: string,
-  opts: { shell?: string; agent?: string; cols: number; rows: number },
+  opts: {
+    shell?: string;
+    agent?: string;
+    cols: number;
+    rows: number;
+    onExit?: (code: number | null) => void;
+  },
   onOutput: (chunk: string) => void,
 ): Promise<number> {
   const params = new URLSearchParams({
@@ -130,6 +136,7 @@ export async function devTerminalOpen(
       } else if (typeof payload?.chunk === "string") {
         onOutput(payload.chunk);
       } else if (payload?.eof) {
+        opts.onExit?.(typeof payload.code === "number" ? payload.code : null);
         // Fix 5 — Explicitly close the EventSource when the shell exits so that
         // the browser's built-in auto-reconnect logic does not fire and spawn an
         // untracked shell process by hitting /api/terminal-open again.

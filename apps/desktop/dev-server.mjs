@@ -8889,8 +8889,8 @@ async function handleRequest(req, res) {
       proc.onData((chunk) => {
         if (!res.writableEnded) res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
       });
-      proc.onExit(() => {
-        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ eof: true })}\n\n`);
+      proc.onExit(({ exitCode }) => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ eof: true, code: exitCode ?? null })}\n\n`);
         devPtys.delete(id);
       });
       devPtys.set(id, { proc });
