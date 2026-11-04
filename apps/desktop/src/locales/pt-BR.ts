@@ -2358,6 +2358,19 @@ const ptBR: Locale = {
     mergedRefreshFailed: "Merge feito. A atualização da tela falhou: recarregue o repositório para ver o resultado.",
   },
 
+  // ─── Worktree hooks trust (v3.13) ───────────────────────
+  worktreeHooks: {
+    title: "Executar os comandos de worktree deste repositório?",
+    intro: "Este repositório define comandos que o GitWand executa ao criar ou remover um worktree. Eles são executados com as suas permissões. Só confie neles se você confia neste repositório.",
+    setup: "Preparação",
+    teardown: "Desmontagem",
+    url: "URL",
+    changedNote: "O GitWand vai perguntar de novo se esses comandos mudarem.",
+    trust: "Confiar e executar",
+    skip: "Ignorar os comandos desta vez",
+    cancel: "Cancelar",
+  },
+
   // ─── Submodules ─────────────────────────────────────────
   submodule: {
     title: "Submódulos",

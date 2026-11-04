@@ -2399,6 +2399,19 @@ const en = {
     mergedRefreshFailed: "Merged back. Refreshing the view failed: reload the repository to see the result.",
   },
 
+  // ─── Worktree hooks trust (v3.13) ───────────────────────
+  worktreeHooks: {
+    title: "Run this repository's worktree commands?",
+    intro: "This repository defines commands that GitWand runs when it creates or removes a worktree. They run with your permissions. Only trust them if you trust this repository.",
+    setup: "Setup",
+    teardown: "Teardown",
+    url: "URL",
+    changedNote: "GitWand will ask again if these commands change.",
+    trust: "Trust and run",
+    skip: "Skip commands this time",
+    cancel: "Cancel",
+  },
+
   // ─── Submodules ─────────────────────────────────────────
   submodule: {
     title: "Submodules",

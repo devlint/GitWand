@@ -2367,6 +2367,19 @@ const zhCN: Locale = {
     mergedRefreshFailed: "已合并。刷新视图失败：请重新加载仓库以查看结果。",
   },
 
+  // ─── Worktree hooks trust (v3.13) ───────────────────────
+  worktreeHooks: {
+    title: "要运行此仓库的工作树命令吗？",
+    intro: "此仓库定义了 GitWand 在创建或删除工作树时运行的命令。这些命令将以你的权限运行。只有在你信任此仓库时才信任它们。",
+    setup: "初始化",
+    teardown: "清理",
+    url: "URL",
+    changedNote: "如果这些命令发生变化，GitWand 会再次询问。",
+    trust: "信任并运行",
+    skip: "本次跳过这些命令",
+    cancel: "取消",
+  },
+
   // ─── Submodules ─────────────────────────────────────────
   submodule: {
     title: "子模块",

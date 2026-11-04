@@ -2367,6 +2367,19 @@ const fr: Locale = {
     mergedRefreshFailed: "Fusion faite. L'actualisation de la vue a échoué : rechargez le dépôt pour voir le résultat.",
   },
 
+  // ─── Worktree hooks trust (v3.13) ───────────────────────
+  worktreeHooks: {
+    title: "Exécuter les commandes de worktree de ce dépôt ?",
+    intro: "Ce dépôt définit des commandes que GitWand exécute quand il crée ou supprime un worktree. Elles s'exécutent avec vos droits. Ne leur faites confiance que si vous faites confiance à ce dépôt.",
+    setup: "Installation",
+    teardown: "Démontage",
+    url: "URL",
+    changedNote: "GitWand vous redemandera si ces commandes changent.",
+    trust: "Faire confiance et exécuter",
+    skip: "Ignorer les commandes cette fois",
+    cancel: "Annuler",
+  },
+
   // ─── Submodules ─────────────────────────────────────────
   submodule: {
     title: "Submodules",

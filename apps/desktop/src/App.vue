@@ -57,6 +57,7 @@ const LaunchpadView = defineAsyncComponent(() => import("./components/LaunchpadV
 const AgentSessionsPanel = defineAsyncComponent(() => import("./components/AgentSessionsPanel.vue"));
 const AiTaskCloseModal = defineAsyncComponent(() => import("./components/AiTaskCloseModal.vue"));
 const AiTaskNameModal = defineAsyncComponent(() => import("./components/AiTaskNameModal.vue"));
+const WorktreeHookTrustModal = defineAsyncComponent(() => import("./components/WorktreeHookTrustModal.vue"));
 const CommandLogPanel = defineAsyncComponent(() => import("./components/CommandLogPanel.vue"));
 const SearchPalette = defineAsyncComponent(() => import("./components/header/SearchPalette.vue"));
 const BranchRenameModal = defineAsyncComponent(() => import("./components/header/BranchRenameModal.vue"));
@@ -94,6 +95,7 @@ import { useApplyFromPreview, assertOperationSucceeded, type ApplyOutcome } from
 import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrategy } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
+import { useWorktreeHookTrust } from "./composables/useWorktreeHookTrust";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
 import { computeCheckoutPrompt, isUpdatePromptSkipped, isUpstreamRewriteOnly, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
 import { useGitRepo, type ViewMode, type RepoFileEntry } from "./composables/useGitRepo";
@@ -545,6 +547,8 @@ const {
 
 // ─── AI-task scratch worktrees (registry + worktree submenu) ──
 const aiTasks = useAiTasks();
+// v3.13 — trust prompt for a repository's worktree commands (asked by creation/removal).
+const hookTrust = useWorktreeHookTrust();
 
 // Non-main worktree count per project path — drives whether the chip shows its
 // submenu caret (no caret when a project has only its main worktree). Keyed by
@@ -4769,6 +4773,10 @@ onUnmounted(() => {
     <AgentSessionsPanel v-if="showAgents && repoFolderPath" :cwd="repoFolderPath" @close="showAgents = false"
       @open-tab="(path) => { openTab(path); showAgents = false; }"
       @launch-agent="onLaunchAgent" />
+
+    <!-- v3.13 — ask before running a repository's worktree commands -->
+    <WorktreeHookTrustModal v-if="hookTrust.pending.value" :status="hookTrust.pending.value"
+      :error="hookTrust.error.value" @answer="hookTrust.answer" />
 
     <!-- AI-task name prompt — names the scratch worktree after the task -->
     <AiTaskNameModal v-if="aiTaskNamePrompt" :busy="aiTaskNameBusy" @cancel="aiTaskNamePrompt = false"
