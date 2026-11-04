@@ -147,13 +147,18 @@ export function devResolveExplicitBase(root, base) {
 
 const escapes = (rel) => isAbsolute(rel) || rel.split(/[\\/]/).includes("..");
 
-function copyTree(src, dst) {
+/** Links are recreated, never followed; one that cannot be is skipped. */
+function copyTree(src, dst, skipped) {
   const st = lstatSync(src);
   if (st.isSymbolicLink()) {
-    symlinkSync(readlinkSync(src), dst);
+    try {
+      symlinkSync(readlinkSync(src), dst);
+    } catch {
+      skipped.push(src);
+    }
   } else if (st.isDirectory()) {
     mkdirSync(dst, { recursive: true });
-    for (const name of readdirSync(src)) copyTree(join(src, name), join(dst, name));
+    for (const name of readdirSync(src)) copyTree(join(src, name), join(dst, name), skipped);
   } else {
     copyFileSync(src, dst);
   }
@@ -208,6 +213,7 @@ export function devApplyInclude(mainRoot, worktree, entries) {
         warn(rel, "exists");
         continue;
       }
+      const skipped = [];
       try {
         mkdirSync(dirname(dst), { recursive: true });
         if (entry.mode === "symlink") {
@@ -215,14 +221,15 @@ export function devApplyInclude(mainRoot, worktree, entries) {
             symlinkSync(target, dst, isDir ? "dir" : "file");
           } catch (e) {
             warn(rel, "symlink-fallback", String(e.message ?? e));
-            copyTree(src, dst);
+            copyTree(src, dst, skipped);
           }
         } else {
-          copyTree(src, dst);
+          copyTree(src, dst, skipped);
         }
       } catch (e) {
         warn(rel, "error", String(e.message ?? e));
       }
+      for (const link of skipped) warn(link.startsWith(main + sep) ? link.slice(main.length + 1) : link, "link-skipped");
     }
   }
   return warnings;

@@ -9,7 +9,8 @@ use std::path::{Component, Path, PathBuf};
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct IncludeWarning {
     pub path: String,
-    /// `tracked`, `not-ignored`, `outside`, `exists`, `symlink-fallback`, `error`.
+    /// `tracked`, `not-ignored`, `outside`, `exists`, `symlink-fallback`,
+    /// `link-skipped`, `error`.
     pub reason: String,
     pub detail: Option<String>,
 }
@@ -103,32 +104,47 @@ fn make_link(target: &Path, link: &Path, is_dir: bool) -> std::io::Result<()> {
     }
 }
 
+type LinkFn = dyn Fn(&Path, &Path, bool) -> std::io::Result<()>;
+
 /// Recursive copy; links inside are copied as links.
-fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+fn copy_tree(src: &Path, dst: &Path, skipped: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    copy_tree_with(src, dst, &make_link, skipped)
+}
+
+fn copy_tree_with(
+    src: &Path,
+    dst: &Path,
+    link: &LinkFn,
+    skipped: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
     let meta = std::fs::symlink_metadata(src)?;
     if meta.file_type().is_symlink() {
+        // Recreated as a link, never followed: it may point outside the repo
+        // or loop. When links cannot be made (Windows without Developer
+        // Mode), it is skipped and reported.
         let target = std::fs::read_link(src)?;
-        let is_dir = src.is_dir();
-        return make_link(&target, dst, is_dir).or_else(|_| {
-            if is_dir {
-                copy_dir(src, dst)
-            } else {
-                std::fs::copy(src, dst).map(|_| ())
-            }
-        });
+        if link(&target, dst, src.is_dir()).is_err() {
+            skipped.push(src.to_path_buf());
+        }
+        return Ok(());
     }
     if meta.is_dir() {
-        copy_dir(src, dst)
+        copy_dir(src, dst, link, skipped)
     } else {
         std::fs::copy(src, dst).map(|_| ())
     }
 }
 
-fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+fn copy_dir(
+    src: &Path,
+    dst: &Path,
+    link: &LinkFn,
+    skipped: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
-        copy_tree(&entry.path(), &dst.join(entry.file_name()))?;
+        copy_tree_with(&entry.path(), &dst.join(entry.file_name()), link, skipped)?;
     }
     Ok(())
 }
@@ -173,18 +189,26 @@ fn bring(
             return;
         }
     }
+    let mut skipped = Vec::new();
     let result = match mode {
-        IncludeMode::Copy => copy_tree(&src, &dst),
+        IncludeMode::Copy => copy_tree(&src, &dst, &mut skipped),
         IncludeMode::Symlink => match make_link(&real, &dst, is_dir) {
             Ok(()) => Ok(()),
             Err(e) => {
                 warnings.push(warn(rel, "symlink-fallback", Some(e.to_string())));
-                copy_tree(&src, &dst)
+                copy_tree(&src, &dst, &mut skipped)
             }
         },
     };
     if let Err(e) = result {
         warnings.push(warn(rel, "error", Some(e.to_string())));
+    }
+    for link in skipped {
+        let shown = link
+            .strip_prefix(main_canon)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| link.to_string_lossy().to_string());
+        warnings.push(warn(&shown, "link-skipped", None));
     }
 }
 
@@ -304,6 +328,35 @@ mod tests {
             ]
         );
         assert!(std::fs::read_dir(&wt).unwrap().next().is_none());
+    }
+
+    /// Windows without Developer Mode cannot create links: a link inside an
+    /// included folder is then skipped, never followed (it may point outside
+    /// the repo, or loop, like pnpm's junctions).
+    #[cfg(unix)]
+    #[test]
+    fn copy_never_follows_a_link_it_cannot_recreate() {
+        let (repo, wt) = setup();
+        let outside = repo.sandbox.join("secret");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("key"), "k").unwrap();
+        repo.write("cache/ok.txt", "ok");
+        std::os::unix::fs::symlink(&outside, repo.path.join("cache/ext")).unwrap();
+        let fail = |_: &Path, _: &Path, _: bool| -> std::io::Result<()> {
+            Err(std::io::Error::other("no symlink privilege"))
+        };
+        let mut skipped = Vec::new();
+        copy_tree_with(
+            &repo.path.join("cache"),
+            &wt.join("cache"),
+            &fail,
+            &mut skipped,
+        )
+        .unwrap();
+        assert!(wt.join("cache/ok.txt").is_file());
+        assert!(!wt.join("cache/ext").exists());
+        assert!(std::fs::symlink_metadata(wt.join("cache/ext")).is_err());
+        assert_eq!(skipped, vec![repo.path.join("cache/ext")]);
     }
 
     #[test]

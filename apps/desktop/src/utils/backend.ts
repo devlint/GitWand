@@ -3582,7 +3582,7 @@ export interface WorktreeBaseInfo {
 
 export interface IncludeWarning {
   path: string;
-  reason: "tracked" | "not-ignored" | "outside" | "exists" | "symlink-fallback" | "error";
+  reason: "tracked" | "not-ignored" | "outside" | "exists" | "symlink-fallback" | "link-skipped" | "error";
   detail: string | null;
 }
 
