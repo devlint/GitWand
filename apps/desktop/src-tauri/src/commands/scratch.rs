@@ -14,6 +14,7 @@
 
 use crate::git::{git_cmd, repo_lock, safe_repo_path};
 use crate::types::{ScratchMergeBackOutcome, ScratchWorktree};
+use crate::worktree::record::{self, Kind, WorktreeRecord};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -61,17 +62,10 @@ fn validate_scratch_path(cwd: &Path, scratch_path: &str) -> Result<PathBuf, Stri
         .canonicalize()
         .map_err(|e| format!("scratch_path does not resolve: {}", e))?;
 
-    // Basename must follow the gitwand-scratch-* convention we create.
     let name = candidate
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or("scratch_path has no basename")?;
-    if !name.starts_with("gitwand-scratch-") {
-        return Err(format!(
-            "refusing to operate on a non-scratch worktree: {}",
-            name
-        ));
-    }
 
     // Must be registered as a worktree of this repo (porcelain output lists the
     // absolute path on each `worktree ` line).
@@ -92,7 +86,22 @@ fn validate_scratch_path(cwd: &Path, scratch_path: &str) -> Result<PathBuf, Stri
         ));
     }
 
+    // Either the gitwand-scratch-* convention, or an AI task the worktree
+    // service created (v3.13: `<repo>.worktrees/<name>` on `task/<name>`).
+    if !name.starts_with("gitwand-scratch-") && recorded_task(cwd, &candidate).is_none() {
+        return Err(format!(
+            "refusing to operate on a non-scratch worktree: {}",
+            name
+        ));
+    }
+
     Ok(candidate)
+}
+
+/// The worktree service's record for `path`, when it is an AI task.
+fn recorded_task(cwd: &Path, path: &Path) -> Option<WorktreeRecord> {
+    let common = record::common_dir(cwd).ok()?;
+    record::find(&common, path).filter(|r| r.kind == Kind::Task)
 }
 
 /// Turn a user-supplied AI-task name into a git-ref-safe slug. Lowercases,
@@ -375,7 +384,7 @@ fn operation_in_progress(dir: &Path) -> Result<Option<&'static str>, String> {
     Ok(None)
 }
 
-fn scratch_worktree_merge_back_impl(
+pub(crate) fn scratch_worktree_merge_back_impl(
     cwd: String,
     scratch_path: String,
     snapshots_enabled: Option<bool>,
@@ -454,6 +463,27 @@ fn scratch_worktree_merge_back_impl(
         let contains_base =
             git_in(&repo_root, &["merge-base", "--is-ancestor", &base, "HEAD"]).is_ok();
         if !contains_base && head != source {
+            // v3.13 tasks start from a remote-tracking ref (`origin/main`):
+            // checking it out would detach HEAD, so say to update the branch.
+            let remote_base = git_in(
+                &repo_root,
+                &[
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    &format!("refs/remotes/{source}"),
+                ],
+            )
+            .is_ok();
+            if remote_base {
+                return Err(format!(
+                    "{b} was created from {s} ({base:.7}), which {h} does not contain yet: merging back would also bring {s}'s commits. Nothing was changed. Update {h} to {s} (pull, or fast-forward), then merge back",
+                    b = scratch_branch,
+                    s = source,
+                    base = base,
+                    h = head
+                ));
+            }
             return Err(format!(
                 "{b} was created from {s} ({base:.7}), which {h} does not contain: merging back would also bring {s}'s commits. Nothing was changed. Check out {s}, then merge back",
                 b = scratch_branch,
@@ -579,6 +609,7 @@ fn remove_scratch(
     scratch_branch: Option<&str>,
     release_on_failure: bool,
 ) -> Result<(), String> {
+    let recorded = recorded_task(repo_root, scratch);
     let output = git_cmd()
         .args(["worktree", "remove", "--force"])
         .arg(scratch)
@@ -612,8 +643,16 @@ fn remove_scratch(
         }
     }
     let _ = git_in(repo_root, &["worktree", "prune"]);
-    if let Some(branch) = scratch_branch.filter(|b| b.starts_with("gitwand-scratch-")) {
+    let ours = |b: &&str| {
+        b.starts_with("gitwand-scratch-") || recorded.as_ref().is_some_and(|r| r.branch == *b)
+    };
+    if let Some(branch) = scratch_branch.filter(ours) {
         let _ = git_in(repo_root, &["branch", "-D", branch]);
+    }
+    if recorded.is_some() {
+        if let Ok(common) = record::common_dir(repo_root) {
+            let _ = record::remove(&common, scratch);
+        }
     }
     removed
 }
@@ -628,7 +667,10 @@ pub(crate) async fn scratch_worktree_discard(
     scratch_worktree_discard_impl(cwd, scratch_path)
 }
 
-fn scratch_worktree_discard_impl(cwd: String, scratch_path: String) -> Result<(), String> {
+pub(crate) fn scratch_worktree_discard_impl(
+    cwd: String,
+    scratch_path: String,
+) -> Result<(), String> {
     let repo_root = canonical_cwd(&cwd)?;
     let scratch = validate_scratch_path(&repo_root, &scratch_path)?;
 

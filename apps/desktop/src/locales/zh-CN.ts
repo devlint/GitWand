@@ -2212,6 +2212,26 @@ const zhCN: Locale = {
 
   // ─── Worktrees ──────────────────────────────────────────
   worktree: {
+    // v3.13 worktree service (setup, base)
+    setupTabTitle: "Setup · {0}",
+    setupDone: "Setup 已完成",
+    setupFailedCode: "Setup 失败（退出码 {0}）",
+    setupStopped: "Setup 已停止",
+    setupRunning: "Setup 运行中…",
+    setupFailed: "Setup 失败",
+    setupSkipped: "已跳过 Setup",
+    retrySetup: "重试 Setup",
+    openLog: "打开日志",
+    openUrl: "打开",
+    baseFetched: "基于 {0}，{1} 秒前获取",
+    baseOffline: "离线：基于 {0}",
+    baseNoRemote: "无远程：基于 {0}",
+    baseNoDefault: "远程默认分支未知：基于 {0}",
+    baseExplicit: "基于 {0}",
+    baseResolving: "正在获取基准…",
+    includeWarnings: "部分 include 条目已跳过：{0}",
+    formBaseDefault: "远程默认分支（最新）",
+    setupStartFailed: "Setup 无法启动：{0}",
     title: "工作树",
     empty: "暂无工作树。创建一个工作树，即可同时处理两个分支而无需切换。",
     main: "主",
@@ -2345,6 +2365,7 @@ const zhCN: Locale = {
 
   // ─── AI 任务工作树 ──────────────────────────────────────
   aiTask: {
+    setupFailed: "{0} 的 Setup 失败，未启动代理：请在 worktree 管理器中重试 Setup，或手动启动。",
     badgeTooltip: "AI 任务工作树",
     nameTitle: "新建 AI 任务",
     nameBody: "为此任务命名。隔离的工作树将使用该名称，便于以后识别。",

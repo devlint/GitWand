@@ -2203,6 +2203,26 @@ const ptBR: Locale = {
 
   // ─── Worktrees ──────────────────────────────────────────
   worktree: {
+    // v3.13 worktree service (setup, base)
+    setupTabTitle: "Setup · {0}",
+    setupDone: "Setup concluído",
+    setupFailedCode: "O setup falhou (código de saída {0})",
+    setupStopped: "Setup interrompido",
+    setupRunning: "Setup em andamento…",
+    setupFailed: "O setup falhou",
+    setupSkipped: "Setup ignorado",
+    retrySetup: "Tentar o setup de novo",
+    openLog: "Abrir o log",
+    openUrl: "Abrir",
+    baseFetched: "Baseado em {0}, obtido há {1} s",
+    baseOffline: "Offline: baseado em {0}",
+    baseNoRemote: "Sem remoto: baseado em {0}",
+    baseNoDefault: "Branch padrão do remoto desconhecida: baseado em {0}",
+    baseExplicit: "Baseado em {0}",
+    baseResolving: "Obtendo a base…",
+    includeWarnings: "Algumas entradas include foram ignoradas: {0}",
+    formBaseDefault: "Branch padrão do remoto, atualizada",
+    setupStartFailed: "O setup não pôde iniciar: {0}",
     title: "Worktrees",
     empty: "Nenhum worktree ainda. Crie um para trabalhar em dois ramos simultaneamente sem trocar.",
     main: "principal",
@@ -2336,6 +2356,7 @@ const ptBR: Locale = {
 
   // ─── Worktrees de tarefas IA ─────────────────────────────
   aiTask: {
+    setupFailed: "O setup de {0} falhou. O agente não foi iniciado: tente o setup de novo no gerenciador de worktrees ou inicie-o manualmente.",
     badgeTooltip: "Worktree de tarefa IA",
     nameTitle: "Nova tarefa IA",
     nameBody: "Nomeie esta tarefa. O worktree isolado recebe esse nome para você reconhecê-lo depois.",

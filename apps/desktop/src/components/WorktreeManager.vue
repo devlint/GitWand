@@ -2,14 +2,20 @@
 import { ref, onMounted, computed, watch } from "vue";
 import {
   gitWorktreeList,
-  gitWorktreeAdd,
   gitWorktreeRemove,
   gitWorktreePrune,
   gitWorktreeRepair,
   gitWorktreeStatusAll,
   type WorktreeEntry,
   type WorkspaceRepoStatus,
+  worktreeResolveBase,
+  openExternalUrl,
+  type WorktreeBaseInfo,
+  type CreatedWorktree,
 } from "../utils/backend";
+import { useWorktreeCreation } from "../composables/useWorktreeCreation";
+import type { HookTrustDecision } from "../composables/useWorktreeHookTrust";
+import { describeBase, slugifyWorktreeName } from "../utils/worktreeBase";
 import type { GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import BaseModal from "./BaseModal.vue";
@@ -27,7 +33,51 @@ const emit = defineEmits<{
   (e: "close"): void;
   (e: "open-tab", path: string): void;
   (e: "load-branches"): void;
+  /** v3.13: created through the worktree service; App runs its setup. */
+  (e: "created", payload: { cwd: string; created: CreatedWorktree; decision: HookTrustDecision; open: boolean }): void;
+  /** v3.13: focus a worktree's setup tab. */
+  (e: "open-setup-log", payload: { repoPath: string; tabId: number }): void;
 }>();
+
+const flow = useWorktreeCreation();
+
+// ── v3.13: base and default directory, fetched when a form opens ─────
+const baseInfo = ref<WorktreeBaseInfo | null>(null);
+let baseLoading = false;
+async function loadBaseInfo() {
+  if (baseInfo.value || baseLoading) return;
+  baseLoading = true;
+  try {
+    baseInfo.value = await worktreeResolveBase(props.cwd);
+  } catch {
+    // Creation resolves the base itself; the line just stays "fetching".
+  } finally {
+    baseLoading = false;
+  }
+}
+const baseLine = computed(() => {
+  if (!baseInfo.value) return t("worktree.baseResolving");
+  const line = describeBase(baseInfo.value.base);
+  return t(line.key, ...line.args);
+});
+
+function setupStateFor(path: string) {
+  return flow.states.value[path];
+}
+
+async function retrySetup(path: string) {
+  const name = slugifyWorktreeName(path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "") ?? "";
+  try {
+    await flow.retrySetup(props.cwd, props.cwd, path, name);
+  } catch (err: any) {
+    error.value = t("worktree.setupStartFailed", String(err?.message ?? err));
+  }
+}
+
+function openSetupLog(path: string) {
+  const st = setupStateFor(path);
+  if (st?.tabId != null) emit("open-setup-log", { repoPath: st.repoPath, tabId: st.tabId });
+}
 
 const { t } = useI18n();
 
@@ -61,8 +111,9 @@ const formBranch = ref("");
 const formNewBranch = ref("");
 const creating = ref(false);
 
-/** Base directory for worktrees (sibling of the main repo). */
+/** Base directory for worktrees: `worktree.dir`, else the sibling `<repo>.worktrees`. */
 const worktreeBaseDir = computed(() => {
+  if (baseInfo.value) return baseInfo.value.dir.replace(/\\/g, "/").replace(/\/+$/, "");
   const main = worktrees.value.find((w) => w.is_main);
   const basePath = main ? main.path : props.cwd;
   const normalizedBase = basePath.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -80,19 +131,30 @@ const showQuickCreate = ref(false);
 const quickName = ref("");
 const quickCreating = ref(false);
 
+/** What quick-create will make: the backend slugs the name the same way. */
+const quickSlug = computed(() => slugifyWorktreeName(quickName.value) ?? "");
+const quickBranch = computed(() => {
+  const name = quickName.value.trim();
+  return name.includes("/") ? name : `task/${quickSlug.value}`;
+});
+
 async function quickCreate() {
   const name = quickName.value.trim();
-  if (!name) return;
+  if (!name || !quickSlug.value) return;
   quickCreating.value = true;
   error.value = null;
   try {
-    const path = derivePath(name);
-    const branch = name.includes("/") ? name : `task/${name}`;
-    await gitWorktreeAdd(props.cwd, path, "", branch);
+    const result = await flow.create(props.cwd, {
+      name,
+      branch: name.includes("/") ? name : undefined,
+      base: baseInfo.value?.base.base_ref,
+      kind: "manual",
+    });
+    if (!result) return; // cancelled at the trust prompt
     quickName.value = "";
     showQuickCreate.value = false;
     await loadWorktrees();
-    emit("open-tab", path);
+    emit("created", { cwd: props.cwd, created: result.created, decision: result.decision, open: true });
   } catch (err: any) {
     error.value = t("worktree.errorCreate").replace("{0}", String(err?.message ?? err));
   } finally {
@@ -157,21 +219,35 @@ async function loadWorktrees() {
 }
 
 async function createWorktree() {
-  if (!formPath.value.trim() || !formBranch.value.trim()) return;
+  const path = formPath.value.trim();
+  const picked = formBranch.value.trim();
+  const newBranch = formNewBranch.value.trim();
+  if (!path || (!picked && !newBranch)) return;
   creating.value = true;
   error.value = null;
   try {
-    await gitWorktreeAdd(
-      props.cwd,
-      formPath.value.trim(),
-      formBranch.value.trim(),
-      formNewBranch.value.trim() || undefined,
-    );
+    // New branch: from the picked base, else the fresh default base.
+    // Existing local branch: checked out. Remote branch: a local branch of
+    // the same name is created from it (no upstream, spec §5.2).
+    const remote = remoteBranches.value.find((b) => b.name === picked);
+    const req = newBranch
+      ? { branch: newBranch, base: picked || undefined }
+      : remote
+        ? { branch: picked.split("/").slice(1).join("/"), base: picked }
+        : { branch: picked };
+    const result = await flow.create(props.cwd, {
+      name: path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path,
+      path,
+      kind: "manual",
+      ...req,
+    });
+    if (!result) return; // cancelled at the trust prompt
     formPath.value = "";
     formBranch.value = "";
     formNewBranch.value = "";
     showForm.value = false;
     await loadWorktrees();
+    emit("created", { cwd: props.cwd, created: result.created, decision: result.decision, open: false });
   } catch (err: any) {
     error.value = t("worktree.errorCreate").replace("{0}", String(err?.message ?? err));
   } finally {
@@ -216,6 +292,11 @@ watch([formBranch, formNewBranch], ([branch, newBranch]) => {
   if (target) {
     formPath.value = derivePath(target);
   }
+});
+
+// Fetch the base (and the default dir) once a creation form opens.
+watch([showQuickCreate, showForm], ([quick, form]) => {
+  if (quick || form) void loadBaseInfo();
 });
 
 // Reload statuses whenever worktrees change
@@ -307,12 +388,11 @@ onMounted(async () => {
             {{ t("common.cancel") }}
           </button>
         </div>
-        <p v-if="quickName.trim()" class="wt-quick-preview">
-          → {{ derivePath(quickName) }}
-          <span class="wt-quick-branch">
-            ({{ quickName.includes("/") ? quickName.trim() : `task/${quickName.trim()}` }})
-          </span>
+        <p v-if="quickSlug" class="wt-quick-preview">
+          → {{ `${worktreeBaseDir}/${quickSlug}` }}
+          <span class="wt-quick-branch">({{ quickBranch }})</span>
         </p>
+        <p class="wt-quick-preview wt-base-line">{{ baseLine }}</p>
       </div>
 
       <!-- ── New worktree form ───────────────────────────── -->
@@ -320,7 +400,7 @@ onMounted(async () => {
         <div class="wt-form-row">
           <label class="wt-label" for="wt-form-branch">{{ t("worktree.formBranch") }}</label>
           <select id="wt-form-branch" v-model="formBranch" class="wt-select">
-            <option value="" disabled>{{ t("worktree.formBranchPlaceholder") }}</option>
+            <option value="">{{ formNewBranch.trim() ? t("worktree.formBaseDefault") : t("worktree.formBranchPlaceholder") }}</option>
             <optgroup :label="t('worktree.localBranches')">
               <option v-for="b in localBranches" :key="b.name" :value="b.name" :disabled="isBranchUsed(b.name)">
                 {{ b.name }}{{ isBranchUsed(b.name) ? ` ${t("worktree.formBranchAlreadyUsed")}` : "" }}
@@ -353,10 +433,11 @@ onMounted(async () => {
             @keydown.enter="createWorktree"
           />
         </div>
+        <p v-if="!formBranch.trim() && formNewBranch.trim()" class="wt-quick-preview wt-base-line">{{ baseLine }}</p>
         <div class="wt-form-actions">
           <button
             class="bm-btn bm-btn--primary"
-            :disabled="creating || !formPath.trim() || !formBranch.trim()"
+            :disabled="creating || !formPath.trim() || (!formBranch.trim() && !formNewBranch.trim())"
             @click="createWorktree"
           >
             {{ creating ? t("worktree.creating") : t("worktree.create") }}
@@ -455,6 +536,22 @@ onMounted(async () => {
               </template>
             </div>
             <div class="wt-item-path" :title="wt.path">{{ shortPath(wt.path) }}</div>
+            <!-- v3.13: setup state and URL from this session -->
+            <template v-for="st in [setupStateFor(wt.path)].filter(Boolean)" :key="wt.path + '-setup'">
+              <div class="wt-item-setup" :class="`wt-item-setup--${st!.status}`">
+                <span v-if="st!.status === 'running'">{{ t("worktree.setupRunning") }}</span>
+                <template v-else-if="st!.status === 'failed'">
+                  <span class="wt-setup-failed">{{ t("worktree.setupFailed") }}</span>
+                  <button class="bm-btn bm-btn--ghost" @click="retrySetup(wt.path)">{{ t("worktree.retrySetup") }}</button>
+                  <button v-if="st!.tabId != null" class="bm-btn bm-btn--ghost" @click="openSetupLog(wt.path)">{{ t("worktree.openLog") }}</button>
+                  <button class="bm-btn bm-btn--danger" @click="requestRemove(wt.path)">{{ t("worktree.remove") }}</button>
+                </template>
+                <template v-else-if="st!.url">
+                  <span class="wt-item-url" :title="st!.url">{{ st!.url }}</span>
+                  <button class="bm-btn bm-btn--ghost" @click="openExternalUrl(st!.url!)">{{ t("worktree.openUrl") }}</button>
+                </template>
+              </div>
+            </template>
             <div v-if="wt.head" class="wt-item-head">{{ wt.head.slice(0, 7) }}</div>
           </div>
           <div class="wt-item-actions">
@@ -841,5 +938,28 @@ onMounted(async () => {
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-medium);
   margin-top: -1px;
+}
+.wt-item-setup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.wt-setup-failed {
+  color: var(--color-danger, #e5484d);
+  font-weight: 600;
+}
+.wt-item-url {
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+.wt-base-line {
+  opacity: 0.8;
 }
 </style>

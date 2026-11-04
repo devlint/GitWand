@@ -22,7 +22,7 @@
 
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
 import { dispatchTerminalEvent, type TerminalEvent } from "./terminalEvents";
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
+import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devPtyStream, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
 export { isTauri };
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
@@ -3559,6 +3559,125 @@ export interface ProcessInfo {
   pid: number;
   ppid: number;
   name: string;
+}
+
+// ─── v3.13 worktree service ──────────────────────────────
+
+/** Where a new worktree starts from (`worktree::base::BaseResolution`). */
+export interface BaseResolution {
+  base_ref: string;
+  commit: string;
+  /** Unix seconds of the fetch, when the base was just fetched. */
+  fetched_at: number | null;
+  fallback_reason: "no-remote" | "no-default-branch" | "fetch-failed" | null;
+  /** git's message, for `fetch-failed`. */
+  fallback_detail: string | null;
+}
+
+export interface WorktreeBaseInfo {
+  base: BaseResolution;
+  /** Default directory for new worktrees (`worktree.dir`, or `<repo>.worktrees`). */
+  dir: string;
+}
+
+export interface IncludeWarning {
+  path: string;
+  reason: "tracked" | "not-ignored" | "outside" | "exists" | "symlink-fallback" | "link-skipped" | "error";
+  detail: string | null;
+}
+
+export type WorktreeKind = "task" | "manual";
+
+export interface CreatedWorktree {
+  path: string;
+  branch: string;
+  /** `{name}` in the worktree's hooks. */
+  name: string;
+  kind: WorktreeKind;
+  base: BaseResolution;
+  warnings: IncludeWarning[];
+  created_at: number;
+}
+
+async function devPost<T>(route: string, body: unknown, what: string): Promise<T> {
+  const res = await devFetch(`${DEV_SERVER}${route}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `${what}: ${res.status}`);
+  return data as T;
+}
+
+/** v3.13 — fetch the remote default branch now and say what a new worktree would start from. */
+export async function worktreeResolveBase(cwd: string): Promise<WorktreeBaseInfo> {
+  if (isTauri()) {
+    return tauriInvoke<WorktreeBaseInfo>("worktree_resolve_base", { cwd }, IPC_TIMEOUT.NETWORK);
+  }
+  return devPost<WorktreeBaseInfo>("/api/worktree-resolve-base", { cwd }, "Failed to resolve the base");
+}
+
+/**
+ * v3.13 — create a worktree through the worktree service: base (fetched when
+ * not given), branch (`task/<name>` by default, no upstream), directory,
+ * `include` files and the record. Does not run `setup`.
+ */
+export async function worktreeCreate(
+  cwd: string,
+  req: { name: string; base?: string; branch?: string; path?: string; kind: WorktreeKind },
+): Promise<CreatedWorktree> {
+  const args = {
+    cwd,
+    name: req.name,
+    base: req.base ?? null,
+    branch: req.branch ?? null,
+    path: req.path ?? null,
+    kind: req.kind,
+  };
+  if (isTauri()) {
+    return tauriInvoke<CreatedWorktree>("worktree_create", args, IPC_TIMEOUT.NETWORK);
+  }
+  return devPost<CreatedWorktree>("/api/worktree-create", args, "Failed to create the worktree");
+}
+
+/**
+ * v3.13 — run the repository's `setup` hook for a worktree in a PTY, like
+ * `terminalOpen`. `hash` is the one the user trusted; the backend refuses if
+ * the hooks changed since.
+ */
+export async function worktreeRunHook(
+  cwd: string,
+  path: string,
+  hook: "setup",
+  hash: string,
+  opts: { cols: number; rows: number; onExit?: (code: number | null) => void },
+  onOutput: (chunk: string) => void,
+): Promise<number> {
+  if (isTauri()) {
+    const { Channel } = await import("@tauri-apps/api/core");
+    const channel = new Channel<TerminalEvent>();
+    channel.onmessage = (event) => dispatchTerminalEvent(event, onOutput, opts.onExit);
+    return tauriInvoke<number>("worktree_run_hook", {
+      cwd,
+      path,
+      hook,
+      hash,
+      cols: opts.cols,
+      rows: opts.rows,
+      onOutput: channel,
+    });
+  }
+  const params = new URLSearchParams({ cwd, path, hook, hash, cols: String(opts.cols), rows: String(opts.rows) });
+  return devPtyStream("/api/worktree-run-hook", params, opts.onExit, onOutput);
+}
+
+/** v3.13 — the worktree's URL (first non-empty line of `url`), or null when the repo defines none. */
+export async function worktreeUrl(cwd: string, path: string, hash: string): Promise<string | null> {
+  if (isTauri()) {
+    return tauriInvoke<string | null>("worktree_url", { cwd, path, hash });
+  }
+  return devPost<string | null>("/api/worktree-url", { cwd, path, hash }, "Failed to get the worktree URL");
 }
 
 /**

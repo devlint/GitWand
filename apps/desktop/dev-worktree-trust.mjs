@@ -63,7 +63,7 @@ function saveStore(path, store) {
 }
 
 /** First entry of `git worktree list --porcelain` is the main worktree. */
-function mainWorktreeRoot(cwd) {
+export function mainWorktreeRoot(cwd) {
   const out = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf-8" });
   const first = out.split("\n\n")[0].split("\n");
   if (first.includes("bare")) throw new Error("This repository is bare: it has no main worktree.");
@@ -73,7 +73,7 @@ function mainWorktreeRoot(cwd) {
 }
 
 /** `.gitwandrc` → `.gitwandrc.json` → package.json#gitwand, as `/api/read-gitwandrc`. */
-function readRcText(dir) {
+export function readRcText(dir) {
   for (const name of [".gitwandrc", ".gitwandrc.json"]) {
     const p = join(dir, name);
     if (existsSync(p)) {
@@ -113,4 +113,18 @@ export function devTrustSet(cwd, hash, storePath = devTrustStorePath()) {
   const store = loadStore(storePath);
   store[repoRoot] = hash;
   saveStore(storePath, store);
+}
+
+/**
+ * Mirror of Rust's `assert_hooks_trusted_at`: the hooks, re-read now, only if
+ * they still hash to `hash` and that hash is trusted for the repo.
+ */
+export function devAssertTrusted(cwd, hash, storePath = devTrustStorePath()) {
+  const repoRoot = mainWorktreeRoot(cwd);
+  const hooks = devHooksFromRcText(readRcText(repoRoot));
+  if (devHooksHash(hooks) !== hash) throw new Error(STALE_HOOKS);
+  if (loadStore(storePath)[repoRoot] !== hash) {
+    throw new Error("These worktree hooks are not trusted for this repository.");
+  }
+  return hooks;
 }

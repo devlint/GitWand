@@ -138,6 +138,49 @@ fn login_flag(shell_path: &str) -> Option<&'static str> {
     }
 }
 
+/// The program, arguments and extra environment that run `command` through
+/// the user's shell (spec §4): `$SHELL [-l] -c <command>` on Unix,
+/// `cmd /D /C` on Windows. Shared by PTY sessions and the captured `url` hook.
+pub(crate) fn shell_invocation(
+    shell: &Option<String>,
+    command: &str,
+) -> (String, Vec<String>, Vec<(String, String)>) {
+    #[cfg(windows)]
+    {
+        let _ = shell;
+        cmd_invocation(command)
+    }
+    #[cfg(not(windows))]
+    {
+        let program = resolve_shell(shell);
+        let mut args = Vec::new();
+        if let Some(flag) = login_flag(&program) {
+            args.push(flag.to_string());
+        }
+        args.push("-c".to_string());
+        args.push(command.to_string());
+        (program, args, Vec::new())
+    }
+}
+
+/// `cmd.exe` cannot be handed a command line as one argument: both std and
+/// portable-pty quote it MSVCRT-style (`"` → `\"`), which cmd does not
+/// understand. The command travels in an environment variable instead, and
+/// the only argument is `%GITWAND_HOOK_COMMAND%` (no space, no quote, passed
+/// as is). cmd expands it once, then parses the result as if typed.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn cmd_invocation(command: &str) -> (String, Vec<String>, Vec<(String, String)>) {
+    (
+        "cmd".to_string(),
+        vec![
+            "/D".to_string(),
+            "/C".to_string(),
+            "%GITWAND_HOOK_COMMAND%".to_string(),
+        ],
+        vec![("GITWAND_HOOK_COMMAND".to_string(), command.to_string())],
+    )
+}
+
 /// The only environment variables a caller may add to a session (spec §10.2).
 /// Anything else is refused: an added variable can then never bring back a
 /// secret `CLAUDE_AUTH_OVERRIDE_ENV` stripped.
@@ -150,7 +193,6 @@ pub(crate) const WORKTREE_ENV_ALLOWLIST: [&str; 5] = [
 ];
 
 /// What a session runs.
-#[allow(dead_code)] // `Command` is built by the worktree hook runner (v3.13 PR 3).
 pub(crate) enum SpawnKind {
     /// An interactive shell: the override, or the user's default shell.
     Shell(Option<String>),
@@ -261,23 +303,13 @@ pub(crate) fn spawn_session(
             cmd
         }
         SpawnKind::Command { command, shell } => {
-            #[cfg(windows)]
-            {
-                let _ = shell;
-                let mut cmd = CommandBuilder::new("cmd");
-                cmd.args(["/C", command.as_str()]);
-                cmd
+            let (program, args, env) = shell_invocation(shell, command);
+            let mut cmd = CommandBuilder::new(&program);
+            cmd.args(&args);
+            for (k, v) in env {
+                cmd.env(k, v);
             }
-            #[cfg(not(windows))]
-            {
-                let program = resolve_shell(shell);
-                let mut cmd = CommandBuilder::new(&program);
-                if let Some(flag) = login_flag(&program) {
-                    cmd.arg(flag);
-                }
-                cmd.args(["-c", command.as_str()]);
-                cmd
-            }
+            cmd
         }
     };
 

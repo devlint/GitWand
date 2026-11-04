@@ -16,8 +16,9 @@ import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
-import { devTrustStatus, devTrustSet } from "./dev-worktree-trust.mjs";
+import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
+import { devCreateWorktree, devReadSettings, devResolveBase, devSetupSpawn, devWorktreesDir, devWorktreeUrl } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
 // output, resize, and control sequences without any manual workarounds.
@@ -7127,6 +7128,41 @@ async function handleRequest(req, res) {
       }
     }
 
+    // POST /api/worktree-resolve-base  { cwd } — mirrors worktree_resolve_base
+    if (url.pathname === "/api/worktree-resolve-base" && req.method === "POST") {
+      try {
+        const { cwd } = await readBody(req);
+        const main = mainWorktreeRoot(resolve(cwd));
+        return jsonResponse(req, res, {
+          base: devResolveBase(main),
+          dir: devWorktreesDir(main, devReadSettings(main)),
+        });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-create  { cwd, name, base?, branch?, path?, kind } — mirrors worktree_create
+    if (url.pathname === "/api/worktree-create" && req.method === "POST") {
+      try {
+        const { cwd, name, base, branch, path, kind } = await readBody(req);
+        return jsonResponse(req, res, devCreateWorktree(resolve(cwd), { name, base, branch, path, kind }));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-url  { cwd, path, hash } — mirrors worktree_url
+    if (url.pathname === "/api/worktree-url" && req.method === "POST") {
+      try {
+        const { cwd, path, hash } = await readBody(req);
+        const value = devWorktreeUrl(resolve(cwd), resolve(String(path ?? "")), String(hash ?? ""), { baseEnv: claudeSpawnEnv });
+        return jsonResponse(req, res, value);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // POST /api/read-gitwandrc  { cwd }
     // Searches: .gitwandrc → .gitwandrc.json → package.json#gitwand
     if (url.pathname === "/api/read-gitwandrc" && req.method === "POST") {
@@ -7715,13 +7751,14 @@ async function handleRequest(req, res) {
           mkdirSync(parentDir, { recursive: true });
         }
 
-        let cmd = `git worktree add "${wtPath}"`;
-        if (new_branch) cmd += ` -b "${new_branch}" "${branch}"`;
-        else cmd += ` "${branch}"`;
-        execSync(cmd, { cwd: resolvedCwd, encoding: "utf-8", shell: true });
+        // Argument array, like the Rust command: no shell, no interpolation.
+        const args = ["worktree", "add", wtPath];
+        if (new_branch) args.push("-b", new_branch, branch);
+        else args.push(branch);
+        execFileSync("git", args, { cwd: resolvedCwd, encoding: "utf-8" });
         const resolvedBranch = new_branch || branch;
         let head = "";
-        try { head = execSync("git rev-parse HEAD", { cwd: wtPath, encoding: "utf-8" }).trim(); } catch {}
+        try { head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: wtPath, encoding: "utf-8" }).trim(); } catch {}
         return jsonResponse(req, res, { path: wtPath, branch: resolvedBranch, head, is_main: false, is_locked: false, lock_reason: null, is_bare: false, is_prunable: false, prunable_reason: null });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
@@ -7733,8 +7770,10 @@ async function handleRequest(req, res) {
       try {
         const { cwd, path: wtPath, force } = await readBody(req);
         const resolvedCwd = resolve(cwd);
-        const forceFlag = force ? "--force " : "";
-        execSync(`git worktree remove ${forceFlag}"${wtPath}"`, { cwd: resolvedCwd, encoding: "utf-8", shell: true });
+        const args = ["worktree", "remove"];
+        if (force) args.push("--force");
+        args.push(wtPath);
+        execFileSync("git", args, { cwd: resolvedCwd, encoding: "utf-8" });
         return jsonResponse(req, res, {});
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
@@ -7756,8 +7795,7 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/git-worktree-repair" && req.method === "POST") {
       try {
         const { cwd, paths = [] } = await readBody(req);
-        const extraPaths = paths.map(p => `"${p}"`).join(" ");
-        execSync(`git worktree repair ${extraPaths}`.trim(), { cwd: resolve(cwd), encoding: "utf-8", shell: true });
+        execFileSync("git", ["worktree", "repair", ...paths.map(String)], { cwd: resolve(cwd), encoding: "utf-8" });
         return jsonResponse(req, res, {});
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
@@ -8909,6 +8947,54 @@ async function handleRequest(req, res) {
       let ptyCwd = null;
       try { ptyCwd = realpathSync.native(cwd); } catch (_) {}
       devPtys.set(id, { proc, cwd: ptyCwd });
+      req.on("close", () => { try { proc.kill(); } catch (_) {} devPtys.delete(id); });
+      return;
+    }
+    // GET /api/worktree-run-hook?cwd&path&hook&hash&cols&rows — mirrors
+    // worktree_run_hook, same SSE protocol as /api/terminal-open.
+    if (url.pathname === "/api/worktree-run-hook" && req.method === "GET") {
+      if (rejectCrossOrigin(req, res)) return;
+      const cols = Math.max(1, parseInt(url.searchParams.get("cols") || "80", 10));
+      const rows = Math.max(1, parseInt(url.searchParams.get("rows") || "24", 10));
+      const sseOrigin = req.headers.origin;
+      const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
+      });
+      let spec;
+      try {
+        spec = devSetupSpawn(
+          resolve(url.searchParams.get("cwd") || ""),
+          resolve(url.searchParams.get("path") || ""),
+          url.searchParams.get("hook") || "",
+          url.searchParams.get("hash") || "",
+        );
+      } catch (err) {
+        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.end();
+        return;
+      }
+      const id = devPtyNextId++;
+      let proc;
+      try {
+        proc = nodePty.spawn(spec.program, spec.args, { name: "xterm-256color", cols, rows, cwd: spec.cwd, env: { ...claudeSpawnEnv, ...spec.env } });
+      } catch (spawnErr) {
+        res.write(`data: ${JSON.stringify({ error: String(spawnErr) })}\n\n`);
+        res.end();
+        return;
+      }
+      res.write(`data: ${JSON.stringify({ id })}\n\n`);
+      proc.onData((chunk) => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+      });
+      proc.onExit(({ exitCode }) => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ eof: true, code: exitCode ?? null })}\n\n`);
+        devPtys.delete(id);
+      });
+      devPtys.set(id, { proc, cwd: spec.cwd });
       req.on("close", () => { try { proc.kill(); } catch (_) {} devPtys.delete(id); });
       return;
     }

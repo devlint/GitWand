@@ -2213,6 +2213,26 @@ const fr: Locale = {
 
   // ─── Worktrees ──────────────────────────────────────────
   worktree: {
+    // v3.13 worktree service (setup, base)
+    setupTabTitle: "Setup · {0}",
+    setupDone: "Setup terminé",
+    setupFailedCode: "Échec du setup (code de sortie {0})",
+    setupStopped: "Setup arrêté",
+    setupRunning: "Setup en cours…",
+    setupFailed: "Échec du setup",
+    setupSkipped: "Setup ignoré",
+    retrySetup: "Relancer le setup",
+    openLog: "Ouvrir le journal",
+    openUrl: "Ouvrir",
+    baseFetched: "Basé sur {0}, récupéré il y a {1} s",
+    baseOffline: "Hors ligne : basé sur {0}",
+    baseNoRemote: "Pas de remote : basé sur {0}",
+    baseNoDefault: "Branche par défaut du remote inconnue : basé sur {0}",
+    baseExplicit: "Basé sur {0}",
+    baseResolving: "Récupération de la base…",
+    includeWarnings: "Certaines entrées include ont été ignorées : {0}",
+    formBaseDefault: "Branche par défaut du remote, à jour",
+    setupStartFailed: "Le setup n'a pas pu démarrer : {0}",
     title: "Worktrees",
     empty: "Aucun worktree pour l\u2019instant. Cr\u00e9es-en un pour travailler sur deux branches simultan\u00e9ment sans switcher.",
     main: "principal",
@@ -2345,6 +2365,7 @@ const fr: Locale = {
   },
   // ─── Worktrees de tâches IA ──────────────────────────────
   aiTask: {
+    setupFailed: "Échec du setup de {0}. L'agent n'a pas été lancé : relancez le setup depuis le gestionnaire de worktrees, ou lancez-le à la main.",
     badgeTooltip: "Worktree de tâche IA",
     nameTitle: "Nouvelle tâche IA",
     nameBody: "Nommez cette tâche. Le worktree isolé portera ce nom pour la retrouver plus tard.",

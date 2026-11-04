@@ -3,6 +3,7 @@ pub mod git;
 pub(crate) mod process_tree;
 pub(crate) mod shell_env;
 pub(crate) mod types;
+pub(crate) mod worktree;
 
 pub(crate) use crate::types::*;
 // Used only by the `#[cfg(test)] mod tests` block below (parse_gh_pr_json,
@@ -548,6 +549,12 @@ pub fn preview_cherry_pick_parity(
     tauri::async_runtime::block_on(commands::read::preview_cherry_pick(cwd, commit))
 }
 
+pub fn worktree_resolve_base_parity(
+    cwd: String,
+) -> Result<commands::worktree::WorktreeBaseInfo, String> {
+    tauri::async_runtime::block_on(commands::worktree::worktree_resolve_base(cwd))
+}
+
 pub fn git_remote_info_parity(cwd: String) -> Result<types::RemoteInfo, String> {
     tauri::async_runtime::block_on(commands::ops::git_remote_info(cwd))
 }
@@ -830,6 +837,10 @@ pub fn run() {
             commands::ops::reveal_in_file_manager,
             commands::ops::set_git_config,
             commands::ops::read_gitwandrc,
+            commands::worktree::worktree_create,
+            commands::worktree::worktree_resolve_base,
+            commands::worktree::worktree_run_hook,
+            commands::worktree::worktree_url,
             commands::worktree_processes::worktree_stop_processes,
             commands::worktree_trust::worktree_hooks_trust,
             commands::worktree_trust::worktree_hooks_trust_set,

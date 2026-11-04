@@ -147,7 +147,7 @@ fn stop_processes_in(
 
 /// `worktree`, canonical, when it is a linked worktree of `repo`: never the
 /// main worktree, never a path git does not list.
-fn linked_worktree(repo: &Path, worktree: &Path) -> Result<PathBuf, String> {
+pub(crate) fn linked_worktree(repo: &Path, worktree: &Path) -> Result<PathBuf, String> {
     let refuse = || {
         format!(
             "Not a linked worktree of this repository: {}",

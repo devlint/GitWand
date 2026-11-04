@@ -35,6 +35,8 @@ const props = defineProps<{
   repoStats?: { staged: number; unstaged: number; untracked: number; conflicted: number; added: number; modified: number; deleted: number; renamed: number };
   branches?: GitBranch[];
   worktreeBranches?: Set<string>;
+  /** Branches of registered AI tasks (v3.13: `task/<name>`), which can merge back. */
+  aiTaskBranches?: Set<string>;
   stashes?: any[];
   /** Map of commit SHA → submodule pointer changes, for the Git Tree badge (v2.15.1). */
   submoduleChanges?: Record<string, Array<{ path: string; pointedSha: string }>>;
@@ -410,10 +412,12 @@ const clickedBranchIsWorktree = computed(() => {
   return props.worktreeBranches?.has(b) ?? false;
 });
 
-/** A `gitwand-scratch-*` worktree branch can also merge its work back. */
-const clickedBranchIsScratch = computed(
-  () => ctxMenu.value.clickedBranch?.startsWith("gitwand-scratch-") ?? false,
-);
+/** A `gitwand-scratch-*` or AI-task worktree branch can also merge its work back. */
+const clickedBranchIsScratch = computed(() => {
+  const b = ctxMenu.value.clickedBranch;
+  if (!b) return false;
+  return b.startsWith("gitwand-scratch-") || (props.aiTaskBranches?.has(b) ?? false);
+});
 
 function onCtxDeleteWorktree() {
   if (ctxMenu.value.clickedBranch) emit("delete-worktree", ctxMenu.value.clickedBranch);
