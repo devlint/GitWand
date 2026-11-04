@@ -4,18 +4,19 @@
 //! 1. GitWand's own terminal sessions in the worktree are closed, with
 //!    their whole session (`close_session_ids`).
 //! 2. After 500 ms, the processes whose working directory is still inside
-//!    the worktree are swept. Those GitWand started (same session as a
-//!    closed one, or a descendant of GitWand) get SIGTERM, then SIGKILL
+//!    the worktree are swept. Those GitWand started (in the session of one
+//!    it spawned there, open or ended, or a descendant of GitWand) get SIGTERM, then SIGKILL
 //!    after 2 s. The others are only listed, unless the user clicked
 //!    "Stop all" (`kill_foreign`).
 //!
 //! What is returned is what still runs there. Windows has no sweep (see
 //! `process_tree`): its Job Objects cover what GitWand started.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use super::terminal::{close_session_ids, sessions_under};
+use super::terminal::{close_session_ids, recorded_sessions_under, sessions_under};
 use crate::process_tree::{self, ProcInfo};
 
 #[tauri::command]
@@ -26,17 +27,68 @@ pub(crate) async fn worktree_stop_processes(
 ) -> Result<Vec<ProcInfo>, String> {
     let repo =
         crate::git::safe_repo_path(cwd.trim(), ".").map_err(|e| format!("invalid cwd: {e}"))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        stop_processes_in(&repo, Path::new(path.trim()), kill_foreign)
-    })
-    .await
-    .map_err(|e| format!("worktree process stop failed: {e}"))?
+    // The single audited path guard (AGENTS.md); `linked_worktree` then
+    // narrows it to a worktree git lists for this repository.
+    let worktree =
+        crate::git::safe_repo_path(path.trim(), ".").map_err(|e| format!("invalid path: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || stop_processes_in(&repo, &worktree, kill_foreign))
+        .await
+        .map_err(|e| format!("worktree process stop failed: {e}"))?
 }
 
 /// Grace between closing the sessions and the sweep (spec §8 step 3).
 const SWEEP_DELAY: Duration = Duration::from_millis(500);
 /// SIGTERM → SIGKILL (spec §8 step 3).
 const KILL_AFTER: Duration = Duration::from_secs(2);
+
+/// GitWand and its ancestors (the shell, `pnpm`, `cargo` it was started
+/// from, maybe inside this very worktree): never signalled, never listed.
+fn self_and_ancestors(me: u32, procs: &[ProcInfo]) -> HashSet<u32> {
+    let mut chain = HashSet::from([me]);
+    let mut current = me;
+    while let Some(p) = procs.iter().find(|p| p.pid == current) {
+        if p.ppid <= 1 || !chain.insert(p.ppid) {
+            break;
+        }
+        current = p.ppid;
+    }
+    chain
+}
+
+/// The swept pids to stop: owned ones (in a session GitWand spawned, or a
+/// descendant of `own`), plus every other one when `kill_foreign` — never
+/// pid ≤ 1, GitWand or its ancestors.
+fn select_targets(
+    candidates: &[u32],
+    me: u32,
+    own: &HashSet<u32>,
+    procs: &[ProcInfo],
+    kill_foreign: bool,
+    session_of: impl Fn(u32) -> Option<u32>,
+) -> Vec<u32> {
+    let spared = self_and_ancestors(me, procs);
+    candidates
+        .iter()
+        .copied()
+        .filter(|&pid| pid > 1 && !spared.contains(&pid))
+        .filter(|&pid| {
+            kill_foreign
+                || session_of(pid).is_some_and(|sid| own.contains(&sid))
+                || process_tree::is_descendant(pid, own, procs)
+        })
+        .collect()
+}
+
+/// What to report as still running: the swept pids, minus pid ≤ 1, GitWand
+/// and its ancestors (which "Stop all" would not stop either).
+fn listed(candidates: &[u32], me: u32, procs: &[ProcInfo]) -> Vec<u32> {
+    let spared = self_and_ancestors(me, procs);
+    candidates
+        .iter()
+        .copied()
+        .filter(|&pid| pid > 1 && !spared.contains(&pid))
+        .collect()
+}
 
 fn stop_processes_in(
     repo: &Path,
@@ -46,26 +98,27 @@ fn stop_processes_in(
     let worktree = linked_worktree(repo, worktree)?;
 
     let mut own = close_session_ids(&sessions_under(&worktree));
+    own.extend(recorded_sessions_under(&worktree));
     let me = std::process::id();
     own.insert(me);
     std::thread::sleep(SWEEP_DELAY);
 
     let procs = process_tree::list_processes();
-    let targets: Vec<u32> = process_tree::pids_with_cwd_under(&worktree)
-        .into_iter()
-        .filter(|&pid| pid > 1 && pid != me)
-        .filter(|&pid| {
-            kill_foreign
-                || process_tree::session_of(pid).is_some_and(|sid| own.contains(&sid))
-                || process_tree::is_descendant(pid, &own, &procs)
-        })
-        .collect();
+    let swept = process_tree::pids_with_cwd_under(&worktree);
+    let targets = select_targets(
+        &swept,
+        me,
+        &own,
+        &procs,
+        kill_foreign,
+        process_tree::session_of,
+    );
     terminate(&targets);
 
     let procs = process_tree::list_processes();
-    Ok(process_tree::pids_with_cwd_under(&worktree)
+    let swept = process_tree::pids_with_cwd_under(&worktree);
+    Ok(listed(&swept, me, &procs)
         .into_iter()
-        .filter(|&pid| pid != me)
         .map(|pid| {
             procs
                 .iter()
@@ -151,7 +204,7 @@ fn terminate(_pids: &[u32]) {}
 mod tests {
     use super::*;
     use crate::commands::terminal::{spawn_session, SpawnKind, SpawnSpec};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     struct Repo {
         root: PathBuf,
@@ -223,6 +276,30 @@ mod tests {
     }
 
     #[test]
+    fn stop_all_never_targets_gitwand_or_its_ancestors() {
+        let p = |pid, ppid| ProcInfo {
+            pid,
+            ppid,
+            name: "x".into(),
+        };
+        // 1 → 50 (user's shell) → 60 (pnpm) → 70 (GitWand) → 80 (a git child);
+        // 90 is foreign. All have their cwd in the worktree.
+        let procs = [p(1, 0), p(50, 1), p(60, 50), p(70, 60), p(80, 70), p(90, 1)];
+        let candidates = [1, 50, 60, 70, 80, 90];
+        let own = HashSet::from([70]);
+        let none = |_| None;
+        assert_eq!(
+            select_targets(&candidates, 70, &own, &procs, true, none),
+            vec![80, 90]
+        );
+        assert_eq!(
+            select_targets(&candidates, 70, &own, &procs, false, none),
+            vec![80]
+        );
+        assert_eq!(listed(&candidates, 70, &procs), vec![80, 90]);
+    }
+
+    #[test]
     fn refuses_main_worktree_and_non_worktree() {
         let r = Repo::new("refuse");
         let err = stop_processes_in(&r.main, &r.main, true).unwrap_err();
@@ -248,6 +325,51 @@ mod tests {
         let left = stop_processes_in(&r.main, &r.linked, true).unwrap();
         assert!(left.is_empty(), "{left:?}");
         assert!(wait_gone(sleep_pid));
+    }
+
+    /// An interactive shell's background job (its own group, with job
+    /// control) outlives the shell, keeping the ended session's id: GitWand
+    /// started it, so it is stopped without "Stop all".
+    #[test]
+    fn job_left_by_an_ended_session_is_still_owned() {
+        let r = Repo::new("ended");
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        let (etx, erx) = std::sync::mpsc::channel();
+        spawn_session(
+            SpawnSpec {
+                cwd: r.linked.clone(),
+                kind: SpawnKind::Command {
+                    command: "set -m; sleep 300 </dev/null >/dev/null 2>&1 & echo BG:$!".into(),
+                    shell: Some("/bin/sh".into()),
+                },
+                env: HashMap::new(),
+                cols: 80,
+                rows: 24,
+            },
+            Box::new(move |c| tx.send(c).is_ok()),
+            Box::new(move |code| {
+                let _ = etx.send(code);
+            }),
+        )
+        .unwrap();
+        erx.recv_timeout(Duration::from_secs(10))
+            .expect("session ends");
+        let out: String = rx.try_iter().collect();
+        let bg: u32 = out
+            .split("BG:")
+            .nth(1)
+            .map(|r| {
+                r.chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+            })
+            .and_then(|d| d.parse().ok())
+            .unwrap_or_else(|| panic!("no BG pid in {out:?}"));
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(alive(bg), "the job outlives its shell");
+        let left = stop_processes_in(&r.main, &r.linked, false).unwrap();
+        assert!(left.is_empty(), "{left:?}");
+        assert!(wait_gone(bg));
     }
 
     #[test]

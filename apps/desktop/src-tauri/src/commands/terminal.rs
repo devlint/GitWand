@@ -47,6 +47,39 @@ fn lock_sessions() -> std::sync::MutexGuard<'static, HashMap<u64, PtyHandle>> {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Every session GitWand spawned, as (leader pid = session id, canonical
+/// cwd), kept after the session ends: a background job an interactive shell
+/// left behind keeps that session id, and stopping a worktree must still
+/// recognise it as GitWand's (spec §8: "GitWand records its session id").
+/// Bounded: the oldest entries go first.
+const SPAWNED_CAP: usize = 256;
+
+fn spawned() -> &'static Mutex<std::collections::VecDeque<(u32, PathBuf)>> {
+    static S: OnceLock<Mutex<std::collections::VecDeque<(u32, PathBuf)>>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(std::collections::VecDeque::new()))
+}
+
+fn record_spawned(sid: u32, cwd: &std::path::Path) {
+    let mut list = spawned().lock().unwrap_or_else(|e| e.into_inner());
+    if list.len() >= SPAWNED_CAP {
+        list.pop_front();
+    }
+    list.push_back((sid, cwd.to_path_buf()));
+}
+
+/// The session ids of every session GitWand spawned in `root` or under it,
+/// ended or not.
+pub(crate) fn recorded_sessions_under(root: &std::path::Path) -> std::collections::HashSet<u32> {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    spawned()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(_, cwd)| cwd.starts_with(&root))
+        .map(|(sid, _)| *sid)
+        .collect()
+}
+
 /// Résout le shell à lancer : override explicite, sinon $SHELL (Unix) /
 /// %ComSpec% ou powershell (Windows).
 ///
@@ -142,13 +175,33 @@ pub(crate) struct SpawnSpec {
     pub rows: u16,
 }
 
-/// Sent once on `terminal_open`'s `on_exit` channel (a separate channel, so
-/// `on_output` stays a plain stream of strings), after the last output
-/// chunk. `code` is `None` when the session was closed by GitWand, or the
-/// status could not be read.
+/// What `terminal_open` streams on its one channel: output chunks, then one
+/// `Exit`, last. One channel, because Tauri only orders messages within a
+/// channel (a large payload is fetched, a small one evaluated directly): an
+/// exit on a second channel could overtake the last chunk. `code` is `None`
+/// when GitWand closed the session, or the status could not be read.
 #[derive(Serialize, Clone, Debug)]
-pub struct TerminalExit {
-    pub code: Option<i32>,
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum TerminalEvent {
+    Chunk { data: String },
+    Exit { code: Option<i32> },
+}
+
+/// `spawn_session`'s two callbacks, both sending to one ordered `send`.
+pub(crate) type ChunkSink = Box<dyn FnMut(String) -> bool + Send>;
+pub(crate) type ExitSink = Box<dyn FnOnce(Option<i32>) + Send>;
+
+pub(crate) fn event_sinks(
+    send: impl Fn(TerminalEvent) -> bool + Send + Sync + 'static,
+) -> (ChunkSink, ExitSink) {
+    let send = Arc::new(send);
+    let for_exit = Arc::clone(&send);
+    (
+        Box::new(move |data| send(TerminalEvent::Chunk { data })),
+        Box::new(move |code| {
+            let _ = for_exit(TerminalEvent::Exit { code });
+        }),
+    )
 }
 
 /// Opens a PTY session and starts streaming its output. `on_chunk` gets each
@@ -156,8 +209,8 @@ pub struct TerminalExit {
 /// called exactly once, after the last chunk.
 pub(crate) fn spawn_session(
     spec: SpawnSpec,
-    mut on_chunk: Box<dyn FnMut(String) -> bool + Send>,
-    on_exit: Box<dyn FnOnce(Option<i32>) + Send>,
+    mut on_chunk: ChunkSink,
+    on_exit: ExitSink,
 ) -> Result<u64, String> {
     if let Some(key) = spec
         .env
@@ -287,6 +340,9 @@ pub(crate) fn spawn_session(
 
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     let leader = child.process_id();
+    if let Some(pid) = leader {
+        record_spawned(pid, &spec.cwd);
+    }
     #[cfg(windows)]
     let job = leader.and_then(|pid| match job::Job::assign(pid) {
         Ok(j) => Some(j),
@@ -385,8 +441,7 @@ pub(crate) fn terminal_open(
     agent: Option<String>,
     cols: u16,
     rows: u16,
-    on_output: Channel<String>,
-    on_exit: Channel<TerminalExit>,
+    on_output: Channel<TerminalEvent>,
 ) -> Result<u64, String> {
     // Validate and canonicalize cwd through the single audited guard (AGENTS.md:
     // "every file-system operation on user-supplied paths must go through
@@ -402,6 +457,7 @@ pub(crate) fn terminal_open(
         Some(a) => SpawnKind::Agent(a.to_string()),
         None => SpawnKind::Shell(shell),
     };
+    let (on_chunk, on_exit) = event_sinks(move |event| on_output.send(event).is_ok());
     spawn_session(
         SpawnSpec {
             cwd: canon,
@@ -410,10 +466,8 @@ pub(crate) fn terminal_open(
             cols,
             rows,
         },
-        Box::new(move |chunk| on_output.send(chunk).is_ok()),
-        Box::new(move |code| {
-            let _ = on_exit.send(TerminalExit { code });
-        }),
+        on_chunk,
+        on_exit,
     )
 }
 
@@ -841,6 +895,44 @@ mod tests {
         assert_eq!(code, Some(3));
         let (_, code) = run("exit7", sh("exit 7"), HashMap::new());
         assert_eq!(code, Some(7));
+    }
+
+    /// What `terminal_open` sends on its one channel: chunks, then exactly
+    /// one exit, last — one channel, so IPC keeps that order.
+    #[test]
+    fn channel_events_end_with_the_exit() {
+        let dir = scratch_dir("events");
+        let events = Arc::new(Mutex::new(Vec::<TerminalEvent>::new()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sink = Arc::clone(&events);
+        let (on_chunk, on_exit) = event_sinks(move |e: TerminalEvent| {
+            let exit = matches!(e, TerminalEvent::Exit { .. });
+            sink.lock().unwrap().push(e);
+            if exit {
+                let _ = tx.send(());
+            }
+            true
+        });
+        spawn_session(
+            spec(&dir, sh("printf out; exit 4"), HashMap::new()),
+            on_chunk,
+            on_exit,
+        )
+        .unwrap();
+        rx.recv_timeout(Duration::from_secs(10)).expect("no exit");
+        let events = events.lock().unwrap();
+        let (last, chunks) = events.split_last().unwrap();
+        assert!(
+            matches!(last, TerminalEvent::Exit { code: Some(4) }),
+            "{last:?}"
+        );
+        assert!(chunks
+            .iter()
+            .all(|e| matches!(e, TerminalEvent::Chunk { .. })));
+        assert_eq!(
+            serde_json::to_string(last).unwrap(),
+            r#"{"type":"exit","code":4}"#
+        );
     }
 
     #[test]

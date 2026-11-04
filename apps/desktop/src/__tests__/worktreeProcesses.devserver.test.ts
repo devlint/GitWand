@@ -9,7 +9,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @ts-expect-error — plain ESM module without types, shared with dev-server.mjs
-import { devStopProcessesIn } from "../../dev-worktree-processes.mjs";
+import { devStopProcessesIn, devSelfAndAncestors } from "../../dev-worktree-processes.mjs";
 
 const root = realpathSync.native(mkdtempSync(join(tmpdir(), "gitwand-devwtproc-")));
 const main = join(root, "main");
@@ -34,6 +34,17 @@ const alive = (pid: number) => {
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("dev-server worktree process stop", () => {
+  it("spares the dev-server and its ancestors", () => {
+    const procs = [
+      { pid: 1, ppid: 0, name: "init" },
+      { pid: 50, ppid: 1, name: "zsh" },
+      { pid: 60, ppid: 50, name: "pnpm" },
+      { pid: 70, ppid: 60, name: "node" },
+      { pid: 80, ppid: 70, name: "git" },
+    ];
+    expect([...devSelfAndAncestors(70, procs)].sort()).toEqual([50, 60, 70]);
+  });
+
   it("refuses the main worktree and a non-worktree", async () => {
     await expect(devStopProcessesIn(main, main, true, new Map())).rejects.toThrow(/Not a linked worktree/);
     await expect(devStopProcessesIn(main, root, true, new Map())).rejects.toThrow(/Not a linked worktree/);

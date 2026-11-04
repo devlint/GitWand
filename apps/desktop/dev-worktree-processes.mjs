@@ -100,6 +100,19 @@ async function pidsWithCwdUnder(root) {
   return [...pids].sort((a, b) => a - b);
 }
 
+/** `pid` and its ancestors (the shell, pnpm… the dev-server was started from). */
+export function devSelfAndAncestors(pid, procs) {
+  const byPid = new Map(procs.map((p) => [p.pid, p]));
+  const chain = new Set([pid]);
+  let cur = pid;
+  for (;;) {
+    const p = byPid.get(cur);
+    if (!p || p.ppid <= 1 || chain.has(p.ppid)) return chain;
+    chain.add(p.ppid);
+    cur = p.ppid;
+  }
+}
+
 function isDescendant(pid, ancestors, procs) {
   const byPid = new Map(procs.map((p) => [p.pid, p]));
   const seen = new Set();
@@ -135,8 +148,9 @@ export async function devStopProcessesIn(repo, worktree, killForeign, devPtys) {
   await sleep(SWEEP_DELAY_MS);
 
   const procs = await listProcesses();
+  const spared = devSelfAndAncestors(process.pid, procs);
   const targets = (await pidsWithCwdUnder(root)).filter(
-    (pid) => pid > 1 && pid !== process.pid && (killForeign || isDescendant(pid, own, procs)),
+    (pid) => pid > 1 && !spared.has(pid) && (killForeign || isDescendant(pid, own, procs)),
   );
   for (const pid of targets) {
     try {
@@ -162,6 +176,6 @@ export async function devStopProcessesIn(repo, worktree, killForeign, devPtys) {
 
   const after = await listProcesses();
   return (await pidsWithCwdUnder(root))
-    .filter((pid) => pid !== process.pid)
+    .filter((pid) => pid > 1 && !spared.has(pid))
     .map((pid) => after.find((p) => p.pid === pid) ?? { pid, ppid: 0, name: "?" });
 }

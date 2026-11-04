@@ -21,6 +21,7 @@
  */
 
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
+import { dispatchTerminalEvent, type TerminalEvent } from "./terminalEvents";
 import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
 export { isTauri };
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
@@ -3673,10 +3674,9 @@ export async function terminalOpen(
 ): Promise<number> {
   if (isTauri()) {
     const { Channel } = await import("@tauri-apps/api/core");
-    const channel = new Channel<string>();
-    channel.onmessage = onOutput;
-    const exitChannel = new Channel<{ code: number | null }>();
-    exitChannel.onmessage = (msg) => opts.onExit?.(msg.code ?? null);
+    // One channel for output and exit: Tauri orders messages within a channel only.
+    const channel = new Channel<TerminalEvent>();
+    channel.onmessage = (event) => dispatchTerminalEvent(event, onOutput, opts.onExit);
     return tauriInvoke<number>("terminal_open", {
       cwd,
       shell: opts.shell ?? null,
@@ -3684,7 +3684,6 @@ export async function terminalOpen(
       cols: opts.cols,
       rows: opts.rows,
       onOutput: channel,
-      onExit: exitChannel,
     });
   }
   // Dev mode : SSE. Le serveur renvoie l'id en premier message JSON, puis
