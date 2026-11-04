@@ -31,7 +31,7 @@ describe("useWorktreeHookTrust", () => {
   it("returns run without prompting when trusted", async () => {
     const { ensureTrusted, pending } = useWorktreeHookTrust();
     status({ trusted: true, hash: null });
-    expect(await ensureTrusted("/r")).toBe("run");
+    expect((await ensureTrusted("/r")).choice).toBe("run");
     expect(pending.value).toBeNull();
   });
 
@@ -44,7 +44,7 @@ describe("useWorktreeHookTrust", () => {
     expect(pending.value?.hash).toBe("h1");
     await answer("trust");
     expect(setMock).toHaveBeenCalledWith("/r", "h1");
-    expect(await p).toBe("run");
+    expect((await p).choice).toBe("run");
     expect(pending.value).toBeNull();
   });
 
@@ -54,11 +54,11 @@ describe("useWorktreeHookTrust", () => {
     const p1 = ensureTrusted("/r");
     await flush();
     await answer("skip");
-    expect(await p1).toBe("skip");
+    expect((await p1).choice).toBe("skip");
     const p2 = ensureTrusted("/r");
     await flush();
     await answer("cancel");
-    expect(await p2).toBe("cancel");
+    expect((await p2).choice).toBe("cancel");
     expect(setMock).not.toHaveBeenCalled();
   });
 
@@ -75,7 +75,7 @@ describe("useWorktreeHookTrust", () => {
     setMock.mockResolvedValueOnce(undefined);
     await answer("trust");
     expect(setMock).toHaveBeenLastCalledWith("/r", "h2");
-    expect(await p).toBe("run");
+    expect((await p).choice).toBe("run");
     expect(error.value).toBeNull();
   });
 
@@ -84,8 +84,40 @@ describe("useWorktreeHookTrust", () => {
     status({ trusted: false, hash: "h1" });
     const p1 = ensureTrusted("/r");
     await flush();
-    expect(await ensureTrusted("/r")).toBe("cancel");
+    expect((await ensureTrusted("/r")).choice).toBe("cancel");
     await answer("skip");
-    expect(await p1).toBe("skip");
+    expect((await p1).choice).toBe("skip");
+  });
+
+  it("returns the exact status the user approved, so the caller runs those hooks", async () => {
+    const { ensureTrusted, answer } = useWorktreeHookTrust();
+    status({ trusted: false, hash: "h1" });
+    setMock.mockResolvedValue(undefined);
+    const p = ensureTrusted("/r");
+    await flush();
+    await answer("trust");
+    const d = await p;
+    expect(d.choice).toBe("run");
+    expect(d.status?.hash).toBe("h1");
+    expect(d.status?.hooks.setup).toBe("bin/up");
+  });
+
+  it("ignores answers while a trust is in flight and exposes busy", async () => {
+    const { ensureTrusted, answer, busy, pending } = useWorktreeHookTrust();
+    status({ trusted: false, hash: "h1" });
+    let release!: () => void;
+    setMock.mockImplementation(() => new Promise<void>((r) => { release = r; }));
+    const p = ensureTrusted("/r");
+    await flush();
+    const first = answer("trust");
+    expect(busy.value).toBe(true);
+    await answer("cancel");
+    await answer("trust");
+    expect(setMock).toHaveBeenCalledTimes(1);
+    expect(pending.value).not.toBeNull();
+    release();
+    await first;
+    expect((await p).choice).toBe("run");
+    expect(busy.value).toBe(false);
   });
 });

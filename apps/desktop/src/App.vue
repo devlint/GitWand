@@ -4776,7 +4776,7 @@ onUnmounted(() => {
 
     <!-- v3.13 — ask before running a repository's worktree commands -->
     <WorktreeHookTrustModal v-if="hookTrust.pending.value" :status="hookTrust.pending.value"
-      :error="hookTrust.error.value" @answer="hookTrust.answer" />
+      :error="hookTrust.error.value" :busy="hookTrust.busy.value" @answer="hookTrust.answer" />
 
     <!-- AI-task name prompt — names the scratch worktree after the task -->
     <AiTaskNameModal v-if="aiTaskNamePrompt" :busy="aiTaskNameBusy" @cancel="aiTaskNamePrompt = false"

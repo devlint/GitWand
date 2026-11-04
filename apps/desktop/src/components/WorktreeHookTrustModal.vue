@@ -12,6 +12,8 @@ import type { HookTrustStatus } from "../utils/backend";
 const props = defineProps<{
   status: HookTrustStatus;
   error?: string | null;
+  /** A trust is being recorded: the buttons are disabled meanwhile. */
+  busy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -34,7 +36,7 @@ const rows = computed(() =>
 </script>
 
 <template>
-  <BaseModal :title="t('worktreeHooks.title')" size="md" role="alertdialog" @close="emit('answer', 'cancel')">
+  <BaseModal :title="t('worktreeHooks.title')" size="md" role="alertdialog" @close="!busy && emit('answer', 'cancel')">
     <p class="wht-intro">{{ t("worktreeHooks.intro") }}</p>
     <p class="wht-repo">{{ status.repoRoot }}</p>
 
@@ -47,13 +49,13 @@ const rows = computed(() =>
     <p v-if="error" class="wht-error" role="alert">{{ error }}</p>
 
     <template #footer>
-      <button class="bm-btn bm-btn--ghost" @click="emit('answer', 'cancel')">
+      <button class="bm-btn bm-btn--ghost" :disabled="busy" @click="emit('answer', 'cancel')">
         {{ t("worktreeHooks.cancel") }}
       </button>
-      <button class="bm-btn bm-btn--ghost" @click="emit('answer', 'skip')">
+      <button class="bm-btn bm-btn--ghost" :disabled="busy" @click="emit('answer', 'skip')">
         {{ t("worktreeHooks.skip") }}
       </button>
-      <button class="bm-btn bm-btn--primary" @click="emit('answer', 'trust')">
+      <button class="bm-btn bm-btn--primary" :disabled="busy" @click="emit('answer', 'trust')">
         {{ t("worktreeHooks.trust") }}
       </button>
     </template>

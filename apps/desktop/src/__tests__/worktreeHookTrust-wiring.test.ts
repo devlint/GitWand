@@ -22,6 +22,7 @@ describe("App.vue — worktree hook trust wiring", () => {
     expect(modal).toMatch(/v-if="hookTrust\.pending\.value"/);
     expect(modal).toMatch(/:status="hookTrust\.pending\.value"/);
     expect(modal).toMatch(/:error="hookTrust\.error\.value"/);
+    expect(modal).toMatch(/:busy="hookTrust\.busy\.value"/);
     expect(modal).toMatch(/@answer="hookTrust\.answer"/);
   });
 });
