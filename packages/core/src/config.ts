@@ -389,6 +389,110 @@ export interface GitWandrcConfig {
     /** Cap on the number of staged files sent through the review pass (1-500). */
     maxFiles?: number;
   };
+  /**
+   * v3.13.0 — Worktree lifecycle: where new worktrees go, which ignored files
+   * they get, and the repo's own commands to bring an environment up and down.
+   * Hooks are always read from the main worktree, and only run once the user
+   * has trusted them.
+   *
+   * ```jsonc
+   * {
+   *   "worktree": {
+   *     "dir": ".claude/worktrees",
+   *     "include": [".env", "auth.json", { "path": ".claude/settings.local.json", "mode": "symlink" }],
+   *     "setup": "bin/worktree provision {name}",
+   *     "teardown": "bin/worktree teardown {name}",
+   *     "url": "bin/worktree url {name}"
+   *   }
+   * }
+   * ```
+   */
+  worktree?: WorktreeConfig;
+}
+
+export type WorktreeIncludeMode = "copy" | "symlink";
+
+/** One ignored file or folder brought into a new worktree. */
+export interface WorktreeIncludeEntry {
+  path: string;
+  mode: WorktreeIncludeMode;
+}
+
+export interface WorktreeConfig {
+  /** Where new worktrees go, relative to the main worktree root or absolute. */
+  dir?: string;
+  /** Always normalized to objects; a bare string means `copy`. */
+  include?: WorktreeIncludeEntry[];
+  /** Runs after creation. */
+  setup?: string;
+  /** Runs before any removal; a failure blocks the removal. */
+  teardown?: string;
+  /** Prints the environment's URL; the first non-empty line is used. */
+  url?: string;
+}
+
+function nonBlankString(v: unknown): v is string {
+  return typeof v === "string" && v.trim() !== "";
+}
+
+function parseWorktreeConfig(raw: unknown): WorktreeConfig | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const wt = raw as Record<string, unknown>;
+  const out: WorktreeConfig = {};
+  if (nonBlankString(wt.dir)) out.dir = wt.dir;
+  for (const key of ["setup", "teardown", "url"] as const) {
+    const v = wt[key];
+    if (nonBlankString(v)) out[key] = v;
+  }
+  if (Array.isArray(wt.include)) {
+    const include: WorktreeIncludeEntry[] = [];
+    for (const entry of wt.include) {
+      if (nonBlankString(entry)) {
+        include.push({ path: entry, mode: "copy" });
+      } else if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        const e = entry as Record<string, unknown>;
+        if (!nonBlankString(e.path)) continue;
+        const mode = e.mode === undefined ? "copy" : e.mode;
+        if (mode !== "copy" && mode !== "symlink") continue;
+        include.push({ path: e.path, mode });
+      }
+    }
+    if (include.length > 0) out.include = include;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Parse a `.worktreeinclude` file (Claude Code / Conductor / Strand
+ * convention): one path or pattern per line, `#` comments, blank lines
+ * ignored. Every entry is copied.
+ */
+export function parseWorktreeInclude(text: string): WorktreeIncludeEntry[] {
+  const out: WorktreeIncludeEntry[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    out.push({ path: line, mode: "copy" });
+  }
+  return out;
+}
+
+/**
+ * Union of the `.gitwandrc` include list and the `.worktreeinclude` one, by
+ * path. The `.gitwandrc` entry wins, since only it can say `symlink`.
+ */
+export function mergeWorktreeInclude(
+  fromRc: WorktreeIncludeEntry[] | undefined,
+  fromFile: WorktreeIncludeEntry[],
+): WorktreeIncludeEntry[] {
+  const out = [...(fromRc ?? [])];
+  const seen = new Set(out.map((e) => e.path));
+  for (const e of fromFile) {
+    if (seen.has(e.path)) continue;
+    seen.add(e.path);
+    out.push(e);
+  }
+  return out;
 }
 
 /**
@@ -592,6 +696,10 @@ export function parseGitwandrc(json: string): GitWandrcConfig | null {
         result.commitReview = commitReview;
       }
     }
+
+    // v3.13.0 — Worktree lifecycle.
+    const worktree = parseWorktreeConfig(parsed.worktree);
+    if (worktree) result.worktree = worktree;
 
     return result;
   } catch {

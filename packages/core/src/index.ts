@@ -182,7 +182,15 @@ export type { LockfileMergeResult } from "./resolvers/lockfile-npm.js";
 export type { YarnLockMergeResult } from "./resolvers/lockfile-yarn.js";
 export type { PnpmLockMergeResult } from "./resolvers/lockfile-pnpm.js";
 export type { ImportSortStrategy } from "./resolvers/imports.js";
-export type { MergePolicy, PolicyConfig, GitWandrcConfig } from "./config.js";
+export type {
+  MergePolicy,
+  PolicyConfig,
+  GitWandrcConfig,
+  WorktreeConfig,
+  WorktreeIncludeEntry,
+  WorktreeIncludeMode,
+} from "./config.js";
+export { parseWorktreeInclude, mergeWorktreeInclude } from "./config.js";
 
 // v3.4 — "Recoverable-before-model" tier metric (derived, TS-only — see stats/tiers.ts)
 export { summarizeTiers } from "./stats/tiers.js";

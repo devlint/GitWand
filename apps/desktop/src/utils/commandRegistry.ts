@@ -257,6 +257,8 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   workspace_status_all: { route: "/api/workspace-status-all" },
   workspace_wip_all: { route: "/api/workspace-wip-all" },
   workspace_write: { route: "/api/workspace-write" },
+  worktree_hooks_trust: { route: "/api/worktree-hooks-trust" },
+  worktree_hooks_trust_set: { route: "/api/worktree-hooks-trust-set" },
   write_file: { route: "/api/write-file" },
   write_gitwandrc: { route: "/api/write-gitwandrc" },
 

@@ -59,6 +59,7 @@ tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "5"
+sha2 = "0.10"
 base64 = "0.22"
 # Used for data-parallel iteration in workspace_*_all (P3.2). Each repo's
 # git/gh subprocess runs on its own rayon thread instead of in series.

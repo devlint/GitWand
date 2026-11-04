@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `.gitwandrc` accepts a `worktree` section (`dir`, `include`, `setup`, `teardown`, `url`), and `.worktreeinclude` is parsed. GitWand asks before it runs a repository's worktree commands: it shows them as written, remembers the trust per repository, and asks again whether they change. The commands are always read from the main worktree, never from a linked worktree's copy. Nothing runs them yet: this is the groundwork for v3.13 Agent Workspaces.
+
 ## [3.12.5] - 2026-11-03
 
 ### Fixed

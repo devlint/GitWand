@@ -3501,6 +3501,58 @@ export async function gitWorktreeRemove(cwd: string, path: string, force?: boole
   }
 }
 
+/** v3.13 — A repository's worktree hook commands, read from its main worktree. */
+export interface WorktreeHooks {
+  setup: string | null;
+  teardown: string | null;
+  url: string | null;
+}
+
+export interface HookTrustStatus {
+  hooks: WorktreeHooks;
+  /** SHA-256 of the hooks; null when the repo defines none. */
+  hash: string | null;
+  /** True when there is nothing to run, or the user trusted this exact hash. */
+  trusted: boolean;
+  /** Canonical main worktree root, the key of the trust store. */
+  repoRoot: string;
+}
+
+/** v3.13 — Whether the user trusts this repository's worktree hooks. */
+export async function worktreeHooksTrust(cwd: string): Promise<HookTrustStatus> {
+  if (isTauri()) {
+    return tauriInvoke<HookTrustStatus>("worktree_hooks_trust", { cwd });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/worktree-hooks-trust`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Failed to read worktree hook trust: ${res.status}`);
+  return data as HookTrustStatus;
+}
+
+/**
+ * v3.13 — Trust this repository's worktree hooks. Refuses when they changed
+ * since `hash` was read, so trust only ever covers commands the user saw.
+ */
+export async function worktreeHooksTrustSet(cwd: string, hash: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("worktree_hooks_trust_set", { cwd, hash });
+    return;
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/worktree-hooks-trust-set`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, hash }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Failed to trust worktree hooks: ${res.status}`);
+  }
+}
+
 /** Prune stale worktree administrative files. */
 export async function gitWorktreePrune(cwd: string): Promise<void> {
   if (isTauri()) {

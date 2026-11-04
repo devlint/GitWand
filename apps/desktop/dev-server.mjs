@@ -16,6 +16,7 @@ import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
+import { devTrustStatus, devTrustSet } from "./dev-worktree-trust.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
 // output, resize, and control sequences without any manual workarounds.
@@ -7089,6 +7090,27 @@ async function handleRequest(req, res) {
         });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-hooks-trust  { cwd } — mirrors worktree_trust.rs
+    if (url.pathname === "/api/worktree-hooks-trust" && req.method === "POST") {
+      try {
+        const { cwd } = await readBody(req);
+        return jsonResponse(req, res, devTrustStatus(resolve(cwd)));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-hooks-trust-set  { cwd, hash } — 409 when the hooks changed
+    if (url.pathname === "/api/worktree-hooks-trust-set" && req.method === "POST") {
+      try {
+        const { cwd, hash } = await readBody(req);
+        devTrustSet(resolve(cwd), String(hash ?? ""));
+        return jsonResponse(req, res, {});
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, err.stale ? 409 : 500);
       }
     }
 

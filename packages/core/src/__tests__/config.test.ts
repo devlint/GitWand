@@ -5,6 +5,8 @@ import {
   effectivePolicyForFile,
   policyToConfig,
   parseGitwandrc,
+  parseWorktreeInclude,
+  mergeWorktreeInclude,
   DEFAULT_POLICY,
 } from "../config.js";
 
@@ -577,5 +579,45 @@ describe("v3.11.1 — llmFallback.history in .gitwandrc", () => {
   it("ignores an invalid history block", () => {
     const cfg = parseGitwandrc(JSON.stringify({ llmFallback: { enabled: true, history: "yes" } }));
     expect(cfg?.llmFallback?.history).toBeUndefined();
+  });
+});
+
+describe("v3.13 — worktree config", () => {
+  it("parses a full worktree section and normalizes include entries", () => {
+    const cfg = parseGitwandrc(JSON.stringify({ worktree: {
+      dir: ".claude/worktrees",
+      include: [".env", { path: ".claude/settings.local.json", mode: "symlink" }],
+      setup: "bin/worktree provision {name}", teardown: "bin/worktree teardown {name}", url: "bin/worktree url {name}",
+    } }));
+    expect(cfg?.worktree).toEqual({
+      dir: ".claude/worktrees",
+      include: [{ path: ".env", mode: "copy" }, { path: ".claude/settings.local.json", mode: "symlink" }],
+      setup: "bin/worktree provision {name}", teardown: "bin/worktree teardown {name}", url: "bin/worktree url {name}",
+    });
+  });
+
+  it("drops invalid worktree entries without failing the file", () => {
+    const cfg = parseGitwandrc(JSON.stringify({ policy: "prefer-safety", worktree: {
+      dir: "", include: ["", 3, { path: "a", mode: "hardlink" }, { mode: "copy" }, "ok"], setup: "  ", teardown: 42, url: null,
+    } }));
+    expect(cfg?.policy).toBe("prefer-safety");
+    expect(cfg?.worktree).toEqual({ include: [{ path: "ok", mode: "copy" }] });
+  });
+
+  it("omits worktree when nothing valid remains", () => {
+    expect(parseGitwandrc(JSON.stringify({ worktree: { setup: "" } }))?.worktree).toBeUndefined();
+    expect(parseGitwandrc(JSON.stringify({ worktree: "bin/setup" }))?.worktree).toBeUndefined();
+  });
+
+  it("parseWorktreeInclude skips blanks and comments, trims, defaults to copy", () => {
+    expect(parseWorktreeInclude("# deps\n.env\n\n  auth.json  \r\n#x\n")).toEqual([
+      { path: ".env", mode: "copy" }, { path: "auth.json", mode: "copy" },
+    ]);
+  });
+
+  it("mergeWorktreeInclude unions by path, the .gitwandrc entry wins", () => {
+    expect(mergeWorktreeInclude([{ path: ".env", mode: "symlink" }], [{ path: ".env", mode: "copy" }, { path: "b", mode: "copy" }]))
+      .toEqual([{ path: ".env", mode: "symlink" }, { path: "b", mode: "copy" }]);
+    expect(mergeWorktreeInclude(undefined, [])).toEqual([]);
   });
 });
