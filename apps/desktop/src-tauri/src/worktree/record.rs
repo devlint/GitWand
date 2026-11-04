@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Kind {
+pub enum Kind {
     Task,
     Manual,
 }

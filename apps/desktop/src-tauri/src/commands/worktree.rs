@@ -42,3 +42,35 @@ pub(crate) async fn worktree_resolve_base(cwd: String) -> Result<WorktreeBaseInf
         .await
         .map_err(|e| format!("worktree base resolution failed: {e}"))?
 }
+
+/// Creates a worktree through the worktree service (spec §5, §10.1). Does
+/// not run `setup`: the frontend opens the setup tab with
+/// `worktree_run_hook` once it knows the user's trust answer.
+#[tauri::command]
+pub(crate) async fn worktree_create(
+    cwd: String,
+    name: String,
+    base: Option<String>,
+    branch: Option<String>,
+    path: Option<String>,
+    kind: String,
+) -> Result<crate::worktree::create::CreatedWorktree, String> {
+    let root = canonical_cwd(&cwd)?;
+    let kind = match kind.as_str() {
+        "task" => crate::worktree::record::Kind::Task,
+        "manual" => crate::worktree::record::Kind::Manual,
+        other => return Err(format!("Unknown worktree kind: {other}")),
+    };
+    let req = crate::worktree::create::CreateRequest {
+        name,
+        base,
+        branch,
+        path,
+        kind,
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::worktree::create::create_worktree(&root, req, FETCH_TIMEOUT)
+    })
+    .await
+    .map_err(|e| format!("worktree creation failed: {e}"))?
+}

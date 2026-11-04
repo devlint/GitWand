@@ -3,7 +3,6 @@ pub mod git;
 pub(crate) mod process_tree;
 pub(crate) mod shell_env;
 pub(crate) mod types;
-#[allow(dead_code)] // first callers land with worktree_create (Task 4 of the v3.13 PR 3 plan)
 pub(crate) mod worktree;
 
 pub(crate) use crate::types::*;
@@ -838,6 +837,7 @@ pub fn run() {
             commands::ops::reveal_in_file_manager,
             commands::ops::set_git_config,
             commands::ops::read_gitwandrc,
+            commands::worktree::worktree_create,
             commands::worktree::worktree_resolve_base,
             commands::worktree_processes::worktree_stop_processes,
             commands::worktree_trust::worktree_hooks_trust,
