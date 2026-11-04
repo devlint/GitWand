@@ -138,6 +138,31 @@ fn login_flag(shell_path: &str) -> Option<&'static str> {
     }
 }
 
+/// The program and arguments that run `command` through the user's shell
+/// (spec §4): `$SHELL [-l] -c <command>` on Unix, `cmd /C <command>` on
+/// Windows. Shared by PTY sessions and the captured `url` hook.
+pub(crate) fn shell_invocation(shell: &Option<String>, command: &str) -> (String, Vec<String>) {
+    #[cfg(windows)]
+    {
+        let _ = shell;
+        (
+            "cmd".to_string(),
+            vec!["/C".to_string(), command.to_string()],
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        let program = resolve_shell(shell);
+        let mut args = Vec::new();
+        if let Some(flag) = login_flag(&program) {
+            args.push(flag.to_string());
+        }
+        args.push("-c".to_string());
+        args.push(command.to_string());
+        (program, args)
+    }
+}
+
 /// The only environment variables a caller may add to a session (spec §10.2).
 /// Anything else is refused: an added variable can then never bring back a
 /// secret `CLAUDE_AUTH_OVERRIDE_ENV` stripped.
@@ -150,7 +175,6 @@ pub(crate) const WORKTREE_ENV_ALLOWLIST: [&str; 5] = [
 ];
 
 /// What a session runs.
-#[allow(dead_code)] // `Command` is built by the worktree hook runner (v3.13 PR 3).
 pub(crate) enum SpawnKind {
     /// An interactive shell: the override, or the user's default shell.
     Shell(Option<String>),
@@ -261,23 +285,10 @@ pub(crate) fn spawn_session(
             cmd
         }
         SpawnKind::Command { command, shell } => {
-            #[cfg(windows)]
-            {
-                let _ = shell;
-                let mut cmd = CommandBuilder::new("cmd");
-                cmd.args(["/C", command.as_str()]);
-                cmd
-            }
-            #[cfg(not(windows))]
-            {
-                let program = resolve_shell(shell);
-                let mut cmd = CommandBuilder::new(&program);
-                if let Some(flag) = login_flag(&program) {
-                    cmd.arg(flag);
-                }
-                cmd.args(["-c", command.as_str()]);
-                cmd
-            }
+            let (program, args) = shell_invocation(shell, command);
+            let mut cmd = CommandBuilder::new(&program);
+            cmd.args(&args);
+            cmd
         }
     };
 

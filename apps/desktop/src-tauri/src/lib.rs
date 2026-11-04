@@ -839,6 +839,8 @@ pub fn run() {
             commands::ops::read_gitwandrc,
             commands::worktree::worktree_create,
             commands::worktree::worktree_resolve_base,
+            commands::worktree::worktree_run_hook,
+            commands::worktree::worktree_url,
             commands::worktree_processes::worktree_stop_processes,
             commands::worktree_trust::worktree_hooks_trust,
             commands::worktree_trust::worktree_hooks_trust_set,

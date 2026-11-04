@@ -74,3 +74,65 @@ pub(crate) async fn worktree_create(
     .await
     .map_err(|e| format!("worktree creation failed: {e}"))?
 }
+
+/// Runs the repository's `setup` hook for `path` in a PTY session streamed on
+/// `on_output`, like `terminal_open` (spec §5.4). Refuses unless the hooks
+/// still hash to `hash` and that hash is trusted for the repo.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn worktree_run_hook(
+    cwd: String,
+    path: String,
+    hook: String,
+    hash: String,
+    cols: u16,
+    rows: u16,
+    on_output: tauri::ipc::Channel<super::terminal::TerminalEvent>,
+) -> Result<u64, String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree =
+        crate::git::safe_repo_path(path.trim(), ".").map_err(|e| format!("invalid path: {e}"))?;
+    if hook != "setup" {
+        return Err(format!("Unknown worktree hook: {hook}"));
+    }
+    let spec = crate::worktree::hooks::setup_spec(
+        &root,
+        &worktree,
+        &hash,
+        &super::worktree_trust::store_path(),
+        None,
+        cols,
+        rows,
+    )?;
+    let (on_chunk, on_exit) =
+        super::terminal::event_sinks(move |event| on_output.send(event).is_ok());
+    super::terminal::spawn_session(spec, on_chunk, on_exit)
+}
+
+/// How long `url` may run (spec §10.1).
+const URL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Runs the repository's `url` hook for `path` and returns the first
+/// non-empty line of its output; `None` when the repo defines no `url`.
+#[tauri::command]
+pub(crate) async fn worktree_url(
+    cwd: String,
+    path: String,
+    hash: String,
+) -> Result<Option<String>, String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree =
+        crate::git::safe_repo_path(path.trim(), ".").map_err(|e| format!("invalid path: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::worktree::hooks::url_for(
+            &root,
+            &worktree,
+            &hash,
+            &super::worktree_trust::store_path(),
+            None,
+            URL_TIMEOUT,
+        )
+    })
+    .await
+    .map_err(|e| format!("worktree url failed: {e}"))?
+}

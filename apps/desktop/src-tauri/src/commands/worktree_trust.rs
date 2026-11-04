@@ -73,7 +73,7 @@ pub(crate) fn save_store(path: &Path, store: &HashMap<String, String>) -> Result
     std::fs::rename(&tmp, path).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
-fn store_path() -> PathBuf {
+pub(crate) fn store_path() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("gitwand")
@@ -153,21 +153,14 @@ fn trust_set_at(cwd: &str, hash: &str, store: &Path) -> Result<(), String> {
     save_store(store, &map)
 }
 
-/// The gate every hook executor must pass (v3.13 PR 3: setup, teardown,
-/// `worktree_url`). Re-reads the main worktree's hooks at the moment of the
-/// operation and returns them only if they still hash to `expected_hash` and
-/// that hash is the one trusted for this repo. The caller runs exactly the
-/// returned hooks, so a `.gitwandrc` rewritten after the question was answered
-/// never runs unasked.
-#[allow(dead_code)] // first callers land with the hook runner (v3.13 PR 3)
-pub(crate) fn assert_hooks_trusted(
-    cwd: &str,
-    expected_hash: &str,
-) -> Result<WorktreeHooks, String> {
-    assert_hooks_trusted_at(cwd, expected_hash, &store_path())
-}
-
-fn assert_hooks_trusted_at(
+/// The gate every hook executor must pass (`worktree::hooks`: setup, and
+/// teardown in PR 4, `worktree_url`), with the trust store at `store`
+/// (`store_path()` in the app). Re-reads the main worktree's hooks at the
+/// moment of the operation and returns them only if they still hash to
+/// `expected_hash` and that hash is the one trusted for this repo. The
+/// caller runs exactly the returned hooks, so a `.gitwandrc` rewritten after
+/// the question was answered never runs unasked.
+pub(crate) fn assert_hooks_trusted_at(
     cwd: &str,
     expected_hash: &str,
     store: &Path,
