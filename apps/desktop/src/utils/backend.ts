@@ -3553,6 +3553,38 @@ export async function worktreeHooksTrustSet(cwd: string, hash: string): Promise<
   }
 }
 
+/** A process still running in a worktree (`worktreeStopProcesses`). */
+export interface ProcessInfo {
+  pid: number;
+  ppid: number;
+  name: string;
+}
+
+/**
+ * v3.13 — stop what runs in a linked worktree of `cwd`'s repository: GitWand's
+ * terminal sessions there, then (after 500 ms) the processes it started whose
+ * working directory is still inside. Processes GitWand did not start are only
+ * listed, unless `killForeign` ("Stop all"). Returns what still runs there.
+ * Refuses the main worktree and any path that is not a linked worktree.
+ */
+export async function worktreeStopProcesses(
+  cwd: string,
+  path: string,
+  killForeign: boolean,
+): Promise<ProcessInfo[]> {
+  if (isTauri()) {
+    return tauriInvoke<ProcessInfo[]>("worktree_stop_processes", { cwd, path, killForeign });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/worktree-stop-processes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, path, killForeign }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Failed to stop worktree processes: ${res.status}`);
+  return data as ProcessInfo[];
+}
+
 /** Prune stale worktree administrative files. */
 export async function gitWorktreePrune(cwd: string): Promise<void> {
   if (isTauri()) {

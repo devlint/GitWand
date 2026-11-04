@@ -3,8 +3,6 @@
 //! `ps` / `lsof` (macOS) or reads `/proc` (Linux), never through a shell.
 //! Windows has no working-directory sweep: every function returns nothing.
 
-#![allow(dead_code)] // consumed by worktree stopping (Tasks 3 and 4)
-
 use std::collections::HashSet;
 use std::path::Path;
 

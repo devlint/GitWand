@@ -830,6 +830,7 @@ pub fn run() {
             commands::ops::reveal_in_file_manager,
             commands::ops::set_git_config,
             commands::ops::read_gitwandrc,
+            commands::worktree_processes::worktree_stop_processes,
             commands::worktree_trust::worktree_hooks_trust,
             commands::worktree_trust::worktree_hooks_trust_set,
             commands::read::preview_merge,

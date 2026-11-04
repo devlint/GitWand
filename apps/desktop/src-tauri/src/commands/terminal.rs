@@ -27,7 +27,6 @@ struct PtyHandle {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     /// The session's working directory, canonical: what a worktree's
     /// processes are matched by.
-    #[allow(dead_code)] // TASK4: used by worktree_stop_processes
     cwd: PathBuf,
     /// The leader's pid, which is also its session id on Unix.
     leader: Option<u32>,
@@ -475,7 +474,6 @@ pub(crate) async fn terminal_close(id: u64) -> Result<(), String> {
 
 /// The open sessions whose working directory is `root` or inside it
 /// (component-wise).
-#[allow(dead_code)] // TASK4: used by worktree_stop_processes
 pub(crate) fn sessions_under(root: &std::path::Path) -> Vec<u64> {
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut ids: Vec<u64> = lock_sessions()
@@ -489,7 +487,6 @@ pub(crate) fn sessions_under(root: &std::path::Path) -> Vec<u64> {
 
 /// Closes these sessions like `terminal_close`, and returns their leaders'
 /// pids (their session ids on Unix).
-#[allow(dead_code)] // TASK4: used by worktree_stop_processes
 pub(crate) fn close_session_ids(ids: &[u64]) -> std::collections::HashSet<u32> {
     let handles: Vec<PtyHandle> = {
         let mut map = lock_sessions();
