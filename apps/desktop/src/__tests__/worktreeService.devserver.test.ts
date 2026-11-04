@@ -70,6 +70,15 @@ describe("dev-server worktree service", () => {
     expect(again.branch).toBe("task/fix-login-2");
   });
 
+  it("keeps {name} unique on a collision at the length cap", () => {
+    const { path } = repo();
+    const a = devCreateWorktree(path, { name: "a".repeat(80), kind: "manual" });
+    const b = devCreateWorktree(path, { name: "a".repeat(80), kind: "manual" });
+    expect(b.name).not.toBe(a.name);
+    expect(b.name.length).toBeLessThanOrEqual(63);
+    expect(b.branch).toBe(`task/${b.name}`);
+  });
+
   it("quotes hostile placeholder values through a real shell", () => {
     const hostile = "/tmp/a b/it's $(x);y \"q\"";
     const cmd = devExpandHook("printf %s {path}", { name: "n", path: hostile, branch: "", base: "", repoRoot: "" });

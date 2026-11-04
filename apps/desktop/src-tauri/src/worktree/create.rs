@@ -161,7 +161,11 @@ pub(crate) fn create_worktree(
     let mut n = 1;
     while (default_path && path.exists()) || (default_branch && branch_exists(&main, &branch)) {
         n += 1;
-        let name = format!("{slug}-{n}");
+        // Room for the suffix within the 63-char cap, so `{name}` (the
+        // directory's slug) stays unique: it keys the hooks' external state.
+        let suffix = format!("-{n}");
+        let stem: String = slug.chars().take(63 - suffix.len()).collect();
+        let name = format!("{}{suffix}", stem.trim_end_matches('-'));
         if default_path {
             path = dir.join(&name);
         }
@@ -303,6 +307,23 @@ mod tests {
         assert!(c.path.ends_with("fix-login-2"));
         assert_eq!(c.branch, "task/fix-login-2");
         assert_eq!(c.name, "fix-login-2");
+    }
+
+    /// `{name}` keys external state (Dendreo's databases, containers): two
+    /// worktrees must never share it, even when the slug is at its 63-char cap.
+    #[test]
+    fn collision_suffix_keeps_name_unique_at_the_length_cap() {
+        let repo = TempRepo::new();
+        let long = "a".repeat(80);
+        let a = create_worktree(&repo.path, req(&long, Kind::Manual), T).unwrap();
+        let b = create_worktree(&repo.path, req(&long, Kind::Manual), T).unwrap();
+        assert_ne!(a.name, b.name);
+        assert!(b.name.len() <= 63, "{}", b.name);
+        assert_eq!(
+            Path::new(&b.path).file_name().unwrap().to_string_lossy(),
+            b.name
+        );
+        assert_eq!(b.branch, format!("task/{}", b.name));
     }
 
     #[test]

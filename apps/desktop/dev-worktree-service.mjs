@@ -319,7 +319,9 @@ export function devCreateWorktree(cwd, req, { fetchTimeoutMs = FETCH_TIMEOUT_MS 
   const dir = devWorktreesDir(main, settings);
   let path = defaultPath ? join(dir, slug) : usablePath(req.path);
   for (let n = 2; (defaultPath && existsSync(path)) || (defaultBranch && branchExists(main, branch)); n++) {
-    const name = `${slug}-${n}`;
+    // Room for the suffix within the 63-char cap: `{name}` must stay unique.
+    const suffix = `-${n}`;
+    const name = `${slug.slice(0, 63 - suffix.length).replace(/-+$/, "")}${suffix}`;
     if (defaultPath) path = join(dir, name);
     if (defaultBranch) branch = `task/${name}`;
   }
