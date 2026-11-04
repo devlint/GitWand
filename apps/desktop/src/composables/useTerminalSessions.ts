@@ -5,6 +5,7 @@ import {
   terminalResize,
   terminalClose,
 } from "../utils/backend";
+import { isUnderPath } from "../utils/paths";
 
 export type TerminalShortcut = "new" | "close" | { switch: number } | null;
 
@@ -29,6 +30,8 @@ export interface TerminalTab {
   alive: boolean;
   type: TerminalTabType;
   hasUnread: boolean;
+  /** The directory the session was opened in: what `disposeCwd` matches. */
+  cwd: string;
 }
 
 // État module (pattern store-composable, pas de Pinia).
@@ -98,6 +101,7 @@ export function useTerminalSessions() {
       alive: true,
       type: tabType,
       hasUnread: false,
+      cwd,
     };
     const list = listFor(repoPath);
     list.push(tab);
@@ -220,6 +224,32 @@ export function useTerminalSessions() {
     ]);
   }
 
+  /**
+   * Close every tab opened in `root` or under it (a worktree's path), in any
+   * repo, waiting for tabs still opening — like `disposeRepo`, but by the
+   * tabs' own directory rather than the repo they are listed under.
+   */
+  async function disposeCwd(root: string): Promise<void> {
+    const closing: Promise<unknown>[] = [];
+    for (const [repoPath, list] of tabsByRepo) {
+      // Removed in place: a tab still spawning checks this very array once
+      // its PTY is up, and closes it when gone (openTab's Fix 3).
+      const gone = list.filter((tab) => isUnderPath(tab.cwd, root));
+      if (gone.length === 0) continue;
+      for (const tab of gone) list.splice(list.indexOf(tab), 1);
+      const active = activeByRepo.get(repoPath);
+      if (gone.some((tab) => tab.id === active)) {
+        activeByRepo.set(repoPath, list.length ? list[list.length - 1].id : null);
+      }
+      for (const tab of gone) {
+        if (tab.sessionId >= 0) closing.push(terminalClose(tab.sessionId));
+        const pending = opening.get(tab.id);
+        if (pending) closing.push(pending.catch(() => {}));
+      }
+    }
+    await Promise.all(closing);
+  }
+
   function notifyOutput(repoPath: string): void {
     const now = Date.now();
     const pendingSince = firstPendingAt.get(repoPath);
@@ -273,6 +303,7 @@ export function useTerminalSessions() {
     renameTab,
     setTitleFromShell,
     disposeRepo,
+    disposeCwd,
     notifyOutput,
     setMutationHandler,
     write,

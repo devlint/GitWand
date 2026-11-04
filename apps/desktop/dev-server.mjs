@@ -17,6 +17,7 @@ import { Socket } from "node:net";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet } from "./dev-worktree-trust.mjs";
+import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
 // output, resize, and control sequences without any manual workarounds.
@@ -958,7 +959,7 @@ function resolveDefaultBranchName(resolvedCwd, configured) {
 let _mockGithubPolls = 0;
 
 // ── Terminal PTY state (dev:web only) ────────────────────────────────────────
-const devPtys = new Map(); // id -> { proc }
+const devPtys = new Map(); // id -> { proc, cwd (real path) }
 let devPtyNextId = 1;
 
 // ── Live Repo watcher state (dev:web only, v3.10.0) ──────────────────────────
@@ -7114,6 +7115,18 @@ async function handleRequest(req, res) {
       }
     }
 
+    // POST /api/worktree-stop-processes  { cwd, path, killForeign } — best-effort
+    // mirror of worktree_stop_processes (see dev-worktree-processes.mjs)
+    if (url.pathname === "/api/worktree-stop-processes" && req.method === "POST") {
+      try {
+        const { cwd, path, killForeign } = await readBody(req);
+        const left = await devStopProcessesIn(resolve(cwd), resolve(String(path ?? "")), killForeign === true, devPtys);
+        return jsonResponse(req, res, left);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // POST /api/read-gitwandrc  { cwd }
     // Searches: .gitwandrc → .gitwandrc.json → package.json#gitwand
     if (url.pathname === "/api/read-gitwandrc" && req.method === "POST") {
@@ -8889,11 +8902,13 @@ async function handleRequest(req, res) {
       proc.onData((chunk) => {
         if (!res.writableEnded) res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
       });
-      proc.onExit(() => {
-        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ eof: true })}\n\n`);
+      proc.onExit(({ exitCode }) => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ eof: true, code: exitCode ?? null })}\n\n`);
         devPtys.delete(id);
       });
-      devPtys.set(id, { proc });
+      let ptyCwd = null;
+      try { ptyCwd = realpathSync.native(cwd); } catch (_) {}
+      devPtys.set(id, { proc, cwd: ptyCwd });
       req.on("close", () => { try { proc.kill(); } catch (_) {} devPtys.delete(id); });
       return;
     }

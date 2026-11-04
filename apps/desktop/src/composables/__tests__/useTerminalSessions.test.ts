@@ -39,6 +39,19 @@ describe("useTerminalSessions", () => {
     expect(s.tabsFor("/repo/a")).toHaveLength(0);
   });
 
+  it("disposeCwd ferme les onglets ouverts dans un worktree, et seulement eux", async () => {
+    const s = useTerminalSessions();
+    vi.mocked(terminalOpen).mockResolvedValueOnce(1).mockResolvedValueOnce(2).mockResolvedValueOnce(3);
+    await s.openTab("/repo/a", "/repo/a", () => {});
+    const inWt = await s.openTab("/repo/a", "/wt/task/sub", () => {});
+    await s.openTab("/repo/a", "/wt/task2", () => {});
+    await s.disposeCwd("/wt/task");
+    expect(terminalClose).toHaveBeenCalledTimes(1);
+    expect(terminalClose).toHaveBeenCalledWith(2);
+    expect(s.tabsFor("/repo/a").map((t) => t.cwd)).toEqual(["/repo/a", "/wt/task2"]);
+    expect(s.activeTabId("/repo/a")).not.toBe(inWt.id);
+  });
+
   it("setTitleFromShell n'écrase pas un titre manuel", async () => {
     const s = useTerminalSessions();
     const tab = await s.openTab("/repo/a", "/repo/a", () => {});

@@ -25,4 +25,5 @@ pub(crate) mod terminal;
 pub(crate) mod tracked_ignored;
 pub(crate) mod watcher;
 pub(crate) mod workspace;
+pub(crate) mod worktree_processes;
 pub(crate) mod worktree_trust;
