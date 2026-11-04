@@ -406,6 +406,39 @@ mod tests {
         assert!(record::find(&common, Path::new(&c.path)).is_none());
     }
 
+    /// The fresh base is often ahead of local `main`: merge-back refuses (it
+    /// would squash origin's commits too), and must say to update `main`,
+    /// never to check out the remote-tracking ref (a detached HEAD).
+    #[test]
+    fn merge_back_refusal_says_to_update_main_when_the_base_is_remote() {
+        use crate::worktree::test_support::git_at;
+        let repo = TempRepo::new();
+        let bare = repo.add_bare_origin();
+        let other = repo.sandbox.join("other");
+        git_at(
+            &repo.sandbox,
+            &["clone", "-q", bare.to_str().unwrap(), "other"],
+        );
+        git_at(&other, &["config", "user.email", "t@e.x"]);
+        git_at(&other, &["config", "user.name", "T"]);
+        std::fs::write(other.join("n.txt"), "n").unwrap();
+        git_at(&other, &["add", "-A"]);
+        git_at(&other, &["commit", "-q", "-m", "remote"]);
+        git_at(&other, &["push", "-q", "origin", "main"]);
+
+        let c = create_worktree(&repo.path, req("t", Kind::Task), T).unwrap();
+        assert_eq!(c.base.base_ref, "origin/main");
+        std::fs::write(Path::new(&c.path).join("w.txt"), "w").unwrap();
+        let err = crate::commands::scratch::scratch_worktree_merge_back_impl(
+            repo.path.to_string_lossy().to_string(),
+            c.path.clone(),
+            Some(false),
+        )
+        .unwrap_err();
+        assert!(!err.contains("Check out origin/main"), "{err}");
+        assert!(err.contains("Update main to origin/main"), "{err}");
+    }
+
     #[test]
     fn a_manual_worktree_is_not_a_scratch() {
         let repo = TempRepo::new();

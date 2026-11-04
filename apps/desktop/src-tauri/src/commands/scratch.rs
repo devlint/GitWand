@@ -384,7 +384,7 @@ fn operation_in_progress(dir: &Path) -> Result<Option<&'static str>, String> {
     Ok(None)
 }
 
-fn scratch_worktree_merge_back_impl(
+pub(crate) fn scratch_worktree_merge_back_impl(
     cwd: String,
     scratch_path: String,
     snapshots_enabled: Option<bool>,
@@ -463,6 +463,27 @@ fn scratch_worktree_merge_back_impl(
         let contains_base =
             git_in(&repo_root, &["merge-base", "--is-ancestor", &base, "HEAD"]).is_ok();
         if !contains_base && head != source {
+            // v3.13 tasks start from a remote-tracking ref (`origin/main`):
+            // checking it out would detach HEAD, so say to update the branch.
+            let remote_base = git_in(
+                &repo_root,
+                &[
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    &format!("refs/remotes/{source}"),
+                ],
+            )
+            .is_ok();
+            if remote_base {
+                return Err(format!(
+                    "{b} was created from {s} ({base:.7}), which {h} does not contain yet: merging back would also bring {s}'s commits. Nothing was changed. Update {h} to {s} (pull, or fast-forward), then merge back",
+                    b = scratch_branch,
+                    s = source,
+                    base = base,
+                    h = head
+                ));
+            }
             return Err(format!(
                 "{b} was created from {s} ({base:.7}), which {h} does not contain: merging back would also bring {s}'s commits. Nothing was changed. Check out {s}, then merge back",
                 b = scratch_branch,
