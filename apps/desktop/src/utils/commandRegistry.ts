@@ -259,7 +259,11 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   workspace_write: { route: "/api/workspace-write" },
   worktree_hooks_trust: { route: "/api/worktree-hooks-trust" },
   worktree_hooks_trust_set: { route: "/api/worktree-hooks-trust-set" },
+  worktree_create: { route: "/api/worktree-create" },
+  worktree_resolve_base: { route: "/api/worktree-resolve-base" },
+  worktree_run_hook: { route: "/api/worktree-run-hook" },
   worktree_stop_processes: { route: "/api/worktree-stop-processes" },
+  worktree_url: { route: "/api/worktree-url" },
   write_file: { route: "/api/write-file" },
   write_gitwandrc: { route: "/api/write-gitwandrc" },
 

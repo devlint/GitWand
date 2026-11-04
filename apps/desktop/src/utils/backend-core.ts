@@ -125,18 +125,35 @@ export async function devTerminalOpen(
   });
   if (opts.shell) params.set("shell", opts.shell);
   if (opts.agent) params.set("agent", opts.agent);
+  return devPtyStream("/api/terminal-open", params, opts.onExit, onOutput);
+}
+
+/**
+ * The dev-server's PTY stream protocol, shared by `/api/terminal-open` and
+ * `/api/worktree-run-hook`: `{id}` first, then `{chunk}`s, then `{eof, code}`.
+ * An `{error}` before the id rejects (e.g. the hook's trust gate refused).
+ */
+export function devPtyStream(
+  route: string,
+  params: URLSearchParams,
+  onExit: ((code: number | null) => void) | undefined,
+  onOutput: (chunk: string) => void,
+): Promise<number> {
   return new Promise((resolve, reject) => {
-    const es = new EventSource(`${DEV_SERVER}/api/terminal-open?${params}`);
+    const es = new EventSource(`${DEV_SERVER}${route}?${params}`);
     let resolved = false;
     es.onmessage = (ev) => {
       const payload = JSON.parse(ev.data);
-      if (!resolved && typeof payload?.id === "number") {
+      if (!resolved && typeof payload?.error === "string") {
+        es.close();
+        reject(new Error(payload.error));
+      } else if (!resolved && typeof payload?.id === "number") {
         resolved = true;
         resolve(payload.id);
       } else if (typeof payload?.chunk === "string") {
         onOutput(payload.chunk);
       } else if (payload?.eof) {
-        opts.onExit?.(typeof payload.code === "number" ? payload.code : null);
+        onExit?.(typeof payload.code === "number" ? payload.code : null);
         // Fix 5 — Explicitly close the EventSource when the shell exits so that
         // the browser's built-in auto-reconnect logic does not fire and spawn an
         // untracked shell process by hitting /api/terminal-open again.
@@ -158,7 +175,7 @@ export async function devTerminalOpen(
         // not yet started, etc.). Reject the Promise so the caller surfaces the
         // error instead of hanging forever with a ghost tab at sessionId=-1.
         es.close();
-        reject(new Error("dev server unreachable: terminal-open SSE connection failed"));
+        reject(new Error(`dev server unreachable: ${route} SSE connection failed`));
       }
     };
   });
