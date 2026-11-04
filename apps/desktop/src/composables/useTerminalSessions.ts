@@ -20,7 +20,28 @@ export function resolveTerminalShortcut(e: KeyboardEvent, focused: boolean): Ter
   return null;
 }
 
-export type TerminalTabType = "shell" | "claude" | "codex" | "opencode" | "antigravity";
+export type TerminalTabType = "shell" | "claude" | "codex" | "opencode" | "antigravity" | "setup";
+
+/**
+ * Opens a backend session for a tab in place of `terminalOpen` (a worktree
+ * hook's `worktreeRunHook`, for instance). Returns the session id.
+ */
+export type TabSpawner = (
+  onChunk: (chunk: string) => void,
+  onExit: (code: number | null) => void,
+) => Promise<number>;
+
+export interface OpenTabOptions {
+  shell?: string;
+  type?: TerminalTabType;
+  /** Tab title; defaults from the type. */
+  title?: string;
+  /** Input is never sent to the session (setup / teardown tabs). */
+  readOnly?: boolean;
+  spawn?: TabSpawner;
+  /** Called once, when the session ends; the tab is then marked dead. */
+  onExit?: (code: number | null) => void;
+}
 
 export interface TerminalTab {
   id: number; // id local (mémoire)
@@ -32,6 +53,8 @@ export interface TerminalTab {
   hasUnread: boolean;
   /** The directory the session was opened in: what `disposeCwd` matches. */
   cwd: string;
+  /** Typing is not forwarded to the session. */
+  readOnly: boolean;
 }
 
 // État module (pattern store-composable, pas de Pinia).
@@ -90,18 +113,19 @@ export function useTerminalSessions() {
     repoPath: string,
     cwd: string,
     onChunk: (tabId: number, chunk: string) => void,
-    opts?: { shell?: string; type?: TerminalTabType },
+    opts?: OpenTabOptions,
   ): Promise<TerminalTab> {
     const tabType = opts?.type ?? "shell";
     const tab: TerminalTab = {
       id: nextLocalId++,
       sessionId: -1,
-      title: tabType === "claude" ? "Claude Code" : tabType === "codex" ? "Codex" : tabType === "opencode" ? "OpenCode" : tabType === "antigravity" ? "Antigravity" : "shell",
+      title: opts?.title ?? (tabType === "claude" ? "Claude Code" : tabType === "codex" ? "Codex" : tabType === "opencode" ? "OpenCode" : tabType === "antigravity" ? "Antigravity" : tabType === "setup" ? "setup" : "shell"),
       titleManual: false,
       alive: true,
       type: tabType,
       hasUnread: false,
       cwd,
+      readOnly: opts?.readOnly ?? false,
     };
     const list = listFor(repoPath);
     list.push(tab);
@@ -125,27 +149,35 @@ export function useTerminalSessions() {
     repoPath: string,
     cwd: string,
     onChunk: (tabId: number, chunk: string) => void,
-    opts?: { shell?: string; type?: TerminalTabType },
+    opts?: OpenTabOptions,
   ): Promise<void> {
     const tabType = tab.type;
+    const onOutput = (chunk: string) => {
+      if (activeByRepo.get(repoPath) !== tab.id) {
+        tab.hasUnread = true;
+      }
+      onChunk(tab.id, chunk);
+    };
+    const onExit = (code: number | null) => {
+      tab.alive = false;
+      opts?.onExit?.(code);
+    };
     try {
-      const sessionId = await terminalOpen(
-        cwd,
-        {
-          cols: 80,
-          rows: 24,
-          shell: opts?.shell || undefined,
-          // Agent tabs ("claude"/"codex") launch as a first-class agent CLI,
-          // never smuggled through the `shell` parameter.
-          agent: tabType !== "shell" ? tabType : undefined,
-        },
-        (chunk) => {
-          if (activeByRepo.get(repoPath) !== tab.id) {
-            tab.hasUnread = true;
-          }
-          onChunk(tab.id, chunk);
-        },
-      );
+      const sessionId = opts?.spawn
+        ? await opts.spawn(onOutput, onExit)
+        : await terminalOpen(
+            cwd,
+            {
+              cols: 80,
+              rows: 24,
+              shell: opts?.shell || undefined,
+              // Agent tabs ("claude"/"codex") launch as a first-class agent CLI,
+              // never smuggled through the `shell` parameter.
+              agent: tabType !== "shell" ? tabType : undefined,
+              onExit,
+            },
+            onOutput,
+          );
 
       // Fix 3 — Check if the tab was closed while we were awaiting the PTY spawn.
       // If closeTab() fired during the await window, it skipped terminalClose()

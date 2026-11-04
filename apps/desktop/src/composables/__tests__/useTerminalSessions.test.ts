@@ -52,6 +52,30 @@ describe("useTerminalSessions", () => {
     expect(s.activeTabId("/repo/a")).not.toBe(inWt.id);
   });
 
+  it("openTab with spawn runs it instead of terminalOpen, read-only, and marks the tab dead on exit", async () => {
+    const s = useTerminalSessions();
+    let exit: ((code: number | null) => void) | null = null;
+    const codes: (number | null)[] = [];
+    const tab = await s.openTab("/repo/a", "/wt/x", () => {}, {
+      type: "setup",
+      title: "Setup · x",
+      readOnly: true,
+      onExit: (c) => codes.push(c),
+      spawn: async (_onChunk, onExit) => {
+        exit = onExit;
+        return 7;
+      },
+    });
+    expect(terminalOpen).not.toHaveBeenCalled();
+    expect(tab.sessionId).toBe(7);
+    expect(tab.title).toBe("Setup · x");
+    expect(tab.readOnly).toBe(true);
+    expect(tab.alive).toBe(true);
+    exit!(2);
+    expect(tab.alive).toBe(false);
+    expect(codes).toEqual([2]);
+  });
+
   it("setTitleFromShell n'écrase pas un titre manuel", async () => {
     const s = useTerminalSessions();
     const tab = await s.openTab("/repo/a", "/repo/a", () => {});
