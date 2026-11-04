@@ -55,25 +55,36 @@ fn self_and_ancestors(me: u32, procs: &[ProcInfo]) -> HashSet<u32> {
     chain
 }
 
-/// The swept pids to stop: owned ones (in a session GitWand spawned, or a
-/// descendant of `own`), plus every other one when `kill_foreign` — never
-/// pid ≤ 1, GitWand or its ancestors.
+/// The swept pids to stop: owned ones, plus every other one when
+/// `kill_foreign` — never pid ≤ 1, GitWand or its ancestors. Owned means:
+/// - in the session of, or descending from, `own` (GitWand and the leaders
+///   it just closed), or
+/// - in the session of a `recorded` sid (a session GitWand spawned there
+///   that has ended). A recorded sid is only matched as a session, never
+///   walked as an ancestor, and is dropped once a live process holds that
+///   pid: its leader is dead, so the pid was reused by someone else.
 fn select_targets(
     candidates: &[u32],
     me: u32,
     own: &HashSet<u32>,
+    recorded: &HashSet<u32>,
     procs: &[ProcInfo],
     kill_foreign: bool,
     session_of: impl Fn(u32) -> Option<u32>,
 ) -> Vec<u32> {
     let spared = self_and_ancestors(me, procs);
+    let ended: HashSet<u32> = recorded
+        .iter()
+        .copied()
+        .filter(|sid| !procs.iter().any(|p| p.pid == *sid))
+        .collect();
     candidates
         .iter()
         .copied()
         .filter(|&pid| pid > 1 && !spared.contains(&pid))
         .filter(|&pid| {
             kill_foreign
-                || session_of(pid).is_some_and(|sid| own.contains(&sid))
+                || session_of(pid).is_some_and(|sid| own.contains(&sid) || ended.contains(&sid))
                 || process_tree::is_descendant(pid, own, procs)
         })
         .collect()
@@ -98,7 +109,7 @@ fn stop_processes_in(
     let worktree = linked_worktree(repo, worktree)?;
 
     let mut own = close_session_ids(&sessions_under(&worktree));
-    own.extend(recorded_sessions_under(&worktree));
+    let recorded = recorded_sessions_under(&worktree);
     let me = std::process::id();
     own.insert(me);
     std::thread::sleep(SWEEP_DELAY);
@@ -109,6 +120,7 @@ fn stop_processes_in(
         &swept,
         me,
         &own,
+        &recorded,
         &procs,
         kill_foreign,
         process_tree::session_of,
@@ -289,14 +301,42 @@ mod tests {
         let own = HashSet::from([70]);
         let none = |_| None;
         assert_eq!(
-            select_targets(&candidates, 70, &own, &procs, true, none),
+            select_targets(&candidates, 70, &own, &HashSet::new(), &procs, true, none),
             vec![80, 90]
         );
         assert_eq!(
-            select_targets(&candidates, 70, &own, &procs, false, none),
+            select_targets(&candidates, 70, &own, &HashSet::new(), &procs, false, none),
             vec![80]
         );
         assert_eq!(listed(&candidates, 70, &procs), vec![80, 90]);
+    }
+
+    /// A recorded sid only ever identifies a session, never an ancestor; and
+    /// once a live process holds that pid, the record is stale (pid reused).
+    #[test]
+    fn recorded_sid_is_a_session_never_an_ancestor() {
+        let p = |pid, ppid| ProcInfo {
+            pid,
+            ppid,
+            name: "x".into(),
+        };
+        // 41 was a GitWand session leader, long ended; 30 is a job it left
+        // (session 41). 41 is now reused by the user's editor, which runs 42.
+        let procs = [p(1, 0), p(30, 1), p(41, 1), p(42, 41), p(70, 1)];
+        let own = HashSet::from([70]);
+        let recorded = HashSet::from([41]);
+        let sid = |pid| Some(if pid == 30 { 41 } else { pid });
+        assert_eq!(
+            select_targets(&[30, 41, 42], 70, &own, &recorded, &procs, false, sid),
+            Vec::<u32>::new(),
+            "41 is alive again: the record is stale, nothing is GitWand's"
+        );
+        let procs = [p(1, 0), p(30, 1), p(42, 1), p(70, 1)];
+        assert_eq!(
+            select_targets(&[30, 42], 70, &own, &recorded, &procs, false, sid),
+            vec![30],
+            "with 41 gone, its session's job is GitWand's"
+        );
     }
 
     #[test]
