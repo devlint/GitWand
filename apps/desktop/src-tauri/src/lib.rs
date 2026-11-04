@@ -1,5 +1,6 @@
 pub(crate) mod commands;
 pub mod git;
+pub(crate) mod process_tree;
 pub(crate) mod shell_env;
 pub(crate) mod types;
 
