@@ -83,7 +83,65 @@ fn quote(s: &str, style: QuoteStyle) -> String {
 /// `{name}` as is (its charset needs no quoting), `{path}`, `{branch}` and
 /// `{base}` quoted; anything else in braces is left alone.
 pub(crate) fn expand(command: &str, v: &HookVars) -> String {
-    expand_with(command, v, QuoteStyle::current())
+    let style = QuoteStyle::current();
+    if style == QuoteStyle::Cmd {
+        // cmd expands `%GITWAND_HOOK_COMMAND%` once and never rescans the
+        // result, so the `%VAR%`s written in the hook are expanded here,
+        // from the hook's environment: the five GITWAND_* values, then what
+        // the child inherits (never a stripped secret). Placeholder values
+        // are inserted afterwards and stay literal.
+        let hook_env = env(v);
+        let lookup = |name: &str| {
+            let upper = name.to_ascii_uppercase();
+            if let Some(value) = hook_env.get(&upper) {
+                return Some(value.clone());
+            }
+            if crate::types::CLAUDE_AUTH_OVERRIDE_ENV
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case(name))
+            {
+                return None;
+            }
+            std::env::var(name).ok()
+        };
+        return expand_with(&expand_percent_vars(command, &lookup), v, style);
+    }
+    expand_with(command, v, style)
+}
+
+/// `%NAME%` → its value when `lookup` knows it; anything else stays as
+/// written (cmd's rule on a command line). No `%VAR:~…%` substring forms.
+pub(crate) fn expand_percent_vars(
+    command: &str,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> String {
+    let mut out = String::with_capacity(command.len());
+    let mut rest = command;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('%') {
+            Some(end) => {
+                let name = &after[..end];
+                match (!name.is_empty()).then(|| lookup(name)).flatten() {
+                    Some(value) => {
+                        out.push_str(&value);
+                        rest = &after[end + 1..];
+                    }
+                    None => {
+                        out.push('%');
+                        rest = after;
+                    }
+                }
+            }
+            None => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 pub(crate) fn expand_with(command: &str, v: &HookVars, style: QuoteStyle) -> String {
@@ -335,6 +393,25 @@ mod tests {
         assert_eq!(
             expand_with("up {path} {branch} {name}", &v, QuoteStyle::Cmd),
             r#"up "C:\Users\John Doe\r.worktrees\x" "feat/100%done" n"#
+        );
+    }
+
+    /// cmd expands `%GITWAND_HOOK_COMMAND%` once and never rescans it, so
+    /// the `%VAR%`s the user wrote are expanded by GitWand, from the hook's
+    /// environment; unknown names stay literal, as on a cmd command line.
+    #[test]
+    fn cmd_vars_written_in_the_hook_are_expanded() {
+        let lookup = |k: &str| match k.to_ascii_uppercase().as_str() {
+            "GITWAND_WORKTREE_PATH" => Some(r"C:\w\x".to_string()),
+            "USERPROFILE" => Some(r"C:\Users\me".to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            expand_percent_vars(
+                r"cd %GITWAND_WORKTREE_PATH% && copy %userprofile%\.npmrc . %NOPE% 100%",
+                &lookup
+            ),
+            r"cd C:\w\x && copy C:\Users\me\.npmrc . %NOPE% 100%"
         );
     }
 

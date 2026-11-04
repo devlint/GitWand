@@ -373,7 +373,18 @@ export function devShellQuote(s) {
   return process.platform === "win32" ? `"${s.replaceAll('"', '""')}"` : `'${s.replaceAll("'", "'\\''")}'`;
 }
 
+/** `%NAME%` → value when known; anything else stays as written (cmd's rule). */
+export function devExpandPercentVars(command, lookup) {
+  return command.replace(/%([^%]+)%/g, (whole, name) => lookup(name) ?? whole);
+}
+
 export function devExpandHook(command, v) {
+  if (process.platform === "win32") {
+    // cmd never rescans %GITWAND_HOOK_COMMAND%: expand the hook's own %VAR%s
+    // here (as Rust's `expand`), before the placeholder values go in.
+    const hookEnv = devHookEnv(v);
+    command = devExpandPercentVars(command, (name) => hookEnv[name.toUpperCase()] ?? process.env[name] ?? null);
+  }
   return command.replace(/\{([^{}]*)\}/g, (whole, key) => {
     if (key === "name") return v.name;
     if (key === "path") return devShellQuote(v.path);
