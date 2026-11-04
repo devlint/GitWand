@@ -138,17 +138,17 @@ fn login_flag(shell_path: &str) -> Option<&'static str> {
     }
 }
 
-/// The program and arguments that run `command` through the user's shell
-/// (spec §4): `$SHELL [-l] -c <command>` on Unix, `cmd /C <command>` on
-/// Windows. Shared by PTY sessions and the captured `url` hook.
-pub(crate) fn shell_invocation(shell: &Option<String>, command: &str) -> (String, Vec<String>) {
+/// The program, arguments and extra environment that run `command` through
+/// the user's shell (spec §4): `$SHELL [-l] -c <command>` on Unix,
+/// `cmd /D /C` on Windows. Shared by PTY sessions and the captured `url` hook.
+pub(crate) fn shell_invocation(
+    shell: &Option<String>,
+    command: &str,
+) -> (String, Vec<String>, Vec<(String, String)>) {
     #[cfg(windows)]
     {
         let _ = shell;
-        (
-            "cmd".to_string(),
-            vec!["/C".to_string(), command.to_string()],
-        )
+        cmd_invocation(command)
     }
     #[cfg(not(windows))]
     {
@@ -159,8 +159,26 @@ pub(crate) fn shell_invocation(shell: &Option<String>, command: &str) -> (String
         }
         args.push("-c".to_string());
         args.push(command.to_string());
-        (program, args)
+        (program, args, Vec::new())
     }
+}
+
+/// `cmd.exe` cannot be handed a command line as one argument: both std and
+/// portable-pty quote it MSVCRT-style (`"` → `\"`), which cmd does not
+/// understand. The command travels in an environment variable instead, and
+/// the only argument is `%GITWAND_HOOK_COMMAND%` (no space, no quote, passed
+/// as is). cmd expands it once, then parses the result as if typed.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn cmd_invocation(command: &str) -> (String, Vec<String>, Vec<(String, String)>) {
+    (
+        "cmd".to_string(),
+        vec![
+            "/D".to_string(),
+            "/C".to_string(),
+            "%GITWAND_HOOK_COMMAND%".to_string(),
+        ],
+        vec![("GITWAND_HOOK_COMMAND".to_string(), command.to_string())],
+    )
 }
 
 /// The only environment variables a caller may add to a session (spec §10.2).
@@ -285,9 +303,12 @@ pub(crate) fn spawn_session(
             cmd
         }
         SpawnKind::Command { command, shell } => {
-            let (program, args) = shell_invocation(shell, command);
+            let (program, args, env) = shell_invocation(shell, command);
             let mut cmd = CommandBuilder::new(&program);
             cmd.args(&args);
+            for (k, v) in env {
+                cmd.env(k, v);
+            }
             cmd
         }
     };

@@ -90,14 +90,37 @@ fn default_branch(root: &Path, remote: &str) -> Option<String> {
 
 /// `git fetch --quiet --no-tags <remote> <branch>`, never prompting and
 /// killed after `timeout`. Err carries git's message.
+///
+/// A transport can leave a process holding stderr after git is gone (ssh
+/// waiting on a dead host, a credential helper's window): on timeout the
+/// whole process group is killed and the reader thread is left to finish
+/// on its own, never joined (same rule as `git::output_with_timeout`).
 fn fetch(root: &Path, remote: &str, branch: &str, timeout: Duration) -> Result<(), String> {
-    let mut child = crate::git::git_cmd()
-        .args(["fetch", "--quiet", "--no-tags", remote, branch])
+    let mut cmd = crate::git::git_cmd();
+    cmd.args(["fetch", "--quiet", "--no-tags", remote, branch])
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
         .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    // ssh must not prompt either, and must give up on a dead host before the
+    // deadline; unless the user configured their own ssh command.
+    let own_ssh = std::env::var_os("GIT_SSH_COMMAND").is_some()
+        || std::env::var_os("GIT_SSH").is_some()
+        || git_ok(root, &["config", "--get", "core.sshCommand"]).is_some();
+    if !own_ssh {
+        cmd.env(
+            "GIT_SSH_COMMAND",
+            "ssh -o BatchMode=yes -o ConnectTimeout=10",
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("cannot run git fetch: {e}"))?;
     let mut stderr = child.stderr.take();
@@ -109,22 +132,33 @@ fn fetch(root: &Path, remote: &str, branch: &str, timeout: Duration) -> Result<(
         s
     });
     let deadline = Instant::now() + timeout;
-    let status = loop {
+    loop {
         match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
+            Ok(Some(status)) => {
+                let message = reader.join().unwrap_or_default().trim().to_string();
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(message)
+                };
+            }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
             _ => {
+                #[cfg(unix)]
+                if let Ok(pgid) = libc::pid_t::try_from(child.id()) {
+                    // SAFETY: signals the group this child leads (process_group(0)).
+                    unsafe {
+                        libc::kill(-pgid, libc::SIGKILL);
+                    }
+                }
                 let _ = child.kill();
                 let _ = child.wait();
-                break None;
+                return Err(format!(
+                    "git fetch timed out after {} s",
+                    timeout.as_secs_f32().ceil() as u64
+                ));
             }
         }
-    };
-    let message = reader.join().unwrap_or_default().trim().to_string();
-    match status {
-        Some(s) if s.success() => Ok(()),
-        Some(_) => Err(message),
-        None => Err(format!("git fetch timed out after {} s", timeout.as_secs())),
     }
 }
 
@@ -252,6 +286,34 @@ mod tests {
         assert_eq!(b.fallback_reason.as_deref(), Some("fetch-failed"));
         assert!(b.fallback_detail.is_some());
         assert_eq!(b.fetched_at, None);
+    }
+
+    /// A transport that leaves a grandchild holding stderr (ssh waiting on a
+    /// dead host, a credential helper window) must not hold creation past
+    /// the timeout.
+    #[cfg(unix)]
+    #[test]
+    fn fetch_timeout_is_not_held_by_a_grandchild() {
+        use std::os::unix::fs::PermissionsExt;
+        let repo = TempRepo::new();
+        repo.add_bare_origin();
+        let script = repo.sandbox.join("slow-upload-pack");
+        std::fs::write(&script, "#!/bin/sh\nsleep 30 &\nexec sleep 30\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        repo.git(&[
+            "config",
+            "remote.origin.uploadpack",
+            script.to_str().unwrap(),
+        ]);
+        let started = std::time::Instant::now();
+        let b = resolve_default_base(&repo.path, Duration::from_millis(500)).unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(b.fallback_reason.as_deref(), Some("fetch-failed"));
+        assert_eq!(b.base_ref, "origin/main");
     }
 
     #[test]

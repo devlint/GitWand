@@ -45,25 +45,48 @@ pub(crate) fn vars_for(cwd: &Path, worktree: &Path) -> Result<HookVars, String> 
         .unwrap_or_default();
     Ok(HookVars {
         name,
-        path: wt.to_string_lossy().to_string(),
+        path: display_path(&wt),
         branch,
         base,
-        repo_root: main.to_string_lossy().to_string(),
+        repo_root: display_path(&main),
     })
 }
 
-/// One literal argument for the shell that runs the hook.
-pub(crate) fn shell_quote(s: &str) -> String {
-    if cfg!(windows) {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        format!("'{}'", s.replace('\'', "'\\''"))
+/// How a placeholder value is made one literal argument.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum QuoteStyle {
+    /// `'…'`, with `'` as `'\''`.
+    Posix,
+    /// `"…"` for `cmd.exe`. The command reaches cmd through
+    /// `%GITWAND_HOOK_COMMAND%`, expanded once, so a `%` in the value is not
+    /// expanded again; inside quotes `&`, `|`, `<`, `>` and `^` are literal.
+    Cmd,
+}
+
+impl QuoteStyle {
+    fn current() -> Self {
+        if cfg!(windows) {
+            QuoteStyle::Cmd
+        } else {
+            QuoteStyle::Posix
+        }
+    }
+}
+
+fn quote(s: &str, style: QuoteStyle) -> String {
+    match style {
+        QuoteStyle::Posix => format!("'{}'", s.replace('\'', "'\\''")),
+        QuoteStyle::Cmd => format!("\"{}\"", s.replace('"', "\"\"")),
     }
 }
 
 /// `{name}` as is (its charset needs no quoting), `{path}`, `{branch}` and
 /// `{base}` quoted; anything else in braces is left alone.
 pub(crate) fn expand(command: &str, v: &HookVars) -> String {
+    expand_with(command, v, QuoteStyle::current())
+}
+
+pub(crate) fn expand_with(command: &str, v: &HookVars, style: QuoteStyle) -> String {
     let mut out = String::with_capacity(command.len());
     let mut rest = command;
     while let Some(start) = rest.find('{') {
@@ -76,15 +99,38 @@ pub(crate) fn expand(command: &str, v: &HookVars) -> String {
         let key = &after[1..end];
         match key {
             "name" => out.push_str(&v.name),
-            "path" => out.push_str(&shell_quote(&v.path)),
-            "branch" => out.push_str(&shell_quote(&v.branch)),
-            "base" => out.push_str(&shell_quote(&v.base)),
+            "path" => out.push_str(&quote(&v.path, style)),
+            "branch" => out.push_str(&quote(&v.branch, style)),
+            "base" => out.push_str(&quote(&v.base, style)),
             _ => out.push_str(&after[..=end]),
         }
         rest = &after[end + 1..];
     }
     out.push_str(rest);
     out
+}
+
+/// `\\?\C:\x` → `C:\x`, `\\?\UNC\srv\x` → `\\srv\x`: Windows' verbatim
+/// form (what `canonicalize` returns there), which `cmd.exe` refuses as a
+/// working directory and most tools mishandle. Other paths are unchanged.
+pub(crate) fn strip_verbatim(p: &str) -> String {
+    if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    match p.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        _ => p.to_string(),
+    }
+}
+
+/// A path as hooks, records and the frontend see it.
+pub(crate) fn display_path(p: &Path) -> String {
+    let s = p.to_string_lossy().to_string();
+    if cfg!(windows) {
+        strip_verbatim(&s)
+    } else {
+        s
+    }
 }
 
 pub(crate) fn env(v: &HookVars) -> HashMap<String, String> {
@@ -141,9 +187,10 @@ pub(crate) fn run_captured(
     shell: Option<String>,
     timeout: Duration,
 ) -> Result<Option<String>, String> {
-    let (program, args) = shell_invocation(&shell, command);
+    let (program, args, extra) = shell_invocation(&shell, command);
     let mut cmd = std::process::Command::new(program);
     cmd.args(&args)
+        .envs(extra)
         .current_dir(&vars.path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -274,6 +321,43 @@ mod tests {
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout), hostile);
         assert_eq!(expand("x {name} {other} {", &vars("/p")), "x n {other} {");
+    }
+
+    #[test]
+    fn cmd_quoting_keeps_values_literal() {
+        let v = HookVars {
+            name: "n".into(),
+            path: r"C:\Users\John Doe\r.worktrees\x".into(),
+            branch: "feat/100%done".into(),
+            base: "origin/main".into(),
+            repo_root: r"C:\r".into(),
+        };
+        assert_eq!(
+            expand_with("up {path} {branch} {name}", &v, QuoteStyle::Cmd),
+            r#"up "C:\Users\John Doe\r.worktrees\x" "feat/100%done" n"#
+        );
+    }
+
+    #[test]
+    fn cmd_invocation_never_puts_the_command_on_the_command_line() {
+        let (program, args, env) =
+            crate::commands::terminal::cmd_invocation(r#"bin\up "a b" & echo %X%"#);
+        assert_eq!(program, "cmd");
+        assert_eq!(args, vec!["/D", "/C", "%GITWAND_HOOK_COMMAND%"]);
+        assert_eq!(
+            env,
+            vec![(
+                "GITWAND_HOOK_COMMAND".to_string(),
+                r#"bin\up "a b" & echo %X%"#.to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped() {
+        assert_eq!(strip_verbatim(r"\\?\C:\a\b"), r"C:\a\b");
+        assert_eq!(strip_verbatim(r"\\?\UNC\srv\share\x"), r"\\srv\share\x");
+        assert_eq!(strip_verbatim("/tmp/a"), "/tmp/a");
     }
 
     /// A repo with `rc` as `.gitwandrc`, a task worktree, and a store that

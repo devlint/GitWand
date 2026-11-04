@@ -384,12 +384,18 @@ export function devHookEnv(v) {
   };
 }
 
-/** `$SHELL [-l] -c <command>` on Unix, `cmd /C <command>` on Windows. */
+/**
+ * `$SHELL [-l] -c <command>` on Unix. On Windows the command travels in
+ * `GITWAND_HOOK_COMMAND` and cmd gets `/D /C %GITWAND_HOOK_COMMAND%`, as in
+ * Rust's `cmd_invocation`: a quoted argument would reach cmd as `\"`.
+ */
 export function devShellInvocation(command, shell = process.env.SHELL || "/bin/sh") {
-  if (process.platform === "win32") return { program: "cmd", args: ["/C", command] };
+  if (process.platform === "win32") {
+    return { program: "cmd", args: ["/D", "/C", "%GITWAND_HOOK_COMMAND%"], env: { GITWAND_HOOK_COMMAND: command } };
+  }
   const name = basename(shell).replace(/\.exe$/, "").toLowerCase();
   const login = ["bash", "zsh", "sh", "dash", "ksh", "fish", "tcsh", "csh"].includes(name);
-  return { program: shell, args: [...(login ? ["-l"] : []), "-c", command] };
+  return { program: shell, args: [...(login ? ["-l"] : []), "-c", command], env: {} };
 }
 
 /** Values for a linked worktree of the repo at `cwd`, as `hooks::vars_for`. */
@@ -425,8 +431,8 @@ export function devSetupSpawn(cwd, path, hook, hash, { storePath, shell } = {}) 
   const hooks = devAssertTrusted(cwd, hash, storePath);
   if (!hooks.setup) throw new Error("This repository defines no setup hook.");
   const vars = devHookVars(cwd, path);
-  const { program, args } = devShellInvocation(devExpandHook(hooks.setup, vars), shell);
-  return { program, args, cwd: vars.path, env: devHookEnv(vars) };
+  const { program, args, env } = devShellInvocation(devExpandHook(hooks.setup, vars), shell);
+  return { program, args, cwd: vars.path, env: { ...devHookEnv(vars), ...env } };
 }
 
 /** Mirror of `hooks::url_for`: first non-empty line, or null without `url`. */
@@ -434,11 +440,11 @@ export function devWorktreeUrl(cwd, path, hash, { storePath, shell, timeoutMs = 
   const hooks = devAssertTrusted(cwd, hash, storePath);
   if (!hooks.url) return null;
   const vars = devHookVars(cwd, path);
-  const { program, args } = devShellInvocation(devExpandHook(hooks.url, vars), shell);
+  const { program, args, env } = devShellInvocation(devExpandHook(hooks.url, vars), shell);
   const r = spawnSync(program, args, {
     cwd: vars.path,
     encoding: "utf-8",
-    env: { ...baseEnv, ...devHookEnv(vars) },
+    env: { ...baseEnv, ...devHookEnv(vars), ...env },
     stdio: ["ignore", "pipe", "pipe"],
     timeout: timeoutMs,
     killSignal: "SIGKILL",

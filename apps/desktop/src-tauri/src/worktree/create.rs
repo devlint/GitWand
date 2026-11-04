@@ -193,7 +193,11 @@ pub(crate) fn create_worktree(
         )
     };
     add.map_err(|e| format!("git worktree add failed: {e}"))?;
-    let path = path.canonicalize().unwrap_or(path);
+    // Canonical, without Windows' `\\?\` prefix: what hooks, the record and
+    // the frontend see.
+    let path = PathBuf::from(super::hooks::display_path(
+        &path.canonicalize().unwrap_or(path),
+    ));
 
     let rollback = |e: String| -> String {
         let p = path.to_string_lossy().to_string();
