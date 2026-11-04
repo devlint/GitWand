@@ -7,6 +7,7 @@
 //! `commands/worktree.rs`.
 
 pub(crate) mod base;
+pub(crate) mod include;
 pub(crate) mod record;
 pub(crate) mod settings;
 pub(crate) mod slug;
