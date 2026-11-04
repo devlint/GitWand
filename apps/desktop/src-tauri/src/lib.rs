@@ -3,6 +3,8 @@ pub mod git;
 pub(crate) mod process_tree;
 pub(crate) mod shell_env;
 pub(crate) mod types;
+#[allow(dead_code)] // first callers land with worktree_create (Task 4 of the v3.13 PR 3 plan)
+pub(crate) mod worktree;
 
 pub(crate) use crate::types::*;
 // Used only by the `#[cfg(test)] mod tests` block below (parse_gh_pr_json,

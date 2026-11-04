@@ -95,7 +95,7 @@ pub struct HookTrustStatus {
 /// The main worktree's root, canonicalized, for any checkout of the repo
 /// (main or linked). Taken from the first entry of `git worktree list
 /// --porcelain`, which is always the main worktree; a bare repo has none.
-fn main_worktree_root(cwd: &str) -> Result<PathBuf, String> {
+pub(crate) fn main_worktree_root(cwd: &str) -> Result<PathBuf, String> {
     let out = crate::git::git_cmd()
         .args(["worktree", "list", "--porcelain"])
         .current_dir(cwd)
