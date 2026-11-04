@@ -106,7 +106,7 @@ fn main_worktree_root(cwd: &str) -> Result<PathBuf, String> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
     let first_block: Vec<&str> = text.split("\n\n").next().unwrap_or("").lines().collect();
-    if first_block.iter().any(|l| *l == "bare") {
+    if first_block.contains(&"bare") {
         return Err("This repository is bare: it has no main worktree.".to_string());
     }
     let path = first_block
