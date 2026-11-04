@@ -4671,8 +4671,13 @@ pub(crate) async fn detect_monorepo(cwd: String) -> Result<MonorepoInfo, String>
 
 #[tauri::command]
 pub(crate) async fn read_gitwandrc(cwd: String) -> String {
-    let cwd_path = std::path::Path::new(&cwd);
+    read_gitwandrc_text(std::path::Path::new(&cwd))
+}
 
+/// Raw text of a directory's GitWand config: `.gitwandrc`, then
+/// `.gitwandrc.json`, then the `gitwand` object of `package.json`. Empty when
+/// none exists.
+pub(crate) fn read_gitwandrc_text(cwd_path: &std::path::Path) -> String {
     // 1. .gitwandrc
     let rc_path = cwd_path.join(".gitwandrc");
     if rc_path.exists() {
