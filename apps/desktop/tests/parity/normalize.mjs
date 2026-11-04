@@ -93,6 +93,10 @@ export function normalize(command, value) {
       // ahead/behind/isRemote) est le cœur de ce qu'on valide.
       return blankVolatile(camel, ["lastCommit", "lastCommitDate"]);
 
+    case "worktree-resolve-base":
+      // `fetchedAt` is the clock at fetch time: never equal across two runs.
+      return blankVolatile(camel, ["fetchedAt"]);
+
     case "scan-secrets":
       // Les deux moteurs (Rust `regex` crate / TS `RegExp`) itèrent fichiers → lignes →
       // patterns dans le même ordre déclaré, donc l'ordre des findings devrait déjà

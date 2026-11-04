@@ -6,6 +6,7 @@
 //! Plain functions over paths; the Tauri commands live in
 //! `commands/worktree.rs`.
 
+pub(crate) mod base;
 pub(crate) mod record;
 pub(crate) mod settings;
 pub(crate) mod slug;
