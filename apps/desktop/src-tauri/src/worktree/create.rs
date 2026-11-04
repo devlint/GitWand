@@ -217,7 +217,7 @@ pub(crate) fn create_worktree(
     let source_branch = git(&main, &["symbolic-ref", "--short", "-q", "HEAD"])
         .ok()
         .filter(|b| !b.is_empty());
-    let common = record::common_dir(&main).map_err(&rollback)?;
+    let common = record::common_dir(&main).map_err(rollback)?;
     record::upsert(
         &common,
         WorktreeRecord {
@@ -230,7 +230,7 @@ pub(crate) fn create_worktree(
             source_branch,
         },
     )
-    .map_err(&rollback)?;
+    .map_err(rollback)?;
     if req.kind == Kind::Task && !checkout {
         // Read by the merge-back guard (scratch.rs) until merge-back moves
         // onto the record: it refuses while the main checkout lacks the base.
