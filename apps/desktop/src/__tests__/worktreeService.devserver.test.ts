@@ -41,7 +41,8 @@ function repo(): { sandbox: string; path: string } {
   return { sandbox, path };
 }
 
-describe("dev-server worktree service", () => {
+// Real git repos: several spawns per test, slow under a parallel monorepo run.
+describe("dev-server worktree service", { timeout: 30_000 }, () => {
   it("slugifies like the backend", () => {
     expect(devSlugify("Fix Login!")).toBe("fix-login");
     expect(devSlugify("--a--b--")).toBe("a-b");
