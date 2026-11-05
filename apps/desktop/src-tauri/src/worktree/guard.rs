@@ -274,6 +274,21 @@ mod tests {
     }
 
     #[test]
+    fn git_worktree_remove_refuses_a_locked_worktree() {
+        let repo = TempRepo::new();
+        let wt = add(&repo, "wt/a", "a");
+        repo.git(&["worktree", "lock", wt.to_str().unwrap()]);
+        let err = crate::commands::ops::git_worktree_remove_impl(
+            repo.path.to_str().unwrap(),
+            wt.to_str().unwrap(),
+            Some(true),
+        )
+        .unwrap_err();
+        assert!(err.starts_with("untouchable:"), "{err}");
+        assert!(wt.exists());
+    }
+
+    #[test]
     fn guard_refuses_the_main_worktree() {
         let repo = TempRepo::new();
         assert!(guard(&repo.path, &repo.path).is_err());

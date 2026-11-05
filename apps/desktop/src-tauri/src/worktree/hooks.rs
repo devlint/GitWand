@@ -210,10 +210,29 @@ fn gate(
     assert_hooks_trusted_at(&cwd.to_string_lossy(), hash, store)
 }
 
-/// The PTY session that runs `setup` for `worktree`, or why it may not.
-pub(crate) fn setup_spec(
+/// A hook that runs in a terminal tab (`url` runs captured, see `url_for`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Hook {
+    Setup,
+    Teardown,
+}
+
+impl Hook {
+    pub(crate) fn parse(name: &str) -> Option<Hook> {
+        match name {
+            "setup" => Some(Hook::Setup),
+            "teardown" => Some(Hook::Teardown),
+            _ => None,
+        }
+    }
+}
+
+/// The PTY session that runs `hook` for `worktree`, or why it may not.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn hook_spec(
     cwd: &Path,
     worktree: &Path,
+    hook: Hook,
     hash: &str,
     store: &Path,
     shell: Option<String>,
@@ -221,14 +240,19 @@ pub(crate) fn setup_spec(
     rows: u16,
 ) -> Result<SpawnSpec, String> {
     let hooks = gate(cwd, hash, store)?;
-    let setup = hooks
-        .setup
-        .ok_or_else(|| "This repository defines no setup hook.".to_string())?;
+    let command = match hook {
+        Hook::Setup => hooks
+            .setup
+            .ok_or_else(|| "This repository defines no setup hook.".to_string())?,
+        Hook::Teardown => hooks
+            .teardown
+            .ok_or_else(|| "This repository defines no teardown hook.".to_string())?,
+    };
     let vars = vars_for(cwd, worktree)?;
     Ok(SpawnSpec {
         cwd: PathBuf::from(&vars.path),
         kind: SpawnKind::Command {
-            command: expand(&setup, &vars),
+            command: expand(&command, &vars),
             shell,
         },
         env: env(&vars),
@@ -470,10 +494,30 @@ mod tests {
         let (repo, wt, hash, store) = trusted(r#"{"worktree":{"setup":"true"}}"#);
         let other =
             hooks_hash(&hooks_from_rc_text(r#"{"worktree":{"setup":"rm -rf /"}}"#)).unwrap();
-        assert!(setup_spec(&repo.path, &wt, &other, &store, None, 80, 24).is_err());
+        assert!(hook_spec(&repo.path, &wt, Hook::Setup, &other, &store, None, 80, 24).is_err());
         // Rewritten after trust: the trusted hash no longer matches.
         repo.write(".gitwandrc", r#"{"worktree":{"setup":"echo changed"}}"#);
-        assert!(setup_spec(&repo.path, &wt, &hash, &store, None, 80, 24).is_err());
+        assert!(hook_spec(&repo.path, &wt, Hook::Setup, &hash, &store, None, 80, 24).is_err());
+    }
+
+    #[test]
+    fn run_hook_teardown_spec_uses_the_teardown_command() {
+        let (repo, wt, hash, store) =
+            trusted(r#"{"worktree":{"setup":"echo up","teardown":"echo down {name}"}}"#);
+        let spec = hook_spec(&repo.path, &wt, Hook::Teardown, &hash, &store, None, 80, 24).unwrap();
+        match spec.kind {
+            SpawnKind::Command { command, .. } => {
+                assert!(command.starts_with("echo down "), "{command}");
+                assert!(command.contains("hook-test"), "{command}");
+            }
+            _ => panic!("not a command"),
+        }
+        // A repo without teardown refuses, setup still works.
+        let (repo, wt, hash, store) = trusted(r#"{"worktree":{"setup":"true"}}"#);
+        assert!(hook_spec(&repo.path, &wt, Hook::Teardown, &hash, &store, None, 80, 24).is_err());
+        assert!(hook_spec(&repo.path, &wt, Hook::Setup, &hash, &store, None, 80, 24).is_ok());
+        assert_eq!(Hook::parse("teardown"), Some(Hook::Teardown));
+        assert_eq!(Hook::parse("url"), None);
     }
 
     #[test]
@@ -481,9 +525,10 @@ mod tests {
         let (repo, wt, hash, store) = trusted(
             r#"{"worktree":{"setup":"pwd; echo N=$GITWAND_WORKTREE_NAME {branch}; exit 4"}}"#,
         );
-        let spec = setup_spec(
+        let spec = hook_spec(
             &repo.path,
             &wt,
+            Hook::Setup,
             &hash,
             &store,
             Some("/bin/sh".into()),

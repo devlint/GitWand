@@ -75,7 +75,7 @@ pub(crate) async fn worktree_create(
     .map_err(|e| format!("worktree creation failed: {e}"))?
 }
 
-/// Runs the repository's `setup` hook for `path` in a PTY session streamed on
+/// Runs the repository's `setup` or `teardown` hook for `path` in a PTY session streamed on
 /// `on_output`, like `terminal_open` (spec §5.4). Refuses unless the hooks
 /// still hash to `hash` and that hash is trusted for the repo.
 #[tauri::command]
@@ -92,12 +92,12 @@ pub(crate) fn worktree_run_hook(
     let root = canonical_cwd(&cwd)?;
     let worktree =
         crate::git::safe_repo_path(path.trim(), ".").map_err(|e| format!("invalid path: {e}"))?;
-    if hook != "setup" {
-        return Err(format!("Unknown worktree hook: {hook}"));
-    }
-    let spec = crate::worktree::hooks::setup_spec(
+    let hook = crate::worktree::hooks::Hook::parse(&hook)
+        .ok_or_else(|| format!("Unknown worktree hook: {hook}"))?;
+    let spec = crate::worktree::hooks::hook_spec(
         &root,
         &worktree,
+        hook,
         &hash,
         &super::worktree_trust::store_path(),
         None,
@@ -135,4 +135,99 @@ pub(crate) async fn worktree_url(
     })
     .await
     .map_err(|e| format!("worktree url failed: {e}"))?
+}
+
+/// A worktree path from the frontend. `safe_repo_path` when it exists; a
+/// path whose directory is gone (a teardown may delete it) is accepted
+/// as is, since the removal service only goes on with a path git itself
+/// lists as a worktree of this repo, and only runs git on it.
+fn worktree_arg(path: &str) -> Result<PathBuf, String> {
+    let p = path.trim();
+    if p.is_empty() {
+        return Err("invalid path: empty".to_string());
+    }
+    if std::path::Path::new(p).exists() {
+        return crate::git::safe_repo_path(p, ".").map_err(|e| format!("invalid path: {e}"));
+    }
+    let raw = PathBuf::from(p);
+    if !raw.is_absolute() {
+        return Err(format!("invalid path: {p}"));
+    }
+    Ok(raw)
+}
+
+/// What GitWand may do to a worktree (spec §7.1).
+#[tauri::command]
+pub(crate) async fn worktree_guard(
+    cwd: String,
+    path: String,
+) -> Result<crate::worktree::guard::GuardReport, String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree = worktree_arg(&path)?;
+    tauri::async_runtime::spawn_blocking(move || crate::worktree::guard::guard(&root, &worktree))
+        .await
+        .map_err(|e| format!("worktree guard failed: {e}"))?
+}
+
+/// Removal steps 1–3 (spec §7.2): guards, stop the processes, snapshot.
+#[tauri::command]
+pub(crate) async fn worktree_remove_prepare(
+    cwd: String,
+    path: String,
+    kill_foreign: bool,
+) -> Result<crate::worktree::remove::Prepared, String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree =
+        crate::git::safe_repo_path(path.trim(), ".").map_err(|e| format!("invalid path: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::worktree::remove::prepare_removal(&root, &worktree, |wt| {
+            super::worktree_processes::stop_processes_in(&root, wt, kill_foreign)
+        })
+    })
+    .await
+    .map_err(|e| format!("worktree removal failed: {e}"))?
+}
+
+/// Removal steps 1 and 5–7 (spec §7.2), once teardown ran, was skipped,
+/// or the user chose "Remove anyway".
+#[tauri::command]
+pub(crate) async fn worktree_remove(
+    cwd: String,
+    path: String,
+    opts: crate::worktree::remove::RemoveOptions,
+) -> Result<crate::worktree::remove::RemoveOutcome, String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree = worktree_arg(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::worktree::remove::remove_worktree(
+            &root,
+            &worktree,
+            &opts,
+            super::worktree_processes::still_running,
+        )
+    })
+    .await
+    .map_err(|e| format!("worktree removal failed: {e}"))?
+}
+
+/// `git worktree unlock`: the only action offered on a locked worktree.
+#[tauri::command]
+pub(crate) async fn worktree_unlock(cwd: String, path: String) -> Result<(), String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree = worktree_arg(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let entry = crate::worktree::guard::listed(&root, &worktree)?;
+        let out = crate::git::git_cmd()
+            .args(["worktree", "unlock"])
+            .arg(&entry.path)
+            .current_dir(&root)
+            .output()
+            .map_err(|e| format!("cannot run git: {e}"))?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("worktree unlock failed: {e}"))?
 }

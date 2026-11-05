@@ -2876,15 +2876,33 @@ pub(crate) async fn git_worktree_remove(
     path: String,
     force: Option<bool>,
 ) -> Result<(), String> {
+    git_worktree_remove_impl(&cwd, &path, force)
+}
+
+/// Kept for compatibility; the app removes through `worktree_remove`. Still
+/// refuses an untouchable worktree (v3.13, spec §7.1).
+pub(crate) fn git_worktree_remove_impl(
+    cwd: &str,
+    path: &str,
+    force: Option<bool>,
+) -> Result<(), String> {
+    if let (Ok(root), Ok(wt)) = (
+        crate::git::safe_repo_path(cwd.trim(), "."),
+        crate::git::safe_repo_path(path.trim(), "."),
+    ) {
+        if let Ok(report) = crate::worktree::guard::guard(&root, &wt) {
+            crate::worktree::guard::refuse_untouchable(&report, &wt)?;
+        }
+    }
     let mut cmd = git_cmd();
     cmd.arg("worktree").arg("remove");
     if force.unwrap_or(false) {
         cmd.arg("--force");
     }
-    cmd.arg(&path);
+    cmd.arg(path);
 
     let output = cmd
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .output()
         .map_err(|e| format!("Failed to remove worktree: {}", e))?;
 
