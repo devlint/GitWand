@@ -61,6 +61,9 @@ export function toTimeline(snapshots: SnapshotMeta[], reflog: UndoEntry[]): Time
     // `pre-restore` snapshots exist only to make a restore undoable; showing
     // them would double every entry the moment the user rewinds once.
     if (s.kind === "pre-restore") continue;
+    // Taken in a worktree before removing it (v3.13): another checkout's
+    // state, which a restore in place here would overwrite this one with.
+    if (s.worktree) continue;
     items.push({
       key: `snapshot:${s.id}`,
       source: "snapshot",

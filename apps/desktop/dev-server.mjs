@@ -1463,7 +1463,7 @@ function snapshotGitDir(cwd) {
   return execFileSync(GIT, ["rev-parse", "--absolute-git-dir"], { cwd, encoding: "utf-8" }).trim();
 }
 
-function createSnapshot(cwd, kind, label) {
+function createSnapshot(cwd, kind, label, worktree = null) {
   const g = (args, opts = {}) =>
     execFileSync(GIT, args, { cwd, encoding: "utf-8", ...opts }).trim();
 
@@ -1508,6 +1508,8 @@ function createSnapshot(cwd, kind, label) {
 
     const timestampMs = snapshotStampMs();
     const meta = { id: "", commit: "", kind, label, timestampMs, headSha, headRef, mergeHead };
+    // v3.13 — written only when set, like `skip_serializing_if` in snapshot.rs.
+    if (worktree) meta.worktree = worktree;
     const commit = g([
       "commit-tree", worktreeTree, "-p", headSha, "-p", metaCommit, "-m", JSON.stringify(meta),
     ]);

@@ -26,6 +26,14 @@ const reflog = (hash: string, ts: number, type: UndoEntry["type"] = "commit"): U
 });
 
 describe("toTimeline", () => {
+  it("leaves out snapshots taken in a removed worktree", () => {
+    // They come from another checkout: restoring one in place here would
+    // overwrite this checkout with the worktree's files (v3.13 §9).
+    const removal = { ...snap("s1", 2000, "removal"), worktree: { path: "/r.worktrees/x", branch: "task/x", name: "x" } };
+    const items = toTimeline([removal, snap("s2", 1000)], []);
+    expect(items.map((i) => i.key)).toEqual(["snapshot:s2"]);
+  });
+
   it("merges both sources newest first", () => {
     const items = toTimeline([snap("s1", 3000), snap("s2", 1000)], [reflog("r1", 2000)]);
     expect(items.map((i) => i.key)).toEqual(["snapshot:s1", "reflog:r1", "snapshot:s2"]);

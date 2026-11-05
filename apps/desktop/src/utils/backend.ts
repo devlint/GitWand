@@ -1961,7 +1961,7 @@ export interface SnapshotMeta {
   /** Full sha of the snapshot commit. */
   commit: string;
   /** What triggered it. */
-  kind: "manual" | "discard" | "reset" | "checkout" | "resolution" | "pre-restore";
+  kind: "manual" | "discard" | "reset" | "checkout" | "resolution" | "pre-restore" | "removal";
   label: string;
   timestampMs: number;
   headSha: string;
@@ -1969,6 +1969,8 @@ export interface SnapshotMeta {
   headRef: string | null;
   /** MERGE_HEAD sha when taken mid-merge. */
   mergeHead: string | null;
+  /** v3.13 — the worktree it was taken in, before removing it. */
+  worktree?: { path: string; branch: string | null; name: string };
 }
 
 /** Capture a snapshot. Returns null on a repo with no HEAD yet. */

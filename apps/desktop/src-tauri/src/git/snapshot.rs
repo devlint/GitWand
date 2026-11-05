@@ -52,6 +52,20 @@ pub struct SnapshotMeta {
     pub head_ref: Option<String>,
     /// MERGE_HEAD sha when the snapshot was taken mid-merge.
     pub merge_head: Option<String>,
+    /// v3.13 — the worktree this snapshot was taken in, when it was taken
+    /// before removing it (spec §9). Absent from older subjects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<SnapshotWorktree>,
+}
+
+/// Which worktree a snapshot comes from, so it can be restored as a new one.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotWorktree {
+    pub path: String,
+    /// `None` when the worktree's HEAD was detached.
+    pub branch: Option<String>,
+    pub name: String,
 }
 
 /// Run a git command in `cwd` and return trimmed stdout, or the stderr as Err.
@@ -150,6 +164,16 @@ pub(crate) fn create_snapshot_inner(
     kind: &str,
     label: &str,
 ) -> Result<Option<SnapshotMeta>, String> {
+    create_snapshot_with(cwd, kind, label, None)
+}
+
+/// `create_snapshot_inner`, recording the worktree it was taken in.
+pub(crate) fn create_snapshot_with(
+    cwd: &str,
+    kind: &str,
+    label: &str,
+    worktree: Option<SnapshotWorktree>,
+) -> Result<Option<SnapshotMeta>, String> {
     let head_sha = match run(cwd, &["rev-parse", "HEAD"]) {
         Ok(s) if !s.is_empty() => s,
         _ => return Ok(None),
@@ -224,6 +248,7 @@ pub(crate) fn create_snapshot_inner(
         head_sha: head_sha.clone(),
         head_ref,
         merge_head,
+        worktree,
     };
     let message = serde_json::to_string(&meta).map_err(|e| e.to_string())?;
     let commit = run(
@@ -579,6 +604,32 @@ mod tests {
             }
             std::fs::write(p, content).unwrap();
         }
+    }
+
+    #[test]
+    fn snapshot_keeps_worktree_metadata() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "c1"]);
+        let wt = SnapshotWorktree {
+            path: "/x/repo.worktrees/fix".into(),
+            branch: Some("task/fix".into()),
+            name: "fix".into(),
+        };
+        let meta = create_snapshot_with(repo.cwd(), "removal", "Remove fix", Some(wt.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(meta.worktree.as_ref(), Some(&wt));
+        let listed = list_snapshots_inner(repo.cwd()).unwrap();
+        assert_eq!(listed[0].worktree.as_ref(), Some(&wt));
+        // A subject written before v3.13 has no `worktree` and still parses.
+        let old = r#"{"id":"","commit":"","kind":"manual","label":"x","timestampMs":1,"headSha":"a","headRef":null,"mergeHead":null}"#;
+        let parsed: SnapshotMeta = serde_json::from_str(old).unwrap();
+        assert!(parsed.worktree.is_none());
+        // And one without worktree metadata does not write the key.
+        let plain = create_snapshot_inner(repo.cwd(), "manual", "p").unwrap().unwrap();
+        assert!(!serde_json::to_string(&plain).unwrap().contains("worktree"));
     }
 
     #[test]
