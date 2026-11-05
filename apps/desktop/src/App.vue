@@ -2772,8 +2772,9 @@ type RemovalDialogState = {
 const removalDialog = ref<RemovalDialogState | null>(null);
 
 /**
- * Delete: the close modal was the confirmation, so the removal starts at
- * once for a worktree GitWand owns; it still stops to ask for any other.
+ * Delete: the removal dialog opens on its confirmation, which shows
+ * "Also delete branch" (spec §7.2 step 6): a task's unmerged agent commits
+ * go only if the user leaves it ticked.
  */
 async function onAiTaskDelete() {
   const target = aiTaskClose.value;
@@ -2783,7 +2784,7 @@ async function onAiTaskDelete() {
   try {
     const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
     aiTaskClose.value = null;
-    removalDialog.value = { cwd: origin, path: target.path, projectPath: target.projectPath, deleteBranch: true, autoStart: true, merged: false };
+    removalDialog.value = { cwd: origin, path: target.path, projectPath: target.projectPath, deleteBranch: true, autoStart: false, merged: false };
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorDelete", String((err as { message?: string })?.message ?? err));
   } finally {
@@ -2811,6 +2812,25 @@ async function onAiTaskMergeBack() {
     aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
   } finally {
     aiTaskCloseBusy.value = false;
+  }
+}
+
+/**
+ * Closed without removing. After a merge-back the work is already in the
+ * main checkout: refresh it, so the view does not offer the task as if it
+ * had not been merged.
+ */
+async function onRemovalClose() {
+  const closed = removalDialog.value;
+  removalDialog.value = null;
+  if (!closed?.merged) return;
+  try {
+    await openRepo(closed.projectPath);
+    await loadBranches();
+    if (viewMode.value === "history" || showGitTree.value) await loadLog();
+  } catch (err) {
+    console.error("[worktree] refresh after merge-back failed:", err);
+    showDetailToast(t("aiTask.mergedRefreshFailed"), String((err as { message?: string })?.message ?? err));
   }
 }
 
@@ -4950,7 +4970,7 @@ onUnmounted(() => {
     <!-- AI-task worktree removal — deletes / merges-back the scratch worktree -->
     <WorktreeRemoveDialog v-if="removalDialog" :cwd="removalDialog.cwd" :repo-path="removalDialog.projectPath"
       :path="removalDialog.path" :delete-branch="removalDialog.deleteBranch" :auto-start="removalDialog.autoStart"
-      @close="removalDialog = null" @done="onRemovalDone" @open-log="onOpenSetupLog" />
+      @close="onRemovalClose" @done="onRemovalDone" @open-log="onOpenSetupLog" />
     <AiTaskCloseModal v-if="aiTaskClose" :branch="aiTaskClose.branch" :mode="aiTaskClose.mode" :busy="aiTaskCloseBusy"
       :error="aiTaskCloseError" @cancel="onAiTaskCancel" @delete="onAiTaskDelete" @merge-back="onAiTaskMergeBack" />
 

@@ -125,22 +125,32 @@ export function createWorktreeRemoval(deps: WorktreeRemovalDeps): WorktreeRemova
     state.value = { ...state.value, ...p };
   }
 
+  /** One user action at a time: a double click must not start a second
+   *  prepare, snapshot or teardown. Set before the first `await`. */
+  let inFlight = false;
+
   async function step(fn: () => Promise<void>) {
+    if (inFlight) return;
+    inFlight = true;
     try {
       await fn();
     } catch (e) {
       patch({ phase: "error", error: message(e) });
+    } finally {
+      inFlight = false;
     }
   }
 
-  async function check(r: RemovalRequest) {
+  async function runCheck(r: RemovalRequest) {
     req = r;
     state.value = { ...fresh(), phase: "checking" };
     deleteBranch = r.deleteBranch;
-    await step(async () => {
-      const g = await deps.guard(r.cwd, r.path);
-      patch({ guard: g, phase: g.untouchable ? "refused" : "confirm" });
-    });
+    const g = await deps.guard(r.cwd, r.path);
+    patch({ guard: g, phase: g.untouchable ? "refused" : "confirm" });
+  }
+
+  async function check(r: RemovalRequest) {
+    await step(() => runCheck(r));
   }
 
   async function unlock() {
@@ -148,7 +158,7 @@ export function createWorktreeRemoval(deps: WorktreeRemovalDeps): WorktreeRemova
     const r = req;
     await step(async () => {
       await deps.unlock(r.cwd, r.path);
-      await check(r);
+      await runCheck(r);
     });
   }
 

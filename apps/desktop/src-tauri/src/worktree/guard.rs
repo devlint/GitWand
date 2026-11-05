@@ -90,7 +90,9 @@ pub(crate) fn listed(repo: &Path, worktree: &Path) -> Result<Listed, String> {
         let wanted = canon.as_deref().unwrap_or(worktree);
         if path.as_deref() == Some(wanted) {
             return Ok(Listed {
-                path: wanted.to_path_buf(),
+                // Without Windows' `\\?\` prefix, which git does not take
+                // as a worktree path.
+                path: PathBuf::from(crate::worktree::hooks::display_path(wanted)),
                 branch,
                 locked,
             });

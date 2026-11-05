@@ -174,4 +174,21 @@ describe("useWorktreeRemoval", () => {
     expect(r.state.value.phase).toBe("error");
     expect(r.state.value.error).toContain("processes:");
   });
+
+  it("ignores a second click while a step is in flight", async () => {
+    const { d } = deps();
+    const r = createWorktreeRemoval(d);
+    await r.check(req);
+    await Promise.all([r.confirm({}), r.confirm({})]);
+    expect(d.prepare).toHaveBeenCalledTimes(1);
+    expect(d.runTeardown).toHaveBeenCalledTimes(1);
+
+    const failing = deps({ runTeardown: vi.fn(async () => ({ code: 1, tabId: 1 })) });
+    const r2 = createWorktreeRemoval(failing.d);
+    await r2.check(req);
+    await r2.confirm({});
+    await Promise.all([r2.retryTeardown(), r2.retryTeardown(), r2.removeAnyway()]);
+    expect(failing.d.runTeardown).toHaveBeenCalledTimes(2);
+    expect(failing.d.remove).not.toHaveBeenCalled();
+  });
 });
