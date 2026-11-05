@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devCreateWorktree, devReadSettings, devResolveBase, devSetupSpawn, devWorktreesDir, devWorktreeUrl } from "./dev-worktree-service.mjs";
+import { devCreateWorktree, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
 // output, resize, and control sequences without any manual workarounds.
@@ -7165,6 +7165,52 @@ async function handleRequest(req, res) {
       }
     }
 
+    // POST /api/worktree-guard  { cwd, path } — mirrors worktree_guard
+    if (url.pathname === "/api/worktree-guard" && req.method === "POST") {
+      try {
+        const { cwd, path } = await readBody(req);
+        return jsonResponse(req, res, devWorktreeGuard(resolve(cwd), resolve(String(path ?? ""))));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-remove-prepare  { cwd, path, killForeign } — mirrors worktree_remove_prepare
+    if (url.pathname === "/api/worktree-remove-prepare" && req.method === "POST") {
+      try {
+        const { cwd, path, killForeign } = await readBody(req);
+        const repo = resolve(cwd);
+        const value = await devRemovePrepare(repo, resolve(String(path ?? "")), {
+          createSnapshot,
+          stop: (wt) => devStopProcessesIn(repo, wt, killForeign === true, devPtys),
+        });
+        return jsonResponse(req, res, value);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-remove  { cwd, path, opts } — mirrors worktree_remove
+    if (url.pathname === "/api/worktree-remove" && req.method === "POST") {
+      try {
+        const { cwd, path, opts } = await readBody(req);
+        return jsonResponse(req, res, devRemoveWorktree(resolve(cwd), resolve(String(path ?? "")), opts ?? {}));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-unlock  { cwd, path } — mirrors worktree_unlock
+    if (url.pathname === "/api/worktree-unlock" && req.method === "POST") {
+      try {
+        const { cwd, path } = await readBody(req);
+        devUnlockWorktree(resolve(cwd), resolve(String(path ?? "")));
+        return jsonResponse(req, res, {});
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // POST /api/read-gitwandrc  { cwd }
     // Searches: .gitwandrc → .gitwandrc.json → package.json#gitwand
     if (url.pathname === "/api/read-gitwandrc" && req.method === "POST") {
@@ -7772,6 +7818,13 @@ async function handleRequest(req, res) {
       try {
         const { cwd, path: wtPath, force } = await readBody(req);
         const resolvedCwd = resolve(cwd);
+        // Mirrors git_worktree_remove_impl: an untouchable worktree is refused.
+        try {
+          const report = devWorktreeGuard(resolvedCwd, resolve(String(wtPath)));
+          if (report.untouchable) {
+            return jsonResponse(req, res, { error: `untouchable: ${wtPath} (${report.reasons.join(", ")}) — GitWand will not remove or modify it.` }, 500);
+          }
+        } catch { /* not a linked worktree: git answers below */ }
         const args = ["worktree", "remove"];
         if (force) args.push("--force");
         args.push(wtPath);
