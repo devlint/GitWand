@@ -56,6 +56,7 @@ const ReleaseNotesModal = defineAsyncComponent(() => import("./components/Releas
 const LaunchpadView = defineAsyncComponent(() => import("./components/LaunchpadView.vue"));
 const AgentSessionsPanel = defineAsyncComponent(() => import("./components/AgentSessionsPanel.vue"));
 const AiTaskCloseModal = defineAsyncComponent(() => import("./components/AiTaskCloseModal.vue"));
+const WorktreeRemoveDialog = defineAsyncComponent(() => import("./components/WorktreeRemoveDialog.vue"));
 const AiTaskNameModal = defineAsyncComponent(() => import("./components/AiTaskNameModal.vue"));
 const WorktreeHookTrustModal = defineAsyncComponent(() => import("./components/WorktreeHookTrustModal.vue"));
 const CommandLogPanel = defineAsyncComponent(() => import("./components/CommandLogPanel.vue"));
@@ -145,8 +146,9 @@ import {
   COMMIT_MESSAGE_SINK_KEY,
   type SettingsSectionTarget,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeMergeBack, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree } from "./utils/backend";
 import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorktreeCreation";
+import { registerRemovalHost } from "./composables/useWorktreeRemoval";
 import type { HookTrustDecision } from "./composables/useWorktreeHookTrust";
 import { aiTaskName, describeBase } from "./utils/worktreeBase";
 import { useCommitActions } from "./composables/useCommitActions";
@@ -2244,13 +2246,25 @@ async function ensureTerminalPanel(): Promise<boolean> {
 // it ends on a ✓/✗ line. Registered once: useWorktreeCreation calls it.
 const worktreeCreation = useWorktreeCreation();
 
-registerSetupRunner(async (repoPath, cwd, path, name, hash) => {
+/**
+ * Runs a worktree hook (`setup` or `teardown`) in a read-only terminal tab
+ * and resolves with its exit code once it ends.
+ */
+async function runHookTab(
+  hook: "setup" | "teardown",
+  repoPath: string,
+  cwd: string,
+  path: string,
+  name: string,
+  hash: string,
+): Promise<{ code: number | null; tabId: number }> {
   if (!(await ensureTerminalPanel())) throw new Error("TerminalPanel mount timeout");
   let resolveExit!: (code: number | null) => void;
   const exited = new Promise<number | null>((r) => (resolveExit = r));
   let tabId = -1;
   let pendingLine: string | null = null;
   const write = (id: number, text: string) => terminalPanelRef.value?.writeChunk(id, text);
+  const setup = hook === "setup";
   try {
     const tab = await termSessions.openTab(
       repoPath,
@@ -2261,15 +2275,15 @@ registerSetupRunner(async (repoPath, cwd, path, name, hash) => {
       },
       {
         type: "setup",
-        title: t("worktree.setupTabTitle", name),
+        title: setup ? t("worktree.setupTabTitle", name) : t("worktree.teardownTabTitle", name),
         readOnly: true,
-        spawn: (onChunk, onExit) => worktreeRunHook(cwd, path, "setup", hash, { cols: 80, rows: 24, onExit }, onChunk),
+        spawn: (onChunk, onExit) => worktreeRunHook(cwd, path, hook, hash, { cols: 80, rows: 24, onExit }, onChunk),
         onExit: (code) => {
           const line = code === 0
-            ? `\r\n\x1b[32m✓ ${t("worktree.setupDone")}\x1b[0m\r\n`
+            ? `\r\n\x1b[32m✓ ${setup ? t("worktree.setupDone") : t("worktree.teardownDone")}\x1b[0m\r\n`
             : code === null
-              ? `\r\n\x1b[31m✗ ${t("worktree.setupStopped")}\x1b[0m\r\n`
-              : `\r\n\x1b[31m✗ ${t("worktree.setupFailedCode", code)}\x1b[0m\r\n`;
+              ? `\r\n\x1b[31m✗ ${setup ? t("worktree.setupStopped") : t("worktree.teardownStopped")}\x1b[0m\r\n`
+              : `\r\n\x1b[31m✗ ${setup ? t("worktree.setupFailedCode", code) : t("worktree.teardownFailedCode", code)}\x1b[0m\r\n`;
           if (tabId >= 0) write(tabId, line);
           else pendingLine = line;
           resolveExit(code);
@@ -2279,10 +2293,23 @@ registerSetupRunner(async (repoPath, cwd, path, name, hash) => {
     tabId = tab.id;
     if (pendingLine) write(tabId, pendingLine);
   } catch (err) {
-    repoError.value = t("worktree.setupStartFailed", String((err as { message?: string })?.message ?? err));
+    if (setup) repoError.value = t("worktree.setupStartFailed", String((err as { message?: string })?.message ?? err));
     throw err;
   }
   return { code: await exited, tabId };
+}
+
+registerSetupRunner((repoPath, cwd, path, name, hash) => runHookTab("setup", repoPath, cwd, path, name, hash));
+
+registerRemovalHost({
+  runTeardown: (repoPath, cwd, path, name, hash) => runHookTab("teardown", repoPath, cwd, path, name, hash),
+  // Every tab open in the worktree, whichever repo key it is listed under
+  // (spec §8 step 4), and the file explorer's watcher on it.
+  disposeTabs: async (path) => {
+    fileExplorer.disposeRepo(path);
+    await termSessions.disposeRepo(path).catch(() => {});
+    await termSessions.disposeCwd(path).catch(() => {});
+  },
 });
 
 /** Include entries the service skipped, if any, as one toast. */
@@ -2732,6 +2759,22 @@ function onAiTaskCancel() {
   aiTaskCloseError.value = null;
 }
 
+/** v3.13 — the removal dialog (guards, processes, snapshot, teardown). */
+type RemovalDialogState = {
+  cwd: string;
+  path: string;
+  projectPath: string;
+  deleteBranch: boolean;
+  autoStart: boolean;
+  /** Opened right after a merge-back: the work is in the main checkout. */
+  merged: boolean;
+};
+const removalDialog = ref<RemovalDialogState | null>(null);
+
+/**
+ * Delete: the close modal was the confirmation, so the removal starts at
+ * once for a worktree GitWand owns; it still stops to ask for any other.
+ */
 async function onAiTaskDelete() {
   const target = aiTaskClose.value;
   if (!target || aiTaskCloseBusy.value) return;
@@ -2739,18 +2782,8 @@ async function onAiTaskDelete() {
   aiTaskCloseError.value = null;
   try {
     const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
-    // Kill the worktree's agent terminal first so no running process holds an
-    // index.lock or open handle that would block the worktree removal.
-    await termSessions.disposeRepo(target.path).catch(() => {});
-    fileExplorer.disposeRepo(target.path);
-    if (target.scratch) {
-      await scratchWorktreeDiscard(origin, target.path);
-    } else {
-      // Plain worktree: remove it, then delete its now-unreferenced branch.
-      await gitWorktreeRemove(origin, target.path, true);
-      if (target.branch) await gitDeleteBranch(origin, target.branch, true);
-    }
-    await finalizeWorktreeRemoval(target.path, target.projectPath);
+    aiTaskClose.value = null;
+    removalDialog.value = { cwd: origin, path: target.path, projectPath: target.projectPath, deleteBranch: true, autoStart: true, merged: false };
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorDelete", String((err as { message?: string })?.message ?? err));
   } finally {
@@ -2766,26 +2799,30 @@ async function onAiTaskMergeBack() {
   try {
     const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
     // Stop the scratch's agent terminal first: nothing may write to the
-    // scratch while it is read and merged, nor hold a handle blocking its
-    // removal. Not swallowed, unlike Delete: if it fails, don't merge.
+    // scratch while it is read and merged. Not swallowed, unlike Delete:
+    // if it fails, don't merge.
     await termSessions.disposeRepo(target.path);
     fileExplorer.disposeRepo(target.path);
-    const { cleanup_warning } = await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
-    // Merged from here on, whatever follows. A scratch that couldn't be
-    // removed is left detached, its branch deleted: a plain worktree now.
-    try {
-      await finalizeWorktreeRemoval(target.path, target.projectPath);
-    } catch (err) {
-      console.error("[ai-task] refresh after merge-back failed:", err);
-      aiTaskClose.value = null;
-      if (!cleanup_warning) showDetailToast(t("aiTask.mergedRefreshFailed"), String((err as { message?: string })?.message ?? err));
-    }
-    // No auto-dismiss: it may be the only sign the worktree is still there.
-    if (cleanup_warning) showDetailToast(t("aiTask.mergedCleanupFailed"), cleanup_warning, 0);
+    // The worktree stays: the removal flow below removes it, teardown included.
+    await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled, false);
+    aiTaskClose.value = null;
+    removalDialog.value = { cwd: origin, path: target.path, projectPath: target.projectPath, deleteBranch: true, autoStart: true, merged: true };
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
   } finally {
     aiTaskCloseBusy.value = false;
+  }
+}
+
+async function onRemovalDone(_outcome: RemoveOutcome) {
+  const done = removalDialog.value;
+  removalDialog.value = null;
+  if (!done) return;
+  try {
+    await finalizeWorktreeRemoval(done.path, done.projectPath);
+  } catch (err) {
+    console.error("[worktree] refresh after removal failed:", err);
+    if (done.merged) showDetailToast(t("aiTask.mergedRefreshFailed"), String((err as { message?: string })?.message ?? err));
   }
 }
 
@@ -4911,6 +4948,9 @@ onUnmounted(() => {
       @create="confirmNewAiTask" />
 
     <!-- AI-task worktree removal — deletes / merges-back the scratch worktree -->
+    <WorktreeRemoveDialog v-if="removalDialog" :cwd="removalDialog.cwd" :repo-path="removalDialog.projectPath"
+      :path="removalDialog.path" :delete-branch="removalDialog.deleteBranch" :auto-start="removalDialog.autoStart"
+      @close="removalDialog = null" @done="onRemovalDone" @open-log="onOpenSetupLog" />
     <AiTaskCloseModal v-if="aiTaskClose" :branch="aiTaskClose.branch" :mode="aiTaskClose.mode" :busy="aiTaskCloseBusy"
       :error="aiTaskCloseError" @cancel="onAiTaskCancel" @delete="onAiTaskDelete" @merge-back="onAiTaskMergeBack" />
 

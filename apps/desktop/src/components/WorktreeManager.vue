@@ -2,7 +2,6 @@
 import { ref, onMounted, computed, watch } from "vue";
 import {
   gitWorktreeList,
-  gitWorktreeRemove,
   gitWorktreePrune,
   gitWorktreeRepair,
   gitWorktreeStatusAll,
@@ -19,6 +18,7 @@ import { describeBase, slugifyWorktreeName } from "../utils/worktreeBase";
 import type { GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import BaseModal from "./BaseModal.vue";
+import WorktreeRemoveDialog from "./WorktreeRemoveDialog.vue";
 
 const props = defineProps<{
   cwd: string;
@@ -200,9 +200,8 @@ function isBranchUsed(name: string): boolean {
 }
 
 // ── Remove confirmation ──────────────────────────────────
+/** v3.13: the worktree being removed, through the removal dialog. */
 const confirmRemovePath = ref<string | null>(null);
-const forceRemove = ref(false);
-const removing = ref(false);
 
 // ── Core actions ─────────────────────────────────────────
 
@@ -256,29 +255,14 @@ async function createWorktree() {
 }
 
 function requestRemove(path: string) {
-  confirmRemovePath.value = path;
-  forceRemove.value = false;
-}
-
-function cancelRemove() {
-  confirmRemovePath.value = null;
-  forceRemove.value = false;
-}
-
-async function confirmRemove() {
-  if (!confirmRemovePath.value) return;
-  removing.value = true;
   error.value = null;
-  try {
-    await gitWorktreeRemove(props.cwd, confirmRemovePath.value, forceRemove.value);
-    confirmRemovePath.value = null;
-    await loadWorktrees();
-  } catch (err: any) {
-    error.value = t("worktree.errorRemove").replace("{0}", String(err?.message ?? err));
-    confirmRemovePath.value = null;
-  } finally {
-    removing.value = false;
-  }
+  confirmRemovePath.value = path;
+}
+
+async function onRemoved() {
+  confirmRemovePath.value = null;
+  await loadWorktrees();
+  emit("load-branches");
 }
 
 function shortPath(path: string): string {
@@ -459,24 +443,16 @@ onMounted(async () => {
       <!-- ── Error ───────────────────────────────────────── -->
       <div v-if="error" class="wt-error">{{ error }}</div>
 
-      <!-- ── Remove confirmation dialog ─────────────────── -->
-      <div v-if="confirmRemovePath" class="wt-confirm">
-        <p>{{ t("worktree.removeConfirm").replace("{0}", shortPath(confirmRemovePath)) }}</p>
-        <label class="wt-checkbox-row">
-          <input type="checkbox" v-model="forceRemove" />
-          <span>{{ t("worktree.removeForce") }}</span>
-        </label>
-        <div class="wt-confirm-actions">
-          <button
-            class="bm-btn bm-btn--danger"
-            :disabled="removing"
-            @click="confirmRemove"
-          >
-            {{ removing ? t("worktree.removing") : t("common.delete") }}
-          </button>
-          <button class="bm-btn bm-btn--ghost" @click="cancelRemove">{{ t("common.cancel") }}</button>
-        </div>
-      </div>
+      <!-- ── Removal (v3.13: guards, processes, snapshot, teardown) ── -->
+      <WorktreeRemoveDialog
+        v-if="confirmRemovePath"
+        :cwd="cwd"
+        :repo-path="cwd"
+        :path="confirmRemovePath"
+        @close="confirmRemovePath = null"
+        @done="onRemoved"
+        @open-log="(p) => emit('open-setup-log', p)"
+      />
 
       <!-- ── Loading ─────────────────────────────────────── -->
       <div v-if="loading" class="wt-state">{{ t("common.loading") }}</div>
@@ -711,35 +687,6 @@ onMounted(async () => {
   border: 1px solid var(--color-danger);
   border-radius: var(--radius-sm);
   flex-shrink: 0;
-}
-
-/* ── Confirm dialog ─────────────────────────────────────── */
-.wt-confirm {
-  padding: var(--space-5) var(--space-7);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-danger-soft);
-  flex-shrink: 0;
-}
-
-.wt-confirm p {
-  margin: 0 0 var(--space-4);
-  font-size: var(--font-size-sm);
-  color: var(--color-text);
-}
-
-.wt-checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-  margin-bottom: var(--space-4);
-  cursor: pointer;
-}
-
-.wt-confirm-actions {
-  display: flex;
-  gap: var(--space-3);
 }
 
 /* ── States ─────────────────────────────────────────────── */
