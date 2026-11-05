@@ -47,8 +47,9 @@ pub(crate) struct Listed {
     pub locked: Option<String>,
 }
 
-/// `worktree`'s porcelain entry, canonical, when it is a linked worktree
-/// of `repo`: never the main worktree, never a path git does not list.
+/// `worktree`'s porcelain entry (canonical while it exists) when it is a
+/// linked worktree of `repo`: never the main worktree, never a path git
+/// does not list.
 pub(crate) fn listed(repo: &Path, worktree: &Path) -> Result<Listed, String> {
     let refuse = || {
         format!(
@@ -56,7 +57,9 @@ pub(crate) fn listed(repo: &Path, worktree: &Path) -> Result<Listed, String> {
             worktree.display()
         )
     };
-    let canon = worktree.canonicalize().map_err(|_| refuse())?;
+    // A worktree whose directory is gone (a teardown may delete it) is
+    // still listed by git until pruned: matched on its raw path then.
+    let canon = worktree.canonicalize().ok();
     let out = crate::git::git_cmd()
         .args(["worktree", "list", "--porcelain"])
         .current_dir(repo)
@@ -72,7 +75,10 @@ pub(crate) fn listed(repo: &Path, worktree: &Path) -> Result<Listed, String> {
         let mut locked = None;
         for line in block.lines() {
             if let Some(p) = line.strip_prefix("worktree ") {
-                path = Path::new(p).canonicalize().ok();
+                path = match &canon {
+                    Some(_) => Path::new(p).canonicalize().ok(),
+                    None => Some(PathBuf::from(p)),
+                };
             } else if let Some(b) = line.strip_prefix("branch ") {
                 branch = Some(b.strip_prefix("refs/heads/").unwrap_or(b).to_string());
             } else if line == "locked" {
@@ -81,9 +87,10 @@ pub(crate) fn listed(repo: &Path, worktree: &Path) -> Result<Listed, String> {
                 locked = Some(r.to_string());
             }
         }
-        if path.as_deref() == Some(canon.as_path()) {
+        let wanted = canon.as_deref().unwrap_or(worktree);
+        if path.as_deref() == Some(wanted) {
             return Ok(Listed {
-                path: canon,
+                path: wanted.to_path_buf(),
                 branch,
                 locked,
             });
@@ -184,7 +191,14 @@ mod tests {
     fn add(repo: &TempRepo, rel: &str, branch: &str) -> PathBuf {
         let path = repo.sandbox.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        repo.git(&["worktree", "add", "-q", "-b", branch, path.to_str().unwrap()]);
+        repo.git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            branch,
+            path.to_str().unwrap(),
+        ]);
         path.canonicalize().unwrap()
     }
 

@@ -628,7 +628,9 @@ mod tests {
         let parsed: SnapshotMeta = serde_json::from_str(old).unwrap();
         assert!(parsed.worktree.is_none());
         // And one without worktree metadata does not write the key.
-        let plain = create_snapshot_inner(repo.cwd(), "manual", "p").unwrap().unwrap();
+        let plain = create_snapshot_inner(repo.cwd(), "manual", "p")
+            .unwrap()
+            .unwrap();
         assert!(!serde_json::to_string(&plain).unwrap().contains("worktree"));
     }
 
