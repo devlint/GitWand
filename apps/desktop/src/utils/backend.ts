@@ -2934,11 +2934,14 @@ export async function scratchWorktreeMergeBack(
   cwd: string,
   scratchPath: string,
   snapshotsEnabled?: boolean,
+  /** v3.13 — false: keep the worktree, the caller runs the removal flow next. */
+  cleanup?: boolean,
 ): Promise<ScratchMergeBackOutcome> {
   return tauriInvoke<ScratchMergeBackOutcome>("scratch_worktree_merge_back", {
     cwd,
     scratchPath,
     snapshotsEnabled,
+    cleanup,
   });
 }
 
@@ -3651,7 +3654,7 @@ export async function worktreeCreate(
 export async function worktreeRunHook(
   cwd: string,
   path: string,
-  hook: "setup",
+  hook: "setup" | "teardown",
   hash: string,
   opts: { cols: number; rows: number; onExit?: (code: number | null) => void },
   onOutput: (chunk: string) => void,
@@ -3705,6 +3708,67 @@ export async function worktreeStopProcesses(
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Failed to stop worktree processes: ${res.status}`);
   return data as ProcessInfo[];
+}
+
+/** What GitWand may do to a worktree before removing it (`worktree::guard`). */
+export interface WorktreeGuard {
+  untouchable: boolean;
+  reasons: ("locked" | "keep-file" | "other-tool")[];
+  /** Created by GitWand (a record, or a pre-v3.13 scratch worktree). */
+  owned: boolean;
+  /** Created by the worktree service: the only ones whose hooks run. */
+  recorded: boolean;
+  /** The repo defines `teardown` and this worktree is recorded. */
+  teardown_required: boolean;
+  branch: string | null;
+  lock_reason: string | null;
+}
+
+/** Removal steps 1–3: processes still running block it, then no snapshot. */
+export interface RemovePrepared {
+  survivors: ProcessInfo[];
+  snapshot: SnapshotMeta | null;
+}
+
+export interface RemoveOptions {
+  snapshotId?: string | null;
+  teardownCode?: number | null;
+  teardownSkipped?: boolean;
+  removeAnyway?: boolean;
+  deleteBranch?: boolean;
+  confirmNotOwned?: boolean;
+}
+
+export interface RemoveOutcome {
+  branch_deleted: string | null;
+  warnings: string[];
+}
+
+/** v3.13 — whether a worktree may be removed (spec §7.1). */
+export async function worktreeGuard(cwd: string, path: string): Promise<WorktreeGuard> {
+  if (isTauri()) return tauriInvoke<WorktreeGuard>("worktree_guard", { cwd, path });
+  return devPost<WorktreeGuard>("/api/worktree-guard", { cwd, path }, "Failed to check the worktree");
+}
+
+/** v3.13 — removal steps 1–3: guards, stop the processes, snapshot. */
+export async function worktreeRemovePrepare(cwd: string, path: string, killForeign: boolean): Promise<RemovePrepared> {
+  if (isTauri()) return tauriInvoke<RemovePrepared>("worktree_remove_prepare", { cwd, path, killForeign });
+  return devPost<RemovePrepared>("/api/worktree-remove-prepare", { cwd, path, killForeign }, "Failed to prepare the removal");
+}
+
+/** v3.13 — removal steps 1 and 5–7, once teardown ran, was skipped or overridden. */
+export async function worktreeRemove(cwd: string, path: string, opts: RemoveOptions): Promise<RemoveOutcome> {
+  if (isTauri()) return tauriInvoke<RemoveOutcome>("worktree_remove", { cwd, path, opts });
+  return devPost<RemoveOutcome>("/api/worktree-remove", { cwd, path, opts }, "Failed to remove the worktree");
+}
+
+/** v3.13 — `git worktree unlock`, the only action offered on a locked worktree. */
+export async function worktreeUnlock(cwd: string, path: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("worktree_unlock", { cwd, path });
+    return;
+  }
+  await devPost("/api/worktree-unlock", { cwd, path }, "Failed to unlock the worktree");
 }
 
 /** Prune stale worktree administrative files. */
