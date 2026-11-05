@@ -8,6 +8,7 @@
 
 pub(crate) mod base;
 pub(crate) mod create;
+pub(crate) mod guard;
 pub(crate) mod hooks;
 pub(crate) mod include;
 pub(crate) mod record;
