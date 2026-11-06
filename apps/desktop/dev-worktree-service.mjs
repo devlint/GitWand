@@ -704,6 +704,8 @@ export function devMergeBackCheck(repo, worktree, target = null) {
     main_clean: mainChanges.size === 0,
     task_commits: 0,
     task_dirty: taskChanges.size > 0,
+    task_merged: false,
+    main_staged: spawnSync("git", ["diff", "--cached", "--quiet"], { cwd: main }).status !== 0,
     refusal: null,
   };
   if (report.untouchable) return { ...out, refusal: refusal("untouchable", `This worktree is protected (${report.reasons.join(", ")}).`) };
@@ -712,6 +714,8 @@ export function devMergeBackCheck(repo, worktree, target = null) {
   if (t === taskBranch || !localBranchExists(main, t)) {
     return { ...out, refusal: refusal("unknown-target", `${t} is not a local branch to merge into.`) };
   }
+  out.task_merged =
+    spawnSync("git", ["merge-base", "--is-ancestor", `refs/heads/${taskBranch}`, `refs/heads/${t}`], { cwd: main }).status === 0;
   out.task_commits = parseInt(git(main, ["rev-list", "--count", `refs/heads/${t}..refs/heads/${taskBranch}`]), 10) || 0;
   if (mainBranch !== t) {
     return { ...out, refusal: refusal("wrong-branch", `The main checkout is on ${mainBranch ?? "a detached HEAD"}, not ${t}.`) };
@@ -727,10 +731,15 @@ export function devMergeBackCheck(repo, worktree, target = null) {
   }
   const base = git(main, ["merge-base", `refs/heads/${t}`, `refs/heads/${taskBranch}`]);
   const taskFiles = new Set([
-    ...gitRaw(main, ["diff", "--name-only", "-z", base, `refs/heads/${taskBranch}`]).split("\0").filter(Boolean),
+    ...gitRaw(main, ["diff", "--no-renames", "--name-only", "-z", base, `refs/heads/${taskBranch}`]).split("\0").filter(Boolean),
     ...taskChanges,
   ]);
-  const overlap = [...mainChanges].filter((p) => taskFiles.has(p)).sort();
+  const ignored = gitRaw(main, ["ls-files", "-o", "-i", "--exclude-standard", "--directory", "-z"]).split("\0").filter(Boolean);
+  const overlapSet = new Set([...mainChanges].filter((p) => taskFiles.has(p)));
+  for (const f of taskFiles) {
+    if (ignored.some((i) => i === f || (i.endsWith("/") && f.startsWith(i)))) overlapSet.add(f);
+  }
+  const overlap = [...overlapSet].sort();
   if (overlap.length > 0) {
     out.refusal = refusal("overlap", "The main checkout has changes to files the task also changes.", overlap);
   }

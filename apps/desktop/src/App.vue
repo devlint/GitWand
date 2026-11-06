@@ -1739,8 +1739,16 @@ watch(
 // whatever Vouch/Skip/ran decision applied to the PREVIOUS repo. Deliberately
 // separate from the staged-set watcher above — the decision must survive a
 // plain staging change within the SAME repo (e.g. the "Review now" round trip).
+/**
+ * v3.13 — true while a merge-back brings the checkout it runs in to the
+ * front: the user set the bar and the per-hunk choices on the preview of
+ * THAT checkout, so the switch must not reset them before the apply.
+ */
+let keepResolutionSelection = false;
+
 watch(repoFolderPath, () => {
   commitReviewDecision.value = null;
+  if (keepResolutionSelection) return;
   // v3.11 — the per-hunk opt-out set is keyed by repo-relative path, so it
   // must not survive a repo change: the same path means a different file. The
   // confidence bar does: it is a user preference, so it is re-seeded from
@@ -2819,8 +2827,11 @@ async function onAiTaskMergeBack() {
 async function onManagerMergeBack(payload: { cwd: string; path: string }) {
   showWorktrees.value = false;
   try {
+    // The project tab's own path, not `git worktree list`'s spelling of it,
+    // so focusing the main checkout finds that tab.
+    const tabPath = repoTabs.value.find((tab) => tab.id === activeTabId.value)?.path;
     const entries = await gitWorktreeList(payload.cwd);
-    const main = entries.find((w) => w.is_main)?.path ?? payload.cwd;
+    const main = tabPath ?? entries.find((w) => w.is_main)?.path ?? payload.cwd;
     mergeBackDialog.value = { cwd: main, path: payload.path, projectPath: main, minimized: false };
   } catch (err) {
     repoError.value = t("mergeBack.failed", String((err as { message?: string })?.message ?? err));
@@ -2833,8 +2844,7 @@ async function onManagerMergeBack(payload: { cwd: string; path: string }) {
  * not looking at.
  */
 async function focusCheckout(path: string, projectPath: string) {
-  if (repoFolderPath.value === path) return;
-  await openRepo(path);
+  if (repoFolderPath.value !== path) await openRepo(path);
   const owner = repoTabs.value.find((tab) => tab.path === projectPath);
   if (owner) {
     selectWorktree(owner.id, path);
@@ -2845,7 +2855,16 @@ async function focusCheckout(path: string, projectPath: string) {
 registerMergeBackHost({
   apply: async (a) => {
     const projectPath = mergeBackDialog.value?.projectPath ?? a.checkout;
-    await focusCheckout(a.checkout, projectPath);
+    // The main checkout is the project's own tab: use that spelling of its
+    // path, not the canonical one the backend reports (`/private/var`…).
+    const checkout = a.operation === "rebase" ? a.checkout : projectPath;
+    keepResolutionSelection = true;
+    try {
+      await focusCheckout(checkout, projectPath);
+      await nextTick();
+    } finally {
+      keepResolutionSelection = false;
+    }
     const { gitMerge, worktreeMergeBackSquash } = await import("./utils/backend");
     const opts =
       a.mode === "squash"
@@ -2854,7 +2873,7 @@ registerMergeBackHost({
           ? {
               // `--no-ff --no-edit`: a merge commit, so the agent's commits are kept.
               runMerge: async (ref_: string) => {
-                assertOperationSucceeded(await gitMerge(a.checkout, ref_, true), `merge ${ref_}`);
+                assertOperationSucceeded(await gitMerge(checkout, ref_, true), `merge ${ref_}`);
               },
             }
           : {};

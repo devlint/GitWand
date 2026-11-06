@@ -69,4 +69,11 @@ describe("parity: worktree-merge-back-check", () => {
     const cwd = fixtureClean();
     await check(cwd, task(cwd, "t"), "nope");
   });
+
+  it("main checkout on another branch", async () => {
+    const cwd = fixtureClean();
+    const path = task(cwd, "wb");
+    execFileSync("git", ["-C", cwd, "checkout", "-q", "-b", "other"]);
+    await check(cwd, path);
+  });
 });

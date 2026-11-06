@@ -14,6 +14,8 @@ const check = (over: Partial<MergeBackCheck> = {}): MergeBackCheck => ({
   main_clean: true,
   task_commits: 2,
   task_dirty: false,
+  task_merged: false,
+  main_staged: false,
   refusal: null,
   ...over,
 });
@@ -167,9 +169,57 @@ describe("useWorktreeMergeBack", () => {
     await m.resume();
     expect(m.state.value.phase).toBe("residual");
     expect(m.state.value.error).toBe("mid merge");
-    d.check = vi.fn(async () => check({ refusal: { code: "nothing", message: "", paths: [] } }));
+    d.check = vi.fn(async () => check({ task_merged: true, refusal: { code: "nothing", message: "", paths: [] } }));
     await m.resume();
     expect(m.state.value.phase).toBe("done");
+  });
+
+  it("an abandoned merge or squash is never done, so the branch is not deleted", async () => {
+    const d = deps({ apply: vi.fn(async () => outcome({ stoppedReason: "residual", finalized: false })) });
+    const m = createWorktreeMergeBack(d);
+    await m.open(req);
+    await m.start();
+    await m.apply(0);
+    // `git merge --abort` by hand: no refusal, but the target lacks the task.
+    d.check = vi.fn(async () => check());
+    await m.resume();
+    expect(m.state.value.phase).toBe("residual");
+    expect(m.state.value.error).toBeTruthy();
+    expect(m.cleanup.value).toBeNull();
+
+    const sq = deps({ apply: vi.fn(async () => outcome({ stoppedReason: "residual", finalized: false })) });
+    const m2 = createWorktreeMergeBack(sq);
+    await m2.open(req);
+    m2.setMode("squash");
+    await m2.start();
+    await m2.apply(0);
+    sq.check = vi.fn(async () => check({ main_staged: false }));
+    await m2.resume();
+    expect(m2.state.value.phase).toBe("residual");
+    sq.check = vi.fn(async () => check({ main_staged: true, refusal: { code: "overlap", message: "", paths: ["t"] } }));
+    await m2.resume();
+    expect(m2.state.value.phase).toBe("done");
+  });
+
+  it("a failure once the operation started can be resumed, not only closed", async () => {
+    const d = deps({ fastForward: vi.fn(async () => Promise.reject(new Error("git refused to fast-forward"))) });
+    const m = createWorktreeMergeBack(d);
+    await m.open(req);
+    m.setMode("rebase");
+    await m.start();
+    await m.apply(0);
+    expect(m.state.value.phase).toBe("residual");
+    expect(m.state.value.error).toContain("fast-forward");
+    d.fastForward = vi.fn(async () => ({ conflicts: false }));
+    await m.resume();
+    expect(m.state.value.phase).toBe("done");
+
+    const thrown = deps({ apply: vi.fn(async () => Promise.reject(new Error("refresh failed"))) });
+    const m2 = createWorktreeMergeBack(thrown);
+    await m2.open(req);
+    await m2.start();
+    await m2.apply(0);
+    expect(m2.state.value.phase).toBe("residual");
   });
 
   it("squash: the branch is not merged, so cleanup asks", async () => {

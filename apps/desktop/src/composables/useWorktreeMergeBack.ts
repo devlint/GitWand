@@ -214,15 +214,23 @@ export function createWorktreeMergeBack(deps: MergeBackDeps): WorktreeMergeBack 
     const r = req;
     await step(async () => {
       patch({ phase: "applying" });
-      const out = await deps.apply({
-        checkout: spec.cwd,
-        operation: spec.operation,
-        ref: spec.ref,
-        estimated,
-        mode: state.value.mode,
-        target: c.target,
-        path: r.path,
-      });
+      let out: ApplyOutcome;
+      try {
+        out = await deps.apply({
+          checkout: spec.cwd,
+          operation: spec.operation,
+          ref: spec.ref,
+          estimated,
+          mode: state.value.mode,
+          target: c.target,
+          path: r.path,
+        });
+      } catch (e) {
+        // git may have started: the operation is the user's to finish or
+        // abort, and the dialog must still be able to resume.
+        patch({ phase: "residual", error: message(e) });
+        return;
+      }
       patch({ outcome: out });
       if (out.stoppedReason === "op-failed") {
         patch({ phase: "error", error: out.operationError ?? "The operation failed." });
@@ -232,9 +240,16 @@ export function createWorktreeMergeBack(deps: MergeBackDeps): WorktreeMergeBack 
         patch({ phase: "residual" });
         return;
       }
-      await finish();
+      try {
+        await finish();
+      } catch (e) {
+        patch({ phase: "residual", error: message(e) });
+      }
     });
   }
+
+  /** Marks an abandoned merge or squash: never done, so never cleaned up. */
+  const ABANDONED = "abandoned";
 
   async function resume() {
     if (!req || state.value.phase !== "residual") return;
@@ -248,6 +263,13 @@ export function createWorktreeMergeBack(deps: MergeBackDeps): WorktreeMergeBack 
         const c = await deps.check(r.cwd, r.path, state.value.check?.target);
         if (c.refusal?.code === "main-in-progress") {
           patch({ phase: "residual", error: c.refusal.message });
+          return;
+        }
+        // The target must actually hold the result: a merge aborted by hand
+        // leaves no refusal behind, and "done" would delete an unmerged branch.
+        const holds = state.value.mode === "merge" ? c.task_merged : c.main_staged;
+        if (!holds) {
+          patch({ phase: "residual", error: ABANDONED });
           return;
         }
         patch({ phase: "done", error: null });

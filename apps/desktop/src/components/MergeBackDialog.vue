@@ -151,7 +151,7 @@ function refusalText(): string {
             <a href="#" @click.prevent="emit('open-residual', f); emit('minimize')">{{ f }}</a>
           </li>
         </ul>
-        <p v-if="st.error" class="mbd-error">{{ st.error }}</p>
+        <p v-if="st.error" class="mbd-error">{{ st.error === "abandoned" ? t("mergeBack.abandoned") : st.error }}</p>
       </template>
 
       <p v-else-if="st.phase === 'finishing'" class="mbd-muted">{{ t("mergeBack.finishing", st.check?.target ?? "") }}</p>

@@ -3799,6 +3799,10 @@ export interface MergeBackCheck {
   main_clean: boolean;
   task_commits: number;
   task_dirty: boolean;
+  /** The target already contains the task branch. */
+  task_merged: boolean;
+  /** The main checkout has staged changes (what a squash leaves). */
+  main_staged: boolean;
   refusal: MergeBackRefusal | null;
 }
 

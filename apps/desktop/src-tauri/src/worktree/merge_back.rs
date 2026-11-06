@@ -49,6 +49,11 @@ pub struct MergeBackCheck {
     pub task_commits: u32,
     /// Uncommitted changes in the task worktree, committed by `prepare`.
     pub task_dirty: bool,
+    /// The target already contains the task branch (a merge or rebase is
+    /// done; an aborted one is not).
+    pub task_merged: bool,
+    /// The main checkout has staged changes (what a squash leaves).
+    pub main_staged: bool,
     pub refusal: Option<Refusal>,
 }
 
@@ -205,6 +210,8 @@ pub(crate) fn check(
         main_clean: main_changes.is_empty(),
         task_commits: 0,
         task_dirty: !task_changes.is_empty(),
+        task_merged: false,
+        main_staged: !ok(&main, &["diff", "--cached", "--quiet"]),
         refusal: None,
     };
 
@@ -233,6 +240,15 @@ pub(crate) fn check(
         );
         return Ok(out);
     }
+    out.task_merged = ok(
+        &main,
+        &[
+            "merge-base",
+            "--is-ancestor",
+            &format!("refs/heads/{task_branch}"),
+            &format!("refs/heads/{target}"),
+        ],
+    );
     out.task_commits = git(
         &main,
         &[
@@ -289,10 +305,12 @@ pub(crate) fn check(
             &format!("refs/heads/{task_branch}"),
         ],
     )?;
+    // `--no-renames`: a renamed file's source is changed too.
     let committed = git_raw(
         &main,
         &[
             "diff",
+            "--no-renames",
             "--name-only",
             "-z",
             &base,
@@ -305,7 +323,30 @@ pub(crate) fn check(
         .map(str::to_string)
         .chain(task_changes)
         .collect();
-    let overlap: Vec<String> = main_changes.intersection(&task_files).cloned().collect();
+    // Ignored files in main are in no snapshot: a merge overwriting one could
+    // not be undone. `--directory` keeps an ignored tree to one entry.
+    let ignored_raw = git_raw(
+        &main,
+        &[
+            "ls-files",
+            "-o",
+            "-i",
+            "--exclude-standard",
+            "--directory",
+            "-z",
+        ],
+    )?;
+    let ignored: Vec<&str> = ignored_raw.split('\0').filter(|p| !p.is_empty()).collect();
+    let mut overlap: BTreeSet<String> = main_changes.intersection(&task_files).cloned().collect();
+    for f in &task_files {
+        if ignored
+            .iter()
+            .any(|i| i == f || (i.ends_with('/') && f.starts_with(i)))
+        {
+            overlap.insert(f.clone());
+        }
+    }
+    let overlap: Vec<String> = overlap.into_iter().collect();
     if !overlap.is_empty() {
         out.refusal = Some(Refusal {
             code: "overlap".into(),
@@ -571,6 +612,49 @@ mod tests {
             code(&check(&repo.path, &wt, None).unwrap()),
             Some("overlap")
         );
+    }
+
+    #[test]
+    fn check_overlap_sees_rename_sources_and_ignored_files() {
+        let repo = TempRepo::new();
+        repo.commit("a.ts", "export const a = 1;\n", "a");
+        repo.commit(".gitignore", "local.json\n", "ignore");
+        let wt = task(&repo, "a");
+        git_at(&wt, &["mv", "a.ts", "b.ts"]);
+        git_at(&wt, &["commit", "-q", "-m", "rename"]);
+        repo.write("a.ts", "export const a = 2;\n");
+        let c = check(&repo.path, &wt, None).unwrap();
+        assert_eq!(code(&c), Some("overlap"));
+        assert!(c.refusal.unwrap().paths.contains(&"a.ts".to_string()));
+        repo.git(&["checkout", "--", "a.ts"]);
+
+        // The task commits a path main ignores and holds locally: a merge
+        // would overwrite it, and snapshots do not keep ignored files.
+        git_at(&wt, &["add", "-f", "-N", "."]);
+        std::fs::write(wt.join("local.json"), "task").unwrap();
+        git_at(&wt, &["add", "-f", "local.json"]);
+        git_at(&wt, &["commit", "-q", "-m", "local"]);
+        repo.write("local.json", "mine");
+        let c = check(&repo.path, &wt, None).unwrap();
+        assert_eq!(code(&c), Some("overlap"));
+        assert_eq!(c.refusal.unwrap().paths, vec!["local.json"]);
+    }
+
+    #[test]
+    fn check_says_whether_the_target_holds_the_task() {
+        let repo = TempRepo::new();
+        let wt = task(&repo, "a");
+        commit_in(&wt, "t.txt", "t");
+        let c = check(&repo.path, &wt, None).unwrap();
+        assert!(!c.task_merged && !c.main_staged);
+        repo.git(&["merge", "-q", "--no-ff", "--no-edit", "task/a"]);
+        assert!(check(&repo.path, &wt, None).unwrap().task_merged);
+
+        let wt2 = task(&repo, "b");
+        commit_in(&wt2, "u.txt", "u");
+        squash(&repo.path, &wt2, "main").unwrap();
+        let c = check(&repo.path, &wt2, None).unwrap();
+        assert!(c.main_staged && !c.task_merged);
     }
 
     #[test]

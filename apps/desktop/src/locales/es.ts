@@ -2204,6 +2204,7 @@ const es: Locale = {
   // ─── Worktrees ──────────────────────────────────────────
   // v3.13 merge-back (spec §6)
   mergeBack: {
+    abandoned: "La rama de destino no contiene el trabajo de la tarea: la operación se abandonó. Cierra este diálogo y vuelve a iniciar el merge-back; la rama se conserva.",
     title: "Traer de vuelta {0}",
     checking: "Comprobando la tarea…",
     commits: "{0} commit(s) que la rama de destino no tiene",

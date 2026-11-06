@@ -2214,6 +2214,7 @@ const fr: Locale = {
   // ─── Worktrees ──────────────────────────────────────────
   // v3.13 merge-back (spec §6)
   mergeBack: {
+    abandoned: "La cible ne contient pas le travail de la tâche : l'opération a été abandonnée. Fermez ce dialogue et relancez le merge-back ; la branche est conservée.",
     title: "Ramener {0}",
     checking: "Vérification de la tâche…",
     commits: "{0} commit(s) absent(s) de la cible",

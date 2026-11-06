@@ -2213,6 +2213,7 @@ const zhCN: Locale = {
   // ─── Worktrees ──────────────────────────────────────────
   // v3.13 merge-back (spec §6)
   mergeBack: {
+    abandoned: "目标分支不包含任务的工作：操作已被放弃。请关闭此对话框并重新开始合并回；分支会被保留。",
     title: "合并回 {0}",
     checking: "正在检查任务…",
     commits: "目标分支缺少的提交：{0} 个",
