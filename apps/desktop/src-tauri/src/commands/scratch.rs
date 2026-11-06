@@ -21,7 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Run a git command in `dir`, returning trimmed stdout on success or a
 /// formatted error (stderr) on failure. All args are passed discretely — never
 /// interpolated — per AGENTS.md.
-fn git_in(dir: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git_in(dir: &Path, args: &[&str]) -> Result<String, String> {
     let output = git_cmd()
         .args(args)
         .current_dir(dir)
@@ -358,7 +358,7 @@ fn guard_scratch(repo_root: &Path, scratch: &Path, removes: bool) -> Result<(), 
 /// `git status --porcelain` XY codes of an unmerged (conflicted) path.
 const CONFLICT_CODES: &[&str] = &["UU", "AA", "DD", "AU", "UA", "DU", "UD"];
 
-fn has_unmerged_entries(dir: &Path) -> Result<bool, String> {
+pub(crate) fn has_unmerged_entries(dir: &Path) -> Result<bool, String> {
     Ok(git_in(dir, &["status", "--porcelain"])?
         .lines()
         .any(|l| l.len() >= 2 && CONFLICT_CODES.contains(&&l[..2])))
@@ -388,7 +388,7 @@ fn unresolved_conflicts(dir: &Path) -> Result<Vec<String>, String> {
 
 /// The git operation in progress in `dir`, if any, from the state files git
 /// keeps for it. `--git-path` resolves them for linked worktrees too.
-fn operation_in_progress(dir: &Path) -> Result<Option<&'static str>, String> {
+pub(crate) fn operation_in_progress(dir: &Path) -> Result<Option<&'static str>, String> {
     const STATES: &[(&str, &str)] = &[
         ("rebase-merge", "a rebase"),
         ("rebase-apply", "a rebase or `git am`"),

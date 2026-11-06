@@ -128,6 +128,16 @@ export function assertOperationSucceeded(
   }
 }
 
+/**
+ * v3.13 merge-back: how a merge is run when it is not the plain one.
+ * `runMerge` replaces `deps.runMerge` (`--no-ff --no-edit`, or `--squash`);
+ * `skipFinalize` is for a squash, which leaves no operation to `--continue`.
+ */
+export interface ApplyOptions {
+  runMerge?: (ref: string) => Promise<void>;
+  skipFinalize?: boolean;
+}
+
 /** Bounded so a pathological rebase reports instead of spinning forever. */
 const MAX_REBASE_STEPS = 100;
 
@@ -191,6 +201,7 @@ export function useApplyFromPreview(deps: ApplyDeps) {
     operation: PreviewOperation,
     ref_: string,
     estimatedHunks: number,
+    opts: ApplyOptions = {},
   ): Promise<ApplyOutcome> {
     const cwd = deps.cwd();
     const base: ApplyOutcome = {
@@ -240,7 +251,7 @@ export function useApplyFromPreview(deps: ApplyDeps) {
 
     // 2. Run the real operation.
     try {
-      if (operation === "merge") await deps.runMerge(ref_);
+      if (operation === "merge") await (opts.runMerge ?? deps.runMerge)(ref_);
       else if (operation === "cherry-pick") await deps.runCherryPick(ref_);
       else await deps.runRebaseOnto(ref_);
     } catch (e) {
@@ -346,7 +357,7 @@ export function useApplyFromPreview(deps: ApplyDeps) {
     //    A merge or cherry-pick that never conflicted has nothing to continue.
     let finalized = false;
     if (applied > 0 || resolvedFiles.length > 0) {
-      if (operation !== "rebase") {
+      if (operation !== "rebase" && !opts.skipFinalize) {
         try {
           await deps.finalize(operation);
         } catch (e) {

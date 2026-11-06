@@ -1961,7 +1961,7 @@ export interface SnapshotMeta {
   /** Full sha of the snapshot commit. */
   commit: string;
   /** What triggered it. */
-  kind: "manual" | "discard" | "reset" | "checkout" | "resolution" | "pre-restore" | "removal";
+  kind: "manual" | "discard" | "reset" | "checkout" | "resolution" | "pre-restore" | "removal" | "merge-back" | "merge-back-task";
   label: string;
   timestampMs: number;
   headSha: string;
@@ -3771,6 +3771,73 @@ export async function worktreeUnlock(cwd: string, path: string): Promise<void> {
     return;
   }
   await devPost("/api/worktree-unlock", { cwd, path }, "Failed to unlock the worktree");
+}
+
+/** Why a merge-back cannot start now (`worktree::merge_back::Refusal`). */
+export interface MergeBackRefusal {
+  code:
+    | "untouchable"
+    | "not-owned"
+    | "detached"
+    | "unknown-target"
+    | "wrong-branch"
+    | "main-in-progress"
+    | "task-in-progress"
+    | "overlap"
+    | "nothing";
+  message: string;
+  paths: string[];
+}
+
+/** Merge-back steps 1–2 (`worktree::merge_back::check`). */
+export interface MergeBackCheck {
+  task_branch: string;
+  task_path: string;
+  name: string;
+  target: string;
+  default_target: string;
+  main_path: string;
+  main_branch: string | null;
+  main_clean: boolean;
+  task_commits: number;
+  task_dirty: boolean;
+  /** The target already contains the task branch. */
+  task_merged: boolean;
+  /** The main checkout has staged changes (what a squash leaves). */
+  main_staged: boolean;
+  refusal: MergeBackRefusal | null;
+}
+
+export interface MergeBackPrepared {
+  check: MergeBackCheck;
+  survivors: ProcessInfo[];
+  task_snapshot: SnapshotMeta | null;
+  main_snapshot: SnapshotMeta | null;
+  committed_wip: boolean;
+}
+
+/** v3.13 — whether a task can be merged back into `target` now (read-only). */
+export async function worktreeMergeBackCheck(cwd: string, path: string, target?: string | null): Promise<MergeBackCheck> {
+  if (isTauri()) return tauriInvoke<MergeBackCheck>("worktree_merge_back_check", { cwd, path, target: target ?? null });
+  return devPost<MergeBackCheck>("/api/worktree-merge-back-check", { cwd, path, target: target ?? null }, "Failed to check the merge-back");
+}
+
+/** v3.13 — stop the task's processes, commit its outstanding work, snapshot both sides. */
+export async function worktreeMergeBackPrepare(cwd: string, path: string, target: string): Promise<MergeBackPrepared> {
+  if (isTauri()) return tauriInvoke<MergeBackPrepared>("worktree_merge_back_prepare", { cwd, path, target });
+  return devPost<MergeBackPrepared>("/api/worktree-merge-back-prepare", { cwd, path, target }, "Failed to prepare the merge-back");
+}
+
+/** v3.13 — squash mode: the task's changes staged on the target. */
+export async function worktreeMergeBackSquash(cwd: string, path: string, target: string): Promise<{ conflicts: boolean }> {
+  if (isTauri()) return tauriInvoke<{ conflicts: boolean }>("worktree_merge_back_squash", { cwd, path, target });
+  return devPost<{ conflicts: boolean }>("/api/worktree-merge-back-squash", { cwd, path, target }, "Failed to squash the task");
+}
+
+/** v3.13 — rebase mode, last step: the target fast-forwards to the rebased task. */
+export async function worktreeMergeBackFastForward(cwd: string, path: string, target: string): Promise<{ conflicts: boolean }> {
+  if (isTauri()) return tauriInvoke<{ conflicts: boolean }>("worktree_merge_back_fast_forward", { cwd, path, target });
+  return devPost<{ conflicts: boolean }>("/api/worktree-merge-back-fast-forward", { cwd, path, target }, "Failed to fast-forward the target");
 }
 
 /** v3.13 — a `removal` or `merge-back-task` snapshot as a new worktree (spec §9). */

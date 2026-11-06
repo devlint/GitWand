@@ -2208,6 +2208,65 @@ const es: Locale = {
   },
 
   // ─── Worktrees ──────────────────────────────────────────
+  // v3.13 merge-back (spec §6)
+  mergeBack: {
+    abandoned: "La rama de destino no contiene el trabajo de la tarea como merge. Si hiciste tú el commit del squash, ya está: cierra este diálogo. Si no, la operación se abandonó: cierra este diálogo y vuelve a iniciar el merge-back. En ambos casos la rama se conserva.",
+    title: "Traer de vuelta {0}",
+    checking: "Comprobando la tarea…",
+    commits: "{0} commit(s) que la rama de destino no tiene",
+    target: "A",
+    mode: "Cómo",
+    modes: {
+      merge: "Merge",
+      rebase: "Rebase",
+      squash: "Squash",
+    },
+    modesHint: {
+      merge: "Un commit de merge en la rama de destino: se conservan los commits del agente.",
+      rebase: "Los commits del agente se reaplican sobre la rama de destino, que luego avanza en fast-forward: historial lineal.",
+      squash: "Los cambios quedan en el índice de la rama de destino, sin commit, para que escribas el commit.",
+    },
+    wipNote: "Los cambios sin commit de la tarea se commitean primero, como “wip({0}): uncommitted work at merge-back”.",
+    snapshotNote: "Se toma un snapshot de ambos checkouts antes de cambiar nada.",
+    refusal: {
+      untouchable: "Este worktree está protegido (bloqueado, .worktree-keep o de otra herramienta).",
+      "not-owned": "GitWand no creó este worktree, así que no lo trae de vuelta.",
+      detached: "El worktree de la tarea no está en ninguna rama.",
+      "unknown-target": "{0} no es una rama local en la que hacer merge.",
+      "wrong-branch": "El checkout principal está en {1}, no en {0}. Cámbialo primero a {0}.",
+      "main-in-progress": "El checkout principal está en medio de una operación git o tiene conflictos sin resolver. Termínala o abórtala primero.",
+      "task-in-progress": "El worktree de la tarea está en medio de una operación git. Termínala o abórtala primero.",
+      overlap: "El checkout principal tiene cambios en archivos que la tarea también modifica. Haz commit, stash o descártalos primero; GitWand nunca hace stash por ti.",
+      nothing: "La tarea no tiene nada que {0} no tenga ya.",
+    },
+    preparing: "Deteniendo los procesos de la tarea, guardando su trabajo y tomando snapshots…",
+    previewIntro: {
+      merge: "Hacer merge de {0} en {1}, con un commit de merge.",
+      rebase: "Hacer rebase de {0} sobre {1} y luego avanzar {1} en fast-forward.",
+      squash: "Hacer squash de {0} sobre {1}, en el índice y sin commit.",
+    },
+    wipCommitted: "Los cambios sin commit de la tarea se commitearon primero.",
+    residualRebase: "El rebase se detuvo en conflictos que el motor te deja, en el worktree de la tarea. Resuélvelos y continúa el rebase; luego vuelve y elige Reanudar.",
+    residualMerge: "Te quedan conflictos en el checkout principal. Resuélvelos y termina el merge; luego vuelve y elige Reanudar. No se abortó nada.",
+    finishing: "Avanzando {0} en fast-forward…",
+    done: {
+      merge: "La tarea está fusionada en {0}, con sus commits.",
+      rebase: "{0} contiene ahora los commits de la tarea, rebasados.",
+      squash: "Los cambios de la tarea están en el índice de {0}. Escribe el mensaje de commit para terminar.",
+    },
+    cleanupMerged: "El worktree sigue ahí para que compruebes primero el resultado. Elimínalo cuando hayas terminado.",
+    cleanupSquash: "Un squash no fusiona {0}: sus commits solo sobreviven si conservas la rama. La eliminación te lo preguntará.",
+    failed: "El merge-back falló: {0}",
+    switchMain: "Cambiar el checkout principal a {0}",
+    continue: "Continuar",
+    resolveNow: "Resolver ahora",
+    resume: "Reanudar",
+    removeWorktree: "Eliminar el worktree",
+    resumePill: "Reanudar el merge-back",
+    action: "Traer de vuelta",
+    managerTooltip: "Traer el trabajo de este worktree a una rama",
+  },
+
   worktree: {
     // v3.13 worktree service (setup, base)
     setupTabTitle: "Setup · {0}",

@@ -11,6 +11,7 @@ pub(crate) mod create;
 pub(crate) mod guard;
 pub(crate) mod hooks;
 pub(crate) mod include;
+pub(crate) mod merge_back;
 pub(crate) mod record;
 pub(crate) mod remove;
 pub(crate) mod restore;

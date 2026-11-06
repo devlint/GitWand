@@ -232,6 +232,82 @@ pub(crate) async fn worktree_unlock(cwd: String, path: String) -> Result<(), Str
     .map_err(|e| format!("worktree unlock failed: {e}"))?
 }
 
+/// Merge-back steps 1–2 (spec §6.1), read-only: the task, the target and
+/// whether the main checkout can take the work now.
+#[tauri::command]
+pub(crate) async fn worktree_merge_back_check(
+    cwd: String,
+    path: String,
+    target: Option<String>,
+) -> Result<crate::worktree::merge_back::MergeBackCheck, String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree =
+        crate::git::safe_repo_path(path.trim(), ".").map_err(|e| format!("invalid path: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::worktree::merge_back::check(&root, &worktree, target.as_deref())
+    })
+    .await
+    .map_err(|e| format!("merge-back check failed: {e}"))?
+}
+
+/// Merge-back steps 3–5: stop the task's processes, commit its outstanding
+/// work, snapshot both sides. Preview and apply go through the existing
+/// commands.
+#[tauri::command]
+pub(crate) async fn worktree_merge_back_prepare(
+    cwd: String,
+    path: String,
+    target: String,
+) -> Result<crate::worktree::merge_back::Prepared, String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree =
+        crate::git::safe_repo_path(path.trim(), ".").map_err(|e| format!("invalid path: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        // Same lock as the scratch merge-back: no other GitWand write to the
+        // repo while the task is committed and both sides snapshotted.
+        let _repo = crate::git::repo_lock::write(&root.to_string_lossy());
+        crate::worktree::merge_back::prepare(&root, &worktree, &target, |wt| {
+            super::worktree_processes::stop_processes_in(&root, wt, false)
+        })
+    })
+    .await
+    .map_err(|e| format!("merge-back preparation failed: {e}"))?
+}
+
+/// Squash mode: `git merge --squash <task>` in the main checkout.
+#[tauri::command]
+pub(crate) async fn worktree_merge_back_squash(
+    cwd: String,
+    path: String,
+    target: String,
+) -> Result<crate::worktree::merge_back::StepResult, String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree =
+        crate::git::safe_repo_path(path.trim(), ".").map_err(|e| format!("invalid path: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::worktree::merge_back::squash(&root, &worktree, &target)
+    })
+    .await
+    .map_err(|e| format!("merge-back squash failed: {e}"))?
+}
+
+/// Rebase mode, last step: `git merge --ff-only <task>` in the main checkout.
+#[tauri::command]
+pub(crate) async fn worktree_merge_back_fast_forward(
+    cwd: String,
+    path: String,
+    target: String,
+) -> Result<crate::worktree::merge_back::StepResult, String> {
+    let root = canonical_cwd(&cwd)?;
+    let worktree =
+        crate::git::safe_repo_path(path.trim(), ".").map_err(|e| format!("invalid path: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::worktree::merge_back::fast_forward(&root, &worktree, &target)
+    })
+    .await
+    .map_err(|e| format!("merge-back fast-forward failed: {e}"))?
+}
+
 /// Restores a `removal` or `merge-back-task` snapshot as a new worktree
 /// (spec §9). Does not run `setup`: the frontend does, as after any creation.
 #[tauri::command]

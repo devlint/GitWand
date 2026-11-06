@@ -37,6 +37,8 @@ const emit = defineEmits<{
   (e: "created", payload: { cwd: string; created: CreatedWorktree; decision: HookTrustDecision; open: boolean }): void;
   /** v3.13: focus a worktree's setup tab. */
   (e: "open-setup-log", payload: { repoPath: string; tabId: number }): void;
+  /** v3.13: bring a worktree's work back (App opens the merge-back dialog). */
+  (e: "merge-back", payload: { cwd: string; path: string }): void;
 }>();
 
 const flow = useWorktreeCreation();
@@ -537,6 +539,14 @@ onMounted(async () => {
               @click="emit('open-tab', wt.path)"
             >
               {{ t("worktree.openInTab") }}
+            </button>
+            <button
+              v-if="!wt.is_main"
+              class="bm-btn bm-btn--ghost"
+              :title="t('mergeBack.managerTooltip')"
+              @click="emit('merge-back', { cwd, path: wt.path })"
+            >
+              {{ t("mergeBack.action") }}
             </button>
             <button
               v-if="!wt.is_main"

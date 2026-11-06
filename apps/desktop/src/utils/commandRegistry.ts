@@ -261,6 +261,11 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   worktree_hooks_trust_set: { route: "/api/worktree-hooks-trust-set" },
   worktree_create: { route: "/api/worktree-create" },
   worktree_guard: { route: "/api/worktree-guard" },
+  worktree_merge_back_check: { route: "/api/worktree-merge-back-check" },
+  // Best-effort mirror: the dev process sweep is `devStopProcessesIn`.
+  worktree_merge_back_prepare: { route: "/api/worktree-merge-back-prepare" },
+  worktree_merge_back_squash: { route: "/api/worktree-merge-back-squash" },
+  worktree_merge_back_fast_forward: { route: "/api/worktree-merge-back-fast-forward" },
   snapshot_restore_as_worktree: { route: "/api/snapshot-restore-as-worktree" },
   // Best-effort mirror: the dev process sweep is `devStopProcessesIn`.
   worktree_remove_prepare: { route: "/api/worktree-remove-prepare" },

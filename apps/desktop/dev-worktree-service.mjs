@@ -626,6 +626,195 @@ export function devUnlockWorktree(repo, worktree) {
   git(repo, ["worktree", "unlock", entry.path]);
 }
 
+// ── Merge-back (mirror of `worktree::merge_back`) ────────────────────────────
+
+const gitRaw = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+
+function changedPaths(dir) {
+  const raw = gitRaw(dir, ["status", "--porcelain", "-z", "--untracked-files=all"]);
+  const out = new Set();
+  const tokens = raw.split("\0").filter(Boolean);
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.length < 4) continue;
+    const code = t.slice(0, 2);
+    out.add(t.slice(3));
+    if ((code[0] === "R" || code[0] === "C") && i + 1 < tokens.length) out.add(tokens[++i]);
+  }
+  return out;
+}
+
+const localBranchExists = (dir, b) => !!b && gitOk(dir, ["show-ref", "--verify", "--quiet", `refs/heads/${b}`]) !== null;
+
+/** Mirror of `scratch::operation_in_progress`. */
+function opInProgress(dir) {
+  const states = [
+    ["rebase-merge", "a rebase"],
+    ["rebase-apply", "a rebase or `git am`"],
+    ["MERGE_HEAD", "a merge"],
+    ["CHERRY_PICK_HEAD", "a cherry-pick"],
+    ["REVERT_HEAD", "a revert"],
+    ["BISECT_LOG", "a bisect (`git bisect reset` ends it)"],
+  ];
+  for (const [name, op] of states) {
+    const p = git(dir, ["rev-parse", "--git-path", name]);
+    if (existsSync(isAbsolute(p) ? p : join(dir, p))) return op;
+  }
+  return null;
+}
+
+const CONFLICT_CODES = new Set(["UU", "AA", "DD", "AU", "UA", "DU", "UD"]);
+const hasUnmerged = (dir) =>
+  gitRaw(dir, ["status", "--porcelain"]).split("\n").some((l) => l.length >= 2 && CONFLICT_CODES.has(l.slice(0, 2)));
+
+function devDefaultTarget(main, taskBranch, rec, mainBranch) {
+  if (rec?.source_branch && localBranchExists(main, rec.source_branch)) return rec.source_branch;
+  const src = gitOk(main, ["config", "--get", `branch.${taskBranch}.gitwandSource`]);
+  if (src && localBranchExists(main, src)) return src;
+  if (rec?.base_ref) {
+    const base = rec.base_ref;
+    const i = base.indexOf("/");
+    const local = i >= 0 ? base.slice(i + 1) : base;
+    for (const c of [base, local]) if (c !== taskBranch && localBranchExists(main, c)) return c;
+  }
+  return mainBranch ?? "";
+}
+
+const refusal = (code, message, paths = []) => ({ code, message, paths });
+
+/** Mirror of `merge_back::check`. */
+export function devMergeBackCheck(repo, worktree, target = null) {
+  const report = devWorktreeGuard(repo, worktree);
+  const entry = devListedWorktree(repo, worktree);
+  const taskPath = entry.path;
+  const main = mainWorktreeRoot(repo);
+  const mainBranch = gitOk(main, ["symbolic-ref", "--quiet", "--short", "HEAD"]) || null;
+  const taskBranch = entry.branch ?? "";
+  const rec = devFindRecord(devCommonDir(repo), taskPath);
+  const defaultTarget = devDefaultTarget(main, taskBranch, rec, mainBranch);
+  const t = typeof target === "string" && target.trim() ? target.trim() : defaultTarget;
+  const mainChanges = changedPaths(main);
+  const taskChanges = changedPaths(taskPath);
+  const out = {
+    task_branch: taskBranch,
+    task_path: taskPath,
+    name: basename(taskPath),
+    target: t,
+    default_target: defaultTarget,
+    main_path: main,
+    main_branch: mainBranch,
+    main_clean: mainChanges.size === 0,
+    task_commits: 0,
+    task_dirty: taskChanges.size > 0,
+    task_merged: false,
+    main_staged: spawnSync("git", ["diff", "--cached", "--quiet"], { cwd: main }).status !== 0,
+    refusal: null,
+  };
+  if (report.untouchable) return { ...out, refusal: refusal("untouchable", `This worktree is protected (${report.reasons.join(", ")}).`) };
+  if (!report.owned) return { ...out, refusal: refusal("not-owned", "GitWand did not create this worktree.") };
+  if (!taskBranch) return { ...out, refusal: refusal("detached", "The task worktree is not on a branch.") };
+  if (t === taskBranch || !localBranchExists(main, t)) {
+    return { ...out, refusal: refusal("unknown-target", `${t} is not a local branch to merge into.`) };
+  }
+  out.task_merged =
+    spawnSync("git", ["merge-base", "--is-ancestor", `refs/heads/${taskBranch}`, `refs/heads/${t}`], { cwd: main }).status === 0;
+  out.task_commits = parseInt(git(main, ["rev-list", "--count", `refs/heads/${t}..refs/heads/${taskBranch}`]), 10) || 0;
+  if (mainBranch !== t) {
+    return { ...out, refusal: refusal("wrong-branch", `The main checkout is on ${mainBranch ?? "a detached HEAD"}, not ${t}.`) };
+  }
+  const op = opInProgress(main);
+  if (op) return { ...out, refusal: refusal("main-in-progress", `The main checkout is in the middle of ${op}.`) };
+  if (hasUnmerged(main)) return { ...out, refusal: refusal("main-in-progress", "The main checkout has unresolved conflicts.") };
+  if (opInProgress(taskPath) || hasUnmerged(taskPath)) {
+    return { ...out, refusal: refusal("task-in-progress", "The task worktree is in the middle of a git operation.") };
+  }
+  if (out.task_commits === 0 && !out.task_dirty) {
+    return { ...out, refusal: refusal("nothing", `${taskBranch} has nothing that ${t} lacks.`) };
+  }
+  const base = git(main, ["merge-base", `refs/heads/${t}`, `refs/heads/${taskBranch}`]);
+  const taskFiles = new Set([
+    ...gitRaw(main, ["diff", "--no-renames", "--name-only", "-z", base, `refs/heads/${taskBranch}`]).split("\0").filter(Boolean),
+    ...taskChanges,
+  ]);
+  const ignored = gitRaw(main, ["ls-files", "-o", "-i", "--exclude-standard", "--directory", "-z"]).split("\0").filter(Boolean);
+  const overlapSet = new Set([...mainChanges].filter((p) => taskFiles.has(p)));
+  for (const f of taskFiles) {
+    if (ignored.some((i) => i === f || (i.endsWith("/") && f.startsWith(i)))) overlapSet.add(f);
+  }
+  const overlap = [...overlapSet].sort();
+  if (overlap.length > 0) {
+    out.refusal = refusal("overlap", "The main checkout has changes to files the task also changes.", overlap);
+  }
+  return out;
+}
+
+function refuseCheck(c) {
+  if (c.refusal) throw new Error(`${c.refusal.code}: ${c.refusal.message}`);
+}
+
+/** Mirror of `merge_back::prepare`. */
+export async function devMergeBackPrepare(repo, worktree, target, { createSnapshot, stop = async () => [] }) {
+  const c = devMergeBackCheck(repo, worktree, target);
+  refuseCheck(c);
+  const survivors = await stop(c.task_path);
+  if (survivors.length > 0) {
+    return { check: c, survivors, task_snapshot: null, main_snapshot: null, committed_wip: false };
+  }
+  git(c.task_path, ["add", "-A"]);
+  const committedWip = changedPaths(c.task_path).size > 0;
+  if (committedWip) {
+    git(c.task_path, [
+      "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+      "commit", "--no-verify", "-q", "-m", `wip(${c.name}): uncommitted work at merge-back`,
+    ]);
+  }
+  const rec = devFindRecord(devCommonDir(repo), c.task_path);
+  const base = rec ? { baseRef: rec.base_ref, baseCommit: rec.base_commit } : null;
+  const taskSnapshot = createSnapshot(c.task_path, "merge-back-task", `Merge back ${c.name} (task)`, {
+    path: c.task_path,
+    branch: c.task_branch,
+    name: c.name,
+  }, base);
+  const mainSnapshot = createSnapshot(c.main_path, "merge-back", `Merge back ${c.name} into ${c.target}`);
+  return {
+    check: devMergeBackCheck(repo, worktree, target),
+    survivors: [],
+    task_snapshot: taskSnapshot,
+    main_snapshot: mainSnapshot,
+    committed_wip: committedWip,
+  };
+}
+
+function mainOn(repo, target) {
+  const main = mainWorktreeRoot(repo);
+  if ((gitOk(main, ["symbolic-ref", "--quiet", "--short", "HEAD"]) ?? "") !== target) {
+    throw new Error(`wrong-branch: the main checkout is no longer on ${target}.`);
+  }
+  return main;
+}
+
+/** Mirror of `merge_back::squash`. */
+export function devMergeBackSquash(repo, worktree, target) {
+  const entry = devListedWorktree(repo, worktree);
+  if (!entry.branch) throw new Error("detached: the task worktree is not on a branch.");
+  const main = mainOn(repo, target);
+  const r = spawnSync("git", ["merge", "--squash", "--no-autostash", "--no-verify-signatures", `refs/heads/${entry.branch}`], { cwd: main, encoding: "utf-8" });
+  if (r.status === 0) return { conflicts: false };
+  if (hasUnmerged(main)) return { conflicts: true };
+  throw new Error(`git refused the squash: ${(r.stderr ?? "").trim()}`);
+}
+
+/** Mirror of `merge_back::fast_forward`. */
+export function devMergeBackFastForward(repo, worktree, target) {
+  const entry = devListedWorktree(repo, worktree);
+  if (!entry.branch) throw new Error("detached: the task worktree is not on a branch (is its rebase still running?).");
+  if (opInProgress(entry.path)) throw new Error("task-in-progress: finish the rebase in the task worktree first.");
+  const main = mainOn(repo, target);
+  const r = spawnSync("git", ["merge", "--ff-only", "--no-autostash", `refs/heads/${entry.branch}`], { cwd: main, encoding: "utf-8" });
+  if (r.status !== 0) throw new Error(`git refused to fast-forward ${target}: ${(r.stderr ?? "").trim()}`);
+  return { conflicts: false };
+}
+
 // ── Restore as worktree (mirror of `worktree::restore`) ──────────────────────
 
 export const RESTORABLE_KINDS = ["removal", "merge-back-task"];
