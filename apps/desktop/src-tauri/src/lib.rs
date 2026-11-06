@@ -852,6 +852,7 @@ pub fn run() {
             commands::worktree::worktree_remove_prepare,
             commands::worktree::worktree_remove,
             commands::worktree::worktree_unlock,
+            commands::worktree::snapshot_restore_as_worktree,
             commands::worktree_processes::worktree_stop_processes,
             commands::worktree_trust::worktree_hooks_trust,
             commands::worktree_trust::worktree_hooks_trust_set,

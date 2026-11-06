@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devCreateWorktree, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl } from "./dev-worktree-service.mjs";
+import { devCreateWorktree, devReadSettings, devRestoreAsWorktree, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
 // output, resize, and control sequences without any manual workarounds.
@@ -1463,7 +1463,7 @@ function snapshotGitDir(cwd) {
   return execFileSync(GIT, ["rev-parse", "--absolute-git-dir"], { cwd, encoding: "utf-8" }).trim();
 }
 
-function createSnapshot(cwd, kind, label, worktree = null) {
+function createSnapshot(cwd, kind, label, worktree = null, worktreeBase = null) {
   const g = (args, opts = {}) =>
     execFileSync(GIT, args, { cwd, encoding: "utf-8", ...opts }).trim();
 
@@ -1510,6 +1510,7 @@ function createSnapshot(cwd, kind, label, worktree = null) {
     const meta = { id: "", commit: "", kind, label, timestampMs, headSha, headRef, mergeHead };
     // v3.13 — written only when set, like `skip_serializing_if` in snapshot.rs.
     if (worktree) meta.worktree = worktree;
+    if (worktreeBase) meta.worktreeBase = worktreeBase;
     const commit = g([
       "commit-tree", worktreeTree, "-p", headSha, "-p", metaCommit, "-m", JSON.stringify(meta),
     ]);
@@ -1556,26 +1557,10 @@ function listSnapshots(cwd) {
   return out;
 }
 
-function restoreSnapshot(cwd, id) {
+/** Mirror of `snapshot::apply_snapshot_state`: tree, exact index, merge state. */
+function applySnapshotState(cwd, target) {
   const g = (args, opts = {}) =>
     execFileSync(GIT, args, { cwd, encoding: "utf-8", ...opts }).trim();
-  const target = listSnapshots(cwd).find((s) => s.id === id);
-  if (!target) throw new Error(`snapshot ${id} not found`);
-
-  const redo = createSnapshot(cwd, "pre-restore", `before restoring ${id}`);
-
-  // Plumbing, not `checkout`: a checkout would refuse on a dirty tree, which
-  // is exactly the state an undo has to recover from. `-m` on every ref move:
-  // without it git writes an empty reflog message (see snapshot.rs).
-  const reason = `gitwand: restore snapshot ${id}`;
-  if (target.headRef) {
-    const full = `refs/heads/${target.headRef}`;
-    g(["update-ref", "-m", reason, full, target.headSha]);
-    g(["symbolic-ref", "-m", reason, "HEAD", full]);
-  } else {
-    g(["update-ref", "-m", reason, "--no-deref", "HEAD", target.headSha]);
-  }
-
   g(["read-tree", "-u", "--reset", `${target.commit}^{tree}`]);
 
   // Staged into a scratch index and moved into place only on success — see
@@ -1612,6 +1597,29 @@ function restoreSnapshot(cwd, id) {
     const mergeMsgPath = join(dir, "MERGE_MSG");
     if (existsSync(mergeMsgPath)) unlinkSync(mergeMsgPath);
   }
+}
+
+function restoreSnapshot(cwd, id) {
+  const g = (args, opts = {}) =>
+    execFileSync(GIT, args, { cwd, encoding: "utf-8", ...opts }).trim();
+  const target = listSnapshots(cwd).find((s) => s.id === id);
+  if (!target) throw new Error(`snapshot ${id} not found`);
+
+  const redo = createSnapshot(cwd, "pre-restore", `before restoring ${id}`);
+
+  // Plumbing, not `checkout`: a checkout would refuse on a dirty tree, which
+  // is exactly the state an undo has to recover from. `-m` on every ref move:
+  // without it git writes an empty reflog message (see snapshot.rs).
+  const reason = `gitwand: restore snapshot ${id}`;
+  if (target.headRef) {
+    const full = `refs/heads/${target.headRef}`;
+    g(["update-ref", "-m", reason, full, target.headSha]);
+    g(["symbolic-ref", "-m", reason, "HEAD", full]);
+  } else {
+    g(["update-ref", "-m", reason, "--no-deref", "HEAD", target.headSha]);
+  }
+
+  applySnapshotState(cwd, target);
   return redo;
 }
 
@@ -7195,6 +7203,16 @@ async function handleRequest(req, res) {
       try {
         const { cwd, path, opts } = await readBody(req);
         return jsonResponse(req, res, devRemoveWorktree(resolve(cwd), resolve(String(path ?? "")), opts ?? {}));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/snapshot-restore-as-worktree  { cwd, id, name? } — mirrors snapshot_restore_as_worktree
+    if (url.pathname === "/api/snapshot-restore-as-worktree" && req.method === "POST") {
+      try {
+        const { cwd, id, name } = await readBody(req);
+        return jsonResponse(req, res, devRestoreAsWorktree(resolve(cwd), String(id ?? ""), name ?? null, { listSnapshots, applySnapshotState }));
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }

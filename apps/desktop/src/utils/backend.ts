@@ -1971,6 +1971,8 @@ export interface SnapshotMeta {
   mergeHead: string | null;
   /** v3.13 — the worktree it was taken in, before removing it. */
   worktree?: { path: string; branch: string | null; name: string };
+  /** v3.13 — that worktree's recorded base. */
+  worktreeBase?: { baseRef: string; baseCommit: string };
 }
 
 /** Capture a snapshot. Returns null on a repo with no HEAD yet. */
@@ -3769,6 +3771,12 @@ export async function worktreeUnlock(cwd: string, path: string): Promise<void> {
     return;
   }
   await devPost("/api/worktree-unlock", { cwd, path }, "Failed to unlock the worktree");
+}
+
+/** v3.13 — a `removal` or `merge-back-task` snapshot as a new worktree (spec §9). */
+export async function snapshotRestoreAsWorktree(cwd: string, id: string, name?: string): Promise<CreatedWorktree> {
+  if (isTauri()) return tauriInvoke<CreatedWorktree>("snapshot_restore_as_worktree", { cwd, id, name: name ?? null });
+  return devPost<CreatedWorktree>("/api/snapshot-restore-as-worktree", { cwd, id, name: name ?? null }, "Failed to restore the snapshot as a worktree");
 }
 
 /** Prune stale worktree administrative files. */

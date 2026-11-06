@@ -558,11 +558,13 @@ export async function devRemovePrepare(repo, worktree, { createSnapshot, stop = 
   const survivors = await stop(entry.path);
   if (survivors.length > 0) return { survivors, snapshot: null };
   const name = basename(entry.path);
+  const rec = devFindRecord(devCommonDir(repo), entry.path);
+  const base = rec ? { baseRef: rec.base_ref, baseCommit: rec.base_commit } : null;
   const snapshot = createSnapshot(entry.path, "removal", `Remove worktree ${name}`, {
     path: entry.path,
     branch: entry.branch,
     name,
-  });
+  }, base);
   return { survivors: [], snapshot };
 }
 
@@ -622,4 +624,42 @@ export function devRemoveWorktree(repo, worktree, opts = {}) {
 export function devUnlockWorktree(repo, worktree) {
   const entry = devListedWorktree(repo, worktree);
   git(repo, ["worktree", "unlock", entry.path]);
+}
+
+// ── Restore as worktree (mirror of `worktree::restore`) ──────────────────────
+
+export const RESTORABLE_KINDS = ["removal", "merge-back-task"];
+
+/**
+ * Mirror of `restore::restore_as_worktree`. The dev-server hands in its own
+ * snapshot primitives (`listSnapshots`, `applySnapshotState`).
+ */
+export function devRestoreAsWorktree(repo, id, name, { listSnapshots, applySnapshotState }) {
+  const main = mainWorktreeRoot(repo);
+  const snap = listSnapshots(main).find((s) => s.id === id);
+  if (!snap) throw new Error(`Snapshot ${id} not found.`);
+  if (!snap.worktree || !RESTORABLE_KINDS.includes(snap.kind)) {
+    throw new Error("This snapshot was not taken from a worktree GitWand removed.");
+  }
+  const wanted = typeof name === "string" && name.trim() ? name.trim() : snap.worktree.name;
+  const slug = devSlugify(wanted);
+  if (!slug) throw new Error("The name needs at least one letter or digit.");
+  let branch = `restore/${slug}`;
+  for (let n = 2; branchExists(main, branch); n++) branch = `restore/${slug}-${n}`;
+  const created = devCreateWorktree(main, { name: `${slug}-restored`, base: snap.headSha, branch, kind: "task" });
+  const common = devCommonDir(main);
+  try {
+    applySnapshotState(created.path, snap);
+    const rec = devFindRecord(common, created.path);
+    if (snap.worktreeBase && rec) {
+      devUpsertRecord(common, { ...rec, base_ref: snap.worktreeBase.baseRef, base_commit: snap.worktreeBase.baseCommit });
+    }
+  } catch (e) {
+    gitOk(main, ["worktree", "remove", "--force", created.path]);
+    gitOk(main, ["worktree", "prune"]);
+    gitOk(main, ["branch", "-D", branch]);
+    saveRecords(common, devLoadRecords(common).filter((r) => real(r.path) !== real(created.path)));
+    throw new Error(`The snapshot could not be restored: ${e.message}`);
+  }
+  return created;
 }

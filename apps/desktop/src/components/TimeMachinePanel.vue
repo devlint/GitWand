@@ -6,6 +6,8 @@ import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
 import { formatRelativeAge } from "../utils/relativeTime";
 import { useSnapshotLabels } from "../composables/useSnapshotLabels";
+import { useSnapshots } from "../composables/useSnapshots";
+import type { SnapshotMeta } from "../utils/backend";
 
 /**
  * Time Machine (v3.8) — the full chronological history of the repo, merging
@@ -22,6 +24,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "close"): void;
   (e: "restored"): void;
+  /** v3.13 — restore a removed worktree's snapshot as a new worktree. */
+  (e: "restore-worktree", snapshot: SnapshotMeta): void;
 }>();
 
 const { t } = useI18n();
@@ -34,6 +38,16 @@ const aiLabels = useSnapshotLabels();
 type Filter = "all" | "snapshot" | "reflog";
 const filter = ref<Filter>("all");
 const busyKey = ref<string | null>(null);
+
+/**
+ * v3.13 — snapshots of worktrees GitWand removed or merged back. They are
+ * not in the timeline (restoring one in place would overwrite this
+ * checkout); they come back as a new worktree instead (spec §9).
+ */
+const RESTORABLE = ["removal", "merge-back-task"];
+const removedWorktrees = computed(() =>
+  useSnapshots().snapshots.value.filter((s) => s.worktree && RESTORABLE.includes(s.kind)),
+);
 
 const items = computed(() =>
   tm.timeline.value.filter((i) => filter.value === "all" || i.source === filter.value),
@@ -182,6 +196,26 @@ watch(
         </button>
       </li>
     </ol>
+
+    <section v-if="removedWorktrees.length > 0" class="tm-removed">
+      <h3 class="tm-removed-title">{{ t('timeMachine.removedWorktrees') }}</h3>
+      <ol class="tm-list">
+        <li v-for="snap in removedWorktrees" :key="snap.id" class="tm-item">
+          <span class="tm-clock mono muted" :title="age(snap.timestampMs)">{{ clock(snap.timestampMs) }}</span>
+          <div class="tm-body">
+            <div class="tm-label">{{ snap.worktree?.name }}</div>
+            <div class="tm-detail muted">
+              {{ snap.worktree?.branch ?? "HEAD" }} ·
+              {{ snap.kind === 'removal' ? t('timeMachine.kindRemoval') : t('timeMachine.kindMergeBackTask') }} ·
+              {{ age(snap.timestampMs) }}
+            </div>
+          </div>
+          <button class="tm-restore" @click="emit('restore-worktree', snap)">
+            {{ t('timeMachine.restoreAsWorktree') }}
+          </button>
+        </li>
+      </ol>
+    </section>
   </BaseModal>
 </template>
 
@@ -239,5 +273,7 @@ watch(
   white-space: nowrap;
 }
 .tm-restore { font-size: 12px; padding: 2px 10px; }
+.tm-removed { margin-top: var(--space-4); border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
+.tm-removed-title { margin: 0; font-size: var(--font-size-sm); font-weight: 600; }
 .tm-ai { font-size: 12px; padding: 2px 10px; color: var(--color-text-muted); }
 </style>

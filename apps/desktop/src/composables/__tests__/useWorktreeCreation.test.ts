@@ -21,7 +21,7 @@ const status = (setup: string | null, url: string | null = null): HookTrustStatu
 });
 
 function deps(decision: HookTrustDecision, exitCode: number | null = 0) {
-  const calls = { create: 0, runSetup: 0, url: 0 };
+  const calls = { create: 0, runSetup: 0, url: 0, restore: 0 };
   const d: WorktreeCreationDeps = {
     ensureTrusted: async () => decision,
     create: async () => {
@@ -35,6 +35,10 @@ function deps(decision: HookTrustDecision, exitCode: number | null = 0) {
     url: async () => {
       calls.url++;
       return "http://x";
+    },
+    restore: async () => {
+      calls.restore++;
+      return created;
     },
   };
   return { d, calls };
@@ -93,5 +97,17 @@ describe("useWorktreeCreation", () => {
     const r = await flow.create("/repo", { name: "x", kind: "task" });
     expect(await flow.runSetup("/repo", "/repo", r!.created, r!.decision)).toBe("ok");
     expect(flow.states.value["/wt/x"].url).toBeNull();
+  });
+
+  it("restore asks for trust first, then restores; Cancel restores nothing", async () => {
+    const cancel = deps({ choice: "cancel", status: status("up") });
+    expect(await createWorktreeCreation(cancel.d).restore("/repo", "1-ab")).toBeNull();
+    expect(cancel.calls.restore).toBe(0);
+
+    const ok = deps({ choice: "run", status: status("up") });
+    const out = await createWorktreeCreation(ok.d).restore("/repo", "1-ab", "fix");
+    expect(out?.created.path).toBe("/wt/x");
+    expect(out?.decision.choice).toBe("run");
+    expect(ok.calls.restore).toBe(1);
   });
 });

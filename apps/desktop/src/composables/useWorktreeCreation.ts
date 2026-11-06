@@ -11,6 +11,7 @@
  */
 import { ref, readonly, type Ref } from "vue";
 import {
+  snapshotRestoreAsWorktree,
   worktreeCreate,
   worktreeUrl,
   type CreatedWorktree,
@@ -53,12 +54,16 @@ export interface WorktreeCreationDeps {
   create: (cwd: string, req: CreateRequest) => Promise<CreatedWorktree>;
   runSetup: SetupRunner;
   url: (cwd: string, path: string, hash: string) => Promise<string | null>;
+  /** v3.13 — a removal or merge-back snapshot as a new worktree (spec §9). */
+  restore: (cwd: string, id: string, name?: string) => Promise<CreatedWorktree>;
 }
 
 export interface WorktreeCreation {
   states: Readonly<Ref<Record<string, WorktreeSetupState>>>;
   /** `null` when the user cancelled at the trust prompt. */
   create(cwd: string, req: CreateRequest): Promise<{ created: CreatedWorktree; decision: HookTrustDecision } | null>;
+  /** Like `create`, from a snapshot: trust first, then the restore; `null` on Cancel. */
+  restore(cwd: string, id: string, name?: string): Promise<{ created: CreatedWorktree; decision: HookTrustDecision } | null>;
   runSetup(
     repoPath: string,
     cwd: string,
@@ -80,6 +85,13 @@ export function createWorktreeCreation(deps: WorktreeCreationDeps): WorktreeCrea
     const decision = await deps.ensureTrusted(cwd);
     if (decision.choice === "cancel") return null;
     const created = await deps.create(cwd, req);
+    return { created, decision };
+  }
+
+  async function restore(cwd: string, id: string, name?: string) {
+    const decision = await deps.ensureTrusted(cwd);
+    if (decision.choice === "cancel") return null;
+    const created = await deps.restore(cwd, id, name);
     return { created, decision };
   }
 
@@ -125,7 +137,7 @@ export function createWorktreeCreation(deps: WorktreeCreationDeps): WorktreeCrea
     return runSetup(repoPath, cwd, { path, name }, decision);
   }
 
-  return { states: readonly(states) as Readonly<Ref<Record<string, WorktreeSetupState>>>, create, runSetup, retrySetup };
+  return { states: readonly(states) as Readonly<Ref<Record<string, WorktreeSetupState>>>, create, restore, runSetup, retrySetup };
 }
 
 let runner: SetupRunner | null = null;
@@ -146,6 +158,7 @@ export function useWorktreeCreation(): WorktreeCreation {
       return runner(...args);
     },
     url: worktreeUrl,
+    restore: snapshotRestoreAsWorktree,
   });
   return shared;
 }

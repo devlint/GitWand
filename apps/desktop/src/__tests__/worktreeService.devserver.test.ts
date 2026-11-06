@@ -19,6 +19,7 @@ import {
   devWorktreeGuard,
   devRemovePrepare,
   devRemoveWorktree,
+  devRestoreAsWorktree,
   // @ts-expect-error — plain ESM module without types, shared with dev-server.mjs
 } from "../../dev-worktree-service.mjs";
 // @ts-expect-error — plain ESM module without types
@@ -151,5 +152,36 @@ describe("dev-server worktree service", { timeout: 30_000 }, () => {
     expect(() => devRemoveWorktree(path, p, {})).toThrow(/^not-owned:/);
     devRemoveWorktree(path, p, { confirmNotOwned: true });
     expect(existsSync(p)).toBe(false);
+  });
+
+  it("restores a removal snapshot as a new worktree like the backend", () => {
+    const { path } = repo();
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: path, encoding: "utf-8" }).trim();
+    const snap = {
+      id: "1-abc",
+      kind: "removal",
+      headSha: head,
+      worktree: { path: "/gone/fix", branch: "task/fix", name: "fix" },
+      worktreeBase: { baseRef: "main", baseCommit: head },
+    };
+    const applied: string[] = [];
+    const prims = {
+      listSnapshots: () => [snap, { ...snap, id: "2-def", kind: "manual" }],
+      applySnapshotState: (cwd: string) => {
+        applied.push(cwd);
+        writeFileSync(join(cwd, "restored.txt"), "back\n");
+      },
+    };
+    const a = devRestoreAsWorktree(path, "1-abc", null, prims);
+    expect(a.branch).toBe("restore/fix");
+    expect(a.path.endsWith("fix-restored")).toBe(true);
+    expect(applied).toEqual([a.path]);
+    expect(existsSync(join(a.path, "restored.txt"))).toBe(true);
+    expect(devFindRecord(devCommonDir(path), a.path)).toMatchObject({ kind: "task", base_ref: "main", base_commit: head });
+    expect(devRestoreAsWorktree(path, "1-abc", null, prims).branch).toBe("restore/fix-2");
+    expect(() => devRestoreAsWorktree(path, "2-def", null, prims)).toThrow(/not taken from a worktree/);
+    const failing = { ...prims, applySnapshotState: () => { throw new Error("boom"); } };
+    expect(() => devRestoreAsWorktree(path, "1-abc", "x", failing)).toThrow(/could not be restored/);
+    expect(execFileSync("git", ["branch", "--list", "restore/x"], { cwd: path, encoding: "utf-8" }).trim()).toBe("");
   });
 });
