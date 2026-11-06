@@ -2211,6 +2211,64 @@ const zhCN: Locale = {
   },
 
   // ─── Worktrees ──────────────────────────────────────────
+  // v3.13 merge-back (spec §6)
+  mergeBack: {
+    title: "合并回 {0}",
+    checking: "正在检查任务…",
+    commits: "目标分支缺少的提交：{0} 个",
+    target: "合并到",
+    mode: "方式",
+    modes: {
+      merge: "Merge",
+      rebase: "Rebase",
+      squash: "Squash",
+    },
+    modesHint: {
+      merge: "在目标分支上创建合并提交：保留 agent 的提交。",
+      rebase: "将 agent 的提交重放到目标分支上，然后目标分支快进：线性历史。",
+      squash: "将改动暂存到目标分支，不提交，由你来写提交信息。",
+    },
+    wipNote: "任务中未提交的改动会先提交为“wip({0}): uncommitted work at merge-back”。",
+    snapshotNote: "在做任何改动之前，会为两个 checkout 各保存一个快照。",
+    refusal: {
+      untouchable: "此 worktree 受保护（已锁定、含 .worktree-keep 或属于其他工具）。",
+      "not-owned": "此 worktree 不是 GitWand 创建的，因此不会将其合并回。",
+      detached: "任务 worktree 不在任何分支上。",
+      "unknown-target": "{0} 不是可以合并进去的本地分支。",
+      "wrong-branch": "主 checkout 在 {1} 上，而不是 {0}。请先切换到 {0}。",
+      "main-in-progress": "主 checkout 正处于 git 操作中，或有未解决的冲突。请先完成或中止。",
+      "task-in-progress": "任务 worktree 正处于 git 操作中。请先完成或中止。",
+      overlap: "主 checkout 中有改动涉及任务也修改的文件。请先提交、贮藏或丢弃它们；GitWand 不会替你执行 stash。",
+      nothing: "任务中没有 {0} 缺少的内容。",
+    },
+    preparing: "正在停止任务的进程、提交其工作并保存快照…",
+    previewIntro: {
+      merge: "将 {0} 合并到 {1}，创建合并提交。",
+      rebase: "将 {0} 变基到 {1}，然后快进 {1}。",
+      squash: "将 {0} squash 到 {1}，已暂存、未提交。",
+    },
+    wipCommitted: "任务中未提交的改动已先行提交。",
+    residualRebase: "变基在引擎留给你的冲突处停止，位于任务 worktree 中。请解决冲突并继续变基，然后回来选择“继续”。",
+    residualMerge: "主 checkout 中还有留给你的冲突。请解决并完成合并，然后回来选择“继续”。没有任何操作被中止。",
+    finishing: "正在快进 {0}…",
+    done: {
+      merge: "任务已合并到 {0}，保留了其提交。",
+      rebase: "{0} 现在包含任务变基后的提交。",
+      squash: "任务的改动已暂存到 {0}。写好提交信息即可完成。",
+    },
+    cleanupMerged: "worktree 仍然保留，方便你先检查结果。确认无误后再删除。",
+    cleanupSquash: "squash 不会合并 {0}：只有保留该分支，其提交才会保留。删除时会询问你。",
+    failed: "合并回失败：{0}",
+    switchMain: "将主 checkout 切换到 {0}",
+    continue: "继续",
+    resolveNow: "立即解决",
+    resume: "继续",
+    removeWorktree: "删除 worktree",
+    resumePill: "继续合并回",
+    action: "合并回",
+    managerTooltip: "将此 worktree 的工作合并回某个分支",
+  },
+
   worktree: {
     // v3.13 worktree service (setup, base)
     setupTabTitle: "Setup · {0}",

@@ -57,6 +57,7 @@ const LaunchpadView = defineAsyncComponent(() => import("./components/LaunchpadV
 const AgentSessionsPanel = defineAsyncComponent(() => import("./components/AgentSessionsPanel.vue"));
 const AiTaskCloseModal = defineAsyncComponent(() => import("./components/AiTaskCloseModal.vue"));
 const WorktreeRemoveDialog = defineAsyncComponent(() => import("./components/WorktreeRemoveDialog.vue"));
+const MergeBackDialog = defineAsyncComponent(() => import("./components/MergeBackDialog.vue"));
 const AiTaskNameModal = defineAsyncComponent(() => import("./components/AiTaskNameModal.vue"));
 const WorktreeHookTrustModal = defineAsyncComponent(() => import("./components/WorktreeHookTrustModal.vue"));
 const CommandLogPanel = defineAsyncComponent(() => import("./components/CommandLogPanel.vue"));
@@ -146,9 +147,10 @@ import {
   COMMIT_MESSAGE_SINK_KEY,
   type SettingsSectionTarget,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeMergeBack, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree } from "./utils/backend";
 import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorktreeCreation";
 import { registerRemovalHost } from "./composables/useWorktreeRemoval";
+import { registerMergeBackHost } from "./composables/useWorktreeMergeBack";
 import type { HookTrustDecision } from "./composables/useWorktreeHookTrust";
 import { aiTaskName, describeBase } from "./utils/worktreeBase";
 import { useCommitActions } from "./composables/useCommitActions";
@@ -2792,6 +2794,11 @@ async function onAiTaskDelete() {
   }
 }
 
+// ─── Merge-back (v3.13, spec §6) ─────────────────────────
+type MergeBackDialogState = { cwd: string; path: string; projectPath: string; minimized: boolean };
+const mergeBackDialog = ref<MergeBackDialogState | null>(null);
+
+/** "Merge back" on an AI task (close modal, Git Tree): the merge-back dialog. */
 async function onAiTaskMergeBack() {
   const target = aiTaskClose.value;
   if (!target || aiTaskCloseBusy.value) return;
@@ -2799,19 +2806,105 @@ async function onAiTaskMergeBack() {
   aiTaskCloseError.value = null;
   try {
     const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
-    // Stop the scratch's agent terminal first: nothing may write to the
-    // scratch while it is read and merged. Not swallowed, unlike Delete:
-    // if it fails, don't merge.
-    await termSessions.disposeRepo(target.path);
-    fileExplorer.disposeRepo(target.path);
-    // The worktree stays: the removal flow below removes it, teardown included.
-    await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled, false);
     aiTaskClose.value = null;
-    removalDialog.value = { cwd: origin, path: target.path, projectPath: target.projectPath, deleteBranch: true, autoStart: true, merged: true };
+    mergeBackDialog.value = { cwd: origin, path: target.path, projectPath: target.projectPath, minimized: false };
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
   } finally {
     aiTaskCloseBusy.value = false;
+  }
+}
+
+/** "Merge back" from the worktree manager. */
+async function onManagerMergeBack(payload: { cwd: string; path: string }) {
+  showWorktrees.value = false;
+  try {
+    const entries = await gitWorktreeList(payload.cwd);
+    const main = entries.find((w) => w.is_main)?.path ?? payload.cwd;
+    mergeBackDialog.value = { cwd: main, path: payload.path, projectPath: main, minimized: false };
+  } catch (err) {
+    repoError.value = t("mergeBack.failed", String((err as { message?: string })?.message ?? err));
+  }
+}
+
+/**
+ * Brings a checkout of the project to the front: the operation runs there
+ * and its conflicts show there (spec §6.2), never in a checkout the user is
+ * not looking at.
+ */
+async function focusCheckout(path: string, projectPath: string) {
+  if (repoFolderPath.value === path) return;
+  await openRepo(path);
+  const owner = repoTabs.value.find((tab) => tab.path === projectPath);
+  if (owner) {
+    selectWorktree(owner.id, path);
+    if (activeTabId.value !== owner.id) switchTab(owner.id);
+  }
+}
+
+registerMergeBackHost({
+  apply: async (a) => {
+    const projectPath = mergeBackDialog.value?.projectPath ?? a.checkout;
+    await focusCheckout(a.checkout, projectPath);
+    const { gitMerge, worktreeMergeBackSquash } = await import("./utils/backend");
+    const opts =
+      a.mode === "squash"
+        ? { runMerge: async () => { await worktreeMergeBackSquash(projectPath, a.path, a.target); }, skipFinalize: true }
+        : a.mode === "merge"
+          ? {
+              // `--no-ff --no-edit`: a merge commit, so the agent's commits are kept.
+              runMerge: async (ref_: string) => {
+                assertOperationSucceeded(await gitMerge(a.checkout, ref_, true), `merge ${ref_}`);
+              },
+            }
+          : {};
+    applyingFromPreview.value = true;
+    try {
+      const out = await runApplyFromPreview(a.operation, a.ref, a.estimated, opts);
+      if (out.residualFiles.length > 0) {
+        viewMode.value = "changes";
+        wipDiffOpen.value = true;
+        await repoSelectFile(out.residualFiles[0], false);
+      }
+      return out;
+    } finally {
+      applyingFromPreview.value = false;
+    }
+  },
+  disposeTabs: async (path) => {
+    fileExplorer.disposeRepo(path);
+    await termSessions.disposeRepo(path).catch(() => {});
+    await termSessions.disposeCwd(path).catch(() => {});
+  },
+});
+
+/** Merge-back done: "Remove the worktree" opens the removal dialog. */
+function onMergeBackCleanup(payload: { deleteBranch: boolean }) {
+  const mb = mergeBackDialog.value;
+  mergeBackDialog.value = null;
+  if (!mb) return;
+  removalDialog.value = {
+    cwd: mb.projectPath,
+    path: mb.path,
+    projectPath: mb.projectPath,
+    deleteBranch: payload.deleteBranch,
+    // A squash leaves the branch unmerged: the removal dialog asks.
+    autoStart: payload.deleteBranch,
+    merged: true,
+  };
+}
+
+/** Closed: refresh the project, whatever the merge-back got to. */
+async function onMergeBackClose() {
+  const mb = mergeBackDialog.value;
+  mergeBackDialog.value = null;
+  if (!mb) return;
+  try {
+    await focusCheckout(mb.projectPath, mb.projectPath);
+    await loadBranches();
+    if (viewMode.value === "history" || showGitTree.value) await loadLog();
+  } catch (err) {
+    console.error("[merge-back] refresh failed:", err);
   }
 }
 
@@ -4968,6 +5061,12 @@ onUnmounted(() => {
       @create="confirmNewAiTask" />
 
     <!-- AI-task worktree removal — deletes / merges-back the scratch worktree -->
+    <MergeBackDialog v-if="mergeBackDialog" :cwd="mergeBackDialog.cwd" :path="mergeBackDialog.path"
+      :branches="branches.filter((b) => !b.isRemote).map((b) => b.name)" :minimized="mergeBackDialog.minimized"
+      @close="onMergeBackClose" @minimize="mergeBackDialog.minimized = true" @cleanup="onMergeBackCleanup"
+      @open-residual="handleOpenResidual" />
+    <button v-if="mergeBackDialog?.minimized" class="merge-back-resume" type="button"
+      @click="mergeBackDialog.minimized = false">{{ t("mergeBack.resumePill") }}</button>
     <WorktreeRemoveDialog v-if="removalDialog" :cwd="removalDialog.cwd" :repo-path="removalDialog.projectPath"
       :path="removalDialog.path" :delete-branch="removalDialog.deleteBranch" :auto-start="removalDialog.autoStart"
       @close="onRemovalClose" @done="onRemovalDone" @open-log="onOpenSetupLog" />
@@ -4997,7 +5096,7 @@ onUnmounted(() => {
       @close="showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false;"
       @load-branches="loadBranches"
       @open-tab="(path) => { openTab(path); showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false; }"
-      @created="onWorktreeCreated" @open-setup-log="onOpenSetupLog" />
+      @created="onWorktreeCreated" @open-setup-log="onOpenSetupLog" @merge-back="onManagerMergeBack" />
 
     <!-- Release notes generator (shared modal, also on Dashboard + Tags panel) -->
     <ReleaseNotesModal v-if="showReleaseNotes && repoFolderPath" :cwd="repoFolderPath"
@@ -5383,6 +5482,23 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+
+/* v3.13 — a merge-back waiting for the user to finish resolving. */
+.merge-back-resume {
+  position: fixed;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  z-index: 900;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: var(--color-on-accent, #fff);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+
 .app {
   display: flex;
   flex-direction: column;

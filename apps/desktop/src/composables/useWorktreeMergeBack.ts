@@ -261,10 +261,16 @@ export function createWorktreeMergeBack(deps: MergeBackDeps): WorktreeMergeBack 
   return { state, canSwitch, previewSpec, cleanup, open, setMode, setTarget, switchMain, start, apply, resume };
 }
 
-let host: Pick<MergeBackDeps, "apply"> | null = null;
+interface MergeBackHost {
+  apply: MergeBackDeps["apply"];
+  /** Closes the task's terminal tabs before its processes are stopped. */
+  disposeTabs?: (path: string) => Promise<void>;
+}
+
+let host: MergeBackHost | null = null;
 
 /** App.vue registers how an apply runs (focus the checkout, then the v3.11 apply). */
-export function registerMergeBackHost(h: Pick<MergeBackDeps, "apply">): void {
+export function registerMergeBackHost(h: MergeBackHost): void {
   host = h;
 }
 
@@ -274,7 +280,10 @@ export function useWorktreeMergeBack(): WorktreeMergeBack {
     switchBranch: async (checkout, branch) => {
       await gitSwitchBranch(checkout, branch);
     },
-    prepare: worktreeMergeBackPrepare,
+    prepare: async (cwd, path, target) => {
+      await host?.disposeTabs?.(path);
+      return worktreeMergeBackPrepare(cwd, path, target);
+    },
     apply: (a) => {
       if (!host) return Promise.reject(new Error("No merge-back host registered"));
       return host.apply(a);
