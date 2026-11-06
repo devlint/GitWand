@@ -76,7 +76,7 @@ pub(crate) fn restore_as_worktree(
         branch = format!("restore/{slug}-{n}");
     }
 
-    let created = create_worktree(
+    let mut created = create_worktree(
         &main,
         CreateRequest {
             name: format!("{slug}-restored"),
@@ -90,16 +90,43 @@ pub(crate) fn restore_as_worktree(
     let path = Path::new(&created.path).to_path_buf();
     let common = record::common_dir(&main)?;
 
+    // The original base, so merge-back and the "merged" rule see the task as
+    // it was, not as starting from its own last state. A snapshot without one
+    // (taken before v3.13 recorded it) gets where the task left the main
+    // checkout's branch.
+    let (base_ref, base_commit) = match snap.worktree_base.clone() {
+        Some(b) => (b.base_ref, b.base_commit),
+        None => {
+            let on =
+                git(&main, &["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap_or_default();
+            let fork = git(&main, &["merge-base", "HEAD", &snap.head_sha])
+                .unwrap_or(snap.head_sha.clone());
+            (if on.is_empty() { fork.clone() } else { on }, fork)
+        }
+    };
     let restored = apply_snapshot_state(&created.path, &snap).and_then(|_| {
-        // The original base, so merge-back and the "merged" rule see the
-        // task as it was, not as starting from its own last state.
-        if let (Some(base), Some(mut rec)) =
-            (snap.worktree_base.clone(), record::find(&common, &path))
-        {
-            rec.base_ref = base.base_ref;
-            rec.base_commit = base.base_commit;
+        if let Some(mut rec) = record::find(&common, &path) {
+            rec.base_ref = base_ref.clone();
+            rec.base_commit = base_commit.clone();
             record::upsert(&common, rec)?;
         }
+        // Read by the scratch merge-back guard, like those `create` wrote.
+        git(
+            &main,
+            &[
+                "config",
+                &format!("branch.{branch}.gitwandBase"),
+                &base_commit,
+            ],
+        )?;
+        git(
+            &main,
+            &[
+                "config",
+                &format!("branch.{branch}.gitwandSource"),
+                &base_ref,
+            ],
+        )?;
         Ok(())
     });
     if let Err(e) = restored {
@@ -109,6 +136,11 @@ pub(crate) fn restore_as_worktree(
         let _ = record::remove(&common, &path);
         return Err(format!("The snapshot could not be restored: {e}"));
     }
+    created.base.base_ref = base_ref;
+    created.base.commit = base_commit;
+    created.base.fetched_at = None;
+    created.base.fallback_reason = None;
+    created.base.fallback_detail = None;
     Ok(created)
 }
 
@@ -205,6 +237,61 @@ mod tests {
         assert_eq!(
             (rec.base_ref, rec.base_commit),
             (original.base_ref, original.base_commit)
+        );
+    }
+
+    #[test]
+    fn a_restored_task_with_commits_can_still_be_merged_back() {
+        let repo = TempRepo::new();
+        let wt = task(&repo, "agent");
+        std::fs::write(wt.join("work.txt"), "agent\n").unwrap();
+        git_at(&wt, &["add", "-A"]);
+        git_at(&wt, &["commit", "-q", "-m", "agent work"]);
+        let id = remove(&repo, &wt);
+        let c = restore_as_worktree(&repo.path, &id, None, T).unwrap();
+        let common = record::common_dir(&repo.path).unwrap();
+        let rec = record::find(&common, Path::new(&c.path)).unwrap();
+        assert_eq!(
+            c.base.commit, rec.base_commit,
+            "the frontend sees the recorded base"
+        );
+        assert_eq!(
+            repo.git(&[
+                "config",
+                "--get",
+                &format!("branch.{}.gitwandBase", c.branch)
+            ]),
+            rec.base_commit
+        );
+        crate::commands::scratch::scratch_worktree_merge_back_impl(
+            repo.path.to_string_lossy().to_string(),
+            c.path.clone(),
+            Some(false),
+        )
+        .expect("merge-back from main");
+        assert_eq!(
+            std::fs::read_to_string(repo.path.join("work.txt")).unwrap(),
+            "agent\n"
+        );
+    }
+
+    #[test]
+    fn without_a_recorded_base_the_base_is_where_the_task_left_main() {
+        let repo = TempRepo::new();
+        let start = repo.git(&["rev-parse", "HEAD"]);
+        let wt = task(&repo, "old");
+        std::fs::write(wt.join("w.txt"), "w").unwrap();
+        git_at(&wt, &["add", "-A"]);
+        git_at(&wt, &["commit", "-q", "-m", "w"]);
+        // A snapshot without `worktreeBase` (taken before it existed).
+        let common = record::common_dir(&repo.path).unwrap();
+        record::remove(&common, &wt).unwrap();
+        let id = remove(&repo, &wt);
+        let c = restore_as_worktree(&repo.path, &id, None, T).unwrap();
+        let rec = record::find(&common, Path::new(&c.path)).unwrap();
+        assert_eq!(
+            (rec.base_ref.as_str(), rec.base_commit.as_str()),
+            ("main", start.as_str())
         );
     }
 

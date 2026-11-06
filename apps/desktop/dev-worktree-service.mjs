@@ -648,12 +648,22 @@ export function devRestoreAsWorktree(repo, id, name, { listSnapshots, applySnaps
   for (let n = 2; branchExists(main, branch); n++) branch = `restore/${slug}-${n}`;
   const created = devCreateWorktree(main, { name: `${slug}-restored`, base: snap.headSha, branch, kind: "task" });
   const common = devCommonDir(main);
+  // Mirror of the base fallback in `restore::restore_as_worktree`.
+  let baseRef;
+  let baseCommit;
+  if (snap.worktreeBase) {
+    ({ baseRef, baseCommit } = snap.worktreeBase);
+  } else {
+    const on = gitOk(main, ["symbolic-ref", "--quiet", "--short", "HEAD"]) ?? "";
+    baseCommit = gitOk(main, ["merge-base", "HEAD", snap.headSha]) ?? snap.headSha;
+    baseRef = on || baseCommit;
+  }
   try {
     applySnapshotState(created.path, snap);
     const rec = devFindRecord(common, created.path);
-    if (snap.worktreeBase && rec) {
-      devUpsertRecord(common, { ...rec, base_ref: snap.worktreeBase.baseRef, base_commit: snap.worktreeBase.baseCommit });
-    }
+    if (rec) devUpsertRecord(common, { ...rec, base_ref: baseRef, base_commit: baseCommit });
+    git(main, ["config", `branch.${branch}.gitwandBase`, baseCommit]);
+    git(main, ["config", `branch.${branch}.gitwandSource`, baseRef]);
   } catch (e) {
     gitOk(main, ["worktree", "remove", "--force", created.path]);
     gitOk(main, ["worktree", "prune"]);
@@ -661,5 +671,5 @@ export function devRestoreAsWorktree(repo, id, name, { listSnapshots, applySnaps
     saveRecords(common, devLoadRecords(common).filter((r) => real(r.path) !== real(created.path)));
     throw new Error(`The snapshot could not be restored: ${e.message}`);
   }
-  return created;
+  return { ...created, base: { base_ref: baseRef, commit: baseCommit, fetched_at: null, fallback_reason: null, fallback_detail: null } };
 }
