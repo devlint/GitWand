@@ -305,3 +305,30 @@ describe("useApplyFromPreview — rebase replays step by step", () => {
     expect(deps.finalize, "never advance past a conflict we did not solve").not.toHaveBeenCalled();
   });
 });
+
+describe("useApplyFromPreview — merge-back options (v3.13)", () => {
+  it("runs the caller's merge runner instead of the default one", async () => {
+    const deps = makeDeps();
+    const own = vi.fn(async () => {});
+    const { apply } = useApplyFromPreview(deps);
+    const out = await apply("merge", "task/a", 0, { runMerge: own });
+    expect(out.stoppedReason).toBe("clean");
+    expect(own).toHaveBeenCalledWith("task/a");
+    expect(deps.runMerge).not.toHaveBeenCalled();
+  });
+
+  it("a squash resolves and stages but never runs --continue", async () => {
+    let conflicted = ["a.ts"];
+    const deps = makeDeps({
+      conflictedPaths: vi.fn(() => conflicted),
+      files: vi.fn(() => [file("a.ts", 0, 1)]),
+      resolveAll: vi.fn(async () => { conflicted = []; }),
+    });
+    const { apply } = useApplyFromPreview(deps);
+    const out = await apply("merge", "task/a", 1, { runMerge: async () => {}, skipFinalize: true });
+    expect(out.stoppedReason).toBe("clean");
+    expect(out.finalized).toBe(true);
+    expect(deps.stage).toHaveBeenCalledWith(["a.ts"]);
+    expect(deps.finalize).not.toHaveBeenCalled();
+  });
+});

@@ -2202,6 +2202,65 @@ const ptBR: Locale = {
   },
 
   // ─── Worktrees ──────────────────────────────────────────
+  // v3.13 merge-back (spec §6)
+  mergeBack: {
+    abandoned: "O destino não contém o trabalho da tarefa como merge. Se você mesmo commitou o squash, está concluído: feche esta janela. Caso contrário, a operação foi abandonada: feche esta janela e comece o merge-back de novo. Nos dois casos, a branch é mantida.",
+    title: "Trazer de volta {0}",
+    checking: "Verificando a tarefa…",
+    commits: "{0} commit(s) que o destino não tem",
+    target: "Para",
+    mode: "Como",
+    modes: {
+      merge: "Merge",
+      rebase: "Rebase",
+      squash: "Squash",
+    },
+    modesHint: {
+      merge: "Um commit de merge no destino: os commits do agente são mantidos.",
+      rebase: "Os commits do agente reaplicados sobre o destino, que depois avança em fast-forward: histórico linear.",
+      squash: "As mudanças ficam no índice do destino, sem commit, para você escrever o commit.",
+    },
+    wipNote: "As mudanças sem commit da tarefa são commitadas primeiro, como “wip({0}): uncommitted work at merge-back”.",
+    snapshotNote: "Os dois checkouts ganham um snapshot antes de qualquer mudança.",
+    refusal: {
+      untouchable: "Este worktree está protegido (bloqueado, .worktree-keep ou de outra ferramenta).",
+      "not-owned": "O GitWand não criou este worktree, então não o traz de volta.",
+      detached: "O worktree da tarefa não está em nenhuma branch.",
+      "unknown-target": "{0} não é uma branch local para fazer merge.",
+      "wrong-branch": "O checkout principal está em {1}, não em {0}. Mude-o para {0} primeiro.",
+      "main-in-progress": "O checkout principal está no meio de uma operação git ou tem conflitos não resolvidos. Termine ou aborte primeiro.",
+      "task-in-progress": "O worktree da tarefa está no meio de uma operação git. Termine ou aborte primeiro.",
+      overlap: "O checkout principal tem mudanças em arquivos que a tarefa também altera. Faça commit, stash ou descarte-as primeiro; o GitWand nunca faz stash por você.",
+      nothing: "A tarefa não tem nada que {0} já não tenha.",
+    },
+    preparing: "Parando os processos da tarefa, salvando o trabalho e tirando snapshots…",
+    previewIntro: {
+      merge: "Fazer merge de {0} em {1}, com um commit de merge.",
+      rebase: "Fazer rebase de {0} sobre {1} e depois avançar {1} em fast-forward.",
+      squash: "Fazer squash de {0} sobre {1}, no índice e sem commit.",
+    },
+    wipCommitted: "As mudanças sem commit da tarefa foram commitadas primeiro.",
+    residualRebase: "O rebase parou em conflitos que o motor deixou para você, no worktree da tarefa. Resolva-os e continue o rebase; depois volte e escolha Retomar.",
+    residualMerge: "Restam conflitos para você no checkout principal. Resolva-os e termine o merge; depois volte e escolha Retomar. Nada foi abortado.",
+    finishing: "Avançando {0} em fast-forward…",
+    done: {
+      merge: "A tarefa foi mesclada em {0}, com seus commits.",
+      rebase: "{0} agora contém os commits da tarefa, rebaseados.",
+      squash: "As mudanças da tarefa estão no índice de {0}. Escreva a mensagem de commit para terminar.",
+    },
+    cleanupMerged: "O worktree continua lá para você conferir o resultado primeiro. Remova-o quando terminar.",
+    cleanupSquash: "Um squash não mescla {0}: os commits só sobrevivem se você mantiver a branch. A remoção vai perguntar.",
+    failed: "O merge-back falhou: {0}",
+    switchMain: "Mudar o checkout principal para {0}",
+    continue: "Continuar",
+    resolveNow: "Resolver agora",
+    resume: "Retomar",
+    removeWorktree: "Remover o worktree",
+    resumePill: "Retomar o merge-back",
+    action: "Trazer de volta",
+    managerTooltip: "Trazer o trabalho deste worktree para uma branch",
+  },
+
   worktree: {
     // v3.13 worktree service (setup, base)
     setupTabTitle: "Setup · {0}",

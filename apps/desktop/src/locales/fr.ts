@@ -2212,6 +2212,65 @@ const fr: Locale = {
   },
 
   // ─── Worktrees ──────────────────────────────────────────
+  // v3.13 merge-back (spec §6)
+  mergeBack: {
+    abandoned: "La cible ne contient pas le travail de la tâche sous forme de merge. Si vous avez commité le squash vous-même, c'est terminé : fermez ce dialogue. Sinon, l'opération a été abandonnée : fermez ce dialogue et relancez le merge-back. Dans les deux cas, la branche est conservée.",
+    title: "Ramener {0}",
+    checking: "Vérification de la tâche…",
+    commits: "{0} commit(s) absent(s) de la cible",
+    target: "Vers",
+    mode: "Comment",
+    modes: {
+      merge: "Merge",
+      rebase: "Rebase",
+      squash: "Squash",
+    },
+    modesHint: {
+      merge: "Un commit de merge sur la cible : les commits de l'agent sont conservés.",
+      rebase: "Les commits de l'agent rejoués sur la cible, puis la cible avance en fast-forward : historique linéaire.",
+      squash: "Les changements indexés sur la cible, non commités, pour que vous écriviez le commit.",
+    },
+    wipNote: "Les changements non commités de la tâche sont d'abord commités, sous « wip({0}): uncommitted work at merge-back ».",
+    snapshotNote: "Les deux checkouts sont sauvegardés en snapshot avant toute modification.",
+    refusal: {
+      untouchable: "Ce worktree est protégé (verrouillé, .worktree-keep, ou appartenant à un autre outil).",
+      "not-owned": "Ce worktree n'a pas été créé par GitWand, qui ne le ramène donc pas.",
+      detached: "Le worktree de la tâche n'est sur aucune branche.",
+      "unknown-target": "{0} n'est pas une branche locale dans laquelle merger.",
+      "wrong-branch": "Le checkout principal est sur {1}, pas sur {0}. Basculez-le d'abord sur {0}.",
+      "main-in-progress": "Le checkout principal est au milieu d'une opération git ou a des conflits non résolus. Terminez-la ou annulez-la d'abord.",
+      "task-in-progress": "Le worktree de la tâche est au milieu d'une opération git. Terminez-la ou annulez-la d'abord.",
+      overlap: "Le checkout principal a des changements sur des fichiers que la tâche modifie aussi. Commitez-les, mettez-les de côté ou annulez-les d'abord ; GitWand ne fait jamais de stash à votre place.",
+      nothing: "La tâche n'a rien que {0} n'ait déjà.",
+    },
+    preparing: "Arrêt des processus de la tâche, commit de son travail et snapshots…",
+    previewIntro: {
+      merge: "Merger {0} dans {1}, avec un commit de merge.",
+      rebase: "Rebaser {0} sur {1}, puis faire avancer {1} en fast-forward.",
+      squash: "Squasher {0} sur {1}, indexé et non commité.",
+    },
+    wipCommitted: "Les changements non commités de la tâche ont d'abord été commités.",
+    residualRebase: "Le rebase s'est arrêté sur des conflits que le moteur vous laisse, dans le worktree de la tâche. Résolvez-les et continuez le rebase, puis revenez et choisissez Reprendre.",
+    residualMerge: "Des conflits vous restent dans le checkout principal. Résolvez-les et terminez le merge, puis revenez et choisissez Reprendre. Rien n'a été annulé.",
+    finishing: "Fast-forward de {0}…",
+    done: {
+      merge: "La tâche est mergée dans {0}, avec ses commits.",
+      rebase: "{0} contient maintenant les commits de la tâche, rebasés.",
+      squash: "Les changements de la tâche sont indexés sur {0}. Écrivez le message de commit pour terminer.",
+    },
+    cleanupMerged: "Le worktree est toujours là, pour que vous vérifiiez d'abord le résultat. Supprimez-le quand c'est bon.",
+    cleanupSquash: "Un squash ne merge pas {0} : ses commits ne survivent que si vous gardez la branche. La suppression vous le demandera.",
+    failed: "Échec du merge-back : {0}",
+    switchMain: "Basculer le checkout principal sur {0}",
+    continue: "Continuer",
+    resolveNow: "Résoudre maintenant",
+    resume: "Reprendre",
+    removeWorktree: "Supprimer le worktree",
+    resumePill: "Reprendre le merge-back",
+    action: "Ramener",
+    managerTooltip: "Ramener le travail de ce worktree dans une branche",
+  },
+
   worktree: {
     // v3.13 worktree service (setup, base)
     setupTabTitle: "Setup · {0}",

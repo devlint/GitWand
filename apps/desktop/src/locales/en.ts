@@ -2244,6 +2244,65 @@ const en = {
   },
 
   // ─── Worktrees ──────────────────────────────────────────
+  // v3.13 merge-back (spec §6)
+  mergeBack: {
+    abandoned: "The target does not hold the task's work as a merge. If you committed the squash yourself, it is done: close this dialog. Otherwise the operation was abandoned: close this dialog and start the merge-back again. The branch is kept either way.",
+    title: "Merge back {0}",
+    checking: "Checking the task…",
+    commits: "{0} commit(s) the target lacks",
+    target: "Into",
+    mode: "How",
+    modes: {
+      merge: "Merge",
+      rebase: "Rebase",
+      squash: "Squash",
+    },
+    modesHint: {
+      merge: "A merge commit on the target: the agent's commits are kept.",
+      rebase: "The agent's commits replayed onto the target, then the target fast-forwards: linear history.",
+      squash: "The changes staged on the target, uncommitted, for you to write the commit.",
+    },
+    wipNote: "Uncommitted changes in the task are committed first, as “wip({0}): uncommitted work at merge-back”.",
+    snapshotNote: "Both checkouts are snapshotted before anything changes.",
+    refusal: {
+      untouchable: "This worktree is protected (locked, .worktree-keep, or another tool's).",
+      "not-owned": "GitWand did not create this worktree, so it does not merge it back.",
+      detached: "The task worktree is not on a branch.",
+      "unknown-target": "{0} is not a local branch to merge into.",
+      "wrong-branch": "The main checkout is on {1}, not {0}. Switch it to {0} first.",
+      "main-in-progress": "The main checkout is in the middle of a git operation or has unresolved conflicts. Finish or abort it first.",
+      "task-in-progress": "The task worktree is in the middle of a git operation. Finish or abort it first.",
+      overlap: "The main checkout has changes to files the task also changes. Commit, stash or discard them first; GitWand never stashes for you.",
+      nothing: "The task has nothing that {0} lacks.",
+    },
+    preparing: "Stopping the task's processes, committing its work and taking snapshots…",
+    previewIntro: {
+      merge: "Merge {0} into {1}, with a merge commit.",
+      rebase: "Rebase {0} onto {1}, then fast-forward {1}.",
+      squash: "Squash {0} onto {1}, staged and uncommitted.",
+    },
+    wipCommitted: "The task's uncommitted changes were committed first.",
+    residualRebase: "The rebase stopped on conflicts the engine left for you, in the task worktree. Resolve them and continue the rebase, then come back and choose Resume.",
+    residualMerge: "Some conflicts are left for you in the main checkout. Resolve them and finish the merge, then come back and choose Resume. Nothing was aborted.",
+    finishing: "Fast-forwarding {0}…",
+    done: {
+      merge: "The task is merged into {0}, with its commits.",
+      rebase: "{0} now holds the task's commits, rebased.",
+      squash: "The task's changes are staged on {0}. Write the commit message to finish.",
+    },
+    cleanupMerged: "The worktree is still there, so you can check the result first. Remove it once you are done.",
+    cleanupSquash: "A squash does not merge {0}: its commits only survive if you keep the branch. The removal dialog will ask.",
+    failed: "Merge-back failed: {0}",
+    switchMain: "Switch the main checkout to {0}",
+    continue: "Continue",
+    resolveNow: "Resolve now",
+    resume: "Resume",
+    removeWorktree: "Remove the worktree",
+    resumePill: "Resume merge-back",
+    action: "Merge back",
+    managerTooltip: "Bring this worktree's work back into a branch",
+  },
+
   worktree: {
     // v3.13 worktree service (setup, base)
     setupTabTitle: "Setup · {0}",

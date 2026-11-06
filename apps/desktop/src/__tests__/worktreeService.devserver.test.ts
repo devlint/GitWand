@@ -19,6 +19,10 @@ import {
   devWorktreeGuard,
   devRemovePrepare,
   devRemoveWorktree,
+  devMergeBackCheck,
+  devMergeBackPrepare,
+  devMergeBackSquash,
+  devMergeBackFastForward,
   // @ts-expect-error — plain ESM module without types, shared with dev-server.mjs
 } from "../../dev-worktree-service.mjs";
 // @ts-expect-error — plain ESM module without types
@@ -151,5 +155,29 @@ describe("dev-server worktree service", { timeout: 30_000 }, () => {
     expect(() => devRemoveWorktree(path, p, {})).toThrow(/^not-owned:/);
     devRemoveWorktree(path, p, { confirmNotOwned: true });
     expect(existsSync(p)).toBe(false);
+  });
+
+  it("merges back like the backend: wip commit, snapshots, squash, fast-forward", async () => {
+    const { path } = repo();
+    const g = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf-8" }).trim();
+    const c = devCreateWorktree(path, { name: "mb", kind: "task" });
+    writeFileSync(join(c.path, "task.txt"), "agent\n");
+    writeFileSync(join(path, "main.txt"), "mine\n");
+    const check = devMergeBackCheck(path, c.path);
+    expect(check).toMatchObject({ target: "main", task_branch: "task/mb", task_dirty: true, refusal: null });
+    writeFileSync(join(path, "task.txt"), "overlap\n");
+    expect(devMergeBackCheck(path, c.path).refusal.code).toBe("overlap");
+    g(path, "clean", "-fq", "task.txt");
+    const kinds: string[] = [];
+    const createSnapshot = (_cwd: string, kind: string) => (kinds.push(kind), { id: kind });
+    const p = await devMergeBackPrepare(path, c.path, "main", { createSnapshot });
+    expect(p.committed_wip).toBe(true);
+    expect(kinds).toEqual(["merge-back-task", "merge-back"]);
+    expect(g(c.path, "log", "-1", "--format=%s")).toBe("wip(mb): uncommitted work at merge-back");
+    expect(devMergeBackSquash(path, c.path, "main")).toEqual({ conflicts: false });
+    expect(g(path, "diff", "--cached", "--name-only")).toBe("task.txt");
+    g(path, "reset", "-q", "--hard");
+    expect(devMergeBackFastForward(path, c.path, "main")).toEqual({ conflicts: false });
+    expect(g(path, "rev-parse", "main")).toBe(g(c.path, "rev-parse", "HEAD"));
   });
 });
