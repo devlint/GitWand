@@ -2246,7 +2246,7 @@ const en = {
   // ─── Worktrees ──────────────────────────────────────────
   // v3.13 merge-back (spec §6)
   mergeBack: {
-    abandoned: "The target does not hold the task's work: the operation was abandoned. Close this dialog and start the merge-back again; the branch is kept.",
+    abandoned: "The target does not hold the task's work as a merge. If you committed the squash yourself, it is done: close this dialog. Otherwise the operation was abandoned: close this dialog and start the merge-back again. The branch is kept either way.",
     title: "Merge back {0}",
     checking: "Checking the task…",
     commits: "{0} commit(s) the target lacks",

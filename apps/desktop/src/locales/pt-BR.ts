@@ -2204,7 +2204,7 @@ const ptBR: Locale = {
   // ─── Worktrees ──────────────────────────────────────────
   // v3.13 merge-back (spec §6)
   mergeBack: {
-    abandoned: "O destino não contém o trabalho da tarefa: a operação foi abandonada. Feche esta janela e comece o merge-back de novo; a branch é mantida.",
+    abandoned: "O destino não contém o trabalho da tarefa como merge. Se você mesmo commitou o squash, está concluído: feche esta janela. Caso contrário, a operação foi abandonada: feche esta janela e comece o merge-back de novo. Nos dois casos, a branch é mantida.",
     title: "Trazer de volta {0}",
     checking: "Verificando a tarefa…",
     commits: "{0} commit(s) que o destino não tem",

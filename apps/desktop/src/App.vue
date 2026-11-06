@@ -2827,15 +2827,23 @@ async function onAiTaskMergeBack() {
 async function onManagerMergeBack(payload: { cwd: string; path: string }) {
   showWorktrees.value = false;
   try {
-    // The project tab's own path, not `git worktree list`'s spelling of it,
-    // so focusing the main checkout finds that tab.
-    const tabPath = repoTabs.value.find((tab) => tab.id === activeTabId.value)?.path;
     const entries = await gitWorktreeList(payload.cwd);
-    const main = tabPath ?? entries.find((w) => w.is_main)?.path ?? payload.cwd;
+    const main = entries.find((w) => w.is_main)?.path ?? payload.cwd;
     mergeBackDialog.value = { cwd: main, path: payload.path, projectPath: main, minimized: false };
   } catch (err) {
     repoError.value = t("mergeBack.failed", String((err as { message?: string })?.message ?? err));
   }
+}
+
+/**
+ * The main checkout's path as the project tab spells it, when that tab IS
+ * the main checkout; otherwise the backend's path. A tab can be a linked
+ * worktree opened on its own: merging there would merge into its branch.
+ */
+async function mainCheckoutSpelling(projectPath: string, canonicalMain: string): Promise<string> {
+  const entries = await gitWorktreeList(projectPath).catch(() => []);
+  const main = entries.find((w) => w.is_main)?.path;
+  return main !== undefined && main === projectPath ? projectPath : canonicalMain;
 }
 
 /**
@@ -2857,7 +2865,7 @@ registerMergeBackHost({
     const projectPath = mergeBackDialog.value?.projectPath ?? a.checkout;
     // The main checkout is the project's own tab: use that spelling of its
     // path, not the canonical one the backend reports (`/private/var`…).
-    const checkout = a.operation === "rebase" ? a.checkout : projectPath;
+    const checkout = a.operation === "rebase" ? a.checkout : await mainCheckoutSpelling(projectPath, a.checkout);
     keepResolutionSelection = true;
     try {
       await focusCheckout(checkout, projectPath);
