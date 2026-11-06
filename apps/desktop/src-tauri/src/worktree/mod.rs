@@ -14,6 +14,7 @@ pub(crate) mod include;
 pub(crate) mod merge_back;
 pub(crate) mod record;
 pub(crate) mod remove;
+pub(crate) mod restore;
 pub(crate) mod settings;
 pub(crate) mod slug;
 

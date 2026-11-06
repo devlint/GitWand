@@ -1971,6 +1971,8 @@ export interface SnapshotMeta {
   mergeHead: string | null;
   /** v3.13 — the worktree it was taken in, before removing it. */
   worktree?: { path: string; branch: string | null; name: string };
+  /** v3.13 — that worktree's recorded base. */
+  worktreeBase?: { baseRef: string; baseCommit: string };
 }
 
 /** Capture a snapshot. Returns null on a repo with no HEAD yet. */
@@ -3836,6 +3838,12 @@ export async function worktreeMergeBackSquash(cwd: string, path: string, target:
 export async function worktreeMergeBackFastForward(cwd: string, path: string, target: string): Promise<{ conflicts: boolean }> {
   if (isTauri()) return tauriInvoke<{ conflicts: boolean }>("worktree_merge_back_fast_forward", { cwd, path, target });
   return devPost<{ conflicts: boolean }>("/api/worktree-merge-back-fast-forward", { cwd, path, target }, "Failed to fast-forward the target");
+}
+
+/** v3.13 — a `removal` or `merge-back-task` snapshot as a new worktree (spec §9). */
+export async function snapshotRestoreAsWorktree(cwd: string, id: string, name?: string): Promise<CreatedWorktree> {
+  if (isTauri()) return tauriInvoke<CreatedWorktree>("snapshot_restore_as_worktree", { cwd, id, name: name ?? null });
+  return devPost<CreatedWorktree>("/api/snapshot-restore-as-worktree", { cwd, id, name: name ?? null }, "Failed to restore the snapshot as a worktree");
 }
 
 /** Prune stale worktree administrative files. */

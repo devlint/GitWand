@@ -14,7 +14,7 @@
 
 use crate::commands::scratch::{has_unmerged_entries, operation_in_progress};
 use crate::git::snapshot::{
-    create_snapshot_inner, create_snapshot_with, SnapshotMeta, SnapshotWorktree,
+    create_snapshot_full, create_snapshot_inner, SnapshotBase, SnapshotMeta, SnapshotWorktree,
 };
 use crate::process_tree::ProcInfo;
 use crate::worktree::guard;
@@ -405,7 +405,12 @@ pub(crate) fn prepare(
             ],
         )?;
     }
-    let task_snapshot = create_snapshot_with(
+    // The task's recorded base, so a restore of this snapshot records it too.
+    let base = guard::record_for(repo, &task).map(|r| SnapshotBase {
+        base_ref: r.base_ref,
+        base_commit: r.base_commit,
+    });
+    let task_snapshot = create_snapshot_full(
         &c.task_path,
         "merge-back-task",
         &format!("Merge back {} (task)", c.name),
@@ -414,6 +419,7 @@ pub(crate) fn prepare(
             branch: Some(c.task_branch.clone()),
             name: c.name.clone(),
         }),
+        base,
     )?;
     let main_snapshot = create_snapshot_inner(
         &c.main_path,
@@ -723,6 +729,10 @@ mod tests {
         assert!(git_at(&wt, &["status", "--porcelain"]).is_empty());
         let ts = p.task_snapshot.unwrap();
         assert_eq!(ts.kind, "merge-back-task");
+        assert!(
+            ts.worktree_base.is_some(),
+            "a restore records the task's base"
+        );
         assert_eq!(ts.worktree.unwrap().branch.as_deref(), Some("task/a"));
         assert_eq!(p.main_snapshot.unwrap().kind, "merge-back");
         assert_eq!(p.check.task_commits, 2);

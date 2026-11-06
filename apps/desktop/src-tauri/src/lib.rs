@@ -866,6 +866,7 @@ pub fn run() {
             commands::worktree::worktree_merge_back_prepare,
             commands::worktree::worktree_merge_back_squash,
             commands::worktree::worktree_merge_back_fast_forward,
+            commands::worktree::snapshot_restore_as_worktree,
             commands::worktree_processes::worktree_stop_processes,
             commands::worktree_trust::worktree_hooks_trust,
             commands::worktree_trust::worktree_hooks_trust_set,

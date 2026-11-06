@@ -307,3 +307,20 @@ pub(crate) async fn worktree_merge_back_fast_forward(
     .await
     .map_err(|e| format!("merge-back fast-forward failed: {e}"))?
 }
+
+/// Restores a `removal` or `merge-back-task` snapshot as a new worktree
+/// (spec §9). Does not run `setup`: the frontend does, as after any creation.
+#[tauri::command]
+pub(crate) async fn snapshot_restore_as_worktree(
+    cwd: String,
+    id: String,
+    name: Option<String>,
+) -> Result<crate::worktree::create::CreatedWorktree, String> {
+    let root = canonical_cwd(&cwd)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _repo = crate::git::repo_lock::write(&root.to_string_lossy());
+        crate::worktree::restore::restore_as_worktree(&root, &id, name.as_deref(), FETCH_TIMEOUT)
+    })
+    .await
+    .map_err(|e| format!("restore as worktree failed: {e}"))?
+}

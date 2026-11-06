@@ -266,6 +266,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   worktree_merge_back_prepare: { route: "/api/worktree-merge-back-prepare" },
   worktree_merge_back_squash: { route: "/api/worktree-merge-back-squash" },
   worktree_merge_back_fast_forward: { route: "/api/worktree-merge-back-fast-forward" },
+  snapshot_restore_as_worktree: { route: "/api/snapshot-restore-as-worktree" },
   // Best-effort mirror: the dev process sweep is `devStopProcessesIn`.
   worktree_remove_prepare: { route: "/api/worktree-remove-prepare" },
   worktree_remove: { route: "/api/worktree-remove" },

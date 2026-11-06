@@ -147,7 +147,7 @@ import {
   COMMIT_MESSAGE_SINK_KEY,
   type SettingsSectionTarget,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree, type SnapshotMeta } from "./utils/backend";
 import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorktreeCreation";
 import { registerRemovalHost } from "./composables/useWorktreeRemoval";
 import { registerMergeBackHost } from "./composables/useWorktreeMergeBack";
@@ -2347,6 +2347,27 @@ async function onWorktreeCreated(payload: { cwd: string; created: CreatedWorktre
     repoPath = payload.created.path;
   }
   await worktreeCreation.runSetup(repoPath, payload.cwd, payload.created, payload.decision);
+}
+
+/**
+ * v3.13 — a removed worktree's snapshot back as a new worktree (spec §9):
+ * trust first, then the restore, then `include` (backend) and `setup`, as
+ * for any new worktree.
+ */
+async function onRestoreWorktree(snapshot: SnapshotMeta) {
+  const cwd = repoFolderPath.value;
+  if (!cwd) return;
+  showTimeMachine.value = false;
+  try {
+    const result = await worktreeCreation.restore(cwd, snapshot.id);
+    if (!result) return; // cancelled at the trust prompt
+    showDetailToast(t("timeMachine.restoredAsWorktree", result.created.path), null, 6000);
+    void refreshWorktreeCount(cwd);
+    await loadBranches();
+    await onWorktreeCreated({ cwd, created: result.created, decision: result.decision, open: false });
+  } catch (err) {
+    repoError.value = t("timeMachine.restoreAsWorktreeFailed", String((err as { message?: string })?.message ?? err));
+  }
 }
 
 /** "Open the log" on a worktree card: focus its setup tab. */
@@ -5066,7 +5087,7 @@ onUnmounted(() => {
 
     <!-- Time Machine (v3.8) — full repo history, snapshots + reflog -->
     <TimeMachinePanel v-if="showTimeMachine && repoFolderPath" :cwd="repoFolderPath"
-      @close="showTimeMachine = false" @restored="onUndoPerformed()" />
+      @close="showTimeMachine = false" @restored="onUndoPerformed()" @restore-worktree="onRestoreWorktree" />
 
     <!-- Clone modal (v2.0) -->
     <CloneModal v-if="showCloneModal" @close="showCloneModal = false" @cloned="onCloned" />

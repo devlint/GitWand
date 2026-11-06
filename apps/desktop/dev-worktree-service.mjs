@@ -558,11 +558,13 @@ export async function devRemovePrepare(repo, worktree, { createSnapshot, stop = 
   const survivors = await stop(entry.path);
   if (survivors.length > 0) return { survivors, snapshot: null };
   const name = basename(entry.path);
+  const rec = devFindRecord(devCommonDir(repo), entry.path);
+  const base = rec ? { baseRef: rec.base_ref, baseCommit: rec.base_commit } : null;
   const snapshot = createSnapshot(entry.path, "removal", `Remove worktree ${name}`, {
     path: entry.path,
     branch: entry.branch,
     name,
-  });
+  }, base);
   return { survivors: [], snapshot };
 }
 
@@ -766,11 +768,13 @@ export async function devMergeBackPrepare(repo, worktree, target, { createSnapsh
       "commit", "--no-verify", "-q", "-m", `wip(${c.name}): uncommitted work at merge-back`,
     ]);
   }
+  const rec = devFindRecord(devCommonDir(repo), c.task_path);
+  const base = rec ? { baseRef: rec.base_ref, baseCommit: rec.base_commit } : null;
   const taskSnapshot = createSnapshot(c.task_path, "merge-back-task", `Merge back ${c.name} (task)`, {
     path: c.task_path,
     branch: c.task_branch,
     name: c.name,
-  });
+  }, base);
   const mainSnapshot = createSnapshot(c.main_path, "merge-back", `Merge back ${c.name} into ${c.target}`);
   return {
     check: devMergeBackCheck(repo, worktree, target),
@@ -809,4 +813,52 @@ export function devMergeBackFastForward(repo, worktree, target) {
   const r = spawnSync("git", ["merge", "--ff-only", "--no-autostash", `refs/heads/${entry.branch}`], { cwd: main, encoding: "utf-8" });
   if (r.status !== 0) throw new Error(`git refused to fast-forward ${target}: ${(r.stderr ?? "").trim()}`);
   return { conflicts: false };
+}
+
+// ── Restore as worktree (mirror of `worktree::restore`) ──────────────────────
+
+export const RESTORABLE_KINDS = ["removal", "merge-back-task"];
+
+/**
+ * Mirror of `restore::restore_as_worktree`. The dev-server hands in its own
+ * snapshot primitives (`listSnapshots`, `applySnapshotState`).
+ */
+export function devRestoreAsWorktree(repo, id, name, { listSnapshots, applySnapshotState }) {
+  const main = mainWorktreeRoot(repo);
+  const snap = listSnapshots(main).find((s) => s.id === id);
+  if (!snap) throw new Error(`Snapshot ${id} not found.`);
+  if (!snap.worktree || !RESTORABLE_KINDS.includes(snap.kind)) {
+    throw new Error("This snapshot was not taken from a worktree GitWand removed.");
+  }
+  const wanted = typeof name === "string" && name.trim() ? name.trim() : snap.worktree.name;
+  const slug = devSlugify(wanted);
+  if (!slug) throw new Error("The name needs at least one letter or digit.");
+  let branch = `restore/${slug}`;
+  for (let n = 2; branchExists(main, branch); n++) branch = `restore/${slug}-${n}`;
+  const created = devCreateWorktree(main, { name: `${slug}-restored`, base: snap.headSha, branch, kind: "task" });
+  const common = devCommonDir(main);
+  // Mirror of the base fallback in `restore::restore_as_worktree`.
+  let baseRef;
+  let baseCommit;
+  if (snap.worktreeBase) {
+    ({ baseRef, baseCommit } = snap.worktreeBase);
+  } else {
+    const on = gitOk(main, ["symbolic-ref", "--quiet", "--short", "HEAD"]) ?? "";
+    baseCommit = gitOk(main, ["merge-base", "HEAD", snap.headSha]) ?? snap.headSha;
+    baseRef = on || baseCommit;
+  }
+  try {
+    applySnapshotState(created.path, snap);
+    const rec = devFindRecord(common, created.path);
+    if (rec) devUpsertRecord(common, { ...rec, base_ref: baseRef, base_commit: baseCommit });
+    git(main, ["config", `branch.${branch}.gitwandBase`, baseCommit]);
+    git(main, ["config", `branch.${branch}.gitwandSource`, baseRef]);
+  } catch (e) {
+    gitOk(main, ["worktree", "remove", "--force", created.path]);
+    gitOk(main, ["worktree", "prune"]);
+    gitOk(main, ["branch", "-D", branch]);
+    saveRecords(common, devLoadRecords(common).filter((r) => real(r.path) !== real(created.path)));
+    throw new Error(`The snapshot could not be restored: ${e.message}`);
+  }
+  return { ...created, base: { base_ref: baseRef, commit: baseCommit, fetched_at: null, fallback_reason: null, fallback_detail: null } };
 }
