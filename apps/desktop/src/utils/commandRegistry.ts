@@ -260,6 +260,11 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   worktree_hooks_trust: { route: "/api/worktree-hooks-trust" },
   worktree_hooks_trust_set: { route: "/api/worktree-hooks-trust-set" },
   worktree_create: { route: "/api/worktree-create" },
+  worktree_guard: { route: "/api/worktree-guard" },
+  // Best-effort mirror: the dev process sweep is `devStopProcessesIn`.
+  worktree_remove_prepare: { route: "/api/worktree-remove-prepare" },
+  worktree_remove: { route: "/api/worktree-remove" },
+  worktree_unlock: { route: "/api/worktree-unlock" },
   worktree_resolve_base: { route: "/api/worktree-resolve-base" },
   worktree_run_hook: { route: "/api/worktree-run-hook" },
   worktree_stop_processes: { route: "/api/worktree-stop-processes" },

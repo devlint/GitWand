@@ -47,11 +47,22 @@ fn file(common: &Path) -> PathBuf {
     common.join("gitwand").join("worktrees.json")
 }
 
+/// The comparison key of a recorded path. On Windows, one folder has
+/// several spellings (`\\?\C:\…` from canonicalize, `C:/…` from git, any
+/// case): they must all find the same record.
+pub(crate) fn record_key(raw: &str, windows: bool) -> String {
+    if windows {
+        crate::worktree::hooks::strip_verbatim(raw)
+            .replace('/', "\\")
+            .to_lowercase()
+    } else {
+        raw.to_string()
+    }
+}
+
 fn canonical(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string()
+    let p = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    record_key(&p.to_string_lossy(), cfg!(windows))
 }
 
 fn read(common: &Path) -> Vec<WorktreeRecord> {
@@ -82,9 +93,12 @@ pub(crate) fn load(common: &Path) -> Vec<WorktreeRecord> {
 /// Adds the record, replacing one with the same (canonical) path.
 pub(crate) fn upsert(common: &Path, mut rec: WorktreeRecord) -> Result<(), String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    rec.path = canonical(Path::new(&rec.path));
+    let given = Path::new(&rec.path);
+    let resolved = given.canonicalize().unwrap_or_else(|_| given.to_path_buf());
+    let key = canonical(&resolved);
+    rec.path = crate::worktree::hooks::display_path(&resolved);
     let mut all = read(common);
-    all.retain(|r| canonical(Path::new(&r.path)) != rec.path);
+    all.retain(|r| canonical(Path::new(&r.path)) != key);
     all.push(rec);
     write(common, &all)
 }
@@ -123,6 +137,15 @@ mod tests {
             kind: Kind::Manual,
             source_branch: Some("main".into()),
         }
+    }
+
+    #[test]
+    fn record_key_matches_windows_spellings_of_one_path() {
+        // canonicalize() gives `\\?\C:\…`; `git worktree list` prints `C:/…`,
+        // which is all a removal has once a teardown deleted the folder.
+        let a = record_key(r"\\?\C:\Users\Me\repo.worktrees\fix", true);
+        assert_eq!(a, record_key("C:/Users/me/repo.worktrees/fix", true));
+        assert_eq!(record_key("/x/Repo", false), "/x/Repo");
     }
 
     #[test]

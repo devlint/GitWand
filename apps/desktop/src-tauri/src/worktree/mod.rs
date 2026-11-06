@@ -8,9 +8,11 @@
 
 pub(crate) mod base;
 pub(crate) mod create;
+pub(crate) mod guard;
 pub(crate) mod hooks;
 pub(crate) mod include;
 pub(crate) mod record;
+pub(crate) mod remove;
 pub(crate) mod settings;
 pub(crate) mod slug;
 

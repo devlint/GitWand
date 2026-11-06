@@ -328,9 +328,31 @@ pub(crate) async fn scratch_worktree_merge_back(
     cwd: String,
     scratch_path: String,
     snapshots_enabled: Option<bool>,
+    cleanup: Option<bool>,
 ) -> Result<ScratchMergeBackOutcome, String> {
     let _repo = repo_lock::write(&cwd);
-    scratch_worktree_merge_back_impl(cwd, scratch_path, snapshots_enabled)
+    scratch_worktree_merge_back_inner(
+        cwd,
+        scratch_path,
+        snapshots_enabled,
+        cleanup.unwrap_or(true),
+    )
+}
+
+/// The worktree service's guards (spec §7.1), for the scratch paths:
+/// nothing merges back into or discards an untouchable worktree. A
+/// worktree whose teardown must run first is refused when this path
+/// would remove it: the removal flow runs teardown, these do not.
+fn guard_scratch(repo_root: &Path, scratch: &Path, removes: bool) -> Result<(), String> {
+    let report = crate::worktree::guard::guard(repo_root, scratch)?;
+    crate::worktree::guard::refuse_untouchable(&report, scratch)?;
+    if removes && report.teardown_required {
+        return Err(
+            "teardown: this worktree has a teardown hook; remove it from the removal dialog so teardown runs."
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 /// `git status --porcelain` XY codes of an unmerged (conflicted) path.
@@ -384,13 +406,26 @@ fn operation_in_progress(dir: &Path) -> Result<Option<&'static str>, String> {
     Ok(None)
 }
 
+#[cfg(test)]
 pub(crate) fn scratch_worktree_merge_back_impl(
     cwd: String,
     scratch_path: String,
     snapshots_enabled: Option<bool>,
 ) -> Result<ScratchMergeBackOutcome, String> {
+    scratch_worktree_merge_back_inner(cwd, scratch_path, snapshots_enabled, true)
+}
+
+/// Merge-back; `cleanup` removes the worktree afterwards. The AI-task
+/// flow passes `false` and runs the removal flow next, so teardown runs.
+pub(crate) fn scratch_worktree_merge_back_inner(
+    cwd: String,
+    scratch_path: String,
+    snapshots_enabled: Option<bool>,
+    cleanup: bool,
+) -> Result<ScratchMergeBackOutcome, String> {
     let repo_root = canonical_cwd(&cwd)?;
     let scratch = validate_scratch_path(&repo_root, &scratch_path)?;
+    guard_scratch(&repo_root, &scratch, cleanup)?;
 
     // GUARD: the main checkout is not mid-operation, conflicted or not (a
     // rebase paused at `edit` has no unmerged entry): the task would be folded
@@ -588,6 +623,11 @@ pub(crate) fn scratch_worktree_merge_back_impl(
         }
     }
 
+    if !cleanup {
+        return Ok(ScratchMergeBackOutcome {
+            cleanup_warning: None,
+        });
+    }
     // The task is merged by now, so a cleanup failure is only a warning.
     let cleanup_warning = remove_scratch(&repo_root, &scratch, Some(&scratch_branch), true).err();
     Ok(ScratchMergeBackOutcome { cleanup_warning })
@@ -673,6 +713,7 @@ pub(crate) fn scratch_worktree_discard_impl(
 ) -> Result<(), String> {
     let repo_root = canonical_cwd(&cwd)?;
     let scratch = validate_scratch_path(&repo_root, &scratch_path)?;
+    guard_scratch(&repo_root, &scratch, true)?;
 
     // Capture the branch name before removal so we can delete it afterwards.
     // Full ref: `--short` answers `heads/<branch>` when a tag has the same name.
@@ -892,6 +933,72 @@ mod tests {
         );
         // Main checkout untouched.
         assert_eq!(repo.read("file.txt"), "original\n");
+    }
+
+    #[test]
+    fn discard_refused_for_a_locked_scratch() {
+        let repo = TempRepo::new();
+        repo.write("file.txt", "original\n");
+        repo.commit_all("base");
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).unwrap();
+        repo.git(&["worktree", "lock", &scratch.path]);
+        let err = scratch_worktree_discard_impl(repo.cwd(), scratch.path.clone()).unwrap_err();
+        assert!(err.starts_with("untouchable:"), "{err}");
+        assert!(Path::new(&scratch.path).exists());
+    }
+
+    #[test]
+    fn merge_back_refused_for_a_keep_file_scratch() {
+        let repo = TempRepo::new();
+        repo.write("file.txt", "original\n");
+        repo.commit_all("base");
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).unwrap();
+        std::fs::write(Path::new(&scratch.path).join(".worktree-keep"), "").unwrap();
+        std::fs::write(Path::new(&scratch.path).join("file.txt"), "resolved\n").unwrap();
+        let err =
+            scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), None).unwrap_err();
+        assert!(err.starts_with("untouchable:"), "{err}");
+        assert_eq!(repo.read("file.txt"), "original\n");
+        assert!(Path::new(&scratch.path).join(".worktree-keep").exists());
+    }
+
+    #[test]
+    fn merge_back_without_cleanup_keeps_the_worktree() {
+        let repo = TempRepo::new();
+        repo.write("file.txt", "original\n");
+        repo.commit_all("base");
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).unwrap();
+        std::fs::write(Path::new(&scratch.path).join("file.txt"), "resolved\n").unwrap();
+        let out = scratch_worktree_merge_back_inner(repo.cwd(), scratch.path.clone(), None, false)
+            .unwrap();
+        assert!(out.cleanup_warning.is_none());
+        assert_eq!(repo.read("file.txt"), "resolved\n");
+        assert!(
+            Path::new(&scratch.path).exists(),
+            "the removal flow removes it"
+        );
+    }
+
+    #[test]
+    fn discard_refused_for_a_recorded_task_with_teardown() {
+        let repo = TempRepo::new();
+        repo.write(".gitwandrc", r#"{"worktree":{"teardown":"echo bye"}}"#);
+        repo.commit_all("base");
+        let created = crate::worktree::create::create_worktree(
+            Path::new(&repo.cwd()),
+            crate::worktree::create::CreateRequest {
+                name: "agent".into(),
+                base: None,
+                branch: None,
+                path: None,
+                kind: Kind::Task,
+            },
+            std::time::Duration::from_secs(20),
+        )
+        .unwrap();
+        let err = scratch_worktree_discard_impl(repo.cwd(), created.path.clone()).unwrap_err();
+        assert!(err.starts_with("teardown:"), "{err}");
+        assert!(Path::new(&created.path).exists());
     }
 
     #[test]
@@ -1684,6 +1791,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn merge_back_reports_a_cleanup_failure_as_a_warning() {
         let repo = TempRepo::new();
         repo.write("task.txt", "v1\n");
@@ -1691,15 +1799,19 @@ mod tests {
 
         let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
         write_in(&scratch, "task.txt", "agent edit\n");
-        // A locked worktree resists `worktree remove --force`.
-        repo.git(&["worktree", "lock", &scratch.path]);
+        // A read-only directory resists `worktree remove --force` (a locked
+        // worktree is refused up front since v3.13, spec §7.1).
+        let ro = Path::new(&scratch.path).join("ro");
+        std::fs::create_dir_all(&ro).unwrap();
+        std::fs::write(ro.join("f.txt"), "x\n").unwrap();
+        set_mode(&ro, 0o555);
 
         let outcome =
             scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false))
                 .expect("the merge itself succeeded");
         assert_eq!(repo.read("task.txt"), "agent edit\n");
         let warning = outcome.cleanup_warning.expect("cleanup failure reported");
-        assert!(warning.contains("locked"), "got: {}", warning);
+        assert!(warning.contains("ermission denied"), "got: {}", warning);
 
         // The task is closed: its branch is gone, the leftover is detached.
         let branch_ref = format!("refs/heads/{}", scratch.branch);
@@ -1711,13 +1823,15 @@ mod tests {
         assert!(!git_at(&scratch.path, &["symbolic-ref", "-q", "HEAD"])
             .status
             .success());
-        assert_eq!(
-            std::fs::read_to_string(Path::new(&scratch.path).join("task.txt")).unwrap(),
-            "agent edit\n",
-            "detaching leaves the files alone"
-        );
-        repo.git(&["worktree", "unlock", &scratch.path]);
-        repo.git(&["worktree", "remove", "--force", &scratch.path]);
+        // git deleted what it could before failing on `ro/`; the work is
+        // merged already, so nothing is lost.
+        set_mode(&ro, 0o755);
+    }
+
+    #[cfg(unix)]
+    fn set_mode(p: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
     }
 
     #[test]

@@ -555,6 +555,13 @@ pub fn worktree_resolve_base_parity(
     tauri::async_runtime::block_on(commands::worktree::worktree_resolve_base(cwd))
 }
 
+pub fn worktree_guard_parity(
+    cwd: String,
+    path: String,
+) -> Result<worktree::guard::GuardReport, String> {
+    tauri::async_runtime::block_on(commands::worktree::worktree_guard(cwd, path))
+}
+
 pub fn git_remote_info_parity(cwd: String) -> Result<types::RemoteInfo, String> {
     tauri::async_runtime::block_on(commands::ops::git_remote_info(cwd))
 }
@@ -841,6 +848,10 @@ pub fn run() {
             commands::worktree::worktree_resolve_base,
             commands::worktree::worktree_run_hook,
             commands::worktree::worktree_url,
+            commands::worktree::worktree_guard,
+            commands::worktree::worktree_remove_prepare,
+            commands::worktree::worktree_remove,
+            commands::worktree::worktree_unlock,
             commands::worktree_processes::worktree_stop_processes,
             commands::worktree_trust::worktree_hooks_trust,
             commands::worktree_trust::worktree_hooks_trust_set,

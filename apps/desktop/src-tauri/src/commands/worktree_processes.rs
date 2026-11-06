@@ -101,7 +101,7 @@ fn listed(candidates: &[u32], me: u32, procs: &[ProcInfo]) -> Vec<u32> {
         .collect()
 }
 
-fn stop_processes_in(
+pub(crate) fn stop_processes_in(
     repo: &Path,
     worktree: &Path,
     kill_foreign: bool,
@@ -127,9 +127,16 @@ fn stop_processes_in(
     );
     terminate(&targets);
 
+    Ok(still_running(&worktree))
+}
+
+/// The processes whose working directory is inside `worktree`, minus
+/// GitWand and its ancestors: what a removal must wait for.
+pub(crate) fn still_running(worktree: &Path) -> Vec<ProcInfo> {
+    let me = std::process::id();
     let procs = process_tree::list_processes();
-    let swept = process_tree::pids_with_cwd_under(&worktree);
-    Ok(listed(&swept, me, &procs)
+    let swept = process_tree::pids_with_cwd_under(worktree);
+    listed(&swept, me, &procs)
         .into_iter()
         .map(|pid| {
             procs
@@ -142,7 +149,7 @@ fn stop_processes_in(
                     name: "?".to_string(),
                 })
         })
-        .collect())
+        .collect()
 }
 
 /// `worktree`, canonical, when it is a linked worktree of `repo`: never the

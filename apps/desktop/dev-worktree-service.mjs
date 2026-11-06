@@ -19,7 +19,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
-import { devAssertTrusted, mainWorktreeRoot, readRcText } from "./dev-worktree-trust.mjs";
+import { devAssertTrusted, devHooksFromRcText, mainWorktreeRoot, readRcText } from "./dev-worktree-trust.mjs";
 
 export const FETCH_TIMEOUT_MS = 20_000;
 export const URL_TIMEOUT_MS = 10_000;
@@ -447,11 +447,11 @@ export function devHookVars(cwd, path) {
 
 /** What `/api/worktree-run-hook` spawns: `{ program, args, cwd, env }`. */
 export function devSetupSpawn(cwd, path, hook, hash, { storePath, shell } = {}) {
-  if (hook !== "setup") throw new Error(`Unknown worktree hook: ${hook}`);
+  if (hook !== "setup" && hook !== "teardown") throw new Error(`Unknown worktree hook: ${hook}`);
   const hooks = devAssertTrusted(cwd, hash, storePath);
-  if (!hooks.setup) throw new Error("This repository defines no setup hook.");
+  if (!hooks[hook]) throw new Error(`This repository defines no ${hook} hook.`);
   const vars = devHookVars(cwd, path);
-  const { program, args, env } = devShellInvocation(devExpandHook(hooks.setup, vars), shell);
+  const { program, args, env } = devShellInvocation(devExpandHook(hooks[hook], vars), shell);
   return { program, args, cwd: vars.path, env: { ...devHookEnv(vars), ...env } };
 }
 
@@ -475,4 +475,151 @@ export function devWorktreeUrl(cwd, path, hash, { storePath, shell, timeoutMs = 
     throw new Error(`The url hook failed (exit status: ${r.status}): ${tail}`);
   }
   return (r.stdout ?? "").split("\n").map((l) => l.trim()).find((l) => l) ?? null;
+}
+
+// ── Removal (mirror of `worktree::guard` / `worktree::remove`) ───────────────
+
+/** Mirror of `guard::OTHER_TOOL_DIRS`. */
+export const OTHER_TOOL_DIRS = [[".claude", "worktrees"], ["conductor", "workspaces"], [".superset", "worktrees"]];
+export const KEEP_FILE = ".worktree-keep";
+
+/** Mirror of `guard::listed`: the linked worktree's porcelain entry, or throws. */
+export function devListedWorktree(repo, worktree) {
+  const refuse = () => new Error(`Not a linked worktree of this repository: ${worktree}`);
+  const exists = existsSync(worktree);
+  const wanted = exists ? real(worktree) : worktree;
+  const text = git(repo, ["worktree", "list", "--porcelain"]);
+  for (const block of text.split("\n\n").slice(1)) {
+    let path = null;
+    let branch = null;
+    let locked = null;
+    for (const line of block.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        const p = line.slice("worktree ".length);
+        path = exists ? real(p) : p;
+      } else if (line.startsWith("branch ")) {
+        const b = line.slice("branch ".length);
+        branch = b.startsWith("refs/heads/") ? b.slice("refs/heads/".length) : b;
+      } else if (line === "locked") locked = "";
+      else if (line.startsWith("locked ")) locked = line.slice("locked ".length);
+    }
+    if (path === wanted) return { path: wanted, branch, locked };
+  }
+  throw refuse();
+}
+
+function inOtherToolDir(path) {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return OTHER_TOOL_DIRS.some((dir) =>
+    parts.some((_, i) => dir.every((d, j) => parts[i + j] === d)),
+  );
+}
+
+function legacyOwned(repo, path, branch) {
+  if (basename(path).startsWith("gitwand-scratch-")) return true;
+  return branch !== null && gitOk(repo, ["config", "--get", `branch.${branch}.gitwandBase`]) !== null;
+}
+
+/** Mirror of `guard::guard`. */
+export function devWorktreeGuard(repo, worktree) {
+  const entry = devListedWorktree(repo, worktree);
+  const recorded = devFindRecord(devCommonDir(repo), entry.path) !== null;
+  const owned = recorded || legacyOwned(repo, entry.path, entry.branch);
+  const reasons = [];
+  if (entry.locked !== null) reasons.push("locked");
+  if (existsSync(join(entry.path, KEEP_FILE))) reasons.push("keep-file");
+  if (!recorded && inOtherToolDir(entry.path)) reasons.push("other-tool");
+  const teardownRequired = recorded && !!devHooksFromRcText(readRcText(mainWorktreeRoot(repo))).teardown;
+  return {
+    untouchable: reasons.length > 0,
+    reasons,
+    owned,
+    recorded,
+    teardown_required: teardownRequired,
+    branch: entry.branch,
+    lock_reason: entry.locked ? entry.locked : null,
+  };
+}
+
+function refuseUntouchable(report, path) {
+  if (report.untouchable) {
+    throw new Error(`untouchable: ${path} (${report.reasons.join(", ")}) — GitWand will not remove or modify it.`);
+  }
+}
+
+/**
+ * Mirror of `remove::prepare_removal`. `stop(path)` stops the worktree's
+ * processes and resolves with the survivors (the dev-server passes
+ * `devStopProcessesIn`, a best-effort mirror of the Rust sweep).
+ */
+export async function devRemovePrepare(repo, worktree, { createSnapshot, stop = async () => [] }) {
+  refuseUntouchable(devWorktreeGuard(repo, worktree), worktree);
+  const entry = devListedWorktree(repo, worktree);
+  const survivors = await stop(entry.path);
+  if (survivors.length > 0) return { survivors, snapshot: null };
+  const name = basename(entry.path);
+  const snapshot = createSnapshot(entry.path, "removal", `Remove worktree ${name}`, {
+    path: entry.path,
+    branch: entry.branch,
+    name,
+  });
+  return { survivors: [], snapshot };
+}
+
+/** Mirror of `remove::remove_worktree`, minus the last process check. */
+export function devRemoveWorktree(repo, worktree, opts = {}) {
+  const report = devWorktreeGuard(repo, worktree);
+  refuseUntouchable(report, worktree);
+  const entry = devListedWorktree(repo, worktree);
+  const path = entry.path;
+  if (!report.owned && !opts.confirmNotOwned) {
+    throw new Error(`not-owned: ${path} was not created by GitWand; confirm to remove it.`);
+  }
+  const teardownDone = !!opts.teardownSkipped || opts.teardownCode === 0 || !!opts.removeAnyway;
+  if (report.teardown_required && !teardownDone) {
+    throw new Error(
+      typeof opts.teardownCode === "number"
+        ? `teardown: it exited with code ${opts.teardownCode}; the worktree is kept.`
+        : "teardown: it has not run; the worktree is kept.",
+    );
+  }
+  const common = devCommonDir(repo);
+  const rec = devFindRecord(common, path);
+  const main = mainWorktreeRoot(repo);
+  if (existsSync(path)) {
+    const id = opts.snapshotId;
+    const force =
+      typeof id === "string" &&
+      /^[0-9a-f-]+$/i.test(id) &&
+      gitOk(main, ["rev-parse", "--verify", "--quiet", `refs/gitwand/snapshots/${id}`]) !== null;
+    const r = spawnSync("git", ["worktree", "remove", ...(force ? ["--force"] : []), path], { cwd: main, encoding: "utf-8" });
+    if (r.status !== 0) throw new Error(`git worktree remove failed: ${(r.stderr ?? "").trim()}`);
+  }
+  gitOk(main, ["worktree", "prune"]);
+  const outcome = { branch_deleted: null, warnings: [] };
+  if (entry.branch) {
+    const target = rec?.source_branch ? `refs/heads/${rec.source_branch}` : "HEAD";
+    const mergedTask =
+      rec?.kind === "task" &&
+      spawnSync("git", ["merge-base", "--is-ancestor", `refs/heads/${entry.branch}`, target], { cwd: main }).status === 0;
+    if (opts.deleteBranch || mergedTask) {
+      const r = spawnSync("git", ["branch", "-D", entry.branch], { cwd: main, encoding: "utf-8" });
+      if (r.status === 0) outcome.branch_deleted = entry.branch;
+      else outcome.warnings.push(`branch ${entry.branch} kept: ${(r.stderr ?? "").trim()}`);
+    }
+  }
+  if (rec) {
+    try {
+      saveRecords(common, devLoadRecords(common).filter((r) => real(r.path) !== real(path)));
+    } catch (e) {
+      outcome.warnings.push(`record kept: ${e.message}`);
+    }
+  }
+  return outcome;
+}
+
+/** Mirror of `worktree_unlock`. */
+export function devUnlockWorktree(repo, worktree) {
+  const entry = devListedWorktree(repo, worktree);
+  git(repo, ["worktree", "unlock", entry.path]);
 }
