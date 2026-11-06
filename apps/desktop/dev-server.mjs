@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devCreateWorktree, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl } from "./dev-worktree-service.mjs";
+import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
 // output, resize, and control sequences without any manual workarounds.
@@ -7195,6 +7195,51 @@ async function handleRequest(req, res) {
       try {
         const { cwd, path, opts } = await readBody(req);
         return jsonResponse(req, res, devRemoveWorktree(resolve(cwd), resolve(String(path ?? "")), opts ?? {}));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-merge-back-check  { cwd, path, target? } — mirrors worktree_merge_back_check
+    if (url.pathname === "/api/worktree-merge-back-check" && req.method === "POST") {
+      try {
+        const { cwd, path, target } = await readBody(req);
+        return jsonResponse(req, res, devMergeBackCheck(resolve(cwd), resolve(String(path ?? "")), target ?? null));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-merge-back-prepare  { cwd, path, target } — mirrors worktree_merge_back_prepare
+    if (url.pathname === "/api/worktree-merge-back-prepare" && req.method === "POST") {
+      try {
+        const { cwd, path, target } = await readBody(req);
+        const repo = resolve(cwd);
+        const value = await devMergeBackPrepare(repo, resolve(String(path ?? "")), String(target ?? ""), {
+          createSnapshot,
+          stop: (wt) => devStopProcessesIn(repo, wt, false, devPtys),
+        });
+        return jsonResponse(req, res, value);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-merge-back-squash  { cwd, path, target } — mirrors worktree_merge_back_squash
+    if (url.pathname === "/api/worktree-merge-back-squash" && req.method === "POST") {
+      try {
+        const { cwd, path, target } = await readBody(req);
+        return jsonResponse(req, res, devMergeBackSquash(resolve(cwd), resolve(String(path ?? "")), String(target ?? "")));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/worktree-merge-back-fast-forward  { cwd, path, target } — mirrors worktree_merge_back_fast_forward
+    if (url.pathname === "/api/worktree-merge-back-fast-forward" && req.method === "POST") {
+      try {
+        const { cwd, path, target } = await readBody(req);
+        return jsonResponse(req, res, devMergeBackFastForward(resolve(cwd), resolve(String(path ?? "")), String(target ?? "")));
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }

@@ -41,7 +41,7 @@ use gitwand_desktop_lib::{
     list_repo_dir_parity, preview_cherry_pick_parity, preview_merge_parity, preview_rebase_parity,
     read_file_parity, scan_secrets_parity, snapshot_create_parity, snapshot_list_parity,
     snapshot_prune_parity, snapshot_restore_parity, worktree_guard_parity,
-    worktree_resolve_base_parity,
+    worktree_merge_back_check_parity, worktree_resolve_base_parity,
 };
 use serde_json::{json, Value};
 use std::io::{self, Read};
@@ -306,6 +306,21 @@ fn main() -> ExitCode {
                 Err(code) => return code,
             };
             to_json(worktree_guard_parity(cwd, path))
+        }
+        "worktree-merge-back-check" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let path = match must_str("path") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let target = input
+                .get("target")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            to_json(worktree_merge_back_check_parity(cwd, path, target))
         }
         "git-stash-list" => {
             let cwd = match must_str("cwd") {
