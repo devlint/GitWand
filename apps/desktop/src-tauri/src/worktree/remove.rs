@@ -9,7 +9,7 @@
 //! The snapshot comes before the teardown, since a teardown may delete
 //! files, or the worktree itself.
 
-use crate::git::snapshot::{create_snapshot_with, SnapshotMeta, SnapshotWorktree};
+use crate::git::snapshot::{create_snapshot_full, SnapshotBase, SnapshotMeta, SnapshotWorktree};
 use crate::process_tree::ProcInfo;
 use crate::worktree::guard::{self, refuse_untouchable};
 use crate::worktree::record::{self, Kind};
@@ -72,7 +72,11 @@ pub(crate) fn prepare_removal(
         });
     }
     let name = name_of(&entry.path);
-    let snapshot = create_snapshot_with(
+    let base = guard::record_for(repo, &entry.path).map(|r| SnapshotBase {
+        base_ref: r.base_ref,
+        base_commit: r.base_commit,
+    });
+    let snapshot = create_snapshot_full(
         &entry.path.to_string_lossy(),
         "removal",
         &format!("Remove worktree {name}"),
@@ -81,6 +85,7 @@ pub(crate) fn prepare_removal(
             branch: entry.branch,
             name,
         }),
+        base,
     )?;
     Ok(Prepared {
         survivors: vec![],

@@ -13,6 +13,7 @@ pub(crate) mod hooks;
 pub(crate) mod include;
 pub(crate) mod record;
 pub(crate) mod remove;
+pub(crate) mod restore;
 pub(crate) mod settings;
 pub(crate) mod slug;
 
