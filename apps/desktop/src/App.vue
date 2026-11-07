@@ -547,6 +547,7 @@ const {
   openTab,
   closeTab,
   selectWorktree,
+  forgetCheckout,
   activeRepoPath,
   switchTab,
   reorderTabs,
@@ -2320,6 +2321,7 @@ registerRemovalHost({
     await termSessions.disposeRepo(path).catch(() => {});
     await termSessions.disposeCwd(path).catch(() => {});
   },
+  closeRepoTabs: (path) => forgetCheckout(path),
 });
 
 /** Include entries the service skipped, if any, as one toast. */

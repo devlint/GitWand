@@ -84,6 +84,12 @@ export interface WorktreeRemovalDeps {
   ) => Promise<{ code: number | null; tabId: number }>;
   /** Closes the terminal tabs open in the worktree (spec §8 step 4). */
   disposeTabs: (path: string) => Promise<void>;
+  /**
+   * Once the worktree is gone: closes the repo tabs open on it, and drops a
+   * project tab's selection of it. Left open, such a tab reads a folder that
+   * no longer exists and shows stale state.
+   */
+  closeRepoTabs: (path: string) => void;
 }
 
 export interface WorktreeRemoval {
@@ -221,6 +227,7 @@ export function createWorktreeRemoval(deps: WorktreeRemovalDeps): WorktreeRemova
       deleteBranch,
       confirmNotOwned,
     });
+    deps.closeRepoTabs(r.path);
     patch({ phase: "done", outcome });
   }
 
@@ -257,6 +264,7 @@ export function createWorktreeRemoval(deps: WorktreeRemovalDeps): WorktreeRemova
 interface RemovalHost {
   runTeardown: WorktreeRemovalDeps["runTeardown"];
   disposeTabs: WorktreeRemovalDeps["disposeTabs"];
+  closeRepoTabs: WorktreeRemovalDeps["closeRepoTabs"];
 }
 
 let host: RemovalHost | null = null;
@@ -279,5 +287,6 @@ export function useWorktreeRemoval(): WorktreeRemoval {
       return host.runTeardown(...args);
     },
     disposeTabs: (path) => (host ? host.disposeTabs(path) : Promise.resolve()),
+    closeRepoTabs: (path) => host?.closeRepoTabs(path),
   });
 }

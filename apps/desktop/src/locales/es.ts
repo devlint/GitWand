@@ -581,6 +581,7 @@ const es: Locale = {
   mergePreview: {
     applying: "Aplicando\u2026",
     applyAndMerge: "Fusionar y auto-resolver",
+    applyClean: "Aplicar",
     applyEstimate: "Estimado: {0} de {1} hunks auto-resolubles",
     applyDone: "Listo",
     applyStopped: "Detenido en los conflictos que te necesitan",

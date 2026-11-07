@@ -176,7 +176,9 @@
     </div>
 
     <!-- ─── Apply from preview (v3.11.0) ─────────────────── -->
-    <div v-if="summary.conflictingFiles > 0" class="preview-apply">
+    <!-- In the merge-back dialog a clean preview still needs its button:
+         the dialog has no other way to run the operation. -->
+    <div v-if="summary.conflictingFiles > 0 || embedded" class="preview-apply">
       <button
         type="button"
         class="btn btn--primary preview-apply__btn"
@@ -184,12 +186,13 @@
         @click="emit('apply')"
       >
         <span v-if="props.applying">… {{ t('mergePreview.applying') }}</span>
-        <span v-else>{{ t('mergePreview.applyAndMerge') }}</span>
+        <span v-else-if="summary.conflictingFiles > 0">{{ t('mergePreview.applyAndMerge') }}</span>
+        <span v-else>{{ t('mergePreview.applyClean') }}</span>
       </button>
       <!-- "Estimated" is load-bearing: the simulation and the real operation
            use different merge algorithms and can see a different file set, so
            this number is a prediction, not a promise. -->
-      <span class="preview-apply__estimate">
+      <span v-if="summary.conflictingFiles > 0" class="preview-apply__estimate">
         {{ t('mergePreview.applyEstimate',
               String(estimatedAutoResolutions),
               String(estimatedAutoResolutions + heldByThreshold + manualHunks)) }}

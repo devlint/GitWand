@@ -583,6 +583,8 @@ const zhCN: Locale = {
 
     applyAndMerge: "\u5408\u5e76\u5e76\u81ea\u52a8\u89e3\u51b3",
 
+    applyClean: "应用",
+
     applyEstimate: "\u9884\u8ba1 {1} \u4e2a\u51b2\u7a81\u5757\u4e2d\u6709 {0} \u4e2a\u53ef\u81ea\u52a8\u89e3\u51b3",
 
     applyDone: "\u5b8c\u6210",

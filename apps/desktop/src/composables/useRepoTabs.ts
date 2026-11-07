@@ -234,6 +234,23 @@ export function useRepoTabs() {
   }
 
   /**
+   * A checkout is gone (its worktree was removed): close the tabs opened on
+   * it, and send any project tab that had it selected back to its main
+   * checkout. Either would otherwise keep reading a folder that no longer
+   * exists.
+   */
+  function forgetCheckout(path: string) {
+    const normalized = path.replace(/\/+$/, "") || path;
+    const selected = Object.entries(worktreeSelections.value).filter(([, p]) => p === normalized);
+    if (selected.length > 0) {
+      const next = { ...worktreeSelections.value };
+      for (const [id] of selected) delete next[Number(id)];
+      worktreeSelections.value = next;
+    }
+    for (const tab of tabs.value.filter((t) => t.path === normalized)) closeTab(tab.id);
+  }
+
+  /**
    * Switch to a tab by ID.
    */
   function switchTab(tabId: number) {
@@ -263,6 +280,7 @@ export function useRepoTabs() {
     openTab,
     closeTab,
     selectWorktree,
+    forgetCheckout,
     activeRepoPath,
     switchTab,
     reorderTabs,
