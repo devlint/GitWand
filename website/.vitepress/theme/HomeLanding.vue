@@ -1348,10 +1348,10 @@ onMounted(() => {
         <div class="blog-teaser-header">
           <span class="blog-teaser-label">From the blog</span>
         </div>
-        <a href="/blog/rebase-vs-merge-conflicts" class="blog-teaser-card">
-          <div class="blog-teaser-meta">November 3, 2026 · 11 min read</div>
-          <h3 class="blog-teaser-title">Rebase or merge: which one gives you fewer conflicts?</h3>
-          <p class="blog-teaser-excerpt">A merge asks one three-way question about two end states; a rebase asks one per replayed commit, against a base that already contains your previous answers. Why that makes a rebase repeat some conflicts and skip others, three small reproducible scenarios with the stops counted, what git rerere actually removes, and how GitWand drives a paused rebase.</p>
+        <a href="/blog/worktrees-step-by-step" class="blog-teaser-card">
+          <div class="blog-teaser-meta">November 9, 2026 · 10 min read</div>
+          <h3 class="blog-teaser-title">Git worktrees in GitWand, step by step</h3>
+          <p class="blog-teaser-excerpt">git worktree add gives you a folder, not the environment that makes it runnable. The whole lifecycle in GitWand 3.13: describe your setup once, create from a fresh base, let an agent work while main moves, merge its work back with its commits intact, remove it with a teardown that has to succeed, and restore it if you change your mind.</p>
           <span class="blog-teaser-cta">Read article →</span>
         </a>
       </div>

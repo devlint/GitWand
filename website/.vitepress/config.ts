@@ -351,6 +351,7 @@ export default defineConfig({
           text: 'Blog',
           items: [
             { text: 'All articles', link: '/blog/' },
+            { text: 'Git worktrees, step by step (v3.13)', link: '/blog/worktrees-step-by-step' },
             { text: 'Rebase or merge: fewer conflicts?', link: '/blog/rebase-vs-merge-conflicts' },
             { text: 'Trivial conflicts: a taxonomy', link: '/blog/trivial-conflicts-taxonomy' },
             { text: 'Reading a Git conflict marker', link: '/blog/reading-git-conflict-markers' },

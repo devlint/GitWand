@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/worktrees-step-by-step" class="blog-card">
+    <div class="blog-meta">November 9, 2026 · 10 min read</div>
+    <h2 class="blog-title">Git worktrees in GitWand, step by step</h2>
+    <p class="blog-excerpt">A worktree is a second checkout of the same repository; <code>git worktree add</code> gives you the folder, not the <code>.env</code>, the containers or the URL that make it runnable. A walkthrough of GitWand 3.13's worktree lifecycle in the order you meet it: describe your environment once in <code>.gitwandrc</code>, trust its commands knowingly, create from a freshly fetched base, watch <code>setup</code>, let an agent work while <code>main</code> moves, <strong>merge back as a merge, rebase or squash</strong> through the usual preview, remove with a teardown that has to succeed, and restore from the Time Machine if you needed it after all.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/rebase-vs-merge-conflicts" class="blog-card">
     <div class="blog-meta">November 3, 2026 · 11 min read</div>
     <h2 class="blog-title">Rebase or merge: which one gives you fewer conflicts?</h2>
