@@ -1623,7 +1623,7 @@ const ptBR: Locale = {
       terminal: "Layout, shell e aparência do terminal integrado.",
       ai: "Ative os recursos de IA, escolha um provedor e configure o modelo usado pelo GitWand.",
       aiTemplates: "Personalize os prompts usados para mensagens de commit, descrições de pull request e notas de versão.",
-      accounts: "Conecte contas do GitHub, GitLab e Bitbucket para pull requests e recursos remotos.",
+      accounts: "Conecte contas do GitHub, GitLab, Bitbucket, Azure DevOps e Gitea / Forgejo para pull requests e recursos remotos.",
       mcp: "Gerencie os servidores MCP disponíveis para os recursos de IA do GitWand.",
       automations: "Tarefas opcionais executadas automaticamente com base em eventos do Git ou em um agendamento.",
       hooks: "Scripts executados em eventos do Git no repositório atual.",

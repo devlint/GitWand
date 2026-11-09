@@ -1635,7 +1635,7 @@ const zhCN: Locale = {
       terminal: "集成终端的布局、Shell 和外观。",
       ai: "启用 AI 功能、选择提供商并配置 GitWand 使用的模型。",
       aiTemplates: "自定义用于提交信息、拉取请求描述和发行说明的提示词。",
-      accounts: "连接 GitHub、GitLab 和 Bitbucket 账户，用于拉取请求和远程功能。",
+      accounts: "连接 GitHub、GitLab、Bitbucket、Azure DevOps 和 Gitea / Forgejo 账户，用于拉取请求和远程功能。",
       mcp: "管理 GitWand AI 功能可用的 MCP 服务器。",
       automations: "根据 Git 事件或计划自动运行的可选任务。",
       hooks: "在当前仓库的 Git 事件上运行的脚本。",

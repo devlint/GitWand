@@ -1623,7 +1623,7 @@ const es: Locale = {
       terminal: "Disposición, shell y apariencia del terminal integrado.",
       ai: "Activa las funciones de IA, elige un proveedor y configura el modelo que usa GitWand.",
       aiTemplates: "Personaliza los prompts usados para mensajes de commit, descripciones de pull request y notas de versión.",
-      accounts: "Conecta cuentas de GitHub, GitLab y Bitbucket para pull requests y funciones remotas.",
+      accounts: "Conecta cuentas de GitHub, GitLab, Bitbucket, Azure DevOps y Gitea / Forgejo para pull requests y funciones remotas.",
       mcp: "Gestiona los servidores MCP disponibles para las funciones de IA de GitWand.",
       automations: "Tareas opcionales que se ejecutan automáticamente según eventos de Git o un horario.",
       hooks: "Scripts que se ejecutan con eventos de Git en el repositorio actual.",

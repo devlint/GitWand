@@ -1649,7 +1649,7 @@ const en = {
       terminal: "Integrated terminal layout, shell and appearance.",
       ai: "Enable AI features, choose a provider and configure the model GitWand uses.",
       aiTemplates: "Customize the prompts used for commit messages, pull request descriptions and release notes.",
-      accounts: "Connect GitHub, GitLab and Bitbucket accounts for pull requests and remote features.",
+      accounts: "Connect GitHub, GitLab, Bitbucket, Azure DevOps and Gitea / Forgejo accounts for pull requests and remote features.",
       mcp: "Manage the MCP servers available to GitWand's AI features.",
       automations: "Opt-in tasks that run automatically based on Git events or a schedule.",
       hooks: "Scripts that run on Git events in the current repository.",
