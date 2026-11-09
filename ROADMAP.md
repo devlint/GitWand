@@ -50,7 +50,7 @@ worktree:
 
 **Removal**
 - Snapshot before removal (v3.8 Time Machine), restorable as a new worktree (Strand)
-- Never touch a worktree that is locked, marked `.worktree-keep` (Dendreo's guard against Claude Desktop's cleaner), or owned by another orchestrator
+- Never touch a worktree that is locked, marked `.worktree-keep` (Dendreo's guard against Claude Desktop's cleaner; ignored on a worktree GitWand created), or owned by another orchestrator
 
 ---
 

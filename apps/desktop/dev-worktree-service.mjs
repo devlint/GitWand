@@ -527,7 +527,8 @@ export function devWorktreeGuard(repo, worktree) {
   const owned = recorded || legacyOwned(repo, entry.path, entry.branch);
   const reasons = [];
   if (entry.locked !== null) reasons.push("locked");
-  if (existsSync(join(entry.path, KEEP_FILE))) reasons.push("keep-file");
+  // Ignored on a recorded worktree, like guard.rs: the file comes from setup.
+  if (!recorded && existsSync(join(entry.path, KEEP_FILE))) reasons.push("keep-file");
   if (!recorded && inOtherToolDir(entry.path)) reasons.push("other-tool");
   const teardownRequired = recorded && !!devHooksFromRcText(readRcText(mainWorktreeRoot(repo))).teardown;
   return {

@@ -119,6 +119,10 @@ describe("dev-server worktree service", { timeout: 30_000 }, () => {
     const kept = add("wt/k", "k");
     writeFileSync(join(kept, ".worktree-keep"), "");
     expect(devWorktreeGuard(path, kept).reasons).toEqual(["keep-file"]);
+    // Ignored on a worktree GitWand created (setup hooks drop it for other tools).
+    const created = devCreateWorktree(path, { name: "kept", kind: "task" });
+    writeFileSync(join(created.path, ".worktree-keep"), "");
+    expect(devWorktreeGuard(path, created.path)).toMatchObject({ untouchable: false, reasons: [] });
     const claude = add("x/.claude/worktrees/c", "c");
     expect(devWorktreeGuard(path, claude)).toMatchObject({ reasons: ["other-tool"], owned: false });
     expect(() => devWorktreeGuard(path, path)).toThrow(/Not a linked worktree/);
