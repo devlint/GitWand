@@ -171,4 +171,4 @@ The restore never overwrites your current checkout. That is why these snapshots 
 
 Describe your environment once in `.gitwandrc`. Trust it once. Create a worktree from a freshly fetched base and let `setup` bring it up. Work in it, or let an agent work in it, while `main` moves. Bring the work back as a merge, a rebase or a squash, through the same preview as any other merge, with both sides snapshotted and nothing aborted behind your back. Remove it with a teardown that has to succeed. And if you needed it after all, restore it from the Time Machine.
 
-What comes next is in the [roadmap](https://github.com/devlint/GitWand/blob/main/roadmap.md): a full worktrees view in place of the dialog, live agent status, a choice of agent beyond Claude Code, and conflict prediction across worktrees, before two tasks collide in the same file.
+What comes next is in the [roadmap](https://github.com/devlint/GitWand/blob/main/ROADMAP.md): a full worktrees view in place of the dialog, live agent status, a choice of agent beyond Claude Code, and conflict prediction across worktrees, before two tasks collide in the same file.
