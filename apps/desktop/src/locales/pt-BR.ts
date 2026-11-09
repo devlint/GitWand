@@ -582,6 +582,7 @@ const ptBR: Locale = {
   mergePreview: {
     applying: "Aplicando\u2026",
     applyAndMerge: "Mesclar e auto-resolver",
+    applyClean: "Aplicar",
     applyEstimate: "Estimativa: {0} de {1} hunks auto-resolv\u00edveis",
     applyDone: "Conclu\u00eddo",
     applyStopped: "Parado nos conflitos que precisam de voc\u00ea",

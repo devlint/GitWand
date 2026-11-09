@@ -593,6 +593,7 @@ const en = {
   mergePreview: {
     applying: "Applying\u2026",
     applyAndMerge: "Merge & auto-resolve",
+    applyClean: "Apply",
     applyEstimate: "Estimated {0} of {1} hunks auto-resolvable",
     applyDone: "Done",
     applyStopped: "Stopped on the conflicts that need you",

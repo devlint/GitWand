@@ -586,6 +586,7 @@ const fr: Locale = {
   mergePreview: {
     applying: "Application\u2026",
     applyAndMerge: "Fusionner et auto-r\u00e9soudre",
+    applyClean: "Appliquer",
     applyEstimate: "Estimation : {0} hunks sur {1} auto-r\u00e9solvables",
     applyDone: "Termin\u00e9",
     applyStopped: "Arr\u00eat sur les conflits qui vous attendent",

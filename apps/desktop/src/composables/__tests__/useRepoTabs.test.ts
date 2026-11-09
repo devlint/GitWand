@@ -52,3 +52,32 @@ describe("useRepoTabs.selectWorktree", () => {
     expect(activeRepoPath.value).toBeNull();
   });
 });
+
+describe("useRepoTabs.forgetCheckout", () => {
+  beforeEach(() => {
+    const { tabs, closeTab } = useRepoTabs();
+    for (const t of [...tabs.value]) closeTab(t.id);
+  });
+
+  it("closes the tab opened on a removed worktree", () => {
+    const { openTab, forgetCheckout, tabs, activeRepoPath } = useRepoTabs();
+    openTab("/repos/myrepo");
+    openTab("/repos/myrepo.worktrees/feat-a/");
+
+    forgetCheckout("/repos/myrepo.worktrees/feat-a");
+
+    expect(tabs.value.map((t) => t.path)).toEqual(["/repos/myrepo"]);
+    expect(activeRepoPath.value).toBe("/repos/myrepo");
+  });
+
+  it("sends a project tab that had the worktree selected back to its main checkout", () => {
+    const { openTab, selectWorktree, forgetCheckout, tabs, activeRepoPath } = useRepoTabs();
+    const project = openTab("/repos/myrepo");
+    selectWorktree(project.id, "/repos/myrepo.worktrees/feat-a");
+
+    forgetCheckout("/repos/myrepo.worktrees/feat-a/");
+
+    expect(tabs.value.map((t) => t.path)).toEqual(["/repos/myrepo"]);
+    expect(activeRepoPath.value).toBe("/repos/myrepo");
+  });
+});

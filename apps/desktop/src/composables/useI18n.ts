@@ -89,7 +89,7 @@ function t(key: LocaleKey, ...args: Array<string | number>): string {
   // Replace {0}, {1}, ... with positional args
   let result = value;
   for (let i = 0; i < args.length; i++) {
-    result = result.replace(`{${i}}`, String(args[i]));
+    result = result.replaceAll(`{${i}}`, String(args[i]));
   }
   return result;
 }

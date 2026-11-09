@@ -32,6 +32,7 @@ function deps(over: Partial<WorktreeRemovalDeps> = {}) {
     ensureTrusted: vi.fn(async () => run),
     runTeardown: vi.fn(async () => ({ code: 0, tabId: 7 })),
     disposeTabs: vi.fn(async () => {}),
+    closeRepoTabs: vi.fn(),
     ...over,
   };
   return { d, removed };
@@ -190,5 +191,23 @@ describe("useWorktreeRemoval", () => {
     await Promise.all([r2.retryTeardown(), r2.retryTeardown(), r2.removeAnyway()]);
     expect(failing.d.runTeardown).toHaveBeenCalledTimes(2);
     expect(failing.d.remove).not.toHaveBeenCalled();
+  });
+
+  it("closes the repo tabs open on the worktree once it is removed", async () => {
+    const { d } = deps();
+    const r = createWorktreeRemoval(d);
+    await r.check(req);
+    await r.confirm({});
+    expect(r.state.value.phase).toBe("done");
+    expect(d.closeRepoTabs).toHaveBeenCalledWith("/r.worktrees/x");
+  });
+
+  it("keeps the repo tabs when the worktree stays", async () => {
+    const { d } = deps({ runTeardown: vi.fn(async () => ({ code: 3, tabId: 7 })) });
+    const r = createWorktreeRemoval(d);
+    await r.check(req);
+    await r.confirm({});
+    expect(r.state.value.phase).toBe("teardown-failed");
+    expect(d.closeRepoTabs).not.toHaveBeenCalled();
   });
 });

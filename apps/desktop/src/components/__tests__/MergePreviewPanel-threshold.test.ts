@@ -184,3 +184,49 @@ describe("MergePreviewPanel — confidence bar", () => {
     expect(line.match(/\b1\b/g)?.length).toBe(3);
   });
 });
+
+describe("MergePreviewPanel — embedded apply (v3.13 merge-back)", () => {
+  const clean = (): MergePreviewSummary => ({
+    sourceBranch: "task/feat-a",
+    files: [],
+    conflictingFiles: 0,
+    autoResolvableFiles: 0,
+    manualFiles: 0,
+    cleanFiles: 3,
+    fullyAutoMergeable: true,
+  });
+
+  it("offers an apply button on a clean preview inside the merge-back dialog", async () => {
+    const state = reactive({ applies: 0 });
+    const Wrapper = defineComponent({
+      setup() {
+        return () =>
+          h(MergePreviewPanel, {
+            loading: false,
+            error: null,
+            summary: clean(),
+            conflictingFiles: [],
+            embedded: true,
+            onApply: () => {
+              state.applies++;
+            },
+          } as never);
+      },
+    });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    app = createApp(Wrapper);
+    app.mount(container);
+    await nextTick();
+    const btn = container.querySelector<HTMLButtonElement>(".preview-apply__btn");
+    expect(btn, "a clean merge-back must still be applicable").not.toBeNull();
+    btn!.click();
+    expect(state.applies).toBe(1);
+  });
+
+  it("shows no apply button on a clean preview outside the dialog", async () => {
+    mountPanel({ summary: clean(), conflictingFiles: [] });
+    await nextTick();
+    expect(container.querySelector(".preview-apply__btn")).toBeNull();
+  });
+});
