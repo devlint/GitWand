@@ -53,6 +53,7 @@ import {
   type WorktreeEntry,
   gitAddToGitignore,
 } from "../utils/backend";
+import { shouldForceLogAfterFetch } from "../utils/fetchRefresh";
 import { requireOnline } from "../utils/networkGuard";
 import { clearUpdatePromptSkip, evaluateAutoForcePush } from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
@@ -563,7 +564,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     isFetching.value = true;
     fetchPercent.value = 0;
     try {
-      await gitFetch(
+      const fetched = await gitFetch(
         folderPath.value,
         // Clamp monotonically: parse_clone_progress's catch-all "info" branch
         // (remote summary lines, ref-update lines) reports percent 0, which
@@ -575,9 +576,12 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await loadStatus(folderPath.value);
       // v2.14 — Refresh log so clicking "Up to date" or periodic fetch
       // updates the Git Tree / History view with new remote commits.
-      // Force: a fetch moves remote-tracking refs without moving local HEAD,
-      // so the canonical fast path would otherwise keep stale origin/* labels.
-      await loadLog(undefined, true);
+      // Force when the fetch moved a ref: it moves remote-tracking refs
+      // without moving local HEAD, so the canonical fast path would otherwise
+      // keep stale origin/* labels. Not when it moved nothing — a forced
+      // reload cuts the Git Tree back to the viewed depth and refills it,
+      // which every 30 s made the scrollbar jump (#287).
+      await loadLog(undefined, shouldForceLogAfterFetch(fetched, full));
       // Manual sync: refresh the rest of the cached view so a deleted/renamed
       // remote branch, a pruned ref, or a new tag surfaces without a reopen.
       if (full) {

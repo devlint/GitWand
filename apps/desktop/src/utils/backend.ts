@@ -994,6 +994,8 @@ export interface GitPushPullResult {
   success: boolean;
   message: string;
   conflicts?: boolean;
+  /** Fetch only: whether any ref moved; absent when it could not be told (#287). */
+  refsChanged?: boolean;
 }
 
 /**

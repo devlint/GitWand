@@ -419,6 +419,25 @@ fn unix_to_ymdhms(t: i64) -> (i32, u32, u32, u32, u32, u32) {
     (y as i32, m, d, h, mi, s)
 }
 
+/// Every ref with what it points at, sorted, read in process (no `git`
+/// spawn). Comparing two of these tells whether a fetch moved anything.
+/// `None` when the repository cannot be read.
+pub(crate) fn ref_fingerprint(path: &str) -> Option<Vec<(String, String)>> {
+    let repo = git2::Repository::open(path).ok()?;
+    let mut refs: Vec<(String, String)> = Vec::new();
+    for r in repo.references().ok()? {
+        let r = r.ok()?;
+        let name = r.name()?.to_string();
+        let target = match r.target() {
+            Some(oid) => oid.to_string(),
+            None => r.symbolic_target().unwrap_or_default().to_string(),
+        };
+        refs.push((name, target));
+    }
+    refs.sort();
+    Some(refs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
