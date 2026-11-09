@@ -12,9 +12,11 @@
 
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { runProbe } from "./probe.mjs";
-import { fixtureDirty } from "./fixtures.mjs";
+import { fixtureDirty, mkTempRepo } from "./fixtures.mjs";
 
 const git = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf-8" });
 
@@ -113,4 +115,38 @@ describe("parity: snapshot-restore", () => {
     const left = runProbe("snapshot-list", { cwd });
     expect(left.value).toHaveLength(1);
   });
+  // A real monorepo (Dendreo: 2.4 MB) lists an index past Node's 1 MB default
+  // `maxBuffer`; the dev-server then failed every snapshot with ENOBUFS, and
+  // with it every worktree removal. Rust reads git's output uncapped.
+  it("the dev-server snapshots and restores a repo whose index listing exceeds 1 MB", async () => {
+    const cwd = mkTempRepo("gw-big-index-");
+    const dir = join(cwd, "a-directory-with-a-reasonably-long-name", "and-a-nested-one-too");
+    mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < 12_000; i++) {
+      writeFileSync(join(dir, `file-number-${String(i).padStart(6, "0")}-with-padding.txt`), `${i}\n`);
+    }
+    git(cwd, ["add", "-A"]);
+    git(cwd, ["commit", "-q", "-m", "big"]);
+    expect(execFileSync("git", ["ls-files", "-s"], { cwd, maxBuffer: Infinity }).length).toBeGreaterThan(1024 * 1024);
+    writeFileSync(join(dir, "file-number-000000-with-padding.txt"), "changed\n");
+
+    const created = await dev.fetch("/api/snapshot-create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd, kind: "manual", label: "big" }),
+    });
+    expect(created.ok, await created.clone().text()).toBe(true);
+    const snap = await created.json();
+
+    git(cwd, ["reset", "-q", "--hard", "HEAD"]);
+    const restored = await dev.fetch("/api/snapshot-restore", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd, id: snap.id }),
+    });
+    expect(restored.ok, await restored.clone().text()).toBe(true);
+    expect(git(cwd, ["status", "--porcelain"]).trim()).toBe(
+      "M a-directory-with-a-reasonably-long-name/and-a-nested-one-too/file-number-000000-with-padding.txt",
+    );
+  }, 60_000);
 });

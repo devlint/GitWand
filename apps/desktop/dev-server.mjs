@@ -1464,8 +1464,10 @@ function snapshotGitDir(cwd) {
 }
 
 function createSnapshot(cwd, kind, label, worktree = null, worktreeBase = null) {
+  // No output cap, like snapshot.rs: `ls-files -s` on a large repo runs
+  // past Node's 1 MB default and fails with ENOBUFS.
   const g = (args, opts = {}) =>
-    execFileSync(GIT, args, { cwd, encoding: "utf-8", ...opts }).trim();
+    execFileSync(GIT, args, { cwd, encoding: "utf-8", maxBuffer: Infinity, ...opts }).trim();
 
   let headSha;
   try {
@@ -1559,8 +1561,10 @@ function listSnapshots(cwd) {
 
 /** Mirror of `snapshot::apply_snapshot_state`: tree, exact index, merge state. */
 function applySnapshotState(cwd, target) {
+  // No output cap, like snapshot.rs: `ls-files -s` on a large repo runs
+  // past Node's 1 MB default and fails with ENOBUFS.
   const g = (args, opts = {}) =>
-    execFileSync(GIT, args, { cwd, encoding: "utf-8", ...opts }).trim();
+    execFileSync(GIT, args, { cwd, encoding: "utf-8", maxBuffer: Infinity, ...opts }).trim();
   g(["read-tree", "-u", "--reset", `${target.commit}^{tree}`]);
 
   // Staged into a scratch index and moved into place only on success — see
@@ -1600,8 +1604,10 @@ function applySnapshotState(cwd, target) {
 }
 
 function restoreSnapshot(cwd, id) {
+  // No output cap, like snapshot.rs: `ls-files -s` on a large repo runs
+  // past Node's 1 MB default and fails with ENOBUFS.
   const g = (args, opts = {}) =>
-    execFileSync(GIT, args, { cwd, encoding: "utf-8", ...opts }).trim();
+    execFileSync(GIT, args, { cwd, encoding: "utf-8", maxBuffer: Infinity, ...opts }).trim();
   const target = listSnapshots(cwd).find((s) => s.id === id);
   if (!target) throw new Error(`snapshot ${id} not found`);
 

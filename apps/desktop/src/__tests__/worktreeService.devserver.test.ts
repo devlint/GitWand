@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -181,6 +181,19 @@ describe("dev-server worktree service", { timeout: 30_000 }, () => {
     expect(devMergeBackFastForward(path, c.path, "main")).toEqual({ conflicts: false });
     expect(g(path, "rev-parse", "main")).toBe(g(c.path, "rev-parse", "HEAD"));
   });
+
+  // A provisioned monorepo worktree lists past Node's 1 MB default `maxBuffer`;
+  // the Rust service reads git's output uncapped, so the mirror must too.
+  it("checks a merge-back whose untracked listing exceeds 1 MB", () => {
+    const { path } = repo();
+    const c = devCreateWorktree(path, { name: "big", kind: "task" });
+    const dir = join(c.path, "a-directory-with-a-reasonably-long-name", "and-a-nested-one-too");
+    mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < 12_000; i++) {
+      writeFileSync(join(dir, `untracked-file-number-${String(i).padStart(6, "0")}-padding.txt`), "x");
+    }
+    expect(devMergeBackCheck(path, c.path)).toMatchObject({ task_dirty: true, refusal: null });
+  }, 60_000);
 
   it("restores a removal snapshot as a new worktree like the backend", () => {
     const { path } = repo();
