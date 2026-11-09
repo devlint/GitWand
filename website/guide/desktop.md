@@ -212,7 +212,7 @@ Browse, create, checkout, and merge PRs without leaving the app. GitWand support
 
 ### Multi-account support (v2.10)
 
-Connect multiple accounts per forge — personal + work GitHub, GitLab on multiple instances, Bitbucket Cloud. GitWand resolves the right account for each repo automatically. Credentials are stored in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service). Configure in **Settings > Comptes**.
+Connect multiple accounts per forge — personal + work GitHub, GitLab on multiple instances, Bitbucket Cloud. GitWand resolves the right account for each repo automatically. Credentials are stored in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service). Configure in **Settings → Accounts**. Gitea and Forgejo servers connect with a personal access token.
 
 ## AI Everywhere (v1.3)
 
@@ -272,26 +272,31 @@ See [MCP Server guide](/guide/mcp) for full documentation of the server itself.
 
 ## Auto-update & version
 
-On launch, GitWand checks for a newer version and shows a toast when one is available. You can also trigger a manual check from **Settings > Système > Vérifier les mises à jour** — the button shows a spinner while checking, a green "Up to date" confirmation for a few seconds, or opens the update modal immediately if a new version is found.
+On launch, GitWand checks for a newer version and shows a toast when one is available. You can also check by hand with **Check for updates**, at the bottom of the Settings menu: the button shows a spinner while checking, a green "Up to date" confirmation for a few seconds, or opens the update modal immediately if a new version is found.
 
 ## Settings
 
-The Settings panel (keyboard shortcut: `⌘,` / `Ctrl+,`) has a left-side navigation sidebar grouped into four sections:
+Settings (`⌘,` / `Ctrl+,`) fills the window, with a menu on the left and a title and one-line description on every page. The menu is grouped into five sections:
 
 **Application**
-- **Général** — language, theme, notifications, update channel, Launchpad options
-- **Éditeur** — font size, tab size, diff mode
+- **General** — interface language, theme, notifications, update channel, privacy (images in PRs and READMEs, Gravatar, anonymous launch event), and on Linux, software rendering
+- **Dock** — which views appear in the dock, in what order, and where the app opens
+- **Dashboard** — which sections the repository dashboard shows, and whether the README comes first
+- **Editor** — external editor and how diffs and code are displayed
+- **Terminal** — integrated terminal layout, shell and appearance
 
-**Dépôt**
-- **Git** — default branch, pull mode, switch behavior, commit signature, blame algorithm
-- **Hooks** — manage Git hooks for the current repo
-- **Comptes** — connect GitHub, GitLab, and Bitbucket accounts (credentials in OS keychain)
+**Repository**
+- **Git** — Git executable, identities, commit templates, pull, branch switching, blame, and Auto fast-forward
+- **Hooks** — scripts that run on Git events in the current repository
+- **Accounts** — connect GitHub, GitLab, Bitbucket, Azure DevOps, Gitea and Forgejo accounts (credentials in the OS keychain)
 
-**IA & Agents**
-- **IA** — enable AI, choose provider (Claude Code CLI / Claude API / OpenAI-compatible / Ollama), API key
+**AI & Agents**
+- **AI (Core & Setup)** — enable AI, choose a provider and model, and set the resolution confidence bar
 - **MCP** — browse and install MCP servers (see [MCP Catalog](#mcp-catalog-v2-10) above)
-- **Automations** — auto-resolve, nightly pull, release notes, AI commit batch
+- **Automations** — opt-in tasks that run on Git events or on a schedule
 
-**Système**
-- **Logs** — activity log with copy-all and clear actions
-- **Vérifier les mises à jour** — manual update check
+**AI Templates**
+- **Commit message**, **Pull request**, **Release notes** — the prompt template and output language for each kind, per repository
+
+**System**
+- **Logs** — recent errors and warnings, with copy-all and clear actions
