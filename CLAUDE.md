@@ -50,7 +50,7 @@ pnpm install
 cd apps/desktop && pnpm dev:web
 
 # Dev app complète (avec Rust/Tauri, recompile le backend)
-cd apps/desktop && pnpm dev
+cd apps/desktop && pnpm tauri dev
 
 # Build tous les workspaces
 pnpm build
