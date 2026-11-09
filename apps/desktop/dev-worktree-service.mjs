@@ -24,10 +24,12 @@ import { devAssertTrusted, devHooksFromRcText, mainWorktreeRoot, readRcText } fr
 export const FETCH_TIMEOUT_MS = 20_000;
 export const URL_TIMEOUT_MS = 10_000;
 
+// No output cap, like the Rust service: on a large repo, status or ls-files
+// output runs past Node's 1 MB default and fails with ENOBUFS.
 const git = (cwd, args, opts = {}) =>
-  execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], ...opts }).trim();
+  execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: Infinity, ...opts }).trim();
 const gitOk = (cwd, args) => {
-  const r = spawnSync("git", args, { cwd, encoding: "utf-8" });
+  const r = spawnSync("git", args, { cwd, encoding: "utf-8", maxBuffer: Infinity });
   return r.status === 0 ? r.stdout.trim() : null;
 };
 const nowSecs = () => Math.floor(Date.now() / 1000);
@@ -628,7 +630,7 @@ export function devUnlockWorktree(repo, worktree) {
 
 // ── Merge-back (mirror of `worktree::merge_back`) ────────────────────────────
 
-const gitRaw = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+const gitRaw = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: Infinity });
 
 function changedPaths(dir) {
   const raw = gitRaw(dir, ["status", "--porcelain", "-z", "--untracked-files=all"]);
