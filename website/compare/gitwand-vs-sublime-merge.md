@@ -14,7 +14,7 @@ head:
 
 **The verdict in three sentences.** Sublime Merge is probably still the fastest Git GUI on the planet on gigantic repositories — if raw scroll-through-a-million-commits speed is your single criterion and $99 is fine, it keeps that crown. GitWand shares the same allergy to bloat (Tauri 2 + Rust, ~8 MB, no Electron) but goes where Sublime Merge deliberately stops: it **resolves the trivial ~95% of merge conflicts itself, reviews PRs from four forges in-app, and talks to your AI agents** — for free, MIT-licensed. Different philosophies: SM is a scalpel; GitWand is a scalpel that also closes the wound.
 
-*Facts checked July 2026.*
+*Facts checked July 2026; worktree, forge and agent rows re-checked November 2026.*
 
 ## Side by side
 
@@ -24,7 +24,7 @@ head:
 | Stack | Tauri 2 + Rust, ~8 MB | Custom native (Sublime engine) |
 | Raw speed on huge repos | Excellent (libgit2 fast-path) | **Best in class** |
 | Merge conflicts | **Auto-resolves ~95% of trivial hunks** + 3-way editor for the rest | 3-way editor (manual) |
-| PR / MR workflow | Full: list, diff, inline comments, CI annotations — GitHub, GitLab, Bitbucket, Azure DevOps | None (by design) |
+| PR / MR workflow | Full: list, diff, inline comments, CI annotations — GitHub, GitLab, Bitbucket, Azure DevOps, Gitea, Forgejo | None (by design) |
 | History | Git Tree DAG, filters, pickaxe & line-range file history | Superb log + search |
 | Command transparency | Command log (`⌘⇧L`) shows every git call | Shows the real git commands — pioneer here |
 | AI | Agent sessions, per-hunk critique, MCP server — all local, opt-in | None (by design) |
@@ -42,7 +42,7 @@ Sublime Merge hands you beautiful conflict markers; you still do the work. GitWa
 
 ### 2. The workflow around Git
 
-PR review in-app across four forges, a cross-repo **Today** inbox, contributors dashboard, first-class worktrees, submodule awareness, a merge/rebase/cherry-pick **Conflict Predictor** that tells you before you act how bad it will be. SM deliberately ships none of this — fair choice, different tool.
+PR review in-app across six forges, a cross-repo **Today** inbox, contributors dashboard, first-class worktrees, submodule awareness, a merge/rebase/cherry-pick **Conflict Predictor** that tells you before you act how bad it will be. SM deliberately ships none of this — fair choice, different tool.
 
 ### 3. $99 vs $0
 

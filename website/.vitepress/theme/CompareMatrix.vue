@@ -5,7 +5,8 @@ interface Row {
   gw?: CV; gk?: CV; fork?: CV; sm?: CV; ghd?: CV; gb?: CV; tower?: CV
 }
 
-// Competitor data fact-checked July 2026. Order matches the deep-dive pages,
+// Competitor data fact-checked July 2026; worktree, forge and agent rows
+// re-checked November 2026 against each client's release notes. Order matches the deep-dive pages,
 // with Tower appended (it has no deep dive but is in the landscape).
 const COLS = [
   { key: 'gw',    name: 'GitWand',        sub: 'Free · MIT',        gw: true },
@@ -36,7 +37,9 @@ const ROWS: Row[] = [
   { category: true, label: 'Power Git' },
   { label: 'Interactive rebase',        gw: true,  gk: true,  fork: true,  sm: true,  ghd: false, gb: true,  tower: true  },
   { label: 'Split commit by hunks',     gw: true,  gk: false, fork: false, sm: true,  ghd: false, gb: false, tower: false },
-  { label: 'Worktrees',                 gw: true,  gk: true,  fork: true,  sm: false, ghd: true,  gb: false, tower: true  },
+  { label: 'Worktrees',                 gw: true,  gk: true,  fork: true,  sm: 'partial', ghd: true,  gb: false, tower: true  },
+  { label: 'Worktree setup / teardown hooks', gw: true, gk: 'partial', fork: false, sm: false, ghd: false, gb: false, tower: false, highlight: true },
+  { label: 'Merge agent work back (merge / rebase / squash)', gw: true, gk: false, fork: false, sm: false, ghd: false, gb: 'partial', tower: false, highlight: true },
   { label: 'Virtual / stacked branches',gw: false, gk: false, fork: false, sm: false, ghd: false, gb: true,  tower: false },
   { label: 'Multi-repo workspaces',     gw: true,  gk: true,  fork: true,  sm: false, ghd: false, gb: false, tower: 'partial' },
   { label: 'Cross-repo dashboard',      gw: true,  gk: true,  fork: false, sm: false, ghd: false, gb: false, tower: false },
@@ -44,10 +47,11 @@ const ROWS: Row[] = [
   { category: true, label: 'Code review & forges' },
   { label: 'In-app PR/MR review',       gw: true, gk: true,  fork: 'partial', sm: false, ghd: 'partial', gb: 'partial', tower: false },
   { label: 'GitHub · GitLab · Bitbucket · Azure', gw: true, gk: true, fork: true, sm: false, ghd: false, gb: false, tower: true },
+  { label: 'Gitea / Forgejo', gw: true, gk: false, fork: false, sm: false, ghd: false, gb: false, tower: 'partial' },
   { label: 'Inline CI check annotations', gw: true, gk: true, fork: false, sm: false, ghd: false, gb: false, tower: false },
 
   { category: true, label: 'AI & agents', note: 'GitWand uses the coding-agent CLIs you already have (Claude Code, Codex, opencode…). No built-in model, no account.' },
-  { label: 'Launch coding agents in-app', gw: true, gk: true,      fork: false, sm: false, ghd: false,     gb: true,  tower: 'partial' },
+  { label: 'Launch coding agents in-app', gw: true, gk: true,      fork: false, sm: false, ghd: false,     gb: true,  tower: false },
   { label: 'MCP server for AI agents',    gw: true, gk: true,      fork: false, sm: false, ghd: false,     gb: true,  tower: false },
   { label: 'AI conflict explanation',     gw: true, gk: 'partial', fork: false, sm: false, ghd: 'partial', gb: false, tower: false },
   { label: 'AI commit messages',          gw: true, gk: true,      fork: true,  sm: false, ghd: true,      gb: 'partial', tower: true },

@@ -17,13 +17,20 @@ Download the latest release for your platform:
 
 👉 [Download from GitHub Releases](https://github.com/devlint/GitWand/releases)
 
-On Windows, you can also install via winget:
+Or use your package manager:
 
 ```bash
+# macOS — Homebrew
+brew install --cask devlint/tap/gitwand
+
+# Windows — winget
 winget install Devlint.GitWand
+
+# Arch Linux — AUR
+yay -S gitwand-bin
 ```
 
-Open the app, select a Git repository, and you're ready to go.
+Open the app, select a Git repository, and you're ready to go. GitWand checks for updates on launch and installs them in one click.
 
 ## CLI
 
@@ -111,21 +118,81 @@ When you open a file with conflict markers, GitWand shows:
 1. Open a repository with merge conflicts
 2. Conflicted files appear in the sidebar with a conflict icon
 3. Click a file to see the diff with conflict markers highlighted
-4. GitWand shows which conflicts it can auto-resolve
-5. Use the merge preview to see the predicted outcome before committing
+4. GitWand shows which conflicts it can auto-resolve, each with a confidence score
+5. Review the summary (untick any hunk you want to keep for yourself) and apply
+
+## A first tour of the desktop app
+
+Once a repository is open, these are the places worth knowing. Each one links to its full description in the [Desktop App guide](/guide/desktop).
+
+### Commit your work from the Git Tree
+
+The **Git Tree** is the main view: your history as a graph, with your uncommitted changes as a **WIP row** at the top whenever there are any. Select that row and the right rail becomes the files and commit pane: stage files, hunks or single lines, write the summary (or let the AI draft it), and commit with `⌘↩` / `Ctrl+Enter`.
+
+Right-click any commit for checkout, reset (soft, mixed, hard, or **Keep**, which drops commits but refuses to overwrite your uncommitted edits), revert, new branch, tag, cherry-pick, or **Cherry-pick as WIP**, which brings the commit's changes in without committing them.
+
+### Merge without surprises
+
+Before you merge or rebase, the **Conflict Predictor** simulates the operation without touching your working tree and tells you file by file what will conflict and what GitWand can resolve on its own. **Merge & auto-resolve** then runs the real merge, applies the resolutions that clear your confidence bar, and stops on whatever needs you. It never aborts behind your back, and every operation (merge, rebase, cherry-pick, revert) ends with the same Continue and Abort banner.
+
+To be stricter than the defaults, set a minimum score in **Settings → AI (Core & Setup) → Resolution confidence**, or `minConfidenceScore` in `.gitwandrc` (see below).
+
+### Review pull requests
+
+Sign in under **Settings → Accounts** and the PR tab works on **GitHub, GitLab, Bitbucket, Azure DevOps, Gitea and Forgejo**: list, diff, CI checks, inline comments and suggestions, create, merge, checkout. A PR whose checks are still running can be set to **merge itself once they pass** (GitHub, GitLab, Azure DevOps).
+
+### Work in parallel with worktrees
+
+A worktree is a second checkout of the same repository, on another branch, in another folder. Open **Worktrees** in the header and choose **⚡ New task** (`⌘⇧N`): type a name, and GitWand creates `task/<name>` in `<repo>.worktrees/<name>`, starting from a freshly fetched `origin/main`, and opens it in a new tab.
+
+If your project needs more than a checkout to run (an `.env`, dependencies, containers), describe it once in `.gitwandrc` and GitWand brings each worktree up for you, then tears it down when you remove it:
+
+```json
+{
+  "worktree": {
+    "include": [".env"],
+    "setup": "docker compose -p {name} up -d",
+    "teardown": "docker compose -p {name} down -v",
+    "url": "echo http://{name}.localhost:3000"
+  }
+}
+```
+
+GitWand asks once before running these commands, and asks again if they change. When the work is done, **Merge back** brings it into your branch as a merge, a rebase or a squash, through the same preview as any other merge. Removing a worktree snapshots it first, so the **Time Machine** can restore it later.
+
+The full walkthrough is in [Worktrees & AI tasks](/guide/desktop#worktrees-ai-tasks), and step by step in the blog post [Git worktrees in GitWand](/blog/worktrees-step-by-step).
+
+### Run an AI agent on its own branch
+
+The integrated **terminal** has typed tabs for a shell and for the coding-agent CLIs you already have installed (Claude Code, Codex, opencode, Antigravity). From its **+** menu, **New AI task** creates a worktree and starts Claude Code in it, so the agent never writes in the checkout you are working in. Bring its work back with **Merge back**, with the agent's commits kept.
+
+### Browse and edit files
+
+The **Files** tile in the dock opens the File Explorer: your working tree with a badge on every changed file and on every folder above it, a diff or editor per tab, blame, and **Scope here** to narrow the whole app to one folder.
+
+### Undo with the Time Machine
+
+Before anything that rewrites your files (a discard, a reset, a merge-back, a worktree removal), GitWand takes a snapshot. The **Time Machine** lists them, so a wrong click is never final.
 
 ## Configuration
 
-Create a `.gitwandrc` file at the root of your repository to customize behavior:
+Create a `.gitwandrc` file at the root of your repository to customize behavior. It is JSON:
 
 ```json
 {
   "policy": "prefer-safety",
+  "minConfidenceScore": 80,
   "patterns": {
     "*.lock": "prefer-theirs",
     "package.json": "prefer-theirs"
+  },
+  "worktree": {
+    "include": [".env"],
+    "setup": "pnpm install"
   }
 }
 ```
+
+The file is committed with the repository, so these settings apply to everyone who works on it, in the desktop app, the CLI, VS Code and the MCP server alike.
 
 See the [Configuration reference](/reference/config) for all options.

@@ -14,7 +14,7 @@ head:
 
 **The verdict in three sentences.** If your team lives in GitKraken's cloud Workspaces, needs its team-management features, or you simply want the most polished commercial ecosystem, GitKraken remains an excellent product — keep it. If you want a **free, open-source, native client that never requires an account and actually resolves your merge conflicts deterministically**, GitWand does that, in an ~8 MB binary. Both now launch local coding-agent CLIs, so the real split is narrower than it looks: GitKraken is a funded subscription suite (Electron, cloud AI, optional account); GitWand is a free MIT tool built around a deterministic conflict engine.
 
-*Facts checked July 2026.*
+*Facts checked July 2026; worktree, forge and agent rows re-checked November 2026.*
 
 ## Side by side
 
@@ -23,9 +23,9 @@ head:
 | Price | **Free, MIT open source** | Free Community tier; Pro $8/seat/mo, Advanced $14 (billed annually) |
 | Stack | Tauri 2 + Rust, ~8 MB | Electron (v41), ~150 MB class |
 | Merge conflicts | **Auto-resolves ~95% of trivial hunks** — 8 deterministic patterns, confidence score, decision trace | 3-way merge editor; AI suggestions |
-| PR / MR review | In-app, 4 forges: GitHub, GitLab, Bitbucket, Azure DevOps — inline comments, suggestions, CI annotations | In-app, multi-forge (Launchpad) |
+| PR / MR review | In-app, 6 forges: GitHub, GitLab, Bitbucket, Azure DevOps, Gitea, Forgejo — inline comments, suggestions, CI annotations | In-app, multi-forge (Launchpad) |
 | AI | Agent sessions (Claude Code, Codex, opencode…) in-app, per-hunk critique, MCP server exposing the engine — all local, opt-in | Agent sessions in worktrees (Claude Code, Codex, Copilot, Gemini, opencode) + cloud GitKraken AI (commit/PR/merge) |
-| Worktrees | First-class (tab = worktree, scratch worktrees) | First-class (agent session per worktree) |
+| Worktrees | First-class: a tab per worktree, setup/teardown hooks from `.gitwandrc`, merge-back as merge, rebase or squash, snapshot before removal | First-class (agent session per worktree, app-level setup commands) |
 | Cross-repo dashboard | Today inbox + Dashboard | Launchpad + cloud Workspaces |
 | Account required | **Never** | For cloud AI and advanced features |
 | Offline | Fully functional | Core works; cloud features don't |
@@ -54,7 +54,7 @@ GitWand is MIT. Free for commercial use, forkable, auditable. Your Git client sh
 Yes. MIT license, desktop + CLI + VS Code extension + MCP server. No tiers, no seat pricing.
 
 ### Can GitWand replace GitKraken for PR reviews?
-For individual review work, yes: inline comments, pending review batches, GitHub-native suggestions and CI annotations across GitHub, GitLab, Bitbucket and Azure DevOps. For *team orchestration* (shared workspaces), no.
+For individual review work, yes: inline comments, pending review batches, GitHub-native suggestions and CI annotations across GitHub, GitLab, Bitbucket, Azure DevOps, Gitea and Forgejo. For *team orchestration* (shared workspaces), no.
 
 ### Does GitWand have something like Launchpad?
 Yes — **Today**, a cross-repo action inbox (PRs to review, CI failures, WIP), plus a contributors Dashboard. Local, no cloud account.

@@ -14,7 +14,7 @@ head:
 
 **The verdict in three sentences.** These are the two modern (Tauri + Rust, free, open-source, AI-aware) Git clients — and they bet on opposite ideas. GitButler bets you'll **change how you branch**: virtual branches let you work multiple streams simultaneously in one working directory, with first-class stacked PRs — if that paradigm clicks for you, nothing else offers it and you should use GitButler. GitWand bets you'll **keep the classic Git workflow** and remove its worst pain instead: a deterministic engine that auto-resolves the trivial ~95% of merge conflicts, a full-featured client (real DAG history, 4-forge PR review, interactive rebase, worktrees) around it.
 
-*Facts checked July 2026.*
+*Facts checked July 2026; worktree, forge and agent rows re-checked November 2026.*
 
 ## Side by side
 
@@ -24,9 +24,9 @@ head:
 | Stack | Tauri 2 + Rust, ~8 MB | Tauri + Rust |
 | Core bet | **Resolve conflicts, keep classic Git** | **Virtual branches, rethink Git** |
 | Merge conflicts | **Auto-resolves ~95% of trivial hunks**, confidence scores, decision trace | Standard resolution (virtual branches reduce some conflicts upstream) |
-| Branching model | Classic branches + first-class worktrees + scratch worktrees | Virtual branches (simultaneous streams, one dir) |
+| Branching model | Classic branches + worktrees with setup/teardown hooks and merge-back | Virtual branches (simultaneous streams, one dir) |
 | Stacked PRs | ❌ | ✅ first-class |
-| PR review in-app | ✅ GitHub, GitLab, Bitbucket, Azure DevOps — inline comments, CI annotations | PR creation/stacks (GitHub) |
+| PR review in-app | ✅ GitHub, GitLab, Bitbucket, Azure DevOps, Gitea, Forgejo — inline comments, CI annotations | PR creation/stacks (GitHub) |
 | History | Git Tree DAG, filters, pickaxe, submodules in-graph | Focused on current work |
 | Interactive rebase | ✅ (+ split by hunks) | Drag-and-drop between virtual branches |
 | AI agents | Agent sessions (Claude Code, Codex, opencode…), per-hunk critique, MCP server | Agents Tab (Claude Code), MCP server |
@@ -44,7 +44,7 @@ Virtual branches can *reduce* conflicts; they don't resolve the ones that happen
 
 ### 2. A complete classic client
 
-GitWand is also the daily driver: multi-branch DAG history with search, PR review across four forges with inline comments and CI annotations, interactive rebase with commit splitting, first-class worktrees (a tab per worktree), submodules, stash, blame, image & folder diffs, a cross-repo **Today** inbox. GitButler focuses tightly on the work-in-progress surface.
+GitWand is also the daily driver: multi-branch DAG history with search, PR review across six forges with inline comments and CI annotations, interactive rebase with commit splitting, first-class worktrees (a tab per worktree), submodules, stash, blame, image & folder diffs, a cross-repo **Today** inbox. GitButler focuses tightly on the work-in-progress surface.
 
 ### 3. Zero lock-in
 

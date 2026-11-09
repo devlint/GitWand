@@ -30,6 +30,69 @@ Click the branch name in the header to:
 - Delete a branch
 - Merge any branch via the merge button
 
+**Reset** offers four modes: soft, mixed, hard and **Keep** (v3.12.3), which drops commits like hard but keeps your uncommitted edits, and refuses, naming the files, if one of them would be overwritten. After rebasing a branch you had already pushed, the main action becomes **Force Push**, which refuses if someone else pushed in the meantime.
+
+With **Auto fast-forward** on (Settings → Git, off by default), the background fetch moves your current branch forward when it is simply behind its upstream. It never merges, rebases or stashes, and when something holds it back the sync button's tooltip says what.
+
+When a tracked file matches a `.gitignore` rule (so the rule has no effect on it), the sidebar says so and offers to untrack it: the file stays on disk and the removal is staged.
+
+## Worktrees & AI tasks
+
+A worktree is a second checkout of the same repository, on another branch, in another folder. GitWand 3.13 treats each one as an environment your repository knows how to bring up and tear down. A step-by-step walkthrough is on the blog: [Git worktrees in GitWand, step by step](/blog/worktrees-step-by-step).
+
+### Creating a worktree
+
+Open **Worktrees** from the header or the command palette.
+
+- **⚡ New task** (`⌘⇧N`): type a name; the worktree is created and opened in a new tab.
+- **New worktree**: the full form, to pick the path, the branch or the base yourself.
+- **New AI task**, in the **+** menu of the terminal panel: the same worktree, with Claude Code started in it.
+
+By default the worktree starts from the **freshly fetched remote default branch**. The dialog says which base it used ("Based on origin/main, fetched 2 s ago"); offline, it falls back to the local tracking branch, then to `HEAD`, and says so. It goes in `<repo>.worktrees/<name>` on a branch `task/<name>`, created without upstream tracking so a push from the task cannot land on `main`.
+
+### Setup, teardown and URL
+
+A `worktree` section in `.gitwandrc` tells GitWand how to prepare a worktree (see the [configuration reference](/reference/config#worktrees)):
+
+- `include` copies (or links) ignored files such as `.env` from your main checkout. A `.worktreeinclude` file is read too.
+- `setup` runs once the worktree exists, in a read-only terminal tab, **Setup · &lt;name&gt;**. If it fails, the worktree is kept with **Retry setup**, **Open the log** and **Remove**. An AI task's agent starts only after setup succeeds.
+- `url` prints the environment's address, shown on the worktree with an **Open** button.
+- `teardown` runs before the worktree is removed.
+
+The first time GitWand is about to run these commands in a repository, it shows them verbatim and asks: **Trust and run**, **Skip commands this time** or **Cancel**. The trust is remembered per repository, outside the repository, and asked again whenever the commands change. They are always read from the main checkout, never from the worktree's own copy.
+
+### Merging the work back
+
+**Merge back**, on an AI task or on a worktree in the manager, brings the work into a branch (by default the one the task started from), in one of three modes:
+
+| Mode | Result |
+|------|--------|
+| **Merge** | A merge commit on the target; the task's commits are kept |
+| **Rebase** | The task's commits replayed onto the target, which then fast-forwards |
+| **Squash** | The changes staged on the target, uncommitted, for you to write the commit |
+
+GitWand refuses, and says why, when your main checkout is on another branch (it offers to switch when the checkout is clean), in the middle of an operation, or has uncommitted changes to files the task also changes. It never stashes for you. It then stops the task's processes, commits what the task left uncommitted as `wip(<name>): uncommitted work at merge-back`, snapshots both checkouts, shows the usual merge preview and applies. Conflicts the engine leaves stay for you in the right checkout, never aborted; the dialog waits with **Resume**.
+
+### Removing a worktree
+
+Every removal (worktree manager, AI-task close, Git Tree, cleanup after a merge-back) follows the same sequence:
+
+1. **Guards.** A locked worktree is never touched (an **Unlock** button is offered). Neither is one with a `.worktree-keep` file, unless GitWand created it, nor one that another tool (Claude Code, Conductor, Superset) manages.
+2. **Processes.** GitWand closes the worktree's terminals and stops what it started there. Other processes still running inside it are listed, not killed, with **Retry** and **Stop all**.
+3. **Snapshot** of the worktree's files, committed or not.
+4. **Teardown**, in a read-only tab. If it fails, the worktree is kept, with **Retry teardown**, **Open the log** and **Remove anyway**.
+5. **Removal.** A `task/` branch that is fully merged is deleted with it.
+
+A worktree GitWand did not create asks for one more confirmation. Ignored files are not in the snapshot: `include` brings them back, and outside state (containers, databases) is teardown's job.
+
+### Restoring a removed worktree
+
+The **Time Machine** lists removed worktrees, and tasks as they were before a merge-back, under **Removed worktrees**. **Restore as worktree** creates `<name>-restored` on `restore/<name>`, puts the uncommitted files and the index back, copies the `include` files and runs `setup` again.
+
+## Time Machine
+
+GitWand snapshots your working tree and index before the operations that rewrite them: discard, reset, checkout, applied resolutions, merge-back and worktree removal. The **Time Machine** lists these snapshots alongside git's own reflog, and **Restore** puts the working tree, index and branch back to any of them, after taking a snapshot of the current state, so a restore is itself undoable.
+
 ## Merge Preview
 
 Before merging, GitWand predicts the outcome **without touching the working tree** using `git merge-base`, `git show`, and `git merge-file -p --diff3`.
@@ -45,6 +108,16 @@ The preview shows a per-file breakdown:
 
 A badge summarises the overall result: `Clean merge`, `100% auto-resolvable`, or `N conflicts to review`.
 
+The preview also covers **rebase** (replayed commit by commit) and **cherry-pick**.
+
+### Merge & auto-resolve (v3.11)
+
+**Merge & auto-resolve** runs the real operation, re-runs the engine against what git actually produced, applies every resolution that clears your confidence bar, stages it, and stops with the operation still in progress on whatever needs you. It never aborts on your behalf and never continues past a conflict left for you. The button says "Estimated N of M hunks" because the preview is a simulation; if the real merge differs, the report says so.
+
+The merge editor lists every proposed resolution with its score and a checkbox, so you can decline one hunk without declining the rest. Set a minimum score in **Settings → AI (Core & Setup) → Resolution confidence**, or `minConfidenceScore` in `.gitwandrc`.
+
+Merge, rebase, cherry-pick and revert share one banner with **Continue** and **Abort**. Nothing continues by itself when the last conflict is resolved, and an abort that would discard resolution work asks first.
+
 ## Push & Pull
 
 One-click push and pull with badge counters showing ahead/behind commits. Auto-fetch runs in the background every 30 seconds.
@@ -56,6 +129,12 @@ Browse the full commit log in the sidebar. Click any commit to see its diff with
 Long commit descriptions collapse to 2 lines with an expand toggle.
 
 A separate **DAG graph view** renders the full branch topology as an SVG with lane layout and ref badges.
+
+### Git Tree
+
+The **Git Tree** is the main history view. Your uncommitted changes are a **WIP row** at the top of the graph, shown only when there are any (v3.12.1). Selecting it turns the right rail into the files and commit pane; a diff opens once you pick a file. The graph follows every ref move as soon as it happens, including resets, checkouts and branches created on older commits, even when you run them from a terminal (v3.12.5).
+
+The commit context menu includes **Cherry-pick onto current branch as WIP** (v3.12.0): the commit's changes land in your index and working tree without being committed, so you can trim, split or fold them into your own work first.
 
 ## Diff Viewer
 
@@ -119,13 +198,17 @@ Click the repo name in the header to open a dropdown with all recently opened re
 
 ## Pull Requests & Merge Requests
 
-Browse, create, checkout, and merge PRs without leaving the app. GitWand supports **GitHub**, **GitLab**, and **Bitbucket Cloud** — detected automatically from the remote URL.
+Browse, create, checkout, and merge PRs without leaving the app. GitWand supports **GitHub**, **GitLab**, **Bitbucket Cloud**, **Azure DevOps**, and self-hosted **Gitea** and **Forgejo** (v3.11, personal access token) — detected automatically from the remote URL.
 
 - PR/MR list in the sidebar
 - Full detail view: diff, CI checks, comments, inline review
 - Inline comments anchored to diff lines with full threading
 - Code suggestions via ` ```suggestion ``` ` blocks, applicable in one click
 - **Draft → Ready** — convert a draft PR/MR to ready-for-review in one click
+- **Auto-merge** (v3.11) — a PR whose checks have not finished can be set to merge itself once they pass, on GitHub, GitLab and Azure DevOps
+- **Act on comments** (v3.12.3, GitHub) — reply to a review thread, edit or delete your own comments, resolve a conversation, copy a comment's link
+- **Edit the title and description** (v3.12.1), by hand or redrafted by the AI from the commits and diff; nothing reaches the forge until you apply it
+- Images in descriptions and comments load only when you click **Show images**, so their host cannot tell when you read them
 
 ### Multi-account support (v2.10)
 

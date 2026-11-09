@@ -14,7 +14,7 @@ head:
 
 **The verdict in three sentences.** Fork is one of the best-crafted Git clients ever made — if you're on macOS/Windows, don't need full PR review in-app, and $59.99 once is fine, it will not disappoint you. GitWand matches the "fast, clean, native" philosophy but is **free, open source, runs on Linux, reviews PRs from four forges in-app, and auto-resolves the trivial ~95% of merge conflicts** with a deterministic engine. If conflicts and code review are part of your daily Git life, that's the gap that matters.
 
-*Facts checked July 2026.*
+*Facts checked July 2026; worktree, forge and agent rows re-checked November 2026.*
 
 ## Side by side
 
@@ -24,9 +24,9 @@ head:
 | Platforms | macOS · **Linux** · Windows | macOS · Windows |
 | Stack | Tauri 2 + Rust, ~8 MB | Native (per-platform) |
 | Merge conflicts | **Auto-resolves ~95% of trivial hunks**, confidence scores, decision trace | Good 3-way merge editor (manual) |
-| PR / MR review | In-app: GitHub, GitLab, Bitbucket, Azure DevOps — inline comments, suggestions, CI annotations | Create & view PRs + CI status; no inline review |
+| PR / MR review | In-app: GitHub, GitLab, Bitbucket, Azure DevOps, Gitea, Forgejo — inline comments, suggestions, CI annotations | Create & view PRs + CI status; no inline review |
 | Interactive rebase | ✅ including split-commit-by-hunks | ✅ excellent |
-| Worktrees | First-class (tab = worktree, scratch worktrees) | Supported |
+| Worktrees | First-class: a tab per worktree, setup/teardown hooks from `.gitwandrc`, merge-back as merge, rebase or squash, snapshot before removal | Supported |
 | AI | Agent sessions (Claude Code, Codex, opencode…), per-hunk critique, MCP server — all local, all opt-in | AI commit messages |
 | History view | Git Tree (multi-branch DAG, filters, `#PR` search) | Commit graph (excellent) |
 

@@ -232,6 +232,48 @@ The `minConfidence` setting (set implicitly by each policy) controls the minimum
 | `medium` | ≥ 44 | Resolve with moderate confidence |
 | `low` | < 44 | Resolve even uncertain classifications |
 
+### Numeric bar: `minConfidenceScore`
+
+Since v3.11, a repository can also set a numeric bar from 0 to 100. A resolution scoring below it is proposed instead of applied.
+
+```json
+{ "minConfidenceScore": 90 }
+```
+
+It is combined with the policy's label threshold above, never replaces it: it can only make GitWand apply less, never more. The same bar can be set in the desktop app (**Settings → AI (Core & Setup) → Resolution confidence**), on the CLI and through the MCP tools.
+
+## Worktrees
+
+Since v3.13, a `worktree` section tells GitWand how to prepare a new worktree and how to tear it down. The full flow is described in the [Desktop App guide](/guide/desktop#worktrees-ai-tasks).
+
+```json
+{
+  "worktree": {
+    "dir": "../myapp.worktrees",
+    "include": [".env", { "path": "node_modules", "mode": "symlink" }],
+    "setup": "docker compose -p {name} up -d && pnpm db:migrate",
+    "teardown": "docker compose -p {name} down -v",
+    "url": "echo http://{name}.localhost:3000"
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `dir` | string, relative to the repo root or absolute | `<repo>.worktrees` (sibling folder) | Where new worktrees go |
+| `include` | array of `string` or `{ "path", "mode": "copy" \| "symlink" }` | none | Ignored files and folders copied (or linked) from the main checkout into each new worktree. A bare string means `copy`. |
+| `setup` | string | none | Runs after a worktree is created |
+| `teardown` | string | none | Runs before a worktree is removed. A non-zero exit keeps the worktree. |
+| `url` | string | none | Prints the environment's address; its first non-empty line is shown on the worktree |
+
+**`include`** only processes ignored paths: a tracked path is skipped with a warning, a missing one silently, and a path that resolves outside the repository is refused. On Windows, a symlink that cannot be created falls back to a copy. If a `.worktreeinclude` file exists at the repository root (`.gitignore` syntax), its entries are added in copy mode.
+
+**Placeholders.** In `setup`, `teardown` and `url`, `{name}` is the worktree's slug (`[a-z0-9][a-z0-9-]*`); `{path}`, `{branch}` and `{base}` are inserted shell-quoted. The same values are exported as `GITWAND_WORKTREE_NAME`, `GITWAND_WORKTREE_PATH`, `GITWAND_WORKTREE_BRANCH` and `GITWAND_WORKTREE_BASE`, along with `GITWAND_REPO_ROOT` (the main checkout).
+
+**How they run.** Each command runs in the new worktree, through your login shell (`$SHELL -lc` on Unix, `cmd /D /C` on Windows), and is always read from the **main checkout's** `.gitwandrc`, never from the worktree's own copy.
+
+**Trust.** Because `.gitwandrc` arrives with `git clone`, GitWand shows `setup`, `teardown` and `url` verbatim and asks before running them the first time. The decision is stored per repository in GitWand's app data, not in the repository, and asked again whenever any of the three commands changes. `include` needs no trust.
+
 ## VS Code Extension Settings
 
 When using the VS Code extension, you can also configure via VS Code settings:

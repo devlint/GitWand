@@ -1,12 +1,32 @@
 <script setup lang="ts">
 const GROUPS = [
   {
-    title: 'Core Git',
+    title: 'New in v3.13 — Agent Workspaces',
+    items: [
+      ['Worktrees that set themselves up', 'Describe your environment once in .gitwandrc (ignored files to copy, setup, teardown, URL). Each new worktree starts from a freshly fetched base and comes up ready to run; GitWand asks before running the repo’s commands.'],
+      ['Merge an agent’s work back', 'Bring a task’s work into your branch as a merge, a rebase or a squash, through the same preview as any other merge. Both checkouts are snapshotted first, nothing is stashed or aborted behind your back.'],
+      ['Removal that cleans up', 'Removing a worktree stops its processes, snapshots its files and runs teardown, which has to succeed. Locked worktrees and other tools’ worktrees are never touched.'],
+      ['Restore a removed worktree', 'The Time Machine lists removed worktrees and restores one as a new worktree, uncommitted files, index and setup included.'],
+    ],
+  },
+  {
+    title: 'Conflict engine',
     items: [
       ['Smart resolution', '8 deterministic patterns with a pattern registry and confidence scoring. Conflicts that carry no decision are resolved without intervention, each with a trace.'],
-      ['Integrated Pull Requests', 'Review GitHub, GitLab, Bitbucket and Azure DevOps PRs directly in the app — comments, reviews, CI status, conflict preview.'],
-      ['Visual diff', 'Unified diff viewer with syntax highlighting, hunk-level staging, and merge preview.'],
-      ['Folder tree diff', 'Flat ↔ tree toggle in the file list with per-folder aggregates, click-to-filter and a resizable sidebar.'],
+      ['Merge & auto-resolve', 'The Conflict Predictor runs the real merge, applies what clears your confidence bar and stops on what needs you. It never aborts on your behalf.'],
+      ['A confidence bar you set', 'minConfidenceScore (0–100) in the app, .gitwandrc, the CLI and MCP. Per-hunk checkboxes let you decline one resolution without declining the rest.'],
+      ['Token-level merge', 'Both sides changed disjoint tokens on the same line — GitWand decomposes it token by token and proposes the merge. Never auto-applied: you confirm it in a panel.'],
+      ['2-way base recovery', 'Reconstructs the diff3 base from the git index so the base-dependent patterns work even on repos using git’s default conflict style.'],
+      ['History-aware AI fallback', 'Opt-in: when a hunk goes to a model, the prompt says why each side changed it, from the commits since the merge base. A repository can turn it off for everyone.'],
+    ],
+  },
+  {
+    title: 'Core Git',
+    items: [
+      ['Git Tree', 'Your history as a graph, with uncommitted work as a WIP row at the top. Follows every ref move as it happens, even from a terminal.'],
+      ['Integrated Pull Requests', 'Review GitHub, GitLab, Bitbucket, Azure DevOps, Gitea and Forgejo PRs in the app — comments, reviews, CI status, conflict preview, and auto-merge once checks pass.'],
+      ['Visual diff', 'Unified diff viewer with syntax highlighting, hunk-level staging, merge preview, and hunks you can edit in place.'],
+      ['Safer branch moves', 'Reset --keep refuses instead of discarding an edit, opt-in auto fast-forward after fetch, Cherry-pick as WIP, and a Time Machine snapshot before every rewrite.'],
       ['Split a commit by hunks', 'Break a commit in two by picking files and lines — handles added, deleted and renamed files.'],
       ['Tags manager', 'List, create, push and delete local and remote tags. AI-suggested next semantic version.'],
     ],
@@ -14,32 +34,23 @@ const GROUPS = [
   {
     title: 'Power user',
     items: [
-      ['Git worktrees', 'Work on multiple branches at once without stashing. Each worktree opens as a tab, created in one click.'],
+      ['Git worktrees', 'Work on several branches at once without stashing. Each worktree opens as a tab, created in one click, set up by your repo’s own commands.'],
       ['Submodule management', 'List, initialize and update submodules with status badges, open them as tabs.'],
-      ['Advanced file history', 'Pickaxe search (-S/-G), blame by line range, and a diff algorithm selector.'],
-      ['History & graph', 'Full history, interactive DAG graph, file blame and natural-language commit search.'],
-      ['Commit context menu', '12 right-click actions: checkout, reset, revert, new branch, tag, cherry-pick, view on forge, copy SHA.'],
+      ['Advanced file history', 'Pickaxe search (-S/-G), blame by line range, a diff algorithm selector, and a Compare tab that follows renames.'],
+      ['Commit context menu', 'Right-click actions: checkout, reset, revert, new branch, tag, cherry-pick (or as WIP), view on forge, copy SHA.'],
       ['Fork & triangular workflow', '“↑N fork” badge in the sync button so push remote ≠ upstream — no accidental pushes to origin.'],
-      ['Integrated terminal & AI agents', 'A real PTY terminal in-app — WebGL rendering, inline search, clickable links, typed tabs. Beyond a plain shell, first-class agent tabs launch Claude Code, Codex, opencode or Antigravity, and “New AI task” runs an agent in an isolated scratch worktree.'],
-      ['File explorer & editor', 'A gitignore-aware working-tree file tree with a built-in CodeMirror 6 editor: syntax highlighting, a lock/edit toggle, undo and save — read and tweak files without leaving GitWand.'],
+      ['Integrated terminal & AI agents', 'GitWand’s own terminal emulator, fast even without a GPU: truecolor, search, clickable links, Nerd Font icons. Typed tabs launch Claude Code, Codex, opencode or Antigravity, and “New AI task” runs an agent in its own worktree.'],
+      ['File explorer & editor', 'A file browser for the whole working tree, with a badge on every changed file and the folders above it, a diff or editor per tab, blame, and “Scope here”.'],
     ],
   },
   {
     title: 'AI (opt-in)',
     items: [
       ['AI merge insight', 'Plain-English conflict explanation, AI risk summary before rebase/merge, semantic squash in interactive rebase.'],
-      ['AI code review & PR', 'Auto-generated PR title and description, per-hunk AI critique in the Review panel, branch-name suggestions.'],
-      ['AI commit & history', 'Generated commit and stash messages, semantically-ranked Absorb, blame context and release notes.'],
+      ['AI code review & PR', 'Generated or redrafted PR titles and descriptions, per-hunk AI critique in the Review panel, branch-name suggestions, and a “ctx” field for what the diff can’t say.'],
+      ['AI commit & history', 'Generated commit and stash messages, semantically-ranked Absorb, blame context and release notes, with per-repo templates and output language.'],
+      ['Agents at arm’s length', 'AI CLIs run in an empty environment and a throwaway folder, without your forge tokens; API keys live in the system keychain.'],
       ['MCP server', 'Expose GitWand to Claude Code, Cursor, Windsurf and any MCP client. One command: npx -y @gitwand/mcp.'],
-    ],
-  },
-  {
-    title: 'New in v3.4',
-    items: [
-      ['Token-level merge', 'Both sides changed disjoint tokens on the same line — GitWand decomposes it token by token and proposes the merge. Never auto-applied: you confirm it in a panel.'],
-      ['2-way base recovery', 'Reconstructs the diff3 base from the git index so the base-dependent patterns work even on repos using git’s default conflict style — where they used to sit inert.'],
-      ['Resolution preview + per-hunk confirm', 'Every auto-resolvable hunk shows its result before you apply it, and “Resolve auto” confirms a per-hunk summary instead of applying blind.'],
-      ['Recoverable-before-model metric', 'See how much of the residual is still resolved deterministically before any AI — in the CLI, the merge editor, and a cumulative local tally in Settings.'],
     ],
   },
 ] as const
@@ -106,7 +117,7 @@ function cc(v?: CV){ return v===true?'y':v==='partial'?'p':v==='soon'?'s':'n' }
     <section class="ph-section ph-section--alt">
       <div class="ph-inner">
         <h2 class="ph-h2">How GitWand compares</h2>
-        <p class="ph-secsub">Feature-by-feature against the most popular Git clients. Fact-checked July 2026.</p>
+        <p class="ph-secsub">Feature-by-feature against the most popular Git clients. Fact-checked July 2026; worktree, forge and agent rows re-checked November 2026.</p>
         <CompareMatrix />
         <div class="ph-ctas ph-ctas--center">
           <a href="/compare/" class="ph-btn">Full comparisons →</a>

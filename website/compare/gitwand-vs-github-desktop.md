@@ -14,7 +14,7 @@ head:
 
 **The verdict in three sentences.** If you're new to Git, live 100% on GitHub, and want the least-intimidating on-ramp ever built, GitHub Desktop is exactly that — genuinely great at being simple, and there's no shame in staying. GitWand is the tool you graduate to **without paying**: also free, but multi-forge (GitLab, Bitbucket, Azure DevOps too), Linux-supported, with interactive rebase and full in-app PR review — and an engine that **auto-resolves the trivial ~95% of merge conflicts deterministically**. The day a merge conflict first scares you is the day the difference matters.
 
-*Facts checked July 2026.*
+*Facts checked July 2026; worktree, forge and agent rows re-checked November 2026.*
 
 ## Side by side
 
@@ -23,11 +23,11 @@ head:
 | Price | Free, MIT | Free, MIT |
 | Platforms | macOS · **Linux** · Windows | macOS · Windows |
 | Stack | Tauri 2 + Rust, ~8 MB | Electron |
-| Forges | GitHub, GitLab, Bitbucket, Azure DevOps | GitHub (others: basic push/pull only) |
+| Forges | GitHub, GitLab, Bitbucket, Azure DevOps, Gitea, Forgejo | GitHub (others: basic push/pull only) |
 | Merge conflicts | **Auto-resolves ~95% of trivial hunks** (deterministic) + guided editor | Copilot AI assist (opt-in, 3.6) or your editor |
 | PR review | Full in-app: diff, inline comments, suggestions, CI annotations | Link to github.com |
 | Interactive rebase | ✅ (+ split commit by hunks) | ❌ |
-| Worktrees / submodules | First-class (tab = worktree, scratch worktrees) | ✅ worktrees (3.6) / minimal submodules |
+| Worktrees / submodules | First-class: a tab per worktree, setup/teardown hooks from `.gitwandrc`, merge-back as merge, rebase or squash, snapshot before removal | ✅ worktrees (3.6) / minimal submodules |
 | History | Git Tree DAG, filters, file history with pickaxe | Linear list, basic diff |
 | AI | Optional agent sessions, per-hunk critique, MCP server | Copilot commit authoring + conflict resolution |
 | Sign-in | Optional (for PR features, OAuth device flow) | GitHub account expected |
@@ -44,7 +44,7 @@ GitHub Desktop 3.6 added Copilot-assisted conflict resolution — but that means
 
 ### 2. Not married to GitHub
 
-Same client for GitHub, GitLab, Bitbucket and Azure DevOps: PR/MR review with inline comments and CI annotations in-app, multiple accounts, cross-fork PRs. Your client shouldn't change when your employer does.
+Same client for GitHub, GitLab, Bitbucket, Azure DevOps, Gitea and Forgejo: PR/MR review with inline comments and CI annotations in-app, multiple accounts, cross-fork PRs. Your client shouldn't change when your employer does.
 
 ### 3. Room to grow
 
