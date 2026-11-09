@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Publishing a branch no longer fails with "reference already exists".** Two pushes to the same repository now run one after the other: publishing the same new branch twice at once used to send two creates, and the second was rejected. Deleting a remote branch or pushing tags waits its turn too, while reading the repository stays possible during a push. When a branch already exists on the remote without GitWand knowing it (pushed from another machine, tracking branch pruned), the publish now fetches and tries once more, as a normal fast-forward update: a branch that diverged is still refused, never overwritten. Reported and fixed by Guillaume Huard Hughes.
+
 ## [3.13.0] - 2026-11-09
 
 ### Added
