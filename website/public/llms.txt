@@ -4,8 +4,9 @@
 
 Key facts:
 - Deterministic conflict-resolution engine: 8 auto-applied patterns (12-pattern registry), confidence scoring (certain/high/medium/low), decision trace per hunk. LLM fallback is strictly opt-in.
-- Full Git client: changes, history (Git Tree), branches, push/pull, interactive rebase, worktrees, submodules, integrated PR review (GitHub, GitLab, Bitbucket, Azure DevOps).
-- AI-agent friendly: MCP server (`@gitwand/mcp`), agent sessions (Claude Code, Codex, opencode, Gemini), scratch worktrees for AI tasks.
+- Full Git client: changes, history (Git Tree), branches, push/pull, interactive rebase, worktrees, submodules, integrated PR review (GitHub, GitLab, Bitbucket, Azure DevOps, Gitea, Forgejo), Time Machine snapshots.
+- AI-agent friendly: MCP server (`@gitwand/mcp`), agent sessions (Claude Code, Codex, opencode, Antigravity), AI tasks in their own worktree.
+- Worktrees as environments (v3.13): per-repo setup/teardown/url commands and ignored-file includes in `.gitwandrc`, merge-back as merge, rebase or squash through the merge preview, snapshot before removal, restore from the Time Machine.
 - Native performance: Tauri 2 + Rust, ~8 MB binary, local-first, zero mandatory cloud.
 
 ## Docs
@@ -49,12 +50,14 @@ Key facts:
 - [AI & agents](https://gitwand.app/ai-agents): MCP, agent sessions, AI features
 - [Changelog](https://gitwand.app/changelog): full release history
 - [Blog](https://gitwand.app/blog/): engineering and product articles
+- [Git worktrees in GitWand, step by step](https://gitwand.app/blog/worktrees-step-by-step): the v3.13 worktree lifecycle
 
 ## Install
 
 - Desktop: https://github.com/devlint/GitWand/releases (macOS .dmg, Linux .deb/.AppImage/.rpm, Windows .exe/.msi)
 - macOS via Homebrew: `brew install --cask devlint/tap/gitwand`
 - Windows via winget: `winget install Devlint.GitWand`
+- Arch Linux via AUR: `gitwand-bin`
 - CLI: `npm install -g @gitwand/cli`
 - MCP server: `npx @gitwand/mcp` — server card at https://gitwand.app/.well-known/mcp/server-card.json
 - VS Code: `code --install-extension gitwand.gitwand-vscode` (also on Open VSX for VSCodium and Cursor)

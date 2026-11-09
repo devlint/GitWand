@@ -239,7 +239,7 @@ Resolution: parse the three versions into statements, take the base plus what ea
 
 **Why it is safe.** Two branches each needing a new import is the single most common shape of "conflict at the top of the file", and an import added by one side never cancels an import added by the other.
 
-**Where it stops.** When both sides import the same module in different ways, the import resolver declines, because that is a real choice. One known gap, found while writing this: when that happens, the hunk continues to the line patterns, and two differently-shaped imports of the same module that are both pure insertions (`import { useAuth } from "./auth"` on one side, `import useAuth from "./auth"` on the other) currently pass as `insertion_at_boundary`, keeping both lines. That produces a duplicate binding your compiler rejects immediately, so it cannot ship silently, but it should not be applied at all, and it is on the list to fix.
+**Where it stops.** When both sides import the same module in different ways, the import resolver declines, because that is a real choice. When that happens with two differently-shaped imports of the same module that declare the same name (`import { useAuth } from "./auth"` on one side, `import useAuth from "./auth"` on the other), the hunk is classified `complex` and left to you. *Update, November 2026:* this was a known gap when the article was written: the hunk went on to the line patterns, which kept both lines as an `insertion_at_boundary` and produced a duplicate binding. v3.12.5 fixed it. Two imports of the same module that bind different names (`import React` and `import { useState }`) are still both kept.
 
 ## 10. Lockfiles and other generated files — declined by default
 
