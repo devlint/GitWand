@@ -10,47 +10,13 @@ _Ordered by priority, last verified 2026-10-10 (v3.12.1 shipped 2026-10-10 with 
 
 | Version | Codename | Why now |
 |---------|----------|---------|
-| **v3.13.0** | Agent Workspaces I — Lifecycle & merge-back | Worktrees as provisioned environments (repo-defined setup/teardown hooks) and the real merge-back through preview→apply: the interim v3.12.1 fix refuses as soon as `main` moved, which is the normal case for a long agent task; Dendreo's `bin/worktree` shows what a real team needs |
 | **v3.14.0** | Stacked Branches | Native stacked PRs, sequenced after v3.11 (leans on preview→apply) |
 | **v3.15.0** | Combined Diffs | Multi-commit, non-contiguous aggregated diff |
 | **v3.16.0** | Agent Workspaces II — Agents & parallel work | Live agent status, in-app permission requests, agent picker, worktrees view, cross-worktree conflict prediction, merged-PR cleanup — GitKraken 12.x, VS Code 1.141 and Conductor shipped parts of it |
 | **v3.17.0** | Voice Input | Experimental — local dictation via embedded Whisper |
 | **v4.0.0** (candidate) | Blast Radius | Code-graph impact before merge — the code-intelligence headline |
 
-_v3.12.5 (Git Tree follows ref moves, imports and Dockerfile resolvers stop keeping both sides), v3.12.4 (Windows build no longer needs the VC++ runtime), v3.12.3 (reset `--keep`, opt-in auto fast-forward, tracked-but-ignored warning, diffs that keep `--`/`++` lines, file history compare across renames, PR comment actions, in-house Markdown, GPU rendering on Linux), v3.12.2 (AI context for PRs and release notes, AI branch creation, AI language and model fixes), v3.12.1 (merge-back no longer loses data, security hardening, full-screen Settings, WIP as a Git Tree row, per-project identity), v3.12.0 (built-in terminal renderer, WIP in the Git Tree), v3.11.2 (Finder-like folder navigation), v3.11.1 (History-aware LLM fallback) and v3.11.0 (Merge preview-to-apply) shipped; see [Shipped](#shipped) below and the full detail in [CHANGELOG.md](./CHANGELOG.md)._
-
----
-
-### v3.13.0 — Agent Workspaces I: lifecycle & merge-back
-
-_From the 2026-10-08 changelog scan and worktree audit. GitKraken 12.1→12.5 shows each agent session's live status, answers Claude Code / Codex / Copilot CLI permission requests from its panel and runs per-repo setup commands before an agent starts; VS Code 1.141 cleans up agent worktrees by disk use and merged PR; Conductor gives each workspace setup/archive scripts and a port range; Strand snapshots a worktree before removing it. Dendreo's own `bin/worktree` (~1,700 lines) shows the real need: a worktree is a running environment — its own containers, subdomain, tenant, test databases and reserved Vite port — that must be provisioned on create and torn down on delete. GitWand today creates and removes the git worktree only (`WorktreeManager.vue`, `scratch.rs`), launches Claude Code only, and then loses sight of the session._
-
-_Split on 2026-10-10: this part makes a worktree a provisioned environment and brings agent work back for real; the agent-facing half (status, permissions, parallel-work prediction) is v3.16.0 below._
-
-**Lifecycle hooks (the foundation)** — a `worktree` section in `.gitwandrc`, so the repo, not GitWand, says how to bring an environment up and down:
-
-```yaml
-worktree:
-  dir: .claude/worktrees            # default stays configurable; Claude Code / Dendreo convention
-  include: [.env, auth.json]        # or a .worktreeinclude file (Claude Code / Conductor / Strand)
-  setup: bin/worktree provision {name}
-  teardown: bin/worktree teardown {name}
-  url: bin/worktree url {name}
-```
-
-- `setup` runs after creation, streamed into a terminal tab; `teardown` runs **before** any removal (manual, merge-back, cleanup), and a failed teardown blocks the removal instead of orphaning containers, volumes and databases — what happens today when a Dendreo worktree is removed from GitWand
-- name, path, branch and base exported as `GITWAND_WORKTREE_*` variables; `url` output shown on the worktree card and openable
-- `include` copies ignored files only (same semantics as `.worktreeinclude`); symlink vs copy per entry, for agent config (`settings.local.json`, `mcp.json`) and shared dependency folders
-
-**Creation**
-- Base on the freshly fetched remote default branch by default (Claude Code, Dendreo, Conductor), not the local `HEAD` as AI tasks do today
-
-**Bringing work back**
-- Merge-back becomes a real merge or rebase through the v3.11 preview → apply flow (completing the v3.12.1 interim fix; the agent's terminal processes are stopped first — on Windows too, where v3.12.1 only kills the leader, and including a shell's background jobs, `setsid` processes and a foreground job whose leader already exited, which survive `terminal_close` today): conflicts previewed, auto-resolved by the engine, agent commits kept, snapshot taken
-
-**Removal**
-- Snapshot before removal (v3.8 Time Machine), restorable as a new worktree (Strand)
-- Never touch a worktree that is locked, marked `.worktree-keep` (Dendreo's guard against Claude Desktop's cleaner; ignored on a worktree GitWand created), or owned by another orchestrator
+_v3.13.0 (Agent Workspaces I: worktree lifecycle hooks, real merge-back, removal with teardown and snapshot, restore as worktree), v3.12.5 (Git Tree follows ref moves, imports and Dockerfile resolvers stop keeping both sides), v3.12.4 (Windows build no longer needs the VC++ runtime), v3.12.3 (reset `--keep`, opt-in auto fast-forward, tracked-but-ignored warning, diffs that keep `--`/`++` lines, file history compare across renames, PR comment actions, in-house Markdown, GPU rendering on Linux), v3.12.2 (AI context for PRs and release notes, AI branch creation, AI language and model fixes), v3.12.1 (merge-back no longer loses data, security hardening, full-screen Settings, WIP as a Git Tree row, per-project identity), v3.12.0 (built-in terminal renderer, WIP in the Git Tree), v3.11.2 (Finder-like folder navigation), v3.11.1 (History-aware LLM fallback) and v3.11.0 (Merge preview-to-apply) shipped; see [Shipped](#shipped) below and the full detail in [CHANGELOG.md](./CHANGELOG.md)._
 
 ---
 
@@ -110,6 +76,11 @@ _Second half of Agent Workspaces (split 2026-10-10), on top of the v3.13.0 lifec
 **Parallel work — where the engine pays off**
 - **Cross-worktree conflict prediction** — run the Conflict Predictor between parallel tasks and against the target before anything lands: "task A and task B will conflict on `useRepo.ts`, 3 hunks, 2 auto-resolvable". Strand only warns that two worktrees touch the same files; nobody predicts the actual conflicts. The headline of this release
 - Compare two attempts at the same task side by side, keep one (Strand)
+
+**Follow-ups from v3.13.0**
+- Real-machine check on Windows: hook commands through `cmd /D /C`, `%VAR%` expansion, ConPTY exit events and Job Object teardown were only covered by CI
+- Restore as worktree opens a tab on the restored worktree (a toast only today); removed worktrees leave the Recent list
+- The worktree manager shows "No worktree" for a moment while it loads; the apply button keeps "Merge and auto-resolve" in Rebase mode
 
 **Cleanup**
 - `git worktree lock` while an agent runs (Claude Code does the same), unlock when it exits
@@ -292,6 +263,7 @@ Positioning: neither "yet another Git GUI" nor an IDE. A first-class Git navigat
 
 | Version | Highlights |
 |---------|-----------|
+| **v3.13.0** | **Agent Workspaces I — lifecycle & merge-back** (#281–#290) — a `worktree` section in `.gitwandrc` (`dir`, `include`, `setup`, `teardown`, `url`) run only once trusted · new worktrees and AI tasks start from the freshly fetched remote default branch, get their `include` files and run `setup` in a terminal tab · one removal sequence: guards (lock, `.worktree-keep`, other tools), processes stopped, snapshot, `teardown` before removal · merge-back as a real merge, rebase or squash through preview → apply · a removed worktree restorable as a new one from the Time Machine |
 | **v3.12.5** | **The Git Tree follows ref moves that keep the newest commit** (#266, #267) — labels, lanes and the trunk pin refresh after a reset onto `origin/main`, a branch on an existing commit or a checkout, without a restart · **imports and Dockerfile resolvers stop keeping both sides** (#278) — a name declared by both added imports is left to you, Dockerfile stages paired by alias or position and merged against base · rustls 0.23.46, DOMPurify 3.4.17, Vite 6.4.5 |
 | **v3.12.4** | **Windows app starts without the Visual C++ Redistributable** — the C runtime is linked statically (it had been imported since v3.11.2, so winget rejected v3.11.2 to v3.12.3), and the release fails if the exe imports it again · the asset re-upload step looks in the real bundle folder (#273) · `SECURITY.md` (#272) |
 | **v3.12.3** | **Reset `--keep`** (#263) · **opt-in auto fast-forward after fetch** (#265) · **tracked files matching `.gitignore`** warning + untrack (#264) · **PR comment actions** on GitHub, in-house Markdown renderer, GPU rendering by default on Linux with an automatic software fallback (#257) · diff parsers bounded by hunk counts keep `--`/`++` lines (#270) · file history compare in the desktop app, across renames (#269) · `non_overlapping` no duplicate lines under `diff3` (#259) · MCP residual-marker check (#260), Bitbucket PR-list pagination (#261), PR write actions on forks (#262), global-shortcut startup (#256) · command registry covers forge wrappers and Rust registration (#268, #269) |

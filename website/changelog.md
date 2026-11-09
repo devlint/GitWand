@@ -5,6 +5,26 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.13.0 — November 2026
+
+### Worktrees become environments
+
+A worktree is often more than a second checkout. It needs its own `.env`, its containers, a database, a URL. A repository can now say how to bring all that up and down, in a `worktree` section of `.gitwandrc`: which ignored files to copy (`include`), a `setup` command run after creation, a `teardown` command run before removal, and a `url` command whose output appears on the worktree's card. GitWand shows these commands as written and runs nothing until you trust them; it asks again if they change.
+
+New worktrees and AI tasks now start from the remote default branch, fetched first, instead of whatever was checked out locally. Offline, GitWand falls back to the local copy and the creation dialog says so. `setup` runs in a terminal tab, so you watch the environment come up.
+
+### Removing a worktree no longer leaves things behind
+
+Every removal, from the worktree manager, an AI task or the Git Tree, follows the same steps. GitWand never touches a worktree that is locked or that belongs to another tool. It closes its terminals, stops the processes it started there and lists the ones it did not, takes a snapshot of the files, then runs `teardown`. If `teardown` fails, the worktree stays, with its log, a retry and an explicit "remove anyway". Containers and databases no longer outlive their worktree.
+
+### Bringing an agent's work back for real
+
+Merge-back used to refuse as soon as `main` had moved, which is what happens during any long agent task. It now goes through the same preview and apply as any other merge: pick the target and the mode, **Merge** to keep the agent's commits under a merge commit, **Rebase** to replay them and fast-forward, or **Squash** to stage the changes. Conflicts show up in the preview and the engine resolves what it can; what is left opens in the conflict editor, inside the task's worktree, and merge-back resumes once it is done. Uncommitted work in the task is committed first, and both sides are snapshotted.
+
+### A removed worktree can come back
+
+The Time Machine lists the worktrees GitWand removed, and tasks as they were before their merge-back, under "Removed worktrees". **Restore as worktree** brings one back next to the main checkout, with its commits, its uncommitted files and its original base, and runs `setup` again.
+
 ## v3.12.5 — November 2026
 
 ### The Git Tree keeps up when branches move

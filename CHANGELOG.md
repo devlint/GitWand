@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-11-09
+
 ### Added
 
-- `.gitwandrc` accepts a `worktree` section (`dir`, `include`, `setup`, `teardown`, `url`), and `.worktreeinclude` is parsed. GitWand asks before it runs a repository's worktree commands: it shows them as written, remembers the trust per repository, and asks again whether they change. The commands are always read from the main worktree, never from a linked worktree's copy. Nothing runs them yet: this is the groundwork for v3.13 Agent Workspaces.
-- GitWand can stop what runs in a linked worktree: it closes its own terminals there, then stops the processes it started that still have their working directory inside. Processes it did not start are listed, never killed unless you ask. A terminal session can also run a given command and report its exit code. Groundwork for v3.13 Agent Workspaces; nothing in the UI uses it yet.
+- `.gitwandrc` accepts a `worktree` section (`dir`, `include`, `setup`, `teardown`, `url`), and `.worktreeinclude` is parsed. GitWand asks before it runs a repository's worktree commands: it shows them as written, remembers the trust per repository, and asks again whether they change. The commands are always read from the main worktree, never from a linked worktree's copy. The worktree service below runs them.
+- GitWand can stop what runs in a linked worktree: it closes its own terminals there, then stops the processes it started that still have their working directory inside. Processes it did not start are listed, never killed unless you ask. A terminal session can also run a given command and report its exit code. Removal uses both.
 - New worktrees and AI tasks are created by one worktree service. They start from the remote default branch, fetched first; offline, GitWand falls back to the local tracking branch, then to `HEAD`, and the creation dialog says which base it used and why. They go in `<repo>.worktrees/<name>` (or `worktree.dir`) on `task/<name>`, without upstream tracking, and get the ignored `include` files copied or linked from the main worktree. Once you trust the repository's commands, `setup` runs in a read-only terminal tab, and the AI-task agent only starts after it succeeds. `url` then puts the environment's address on the worktree, with an Open button. A failed setup leaves the worktree in place with Retry setup, Open the log and Remove. Until merge-back is reworked (v3.13), an AI task started from a newer `origin/main` merges back only once your `main` is updated to it.
 - Every worktree removal (worktree manager, AI-task close, Git Tree, the cleanup after a merge-back) now follows one sequence. GitWand refuses to touch a worktree that is locked, has a `.worktree-keep` file (ignored on a worktree GitWand created, where setup hooks drop it to shield it from another tool's cleanup), or lives in another tool's directory (Claude Code, Conductor, Superset) without being its own; a git lock gets an Unlock button. It then closes the worktree's terminals and stops its processes, and lists those it did not start instead of removing anything (Retry, Stop all). It snapshots the worktree's files, so uncommitted work can be restored, runs the repository's `teardown` in a read-only terminal tab, and removes the worktree only if teardown succeeded; a failed teardown keeps it, with Retry teardown, Open the log and Remove anyway. A task branch already merged is deleted with the worktree. Removing a worktree GitWand did not create asks for one more confirmation.
 - Merge-back brings an AI task's work back as real commits, through the same preview and apply as any other merge. You pick the target (the task's source branch by default) and the mode: **Merge** (a merge commit, the agent's commits kept), **Rebase** (the agent's commits replayed onto the target, which then fast-forwards), or **Squash** (the changes staged on the target, as before). `main` moving on no longer blocks it. GitWand refuses, and says why, when the main checkout is on another branch (offering to switch it when it is clean), in the middle of an operation, or has changes to files the task also changes; it never stashes for you. It then stops the task's processes, commits its uncommitted work as `wip(<name>): uncommitted work at merge-back`, snapshots both checkouts, shows the preview, and applies in the checkout the mode works in. Conflicts the engine cannot resolve stay for you there, never aborted, and the dialog waits with Resume. Removing the worktree is offered afterwards, not done for you; after a squash the removal asks about the branch, since its commits are not merged. The worktree manager gets a Merge back button too.
@@ -19,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The worktree manager's quick-create no longer starts from an empty base. In `pnpm dev:web`, the worktree add, remove and repair routes no longer build a shell command from the request.
+- A message that repeats a value now shows it everywhere: `{1}` stayed raw from the second occurrence on (wrong-branch warning, agent open failure).
 - Closing a terminal now also stops the shell's background jobs (`sleep 300 &` survived before). On Windows, it stops the terminal's whole process tree instead of the shell alone.
 
 ## [3.12.5] - 2026-11-03
@@ -1717,7 +1720,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.12.4...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.13.0...HEAD
+[3.13.0]: https://github.com/devlint/GitWand/compare/v3.12.5...v3.13.0
 [3.12.5]: https://github.com/devlint/GitWand/compare/v3.12.4...v3.12.5
 [3.12.4]: https://github.com/devlint/GitWand/compare/v3.12.3...v3.12.4
 [3.12.3]: https://github.com/devlint/GitWand/compare/v3.12.2...v3.12.3

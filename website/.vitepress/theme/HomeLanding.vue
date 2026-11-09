@@ -25,7 +25,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.12.5'
+const LATEST = '3.13.0'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -101,7 +101,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Natif (sans Electron)",
     mcRow4: "Serveur MCP pour agents",
     agentsCta: "Découvrir IA & agents →",
-    heroAnnounce: "Nouveau dans la v3.12 — reset --keep, fast-forward automatique, des diffs qui gardent chaque ligne",
+    heroAnnounce: "Nouveau dans la v3.13 — worktrees avec setup et teardown, vrai merge-back des tâches IA",
     heroPoint1: "8 patterns déterministes — zéro pari sur ton code",
     heroPoint2: "100 % local — ton code ne quitte jamais ta machine",
     heroPoint3: "Un seul moteur — Desktop, CLI, VS Code & agents IA",
@@ -118,7 +118,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "Ce petit coup au moral quand 12 fichiers passent au rouge ? Terminé. GitWand classe chaque hunk avec 8 patterns déterministes — sans deviner, sans halluciner — résout tout seul ceux qui n'étaient pas des décisions, et ne te rend que ce qui mérite ton cerveau. Natif, gratuit, MIT.",
     download: 'Télécharger',
     github: 'GitHub',
-    whatsNew: 'Nouveautés v3.12',
+    whatsNew: 'Nouveautés v3.13',
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -201,7 +201,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Native (no Electron)",
     mcRow4: "MCP server for agents",
     agentsCta: "Explore AI & agents →",
-    heroAnnounce: "New in v3.12 — reset --keep, auto fast-forward, diffs that keep every line",
+    heroAnnounce: "New in v3.13 — worktrees with setup and teardown, a real merge-back for agent tasks",
     heroPoint1: "8 deterministic patterns — zero gambling with your code",
     heroPoint2: "100% local — your code never leaves your machine",
     heroPoint3: "One engine — Desktop, CLI, VS Code & AI agents",
@@ -218,7 +218,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "That sinking feeling when 12 files turn red? Gone. GitWand classifies every hunk with 8 deterministic patterns — no guessing, no hallucinations — auto-resolves the ones that were never decisions, and hands you only what's worth your brain. Native, free, MIT.",
     download: 'Download',
     github: 'GitHub',
-    whatsNew: "What's new in v3.12",
+    whatsNew: "What's new in v3.13",
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -301,7 +301,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sin Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA y agentes →",
-    heroAnnounce: "Nuevo en la v3.12 — reset --keep, fast-forward automático, diffs que conservan cada línea",
+    heroAnnounce: "Nuevo en la v3.13 — worktrees con setup y teardown, merge-back real de las tareas de IA",
     heroPoint1: "8 patrones deterministas — cero apuestas con tu código",
     heroPoint2: "100 % local — tu código nunca sale de tu máquina",
     heroPoint3: "Un solo motor — Desktop, CLI, VS Code y agentes de IA",
@@ -318,7 +318,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "¿Esa sensación de vacío cuando 12 archivos se ponen en rojo? Se acabó. GitWand clasifica cada hunk con 8 patrones deterministas — sin adivinar, sin alucinar — resuelve solo los que nunca fueron decisiones y te entrega únicamente lo que merece tu cerebro. Nativo, gratis, MIT.",
     download: 'Descargar',
     github: 'GitHub',
-    whatsNew: 'Novedades v3.12',
+    whatsNew: 'Novedades v3.13',
     docs: 'Documentación →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -401,7 +401,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sem Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA e agentes →",
-    heroAnnounce: "Novidade na v3.12 — reset --keep, fast-forward automático, diffs que mantêm cada linha",
+    heroAnnounce: "Novidade na v3.13 — worktrees com setup e teardown, merge-back real das tarefas de IA",
     heroPoint1: "8 padrões deterministas — zero aposta com seu código",
     heroPoint2: "100 % local — seu código nunca sai da sua máquina",
     heroPoint3: "Um único motor — Desktop, CLI, VS Code e agentes de IA",
@@ -418,7 +418,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "Aquele frio na barriga quando 12 arquivos ficam vermelhos? Acabou. O GitWand classifica cada hunk com 8 padrões deterministas — sem chutar, sem alucinar — resolve sozinho os que nunca foram decisões e devolve só o que merece seu cérebro. Nativo, gratuito, MIT.",
     download: 'Baixar',
     github: 'GitHub',
-    whatsNew: 'Novidades v3.12',
+    whatsNew: 'Novidades v3.13',
     docs: 'Documentação →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -501,7 +501,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "原生（无 Electron）",
     mcRow4: "面向代理的 MCP 服务器",
     agentsCta: "探索 AI 与代理 →",
-    heroAnnounce: "v3.12 新功能 — reset --keep、自动快进、不再丢行的 diff",
+    heroAnnounce: "v3.13 新功能 — 带 setup 与 teardown 的工作树，AI 任务真正合并回主分支",
     heroPoint1: "8 种确定性模式 — 绝不拿你的代码赌运气",
     heroPoint2: "100% 本地运行 — 代码永不离开你的机器",
     heroPoint3: "一个引擎 — 桌面端、CLI、VS Code 与 AI 代理",
@@ -518,7 +518,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "12 个文件同时变红的那种心凉？不会再有。GitWand 用 8 种确定性模式分类每个 hunk——不猜测、无幻觉——自动解决那些本就无需决定的冲突，只把真正值得你思考的部分交还给你。原生、免费、MIT。",
     download: '下载',
     github: 'GitHub',
-    whatsNew: 'v3.12 新特性',
+    whatsNew: 'v3.13 新特性',
     docs: '文档 →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: '命令行',
@@ -587,7 +587,7 @@ const t = computed(() => i18n[locale.value])
 // `t` sert les sections historiques, `nt` les nouvelles.
 const NC: Record<Locale, any> = {
   en: {
-    badge: 'v3.12 — a Git Tree that follows every branch move, safer import and Dockerfile merges',
+    badge: 'v3.13 — worktrees with setup and teardown hooks, and a real merge-back for agent tasks',
     h1a: 'The merge ends', h1b: 'without you', h1c: '.',
     sub: 'Eight deterministic patterns classify every hunk, settle the ones that carried no decision, and hand you back only what deserves your attention. Native, local, MIT.',
     cta: 'Download GitWand',
@@ -639,7 +639,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   fr: {
-    badge: 'v3.12 — un arbre Git qui suit chaque déplacement de branche, des imports et Dockerfiles mieux fusionnés',
+    badge: 'v3.13 — des worktrees avec hooks setup et teardown, et un vrai merge-back des tâches IA',
     h1a: 'Le merge se termine', h1b: 'sans toi', h1c: '.',
     sub: 'Huit patterns déterministes classent chaque hunk, règlent ceux qui ne demandaient aucune décision, et te laissent uniquement ce qui vaut ton attention. Natif, local, MIT.',
     cta: 'Télécharger GitWand',
@@ -691,7 +691,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   es: {
-    badge: 'v3.12 — un árbol Git que sigue cada movimiento de rama, imports y Dockerfiles mejor fusionados',
+    badge: 'v3.13 — worktrees con hooks de setup y teardown, y un merge-back real de las tareas de IA',
     h1a: 'El merge termina', h1b: 'sin ti', h1c: '.',
     sub: 'Ocho patrones deterministas clasifican cada hunk, resuelven los que no exigían ninguna decisión y te devuelven solo lo que merece tu atención. Nativo, local, MIT.',
     cta: 'Descargar GitWand',
@@ -743,7 +743,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'pt-BR': {
-    badge: 'v3.12 — uma árvore Git que acompanha cada movimento de branch, imports e Dockerfiles mesclados com mais segurança',
+    badge: 'v3.13 — worktrees com hooks de setup e teardown, e um merge-back real das tarefas de IA',
     h1a: 'O merge termina', h1b: 'sem você', h1c: '.',
     sub: 'Oito padrões determinísticos classificam cada hunk, resolvem os que não exigiam decisão nenhuma e devolvem só o que merece a sua atenção. Nativo, local, MIT.',
     cta: 'Baixar o GitWand',
@@ -795,7 +795,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'zh-CN': {
-    badge: 'v3.12 — Git 树跟随每次分支移动，导入与 Dockerfile 合并更可靠',
+    badge: 'v3.13 — 带 setup 与 teardown 钩子的工作树，AI 任务真正合并回主分支',
     h1a: '合并结束时', h1b: '不必再找你', h1c: '。',
     sub: '八种确定性模式为每个 hunk 分类，自动处理那些本就无需决策的部分，只把值得你关注的留给你。原生、本地、MIT。',
     cta: '下载 GitWand',
