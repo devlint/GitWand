@@ -1,8 +1,10 @@
 //! What GitWand may do to a worktree before removing it (spec §7.1).
 //!
 //! A worktree is **untouchable** when it is locked (`git worktree lock`),
-//! has a `.worktree-keep` file at its root, or sits in another tool's
-//! worktree directory without a GitWand record. Nothing removes, merges
+//! or, without a GitWand record, has a `.worktree-keep` file at its root or
+//! sits in another tool's worktree directory. A recorded worktree was
+//! created by GitWand: a keep file there comes from the repo's own setup
+//! hook (shielding it from another tool's cleanup), not from the user. Nothing removes, merges
 //! back into or discards an untouchable worktree; the only action offered
 //! is the specific unlock.
 
@@ -144,7 +146,9 @@ pub(crate) fn guard(repo: &Path, worktree: &Path) -> Result<GuardReport, String>
     if entry.locked.is_some() {
         reasons.push("locked".to_string());
     }
-    if entry.path.join(KEEP_FILE).exists() {
+    // Ignored on a worktree GitWand created: there the file comes from the
+    // repo's own setup hook, shielding it from another tool's cleanup.
+    if !recorded && entry.path.join(KEEP_FILE).exists() {
         reasons.push("keep-file".to_string());
     }
     if !recorded && in_other_tool_dir(&entry.path) {
@@ -236,13 +240,18 @@ mod tests {
     }
 
     #[test]
-    fn guard_reports_a_keep_file() {
+    fn guard_reports_a_keep_file_unless_recorded() {
         let repo = TempRepo::new();
         let wt = add(&repo, "wt/a", "a");
         std::fs::write(wt.join(KEEP_FILE), "").unwrap();
         let g = guard(&repo.path, &wt).unwrap();
         assert!(g.untouchable);
         assert_eq!(g.reasons, vec!["keep-file"]);
+        // A worktree GitWand created: the file is the repo's setup hook
+        // shielding it from another tool's cleanup, not a "never remove".
+        record(&repo, &wt, "a");
+        let g = guard(&repo.path, &wt).unwrap();
+        assert!(!g.untouchable, "{:?}", g.reasons);
     }
 
     #[test]

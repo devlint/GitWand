@@ -313,7 +313,16 @@ mod tests {
         let repo = TempRepo::new();
         let locked = task(&repo, "locked");
         repo.git(&["worktree", "lock", locked.to_str().unwrap()]);
-        let kept = task(&repo, "kept");
+        // Not created by GitWand: a recorded task ignores the keep file.
+        let kept = repo.sandbox.join("kept");
+        repo.git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "task/kept",
+            kept.to_str().unwrap(),
+        ]);
         std::fs::write(kept.join(guard::KEEP_FILE), "").unwrap();
         let opts = RemoveOptions {
             delete_branch: true,
@@ -332,6 +341,26 @@ mod tests {
         }
         assert!(kept.join(guard::KEEP_FILE).exists());
         assert!(branch_exists(&repo, "task/locked") && branch_exists(&repo, "task/kept"));
+    }
+
+    #[test]
+    fn a_keep_file_does_not_block_a_task_gitwand_created() {
+        // Setup hooks (Dendreo's `provision`) drop one to shield the
+        // worktree from another tool's cleanup.
+        let repo = TempRepo::new();
+        let wt = task(&repo, "provisioned");
+        std::fs::write(wt.join(guard::KEEP_FILE), "").unwrap();
+        let id = prepare_removal(&repo.path, &wt, none)
+            .unwrap()
+            .snapshot
+            .map(|s| s.id);
+        let opts = RemoveOptions {
+            snapshot_id: id,
+            delete_branch: true,
+            ..Default::default()
+        };
+        remove_worktree(&repo.path, &wt, &opts, nothing).unwrap();
+        assert!(!wt.exists());
     }
 
     #[test]
