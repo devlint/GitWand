@@ -1589,6 +1589,10 @@ function submitRequestReviewers() {
             <div v-if="p.checksError.value" class="pdv-checks-stale" role="status">
               {{ p.prChecks.value.length ? t('pr.detail.checksStale') : t('pr.detail.checksLoadFailed') }}
             </div>
+            <!-- The list is another commit's (a push the CI has not caught up with). -->
+            <div v-else-if="p.checksOtherCommit.value" class="pdv-checks-stale" role="status">
+              {{ t('pr.detail.checksOtherCommit', p.checksOtherCommit.value.slice(0, 7), (p.prDetail.value?.headSha ?? '').slice(0, 7)) }}
+            </div>
             <div v-for="c in p.checksWithConflict.value" :key="c.name" class="pdv-check">
               <span class="pdv-check-icon">{{ p.checkIcon(c) }}</span>
               <span class="pdv-check-name">{{ c.name }}</span>

@@ -778,3 +778,83 @@ describe("usePrPanel — one notion of a running check", () => {
     }
   });
 });
+
+describe("usePrPanel — checks of another commit than the head", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    window.localStorage.clear();
+    _resetPrCacheForTesting();
+    ghPrDetail.mockReset().mockResolvedValue(fakeDetail()); // head "abc"
+    ghPrChecks.mockReset();
+  });
+  afterEach(() => {
+    scopes.splice(0).forEach((s) => s.stop());
+    vi.useRealTimers();
+  });
+  const on = (sha: string, conclusion = "SUCCESS") => [
+    { name: "build", state: "COMPLETED", conclusion, detailsUrl: "", commitSha: sha },
+  ];
+  const runningOn = (sha: string) => [
+    { name: "build", state: "IN_PROGRESS", conclusion: "", detailsUrl: "", commitSha: sha },
+  ];
+
+  it("keeps following finished checks of an older commit until the head's come", async () => {
+    ghPrChecks.mockResolvedValueOnce(on("old")).mockResolvedValueOnce(on("old")).mockResolvedValue(on("abc"));
+    const p = await openChecksTab();
+    expect(p.checksOtherCommit.value).toBe("old");
+
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(ghPrChecks).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(ghPrChecks).toHaveBeenCalledTimes(3);
+    expect(p.checksOtherCommit.value).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 4);
+    expect(ghPrChecks).toHaveBeenCalledTimes(3);
+  });
+
+  it("the merge banner does not say ready on another commit's green checks", async () => {
+    ghPrChecks.mockResolvedValueOnce(on("old")).mockResolvedValue(on("abc"));
+    const p = await openChecksTab();
+    p.prReviews.value = [{ state: "APPROVED", user: { login: "x" }, submitted_at: "1" } as any];
+    expect(p.mergeReadiness.value).toBeNull();
+    expect(p.mergeBlocked.value).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(p.mergeReadiness.value?.ready).toBe(true);
+  });
+
+  it("another commit's failed checks do not block the merge (the head may get no pipeline)", async () => {
+    ghPrChecks.mockResolvedValue(on("old", "FAILURE"));
+    const p = await openChecksTab();
+    p.prReviews.value = [{ state: "APPROVED", user: { login: "x" }, submitted_at: "1" } as any];
+    expect(p.mergeBlocked.value).toBe(false);
+  });
+
+  it("revalidates the detail once when the checks report a commit it has not seen", async () => {
+    // The detail was fetched before a push the checks backend already reads.
+    ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(runningOn("new"));
+    const p = await openChecksTab();
+    expect(ghPrDetail).toHaveBeenCalledTimes(1);
+
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "new" });
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    await flush();
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+    expect(p.prDetail.value?.headSha).toBe("new");
+    expect(p.checksOtherCommit.value).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 3);
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not revalidate the detail for checks that lag behind it more than once", async () => {
+    ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(runningOn("old"));
+    await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    await flush();
+    expect(ghPrDetail).toHaveBeenCalledTimes(2); // once, to settle which side lags
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 4);
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+  });
+});

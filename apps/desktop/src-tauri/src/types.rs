@@ -693,6 +693,10 @@ pub struct CICheck {
     pub state: String,
     pub conclusion: String,
     pub details_url: String,
+    /// The commit this check ran on, or "" when the forge does not say. After
+    /// a push, the frontend compares it to the PR's head to tell the previous
+    /// commit's checks from the new one's.
+    pub commit_sha: String,
 }
 
 // ─── CI Annotation (v2.18) ─────────────────────────────────────────

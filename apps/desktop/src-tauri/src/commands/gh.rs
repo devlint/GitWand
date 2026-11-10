@@ -1599,6 +1599,7 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
                 },
                 conclusion,
                 details_url: js("html_url"),
+                commit_sha: sha.clone(),
             }
         })
         .collect();

@@ -1026,6 +1026,7 @@ const es: Locale = {
       noChecks: "No se encontraron checks de CI.",
       checksLoadFailed: "No se pudieron cargar los checks de CI. Vuelve a abrir esta pestaña para reintentarlo.",
       checksStale: "Actualización en directo detenida: no se pudo acceder a los checks de CI. Vuelve a abrir esta pestaña para reintentarlo.",
+      checksOtherCommit: "Estos checks se ejecutaron en el commit {0}, no en la cabeza de la PR ({1}). Se sigue la CI hasta que aparezcan los de la cabeza.",
     },
     annotations: {
       badge: "{0} anotación(es)",

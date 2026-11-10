@@ -7,6 +7,8 @@ import {
   PullRequest,
   PullRequestDetail,
   CICheck,
+  type CICheckRaw,
+  mapCICheck,
   CIAnnotation,
   CIAnnotationRaw,
   mapAnnotation,
@@ -165,7 +167,8 @@ export async function bbPrFiles(cwd: string, prId: number): Promise<string[]> {
 /** Get CI status checks for a PR via Bitbucket Pipelines commit statuses. */
 export async function bbPrCiChecks(cwd: string, prId: number): Promise<CICheck[]> {
   if (!isTauri()) return [];
-  return tauriInvoke<CICheck[]>("bb_pr_ci_checks", { cwd, prId });
+  const raw = await tauriInvoke<CICheckRaw[]>("bb_pr_ci_checks", { cwd, prId });
+  return raw.map(mapCICheck);
 }
 
 /** Get report annotations for a PR via the Bitbucket Reports API (v2.18). */

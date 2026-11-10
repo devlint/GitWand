@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isCheckRunning, isCheckPending, isCheckFailing, isCheckBlocking, checkIcon, checksIcon,
-  rollupFromDetailStatus,
+  rollupFromDetailStatus, checksCommitMismatch,
 } from "../ciChecks";
 
 const chk = (state: string, conclusion: string) => ({ name: "c", state, conclusion, detailsUrl: "" });
@@ -133,5 +133,28 @@ describe("WAITING (an approval) is pending but not polled", () => {
   it("blocks without polling", () => {
     expect(isCheckRunning(chk("WAITING", ""))).toBe(false);
     expect(isCheckPending(chk("waiting", ""))).toBe(true);
+  });
+});
+
+describe("checksCommitMismatch", () => {
+  const on = (sha: string) => ({ name: "c", state: "COMPLETED", conclusion: "SUCCESS", detailsUrl: "", commitSha: sha });
+
+  it("names the commit when every check that says ran on another one", () => {
+    expect(checksCommitMismatch([on("old"), on("old")], "new")).toBe("old");
+  });
+
+  it("is null when the checks ran on the head", () => {
+    expect(checksCommitMismatch([on("new")], "new")).toBeNull();
+  });
+
+  it("is null when one check already ran on the head (a forge mixing commits)", () => {
+    expect(checksCommitMismatch([on("old"), on("new")], "new")).toBeNull();
+  });
+
+  it("is null when nothing says: no check names its commit, no checks, no head", () => {
+    expect(checksCommitMismatch([on(""), chk("COMPLETED", "SUCCESS")], "new")).toBeNull();
+    expect(checksCommitMismatch([], "new")).toBeNull();
+    expect(checksCommitMismatch([on("old")], "")).toBeNull();
+    expect(checksCommitMismatch([on("old")], undefined)).toBeNull();
   });
 });

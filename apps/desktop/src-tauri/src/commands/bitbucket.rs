@@ -1251,6 +1251,7 @@ pub(crate) async fn bb_pr_ci_checks(cwd: String, pr_id: i64) -> Result<Vec<CIChe
                         u
                     }
                 },
+                commit_sha: head_sha.clone(),
             }
         })
         .collect();

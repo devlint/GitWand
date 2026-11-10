@@ -42,7 +42,7 @@ import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
 import { formatRelativeAge } from "../utils/relativeTime";
 import {
-  isCheckRunning, isCheckBlocking, checkIcon, checksIcon, rollupFromDetailStatus,
+  isCheckRunning, isCheckBlocking, checkIcon, checksIcon, rollupFromDetailStatus, checksCommitMismatch,
 } from "../utils/ciChecks";
 import { t } from "./useI18n";
 import { useReviewIntelligence } from "./useReviewIntelligence";
@@ -405,6 +405,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   const commentCount = computed(() => prComments.value.length);
 
+  /** The commit the CI tab's checks ran on when it is not the PR's head (see
+   *  `checksCommitMismatch`): they say nothing about the head yet. */
+  const checksOtherCommit = computed(() => checksCommitMismatch(prChecks.value, prDetail.value?.headSha));
+
   const mergeReadiness = computed<{ ready: boolean; reason: string } | null>(() => {
     // A merge conflict blocks the PR on its own, even with no checks/reviews.
     const hasConflict = isMergeConflict(prDetail.value?.mergeable);
@@ -420,7 +424,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // Failing / pending checks + branch policies — surfaced by name so
     // forge-specific requirements (e.g. Azure "At least 1 reviewer must approve")
     // read clearly in the banner instead of a generic "checks failing".
-    const unmet = prChecks.value.filter(isBlocking);
+    // Another commit's checks say nothing about the head: neither green nor
+    // red counts. They don't block either: the head may never get a pipeline
+    // (GitLab `[skip ci]`, workflow rules), and the forge's own mergeability
+    // still gates the merge.
+    const otherCommit = !!checksOtherCommit.value;
+    const unmet = otherCommit ? [] : prChecks.value.filter(isBlocking);
     const checksOk = unmet.length === 0;
     // Only each reviewer's *latest* verdict counts — a later APPROVED supersedes
     // an earlier CHANGES_REQUESTED (and vice versa). Scanning every historical
@@ -444,7 +453,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const hasApproval = verdicts.includes("APPROVED");
     const hasChangesRequested = verdicts.includes("CHANGES_REQUESTED");
     if (checksOk && hasApproval && !hasChangesRequested && !hasConflict) {
-      return { ready: true, reason: t("pr.ready.ready") };
+      // Never "ready" on the strength of another commit's checks.
+      return otherCommit ? null : { ready: true, reason: t("pr.ready.ready") };
     }
     const reasons: string[] = [];
     // Merge conflict first — it's the hardest blocker.
@@ -1033,6 +1043,22 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       persistDetailCache();
     }
     if (wasRunning && !checksRunning.value) onChecksFinished(number, asked);
+    else onChecksOtherCommit(number, asked);
+  }
+
+  /** The checks ran on a commit that is not the head the detail shows. Either
+   *  the checks lag (GitLab, Azure: the CI tab follows them until the head's
+   *  come) or the detail does (a push it has not seen: the backends that read
+   *  the PR's head themselves are always on the latest). Revalidate the detail
+   *  once per such commit, unless a detail fetch already started around the
+   *  checks request, to settle which. */
+  let _otherCommitSeen: string | null = null;
+  function onChecksOtherCommit(number: number, asked: number) {
+    const sha = checksOtherCommit.value;
+    if (!sha || sha === _otherCommitSeen) return;
+    _otherCommitSeen = sha;
+    const d = _lastDetailFetch;
+    if (d.number !== number || d.at < asked - DETAIL_FRESH_MS) void revalidateOpenDetail();
   }
 
   /** Re-fetch the open PR's checks in the background, keeping the current list
@@ -1107,8 +1133,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     return detailTab.value === "checks" && checksLoaded.value && (checksLiveWanted() || checksError.value);
   }
 
-  /** Whether the CI tab should follow the checks right now. */
-  const checksLiveWanted = () => checksRunning.value;
+  /** Whether the CI tab should follow the checks right now: a check runs, or
+   *  the list is another commit's and the head's has yet to come. */
+  const checksLiveWanted = () => checksRunning.value || !!checksOtherCommit.value;
 
   function stopChecksLive() {
     if (_checksLiveTimer) {
@@ -1142,9 +1169,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   });
 
   watch(
-    [detailTab, () => selectedPr.value?.number, checksRunning],
+    [detailTab, () => selectedPr.value?.number, checksRunning, checksOtherCommit],
     ([, number], [, prevNumber]) => {
       if (number !== prevNumber) {
+        _otherCommitSeen = null;
         _checksFailures = 0;
         _lastChecksFetch = 0;
         _checksLiveSince = 0;
@@ -1157,9 +1185,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   // A push moves the PR's head: the checks shown belong to the old commit, and
   // the merge banner reads them. Fetch them again once, on any tab; the CI tab
-  // then follows them as usual. (Telling the old commit's list from the new
-  // one's for sure needs the backends to say which commit their checks are
-  // for: a follow-up, not guessed here.)
+  // then follows them as usual, and keeps following a list that is still the
+  // old commit's (checksOtherCommit) until the new one's comes.
   watch(
     [() => prDetail.value?.number, () => prDetail.value?.headSha],
     ([number, sha], [prevNumber, prevSha]) => {
@@ -1947,7 +1974,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     showCreateForm, newPrTitle, newPrBody, newPrBase, newPrDraft, newPrReviewers, isCreating,
     forkInfo, newPrBaseRepo,
     mergingPr, mergeMethod,
-    selectedPr, prDetail, prChecks, checksWithConflict, checksError, setDetailVisible, prDiffFiles, prComments, prIssueComments, prReviews,
+    selectedPr, prDetail, prChecks, checksWithConflict, checksError, checksOtherCommit, setDetailVisible, prDiffFiles, prComments, prIssueComments, prReviews,
     detailLoading, detailRefreshing, detailError, detailTab, selectedDiffFile, diffMode,
     // Viewed-file state (B2)
     viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,

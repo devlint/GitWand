@@ -1027,6 +1027,7 @@ const ptBR: Locale = {
       noChecks: "Nenhum check de CI encontrado.",
       checksLoadFailed: "Não foi possível carregar os checks de CI. Reabra esta aba para tentar de novo.",
       checksStale: "Atualização ao vivo interrompida: não foi possível acessar os checks de CI. Reabra esta aba para tentar de novo.",
+      checksOtherCommit: "Estes checks rodaram no commit {0}, não na cabeça da PR ({1}). Acompanhando a CI até aparecerem os da cabeça.",
     },
     annotations: {
       badge: "{0} anotação(ões)",

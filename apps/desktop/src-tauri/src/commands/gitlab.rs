@@ -763,6 +763,9 @@ fn gl_pipeline_checks(arr: &[serde_json::Value]) -> Vec<CICheck> {
                 state: status.clone(),
                 conclusion,
                 details_url: js(p, "web_url"),
+                // The pipeline's commit: until the new head's pipeline is
+                // created, the newest one is still the previous commit's.
+                commit_sha: js(p, "sha"),
             }
         })
         .collect()
@@ -2806,7 +2809,7 @@ mod gl_pipeline_checks_tests {
         // GitLab lists an MR's pipelines newest first; an old failed one must
         // not show as a check (nor keep a "created" one polled for ever).
         let arr = json!([
-            {"id": 30, "status": "success", "web_url": "u30"},
+            {"id": 30, "status": "success", "web_url": "u30", "sha": "c30"},
             {"id": 20, "status": "failed", "web_url": "u20"},
             {"id": 10, "status": "created", "web_url": "u10"}
         ]);
@@ -2815,6 +2818,8 @@ mod gl_pipeline_checks_tests {
         assert_eq!(checks[0].name, "Pipeline #30");
         assert_eq!(checks[0].conclusion, "SUCCESS");
         assert_eq!(checks[0].details_url, "u30");
+        // The pipeline's commit, which after a push may not be the MR's head yet.
+        assert_eq!(checks[0].commit_sha, "c30");
     }
 
     #[test]

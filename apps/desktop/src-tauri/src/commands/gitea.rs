@@ -407,6 +407,8 @@ fn gitea_auto_merge_support() -> AutoMergeSupport {
 }
 
 fn map_status(v: &serde_json::Value) -> Vec<CICheck> {
+    // The combined status is the commit's: its `sha` is every status's.
+    let sha = jstr(v, "sha");
     v.get("statuses")
         .and_then(|a| a.as_array())
         .map(|arr| {
@@ -416,6 +418,7 @@ fn map_status(v: &serde_json::Value) -> Vec<CICheck> {
                     state: jstr(s, "status"),
                     conclusion: jstr(s, "status"),
                     details_url: jstr(s, "target_url"),
+                    commit_sha: sha.clone(),
                 })
                 .collect()
         })
@@ -1286,7 +1289,7 @@ mod gitea_mapping_tests {
     #[test]
     fn maps_the_combined_status_into_checks() {
         let v: serde_json::Value = serde_json::from_str(
-            r#"{"state": "success", "statuses": [
+            r#"{"state": "success", "sha": "abc123", "statuses": [
                  {"context": "build", "status": "success", "target_url": "https://ci/1"},
                  {"context": "lint", "status": "pending", "target_url": ""}
                ]}"#,
@@ -1298,6 +1301,10 @@ mod gitea_mapping_tests {
         assert_eq!(checks[0].conclusion, "success");
         assert_eq!(checks[0].details_url, "https://ci/1");
         assert_eq!(checks[1].state, "pending");
+        assert_eq!(
+            checks[1].commit_sha, "abc123",
+            "each status carries the commit's sha"
+        );
     }
 
     #[test]

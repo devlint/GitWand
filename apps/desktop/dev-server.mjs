@@ -1902,6 +1902,7 @@ function giteaMapStatus(v) {
     state: s.status ?? "",
     conclusion: s.status ?? "",
     details_url: s.target_url ?? "",
+    commit_sha: v?.sha ?? "",
   }));
 }
 
@@ -5471,6 +5472,7 @@ async function handleRequest(req, res) {
           state: c.status === "completed" ? c.conclusion : c.status,
           conclusion: c.conclusion ?? "",
           details_url: c.html_url ?? "",
+          commit_sha: sha,
         })));
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
