@@ -855,6 +855,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (selectedPr.value?.number === pr.number) return;
     selectedPr.value = pr;
     resetDetail();
+    _detailSettled = false;
     // SWR: paint cached detail bundle instantly, revalidate in background.
     const cached = cache.getDetail(detailKey(cwd.value, pr.number));
     if (cached) {
@@ -891,6 +892,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    */
   async function fetchDetailBundle(pr: PullRequest, { silentError }: { silentError: boolean }) {
     const key = detailKey(cwd.value, pr.number);
+    _lastDetailFetch = { number: pr.number, at: Date.now() };
     detailError.value = null;
     try {
       const [detail, comments, reviews] = await Promise.all([
@@ -900,6 +902,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       ]);
       // Ignore a stale response if the user moved on to another PR meanwhile.
       if (selectedPr.value?.number !== pr.number) return;
+      // The first fetch after selecting the PR replaces the cached head with
+      // the current one: that is the cache catching up, not a push.
+      if (!_detailSettled) {
+        _detailSettled = true;
+        const shown = prDetail.value?.headSha;
+        if (shown && detail.headSha && shown !== detail.headSha) _ignoreShaChange = true;
+      }
       prDetail.value = detail;
       prComments.value = comments;
       prReviews.value = reviews;
@@ -941,16 +950,18 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     _checksGen++; // a refresh started before this load must not overwrite it
     checksLoading.value = true;
     try {
+      const asked = Date.now();
       const checks = await forge.value.getCIChecks(repo, number);
       // Stale response: the user moved to another PR — don't write PR A's
       // checks into PR B's refs (or cache key via persistDetailCache).
       if (!current()) return;
-      applyChecks(number, checks, wasRunning);
+      applyChecks(number, checks, wasRunning, asked);
     } catch {
       // Non-fatal: the tab stays empty, or keeps a cached running list, which
       // live polling then retries.
       if (current()) {
         checksLoaded.value = true;
+        checksError.value = true;
         _checksFailures++;
       }
     } finally {
@@ -994,18 +1005,40 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   let _checksAwaitUntil = 0;
   /** A push was seen while loadChecks was in flight: fetch again after it. */
   let _refetchAfterLoad = false;
+  /** Start of the last detail fetch, for which PR. */
+  let _lastDetailFetch: { number: number; at: number } = { number: -1, at: 0 };
+  /** A detail fetch started this close before the checks request (or after it)
+   *  sees the same CI state: no need for another when the checks finish. */
+  const DETAIL_FRESH_MS = 2_000;
+  /** Set by selectPr; the first detail fetch for the PR settles its head. */
+  let _detailSettled = false;
+  /** The settling fetch moved the head: the next head change is not a push. */
+  let _ignoreShaChange = false;
   let _disposed = false;
+  /** The last load of the checks failed: the tab says so, and re-opening it
+   *  retries (an empty tab would otherwise read as "no CI"). */
+  const checksError = ref(false);
+  /** Whether the PR detail view is on screen (PrDetailView mounted). The panel
+   *  is an app-wide singleton: leaving the PR view keeps a PR selected, and
+   *  the CI tab must not be polled for a view nobody sees. */
+  const detailVisible = ref(false);
+  function setDetailVisible(visible: boolean) {
+    detailVisible.value = visible;
+  }
   const checksRunning = computed(() => prChecks.value.some(isCheckRunning));
   const awaitingChecks = () => Date.now() < _checksAwaitUntil;
 
   /** Show a fetched list. When the last running check finished, revalidate. */
-  function applyChecks(number: number, checks: CICheck[], wasRunning: boolean) {
+  function applyChecks(number: number, checks: CICheck[], wasRunning: boolean, asked: number) {
     _checksFailures = 0;
     _lastChecksFetch = Date.now();
+    checksError.value = false;
     prChecks.value = checks;
     checksLoaded.value = true;
     persistDetailCache();
-    if (wasRunning && !checksRunning.value) onChecksFinished(number);
+    // After a push, an empty list means "not registered yet", not "finished".
+    const notYet = checks.length === 0 && awaitingChecks();
+    if (wasRunning && !checksRunning.value && !notYet) onChecksFinished(number, asked);
   }
 
   /** Re-fetch the open PR's checks in the background, keeping the current list
@@ -1022,8 +1055,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       selectedPr.value?.number === number && gen === _checksGen && cwd.value === repo;
     _checksRefreshing = key;
     try {
+      const asked = Date.now();
       const checks = await forge.value.getCIChecks(repo, number);
-      if (current()) applyChecks(number, checks, wasRunning);
+      if (current()) applyChecks(number, checks, wasRunning, asked);
     } catch {
       // Keep the list on screen; the next tick retries, up to the limit.
       if (current()) _checksFailures++;
@@ -1035,13 +1069,20 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   /** The last running check finished: revalidate the detail once, so
    *  mergeability and the Merge button follow, and set the PR's row in the
    *  list (its CI dot) from the finished checks rather than wait for a reload. */
-  function onChecksFinished(number: number) {
-    void revalidateOpenDetail();
+  function onChecksFinished(number: number, asked: number) {
+    const d = _lastDetailFetch;
+    if (d.number !== number || d.at < asked - DETAIL_FRESH_MS) void revalidateOpenDetail();
     const rollup = checksRollup(prChecks.value);
     if (rollup === null) return;
     if (prs.value.some((pr) => pr.number === number && pr.checksRollup !== rollup)) {
       prs.value = prs.value.map((pr) => (pr.number === number ? { ...pr, checksRollup: rollup } : pr));
     }
+    // And in the caches the list is repainted from, or the old dot comes back.
+    const memo = PR_LIST_CACHE.get(cwd.value);
+    if (memo) {
+      memo.prs = memo.prs.map((pr) => (pr.number === number ? { ...pr, checksRollup: rollup } : pr));
+    }
+    cache.patchListRow(cwd.value, number, { checksRollup: rollup });
   }
 
   /** A fresh attempt (tab or window re-opened, a push) after giving up. */
@@ -1072,7 +1113,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     stopChecksLive();
     if (_disposed || _checksFailures >= CHECKS_LIVE_MAX_FAILURES) return;
     const hidden = typeof document !== "undefined" && document.hidden;
-    if (detailTab.value !== "checks" || !selectedPr.value || !checksLiveWanted() || hidden) {
+    const shown = detailVisible.value && detailTab.value === "checks" && !hidden;
+    if (!shown || !selectedPr.value || !checksLiveWanted()) {
       _checksLiveSince = 0;
       return;
     }
@@ -1085,6 +1127,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }, slow ? CHECKS_LIVE_SLOW_INTERVAL_MS : CHECKS_LIVE_INTERVAL_MS);
   }
 
+  // The detail view coming back on screen: catch up like a tab switch.
+  watch(detailVisible, (visible) => {
+    if (!visible) stopChecksLive();
+    else if (detailTab.value === "checks" && checksLoaded.value && (checksLiveWanted() || checksError.value)) {
+      resumeChecksLive();
+    }
+  });
+
   watch(
     [detailTab, () => selectedPr.value?.number, checksRunning],
     ([, number], [, prevNumber]) => {
@@ -1094,6 +1144,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         _checksLiveSince = 0;
         _checksAwaitUntil = 0;
         _refetchAfterLoad = false;
+        checksError.value = false;
       }
       scheduleChecksLive();
     },
@@ -1107,6 +1158,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     [() => prDetail.value?.number, () => prDetail.value?.headSha],
     ([number, sha], [prevNumber, prevSha]) => {
       if (!sha || !prevSha || number !== prevNumber || sha === prevSha) return;
+      if (_ignoreShaChange) {
+        _ignoreShaChange = false;
+        return;
+      }
       _checksGen++;
       _checksAwaitUntil = Date.now() + CHECKS_AWAIT_AFTER_PUSH_MS;
       _checksLiveSince = 0;
@@ -1269,7 +1324,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // Already loaded: re-fetch only if a check was still running (a finished
       // list doesn't change, A3); not loaded yet: the lazy first load.
       if (checksLoaded.value) {
-        if (checksLiveWanted()) resumeChecksLive();
+        if (checksLiveWanted() || checksError.value) resumeChecksLive();
       } else {
         loadChecks();
       }
@@ -1776,7 +1831,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       startPoll();
       // Live CI: catch up on return if the last fetch is a full interval old,
       // then resume the 15 s cadence. A brief alt-tab costs no extra call.
-      if (detailTab.value === "checks" && checksLiveWanted()) {
+      if (detailVisible.value && detailTab.value === "checks" && (checksLiveWanted() || checksError.value)) {
         resumeChecksLive();
       }
       // Catch up immediately if a full interval elapsed while hidden, but don't
@@ -1899,7 +1954,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     showCreateForm, newPrTitle, newPrBody, newPrBase, newPrDraft, newPrReviewers, isCreating,
     forkInfo, newPrBaseRepo,
     mergingPr, mergeMethod,
-    selectedPr, prDetail, prChecks, checksWithConflict, prDiffFiles, prComments, prIssueComments, prReviews,
+    selectedPr, prDetail, prChecks, checksWithConflict, checksError, setDetailVisible, prDiffFiles, prComments, prIssueComments, prReviews,
     detailLoading, detailRefreshing, detailError, detailTab, selectedDiffFile, diffMode,
     // Viewed-file state (B2)
     viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,

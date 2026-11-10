@@ -26,8 +26,9 @@ const FAILING = new Set([
  */
 const WAITING_ON_SOMEONE = new Set(["EXPECTED", "MANUAL", "SCHEDULED"]);
 
-/** Final results that count as passing in every backend's rollup. */
-const PASSING = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
+/** Final results that count as passing in every backend's rollup. Gitea's
+ *  `warning` is a finished, non-failing commit status. */
+const PASSING = new Set(["SUCCESS", "NEUTRAL", "SKIPPED", "WARNING"]);
 
 function status(check: CICheck): string {
   return (check.conclusion || check.state || "").toUpperCase();
@@ -61,7 +62,7 @@ export function checkIcon(check: CICheck): string {
   const s = status(check);
   if (s === "SUCCESS") return "✅";
   if (isCheckFailing(check)) return "❌";
-  if (s === "EXPIRED") return "⚠️";
+  if (s === "EXPIRED" || s === "WARNING") return "⚠️";
   if (isCheckPending(check)) return "⏳";
   if (s === "SKIPPED") return "⏭️";
   return "❓";
@@ -71,15 +72,18 @@ export function checkIcon(check: CICheck): string {
  * The CI rollup of a list of checks, in the PR list's vocabulary and by the
  * backends' own rule (`rollup_from_check_runs`, `rollup_from_checks`,
  * `bb_rollup_from_statuses`, `gl_status_to_rollup`): any failure is
- * `FAILURE`; every check passed (success, neutral, skipped) is `SUCCESS`;
- * anything else (running, waiting, expired, unknown) is `PENDING`; no checks
- * is `""`. A list of skipped checks only gives `null`, "don't know": GitHub
- * reads it as SUCCESS, GitLab as no CI.
+ * `FAILURE`; every check passed (success, neutral, skipped, warning) is
+ * `SUCCESS`; a check still pending or expired is `PENDING`; no checks is `""`.
+ *
+ * `null` means "don't know", and the caller leaves the row as it is: a list of
+ * skipped checks only (GitHub reads it as SUCCESS, GitLab as no CI), or a
+ * finished check whose result this table doesn't know.
  */
 export function checksRollup(checks: CICheck[]): string | null {
   if (checks.length === 0) return "";
   if (checks.some(isCheckFailing)) return "FAILURE";
-  if (!checks.every((c) => PASSING.has(status(c)))) return "PENDING";
+  if (checks.some((c) => isCheckPending(c) || status(c) === "EXPIRED")) return "PENDING";
+  if (!checks.every((c) => PASSING.has(status(c)))) return null;
   if (checks.every((c) => status(c) === "SKIPPED")) return null;
   return "SUCCESS";
 }

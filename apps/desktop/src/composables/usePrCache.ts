@@ -226,6 +226,19 @@ export function usePrCache() {
     saveToStorage(_file);
   }
 
+  /** Apply `patch` to PR `number` in every cached list of a repo, keeping
+   *  each list's age (it is a correction, not a fresh fetch). */
+  function patchListRow(cwd: string, number: number, patch: Partial<PullRequest>): void {
+    const prefix = `${cwd}::`;
+    let changed = false;
+    for (const [k, list] of Object.entries(_file.lists)) {
+      if (!k.startsWith(prefix) || !list.prs.some((pr) => pr.number === number)) continue;
+      list.prs = list.prs.map((pr) => (pr.number === number ? { ...pr, ...patch } : pr));
+      changed = true;
+    }
+    if (changed) saveToStorage(_file);
+  }
+
   /** Drop every cached list for a repo — used after create / merge mutate it. */
   function invalidateLists(cwd: string): void {
     const prefix = `${cwd}::`;
@@ -343,7 +356,7 @@ export function usePrCache() {
   }
 
   return {
-    getList, setList, invalidateLists,
+    getList, setList, invalidateLists, patchListRow,
     getDetail, setDetail, invalidateDetail,
     getRemote, setRemote,
     getDismissed, addDismissed,

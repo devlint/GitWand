@@ -109,10 +109,18 @@ describe("checksRollup follows the backends' rule", () => {
   it("all passed → SUCCESS", () => {
     expect(checksRollup([chk("COMPLETED", "SUCCESS"), chk("COMPLETED", "SKIPPED"), chk("COMPLETED", "NEUTRAL")])).toBe("SUCCESS");
   });
-  it("anything else → PENDING (manual, expired, unknown)", () => {
+  it("pending or expired → PENDING", () => {
     expect(checksRollup([chk("manual", "")])).toBe("PENDING");
     expect(checksRollup([chk("COMPLETED", "SUCCESS"), chk("COMPLETED", "EXPIRED")])).toBe("PENDING");
-    expect(checksRollup([chk("COMPLETED", "WEIRD")])).toBe("PENDING");
+  });
+  it("Gitea's warning is a finished, passing result", () => {
+    expect(checksRollup([chk("warning", "warning")])).toBe("SUCCESS");
+    expect(isCheckBlocking(chk("warning", "warning"))).toBe(false);
+    expect(checkIcon(chk("warning", "warning"))).toBe("⚠️");
+  });
+  it("a finished list it cannot read → null, the row is left alone", () => {
+    expect(checksRollup([chk("completed", "")])).toBeNull();
+    expect(checksRollup([chk("COMPLETED", "WEIRD")])).toBeNull();
   });
   it("only skipped → null (forges disagree)", () => {
     expect(checksRollup([chk("COMPLETED", "SKIPPED")])).toBeNull();

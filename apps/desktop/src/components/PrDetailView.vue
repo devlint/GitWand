@@ -427,11 +427,14 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
+  // Live CI polls only while this view is on screen (usePrPanel).
+  p.setDetailVisible(true);
   window.addEventListener("keydown", handleKeydown);
   window.addEventListener("mousemove", trackMouse);
 });
 
 onUnmounted(() => {
+  p.setDetailVisible(false);
   window.removeEventListener("keydown", handleKeydown);
   window.removeEventListener("mousemove", trackMouse);
   document.body.style.cursor = "";
@@ -1577,7 +1580,9 @@ function submitRequestReviewers() {
 
         <!-- CI tab -->
         <div v-else-if="p.detailTab.value === 'checks'" class="pdv-body pdv-checks-body">
-          <div v-if="p.checksWithConflict.value.length === 0" class="pdv-loading">{{ t('pr.detail.noChecks') }}</div>
+          <div v-if="p.checksWithConflict.value.length === 0" class="pdv-loading">
+            {{ p.checksError.value ? t('pr.detail.checksLoadFailed') : t('pr.detail.noChecks') }}
+          </div>
           <div v-else class="pdv-checks">
             <div v-for="c in p.checksWithConflict.value" :key="c.name" class="pdv-check">
               <span class="pdv-check-icon">{{ p.checkIcon(c) }}</span>

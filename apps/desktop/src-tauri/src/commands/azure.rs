@@ -1484,9 +1484,14 @@ fn rollup_from_checks(checks: &[CICheck]) -> String {
     }
 }
 
-/// True for the error `finalize_json` builds from a 4xx answer.
-fn az_is_client_error(err: &str) -> bool {
-    err.starts_with("Azure DevOps API error (4")
+/// True when the policy-evaluations API is simply not available for this repo
+/// or user: 400 (preview API refused), 403 (no permission on policies) or 404
+/// (none configured). Other errors (429 rate limiting, 5xx, network) are a
+/// failed fetch. Matches the error `finalize_json` builds.
+fn az_policies_unavailable(err: &str) -> bool {
+    ["400", "403", "404"]
+        .iter()
+        .any(|code| err.starts_with(&format!("Azure DevOps API error ({})", code)))
 }
 
 fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
@@ -1510,12 +1515,12 @@ fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
         urlenc(project_id),
         urlenc(&artifact),
     );
-    // Policies may be disabled on the repo: a 4xx answer means "no checks".
-    // Anything else (network, 5xx) is a failed fetch and stays an error, so
-    // the CI tab can keep a running list on screen instead of emptying it.
+    // Policies unavailable (see az_policies_unavailable): no evaluations, and
+    // the reviewer fallback below still applies. Anything else is a failed
+    // fetch and stays an error, so the CI tab keeps a running list on screen.
     let v = match az_json("GET", &url, None) {
         Ok(v) => v,
-        Err(e) if az_is_client_error(&e) => return Ok(Vec::new()),
+        Err(e) if az_policies_unavailable(&e) => serde_json::Value::Null,
         Err(e) => return Err(e),
     };
     let evals = v
@@ -2495,18 +2500,22 @@ mod az_auto_complete_body_tests {
 
 #[cfg(test)]
 mod az_client_error_tests {
-    use super::{az_is_client_error, finalize_json};
+    use super::{az_policies_unavailable, finalize_json};
 
     #[test]
-    fn a_4xx_answer_is_a_client_error() {
-        let e = finalize_json(404, r#"{"message":"not found"}"#).unwrap_err();
-        assert!(az_is_client_error(&e));
+    fn policies_unavailable_on_400_403_404() {
+        for code in [400, 403, 404] {
+            let e = finalize_json(code, r#"{"message":"nope"}"#).unwrap_err();
+            assert!(az_policies_unavailable(&e), "{}", code);
+        }
     }
 
     #[test]
-    fn a_5xx_answer_or_a_network_error_is_not() {
-        let e = finalize_json(503, "").unwrap_err();
-        assert!(!az_is_client_error(&e));
-        assert!(!az_is_client_error("curl: (6) Could not resolve host"));
+    fn rate_limiting_server_errors_and_network_failures_are_failed_fetches() {
+        for code in [429, 401, 500, 503] {
+            let e = finalize_json(code, "").unwrap_err();
+            assert!(!az_policies_unavailable(&e), "{}", code);
+        }
+        assert!(!az_policies_unavailable("curl: (6) Could not resolve host"));
     }
 }

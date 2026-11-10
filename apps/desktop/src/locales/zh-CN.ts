@@ -1031,6 +1031,7 @@ const zhCN: Locale = {
       filesCount: "{0} 个文件",
       noDiff: "无可用 diff。",
       noChecks: "未找到 CI 检查。",
+      checksLoadFailed: "无法加载 CI 检查。重新打开此标签页以重试。",
     },
     annotations: {
       badge: "{0} 条注释",
