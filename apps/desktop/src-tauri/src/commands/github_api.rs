@@ -96,6 +96,133 @@ pub(crate) fn settings_github_token() -> Option<String> {
     }
 }
 
+// ─── Organizations that restrict OAuth apps ────────────────────────────────
+//
+// An organization can enable "OAuth App access restrictions": every OAuth app
+// it has not approved gets a 403 on its data, even with a valid token. The
+// GitWand sign-in is such an app, while the `gh` CLI (its own OAuth app) is
+// often approved. So when the GitWand token is refused that way for a
+// repository and `gh` is signed in, that repository uses the `gh` path for the
+// rest of the session; other repositories keep the GitWand token.
+
+/// Repositories (by working directory) whose organization refused the
+/// GitWand token. Process-lifetime: a restart tries the GitWand token again.
+static OAUTH_RESTRICTED_REPOS: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+
+fn repo_key(cwd: &str) -> String {
+    cwd.trim_end_matches(['/', '\\']).to_string()
+}
+
+fn restricted_repos() -> &'static Mutex<std::collections::HashSet<String>> {
+    OAUTH_RESTRICTED_REPOS.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+fn is_marked_restricted(cwd: &str) -> bool {
+    restricted_repos()
+        .lock()
+        .map(|set| set.contains(&repo_key(cwd)))
+        .unwrap_or(false)
+}
+
+fn mark_restricted(cwd: &str) {
+    if let Ok(mut set) = restricted_repos().lock() {
+        set.insert(repo_key(cwd));
+    }
+}
+
+/// True for GitHub's 403 "organization has enabled OAuth App access
+/// restrictions" error, as `map_api_error` formats it.
+pub(crate) fn is_oauth_restricted(err: &str) -> bool {
+    err.contains("OAuth App access restrictions")
+}
+
+/// The error to show when the GitWand token is refused by an organization and
+/// there is no `gh` CLI to fall back to: what happened and the two ways out.
+pub(crate) fn oauth_restricted_message(err: &str) -> String {
+    let org = err
+        .split_once("the `")
+        .and_then(|(_, rest)| rest.split_once("` organization"))
+        .map(|(name, _)| name.to_string());
+    let who = match &org {
+        Some(name) => format!("The {} organization", name),
+        None => "This repository's organization".to_string(),
+    };
+    format!(
+        "{} restricts access by third-party OAuth apps and has not approved GitWand, \
+         so the GitHub account signed in under Settings > Accounts cannot read it. \
+         Either sign in to the GitHub CLI (`gh auth login`), which GitWand then uses \
+         for this repository, or ask an organization owner to approve GitWand \
+         (github.com/settings/applications > GitWand > Organization access).",
+        who
+    )
+}
+
+/// The GitWand token to use for `cwd`, unless its organization refused it.
+fn token_for_repo(cwd: &str, settings_token: Option<String>) -> Option<String> {
+    if is_marked_restricted(cwd) {
+        None
+    } else {
+        settings_token
+    }
+}
+
+/// The Settings token for a command on `cwd`: `None` when there is none, or
+/// when this repository's organization refused it earlier in the session.
+pub(crate) fn rest_token_for(cwd: &str) -> Option<String> {
+    token_for_repo(cwd, settings_github_token())
+}
+
+/// Testable core of [`with_rest`]: `token` is the Settings token and
+/// `gh_signed_in` says whether the `gh` CLI can take over.
+fn rest_attempt<T>(
+    cwd: &str,
+    token: Option<String>,
+    gh_signed_in: impl FnOnce() -> bool,
+    call: impl FnOnce(&str) -> Result<T, String>,
+) -> Option<Result<T, String>> {
+    let tok = token_for_repo(cwd, token)?;
+    match call(&tok) {
+        Err(e) if is_oauth_restricted(&e) => {
+            if gh_signed_in() {
+                mark_restricted(cwd);
+                None
+            } else {
+                Some(Err(oauth_restricted_message(&e)))
+            }
+        }
+        other => Some(other),
+    }
+}
+
+/// Run `call` with the Settings token when there is one for `cwd`.
+///
+/// `None` tells the caller to take its `gh` path: there is no Settings token,
+/// or the organization refused it (OAuth App access restrictions) and `gh` is
+/// signed in, in which case the repository is remembered so later commands go
+/// straight to `gh`. Without `gh`, the refusal comes back as an error that
+/// explains it.
+pub(crate) fn with_rest<T>(
+    cwd: &str,
+    call: impl FnOnce(&str) -> Result<T, String>,
+) -> Option<Result<T, String>> {
+    with_rest_using(cwd, settings_github_token().as_deref(), call)
+}
+
+/// [`with_rest`] with a Settings token read once by the caller, for commands
+/// that loop over many repositories.
+pub(crate) fn with_rest_using<T>(
+    cwd: &str,
+    token: Option<&str>,
+    call: impl FnOnce(&str) -> Result<T, String>,
+) -> Option<Result<T, String>> {
+    rest_attempt(
+        cwd,
+        token.map(String::from),
+        || super::gh::gh_auth_token().is_some(),
+        call,
+    )
+}
+
 // ─── Owner/repo resolution ──────────────────────────────────────────────────
 
 /// Parse `(owner, repo)` from `git remote get-url origin` in `cwd`.
@@ -762,7 +889,11 @@ fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_jso
             }
         }
     }
-    Err(format!("GitHub API error ({}) fetching PR #{}", st, number))
+    Err(format!(
+        "{} (fetching PR #{})",
+        map_api_error(st, &body),
+        number
+    ))
 }
 
 pub(crate) fn rest_pr_count(cwd: &str, state: &str, token: &str) -> Result<i64, String> {
@@ -2209,6 +2340,89 @@ pub(crate) async fn github_token_present() -> Result<bool, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ─── OAuth App access restrictions (org-level 403) ───────────────────────
+
+    const RESTRICTED: &str = "GitHub API error (403): Although you appear to have the correct authorization credentials, the `Dendreo` organization has enabled OAuth App access restrictions, meaning that data access to third-parties is limited. For more information on these restrictions, including how to enable this app, visit https://docs.github.com/articles/restricting-access-to-your-organization-s-data/";
+
+    #[test]
+    fn recognises_the_oauth_restriction_error() {
+        assert!(is_oauth_restricted(RESTRICTED));
+        assert!(!is_oauth_restricted(
+            "GitHub API error (403): API rate limit exceeded"
+        ));
+        assert!(!is_oauth_restricted("GitHub API error (404): Not Found"));
+    }
+
+    #[test]
+    fn restriction_message_names_the_org_and_both_ways_out() {
+        let msg = oauth_restricted_message(RESTRICTED);
+        assert!(msg.contains("Dendreo"), "{msg}");
+        assert!(msg.contains("gh auth login"), "{msg}");
+        assert!(msg.contains("github.com/settings/applications"), "{msg}");
+        // No org name in the text: still a usable message.
+        let generic = oauth_restricted_message("OAuth App access restrictions");
+        assert!(generic.contains("gh auth login"), "{generic}");
+    }
+
+    #[test]
+    fn a_restricted_call_falls_back_to_gh_and_marks_the_repo() {
+        let cwd = "/tmp/gitwand-test-restricted-a";
+        let out: Option<Result<(), String>> = rest_attempt(
+            cwd,
+            Some("tok".into()),
+            || true,
+            |_| Err(RESTRICTED.to_string()),
+        );
+        assert!(out.is_none(), "caller must fall through to the gh path");
+        assert!(is_marked_restricted(cwd));
+        assert_eq!(token_for_repo(cwd, Some("tok".into())), None);
+        // Another repository keeps the GitWand token.
+        assert_eq!(
+            token_for_repo("/tmp/gitwand-test-other", Some("tok".into())),
+            Some("tok".to_string())
+        );
+    }
+
+    #[test]
+    fn without_gh_a_restricted_call_explains_instead_of_falling_back() {
+        let cwd = "/tmp/gitwand-test-restricted-b";
+        let out: Option<Result<(), String>> = rest_attempt(
+            cwd,
+            Some("tok".into()),
+            || false,
+            |_| Err(RESTRICTED.to_string()),
+        );
+        let err = out.expect("no gh: the REST result is final").unwrap_err();
+        assert!(
+            err.contains("Dendreo") && err.contains("gh auth login"),
+            "{err}"
+        );
+        // Not marked: the next call tries the GitWand token again, in case the
+        // organization approved GitWand in the meantime.
+        assert!(!is_marked_restricted(cwd));
+    }
+
+    #[test]
+    fn other_results_pass_through_untouched() {
+        let cwd = "/tmp/gitwand-test-restricted-c";
+        let ok: Option<Result<i32, String>> =
+            rest_attempt(cwd, Some("tok".into()), || true, |_| Ok(7));
+        assert_eq!(ok, Some(Ok(7)));
+        let err: Option<Result<i32, String>> = rest_attempt(
+            cwd,
+            Some("tok".into()),
+            || true,
+            |_| Err("GitHub API error (404): Not Found".to_string()),
+        );
+        assert_eq!(
+            err,
+            Some(Err("GitHub API error (404): Not Found".to_string()))
+        );
+        assert!(!is_marked_restricted(cwd));
+        let none: Option<Result<i32, String>> = rest_attempt(cwd, None, || true, |_| Ok(1));
+        assert_eq!(none, None, "no GitWand token: the gh path runs");
+    }
 
     #[test]
     fn rollup_from_check_runs_failure_wins() {
