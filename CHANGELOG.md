@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The CI tab of a pull request follows a running CI.** While the tab is shown and a check is still queued or running, GitWand re-fetches the checks every 15 seconds, and once the last one finishes it reloads the pull request once, so mergeability and the Merge button follow. It stops by itself when every check has finished, on another tab or pull request, and while the window is hidden (with an immediate refresh on return). Re-opening the tab also refreshes checks that were still running. Nothing is polled when no CI is running.
+- **The CI tab of a pull request follows a running CI.** While the tab is shown and a check is still queued or running, GitWand re-fetches the checks every 15 seconds, and once the last one finishes it reloads the pull request once, so mergeability and the Merge button follow. It stops by itself when every check has finished, on another tab or pull request, and while the window is hidden (with a refresh on return if the last one is older than 15 seconds). A failed fetch keeps the list on screen, and after three failures in a row it stops until the tab or the window is re-opened. Re-opening the tab also refreshes checks that were still running. GitLab pipelines that have not started yet (`created`, `preparing`, `waiting_for_resource`) count as running; `manual` and `scheduled` do not. Nothing is polled when no CI is running.
 
 ### Fixed
 

@@ -16,6 +16,17 @@ describe("isCheckRunning", () => {
     expect(isCheckRunning(chk("pending", "pending"))).toBe(true); // Gitea
   });
 
+  it("is true for GitLab pipelines that have not started yet", () => {
+    expect(isCheckRunning(chk("created", ""))).toBe(true);
+    expect(isCheckRunning(chk("preparing", ""))).toBe(true);
+    expect(isCheckRunning(chk("waiting_for_resource", ""))).toBe(true);
+  });
+
+  it("is false for GitLab pipelines waiting on a person or a schedule", () => {
+    expect(isCheckRunning(chk("manual", ""))).toBe(false);
+    expect(isCheckRunning(chk("scheduled", ""))).toBe(false);
+  });
+
   it("is false once the check has finished", () => {
     expect(isCheckRunning(chk("COMPLETED", "SUCCESS"))).toBe(false);
     expect(isCheckRunning(chk("COMPLETED", "FAILURE"))).toBe(false);

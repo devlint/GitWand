@@ -6,7 +6,7 @@
  * PrListSidebar (inside RepoSidebar) and PrDetailView (in <main>)
  * share the same reactive state.
  */
-import { ref, computed, watch, onUnmounted, type Ref } from "vue";
+import { ref, computed, watch, onScopeDispose, type Ref } from "vue";
 import {
   gitFileCount,
   gitRemoteInfo,
@@ -57,6 +57,8 @@ export const PR_PANEL_KEY = Symbol("prPanel");
 
 /** How often the CI tab re-fetches checks while one is still running. */
 export const CHECKS_LIVE_INTERVAL_MS = 15_000;
+/** Failed refreshes in a row after which the CI tab stops polling. */
+export const CHECKS_LIVE_MAX_FAILURES = 3;
 
 /** Human-facing forge names for "Open on …" / platform labels. */
 const FORGE_LABELS: Record<string, string> = {
@@ -929,6 +931,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (!selectedPr.value || checksLoaded.value || checksLoading.value) return;
     const number = selectedPr.value.number;
     const current = () => selectedPr.value?.number === number;
+    // A PR reopened from the cache shows the checks it had then: if they were
+    // running and have finished since, revalidate once, like refreshChecks.
+    const wasRunning = checksRunning.value;
     checksLoading.value = true;
     try {
       const checks = await forge.value.getCIChecks(cwd.value, number);
@@ -937,7 +942,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       if (!current()) return;
       prChecks.value = checks;
       checksLoaded.value = true;
+      _lastChecksFetch = Date.now();
       persistDetailCache();
+      if (wasRunning && !checksRunning.value) void revalidateOpenDetail();
     } catch {
       if (current()) checksLoaded.value = true; // non-fatal — checks tab simply stays empty
     } finally {
@@ -951,31 +958,53 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // While the Checks tab is shown, the window is visible and a check is still
   // running, re-fetch the checks every CHECKS_LIVE_INTERVAL_MS. A chained
   // timeout, not an interval: a slow forge never stacks requests. Nothing runs
-  // once every check has finished (perf rules, apps/desktop/CLAUDE.md).
+  // once every check has finished (perf rules, apps/desktop/CLAUDE.md), and
+  // nothing after CHECKS_LIVE_MAX_FAILURES failed refreshes in a row (offline,
+  // expired token): re-opening the tab or the window tries again.
   let _checksLiveTimer: ReturnType<typeof setTimeout> | null = null;
-  let _checksRefreshing = false;
+  /** PR whose refresh is in flight; per PR, so PR A's request never blocks B. */
+  let _checksRefreshingFor: number | null = null;
+  let _checksFailures = 0;
+  let _lastChecksFetch = 0;
+  let _disposed = false;
   const checksRunning = computed(() => prChecks.value.some(isCheckRunning));
 
   /** Re-fetch the open PR's checks in the background, keeping the current list
    *  on error. When the last running check finishes, revalidate the PR detail
    *  once so mergeability and the Merge button follow. */
   async function refreshChecks() {
-    if (!selectedPr.value || _checksRefreshing || checksLoading.value) return;
+    if (!selectedPr.value || checksLoading.value) return;
     const number = selectedPr.value.number;
+    if (_checksRefreshingFor === number) return;
     const wasRunning = checksRunning.value;
-    _checksRefreshing = true;
+    _checksRefreshingFor = number;
     try {
       const checks = await forge.value.getCIChecks(cwd.value, number);
       if (selectedPr.value?.number !== number) return;
+      // The backends answer a failed fetch with an empty list, not an error.
+      // Checks never all vanish while one is running: keep the list.
+      if (checks.length === 0 && prChecks.value.length > 0) {
+        _checksFailures++;
+        return;
+      }
+      _checksFailures = 0;
+      _lastChecksFetch = Date.now();
       prChecks.value = checks;
       checksLoaded.value = true;
       persistDetailCache();
       if (wasRunning && !checksRunning.value) void revalidateOpenDetail();
     } catch {
-      /* keep the list on screen; the next tick retries */
+      // Keep the list on screen; the next tick retries, up to the limit.
+      if (selectedPr.value?.number === number) _checksFailures++;
     } finally {
-      _checksRefreshing = false;
+      if (_checksRefreshingFor === number) _checksRefreshingFor = null;
     }
+  }
+
+  /** A fresh attempt (tab or window re-opened, another PR) after giving up. */
+  function retryChecksLive() {
+    _checksFailures = 0;
+    void refreshChecks().then(scheduleChecksLive);
   }
 
   function stopChecksLive() {
@@ -987,6 +1016,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   function scheduleChecksLive() {
     stopChecksLive();
+    if (_disposed || _checksFailures >= CHECKS_LIVE_MAX_FAILURES) return;
     if (detailTab.value !== "checks" || !selectedPr.value || !checksRunning.value) return;
     if (typeof document !== "undefined" && document.hidden) return;
     _checksLiveTimer = setTimeout(async () => {
@@ -996,7 +1026,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }, CHECKS_LIVE_INTERVAL_MS);
   }
 
-  watch([detailTab, () => selectedPr.value?.number, checksRunning], scheduleChecksLive);
+  watch(
+    [detailTab, () => selectedPr.value?.number, checksRunning],
+    ([, number], [, prevNumber]) => {
+      if (number !== prevNumber) _checksFailures = 0;
+      scheduleChecksLive();
+    },
+  );
 
   async function loadIssueComments() {
     if (!selectedPr.value || issueCommentsLoaded.value || issueCommentsLoading.value) return;
@@ -1151,7 +1187,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // Already loaded: re-fetch only if a check was still running (a finished
       // list doesn't change, A3); not loaded yet: the lazy first load.
       if (checksLoaded.value) {
-        if (checksRunning.value) void refreshChecks();
+        if (checksRunning.value) retryChecksLive();
       } else {
         loadChecks();
       }
@@ -1666,9 +1702,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       stopChecksLive();
     } else {
       startPoll();
-      // Live CI: catch up at once on return, then resume the 15 s cadence.
+      // Live CI: catch up on return if the last fetch is a full interval old,
+      // then resume the 15 s cadence. A brief alt-tab costs no extra call.
       if (detailTab.value === "checks" && checksRunning.value) {
-        void refreshChecks().then(scheduleChecksLive);
+        if (Date.now() - _lastChecksFetch >= CHECKS_LIVE_INTERVAL_MS) retryChecksLive();
+        else {
+          _checksFailures = 0;
+          scheduleChecksLive();
+        }
       }
       // Catch up immediately if a full interval elapsed while hidden, but don't
       // refetch on every brief alt-tab.
@@ -1692,13 +1733,16 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     document.addEventListener("visibilitychange", _visibilityHandler);
   }
 
-  onUnmounted(() => {
+  // onScopeDispose, not onUnmounted: same moment in a component, and it also
+  // runs when a test's effect scope stops.
+  onScopeDispose(() => {
+    _disposed = true;
     stopPoll();
     stopChecksLive();
     if (typeof document !== "undefined" && _visibilityHandler) {
       document.removeEventListener("visibilitychange", _visibilityHandler);
     }
-  });
+  }, true); // silent outside a scope (most tests)
 
   async function init() {
     // Flip the mounted flag — see `panelMounted` declaration for rationale.
