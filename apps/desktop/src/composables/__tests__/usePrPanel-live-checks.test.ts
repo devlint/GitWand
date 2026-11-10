@@ -269,23 +269,6 @@ describe("usePrPanel — live CI checks", () => {
     expect(p.prChecks.value).toEqual(done);
   });
 
-  it("updates the PR list entry's CI rollup when the last check finishes", async () => {
-    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValue(done);
-    const p = await openChecksTab();
-    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any, { number: 9, checksRollup: "PENDING" } as any];
-    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
-    expect(p.prs.value.find((x: any) => x.number === 1)?.checksRollup).toBe("SUCCESS");
-    expect(p.prs.value.find((x: any) => x.number === 9)?.checksRollup).toBe("PENDING");
-  });
-
-  it("sets the rollup to FAILURE when a finished check failed", async () => {
-    const failed = [{ name: "build", state: "COMPLETED", conclusion: "FAILURE", detailsUrl: "" }];
-    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValue(failed);
-    const p = await openChecksTab();
-    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any];
-    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
-    expect(p.prs.value[0].checksRollup).toBe("FAILURE");
-  });
 });
 
 describe("usePrPanel — live CI, third review", () => {
@@ -297,18 +280,6 @@ describe("usePrPanel — live CI, third review", () => {
   afterEach(() => {
     scopes.splice(0).forEach((s) => s.stop());
     vi.useRealTimers();
-  });
-
-  it("sets the list rollup to PENDING when a finished list still has an expired check", async () => {
-    const expired = [
-      { name: "build", state: "COMPLETED", conclusion: "SUCCESS", detailsUrl: "" },
-      { name: "old", state: "COMPLETED", conclusion: "EXPIRED", detailsUrl: "" },
-    ];
-    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValue(expired);
-    const p = await openChecksTab();
-    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any];
-    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
-    expect(p.prs.value[0].checksRollup).toBe("PENDING");
   });
 
   it("loadChecks keeps cached running checks when the fetch fails", async () => {
@@ -398,15 +369,6 @@ describe("usePrPanel — live CI, third review", () => {
     release(running);
     await flush();
     expect(p.prChecks.value).toEqual(done);
-  });
-
-  it("leaves the list row alone when only skipped checks remain", async () => {
-    const skipped = [{ name: "b", state: "COMPLETED", conclusion: "SKIPPED", detailsUrl: "" }];
-    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValue(skipped);
-    const p = await openChecksTab();
-    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any];
-    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
-    expect(p.prs.value[0].checksRollup).toBe("PENDING");
   });
 
   it("drops a refresh whose answer arrives after the repository changed", async () => {
@@ -517,15 +479,112 @@ describe("usePrPanel — live CI, fifth review", () => {
     expect(ghPrChecks.mock.calls.length).toBe(n + 1);
   });
 
-  it("updates the cached PR lists too when the last check finishes", async () => {
+});
+
+describe("usePrPanel — live CI, sixth review", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ghPrDetail.mockReset().mockResolvedValue(fakeDetail());
+    ghPrChecks.mockReset();
+  });
+  afterEach(() => {
+    scopes.splice(0).forEach((s) => s.stop());
+    vi.useRealTimers();
+  });
+
+  it("the list dot follows the backend's own rollup once the detail is reloaded", async () => {
     _resetPrCacheForTesting();
     const cache = usePrCache();
     cache.setList(listKey("/repo", "open"), [{ number: 1, checksRollup: "PENDING" } as any], false);
     ghPrChecks.mockResolvedValueOnce(running).mockResolvedValue(done);
     const p = await openChecksTab();
-    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any];
+    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any, { number: 9, checksRollup: "PENDING" } as any];
+    // A failing legacy commit status the check-runs don't show: the backend says failure.
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), checksStatus: "failure" });
     await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
-    expect(cache.getList(listKey("/repo", "open"))?.prs[0].checksRollup).toBe("SUCCESS");
+    await flush();
+    expect(p.prs.value[0].checksRollup).toBe("FAILURE");
+    expect(p.prs.value[1].checksRollup).toBe("PENDING");
+    expect(cache.getList(listKey("/repo", "open"))?.prs[0].checksRollup).toBe("FAILURE");
+  });
+
+  it("a detail status it cannot read leaves the row alone", async () => {
+    ghPrChecks.mockResolvedValue(done);
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), checksStatus: "warning" });
+    const p = await openChecksTab();
+    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any];
+    await p.revalidateOpenDetail();
+    expect(p.prs.value[0].checksRollup).toBe("PENDING");
+  });
+
+  it("says so when live updates stop after repeated failures", async () => {
+    ghPrChecks.mockResolvedValueOnce(running).mockRejectedValue(new Error("offline"));
+    const p = await openChecksTab();
+    expect(p.checksError.value).toBe(false);
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 3);
+    expect(p.checksError.value).toBe(true);
+    expect(p.prChecks.value).toEqual(running); // still shown
+  });
+
+  it("a push is still detected when the first detail fetch failed", async () => {
+    ghPrChecks.mockResolvedValue(done);
+    const p = await openChecksTab();
+    await p.selectPr({ number: 2 } as any);
+    await flush();
+    ghPrDetail.mockRejectedValueOnce(new Error("offline"));
+    await p.selectPr({ number: 1 } as any); // cached abc, fetch fails
+    p.detailTab.value = "checks";
+    await flush();
+    const n = ghPrChecks.mock.calls.length;
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+    expect(ghPrChecks.mock.calls.length).toBe(n + 1);
+  });
+
+  it("after a push, the banner waits for CI instead of reading 'no checks' as ready", async () => {
+    ghPrChecks.mockResolvedValueOnce(done).mockResolvedValueOnce([]).mockResolvedValue(running);
+    const p = await openChecksTab();
+    p.prReviews.value = [{ state: "APPROVED", user: { login: "x" }, submitted_at: "1" } as any];
+    p.detailTab.value = "info";
+    await flush();
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+    expect(p.prChecks.value).toEqual([]);
+    p.prReviews.value = [{ state: "APPROVED", user: { login: "x" }, submitted_at: "1" } as any];
+    expect(p.mergeReadiness.value?.ready).toBe(false);
+    // It keeps looking for the new checks, even off the CI tab, for a while.
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(p.prChecks.value).toEqual(running);
+  });
+
+  it("stops waiting for a push's checks after the window, and the banner lets go", async () => {
+    ghPrChecks.mockResolvedValueOnce(done).mockResolvedValue([]);
+    const p = await openChecksTab();
+    p.prReviews.value = [{ state: "APPROVED", user: { login: "x" }, submitted_at: "1" } as any];
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+    await vi.advanceTimersByTimeAsync(CHECKS_AWAIT_AFTER_PUSH_MS + CHECKS_LIVE_INTERVAL_MS * 2);
+    // (the revalidation reloaded the reviews from the mock: approve again)
+    p.prReviews.value = [{ state: "APPROVED", user: { login: "x" }, submitted_at: "1" } as any];
+    expect(p.mergeReadiness.value?.ready).toBe(true);
+    const n = ghPrChecks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 4);
+    expect(ghPrChecks.mock.calls.length).toBe(n);
+  });
+
+  it("does not rewrite the cache when a poll brings the same checks", async () => {
+    _resetPrCacheForTesting();
+    const cache = usePrCache();
+    ghPrChecks.mockResolvedValue(running);
+    await openChecksTab();
+    const spy = vi.spyOn(window.localStorage, "setItem");
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 3);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+    void cache;
   });
 });
 

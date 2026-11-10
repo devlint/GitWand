@@ -9,7 +9,7 @@ import type { CICheck } from "./backend";
  * here: they wait on a person or a clock (see WAITING_ON_SOMEONE).
  */
 const RUNNING = new Set([
-  "QUEUED", "IN_PROGRESS", "INPROGRESS", "PENDING", "WAITING", "REQUESTED", "RUNNING",
+  "QUEUED", "IN_PROGRESS", "INPROGRESS", "PENDING", "REQUESTED", "RUNNING",
   "CREATED", "PREPARING", "WAITING_FOR_RESOURCE",
 ]);
 
@@ -20,11 +20,12 @@ const FAILING = new Set([
 
 /**
  * States with no result yet that nothing is working on: a required status
- * that has not reported (`EXPECTED`), a GitLab pipeline waiting on a manual
- * job or a schedule. They block the merge and show ⏳, like the backends'
+ * that has not reported (`EXPECTED`), an approval (GitHub's `WAITING` for an
+ * environment, Azure's reviewer policies), a GitLab pipeline waiting on a
+ * manual job or a schedule. They block the merge and show ⏳, like the backends'
  * rollups, but polling them could go on for ever.
  */
-const WAITING_ON_SOMEONE = new Set(["EXPECTED", "MANUAL", "SCHEDULED"]);
+const WAITING_ON_SOMEONE = new Set(["EXPECTED", "WAITING", "MANUAL", "SCHEDULED"]);
 
 /** Final results that count as passing in every backend's rollup. Gitea's
  *  `warning` is a finished, non-failing commit status. */
@@ -69,21 +70,27 @@ export function checkIcon(check: CICheck): string {
 }
 
 /**
- * The CI rollup of a list of checks, in the PR list's vocabulary and by the
- * backends' own rule (`rollup_from_check_runs`, `rollup_from_checks`,
- * `bb_rollup_from_statuses`, `gl_status_to_rollup`): any failure is
- * `FAILURE`; every check passed (success, neutral, skipped, warning) is
- * `SUCCESS`; a check still pending or expired is `PENDING`; no checks is `""`.
- *
- * `null` means "don't know", and the caller leaves the row as it is: a list of
- * skipped checks only (GitHub reads it as SUCCESS, GitLab as no CI), or a
- * finished check whose result this table doesn't know.
+ * A PR's overall CI status as the backend computed it for its detail
+ * (`checksStatus`), in the PR list's vocabulary (`checksRollup`): every
+ * backend builds both with the same rule (GitHub's also counts legacy commit
+ * statuses, which the CI tab's check-runs don't show), so this, not the CI
+ * tab's list, is what the list dot should follow. `null` for a value this
+ * table doesn't know: the caller leaves the dot alone.
  */
-export function checksRollup(checks: CICheck[]): string | null {
-  if (checks.length === 0) return "";
-  if (checks.some(isCheckFailing)) return "FAILURE";
-  if (checks.some((c) => isCheckPending(c) || status(c) === "EXPIRED")) return "PENDING";
-  if (!checks.every((c) => PASSING.has(status(c)))) return null;
-  if (checks.every((c) => status(c) === "SKIPPED")) return null;
-  return "SUCCESS";
+export function rollupFromDetailStatus(status: string): string | null {
+  const s = (status || "").toUpperCase();
+  if (s === "SUCCESS" || s === "PASS") return "SUCCESS";
+  if (s === "FAILURE" || s === "FAIL" || s === "ERROR") return "FAILURE";
+  if (s === "PENDING" || s === "EXPECTED") return "PENDING";
+  if (s === "" || s === "UNKNOWN") return "";
+  return null;
+}
+
+/** The icon of a PR's overall CI status (`checksStatus`). */
+export function checksIcon(status: string): string {
+  const r = rollupFromDetailStatus(status);
+  if (r === "SUCCESS") return "✅";
+  if (r === "FAILURE") return "❌";
+  if (r === "PENDING") return "⏳";
+  return "";
 }

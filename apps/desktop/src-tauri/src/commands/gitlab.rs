@@ -708,10 +708,15 @@ fn gl_mr_pipelines_inner(cwd: String, iid: i64) -> Result<Vec<CICheck>, String> 
     // An MR with no CI answers 200 with `[]`. A failure is reported as one, so
     // the CI tab can keep a running list on screen instead of emptying it.
     if !output.status.success() {
-        return Err(format!(
+        let err = format!(
             "glab api pipelines: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        );
+        // CI/CD disabled for the project, or not visible: no checks to show.
+        if gl_pipelines_unavailable(&err) {
+            return Ok(Vec::new());
+        }
+        return Err(err);
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -722,6 +727,14 @@ fn gl_mr_pipelines_inner(cwd: String, iid: i64) -> Result<Vec<CICheck>, String> 
         .ok_or_else(|| "glab api pipelines: not a list".to_string())?;
 
     Ok(gl_pipeline_checks(arr))
+}
+
+/// True when glab's error is a 403 or 404 (CI/CD disabled for the project, or
+/// pipelines not visible to this user), as opposed to a failed request.
+fn gl_pipelines_unavailable(err: &str) -> bool {
+    ["(HTTP 403)", "(HTTP 404)", "403 Forbidden", "404 Not Found"]
+        .iter()
+        .any(|m| err.contains(m))
 }
 
 /// The MR's most recent pipeline as a single check. GitLab lists an MR's
@@ -2815,6 +2828,23 @@ mod gl_pipeline_checks_tests {
         let c = &gl_pipeline_checks(created.as_array().unwrap())[0];
         assert_eq!(c.conclusion, "");
         assert_eq!(c.state, "created");
+    }
+
+    #[test]
+    fn forbidden_or_not_found_means_no_ci() {
+        use super::gl_pipelines_unavailable;
+        assert!(gl_pipelines_unavailable(
+            "glab api pipelines: glab: 403 Forbidden (HTTP 403)"
+        ));
+        assert!(gl_pipelines_unavailable(
+            "glab api pipelines: glab: 404 Not Found (HTTP 404)"
+        ));
+        assert!(!gl_pipelines_unavailable(
+            "glab api pipelines: glab: 500 Internal Server Error (HTTP 500)"
+        ));
+        assert!(!gl_pipelines_unavailable(
+            "glab api pipelines: dial tcp: i/o timeout"
+        ));
     }
 
     #[test]

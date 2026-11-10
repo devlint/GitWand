@@ -1586,6 +1586,12 @@ fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
                 None => name.clone(),
             };
             let (mut state, mut conclusion) = map_policy_status(&js(e, "status"));
+            // A reviewer policy that is not met waits on a person, not on a
+            // build: "waiting", which the CI tab shows as pending but does
+            // not poll (utils/ciChecks.ts).
+            if is_reviewer && state == "queued" {
+                state = "waiting";
+            }
             let is_expired = e
                 .get("context")
                 .and_then(|c| c.get("isExpired"))
@@ -1658,7 +1664,8 @@ fn pending_reviewer_check(pr: &serde_json::Value) -> Option<CICheck> {
         } else {
             "Waiting for reviewer approval".to_string()
         },
-        state: "queued".to_string(),
+        // Waits on a person: pending, not polled (see the policy loop).
+        state: "waiting".to_string(),
         conclusion: if any_rejected { "FAILURE" } else { "" }.to_string(),
         details_url: String::new(),
     })

@@ -1032,6 +1032,7 @@ const zhCN: Locale = {
       noDiff: "无可用 diff。",
       noChecks: "未找到 CI 检查。",
       checksLoadFailed: "无法加载 CI 检查。重新打开此标签页以重试。",
+      checksStale: "实时更新已停止：无法获取 CI 检查。重新打开此标签页以重试。",
     },
     annotations: {
       badge: "{0} 条注释",
@@ -1163,6 +1164,7 @@ const zhCN: Locale = {
       ready: "所有检查均为绿色，PR 已获批准。",
       waitingPrefix: "等待中：{0}。",
       reasonChecksFailing: "CI 检查失败",
+      reasonChecksStarting: "CI 尚未开始",
       reasonMergeConflict: "合并冲突",
       reasonNoApproval: "无批准",
       reasonChangesRequested: "请求修改",

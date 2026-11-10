@@ -42,7 +42,7 @@ import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
 import { formatRelativeAge } from "../utils/relativeTime";
 import {
-  isCheckRunning, isCheckBlocking, checkIcon, checksRollup,
+  isCheckRunning, isCheckBlocking, checkIcon, checksIcon, rollupFromDetailStatus,
 } from "../utils/ciChecks";
 import { t } from "./useI18n";
 import { useReviewIntelligence } from "./useReviewIntelligence";
@@ -410,7 +410,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const mergeReadiness = computed<{ ready: boolean; reason: string } | null>(() => {
     // A merge conflict blocks the PR on its own, even with no checks/reviews.
     const hasConflict = isMergeConflict(prDetail.value?.mergeable);
-    if (!prReviews.value.length && !prChecks.value.length && !hasConflict) return null;
+    if (!prReviews.value.length && !prChecks.value.length && !hasConflict && !checksAwaiting.value) return null;
     // A check blocks merge only when it is genuinely failing or still pending.
     // Anything else (success, skipped, neutral, or a completed check with an
     // unrecognised/empty conclusion) is treated as fine — so a passing CI run is
@@ -423,7 +423,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // forge-specific requirements (e.g. Azure "At least 1 reviewer must approve")
     // read clearly in the banner instead of a generic "checks failing".
     const unmet = prChecks.value.filter(isBlocking);
-    const checksOk = unmet.length === 0;
+    // After a push, no checks yet means "not registered yet", not "no CI".
+    const ciStarting = checksAwaiting.value && prChecks.value.length === 0;
+    const checksOk = unmet.length === 0 && !ciStarting;
     // Only each reviewer's *latest* verdict counts — a later APPROVED supersedes
     // an earlier CHANGES_REQUESTED (and vice versa). Scanning every historical
     // review would keep flagging "changes requested" after the reviewer has
@@ -451,6 +453,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const reasons: string[] = [];
     // Merge conflict first — it's the hardest blocker.
     if (hasConflict) reasons.push(t("pr.ready.reasonMergeConflict"));
+    if (ciStarting) reasons.push(t("pr.ready.reasonChecksStarting"));
     // Prefer the concrete policy/check names; fall back to the generic label.
     // De-duplicate identical names (Azure can report the same policy twice, e.g.
     // an inherited + branch-level "At least 1 reviewer must approve").
@@ -921,7 +924,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       }
 
       cache.setDetail(key, { detail, comments, reviews, checks: prChecks.value, issueComments: prIssueComments.value });
+      syncListRollup(pr.number, detail.checksStatus);
     } catch (err: any) {
+      // A failed first fetch still settles the head: a later change is a push.
+      if (selectedPr.value?.number === pr.number) _detailSettled = true;
       // Keep the cached bundle on screen if revalidation failed.
       if (!silentError) detailError.value = err.message;
     } finally {
@@ -1027,15 +1033,23 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
   const checksRunning = computed(() => prChecks.value.some(isCheckRunning));
   const awaitingChecks = () => Date.now() < _checksAwaitUntil;
+  /** A push was seen and its checks have not shown up yet: the merge banner
+   *  waits for CI rather than read an empty list as "no CI". Cleared when
+   *  checks arrive or the await window ends. */
+  const checksAwaiting = ref(false);
 
   /** Show a fetched list. When the last running check finished, revalidate. */
   function applyChecks(number: number, checks: CICheck[], wasRunning: boolean, asked: number) {
     _checksFailures = 0;
     _lastChecksFetch = Date.now();
     checksError.value = false;
-    prChecks.value = checks;
     checksLoaded.value = true;
-    persistDetailCache();
+    if (checks.length > 0) checksAwaiting.value = false;
+    // Polls mostly bring the same list: don't re-serialize the cache for it.
+    if (JSON.stringify(checks) !== JSON.stringify(prChecks.value)) {
+      prChecks.value = checks;
+      persistDetailCache();
+    }
     // After a push, an empty list means "not registered yet", not "finished".
     const notYet = checks.length === 0 && awaitingChecks();
     if (wasRunning && !checksRunning.value && !notYet) onChecksFinished(number, asked);
@@ -1059,29 +1073,35 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       const checks = await forge.value.getCIChecks(repo, number);
       if (current()) applyChecks(number, checks, wasRunning, asked);
     } catch {
-      // Keep the list on screen; the next tick retries, up to the limit.
-      if (current()) _checksFailures++;
+      // Keep the list on screen; the next tick retries, up to the limit,
+      // where the tab says it stopped updating.
+      if (current() && ++_checksFailures >= CHECKS_LIVE_MAX_FAILURES) checksError.value = true;
     } finally {
       if (_checksRefreshing === key) _checksRefreshing = null;
     }
   }
 
   /** The last running check finished: revalidate the detail once, so
-   *  mergeability and the Merge button follow, and set the PR's row in the
-   *  list (its CI dot) from the finished checks rather than wait for a reload. */
+   *  mergeability, the Merge button and the list dot (syncListRollup) follow.
+   *  Skipped when a detail fetch started around the checks request: it reads
+   *  the same CI state. */
   function onChecksFinished(number: number, asked: number) {
     const d = _lastDetailFetch;
     if (d.number !== number || d.at < asked - DETAIL_FRESH_MS) void revalidateOpenDetail();
-    const rollup = checksRollup(prChecks.value);
+  }
+
+  /** Set PR `number`'s list dot from the backend's own rollup (its detail's
+   *  `checksStatus`), in the list and in the caches it is repainted from.
+   *  Gitea's list has no dots: left alone. */
+  function syncListRollup(number: number, checksStatus: string) {
+    if (forge.value.name === "gitea") return;
+    const rollup = rollupFromDetailStatus(checksStatus);
     if (rollup === null) return;
-    if (prs.value.some((pr) => pr.number === number && pr.checksRollup !== rollup)) {
-      prs.value = prs.value.map((pr) => (pr.number === number ? { ...pr, checksRollup: rollup } : pr));
-    }
-    // And in the caches the list is repainted from, or the old dot comes back.
+    const patch = (list: PullRequest[]) =>
+      list.map((pr) => (pr.number === number && pr.checksRollup !== rollup ? { ...pr, checksRollup: rollup } : pr));
+    if (prs.value.some((pr) => pr.number === number && pr.checksRollup !== rollup)) prs.value = patch(prs.value);
     const memo = PR_LIST_CACHE.get(cwd.value);
-    if (memo) {
-      memo.prs = memo.prs.map((pr) => (pr.number === number ? { ...pr, checksRollup: rollup } : pr));
-    }
+    if (memo) memo.prs = patch(memo.prs);
     cache.patchListRow(cwd.value, number, { checksRollup: rollup });
   }
 
@@ -1113,8 +1133,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     stopChecksLive();
     if (_disposed || _checksFailures >= CHECKS_LIVE_MAX_FAILURES) return;
     const hidden = typeof document !== "undefined" && document.hidden;
-    const shown = detailVisible.value && detailTab.value === "checks" && !hidden;
-    if (!shown || !selectedPr.value || !checksLiveWanted()) {
+    if (checksAwaiting.value && !awaitingChecks()) checksAwaiting.value = false;
+    // The CI tab follows running checks; after a push, any tab of the detail
+    // looks for the new head's checks, for the banner (bounded by the window).
+    const visible = detailVisible.value && !hidden && !!selectedPr.value;
+    const onTab = detailTab.value === "checks" && checksLiveWanted();
+    const awaiting = checksAwaiting.value && awaitingChecks();
+    if (!visible || !(onTab || awaiting)) {
       _checksLiveSince = 0;
       return;
     }
@@ -1143,6 +1168,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         _lastChecksFetch = 0;
         _checksLiveSince = 0;
         _checksAwaitUntil = 0;
+        checksAwaiting.value = false;
         _refetchAfterLoad = false;
         checksError.value = false;
       }
@@ -1164,6 +1190,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       }
       _checksGen++;
       _checksAwaitUntil = Date.now() + CHECKS_AWAIT_AFTER_PUSH_MS;
+      checksAwaiting.value = true;
       _checksLiveSince = 0;
       if (checksLoading.value) _refetchAfterLoad = true;
       else if (checksLoaded.value) retryChecksLive();
@@ -1752,14 +1779,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     return formatRelativeAge(dateStr, t);
   }
 
-  function checksIcon(status: string): string {
-    const s = status.toUpperCase();
-    if (s === "SUCCESS" || s === "PASS") return "✅";
-    if (["FAILURE", "FAIL", "ERROR"].includes(s)) return "❌";
-    if (s === "PENDING") return "⏳";
-    return "";
-  }
-
   function mergeableIcon(s: string) {
     switch (s.toUpperCase()) {
       case "MERGEABLE": return "✅";
@@ -1954,7 +1973,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     showCreateForm, newPrTitle, newPrBody, newPrBase, newPrDraft, newPrReviewers, isCreating,
     forkInfo, newPrBaseRepo,
     mergingPr, mergeMethod,
-    selectedPr, prDetail, prChecks, checksWithConflict, checksError, setDetailVisible, prDiffFiles, prComments, prIssueComments, prReviews,
+    selectedPr, prDetail, prChecks, checksWithConflict, checksError, checksAwaiting, setDetailVisible, prDiffFiles, prComments, prIssueComments, prReviews,
     detailLoading, detailRefreshing, detailError, detailTab, selectedDiffFile, diffMode,
     // Viewed-file state (B2)
     viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,

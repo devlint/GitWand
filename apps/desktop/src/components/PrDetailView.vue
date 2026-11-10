@@ -1584,6 +1584,7 @@ function submitRequestReviewers() {
             {{ p.checksError.value ? t('pr.detail.checksLoadFailed') : t('pr.detail.noChecks') }}
           </div>
           <div v-else class="pdv-checks">
+            <div v-if="p.checksError.value" class="pdv-checks-stale" role="status">{{ t('pr.detail.checksStale') }}</div>
             <div v-for="c in p.checksWithConflict.value" :key="c.name" class="pdv-check">
               <span class="pdv-check-icon">{{ p.checkIcon(c) }}</span>
               <span class="pdv-check-name">{{ c.name }}</span>
@@ -3305,6 +3306,14 @@ function submitRequestReviewers() {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+.pdv-checks-stale {
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
 }
 .pdv-check {
   display: flex;

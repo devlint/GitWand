@@ -1026,6 +1026,7 @@ const ptBR: Locale = {
       noDiff: "Sem diff disponível.",
       noChecks: "Nenhum check de CI encontrado.",
       checksLoadFailed: "Não foi possível carregar os checks de CI. Reabra esta aba para tentar de novo.",
+      checksStale: "Atualização ao vivo interrompida: não foi possível acessar os checks de CI. Reabra esta aba para tentar de novo.",
     },
     annotations: {
       badge: "{0} anotação(ões)",
@@ -1157,6 +1158,7 @@ const ptBR: Locale = {
       ready: "Todos os checks estão verdes e a PR está aprovada.",
       waitingPrefix: "Aguardando: {0}.",
       reasonChecksFailing: "checks de CI falhando",
+      reasonChecksStarting: "CI ainda não iniciada",
       reasonMergeConflict: "conflito de merge",
       reasonNoApproval: "sem aprovação",
       reasonChangesRequested: "alterações solicitadas",

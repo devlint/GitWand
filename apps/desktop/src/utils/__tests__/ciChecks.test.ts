@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  isCheckRunning, isCheckPending, isCheckFailing, isCheckBlocking, checkIcon, checksRollup,
+  isCheckRunning, isCheckPending, isCheckFailing, isCheckBlocking, checkIcon, checksIcon,
+  rollupFromDetailStatus,
 } from "../ciChecks";
 
 const chk = (state: string, conclusion: string) => ({ name: "c", state, conclusion, detailsUrl: "" });
@@ -101,28 +102,34 @@ describe("isCheckBlocking", () => {
   });
 });
 
-describe("checksRollup follows the backends' rule", () => {
-  it("no checks → empty", () => expect(checksRollup([])).toBe(""));
-  it("any failure → FAILURE", () => {
-    expect(checksRollup([chk("COMPLETED", "SUCCESS"), chk("COMPLETED", "TIMED_OUT")])).toBe("FAILURE");
+describe("rollupFromDetailStatus maps the detail's checksStatus to the list's vocabulary", () => {
+  it("passes, failures, pending, none", () => {
+    expect(rollupFromDetailStatus("success")).toBe("SUCCESS");
+    expect(rollupFromDetailStatus("SUCCESS")).toBe("SUCCESS");
+    expect(rollupFromDetailStatus("failure")).toBe("FAILURE");
+    expect(rollupFromDetailStatus("error")).toBe("FAILURE");
+    expect(rollupFromDetailStatus("pending")).toBe("PENDING");
+    expect(rollupFromDetailStatus("")).toBe("");
+    expect(rollupFromDetailStatus("unknown")).toBe("");
   });
-  it("all passed → SUCCESS", () => {
-    expect(checksRollup([chk("COMPLETED", "SUCCESS"), chk("COMPLETED", "SKIPPED"), chk("COMPLETED", "NEUTRAL")])).toBe("SUCCESS");
+  it("anything else → null", () => {
+    expect(rollupFromDetailStatus("warning")).toBeNull();
   });
-  it("pending or expired → PENDING", () => {
-    expect(checksRollup([chk("manual", "")])).toBe("PENDING");
-    expect(checksRollup([chk("COMPLETED", "SUCCESS"), chk("COMPLETED", "EXPIRED")])).toBe("PENDING");
+});
+
+describe("checksIcon (a PR's overall status)", () => {
+  it("maps the overall status to an icon", () => {
+    expect(checksIcon("success")).toBe("✅");
+    expect(checksIcon("PASS")).toBe("✅");
+    expect(checksIcon("failure")).toBe("❌");
+    expect(checksIcon("pending")).toBe("⏳");
+    expect(checksIcon("weird")).toBe("");
   });
-  it("Gitea's warning is a finished, passing result", () => {
-    expect(checksRollup([chk("warning", "warning")])).toBe("SUCCESS");
-    expect(isCheckBlocking(chk("warning", "warning"))).toBe(false);
-    expect(checkIcon(chk("warning", "warning"))).toBe("⚠️");
-  });
-  it("a finished list it cannot read → null, the row is left alone", () => {
-    expect(checksRollup([chk("completed", "")])).toBeNull();
-    expect(checksRollup([chk("COMPLETED", "WEIRD")])).toBeNull();
-  });
-  it("only skipped → null (forges disagree)", () => {
-    expect(checksRollup([chk("COMPLETED", "SKIPPED")])).toBeNull();
+});
+
+describe("WAITING (an approval) is pending but not polled", () => {
+  it("blocks without polling", () => {
+    expect(isCheckRunning(chk("WAITING", ""))).toBe(false);
+    expect(isCheckPending(chk("waiting", ""))).toBe(true);
   });
 });

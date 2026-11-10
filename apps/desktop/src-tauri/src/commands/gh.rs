@@ -1562,10 +1562,15 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
         .output()
         .map_err(|e| format!("gh api check-runs: {}", e))?;
     if !runs_out.status.success() {
-        return Err(format!(
+        let err = format!(
             "gh api check-runs: {}",
             String::from_utf8_lossy(&runs_out.stderr).trim()
-        ));
+        );
+        // Refused for good (see checks_unavailable): no checks to show.
+        if github_api::checks_unavailable(&err) {
+            return Ok(Vec::new());
+        }
+        return Err(err);
     }
     let v: serde_json::Value = serde_json::from_slice(&runs_out.stdout)
         .map_err(|e| format!("gh api check-runs: {}", e))?;

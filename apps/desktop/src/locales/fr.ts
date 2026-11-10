@@ -1034,6 +1034,7 @@ const fr: Locale = {
       noDiff: "Aucun diff disponible.",
       noChecks: "Aucun check CI trouvé.",
       checksLoadFailed: "Impossible de charger les checks CI. Rouvrez cet onglet pour réessayer.",
+      checksStale: "Mise à jour en direct interrompue : impossible de joindre les checks CI. Rouvrez cet onglet pour réessayer.",
     },
     annotations: {
       badge: "{0} annotation(s)",
@@ -1165,6 +1166,7 @@ const fr: Locale = {
       ready: "Tous les checks sont au vert et la PR est approuvée.",
       waitingPrefix: "En attente : {0}.",
       reasonChecksFailing: "checks CI en échec",
+      reasonChecksStarting: "CI pas encore démarrée",
       reasonMergeConflict: "conflit détecté",
       reasonNoApproval: "aucune approbation",
       reasonChangesRequested: "modifications demandées",

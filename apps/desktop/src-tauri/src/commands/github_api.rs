@@ -132,6 +132,19 @@ fn mark_restricted(cwd: &str) {
 
 /// True for GitHub's 403 "organization has enabled OAuth App access
 /// restrictions" error, as `map_api_error` formats it.
+/// True when a checks request was refused for good rather than failed: a 403
+/// or 404 (a fine-grained token without "Checks: read", checks not visible),
+/// in the REST error format (`GitHub API error (403): …`) or gh's (`… (HTTP
+/// 403)`). Not a rate limit (GitHub answers those with 403 too) and not an
+/// organization's OAuth app restriction, which `with_rest` retries through gh.
+pub(crate) fn checks_unavailable(err: &str) -> bool {
+    let code = ["403", "404"].iter().any(|c| {
+        err.starts_with(&format!("GitHub API error ({})", c))
+            || err.contains(&format!("(HTTP {})", c))
+    });
+    code && !err.to_lowercase().contains("rate limit") && !is_oauth_restricted(err)
+}
+
 pub(crate) fn is_oauth_restricted(err: &str) -> bool {
     err.contains("OAuth App access restrictions")
 }
@@ -988,11 +1001,21 @@ pub(crate) fn rest_pr_checks(cwd: &str, number: i64, token: &str) -> Result<Vec<
     if sha.is_empty() {
         return Ok(Vec::new());
     }
-    let url = format!("{}/repos/{}/commits/{}/check-runs", API_BASE, repo, sha);
+    // per_page=100 like the gh path and the dev-server: the default 30 would
+    // let a big matrix look finished while its later runs still go.
+    let url = format!(
+        "{}/repos/{}/commits/{}/check-runs?per_page=100",
+        API_BASE, repo, sha
+    );
     // A commit with no checks answers 200 with an empty list; an error is a
     // failed fetch, and the CI tab must be able to tell the two apart (it
     // keeps a running list on screen through a failure, but not through "none").
-    let v = api_json("GET", &url, token, None)?;
+    // A token that may not read checks (403/404) just has none to show.
+    let v = match api_json("GET", &url, token, None) {
+        Ok(v) => v,
+        Err(e) if checks_unavailable(&e) => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
     let runs = v
         .get("check_runs")
         .and_then(|r| r.as_array())
@@ -2636,5 +2659,36 @@ mod tests {
             "head": { "ref": "main", "repo": null }
         });
         assert_eq!(head_branch_to_delete(&pr), None);
+    }
+}
+
+#[cfg(test)]
+mod checks_unavailable_tests {
+    use super::checks_unavailable;
+
+    #[test]
+    fn forbidden_or_not_found_means_no_checks_to_show() {
+        assert!(checks_unavailable(
+            "GitHub API error (403): Resource not accessible by personal access token"
+        ));
+        assert!(checks_unavailable("GitHub API error (404): Not Found"));
+        assert!(checks_unavailable(
+            "gh api check-runs: gh: Resource not accessible by integration (HTTP 403)"
+        ));
+    }
+
+    #[test]
+    fn rate_limits_oauth_restrictions_and_other_errors_are_failures() {
+        assert!(!checks_unavailable(
+            "GitHub API error (403): API rate limit exceeded for user"
+        ));
+        assert!(!checks_unavailable(
+            "gh: You have exceeded a secondary rate limit (HTTP 403)"
+        ));
+        assert!(!checks_unavailable(
+            "GitHub API error (403): the `X` organization has enabled OAuth App access restrictions"
+        ));
+        assert!(!checks_unavailable("GitHub API error (500): boom"));
+        assert!(!checks_unavailable("curl: (6) Could not resolve host"));
     }
 }

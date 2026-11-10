@@ -1190,8 +1190,20 @@ pub(crate) async fn bb_pr_ci_checks(cwd: String, pr_id: i64) -> Result<Vec<CIChe
         "https://api.bitbucket.org/2.0/repositories/{}/{}/commit/{}/statuses?pagelen=30",
         workspace, slug, head_sha
     );
-    // A failure is an error, not "no checks" (the CI tab tells them apart).
-    let resp = bb_curl("GET", &url, None, &auth_config)?;
+    // A failure is an error, not "no checks" (the CI tab tells them apart);
+    // 403/404 (statuses not visible to this user) just means none to show.
+    let (status, body) = bb_curl_raw("GET", &url, None, &auth_config, "application/json")?;
+    if status == 403 || status == 404 {
+        return Ok(Vec::new());
+    }
+    let resp = if status >= 400 {
+        return Err(format!("Bitbucket API error: HTTP {}", status));
+    } else if body.trim().is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(body.trim())
+            .map_err(|e| format!("Failed to parse Bitbucket response: {}", e))?
+    };
     let values = resp
         .get("values")
         .and_then(|v| v.as_array())
