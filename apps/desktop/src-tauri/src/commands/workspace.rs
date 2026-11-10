@@ -182,11 +182,14 @@ pub(crate) async fn workspace_prs_all(repos: Vec<WorkspaceRepo>) -> Vec<Workspac
         let repo_path = repo.path.clone();
         let repo_name = repo.name.clone();
 
-        if let Some(tok) = rest_token.as_deref() {
-            // `rest_list_prs` returns the same enriched `Vec<PullRequest>` the
-            // notification diff consumes (CI rollup + mergeable state). Per-repo
-            // errors (non-GitHub remote, network) are captured, not fatal.
-            return match github_api::rest_list_prs(&repo_path, "open", 10, 0, tok) {
+        // `rest_list_prs` returns the same enriched `Vec<PullRequest>` the
+        // notification diff consumes (CI rollup + mergeable state). Per-repo
+        // errors (non-GitHub remote, network) are captured, not fatal. A repo
+        // whose organization refuses the GitWand token falls through to `gh`.
+        if let Some(r) = github_api::with_rest_using(&repo_path, rest_token.as_deref(), |tok| {
+            github_api::rest_list_prs(&repo_path, "open", 10, 0, tok)
+        }) {
+            return match r {
                 Ok(prs) => WorkspaceRepoPrs { repo_path, repo_name, prs, error: None },
                 Err(e) => WorkspaceRepoPrs { repo_path, repo_name, prs: vec![], error: Some(e) },
             };
@@ -264,19 +267,25 @@ pub(crate) async fn workspace_issues_all(
     // resolve the authenticated user once (a single REST round-trip) and pass it
     // into every per-repo call rather than re-resolving N times.
     let rest_token = github_api::settings_github_token();
-    if let Some(tok) = rest_token.as_deref() {
-        let me = match filter.as_str() {
-            "assigned" | "created" | "mentioned" => {
-                github_api::rest_current_user(tok).unwrap_or_default()
-            }
-            _ => String::new(),
-        };
-        return repos
-            .into_par_iter()
-            .map(|repo| {
-                let repo_path = repo.path.clone();
-                let repo_name = repo.name.clone();
-                match github_api::rest_list_issues(&repo_path, &filter, &me, 100, tok) {
+    let me = match (rest_token.as_deref(), filter.as_str()) {
+        (Some(tok), "assigned" | "created" | "mentioned") => {
+            github_api::rest_current_user(tok).unwrap_or_default()
+        }
+        _ => String::new(),
+    };
+
+    repos
+        .into_par_iter()
+        .map(|repo| {
+            let repo_path = repo.path.clone();
+            let repo_name = repo.name.clone();
+
+            // REST when signed in under Settings; a repo whose organization
+            // refuses the GitWand token falls through to `gh`.
+            if let Some(r) = github_api::with_rest_using(&repo_path, rest_token.as_deref(), |tok| {
+                github_api::rest_list_issues(&repo_path, &filter, &me, 100, tok)
+            }) {
+                return match r {
                     Ok(issues) => WorkspaceRepoIssues {
                         repo_path,
                         repo_name,
@@ -291,16 +300,8 @@ pub(crate) async fn workspace_issues_all(
                         filter: filter.clone(),
                         error: Some(e),
                     },
-                }
-            })
-            .collect();
-    }
-
-    repos
-        .into_par_iter()
-        .map(|repo| {
-            let repo_path = repo.path.clone();
-            let repo_name = repo.name.clone();
+                };
+            }
 
             let mut args: Vec<String> = vec![
                 "issue".to_string(),

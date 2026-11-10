@@ -4865,8 +4865,10 @@ pub(crate) async fn gh_current_user() -> Result<String, String> {
 // readers don't think it's missing the prefix by accident.
 #[tauri::command]
 pub(crate) async fn pr_files(cwd: String, number: i64) -> Result<Vec<String>, String> {
-    if let Some(tok) = crate::commands::github_api::settings_github_token() {
-        return crate::commands::github_api::rest_pr_files(&cwd, number, &tok);
+    if let Some(r) = crate::commands::github_api::with_rest(&cwd, |tok| {
+        crate::commands::github_api::rest_pr_files(&cwd, number, tok)
+    }) {
+        return r;
     }
     let output = hidden_cmd("gh")
         .args([
