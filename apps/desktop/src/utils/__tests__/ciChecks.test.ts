@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isCheckRunning, isCheckPending, isCheckFailing, isCheckBlocking, checkIcon, checksIcon,
-  rollupFromDetailStatus, checksCommitMismatch,
+  rollupFromDetailStatus, checksCommitMismatch, isCheckOnOtherCommit,
 } from "../ciChecks";
 
 const chk = (state: string, conclusion: string) => ({ name: "c", state, conclusion, detailsUrl: "" });
@@ -139,7 +139,7 @@ describe("WAITING (an approval) is pending but not polled", () => {
 describe("checksCommitMismatch", () => {
   const on = (sha: string) => ({ name: "c", state: "COMPLETED", conclusion: "SUCCESS", detailsUrl: "", commitSha: sha });
 
-  it("names the commit when every check that says ran on another one", () => {
+  it("names the commit the checks ran on when it is not the head", () => {
     expect(checksCommitMismatch([on("old"), on("old")], "new")).toBe("old");
   });
 
@@ -147,8 +147,16 @@ describe("checksCommitMismatch", () => {
     expect(checksCommitMismatch([on("new")], "new")).toBeNull();
   });
 
-  it("is null when one check already ran on the head (a forge mixing commits)", () => {
-    expect(checksCommitMismatch([on("old"), on("new")], "new")).toBeNull();
+  it("names the old commit in a list mixing both (an Azure build not re-queued yet)", () => {
+    expect(checksCommitMismatch([on("new"), on("old")], "new")).toBe("old");
+  });
+
+  it("isCheckOnOtherCommit judges one check: no commit named is never another's", () => {
+    expect(isCheckOnOtherCommit(on("old"), "new")).toBe(true);
+    expect(isCheckOnOtherCommit(on("new"), "new")).toBe(false);
+    expect(isCheckOnOtherCommit(on(""), "new")).toBe(false);
+    expect(isCheckOnOtherCommit(chk("COMPLETED", "SUCCESS"), "new")).toBe(false);
+    expect(isCheckOnOtherCommit(on("old"), "")).toBe(false);
   });
 
   it("is null when nothing says: no check names its commit, no checks, no head", () => {

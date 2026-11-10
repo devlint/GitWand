@@ -43,6 +43,7 @@ import { requireOnline } from "../utils/networkGuard";
 import { formatRelativeAge } from "../utils/relativeTime";
 import {
   isCheckRunning, isCheckBlocking, checkIcon, checksIcon, rollupFromDetailStatus, checksCommitMismatch,
+  isCheckOnOtherCommit,
 } from "../utils/ciChecks";
 import { t } from "./useI18n";
 import { useReviewIntelligence } from "./useReviewIntelligence";
@@ -66,6 +67,9 @@ export const CHECKS_LIVE_MAX_FAILURES = 3;
  *  environment approvals) and would otherwise be polled every 15 s for good. */
 export const CHECKS_LIVE_SLOW_AFTER_MS = 10 * 60_000;
 export const CHECKS_LIVE_SLOW_INTERVAL_MS = 60_000;
+/** How long the CI tab follows checks of another commit than the head, which
+ *  may never get CI of its own (GitLab `[skip ci]`, a manually queued build). */
+export const OTHER_COMMIT_FOLLOW_MS = 10 * 60_000;
 
 /** Human-facing forge names for "Open on …" / platform labels. */
 const FORGE_LABELS: Record<string, string> = {
@@ -122,10 +126,18 @@ export type AutoMergeOffer =
  * Exported as a free function (same precedent as `isMergeConflict` above) so
  * it is unit-testable without instantiating the whole composable.
  */
+/** The merge banner. `blocking: false` waits without disabling Merge (the
+ *  head's CI has not reported yet, and may never: the forge decides). */
+export interface MergeReadiness {
+  ready: boolean;
+  reason: string;
+  blocking?: boolean;
+}
+
 export function computeAutoMergeOffer(
   support: AutoMergeSupport,
   state: AutoMergeState,
-  readiness: { ready: boolean; reason: string } | null,
+  readiness: MergeReadiness | null,
   canMerge?: boolean | null,
 ): AutoMergeOffer {
   if (state.armed) return { kind: "disarm" };
@@ -405,11 +417,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   const commentCount = computed(() => prComments.value.length);
 
-  /** The commit the CI tab's checks ran on when it is not the PR's head (see
-   *  `checksCommitMismatch`): they say nothing about the head yet. */
+  /** A commit other than the PR's head that some of the CI tab's checks ran
+   *  on (see `checksCommitMismatch`): those say nothing about the head. */
   const checksOtherCommit = computed(() => checksCommitMismatch(prChecks.value, prDetail.value?.headSha));
 
-  const mergeReadiness = computed<{ ready: boolean; reason: string } | null>(() => {
+  const mergeReadiness = computed<MergeReadiness | null>(() => {
     // A merge conflict blocks the PR on its own, even with no checks/reviews.
     const hasConflict = isMergeConflict(prDetail.value?.mergeable);
     if (!prReviews.value.length && !prChecks.value.length && !hasConflict) return null;
@@ -424,12 +436,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // Failing / pending checks + branch policies — surfaced by name so
     // forge-specific requirements (e.g. Azure "At least 1 reviewer must approve")
     // read clearly in the banner instead of a generic "checks failing".
-    // Another commit's checks say nothing about the head: neither green nor
-    // red counts. They don't block either: the head may never get a pipeline
-    // (GitLab `[skip ci]`, workflow rules), and the forge's own mergeability
-    // still gates the merge.
-    const otherCommit = !!checksOtherCommit.value;
-    const unmet = otherCommit ? [] : prChecks.value.filter(isBlocking);
+    // A check that ran on another commit says nothing about the head: neither
+    // its green nor its red counts, but the banner waits for the head's (a
+    // wait that never disables Merge: the head may never get a pipeline,
+    // GitLab `[skip ci]`, and the forge's own mergeability still decides).
+    // Checks that name no commit (Azure reviewer policies) still count.
+    const head = prDetail.value?.headSha;
+    const awaitingHead = prChecks.value.some((c) => isCheckOnOtherCommit(c, head));
+    const unmet = prChecks.value.filter((c) => !isCheckOnOtherCommit(c, head) && isBlocking(c));
     const checksOk = unmet.length === 0;
     // Only each reviewer's *latest* verdict counts — a later APPROVED supersedes
     // an earlier CHANGES_REQUESTED (and vice versa). Scanning every historical
@@ -452,9 +466,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const verdicts = [...latestVerdictByUser.values()];
     const hasApproval = verdicts.includes("APPROVED");
     const hasChangesRequested = verdicts.includes("CHANGES_REQUESTED");
-    if (checksOk && hasApproval && !hasChangesRequested && !hasConflict) {
-      // Never "ready" on the strength of another commit's checks.
-      return otherCommit ? null : { ready: true, reason: t("pr.ready.ready") };
+    if (checksOk && hasApproval && !hasChangesRequested && !hasConflict && !awaitingHead) {
+      return { ready: true, reason: t("pr.ready.ready") };
     }
     const reasons: string[] = [];
     // Merge conflict first — it's the hardest blocker.
@@ -466,12 +479,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (names.length) reasons.push(...names);
     else if (!checksOk) reasons.push(t("pr.ready.reasonChecksFailing"));
     if (hasChangesRequested) reasons.push(t("pr.ready.reasonChangesRequested"));
+    const blocking = reasons.length > 0;
+    if (awaitingHead) reasons.push(t("pr.ready.reasonChecksOtherCommit"));
     // A missing approval on its own isn't worth a banner — checks are green and
     // nobody requested changes, so we're just waiting for the merge. Hide it
     // rather than nag with "waiting: no approval". (Named reviewer *policies*
     // from `unmet` are still surfaced above.)
     if (reasons.length === 0) return null;
-    return { ready: false, reason: t("pr.ready.waitingPrefix", reasons.join(", ")) };
+    return { ready: false, reason: t("pr.ready.waitingPrefix", reasons.join(", ")), blocking };
   });
 
   /**
@@ -483,14 +498,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const mergeBlocked = computed<boolean>(() => {
     if (prDetail.value?.canMerge === false) return true;
     const r = mergeReadiness.value;
-    return !!r && !r.ready;
+    return !!r && !r.ready && r.blocking !== false;
   });
 
   /** Human-readable reason for a disabled merge button (tooltip). */
   const mergeBlockedReason = computed<string>(() => {
     if (prDetail.value?.canMerge === false) return t("pr.detail.mergeNoPermission");
     const r = mergeReadiness.value;
-    return r && !r.ready ? r.reason : "";
+    return r && !r.ready && r.blocking !== false ? r.reason : "";
   });
 
   /**
@@ -897,7 +912,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    * tab's lazy loader (`loadChecks`/`loadIssueComments`/`loadRepoFileCount`)
    * below, cutting the hot-path forge calls from 6 to 3.
    */
-  async function fetchDetailBundle(pr: PullRequest, { silentError }: { silentError: boolean }) {
+  async function fetchDetailBundle(pr: PullRequest, { silentError }: { silentError: boolean }): Promise<boolean> {
     const key = detailKey(cwd.value, pr.number);
     const repo = cwd.value;
     _lastDetailFetch = { number: pr.number, at: Date.now() };
@@ -910,7 +925,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       ]);
       // Ignore a stale response if the user moved on to another PR, or to
       // another repository (same PR number there), meanwhile.
-      if (selectedPr.value?.number !== pr.number || cwd.value !== repo) return;
+      if (selectedPr.value?.number !== pr.number || cwd.value !== repo) return true;
       prDetail.value = detail;
       prComments.value = comments;
       prReviews.value = reviews;
@@ -927,10 +942,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     } catch (err: any) {
       // Keep the cached bundle on screen if revalidation failed.
       if (!silentError) detailError.value = err.message;
+      return false;
     } finally {
       detailLoading.value = false;
       detailRefreshing.value = false;
     }
+    return true;
   }
 
   // ─── Lazy detail loaders (A3) — one flight per PR, fired by the tab
@@ -1046,19 +1063,31 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     else onChecksOtherCommit(number, asked);
   }
 
-  /** The checks ran on a commit that is not the head the detail shows. Either
-   *  the checks lag (GitLab, Azure: the CI tab follows them until the head's
-   *  come) or the detail does (a push it has not seen: the backends that read
-   *  the PR's head themselves are always on the latest). Revalidate the detail
-   *  once per such commit, unless a detail fetch already started around the
-   *  checks request, to settle which. */
-  let _otherCommitSeen: string | null = null;
+  /** Some checks ran on a commit that is not the head the detail shows. Either
+   *  the checks lag (GitLab, Azure: the CI tab follows them, for
+   *  OTHER_COMMIT_FOLLOW_MS at most, since the head may get no CI at all) or
+   *  the detail does (a push it has not seen: the backends that read the PR's
+   *  head themselves are always on the latest). Revalidate the detail once
+   *  per such commit, to settle which; a failed revalidation is retried at
+   *  the next fetch. */
+  let _otherCommit: { sha: string; since: number; revalidated: boolean } | null = null;
   function onChecksOtherCommit(number: number, asked: number) {
     const sha = checksOtherCommit.value;
-    if (!sha || sha === _otherCommitSeen) return;
-    _otherCommitSeen = sha;
-    const d = _lastDetailFetch;
-    if (d.number !== number || d.at < asked - DETAIL_FRESH_MS) void revalidateOpenDetail();
+    if (!sha) return;
+    if (_otherCommit?.sha !== sha) _otherCommit = { sha, since: Date.now(), revalidated: false };
+    const seen = _otherCommit;
+    if (seen.revalidated) return;
+    seen.revalidated = true;
+    void revalidateDetailUnlessFresh(number, asked).then((ok) => {
+      if (ok === false) seen.revalidated = false;
+    });
+  }
+
+  /** Whether the CI tab still follows a list with another commit's checks. */
+  function followingOtherCommit(): boolean {
+    const sha = checksOtherCommit.value;
+    if (!sha) return false;
+    return _otherCommit?.sha !== sha || Date.now() - _otherCommit.since < OTHER_COMMIT_FOLLOW_MS;
   }
 
   /** Re-fetch the open PR's checks in the background, keeping the current list
@@ -1092,8 +1121,15 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  Skipped when a detail fetch started around the checks request: it reads
    *  the same CI state. */
   function onChecksFinished(number: number, asked: number) {
+    void revalidateDetailUnlessFresh(number, asked);
+  }
+
+  /** Revalidate the detail, unless a fetch of it started around the checks
+   *  request `asked` (it reads the same state). Null when skipped. */
+  async function revalidateDetailUnlessFresh(number: number, asked: number): Promise<boolean | null> {
     const d = _lastDetailFetch;
-    if (d.number !== number || d.at < asked - DETAIL_FRESH_MS) void revalidateOpenDetail();
+    if (d.number === number && d.at >= asked - DETAIL_FRESH_MS) return null;
+    return revalidateOpenDetail();
   }
 
   /** Set PR `number`'s list dot from the backend's own rollup (its detail's
@@ -1134,8 +1170,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
 
   /** Whether the CI tab should follow the checks right now: a check runs, or
-   *  the list is another commit's and the head's has yet to come. */
-  const checksLiveWanted = () => checksRunning.value || !!checksOtherCommit.value;
+   *  some are another commit's and the head's may still come. */
+  const checksLiveWanted = () => checksRunning.value || followingOtherCommit();
 
   function stopChecksLive() {
     if (_checksLiveTimer) {
@@ -1172,7 +1208,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     [detailTab, () => selectedPr.value?.number, checksRunning, checksOtherCommit],
     ([, number], [, prevNumber]) => {
       if (number !== prevNumber) {
-        _otherCommitSeen = null;
+        _otherCommit = null;
         _checksFailures = 0;
         _lastChecksFetch = 0;
         _checksLiveSince = 0;
@@ -1232,11 +1268,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
 
   /** Re-fetch the currently open detail bundle in the background (poll-driven). */
-  async function revalidateOpenDetail() {
+  /** Re-fetch the open PR's detail in the background. False when it failed. */
+  async function revalidateOpenDetail(): Promise<boolean> {
     const pr = selectedPr.value;
-    if (!pr) return;
+    if (!pr) return false;
     detailRefreshing.value = true;
-    await fetchDetailBundle(pr, { silentError: true });
+    return fetchDetailBundle(pr, { silentError: true });
   }
 
   /** Write the current detail refs back to the SWR cache (write-through after

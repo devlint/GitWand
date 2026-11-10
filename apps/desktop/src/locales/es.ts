@@ -1026,7 +1026,7 @@ const es: Locale = {
       noChecks: "No se encontraron checks de CI.",
       checksLoadFailed: "No se pudieron cargar los checks de CI. Vuelve a abrir esta pestaña para reintentarlo.",
       checksStale: "Actualización en directo detenida: no se pudo acceder a los checks de CI. Vuelve a abrir esta pestaña para reintentarlo.",
-      checksOtherCommit: "Estos checks se ejecutaron en el commit {0}, no en la cabeza de la PR ({1}). Se sigue la CI hasta que aparezcan los de la cabeza.",
+      checksOtherCommit: "Estos checks se ejecutaron en el commit {0}; la cabeza de la PR que se muestra aquí es {1}.",
     },
     annotations: {
       badge: "{0} anotación(es)",
@@ -1158,6 +1158,7 @@ const es: Locale = {
       ready: "Todos los checks están en verde y la PR está aprobada.",
       waitingPrefix: "Esperando: {0}.",
       reasonChecksFailing: "checks de CI fallando",
+      reasonChecksOtherCommit: "CI del último commit aún no disponible",
       reasonMergeConflict: "conflicto de fusión",
       reasonNoApproval: "sin aprobación",
       reasonChangesRequested: "cambios solicitados",

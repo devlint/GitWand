@@ -763,12 +763,22 @@ fn gl_pipeline_checks(arr: &[serde_json::Value]) -> Vec<CICheck> {
                 state: status.clone(),
                 conclusion,
                 details_url: js(p, "web_url"),
-                // The pipeline's commit: until the new head's pipeline is
-                // created, the newest one is still the previous commit's.
-                commit_sha: js(p, "sha"),
+                commit_sha: gl_pipeline_head_sha(p),
             }
         })
         .collect()
+}
+
+/// The MR head a pipeline ran on: its `sha`, which until the new head's
+/// pipeline is created is still the previous commit's. "" for a merged-results
+/// pipeline (`refs/merge-requests/<iid>/merge`) or a merge train's
+/// (`.../train`): their `sha` is a temporary merge commit, never the head.
+fn gl_pipeline_head_sha(p: &serde_json::Value) -> String {
+    let r = js(p, "ref");
+    if r.ends_with("/merge") || r.ends_with("/train") {
+        return String::new();
+    }
+    js(p, "sha")
 }
 
 #[tauri::command]
@@ -2820,6 +2830,25 @@ mod gl_pipeline_checks_tests {
         assert_eq!(checks[0].details_url, "u30");
         // The pipeline's commit, which after a push may not be the MR's head yet.
         assert_eq!(checks[0].commit_sha, "c30");
+    }
+
+    #[test]
+    fn a_merged_results_pipeline_does_not_name_a_head() {
+        // Its sha is the temporary merge commit GitLab made, never the head.
+        for r in ["refs/merge-requests/7/merge", "refs/merge-requests/7/train"] {
+            let arr = json!([{"id": 1, "status": "success", "sha": "m", "ref": r}]);
+            assert_eq!(
+                gl_pipeline_checks(arr.as_array().unwrap())[0].commit_sha,
+                "",
+                "{}",
+                r
+            );
+        }
+        let arr = json!([{"id": 1, "status": "success", "sha": "h", "ref": "refs/merge-requests/7/head"}]);
+        assert_eq!(
+            gl_pipeline_checks(arr.as_array().unwrap())[0].commit_sha,
+            "h"
+        );
     }
 
     #[test]

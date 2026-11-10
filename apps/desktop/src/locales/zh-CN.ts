@@ -1033,7 +1033,7 @@ const zhCN: Locale = {
       noChecks: "未找到 CI 检查。",
       checksLoadFailed: "无法加载 CI 检查。重新打开此标签页以重试。",
       checksStale: "实时更新已停止：无法获取 CI 检查。重新打开此标签页以重试。",
-      checksOtherCommit: "这些检查运行于提交 {0}，而非 PR 的最新提交（{1}）。将持续跟踪 CI，直到出现最新提交的检查。",
+      checksOtherCommit: "这些检查运行于提交 {0}；此处显示的 PR 最新提交为 {1}。",
     },
     annotations: {
       badge: "{0} 条注释",
@@ -1165,6 +1165,7 @@ const zhCN: Locale = {
       ready: "所有检查均为绿色，PR 已获批准。",
       waitingPrefix: "等待中：{0}。",
       reasonChecksFailing: "CI 检查失败",
+      reasonChecksOtherCommit: "最新提交的 CI 尚未上报",
       reasonMergeConflict: "合并冲突",
       reasonNoApproval: "无批准",
       reasonChangesRequested: "请求修改",

@@ -98,18 +98,19 @@ export function checksIcon(status: string): string {
 }
 
 /**
- * The commit the checks ran on, when it is not `headSha`: after a push, the
- * list can still be the previous commit's (GitLab until the new pipeline is
- * created; Azure until the policy re-queues its build), or ahead of a detail
- * fetched before the push. `null` when they match, or when nothing says:
- * no head, or no check that names its commit (an empty list, an Azure
- * reviewer policy, an old cache). One check on the head is enough to count
- * the list as the head's: a forge can mix commits (an Azure build not yet
- * re-queued next to one that was), and that list already shows the head's.
+ * True when `check` says it ran on a commit that is not `headSha`: after a
+ * push, a check can still be the previous commit's (GitLab until the new
+ * pipeline is created, an Azure build not re-queued yet), or ahead of a detail
+ * fetched before the push. Judged check by check: one that does not name its
+ * commit (an Azure reviewer policy, a GitLab merged-results pipeline, an old
+ * cache) is never "another commit's", and a forge can mix both in one list.
  */
+export function isCheckOnOtherCommit(check: CICheck, headSha: string | null | undefined): boolean {
+  return !!headSha && !!check.commitSha && check.commitSha !== headSha;
+}
+
+/** The first commit, other than `headSha`, that a check ran on; `null` when
+ *  every check is the head's or does not say. */
 export function checksCommitMismatch(checks: CICheck[], headSha: string | null | undefined): string | null {
-  if (!headSha) return null;
-  const shas = checks.map((c) => c.commitSha ?? "").filter(Boolean);
-  if (shas.length === 0 || shas.includes(headSha)) return null;
-  return shas[0];
+  return checks.find((c) => isCheckOnOtherCommit(c, headSha))?.commitSha ?? null;
 }

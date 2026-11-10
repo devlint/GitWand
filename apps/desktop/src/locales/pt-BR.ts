@@ -1027,7 +1027,7 @@ const ptBR: Locale = {
       noChecks: "Nenhum check de CI encontrado.",
       checksLoadFailed: "Não foi possível carregar os checks de CI. Reabra esta aba para tentar de novo.",
       checksStale: "Atualização ao vivo interrompida: não foi possível acessar os checks de CI. Reabra esta aba para tentar de novo.",
-      checksOtherCommit: "Estes checks rodaram no commit {0}, não na cabeça da PR ({1}). Acompanhando a CI até aparecerem os da cabeça.",
+      checksOtherCommit: "Estes checks rodaram no commit {0}; a cabeça da PR mostrada aqui é {1}.",
     },
     annotations: {
       badge: "{0} anotação(ões)",
@@ -1159,6 +1159,7 @@ const ptBR: Locale = {
       ready: "Todos os checks estão verdes e a PR está aprovada.",
       waitingPrefix: "Aguardando: {0}.",
       reasonChecksFailing: "checks de CI falhando",
+      reasonChecksOtherCommit: "CI do último commit ainda não disponível",
       reasonMergeConflict: "conflito de merge",
       reasonNoApproval: "sem aprovação",
       reasonChangesRequested: "alterações solicitadas",

@@ -1042,7 +1042,7 @@ const en = {
       noChecks: "No CI checks found.",
       checksLoadFailed: "Couldn’t load the CI checks. Reopen this tab to try again.",
       checksStale: "Live updates stopped: the CI checks could not be reached. Reopen this tab to try again.",
-      checksOtherCommit: "These checks ran on commit {0}, not on the PR's head ({1}). Following the CI until the head's checks appear.",
+      checksOtherCommit: "These checks ran on commit {0}; the pull request's head shown here is {1}.",
     },
     annotations: {
       badge: "{0} annotation(s)",
@@ -1174,6 +1174,7 @@ const en = {
       ready: "All checks are green and the PR is approved.",
       waitingPrefix: "Waiting: {0}.",
       reasonChecksFailing: "CI checks failing",
+      reasonChecksOtherCommit: "CI of the latest commit not reported yet",
       reasonMergeConflict: "merge conflict",
       reasonNoApproval: "no approval",
       reasonChangesRequested: "changes requested",
