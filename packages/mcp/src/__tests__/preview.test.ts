@@ -440,3 +440,69 @@ describe('toolPreview — merge operation (working tree)', { timeout: GIT_IO_TIM
     }
   })
 })
+
+// Both sides insert a different key at the same place: git conflicts, the JSON
+// resolver merges the two keys. The preview must count it as auto-resolvable in
+// rebase and cherry-pick mode, as it already does for a real merge.
+describe('rebase and cherry-pick previews run the resolution', { timeout: GIT_IO_TIMEOUT_MS }, () => {
+  const BASE = '{\n  "a": 1,\n  "z": 0\n}\n'
+  const MAIN = '{\n  "a": 1,\n  "b": 2,\n  "z": 0\n}\n'
+  const FEATURE = '{\n  "a": 1,\n  "c": 3,\n  "z": 0\n}\n'
+
+  function setup(cwd: string): string {
+    writeFileSync(join(cwd, 'p.json'), BASE)
+    git(cwd, ['add', 'p.json'])
+    git(cwd, ['commit', '-m', 'init'])
+    git(cwd, ['checkout', '-b', 'feature'])
+    writeFileSync(join(cwd, 'p.json'), FEATURE)
+    git(cwd, ['commit', '-am', 'feature: add c'])
+    const featureSha = git(cwd, ['rev-parse', 'HEAD'])
+    git(cwd, ['checkout', 'main'])
+    writeFileSync(join(cwd, 'p.json'), MAIN)
+    git(cwd, ['commit', '-am', 'main: add b'])
+    return featureSha
+  }
+
+  it('counts a resolvable rebase conflict as auto-resolvable', async () => {
+    const { cwd, cleanup } = makeRepo()
+    try {
+      setup(cwd)
+      git(cwd, ['checkout', 'feature'])
+      const result: ToolResult = await handleToolCall('gitwand_preview_merge', { operation: 'rebase', onto: 'main' }, cwd)
+      const parsed = JSON.parse(result.content[0].text)
+      expect(parsed.summary.totalConflicts).toBe(1)
+      expect(parsed.summary.autoResolvable).toBe(1)
+      expect(parsed.risk).toBe('low')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('counts a resolvable cherry-pick conflict as auto-resolvable', async () => {
+    const { cwd, cleanup } = makeRepo()
+    try {
+      const featureSha = setup(cwd)
+      const result: ToolResult = await handleToolCall('gitwand_preview_merge', { operation: 'cherry-pick', commit: featureSha }, cwd)
+      const parsed = JSON.parse(result.content[0].text)
+      expect(parsed.summary.totalConflicts).toBe(1)
+      expect(parsed.summary.autoResolvable).toBe(1)
+      expect(parsed.risk).toBe('low')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('honours min_confidence_score in rebase mode', async () => {
+    const { cwd, cleanup } = makeRepo()
+    try {
+      setup(cwd)
+      git(cwd, ['checkout', 'feature'])
+      const result: ToolResult = await handleToolCall('gitwand_preview_merge', { operation: 'rebase', onto: 'main', min_confidence_score: 100 }, cwd)
+      const parsed = JSON.parse(result.content[0].text)
+      expect(parsed.summary.totalConflicts).toBe(1)
+      expect(parsed.summary.autoResolvable).toBe(0)
+    } finally {
+      cleanup()
+    }
+  })
+})

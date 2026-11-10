@@ -57,9 +57,9 @@ Seven tools are exposed:
 | `gitwand_preview_merge` | Dry-run: return stats and a risk assessment without writing |
 | `gitwand_resolve_conflicts` | Auto-resolve trivial conflicts, return resolutions + pending hunks |
 | `gitwand_explain_hunk` | Full decision trace for one hunk (ours / theirs / base / reasoning) |
-| `gitwand_apply_resolution` | Apply an agent-provided resolution to a specific complex hunk |
+| `gitwand_apply_resolution` | Apply an agent-provided resolution to a specific complex hunk, without validating it (an empty string removes the block) |
 | `gitwand_resolve_hunk` | Ask the connected agent (the caller) to propose a resolution for one hunk — inversion of the CLI `--llm-fallback` |
-| `gitwand_resolve_hunk_llm` | Validate + apply an LLM-proposed resolution (residual-markers check, JSON/YAML syntax, score threshold) |
+| `gitwand_resolve_hunk_llm` | Validate + apply an LLM-proposed resolution (residual-markers check, JSON/YAML/TOML syntax, score threshold; an empty string removes the block) |
 
 Plus three resources (`gitwand://repo/conflicts`, `gitwand://repo/policy`, `gitwand://hunk/{file}/{line}`) for ambient context.
 
@@ -114,7 +114,7 @@ GitWand handles the trivial conflicts (whitespace, same-change, non-overlapping 
 1. Agent calls `gitwand_preview_merge` → sees risk level + how many conflicts GitWand can handle alone.
 2. Agent calls `gitwand_resolve_conflicts` → GitWand resolves the easy hunks and returns `pendingHunks` for the rest.
 3. For each pending hunk, the agent reads ours/theirs/base from the response and decides.
-4. Agent calls `gitwand_apply_resolution` with its chosen content — the file is written.
+4. Agent calls `gitwand_resolve_hunk_llm` with its chosen content — the result is validated, then written. (`gitwand_apply_resolution` writes without validating.)
 
 ## Resolution patterns
 
