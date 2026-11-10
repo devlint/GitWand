@@ -102,3 +102,67 @@ describe('gitwand_resolve_hunk_llm residual marker check', () => {
     expect(ok.remainingConflicts).toBe(0)
   })
 })
+
+describe('gitwand_resolve_hunk_llm YAML syntax check', () => {
+  it('rejects a resolution that leaves the YAML file unparseable', async () => {
+    const cwd = makeRepo()
+    const yaml = ['name: app', '<<<<<<< ours', 'port: 80', '=======', 'port: 81', '>>>>>>> theirs', ''].join('\n')
+    writeFileSync(join(cwd, 'c.yaml'), yaml)
+
+    const out = await call(cwd, 'c.yaml', 2, 'port: [80')
+
+    expect(out.accepted).toBe(false)
+    expect(out.syntaxError).toMatch(/^YAML:/)
+    expect(readFileSync(join(cwd, 'c.yaml'), 'utf-8')).toBe(yaml)
+  })
+
+  it('accepts a resolution that keeps the YAML file valid', async () => {
+    const cwd = makeRepo()
+    writeFileSync(join(cwd, 'c.yml'), ['name: app', '<<<<<<< ours', 'port: 80', '=======', 'port: 81', '>>>>>>> theirs', ''].join('\n'))
+
+    const out = await call(cwd, 'c.yml', 2, 'port: 81')
+
+    expect(out.accepted).toBe(true)
+    expect(out.syntaxError).toBeNull()
+    expect(readFileSync(join(cwd, 'c.yml'), 'utf-8')).toBe('name: app\nport: 81\n')
+  })
+})
+
+describe('empty resolutions remove the conflict block', () => {
+  it('gitwand_resolve_hunk_llm accepts an empty resolution and deletes the block', async () => {
+    const cwd = makeRepo()
+    writeFileSync(join(cwd, 'f.txt'), TWO_HUNKS)
+
+    const out = await call(cwd, 'f.txt', 2, '')
+
+    expect(out.accepted).toBe(true)
+    expect(readFileSync(join(cwd, 'f.txt'), 'utf-8')).toBe(
+      ['head', 'middle', '<<<<<<< ours', 'b-ours', '=======', 'b-theirs', '>>>>>>> theirs', 'tail', ''].join('\n'),
+    )
+  })
+
+  it('gitwand_apply_resolution accepts empty content and deletes the block', async () => {
+    const cwd = makeRepo()
+    writeFileSync(join(cwd, 'f.txt'), TWO_HUNKS)
+
+    const res: any = await handleToolCall('gitwand_apply_resolution', { file: 'f.txt', line: 8, content: '' }, cwd)
+
+    expect(res.isError).toBeFalsy()
+    expect(JSON.parse(res.content[0].text).applied).toBe(true)
+    expect(readFileSync(join(cwd, 'f.txt'), 'utf-8')).toBe(
+      ['head', '<<<<<<< ours', 'a-ours', '=======', 'a-theirs', '>>>>>>> theirs', 'middle', 'tail', ''].join('\n'),
+    )
+  })
+
+  it('both write tools still reject a missing resolution', async () => {
+    const cwd = makeRepo()
+    writeFileSync(join(cwd, 'f.txt'), TWO_HUNKS)
+
+    const a: any = await handleToolCall('gitwand_apply_resolution', { file: 'f.txt', line: 2 }, cwd)
+    const b: any = await handleToolCall('gitwand_resolve_hunk_llm', { file: 'f.txt', line: 2 }, cwd)
+
+    expect(a.isError).toBe(true)
+    expect(b.isError).toBe(true)
+    expect(readFileSync(join(cwd, 'f.txt'), 'utf-8')).toBe(TWO_HUNKS)
+  })
+})

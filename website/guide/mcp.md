@@ -151,6 +151,8 @@ Explain why a specific conflict hunk was classified as its type. Returns the ful
 
 Apply a custom resolution to a specific conflict hunk. Replaces the conflict markers at the given line with the provided content, then re-checks for remaining conflicts.
 
+It does **not** validate what it writes: no residual-marker or syntax check. For a resolution an agent wrote itself, `gitwand_resolve_hunk_llm` validates before writing.
+
 **Parameters:**
 
 | Parameter | Type | Required | Description |
@@ -182,7 +184,7 @@ The MCP server enables a workflow where GitWand handles the trivial conflicts an
 
 3. **Understand** — For each pending hunk, the agent has the ours/theirs/base content, the classification trace explaining *why* GitWand flagged it as complex, and the confidence dimensions showing where the uncertainty lies.
 
-4. **Resolve** — The agent writes its own resolution and calls `gitwand_apply_resolution` to apply it. GitWand re-checks the file and reports remaining conflicts.
+4. **Resolve** — The agent writes its own resolution and calls `gitwand_resolve_hunk_llm` to apply it. GitWand checks it (no residual markers, valid JSON/YAML/TOML), writes it, and reports remaining conflicts.
 
 5. **Verify** — The agent can call `gitwand_status` to confirm all conflicts are resolved, or read `gitwand://repo/conflicts` for a final check.
 

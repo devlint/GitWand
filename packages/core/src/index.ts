@@ -38,7 +38,7 @@ export {
   type RepoConventions,
 } from "./conventions/types.js";
 export { isGeneratedFile, stripVolatileValues } from "./resolver/generated-detection.js";
-export { isChangelogFile } from "./resolver/validation.js";
+export { isChangelogFile, validateMergedContent } from "./resolver/validation.js";
 
 // accuracy lot D — Regenerate tier: core emits a plan, never executes it
 export { findEcosystem, REGEN_ECOSYSTEMS, type RegenEcosystem } from "./regenerate/registry.js";
