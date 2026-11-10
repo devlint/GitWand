@@ -5450,7 +5450,16 @@ async function handleRequest(req, res) {
         if (!sha) return jsonResponse(req, res, []);
         // Get check runs for that commit
         const checksResp = await githubFetch(`/repos/${nwo}/commits/${sha}/check-runs?per_page=100`, token);
-        if (!checksResp.ok) return jsonResponse(req, res, { error: `GitHub API ${checksResp.status}` }, 500);
+        if (!checksResp.ok) {
+          // Same split as the Rust `checks_unavailable`: a 403/404 that is not a
+          // rate limit means the checks are not visible (fine-grained token
+          // without Checks: read) → no checks; anything else is a failure.
+          const body = await checksResp.text();
+          if ((checksResp.status === 403 || checksResp.status === 404) && !/rate limit/i.test(body)) {
+            return jsonResponse(req, res, []);
+          }
+          return jsonResponse(req, res, { error: `GitHub API ${checksResp.status}` }, 500);
+        }
         const data = await checksResp.json();
         return jsonResponse(req, res, (data.check_runs ?? []).map((c) => ({
           name: c.name,

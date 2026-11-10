@@ -27,10 +27,6 @@ const FAILING = new Set([
  */
 const WAITING_ON_SOMEONE = new Set(["EXPECTED", "WAITING", "MANUAL", "SCHEDULED"]);
 
-/** Final results that count as passing in every backend's rollup. Gitea's
- *  `warning` is a finished, non-failing commit status. */
-const PASSING = new Set(["SUCCESS", "NEUTRAL", "SKIPPED", "WARNING"]);
-
 function status(check: CICheck): string {
   return (check.conclusion || check.state || "").toUpperCase();
 }

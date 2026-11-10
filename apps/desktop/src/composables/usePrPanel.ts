@@ -859,6 +859,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     selectedPr.value = pr;
     resetDetail();
     _detailSettled = false;
+    _checksFetchedSinceSelect = false;
     // SWR: paint cached detail bundle instantly, revalidate in background.
     const cached = cache.getDetail(detailKey(cwd.value, pr.number));
     if (cached) {
@@ -954,6 +955,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // running and have finished since, revalidate once, like refreshChecks.
     const wasRunning = checksRunning.value;
     _checksGen++; // a refresh started before this load must not overwrite it
+    _checksFetchedSinceSelect = true;
     checksLoading.value = true;
     try {
       const asked = Date.now();
@@ -967,7 +969,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // live polling then retries.
       if (current()) {
         checksLoaded.value = true;
-        checksError.value = true;
+        // With a cached list on screen, live polling retries it and flags an
+        // error only at the limit (refreshChecks); with nothing to show, say so.
+        if (prChecks.value.length === 0) checksError.value = true;
         _checksFailures++;
       }
     } finally {
@@ -1018,6 +1022,19 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const DETAIL_FRESH_MS = 2_000;
   /** Set by selectPr; the first detail fetch for the PR settles its head. */
   let _detailSettled = false;
+  /** A checks request went out since the PR was selected: it asked the forge
+   *  for the current head, whatever head the cached detail showed. */
+  let _checksFetchedSinceSelect = false;
+  /** Ends the post-push wait by itself, even when nothing polls. */
+  let _awaitTimer: ReturnType<typeof setTimeout> | null = null;
+  function endChecksAwait() {
+    if (_awaitTimer) {
+      clearTimeout(_awaitTimer);
+      _awaitTimer = null;
+    }
+    _checksAwaitUntil = 0;
+    checksAwaiting.value = false;
+  }
   /** The settling fetch moved the head: the next head change is not a push. */
   let _ignoreShaChange = false;
   let _disposed = false;
@@ -1044,7 +1061,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     _lastChecksFetch = Date.now();
     checksError.value = false;
     checksLoaded.value = true;
-    if (checks.length > 0) checksAwaiting.value = false;
+    if (checks.length > 0 && checksAwaiting.value) endChecksAwait();
     // Polls mostly bring the same list: don't re-serialize the cache for it.
     if (JSON.stringify(checks) !== JSON.stringify(prChecks.value)) {
       prChecks.value = checks;
@@ -1068,6 +1085,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const current = () =>
       selectedPr.value?.number === number && gen === _checksGen && cwd.value === repo;
     _checksRefreshing = key;
+    _checksFetchedSinceSelect = true;
     try {
       const asked = Date.now();
       const checks = await forge.value.getCIChecks(repo, number);
@@ -1095,8 +1113,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  Gitea's list has no dots: left alone. */
   function syncListRollup(number: number, checksStatus: string) {
     if (forge.value.name === "gitea") return;
+    // "" is both "no CI" and, on several backends, "the rollup fetch failed":
+    // never clear a dot from it; a list reload settles it.
     const rollup = rollupFromDetailStatus(checksStatus);
-    if (rollup === null) return;
+    if (!rollup) return;
     const patch = (list: PullRequest[]) =>
       list.map((pr) => (pr.number === number && pr.checksRollup !== rollup ? { ...pr, checksRollup: rollup } : pr));
     if (prs.value.some((pr) => pr.number === number && pr.checksRollup !== rollup)) prs.value = patch(prs.value);
@@ -1133,7 +1153,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     stopChecksLive();
     if (_disposed || _checksFailures >= CHECKS_LIVE_MAX_FAILURES) return;
     const hidden = typeof document !== "undefined" && document.hidden;
-    if (checksAwaiting.value && !awaitingChecks()) checksAwaiting.value = false;
     // The CI tab follows running checks; after a push, any tab of the detail
     // looks for the new head's checks, for the banner (bounded by the window).
     const visible = detailVisible.value && !hidden && !!selectedPr.value;
@@ -1167,8 +1186,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         _checksFailures = 0;
         _lastChecksFetch = 0;
         _checksLiveSince = 0;
-        _checksAwaitUntil = 0;
-        checksAwaiting.value = false;
+        endChecksAwait();
         _refetchAfterLoad = false;
         checksError.value = false;
       }
@@ -1185,13 +1203,26 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     ([number, sha], [prevNumber, prevSha]) => {
       if (!sha || !prevSha || number !== prevNumber || sha === prevSha) return;
       if (_ignoreShaChange) {
+        // The cache catching up, not a push. Its checks belong to the old
+        // head, though: unless a request went out since the PR was selected,
+        // fetch once (no await window), so the banner doesn't read them.
         _ignoreShaChange = false;
+        if (!_checksFetchedSinceSelect && prChecks.value.length > 0) {
+          _checksGen++;
+          void refreshChecks();
+        }
         return;
       }
       _checksGen++;
-      _checksAwaitUntil = Date.now() + CHECKS_AWAIT_AFTER_PUSH_MS;
-      checksAwaiting.value = true;
       _checksLiveSince = 0;
+      // Wait for the new head's checks only where CI exists: the old head had
+      // checks. Never loaded, or none: nothing says any will come.
+      if (checksLoaded.value && prChecks.value.length > 0) {
+        endChecksAwait();
+        _checksAwaitUntil = Date.now() + CHECKS_AWAIT_AFTER_PUSH_MS;
+        checksAwaiting.value = true;
+        _awaitTimer = setTimeout(endChecksAwait, CHECKS_AWAIT_AFTER_PUSH_MS);
+      }
       if (checksLoading.value) _refetchAfterLoad = true;
       else if (checksLoaded.value) retryChecksLive();
       // Not loaded yet: the next visit of the CI or Diff tab loads them.
@@ -1879,6 +1910,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // runs when a test's effect scope stops.
   onScopeDispose(() => {
     _disposed = true;
+    endChecksAwait();
     stopPoll();
     stopChecksLive();
     if (typeof document !== "undefined" && _visibilityHandler) {

@@ -1584,7 +1584,11 @@ function submitRequestReviewers() {
             {{ p.checksError.value ? t('pr.detail.checksLoadFailed') : t('pr.detail.noChecks') }}
           </div>
           <div v-else class="pdv-checks">
-            <div v-if="p.checksError.value" class="pdv-checks-stale" role="status">{{ t('pr.detail.checksStale') }}</div>
+            <!-- A list that stopped updating, or only the virtual merge-conflict
+                 entry over checks that never loaded. -->
+            <div v-if="p.checksError.value" class="pdv-checks-stale" role="status">
+              {{ p.prChecks.value.length ? t('pr.detail.checksStale') : t('pr.detail.checksLoadFailed') }}
+            </div>
             <div v-for="c in p.checksWithConflict.value" :key="c.name" class="pdv-check">
               <span class="pdv-check-icon">{{ p.checkIcon(c) }}</span>
               <span class="pdv-check-name">{{ c.name }}</span>

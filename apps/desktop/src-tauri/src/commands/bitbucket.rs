@@ -1187,7 +1187,7 @@ pub(crate) async fn bb_pr_ci_checks(cwd: String, pr_id: i64) -> Result<Vec<CIChe
 
     // Step 2: fetch commit statuses.
     let url = format!(
-        "https://api.bitbucket.org/2.0/repositories/{}/{}/commit/{}/statuses?pagelen=30",
+        "https://api.bitbucket.org/2.0/repositories/{}/{}/commit/{}/statuses?pagelen=100",
         workspace, slug, head_sha
     );
     // A failure is an error, not "no checks" (the CI tab tells them apart);

@@ -130,8 +130,6 @@ fn mark_restricted(cwd: &str) {
     }
 }
 
-/// True for GitHub's 403 "organization has enabled OAuth App access
-/// restrictions" error, as `map_api_error` formats it.
 /// True when a checks request was refused for good rather than failed: a 403
 /// or 404 (a fine-grained token without "Checks: read", checks not visible),
 /// in the REST error format (`GitHub API error (403): …`) or gh's (`… (HTTP
@@ -145,6 +143,8 @@ pub(crate) fn checks_unavailable(err: &str) -> bool {
     code && !err.to_lowercase().contains("rate limit") && !is_oauth_restricted(err)
 }
 
+/// True for GitHub's 403 "organization has enabled OAuth App access
+/// restrictions" error, as `map_api_error` formats it.
 pub(crate) fn is_oauth_restricted(err: &str) -> bool {
     err.contains("OAuth App access restrictions")
 }
@@ -780,7 +780,12 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
     if sha.is_empty() {
         return String::new();
     }
-    let url = format!("{}/repos/{}/commits/{}/check-runs", API_BASE, repo, sha);
+    // per_page=100 like the CI tab's own fetch: a big matrix must not look
+    // finished on its first 30 runs.
+    let url = format!(
+        "{}/repos/{}/commits/{}/check-runs?per_page=100",
+        API_BASE, repo, sha
+    );
     let v = match api_json_cached(&url, token) {
         Ok(v) => v,
         Err(_) => return String::new(),

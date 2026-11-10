@@ -588,6 +588,93 @@ describe("usePrPanel — live CI, sixth review", () => {
   });
 });
 
+describe("usePrPanel — live CI, seventh review", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ghPrDetail.mockReset().mockResolvedValue(fakeDetail());
+    ghPrChecks.mockReset();
+  });
+  afterEach(() => {
+    scopes.splice(0).forEach((s) => s.stop());
+    vi.useRealTimers();
+  });
+  const approve = (p: any) => {
+    p.prReviews.value = [{ state: "APPROVED", user: { login: "x" }, submitted_at: "1" } as any];
+  };
+
+  it("a push on a PR whose checks were never loaded does not hold the banner", async () => {
+    window.localStorage.clear(); // no cached bundle from an earlier test
+    _resetPrCacheForTesting();
+    const scope = effectScope();
+    scopes.push(scope);
+    const p = scope.run(() => usePrPanel(ref("/repo")))!;
+    p.setDetailVisible(true);
+    await p.selectPr({ number: 1 } as any); // Info tab, checks never loaded
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+    approve(p);
+    expect(p.mergeReadiness.value?.ready).toBe(true);
+  });
+
+  it("a push on a PR that had no checks (no CI) does not hold the banner", async () => {
+    ghPrChecks.mockResolvedValue([]);
+    const p = await openChecksTab();
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+    approve(p);
+    expect(p.mergeReadiness.value?.ready).toBe(true);
+  });
+
+  it("the wait for a push's checks ends by itself, even with nothing polling", async () => {
+    ghPrChecks.mockResolvedValueOnce(done).mockResolvedValue([]);
+    const p = await openChecksTab();
+    p.setDetailVisible(false); // nothing polls
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+    approve(p);
+    await vi.advanceTimersByTimeAsync(CHECKS_AWAIT_AFTER_PUSH_MS + 1);
+    expect(p.checksAwaiting.value).toBe(false);
+  });
+
+  it("a backend rollup of '' (no CI, or a failed rollup) never clears the dot", async () => {
+    ghPrChecks.mockResolvedValue(done);
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), checksStatus: "" });
+    const p = await openChecksTab();
+    p.prs.value = [{ number: 1, checksRollup: "FAILURE" } as any];
+    await p.revalidateOpenDetail();
+    expect(p.prs.value[0].checksRollup).toBe("FAILURE");
+  });
+
+  it("reopening a cached PR whose head moved re-fetches its checks once if none were fetched since", async () => {
+    ghPrChecks.mockResolvedValue(done);
+    const p = await openChecksTab();
+    await p.selectPr({ number: 2 } as any);
+    await flush();
+    const n = ghPrChecks.mock.calls.length;
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.selectPr({ number: 1 } as any); // Info tab: cached old-head checks
+    await flush();
+    expect(ghPrChecks.mock.calls.length).toBe(n + 1);
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 4);
+    expect(ghPrChecks.mock.calls.length).toBe(n + 1); // no await-window polling
+  });
+
+  it("one failed load over a cached list does not claim live updates stopped", async () => {
+    ghPrChecks.mockResolvedValueOnce(running).mockRejectedValueOnce(new Error("timeout")).mockResolvedValue(running);
+    const p = await openChecksTab();
+    await p.selectPr({ number: 2 } as any);
+    await flush();
+    await p.selectPr({ number: 1 } as any);
+    p.detailTab.value = "checks";
+    await flush();
+    expect(p.prChecks.value).toEqual(running);
+    expect(p.checksError.value).toBe(false);
+  });
+});
+
 describe("usePrPanel — one notion of a running check", () => {
   beforeEach(() => {
     ghPrDetail.mockReset().mockResolvedValue(fakeDetail());
