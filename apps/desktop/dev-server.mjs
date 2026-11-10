@@ -437,6 +437,22 @@ function devListRepoDir(cwd, rawDir, includeIgnored) {
  * stderr into a `{stage,percent,message}` update. Mirrors the Rust
  * `parse_clone_progress` helper in `commands/ops.rs` — keep the two in sync.
  */
+/** Every ref and its target, sorted; `null` when git cannot list them. */
+function devRefFingerprint(cwd) {
+  try {
+    return execFileSync(GIT, ["for-each-ref", "--format=%(refname) %(objectname) %(symref)"], {
+      cwd,
+      encoding: "utf-8",
+      maxBuffer: Infinity,
+    })
+      .split("\n")
+      .sort()
+      .join("\n");
+  } catch {
+    return null;
+  }
+}
+
 function devParseCloneProgress(line) {
   const l = line.trim();
   if (!l) return null;
@@ -3892,6 +3908,9 @@ async function handleRequest(req, res) {
         Connection: "keep-alive",
         ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
       });
+      // Mirrors git_fetch's `refs_changed` (#287): compare every ref before
+      // and after, so the frontend only forces a log reload when one moved.
+      const refsBefore = devRefFingerprint(resolvedCwd);
       const proc = spawn(GIT, ["fetch", "--prune", "--progress"], {
         cwd: resolvedCwd,
         stdio: ["ignore", "ignore", "pipe"],
@@ -3924,7 +3943,9 @@ async function handleRequest(req, res) {
         if (prog) res.write(`data: ${JSON.stringify(prog)}\n\n`);
         const success = code === 0;
         if (success) res.write(`data: ${JSON.stringify({ stage: "done", percent: 100, message: "Fetch complete" })}\n\n`);
+        const refsAfter = devRefFingerprint(resolvedCwd);
         const result = { success, message: success ? "" : allStderr.trim() };
+        if (refsBefore !== null && refsAfter !== null) result.refsChanged = refsBefore !== refsAfter;
         res.write(`data: ${JSON.stringify({ result })}\n\n`);
         res.end();
       });

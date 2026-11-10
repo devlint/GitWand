@@ -287,7 +287,7 @@ export async function devGitClone(
 export async function devGitFetch(
   cwd: string,
   onProgress?: (p: DevCloneProgress) => void,
-): Promise<{ success: boolean; message: string; conflicts?: boolean }> {
+): Promise<{ success: boolean; message: string; conflicts?: boolean; refsChanged?: boolean }> {
   const params = new URLSearchParams({ cwd });
   return new Promise((resolve, reject) => {
     const es = new EventSource(`${DEV_SERVER}/api/git-fetch-stream?${params}`);

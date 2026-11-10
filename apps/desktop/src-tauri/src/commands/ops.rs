@@ -508,6 +508,7 @@ pub(crate) async fn git_push(
             stderr.trim().to_string()
         },
         conflicts: None,
+        refs_changed: None,
     })
 }
 
@@ -530,6 +531,7 @@ pub(crate) async fn git_fetch(
     let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
 
+    let refs_before = crate::git::libgit2::ref_fingerprint(&cwd);
     let mut child = git_cmd()
         .args(["fetch", "--prune", "--progress"])
         .current_dir(&cwd)
@@ -564,6 +566,13 @@ pub(crate) async fn git_fetch(
         });
     }
 
+    // Whether the fetch moved any ref, so the caller only forces a full log
+    // reload when it did (#287).
+    let refs_changed = match (refs_before, crate::git::libgit2::ref_fingerprint(&cwd)) {
+        (Some(before), Some(after)) => Some(before != after),
+        _ => None,
+    };
+
     Ok(GitPushPullResult {
         success: status.success(),
         message: if status.success() {
@@ -572,6 +581,7 @@ pub(crate) async fn git_fetch(
             stderr.trim().to_string()
         },
         conflicts: None,
+        refs_changed,
     })
 }
 
@@ -617,6 +627,7 @@ pub(crate) async fn git_merge(
             stderr.trim().to_string()
         },
         conflicts: if is_conflict { Some(true) } else { None },
+        refs_changed: None,
     })
 }
 
@@ -667,6 +678,7 @@ pub(crate) async fn git_pull(
             stderr.trim().to_string()
         },
         conflicts: None,
+        refs_changed: None,
     })
 }
 
@@ -1764,6 +1776,7 @@ pub(crate) async fn git_cherry_pick(
             stderr
         },
         conflicts: Some(has_conflicts),
+        refs_changed: None,
     })
 }
 
@@ -1934,6 +1947,7 @@ pub(crate) async fn git_revert_commit(
             stderr
         },
         conflicts: Some(has_conflicts),
+        refs_changed: None,
     })
 }
 
@@ -3476,6 +3490,44 @@ mod clone_fetch_channel_tests {
             "no message should contain a UTF-8 replacement character, got {:?}",
             *msgs
         );
+    }
+
+    /// #287 follow-up: the 30 s background fetch forced a log reload every
+    /// time, which cut the Git Tree back to the viewed depth and refilled it,
+    /// even when the fetch brought nothing. `refs_changed` tells the caller.
+    #[test]
+    fn git_fetch_reports_whether_refs_changed() {
+        let bare = make_bare_remote();
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1");
+        repo.commit_all("c1");
+        repo.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        repo.git_ok(&["push", "-q", "origin", "main"]);
+        repo.git_ok(&["fetch", "-q", "origin"]);
+
+        let (channel, _) = collecting_channel();
+        let idle = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel)).unwrap();
+        assert!(idle.success, "{}", idle.message);
+        assert_eq!(
+            idle.refs_changed,
+            Some(false),
+            "a fetch that brings nothing changes no ref"
+        );
+
+        let pusher = TempRepo::new();
+        pusher.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        pusher.git_ok(&["fetch", "-q", "origin", "main"]);
+        pusher.git_ok(&["reset", "-q", "--hard", "origin/main"]);
+        pusher.write("b.txt", "2");
+        pusher.commit_all("c2");
+        pusher.git_ok(&["push", "-q", "origin", "main"]);
+
+        let (channel, _) = collecting_channel();
+        let moved = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel)).unwrap();
+        assert!(moved.success, "{}", moved.message);
+        assert_eq!(moved.refs_changed, Some(true), "origin/main moved");
+
+        let _ = std::fs::remove_dir_all(&bare);
     }
 
     #[test]

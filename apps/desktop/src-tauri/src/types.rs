@@ -252,6 +252,10 @@ pub struct GitPushPullResult {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conflicts: Option<bool>,
+    /// Fetch only: whether any ref moved. `None` when it could not be told,
+    /// which callers treat as "maybe" (#287).
+    #[serde(rename = "refsChanged", skip_serializing_if = "Option::is_none")]
+    pub refs_changed: Option<bool>,
 }
 
 // ─── Repo operation state ──────────────────────────────────────────
