@@ -41,6 +41,7 @@ import type { DiffMode } from "../utils/diffMode";
 import { getPersistedDiffMode } from "../utils/diffMode";
 // Shared parser: keeps hunk lines whose content starts with `--`/`++`.
 import { parseUnifiedDiff } from "../utils/unifiedDiff";
+import { isCheckRunning } from "../utils/ciChecks";
 
 const props = defineProps<{
   cwd: string;
@@ -433,7 +434,7 @@ function checkIcon(c: CICheck): string {
   const s = (c.conclusion || c.state || "").toUpperCase();
   if (s === "SUCCESS") return "✅";
   if (["FAILURE","ERROR","CANCELLED"].includes(s)) return "❌";
-  if (["PENDING","IN_PROGRESS","QUEUED"].includes(s)) return "⏳";
+  if (isCheckRunning(c)) return "⏳";
   if (s === "SKIPPED") return "⏭️";
   return "❓";
 }

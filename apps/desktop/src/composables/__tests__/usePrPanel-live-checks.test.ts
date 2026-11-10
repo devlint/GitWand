@@ -258,4 +258,44 @@ describe("usePrPanel — live CI checks", () => {
     await flush();
     expect(p.prChecks.value).toEqual(done);
   });
+
+  it("updates the PR list entry's CI rollup when the last check finishes", async () => {
+    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValue(done);
+    const p = await openChecksTab();
+    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any, { number: 9, checksRollup: "PENDING" } as any];
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(p.prs.value.find((x: any) => x.number === 1)?.checksRollup).toBe("SUCCESS");
+    expect(p.prs.value.find((x: any) => x.number === 9)?.checksRollup).toBe("PENDING");
+  });
+
+  it("sets the rollup to FAILURE when a finished check failed", async () => {
+    const failed = [{ name: "build", state: "COMPLETED", conclusion: "FAILURE", detailsUrl: "" }];
+    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValue(failed);
+    const p = await openChecksTab();
+    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any];
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(p.prs.value[0].checksRollup).toBe("FAILURE");
+  });
+});
+
+describe("usePrPanel — one notion of a running check", () => {
+  beforeEach(() => {
+    ghPrDetail.mockReset().mockResolvedValue(fakeDetail());
+    ghPrChecks.mockReset();
+  });
+
+  it("mergeReadiness blocks on a check whose conclusion says it is running (GitLab, Bitbucket)", () => {
+    const p = usePrPanel(ref("/repo"));
+    p.prChecks.value = [{ name: "Pipeline #1", state: "running", conclusion: "IN_PROGRESS", detailsUrl: "" }];
+    expect(p.mergeReadiness.value?.ready).toBe(false);
+    p.prChecks.value = [{ name: "b", state: "in_progress", conclusion: "pending", detailsUrl: "" }];
+    expect(p.mergeReadiness.value?.ready).toBe(false);
+  });
+
+  it("checkIcon shows the hourglass for every running state", () => {
+    const p = usePrPanel(ref("/repo"));
+    for (const [state, conclusion] of [["created", ""], ["WAITING", ""], ["REQUESTED", ""], ["running", "RUNNING"]]) {
+      expect(p.checkIcon({ name: "c", state, conclusion, detailsUrl: "" })).toBe("⏳");
+    }
+  });
 });

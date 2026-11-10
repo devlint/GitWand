@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCheckRunning } from "../ciChecks";
+import { isCheckRunning, isCheckFailing } from "../ciChecks";
 
 const chk = (state: string, conclusion: string) => ({ name: "c", state, conclusion, detailsUrl: "" });
 
@@ -33,5 +33,18 @@ describe("isCheckRunning", () => {
     expect(isCheckRunning(chk("completed", "cancelled"))).toBe(false);
     expect(isCheckRunning(chk("COMPLETED", "SKIPPED"))).toBe(false);
     expect(isCheckRunning(chk("", ""))).toBe(false);
+  });
+});
+
+describe("isCheckFailing", () => {
+  it("is true for failed, errored, cancelled or timed-out checks", () => {
+    for (const c of ["FAILURE", "failed", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"]) {
+      expect(isCheckFailing(chk("COMPLETED", c))).toBe(true);
+    }
+  });
+  it("is false for passing, skipped or running checks", () => {
+    for (const c of ["SUCCESS", "SKIPPED", "NEUTRAL", ""]) {
+      expect(isCheckFailing(chk("IN_PROGRESS", c))).toBe(false);
+    }
   });
 });

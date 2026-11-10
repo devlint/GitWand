@@ -18,3 +18,13 @@ export function isCheckRunning(check: CICheck): boolean {
   const value = (check.conclusion || check.state || "").toUpperCase();
   return RUNNING.has(value);
 }
+
+/** Conclusions, upper-cased, of a check that finished badly. */
+const FAILING = new Set([
+  "FAILURE", "FAILED", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE",
+]);
+
+/** True when a CI check finished and failed (errored, cancelled, timed out…). */
+export function isCheckFailing(check: CICheck): boolean {
+  return FAILING.has((check.conclusion || "").toUpperCase());
+}

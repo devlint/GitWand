@@ -41,7 +41,7 @@ import { escapeHtml } from "../utils/escapeHtml";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
 import { formatRelativeAge } from "../utils/relativeTime";
-import { isCheckRunning } from "../utils/ciChecks";
+import { isCheckRunning, isCheckFailing } from "../utils/ciChecks";
 import { t } from "./useI18n";
 import { useReviewIntelligence } from "./useReviewIntelligence";
 import { indexDiffFiles, parseFileDiff, parseUnifiedDiff } from "../utils/unifiedDiff";
@@ -411,16 +411,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // Anything else (success, skipped, neutral, or a completed check with an
     // unrecognised/empty conclusion) is treated as fine — so a passing CI run is
     // never mislabelled as "waiting".
-    const FAILING = ["FAILURE", "FAILED", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE"];
-    const PENDING = ["QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED", "EXPECTED"];
-    const isBlocking = (c: CICheck) => {
-      const concl = (c.conclusion || "").toUpperCase();
-      if (FAILING.includes(concl)) return true;
-      // Expired build (needs a re-queue) — a pending-style warning, still blocks.
-      if (concl === "EXPIRED") return true;
-      // Still running — no conclusion yet and a pending-looking state.
-      return !concl && PENDING.includes((c.state || "").toUpperCase());
-    };
+    // Expired build (needs a re-queue) — a pending-style warning, still blocks.
+    // Running: the same test as the live CI tab (utils/ciChecks.ts), so the
+    // banner never says "ready" while that tab still follows a check.
+    const isBlocking = (c: CICheck) =>
+      isCheckFailing(c) || (c.conclusion || "").toUpperCase() === "EXPIRED" || isCheckRunning(c);
     // Failing / pending checks + branch policies — surfaced by name so
     // forge-specific requirements (e.g. Azure "At least 1 reviewer must approve")
     // read clearly in the banner instead of a generic "checks failing".
@@ -950,7 +945,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       checksLoaded.value = true;
       _lastChecksFetch = Date.now();
       persistDetailCache();
-      if (wasRunning && !checksRunning.value) void revalidateOpenDetail();
+      if (wasRunning && !checksRunning.value) onChecksFinished(number);
     } catch {
       if (current()) checksLoaded.value = true; // non-fatal — checks tab simply stays empty
     } finally {
@@ -1011,12 +1006,24 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       prChecks.value = checks;
       checksLoaded.value = true;
       persistDetailCache();
-      if (wasRunning && !checksRunning.value) void revalidateOpenDetail();
+      if (wasRunning && !checksRunning.value) onChecksFinished(number);
     } catch {
       // Keep the list on screen; the next tick retries, up to the limit.
       if (selectedPr.value?.number === number && gen === _checksGen) _checksFailures++;
     } finally {
       if (_checksRefreshingFor === number) _checksRefreshingFor = null;
+    }
+  }
+
+  /** The last running check finished: revalidate the detail once, so
+   *  mergeability and the Merge button follow, and set the PR's row in the
+   *  list (its CI dot) from the finished checks rather than wait for a reload. */
+  function onChecksFinished(number: number) {
+    void revalidateOpenDetail();
+    const rollup = prChecks.value.length === 0 ? ""
+      : prChecks.value.some(isCheckFailing) ? "FAILURE" : "SUCCESS";
+    if (prs.value.some((pr) => pr.number === number && pr.checksRollup !== rollup)) {
+      prs.value = prs.value.map((pr) => (pr.number === number ? { ...pr, checksRollup: rollup } : pr));
     }
   }
 
@@ -1655,7 +1662,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (s === "SUCCESS") return "✅";
     if (["FAILURE", "ERROR", "CANCELLED"].includes(s)) return "❌";
     if (s === "EXPIRED") return "⚠️";
-    if (["PENDING", "IN_PROGRESS", "QUEUED"].includes(s)) return "⏳";
+    if (isCheckRunning(c)) return "⏳";
     if (s === "SKIPPED") return "⏭️";
     return "❓";
   }
