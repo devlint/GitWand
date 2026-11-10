@@ -839,11 +839,53 @@ describe("usePrPanel — checks of another commit than the head", () => {
     expect(p.mergeReadiness.value?.ready).toBe(true);
   });
 
-  it("another commit's failed checks do not block the merge", async () => {
-    ghPrChecks.mockResolvedValue(on("old", "FAILURE"));
+  it("another commit's failed checks still block: which side lags is unknown", async () => {
+    // A detail fetched before a push lags behind GitHub's checks: a red check
+    // "of another commit" may be the head's real one.
+    ghPrChecks.mockResolvedValue(on("new", "FAILURE"));
+    ghPrDetail.mockResolvedValueOnce(fakeDetail()).mockRejectedValue(new Error("offline"));
     const p = await openChecksTab();
     approve(p);
-    expect(p.mergeBlocked.value).toBe(false);
+    expect(p.checksOtherCommit.value).toBe("new");
+    expect(p.mergeBlocked.value).toBe(true);
+  });
+
+  it("revalidates the detail even right after fetching it: that fetch may predate the push", async () => {
+    ghPrChecks.mockResolvedValue(on("new"));
+    ghPrDetail.mockResolvedValueOnce(fakeDetail()).mockResolvedValue({ ...fakeDetail(), headSha: "new" });
+    const p = await openChecksTab();
+    await vi.waitFor(() => expect(p.prDetail.value?.headSha).toBe("new"));
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("a push restarts the follow window", async () => {
+    ghPrChecks.mockResolvedValue(on("old"));
+    const p = await openChecksTab();
+    await vi.advanceTimersByTimeAsync(OTHER_COMMIT_FOLLOW_MS + CHECKS_LIVE_SLOW_INTERVAL_MS);
+    const before = ghPrChecks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_SLOW_INTERVAL_MS * 2);
+    expect(ghPrChecks).toHaveBeenCalledTimes(before); // window over
+
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "pushed" });
+    await p.revalidateOpenDetail();
+    await flush();
+    const afterPush = ghPrChecks.mock.calls.length;
+    expect(afterPush).toBe(before + 1); // the push's own refetch
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(ghPrChecks).toHaveBeenCalledTimes(afterPush + 1); // followed again
+  });
+
+  it("re-opening the CI tab after the follow window fetches once more", async () => {
+    ghPrChecks.mockResolvedValue(on("old"));
+    const p = await openChecksTab();
+    await vi.advanceTimersByTimeAsync(OTHER_COMMIT_FOLLOW_MS + CHECKS_LIVE_SLOW_INTERVAL_MS * 2);
+    const before = ghPrChecks.mock.calls.length;
+    p.detailTab.value = "info";
+    await flush();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    p.detailTab.value = "checks";
+    await flush();
+    expect(ghPrChecks).toHaveBeenCalledTimes(before + 1);
   });
 
   it("checks that name no commit still block (an Azure reviewer policy)", async () => {

@@ -43,7 +43,6 @@ import { requireOnline } from "../utils/networkGuard";
 import { formatRelativeAge } from "../utils/relativeTime";
 import {
   isCheckRunning, isCheckBlocking, checkIcon, checksIcon, rollupFromDetailStatus, checksCommitMismatch,
-  isCheckOnOtherCommit,
 } from "../utils/ciChecks";
 import { t } from "./useI18n";
 import { useReviewIntelligence } from "./useReviewIntelligence";
@@ -102,6 +101,14 @@ export function isMergeConflict(mergeable: string | null | undefined): boolean {
   return ["CONFLICTING", "CONFLICTS", "DIRTY"].includes((mergeable || "").toUpperCase());
 }
 
+/** The merge banner. `blocking: false` waits without disabling Merge (the
+ *  head's CI has not reported yet, and may never: the forge decides). */
+export interface MergeReadiness {
+  ready: boolean;
+  reason: string;
+  blocking?: boolean;
+}
+
 /** What the PR detail panel should offer for forge-side auto-merge (v3.11.0). */
 export type AutoMergeOffer =
   | { kind: "arm" }
@@ -126,14 +133,6 @@ export type AutoMergeOffer =
  * Exported as a free function (same precedent as `isMergeConflict` above) so
  * it is unit-testable without instantiating the whole composable.
  */
-/** The merge banner. `blocking: false` waits without disabling Merge (the
- *  head's CI has not reported yet, and may never: the forge decides). */
-export interface MergeReadiness {
-  ready: boolean;
-  reason: string;
-  blocking?: boolean;
-}
-
 export function computeAutoMergeOffer(
   support: AutoMergeSupport,
   state: AutoMergeState,
@@ -436,15 +435,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // Failing / pending checks + branch policies — surfaced by name so
     // forge-specific requirements (e.g. Azure "At least 1 reviewer must approve")
     // read clearly in the banner instead of a generic "checks failing".
-    // A check that ran on another commit says nothing about the head: neither
-    // its green nor its red counts, but the banner waits for the head's (a
-    // wait that never disables Merge: the head may never get a pipeline,
-    // GitLab `[skip ci]`, and the forge's own mergeability still decides).
-    // Checks that name no commit (Azure reviewer policies) still count.
-    const head = prDetail.value?.headSha;
-    const awaitingHead = prChecks.value.some((c) => isCheckOnOtherCommit(c, head));
-    const unmet = prChecks.value.filter((c) => !isCheckOnOtherCommit(c, head) && isBlocking(c));
+    const unmet = prChecks.value.filter(isBlocking);
     const checksOk = unmet.length === 0;
+    // Checks that ran on another commit than the head never make the PR
+    // "ready": the banner waits for the head's CI instead, without disabling
+    // Merge (the head may never get a pipeline, GitLab `[skip ci]`). They are
+    // not ignored either: which side lags is unknown (a detail fetched before
+    // a push lags behind GitHub's checks), so a red one still blocks.
+    const awaitingHead = checksOtherCommit.value !== null;
     // Only each reviewer's *latest* verdict counts — a later APPROVED supersedes
     // an earlier CHANGES_REQUESTED (and vice versa). Scanning every historical
     // review would keep flagging "changes requested" after the reviewer has
@@ -1060,7 +1058,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       persistDetailCache();
     }
     if (wasRunning && !checksRunning.value) onChecksFinished(number, asked);
-    else onChecksOtherCommit(number, asked);
+    else onChecksOtherCommit();
   }
 
   /** Some checks ran on a commit that is not the head the detail shows. Either
@@ -1068,18 +1066,19 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  OTHER_COMMIT_FOLLOW_MS at most, since the head may get no CI at all) or
    *  the detail does (a push it has not seen: the backends that read the PR's
    *  head themselves are always on the latest). Revalidate the detail once
-   *  per such commit, to settle which; a failed revalidation is retried at
-   *  the next fetch. */
+   *  per such commit, to settle which, even right after a detail fetch (that
+   *  one may predate the push); a failed revalidation is retried at the next
+   *  fetch. */
   let _otherCommit: { sha: string; since: number; revalidated: boolean } | null = null;
-  function onChecksOtherCommit(number: number, asked: number) {
+  function onChecksOtherCommit() {
     const sha = checksOtherCommit.value;
     if (!sha) return;
     if (_otherCommit?.sha !== sha) _otherCommit = { sha, since: Date.now(), revalidated: false };
     const seen = _otherCommit;
     if (seen.revalidated) return;
     seen.revalidated = true;
-    void revalidateDetailUnlessFresh(number, asked).then((ok) => {
-      if (ok === false) seen.revalidated = false;
+    void revalidateOpenDetail().then((ok) => {
+      if (!ok) seen.revalidated = false;
     });
   }
 
@@ -1121,15 +1120,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  Skipped when a detail fetch started around the checks request: it reads
    *  the same CI state. */
   function onChecksFinished(number: number, asked: number) {
-    void revalidateDetailUnlessFresh(number, asked);
-  }
-
-  /** Revalidate the detail, unless a fetch of it started around the checks
-   *  request `asked` (it reads the same state). Null when skipped. */
-  async function revalidateDetailUnlessFresh(number: number, asked: number): Promise<boolean | null> {
     const d = _lastDetailFetch;
-    if (d.number === number && d.at >= asked - DETAIL_FRESH_MS) return null;
-    return revalidateOpenDetail();
+    if (d.number !== number || d.at < asked - DETAIL_FRESH_MS) void revalidateOpenDetail();
   }
 
   /** Set PR `number`'s list dot from the backend's own rollup (its detail's
@@ -1166,7 +1158,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   /** Whether coming back (window, detail view) should resume live checks:
    *  the CI tab with something to follow or retry. */
   function liveResumeWanted(): boolean {
-    return detailTab.value === "checks" && checksLoaded.value && (checksLiveWanted() || checksError.value);
+    // Another commit's checks past the follow window: coming back fetches once.
+    return detailTab.value === "checks" && checksLoaded.value
+      && (checksLiveWanted() || checksError.value || checksOtherCommit.value !== null);
   }
 
   /** Whether the CI tab should follow the checks right now: a check runs, or
@@ -1228,6 +1222,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     ([number, sha], [prevNumber, prevSha]) => {
       if (!sha || !prevSha || number !== prevNumber || sha === prevSha) return;
       _checksGen++;
+      _otherCommit = null; // a new head: follow its CI afresh
       _checksLiveSince = 0;
       if (checksLoading.value) _refetchAfterLoad = true;
       else if (checksLoaded.value || prChecks.value.length > 0) retryChecksLive();
@@ -1267,7 +1262,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
   }
 
-  /** Re-fetch the currently open detail bundle in the background (poll-driven). */
   /** Re-fetch the open PR's detail in the background. False when it failed. */
   async function revalidateOpenDetail(): Promise<boolean> {
     const pr = selectedPr.value;
@@ -1386,10 +1380,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
     if (tab === "checks") {
       loadAnnotations();
-      // Already loaded: re-fetch only if a check was still running (a finished
-      // list doesn't change, A3); not loaded yet: the lazy first load.
+      // Already loaded: re-fetch only if a check was still running, or some
+      // were another commit's (a finished list of the head's doesn't change,
+      // A3); not loaded yet: the lazy first load.
       if (checksLoaded.value) {
-        if (checksLiveWanted() || checksError.value) resumeChecksLive();
+        if (liveResumeWanted()) resumeChecksLive();
       } else {
         loadChecks();
       }
