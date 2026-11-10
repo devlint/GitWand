@@ -66,8 +66,6 @@ export const CHECKS_LIVE_MAX_FAILURES = 3;
  *  environment approvals) and would otherwise be polled every 15 s for good. */
 export const CHECKS_LIVE_SLOW_AFTER_MS = 10 * 60_000;
 export const CHECKS_LIVE_SLOW_INTERVAL_MS = 60_000;
-/** How long the CI tab keeps polling after a push, for checks not yet registered. */
-export const CHECKS_AWAIT_AFTER_PUSH_MS = 2 * 60_000;
 
 /** Human-facing forge names for "Open on …" / platform labels. */
 const FORGE_LABELS: Record<string, string> = {
@@ -410,7 +408,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const mergeReadiness = computed<{ ready: boolean; reason: string } | null>(() => {
     // A merge conflict blocks the PR on its own, even with no checks/reviews.
     const hasConflict = isMergeConflict(prDetail.value?.mergeable);
-    if (!prReviews.value.length && !prChecks.value.length && !hasConflict && !checksAwaiting.value) return null;
+    if (!prReviews.value.length && !prChecks.value.length && !hasConflict) return null;
     // A check blocks merge only when it is genuinely failing or still pending.
     // Anything else (success, skipped, neutral, or a completed check with an
     // unrecognised/empty conclusion) is treated as fine — so a passing CI run is
@@ -423,10 +421,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // forge-specific requirements (e.g. Azure "At least 1 reviewer must approve")
     // read clearly in the banner instead of a generic "checks failing".
     const unmet = prChecks.value.filter(isBlocking);
-    // After a push, until the new commit's CI starts (or the wait ends), the
-    // list on screen may still be the old commit's: don't read it as ready.
-    const ciStarting = checksAwaiting.value;
-    const checksOk = unmet.length === 0 && !ciStarting;
+    const checksOk = unmet.length === 0;
     // Only each reviewer's *latest* verdict counts — a later APPROVED supersedes
     // an earlier CHANGES_REQUESTED (and vice versa). Scanning every historical
     // review would keep flagging "changes requested" after the reviewer has
@@ -454,13 +449,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const reasons: string[] = [];
     // Merge conflict first — it's the hardest blocker.
     if (hasConflict) reasons.push(t("pr.ready.reasonMergeConflict"));
-    if (ciStarting) reasons.push(t("pr.ready.reasonChecksStarting"));
     // Prefer the concrete policy/check names; fall back to the generic label.
     // De-duplicate identical names (Azure can report the same policy twice, e.g.
     // an inherited + branch-level "At least 1 reviewer must approve").
     const names = [...new Set(unmet.map((c) => c.name).filter(Boolean))];
     if (names.length) reasons.push(...names);
-    else if (!checksOk && !ciStarting) reasons.push(t("pr.ready.reasonChecksFailing"));
+    else if (!checksOk) reasons.push(t("pr.ready.reasonChecksFailing"));
     if (hasChangesRequested) reasons.push(t("pr.ready.reasonChangesRequested"));
     // A missing approval on its own isn't worth a banner — checks are green and
     // nobody requested changes, so we're just waiting for the merge. Hide it
@@ -859,9 +853,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (selectedPr.value?.number === pr.number) return;
     selectedPr.value = pr;
     resetDetail();
-    _detailSettled = false;
-    _ignoreShaChange = false;
-    _checksFetchedSinceSelect = false;
     // SWR: paint cached detail bundle instantly, revalidate in background.
     const cached = cache.getDetail(detailKey(cwd.value, pr.number));
     if (cached) {
@@ -910,13 +901,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // Ignore a stale response if the user moved on to another PR, or to
       // another repository (same PR number there), meanwhile.
       if (selectedPr.value?.number !== pr.number || cwd.value !== repo) return;
-      // The first fetch after selecting the PR replaces the cached head with
-      // the current one: that is the cache catching up, not a push.
-      if (!_detailSettled) {
-        _detailSettled = true;
-        const shown = prDetail.value?.headSha;
-        if (shown && detail.headSha && shown !== detail.headSha) _ignoreShaChange = true;
-      }
       prDetail.value = detail;
       prComments.value = comments;
       prReviews.value = reviews;
@@ -931,8 +915,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       cache.setDetail(key, { detail, comments, reviews, checks: prChecks.value, issueComments: prIssueComments.value });
       syncListRollup(pr.number, detail.checksStatus);
     } catch (err: any) {
-      // A failed first fetch still settles the head: a later change is a push.
-      if (selectedPr.value?.number === pr.number && cwd.value === repo) _detailSettled = true;
       // Keep the cached bundle on screen if revalidation failed.
       if (!silentError) detailError.value = err.message;
     } finally {
@@ -959,7 +941,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // running and have finished since, revalidate once, like refreshChecks.
     const wasRunning = checksRunning.value;
     const gen = ++_checksGen; // a refresh started before this load must not overwrite it
-    _checksFetchedSinceSelect = true;
     checksLoading.value = true;
     try {
       const asked = Date.now();
@@ -1020,7 +1001,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   /** When live polling started; reset whenever it stops (CI finished, another
    *  tab or PR, window hidden), so only continuous following slows it down. */
   let _checksLiveSince = 0;
-  /** Until when to poll after a push, for checks the forge has not registered. */
   /** A push was seen while loadChecks was in flight: fetch again after it. */
   let _refetchAfterLoad = false;
   /** Start of the last detail fetch, for which PR. */
@@ -1028,22 +1008,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   /** A detail fetch started this close before the checks request (or after it)
    *  sees the same CI state: no need for another when the checks finish. */
   const DETAIL_FRESH_MS = 2_000;
-  /** Set by selectPr; the first detail fetch for the PR settles its head. */
-  let _detailSettled = false;
-  /** A checks request went out since the PR was selected: it asked the forge
-   *  for the current head, whatever head the cached detail showed. */
-  let _checksFetchedSinceSelect = false;
-  /** Ends the post-push wait by itself, even when nothing polls. */
-  let _awaitTimer: ReturnType<typeof setTimeout> | null = null;
-  function endChecksAwait() {
-    if (_awaitTimer) {
-      clearTimeout(_awaitTimer);
-      _awaitTimer = null;
-    }
-    checksAwaiting.value = false;
-  }
-  /** The settling fetch moved the head: the next head change is not a push. */
-  let _ignoreShaChange = false;
   let _disposed = false;
   /** The last load of the checks failed: the tab says so, and re-opening it
    *  retries (an empty tab would otherwise read as "no CI"). */
@@ -1056,12 +1020,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     detailVisible.value = visible;
   }
   const checksRunning = computed(() => prChecks.value.some(isCheckRunning));
-  /** A push was seen and the new commit's CI has not started yet: the merge
-   *  banner waits rather than read the list on screen (empty, or still the
-   *  old commit's: GitLab and Azure report per PR, not per commit) as the
-   *  new commit's. Ends when a check starts running, or by its timer after
-   *  CHECKS_AWAIT_AFTER_PUSH_MS. The one source of truth for the wait. */
-  const checksAwaiting = ref(false);
 
   /** Show a fetched list. When the last running check finished, revalidate. */
   function applyChecks(number: number, checks: CICheck[], wasRunning: boolean, asked: number) {
@@ -1069,17 +1027,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     _lastChecksFetch = Date.now();
     checksError.value = false;
     checksLoaded.value = true;
-    // A running check is the new commit's CI starting; finished results may
-    // still be the old commit's.
-    if (checksAwaiting.value && checks.some(isCheckRunning)) endChecksAwait();
     // Polls mostly bring the same list: don't re-serialize the cache for it.
     if (JSON.stringify(checks) !== JSON.stringify(prChecks.value)) {
       prChecks.value = checks;
       persistDetailCache();
     }
-    // After a push, an empty list means "not registered yet", not "finished".
-    const notYet = checks.length === 0 && checksAwaiting.value;
-    if (wasRunning && !checksRunning.value && !notYet) onChecksFinished(number, asked);
+    if (wasRunning && !checksRunning.value) onChecksFinished(number, asked);
   }
 
   /** Re-fetch the open PR's checks in the background, keeping the current list
@@ -1095,7 +1048,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const current = () =>
       selectedPr.value?.number === number && gen === _checksGen && cwd.value === repo;
     _checksRefreshing = key;
-    _checksFetchedSinceSelect = true;
     try {
       const asked = Date.now();
       const checks = await forge.value.getCIChecks(repo, number);
@@ -1150,15 +1102,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
 
   /** Whether coming back (window, detail view) should resume live checks:
-   *  the CI tab with something to follow or retry, or, on any tab, the wait
-   *  for a push's checks. */
+   *  the CI tab with something to follow or retry. */
   function liveResumeWanted(): boolean {
-    if (checksAwaiting.value) return true;
     return detailTab.value === "checks" && checksLoaded.value && (checksLiveWanted() || checksError.value);
   }
 
   /** Whether the CI tab should follow the checks right now. */
-  const checksLiveWanted = () => checksRunning.value || checksAwaiting.value;
+  const checksLiveWanted = () => checksRunning.value;
 
   function stopChecksLive() {
     if (_checksLiveTimer) {
@@ -1171,12 +1121,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     stopChecksLive();
     if (_disposed || _checksFailures >= CHECKS_LIVE_MAX_FAILURES) return;
     const hidden = typeof document !== "undefined" && document.hidden;
-    // The CI tab follows running checks; after a push, any tab of the detail
-    // looks for the new head's checks, for the banner (bounded by the window).
     const visible = detailVisible.value && !hidden && !!selectedPr.value;
-    const onTab = detailTab.value === "checks" && checksLiveWanted();
-    const awaiting = checksAwaiting.value;
-    if (!visible || !(onTab || awaiting)) {
+    if (!visible || detailTab.value !== "checks" || !checksLiveWanted()) {
       _checksLiveSince = 0;
       return;
     }
@@ -1202,7 +1148,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         _checksFailures = 0;
         _lastChecksFetch = 0;
         _checksLiveSince = 0;
-        endChecksAwait();
         _refetchAfterLoad = false;
         checksError.value = false;
       }
@@ -1211,38 +1156,18 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   );
 
   // A push moves the PR's head: the checks shown belong to the old commit, and
-  // the merge banner reads them. Re-fetch at once on any tab (one call), and
-  // keep polling the CI tab for a while: the new head's checks may take a
-  // moment to be registered.
+  // the merge banner reads them. Fetch them again once, on any tab; the CI tab
+  // then follows them as usual. (Telling the old commit's list from the new
+  // one's for sure needs the backends to say which commit their checks are
+  // for: a follow-up, not guessed here.)
   watch(
     [() => prDetail.value?.number, () => prDetail.value?.headSha],
     ([number, sha], [prevNumber, prevSha]) => {
       if (!sha || !prevSha || number !== prevNumber || sha === prevSha) return;
-      if (_ignoreShaChange) {
-        // The cache catching up, not a push. Its checks belong to the old
-        // head, though: unless a request went out since the PR was selected,
-        // fetch once (no await window), so the banner doesn't read them.
-        _ignoreShaChange = false;
-        if (!_checksFetchedSinceSelect && prChecks.value.length > 0) {
-          _checksGen++;
-          void refreshChecks();
-        }
-        return;
-      }
       _checksGen++;
       _checksLiveSince = 0;
-      // Wait for the new head's checks only where CI exists: the old head had
-      // checks. Never loaded, or none: nothing says any will come.
-      // Old head's checks on screen (loaded, or restored from the cache): CI
-      // exists here, wait for the new head's.
-      const hadChecks = prChecks.value.length > 0;
-      if (hadChecks) {
-        endChecksAwait();
-        checksAwaiting.value = true;
-        _awaitTimer = setTimeout(endChecksAwait, CHECKS_AWAIT_AFTER_PUSH_MS);
-      }
       if (checksLoading.value) _refetchAfterLoad = true;
-      else if (checksLoaded.value || hadChecks) retryChecksLive();
+      else if (checksLoaded.value || prChecks.value.length > 0) retryChecksLive();
       // Nothing loaded nor cached: the next visit of the CI or Diff tab loads them.
     },
   );
@@ -1928,7 +1853,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // runs when a test's effect scope stops.
   onScopeDispose(() => {
     _disposed = true;
-    endChecksAwait();
     stopPoll();
     stopChecksLive();
     if (typeof document !== "undefined" && _visibilityHandler) {
@@ -2023,7 +1947,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     showCreateForm, newPrTitle, newPrBody, newPrBase, newPrDraft, newPrReviewers, isCreating,
     forkInfo, newPrBaseRepo,
     mergingPr, mergeMethod,
-    selectedPr, prDetail, prChecks, checksWithConflict, checksError, checksAwaiting, setDetailVisible, prDiffFiles, prComments, prIssueComments, prReviews,
+    selectedPr, prDetail, prChecks, checksWithConflict, checksError, setDetailVisible, prDiffFiles, prComments, prIssueComments, prReviews,
     detailLoading, detailRefreshing, detailError, detailTab, selectedDiffFile, diffMode,
     // Viewed-file state (B2)
     viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,

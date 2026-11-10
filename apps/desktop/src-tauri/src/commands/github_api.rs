@@ -363,13 +363,53 @@ fn api_json(
 /// GitHub does **not** count `304 Not Modified` responses against the REST rate
 /// limit, so re-fetching an unchanged resource via `If-None-Match` is free. The
 /// PR list poller hits the same per-PR detail / check-run URLs every few minutes;
-/// once cached, unchanged PRs cost zero quota. Unbounded but bounded in practice
-/// by the set of PR/commit URLs visited in a session (same lifetime model as
-/// `GIT_DIR_CACHE`).
-static ETAG_CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
-/// Entries kept in ETAG_CACHE before it starts over: it now holds full PR
-/// bodies (get_pr_json), so it must not grow for the whole session.
-const ETAG_CACHE_MAX: usize = 256;
+/// once cached, unchanged PRs cost zero quota. It holds full PR bodies
+/// (get_pr_json) too, so it is bounded: least recently used entries go first,
+/// and the live CI tab's few entries, used every poll, stay.
+static ETAG_CACHE: OnceLock<Mutex<EtagCache>> = OnceLock::new();
+const ETAG_CACHE_MAX: usize = 512;
+
+/// A small LRU of `(etag, body)` by key. Eviction scans for the least recently
+/// used entry: O(n) on insert into a full cache, fine at this size.
+struct EtagCache {
+    map: HashMap<String, (String, String, u64)>,
+    clock: u64,
+    max: usize,
+}
+
+impl EtagCache {
+    fn new(max: usize) -> Self {
+        EtagCache {
+            map: HashMap::new(),
+            clock: 0,
+            max,
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<(String, String)> {
+        self.clock += 1;
+        let now = self.clock;
+        self.map.get_mut(key).map(|e| {
+            e.2 = now;
+            (e.0.clone(), e.1.clone())
+        })
+    }
+
+    fn insert(&mut self, key: String, etag: String, body: String) {
+        self.clock += 1;
+        if self.map.len() >= self.max && !self.map.contains_key(&key) {
+            if let Some(oldest) = self
+                .map
+                .iter()
+                .min_by_key(|(_, e)| e.2)
+                .map(|(k, _)| k.clone())
+            {
+                self.map.remove(&oldest);
+            }
+        }
+        self.map.insert(key, (etag, body, self.clock));
+    }
+}
 
 /// ETAG_CACHE key: the URL and a fingerprint of the token, so a body fetched
 /// with one account is never served on a 304 to another. The token itself is
@@ -399,9 +439,9 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
 /// back as they are; a 2xx with an ETag is cached. The live CI tab polls
 /// through this, so a long matrix doesn't drain the hourly budget.
 fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
-    let cache = ETAG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = ETAG_CACHE.get_or_init(|| Mutex::new(EtagCache::new(ETAG_CACHE_MAX)));
     let key = etag_key(url, token);
-    let cached = cache.lock().unwrap().get(&key).cloned();
+    let cached = cache.lock().unwrap().get(&key);
 
     let auth = bearer_config(token);
     let inm = cached
@@ -435,11 +475,10 @@ fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
     if status < 400 {
         if let Some(etag) = resp_headers.get("etag") {
             if !etag.is_empty() {
-                let mut map = cache.lock().unwrap();
-                if map.len() >= ETAG_CACHE_MAX && !map.contains_key(&key) {
-                    map.clear();
-                }
-                map.insert(key, (etag.clone(), body.clone()));
+                cache
+                    .lock()
+                    .unwrap()
+                    .insert(key, etag.clone(), body.clone());
             }
         }
     }
@@ -2733,5 +2772,32 @@ mod etag_key_tests {
         assert_ne!(a, b);
         assert!(!a.contains("tok-a"));
         assert_eq!(a, etag_key("https://api.github.com/x", "tok-a"));
+    }
+}
+
+#[cfg(test)]
+mod etag_cache_tests {
+    use super::EtagCache;
+
+    #[test]
+    fn evicts_the_least_recently_used_entry_only() {
+        let mut c = EtagCache::new(2);
+        c.insert("a".into(), "ea".into(), "A".into());
+        c.insert("b".into(), "eb".into(), "B".into());
+        assert!(c.get("a").is_some()); // a is now more recent than b
+        c.insert("c".into(), "ec".into(), "C".into());
+        assert!(c.get("b").is_none());
+        assert_eq!(c.get("a"), Some(("ea".into(), "A".into())));
+        assert_eq!(c.get("c"), Some(("ec".into(), "C".into())));
+    }
+
+    #[test]
+    fn replacing_a_key_never_evicts() {
+        let mut c = EtagCache::new(2);
+        c.insert("a".into(), "1".into(), "A".into());
+        c.insert("b".into(), "1".into(), "B".into());
+        c.insert("a".into(), "2".into(), "A2".into());
+        assert!(c.get("b").is_some());
+        assert_eq!(c.get("a"), Some(("2".into(), "A2".into())));
     }
 }

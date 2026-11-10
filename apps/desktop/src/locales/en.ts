@@ -1173,7 +1173,6 @@ const en = {
       ready: "All checks are green and the PR is approved.",
       waitingPrefix: "Waiting: {0}.",
       reasonChecksFailing: "CI checks failing",
-      reasonChecksStarting: "CI not started yet",
       reasonMergeConflict: "merge conflict",
       reasonNoApproval: "no approval",
       reasonChangesRequested: "changes requested",

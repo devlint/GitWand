@@ -30,9 +30,11 @@ describe("isCheckRunning", () => {
     expect(isCheckRunning(chk("scheduled", ""))).toBe(false);
   });
 
-  it("those are still pending: they block and show the hourglass", () => {
-    expect(isCheckPending(chk("manual", ""))).toBe(true);
-    expect(isCheckBlocking(chk("scheduled", ""))).toBe(true);
+  it("those show the hourglass but do not block the merge", () => {
+    // GitLab lets the MR merge unless pipelines must succeed (its own rule).
+    expect(isCheckPending(chk("manual", ""))).toBe(false);
+    expect(isCheckBlocking(chk("scheduled", ""))).toBe(false);
+    expect(isCheckBlocking(chk("manual", ""))).toBe(false);
     expect(checkIcon(chk("manual", ""))).toBe("⏳");
   });
 

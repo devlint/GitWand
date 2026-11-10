@@ -135,11 +135,6 @@ fn bb_curl_raw(
     curl_with_status(method, url, Some(auth_config), body_json, &[], accept)
 }
 
-/// JSON API call: interprets the `(status, body)` from `bb_curl_raw`.
-///
-/// HTTP ≥ 400 maps to an error (preferring the JSON `message` field).
-/// Empty bodies (DELETE / some PUT) return `Null`. Application-level errors
-/// surfaced in a 2xx `{"error":{...}}` envelope are also mapped to errors.
 /// `bb_curl`'s error for an HTTP ≥ 400 answer. The bare `HTTP <code>` form is
 /// kept as is (other callers match on it); a message carries its code in front.
 fn bb_http_error(status: i32, msg: &str) -> String {
@@ -160,6 +155,11 @@ fn bb_is_forbidden_or_missing(err: &str) -> bool {
     .any(|p| err.starts_with(p))
 }
 
+/// JSON API call: interprets the `(status, body)` from `bb_curl_raw`.
+///
+/// HTTP ≥ 400 maps to an error (preferring the JSON `message` field).
+/// Empty bodies (DELETE / some PUT) return `Null`. Application-level errors
+/// surfaced in a 2xx `{"error":{...}}` envelope are also mapped to errors.
 fn bb_curl(
     method: &str,
     url: &str,

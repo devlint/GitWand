@@ -1158,7 +1158,6 @@ const ptBR: Locale = {
       ready: "Todos os checks estão verdes e a PR está aprovada.",
       waitingPrefix: "Aguardando: {0}.",
       reasonChecksFailing: "checks de CI falhando",
-      reasonChecksStarting: "CI ainda não iniciada",
       reasonMergeConflict: "conflito de merge",
       reasonNoApproval: "sem aprovação",
       reasonChangesRequested: "alterações solicitadas",

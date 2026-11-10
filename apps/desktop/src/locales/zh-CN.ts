@@ -1164,7 +1164,6 @@ const zhCN: Locale = {
       ready: "所有检查均为绿色，PR 已获批准。",
       waitingPrefix: "等待中：{0}。",
       reasonChecksFailing: "CI 检查失败",
-      reasonChecksStarting: "CI 尚未开始",
       reasonMergeConflict: "合并冲突",
       reasonNoApproval: "无批准",
       reasonChangesRequested: "请求修改",

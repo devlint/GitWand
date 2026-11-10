@@ -6,7 +6,7 @@ import type { CICheck } from "./backend";
  * GitLab, Bitbucket and Gitea put a running value in `conclusion` itself.
  * GitLab leaves `conclusion` empty before a pipeline starts (`created`,
  * `preparing`, `waiting_for_resource`). Its `manual` and `scheduled` are not
- * here: they wait on a person or a clock (see WAITING_ON_SOMEONE).
+ * here: they wait on a person or a clock (see ON_HOLD).
  */
 const RUNNING = new Set([
   "QUEUED", "IN_PROGRESS", "INPROGRESS", "PENDING", "REQUESTED", "RUNNING",
@@ -21,11 +21,17 @@ const FAILING = new Set([
 /**
  * States with no result yet that nothing is working on: a required status
  * that has not reported (`EXPECTED`), an approval (GitHub's `WAITING` for an
- * environment, Azure's reviewer policies), a GitLab pipeline waiting on a
- * manual job or a schedule. They block the merge and show ⏳, like the backends'
- * rollups, but polling them could go on for ever.
+ * environment, Azure's policies other than an automatic build). They block
+ * the merge and show ⏳, but polling them could go on for ever.
  */
-const WAITING_ON_SOMEONE = new Set(["EXPECTED", "WAITING", "MANUAL", "SCHEDULED"]);
+const WAITING_ON_SOMEONE = new Set(["EXPECTED", "WAITING"]);
+
+/**
+ * A GitLab pipeline waiting on a manual job or a schedule. Not finished (⏳),
+ * not polled, and not blocking: GitLab lets such an MR merge unless the
+ * project requires pipelines to succeed, which its own mergeability reports.
+ */
+const ON_HOLD = new Set(["MANUAL", "SCHEDULED"]);
 
 function status(check: CICheck): string {
   return (check.conclusion || check.state || "").toUpperCase();
@@ -60,7 +66,7 @@ export function checkIcon(check: CICheck): string {
   if (s === "SUCCESS") return "✅";
   if (isCheckFailing(check)) return "❌";
   if (s === "EXPIRED" || s === "WARNING") return "⚠️";
-  if (isCheckPending(check)) return "⏳";
+  if (isCheckPending(check) || ON_HOLD.has(s)) return "⏳";
   if (s === "SKIPPED") return "⏭️";
   return "❓";
 }
