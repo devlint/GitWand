@@ -27,7 +27,9 @@ vi.mock("@/utils/backend", async () => {
   };
 });
 
-import { usePrPanel, CHECKS_LIVE_INTERVAL_MS } from "../usePrPanel";
+import {
+  usePrPanel, CHECKS_LIVE_INTERVAL_MS, CHECKS_LIVE_SLOW_AFTER_MS, CHECKS_LIVE_SLOW_INTERVAL_MS,
+} from "../usePrPanel";
 
 const running = [{ name: "build", state: "IN_PROGRESS", conclusion: "", detailsUrl: "" }];
 const done = [{ name: "build", state: "COMPLETED", conclusion: "SUCCESS", detailsUrl: "" }];
@@ -119,6 +121,7 @@ describe("usePrPanel — live CI checks", () => {
     const p = await openChecksTab();
     p.detailTab.value = "info";
     await flush();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS); // time spent on Info
     p.detailTab.value = "checks";
     await flush();
     expect(ghPrChecks).toHaveBeenCalledTimes(2);
@@ -207,5 +210,52 @@ describe("usePrPanel — live CI checks", () => {
     // plus once more because CI finished.
     const forPr1 = ghPrDetail.mock.calls.filter((c) => c[1] === 1).length;
     expect(forPr1).toBeGreaterThanOrEqual(3);
+  });
+
+  it("toggling back to the CI tab right after a fetch does not fetch again at once", async () => {
+    ghPrChecks.mockResolvedValue(running);
+    const p = await openChecksTab();
+    p.detailTab.value = "info";
+    await flush();
+    p.detailTab.value = "checks";
+    await flush();
+    expect(ghPrChecks).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies an empty list once it has come back three times in a row (CI skipped)", async () => {
+    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValue([]);
+    const p = await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 3);
+    expect(p.prChecks.value).toEqual([]);
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 4);
+    expect(ghPrChecks).toHaveBeenCalledTimes(4);
+  });
+
+  it("slows down to one fetch a minute when a check stays pending for long", async () => {
+    ghPrChecks.mockResolvedValue(running);
+    await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_SLOW_AFTER_MS);
+    const before = ghPrChecks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_SLOW_INTERVAL_MS * 2);
+    expect(ghPrChecks.mock.calls.length - before).toBeLessThanOrEqual(2);
+  });
+
+  it("drops a refresh that started before the PR was re-selected", async () => {
+    let release!: (v: unknown) => void;
+    const older = [{ name: "old", state: "IN_PROGRESS", conclusion: "", detailsUrl: "" }];
+    ghPrChecks.mockResolvedValueOnce(running)
+      .mockImplementationOnce(() => new Promise((r) => { release = r; }))
+      .mockResolvedValue(done);
+    const p = await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS); // refresh in flight
+    await p.selectPr({ number: 2 } as any);
+    await flush();
+    await p.selectPr({ number: 1 } as any);
+    p.detailTab.value = "checks";
+    await flush();
+    expect(p.prChecks.value).toEqual(done);
+    release(older);
+    await flush();
+    expect(p.prChecks.value).toEqual(done);
   });
 });
