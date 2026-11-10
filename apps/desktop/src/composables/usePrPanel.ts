@@ -6,7 +6,7 @@
  * PrListSidebar (inside RepoSidebar) and PrDetailView (in <main>)
  * share the same reactive state.
  */
-import { ref, computed, watch, onUnmounted, type Ref } from "vue";
+import { ref, computed, watch, onScopeDispose, type Ref } from "vue";
 import {
   gitFileCount,
   gitRemoteInfo,
@@ -41,6 +41,9 @@ import { escapeHtml } from "../utils/escapeHtml";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
 import { formatRelativeAge } from "../utils/relativeTime";
+import {
+  isCheckRunning, isCheckBlocking, checkIcon, checksIcon, rollupFromDetailStatus,
+} from "../utils/ciChecks";
 import { t } from "./useI18n";
 import { useReviewIntelligence } from "./useReviewIntelligence";
 import { indexDiffFiles, parseFileDiff, parseUnifiedDiff } from "../utils/unifiedDiff";
@@ -53,6 +56,16 @@ import { indexDiffFiles, parseFileDiff, parseUnifiedDiff } from "../utils/unifie
 export { indexDiffFiles, parseFileDiff, parseUnifiedDiff };
 
 export const PR_PANEL_KEY = Symbol("prPanel");
+
+/** How often the CI tab re-fetches checks while one is still running. */
+export const CHECKS_LIVE_INTERVAL_MS = 15_000;
+/** Failed refreshes in a row after which the CI tab stops polling. */
+export const CHECKS_LIVE_MAX_FAILURES = 3;
+/** After this long following one PR's CI, poll at the slow interval: some
+ *  "queued" checks wait on a person (Azure reviewer policies, GitHub
+ *  environment approvals) and would otherwise be polled every 15 s for good. */
+export const CHECKS_LIVE_SLOW_AFTER_MS = 10 * 60_000;
+export const CHECKS_LIVE_SLOW_INTERVAL_MS = 60_000;
 
 /** Human-facing forge names for "Open on …" / platform labels. */
 const FORGE_LABELS: Record<string, string> = {
@@ -400,16 +413,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // Anything else (success, skipped, neutral, or a completed check with an
     // unrecognised/empty conclusion) is treated as fine — so a passing CI run is
     // never mislabelled as "waiting".
-    const FAILING = ["FAILURE", "FAILED", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE"];
-    const PENDING = ["QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED", "EXPECTED"];
-    const isBlocking = (c: CICheck) => {
-      const concl = (c.conclusion || "").toUpperCase();
-      if (FAILING.includes(concl)) return true;
-      // Expired build (needs a re-queue) — a pending-style warning, still blocks.
-      if (concl === "EXPIRED") return true;
-      // Still running — no conclusion yet and a pending-looking state.
-      return !concl && PENDING.includes((c.state || "").toUpperCase());
-    };
+    // Expired build (needs a re-queue) — a pending-style warning, still blocks.
+    // Running: the same test as the live CI tab (utils/ciChecks.ts), so the
+    // banner never says "ready" while that tab still follows a check.
+    const isBlocking = isCheckBlocking;
     // Failing / pending checks + branch policies — surfaced by name so
     // forge-specific requirements (e.g. Azure "At least 1 reviewer must approve")
     // read clearly in the banner instead of a generic "checks failing".
@@ -882,6 +889,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    */
   async function fetchDetailBundle(pr: PullRequest, { silentError }: { silentError: boolean }) {
     const key = detailKey(cwd.value, pr.number);
+    const repo = cwd.value;
+    _lastDetailFetch = { number: pr.number, at: Date.now() };
     detailError.value = null;
     try {
       const [detail, comments, reviews] = await Promise.all([
@@ -889,8 +898,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         forge.value.listComments(cwd.value, pr.number).catch(() => [] as PrReviewComment[]),
         forge.value.listReviews(cwd.value, pr.number).catch(() => [] as PrReview[]),
       ]);
-      // Ignore a stale response if the user moved on to another PR meanwhile.
-      if (selectedPr.value?.number !== pr.number) return;
+      // Ignore a stale response if the user moved on to another PR, or to
+      // another repository (same PR number there), meanwhile.
+      if (selectedPr.value?.number !== pr.number || cwd.value !== repo) return;
       prDetail.value = detail;
       prComments.value = comments;
       prReviews.value = reviews;
@@ -903,6 +913,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       }
 
       cache.setDetail(key, { detail, comments, reviews, checks: prChecks.value, issueComments: prIssueComments.value });
+      syncListRollup(pr.number, detail.checksStatus);
     } catch (err: any) {
       // Keep the cached bundle on screen if revalidation failed.
       if (!silentError) detailError.value = err.message;
@@ -924,24 +935,242 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   async function loadChecks() {
     if (!selectedPr.value || checksLoaded.value || checksLoading.value) return;
     const number = selectedPr.value.number;
-    const current = () => selectedPr.value?.number === number;
+    const repo = cwd.value;
+    const current = () => selectedPr.value?.number === number && cwd.value === repo;
+    // A PR reopened from the cache shows the checks it had then: if they were
+    // running and have finished since, revalidate once, like refreshChecks.
+    const wasRunning = checksRunning.value;
+    const gen = ++_checksGen; // a refresh started before this load must not overwrite it
     checksLoading.value = true;
     try {
-      const checks = await forge.value.getCIChecks(cwd.value, number);
+      const asked = Date.now();
+      const checks = await forge.value.getCIChecks(repo, number);
       // Stale response: the user moved to another PR — don't write PR A's
-      // checks into PR B's refs (or cache key via persistDetailCache).
-      if (!current()) return;
-      prChecks.value = checks;
-      checksLoaded.value = true;
-      persistDetailCache();
-    } catch {
-      if (current()) checksLoaded.value = true; // non-fatal — checks tab simply stays empty
+      // checks into PR B's refs (or cache key via persistDetailCache). Or a
+      // push came in meanwhile: this answer is the old head's, and the
+      // refetch below (_refetchAfterLoad) brings the new one.
+      if (!current() || gen !== _checksGen) return;
+      applyChecks(number, checks, wasRunning, asked);
+    } catch (err) {
+      // Non-fatal: the tab stays empty, or keeps a cached running list, which
+      // live polling then retries. A forge without CI checks has none to show.
+      // An answer from before a push doesn't count: the refetch decides.
+      if (current() && gen === _checksGen && err instanceof ForgeNotImplementedError) {
+        checksLoaded.value = true;
+      } else if (current() && gen === _checksGen) {
+        checksLoaded.value = true;
+        // With a cached list on screen, live polling retries it and flags an
+        // error only at the limit (refreshChecks); with nothing to show, say so.
+        if (prChecks.value.length === 0) checksError.value = true;
+        _checksFailures++;
+      }
     } finally {
       // `resetDetail()` already cleared the flag for the new PR, whose own
       // flight may now be in progress — leave it alone.
-      if (current()) checksLoading.value = false;
+      if (current()) {
+        checksLoading.value = false;
+        // A push came in while this load was in flight: fetch the new head's.
+        if (_refetchAfterLoad) {
+          _refetchAfterLoad = false;
+          retryChecksLive();
+        }
+      }
     }
   }
+
+  // ─── Live CI (Checks tab) ───────────────────────────────
+  // While the Checks tab is shown, the window is visible and a check is still
+  // running (or a push was just seen and its checks may not be registered
+  // yet), re-fetch the checks every CHECKS_LIVE_INTERVAL_MS, then every
+  // CHECKS_LIVE_SLOW_INTERVAL_MS once that has gone on for
+  // CHECKS_LIVE_SLOW_AFTER_MS. A chained timeout, not an interval: a slow forge
+  // never stacks requests. Nothing runs once every check has finished (perf
+  // rules, apps/desktop/CLAUDE.md), and nothing after CHECKS_LIVE_MAX_FAILURES
+  // failed fetches in a row (offline, expired token): re-opening the tab or
+  // the window tries again. The backends report a failed fetch as an error
+  // and "no checks" as an empty list, so an empty list is always applied.
+  let _checksLiveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Refresh in flight, as "<repo>#<PR>:<generation>": PR A's request never
+   *  blocks B (in this repo or another), nor an old head's the new head's. */
+  let _checksRefreshing: string | null = null;
+  let _checksFailures = 0;
+  /** Bumped by loadChecks and by a push: an answer from before is stale. */
+  let _checksGen = 0;
+  /** Last fetch of the open PR's checks (reset when the PR changes). */
+  let _lastChecksFetch = 0;
+  /** When live polling started; reset whenever it stops (CI finished, another
+   *  tab or PR, window hidden), so only continuous following slows it down. */
+  let _checksLiveSince = 0;
+  /** A push was seen while loadChecks was in flight: fetch again after it. */
+  let _refetchAfterLoad = false;
+  /** Start of the last detail fetch, for which PR. */
+  let _lastDetailFetch: { number: number; at: number } = { number: -1, at: 0 };
+  /** A detail fetch started this close before the checks request (or after it)
+   *  sees the same CI state: no need for another when the checks finish. */
+  const DETAIL_FRESH_MS = 2_000;
+  let _disposed = false;
+  /** The last load of the checks failed: the tab says so, and re-opening it
+   *  retries (an empty tab would otherwise read as "no CI"). */
+  const checksError = ref(false);
+  /** Whether the PR detail view is on screen (PrDetailView mounted). The panel
+   *  is an app-wide singleton: leaving the PR view keeps a PR selected, and
+   *  the CI tab must not be polled for a view nobody sees. */
+  const detailVisible = ref(false);
+  function setDetailVisible(visible: boolean) {
+    detailVisible.value = visible;
+  }
+  const checksRunning = computed(() => prChecks.value.some(isCheckRunning));
+
+  /** Show a fetched list. When the last running check finished, revalidate. */
+  function applyChecks(number: number, checks: CICheck[], wasRunning: boolean, asked: number) {
+    _checksFailures = 0;
+    _lastChecksFetch = Date.now();
+    checksError.value = false;
+    checksLoaded.value = true;
+    // Polls mostly bring the same list: don't re-serialize the cache for it.
+    if (JSON.stringify(checks) !== JSON.stringify(prChecks.value)) {
+      prChecks.value = checks;
+      persistDetailCache();
+    }
+    if (wasRunning && !checksRunning.value) onChecksFinished(number, asked);
+  }
+
+  /** Re-fetch the open PR's checks in the background, keeping the current list
+   *  on error. */
+  async function refreshChecks() {
+    if (!selectedPr.value || checksLoading.value) return;
+    const number = selectedPr.value.number;
+    const gen = _checksGen;
+    const repo = cwd.value;
+    const key = `${repo}#${number}:${gen}`;
+    if (_checksRefreshing === key) return;
+    const wasRunning = checksRunning.value;
+    const current = () =>
+      selectedPr.value?.number === number && gen === _checksGen && cwd.value === repo;
+    _checksRefreshing = key;
+    try {
+      const asked = Date.now();
+      const checks = await forge.value.getCIChecks(repo, number);
+      if (current()) applyChecks(number, checks, wasRunning, asked);
+    } catch {
+      // Keep the list on screen; the next tick retries, up to the limit,
+      // where the tab says it stopped updating.
+      if (current() && ++_checksFailures >= CHECKS_LIVE_MAX_FAILURES) checksError.value = true;
+    } finally {
+      if (_checksRefreshing === key) _checksRefreshing = null;
+    }
+  }
+
+  /** The last running check finished: revalidate the detail once, so
+   *  mergeability, the Merge button and the list dot (syncListRollup) follow.
+   *  Skipped when a detail fetch started around the checks request: it reads
+   *  the same CI state. */
+  function onChecksFinished(number: number, asked: number) {
+    const d = _lastDetailFetch;
+    if (d.number !== number || d.at < asked - DETAIL_FRESH_MS) void revalidateOpenDetail();
+  }
+
+  /** Set PR `number`'s list dot from the backend's own rollup (its detail's
+   *  `checksStatus`), in the list and in the caches it is repainted from.
+   *  Gitea's list has no dots: left alone. */
+  function syncListRollup(number: number, checksStatus: string) {
+    if (forge.value.name === "gitea") return;
+    // "" is both "no CI" and, on several backends, "the rollup fetch failed":
+    // never clear a dot from it; a list reload settles it.
+    const rollup = rollupFromDetailStatus(checksStatus);
+    if (!rollup) return;
+    const patch = (list: PullRequest[]) =>
+      list.map((pr) => (pr.number === number && pr.checksRollup !== rollup ? { ...pr, checksRollup: rollup } : pr));
+    if (prs.value.some((pr) => pr.number === number && pr.checksRollup !== rollup)) prs.value = patch(prs.value);
+    const memo = PR_LIST_CACHE.get(cwd.value);
+    if (memo) memo.prs = patch(memo.prs);
+    cache.patchListRow(cwd.value, number, { checksRollup: rollup });
+  }
+
+  /** A fresh attempt (tab or window re-opened, a push) after giving up. */
+  function retryChecksLive() {
+    _checksFailures = 0;
+    void refreshChecks().then(scheduleChecksLive);
+  }
+
+  /** Catch up when the last fetch is a full interval old, or after giving up;
+   *  otherwise just resume the cadence. Tab switches and window returns. */
+  function resumeChecksLive() {
+    const stale = Date.now() - _lastChecksFetch >= CHECKS_LIVE_INTERVAL_MS;
+    if (stale || _checksFailures >= CHECKS_LIVE_MAX_FAILURES) retryChecksLive();
+    else scheduleChecksLive();
+  }
+
+  /** Whether coming back (window, detail view) should resume live checks:
+   *  the CI tab with something to follow or retry. */
+  function liveResumeWanted(): boolean {
+    return detailTab.value === "checks" && checksLoaded.value && (checksLiveWanted() || checksError.value);
+  }
+
+  /** Whether the CI tab should follow the checks right now. */
+  const checksLiveWanted = () => checksRunning.value;
+
+  function stopChecksLive() {
+    if (_checksLiveTimer) {
+      clearTimeout(_checksLiveTimer);
+      _checksLiveTimer = null;
+    }
+  }
+
+  function scheduleChecksLive() {
+    stopChecksLive();
+    if (_disposed || _checksFailures >= CHECKS_LIVE_MAX_FAILURES) return;
+    const hidden = typeof document !== "undefined" && document.hidden;
+    const visible = detailVisible.value && !hidden && !!selectedPr.value;
+    if (!visible || detailTab.value !== "checks" || !checksLiveWanted()) {
+      _checksLiveSince = 0;
+      return;
+    }
+    if (!_checksLiveSince) _checksLiveSince = Date.now();
+    const slow = Date.now() - _checksLiveSince >= CHECKS_LIVE_SLOW_AFTER_MS;
+    _checksLiveTimer = setTimeout(async () => {
+      _checksLiveTimer = null;
+      await refreshChecks();
+      scheduleChecksLive();
+    }, slow ? CHECKS_LIVE_SLOW_INTERVAL_MS : CHECKS_LIVE_INTERVAL_MS);
+  }
+
+  // The detail view coming back on screen: catch up like a tab switch.
+  watch(detailVisible, (visible) => {
+    if (!visible) stopChecksLive();
+    else if (liveResumeWanted()) resumeChecksLive();
+  });
+
+  watch(
+    [detailTab, () => selectedPr.value?.number, checksRunning],
+    ([, number], [, prevNumber]) => {
+      if (number !== prevNumber) {
+        _checksFailures = 0;
+        _lastChecksFetch = 0;
+        _checksLiveSince = 0;
+        _refetchAfterLoad = false;
+        checksError.value = false;
+      }
+      scheduleChecksLive();
+    },
+  );
+
+  // A push moves the PR's head: the checks shown belong to the old commit, and
+  // the merge banner reads them. Fetch them again once, on any tab; the CI tab
+  // then follows them as usual. (Telling the old commit's list from the new
+  // one's for sure needs the backends to say which commit their checks are
+  // for: a follow-up, not guessed here.)
+  watch(
+    [() => prDetail.value?.number, () => prDetail.value?.headSha],
+    ([number, sha], [prevNumber, prevSha]) => {
+      if (!sha || !prevSha || number !== prevNumber || sha === prevSha) return;
+      _checksGen++;
+      _checksLiveSince = 0;
+      if (checksLoading.value) _refetchAfterLoad = true;
+      else if (checksLoaded.value || prChecks.value.length > 0) retryChecksLive();
+      // Nothing loaded nor cached: the next visit of the CI or Diff tab loads them.
+    },
+  );
 
   async function loadIssueComments() {
     if (!selectedPr.value || issueCommentsLoaded.value || issueCommentsLoading.value) return;
@@ -1093,7 +1322,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
     if (tab === "checks") {
       loadAnnotations();
-      loadChecks();
+      // Already loaded: re-fetch only if a check was still running (a finished
+      // list doesn't change, A3); not loaded yet: the lazy first load.
+      if (checksLoaded.value) {
+        if (checksLiveWanted() || checksError.value) resumeChecksLive();
+      } else {
+        loadChecks();
+      }
     }
     if (tab === "info") {
       loadIssueComments();
@@ -1518,24 +1753,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     return formatRelativeAge(dateStr, t);
   }
 
-  function checkIcon(c: CICheck): string {
-    const s = (c.conclusion || c.state || "").toUpperCase();
-    if (s === "SUCCESS") return "✅";
-    if (["FAILURE", "ERROR", "CANCELLED"].includes(s)) return "❌";
-    if (s === "EXPIRED") return "⚠️";
-    if (["PENDING", "IN_PROGRESS", "QUEUED"].includes(s)) return "⏳";
-    if (s === "SKIPPED") return "⏭️";
-    return "❓";
-  }
-
-  function checksIcon(status: string): string {
-    const s = status.toUpperCase();
-    if (s === "SUCCESS" || s === "PASS") return "✅";
-    if (["FAILURE", "FAIL", "ERROR"].includes(s)) return "❌";
-    if (s === "PENDING") return "⏳";
-    return "";
-  }
-
   function mergeableIcon(s: string) {
     switch (s.toUpperCase()) {
       case "MERGEABLE": return "✅";
@@ -1602,8 +1819,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   function handleVisibilityChange() {
     if (document.hidden) {
       stopPoll();
+      stopChecksLive();
     } else {
       startPoll();
+      // Live CI: catch up on return if the last fetch is a full interval old,
+      // then resume the 15 s cadence. A brief alt-tab costs no extra call.
+      if (detailVisible.value && liveResumeWanted()) {
+        resumeChecksLive();
+      }
       // Catch up immediately if a full interval elapsed while hidden, but don't
       // refetch on every brief alt-tab.
       if (Date.now() - _lastPoll >= REVALIDATE_INTERVAL_MS) pollTick();
@@ -1626,12 +1849,16 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     document.addEventListener("visibilitychange", _visibilityHandler);
   }
 
-  onUnmounted(() => {
+  // onScopeDispose, not onUnmounted: same moment in a component, and it also
+  // runs when a test's effect scope stops.
+  onScopeDispose(() => {
+    _disposed = true;
     stopPoll();
+    stopChecksLive();
     if (typeof document !== "undefined" && _visibilityHandler) {
       document.removeEventListener("visibilitychange", _visibilityHandler);
     }
-  });
+  }, true); // silent outside a scope (most tests)
 
   async function init() {
     // Flip the mounted flag — see `panelMounted` declaration for rationale.
@@ -1720,7 +1947,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     showCreateForm, newPrTitle, newPrBody, newPrBase, newPrDraft, newPrReviewers, isCreating,
     forkInfo, newPrBaseRepo,
     mergingPr, mergeMethod,
-    selectedPr, prDetail, prChecks, checksWithConflict, prDiffFiles, prComments, prIssueComments, prReviews,
+    selectedPr, prDetail, prChecks, checksWithConflict, checksError, setDetailVisible, prDiffFiles, prComments, prIssueComments, prReviews,
     detailLoading, detailRefreshing, detailError, detailTab, selectedDiffFile, diffMode,
     // Viewed-file state (B2)
     viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,
@@ -1753,6 +1980,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // Actions
     init, ensurePrsLoaded, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff, loadChecks,
     revalidateOpenDetail,
+    /** Background re-fetch of the open PR's checks (live CI; exposed for tests). */
+    refreshChecks,
     createPr, checkoutPr, mergePr, armAutoMerge, disarmAutoMerge, convertDraftToReady,
     updatePr, forgeSupportsEdit,
     handleCreateComment, handleReplyComment, handleEditComment,

@@ -41,6 +41,7 @@ import type { DiffMode } from "../utils/diffMode";
 import { getPersistedDiffMode } from "../utils/diffMode";
 // Shared parser: keeps hunk lines whose content starts with `--`/`++`.
 import { parseUnifiedDiff } from "../utils/unifiedDiff";
+import { checkIcon, checksIcon } from "../utils/ciChecks";
 
 const props = defineProps<{
   cwd: string;
@@ -428,23 +429,6 @@ function mergeableIcon(s: string) {
     default: return "—";
   }
 }
-
-function checkIcon(c: CICheck): string {
-  const s = (c.conclusion || c.state || "").toUpperCase();
-  if (s === "SUCCESS") return "✅";
-  if (["FAILURE","ERROR","CANCELLED"].includes(s)) return "❌";
-  if (["PENDING","IN_PROGRESS","QUEUED"].includes(s)) return "⏳";
-  if (s === "SKIPPED") return "⏭️";
-  return "❓";
-}
-
-const checksIcon = (status: string) => {
-  const s = status.toUpperCase();
-  if (s === "SUCCESS" || s === "PASS") return "✅";
-  if (["FAILURE","FAIL","ERROR"].includes(s)) return "❌";
-  if (s === "PENDING") return "⏳";
-  return "";
-};
 
 const commitsUrl = computed(() => {
   const base = prDetail.value?.url || "";

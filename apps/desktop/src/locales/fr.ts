@@ -1033,6 +1033,8 @@ const fr: Locale = {
       filesCount: "{0} fichier(s)",
       noDiff: "Aucun diff disponible.",
       noChecks: "Aucun check CI trouvé.",
+      checksLoadFailed: "Impossible de charger les checks CI. Rouvrez cet onglet pour réessayer.",
+      checksStale: "Mise à jour en direct interrompue : impossible de joindre les checks CI. Rouvrez cet onglet pour réessayer.",
     },
     annotations: {
       badge: "{0} annotation(s)",

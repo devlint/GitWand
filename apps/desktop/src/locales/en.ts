@@ -1040,6 +1040,8 @@ const en = {
       filesCount: "{0} file(s)",
       noDiff: "No diff available.",
       noChecks: "No CI checks found.",
+      checksLoadFailed: "Couldn’t load the CI checks. Reopen this tab to try again.",
+      checksStale: "Live updates stopped: the CI checks could not be reached. Reopen this tab to try again.",
     },
     annotations: {
       badge: "{0} annotation(s)",

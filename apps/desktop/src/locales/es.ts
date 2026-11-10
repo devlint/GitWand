@@ -1024,6 +1024,8 @@ const es: Locale = {
       filesCount: "{0} archivo(s)",
       noDiff: "Sin diff disponible.",
       noChecks: "No se encontraron checks de CI.",
+      checksLoadFailed: "No se pudieron cargar los checks de CI. Vuelve a abrir esta pestaña para reintentarlo.",
+      checksStale: "Actualización en directo detenida: no se pudo acceder a los checks de CI. Vuelve a abrir esta pestaña para reintentarlo.",
     },
     annotations: {
       badge: "{0} anotación(es)",

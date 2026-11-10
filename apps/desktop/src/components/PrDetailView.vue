@@ -427,11 +427,14 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
+  // Live CI polls only while this view is on screen (usePrPanel).
+  p.setDetailVisible(true);
   window.addEventListener("keydown", handleKeydown);
   window.addEventListener("mousemove", trackMouse);
 });
 
 onUnmounted(() => {
+  p.setDetailVisible(false);
   window.removeEventListener("keydown", handleKeydown);
   window.removeEventListener("mousemove", trackMouse);
   document.body.style.cursor = "";
@@ -1577,8 +1580,15 @@ function submitRequestReviewers() {
 
         <!-- CI tab -->
         <div v-else-if="p.detailTab.value === 'checks'" class="pdv-body pdv-checks-body">
-          <div v-if="p.checksWithConflict.value.length === 0" class="pdv-loading">{{ t('pr.detail.noChecks') }}</div>
+          <div v-if="p.checksWithConflict.value.length === 0" class="pdv-loading">
+            {{ p.checksError.value ? t('pr.detail.checksLoadFailed') : t('pr.detail.noChecks') }}
+          </div>
           <div v-else class="pdv-checks">
+            <!-- A list that stopped updating, or only the virtual merge-conflict
+                 entry over checks that never loaded. -->
+            <div v-if="p.checksError.value" class="pdv-checks-stale" role="status">
+              {{ p.prChecks.value.length ? t('pr.detail.checksStale') : t('pr.detail.checksLoadFailed') }}
+            </div>
             <div v-for="c in p.checksWithConflict.value" :key="c.name" class="pdv-check">
               <span class="pdv-check-icon">{{ p.checkIcon(c) }}</span>
               <span class="pdv-check-name">{{ c.name }}</span>
@@ -3300,6 +3310,14 @@ function submitRequestReviewers() {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+.pdv-checks-stale {
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
 }
 .pdv-check {
   display: flex;

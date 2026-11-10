@@ -1380,6 +1380,20 @@ fn rest_pr_create_comment(cwd: &str, number: i64, body: &str) -> Result<serde_js
 
 /// Map an Azure policy-evaluation `status` to (state, conclusion) in the
 /// vocabulary the frontend merge-readiness logic understands.
+/// A pending policy is "queued" only when a build will move it by itself (a
+/// build validation policy with automatic queueing). Any other one (reviewers,
+/// comment resolution, work item linking, a status an external service has not
+/// posted, a build someone must queue by hand) waits on a person or on someone
+/// else: "waiting", which the CI tab shows as pending but does not poll
+/// (utils/ciChecks.ts).
+fn pending_policy_state(automatic_build: bool, state: &'static str) -> &'static str {
+    if state == "queued" && !automatic_build {
+        "waiting"
+    } else {
+        state
+    }
+}
+
 fn map_policy_status(status: &str) -> (&'static str, &'static str) {
     match status {
         "approved" => ("completed", "SUCCESS"),
@@ -1484,6 +1498,16 @@ fn rollup_from_checks(checks: &[CICheck]) -> String {
     }
 }
 
+/// True when the policy-evaluations API is simply not available for this repo
+/// or user: 400 (preview API refused), 403 (no permission on policies) or 404
+/// (none configured). Other errors (429 rate limiting, 5xx, network) are a
+/// failed fetch. Matches the error `finalize_json` builds.
+fn az_policies_unavailable(err: &str) -> bool {
+    ["400", "403", "404"]
+        .iter()
+        .any(|code| err.starts_with(&format!("Azure DevOps API error ({})", code)))
+}
+
 fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
     let (r, pr) = get_pr_json(cwd, number)?;
     let project_id = pr
@@ -1505,10 +1529,13 @@ fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
         urlenc(project_id),
         urlenc(&artifact),
     );
-    // Policies may be disabled on the repo — treat any failure as "no checks".
+    // Policies unavailable (see az_policies_unavailable): no evaluations, and
+    // the reviewer fallback below still applies. Anything else is a failed
+    // fetch and stays an error, so the CI tab keeps a running list on screen.
     let v = match az_json("GET", &url, None) {
         Ok(v) => v,
-        Err(_) => return Ok(Vec::new()),
+        Err(e) if az_policies_unavailable(&e) => serde_json::Value::Null,
+        Err(e) => return Err(e),
     };
     let evals = v
         .get("value")
@@ -1573,6 +1600,12 @@ fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
                 None => name.clone(),
             };
             let (mut state, mut conclusion) = map_policy_status(&js(e, "status"));
+            // A build policy set to manual queueing waits on a person too.
+            let manual_build = settings
+                .and_then(|s| s.get("manualQueueOnly"))
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false);
+            state = pending_policy_state(build_def_id.is_some() && !manual_build, state);
             let is_expired = e
                 .get("context")
                 .and_then(|c| c.get("isExpired"))
@@ -1645,7 +1678,8 @@ fn pending_reviewer_check(pr: &serde_json::Value) -> Option<CICheck> {
         } else {
             "Waiting for reviewer approval".to_string()
         },
-        state: "queued".to_string(),
+        // Waits on a person: pending, not polled (see the policy loop).
+        state: "waiting".to_string(),
         conclusion: if any_rejected { "FAILURE" } else { "" }.to_string(),
         details_url: String::new(),
     })
@@ -2482,5 +2516,40 @@ mod az_auto_complete_body_tests {
     fn an_unknown_method_falls_back_to_no_fast_forward() {
         let b = az_auto_complete_body(Some("id"), "nonsense");
         assert_eq!(b["completionOptions"]["mergeStrategy"], "noFastForward");
+    }
+}
+
+#[cfg(test)]
+mod az_client_error_tests {
+    use super::{az_policies_unavailable, finalize_json};
+
+    #[test]
+    fn policies_unavailable_on_400_403_404() {
+        for code in [400, 403, 404] {
+            let e = finalize_json(code, r#"{"message":"nope"}"#).unwrap_err();
+            assert!(az_policies_unavailable(&e), "{}", code);
+        }
+    }
+
+    #[test]
+    fn rate_limiting_server_errors_and_network_failures_are_failed_fetches() {
+        for code in [429, 401, 500, 503] {
+            let e = finalize_json(code, "").unwrap_err();
+            assert!(!az_policies_unavailable(&e), "{}", code);
+        }
+        assert!(!az_policies_unavailable("curl: (6) Could not resolve host"));
+    }
+}
+
+#[cfg(test)]
+mod pending_policy_state_tests {
+    use super::pending_policy_state;
+
+    #[test]
+    fn only_build_policies_stay_queued() {
+        assert_eq!(pending_policy_state(true, "queued"), "queued");
+        assert_eq!(pending_policy_state(false, "queued"), "waiting");
+        assert_eq!(pending_policy_state(false, "in_progress"), "in_progress");
+        assert_eq!(pending_policy_state(false, "completed"), "completed");
     }
 }

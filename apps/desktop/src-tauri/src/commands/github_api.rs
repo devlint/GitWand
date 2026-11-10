@@ -130,6 +130,19 @@ fn mark_restricted(cwd: &str) {
     }
 }
 
+/// True when a checks request was refused for good rather than failed: a 403
+/// or 404 (a fine-grained token without "Checks: read", checks not visible),
+/// in the REST error format (`GitHub API error (403): …`) or gh's (`… (HTTP
+/// 403)`). Not a rate limit (GitHub answers those with 403 too) and not an
+/// organization's OAuth app restriction, which `with_rest` retries through gh.
+pub(crate) fn checks_unavailable(err: &str) -> bool {
+    let code = ["403", "404"].iter().any(|c| {
+        err.starts_with(&format!("GitHub API error ({})", c))
+            || err.contains(&format!("(HTTP {})", c))
+    });
+    code && !err.to_lowercase().contains("rate limit") && !is_oauth_restricted(err)
+}
+
 /// True for GitHub's 403 "organization has enabled OAuth App access
 /// restrictions" error, as `map_api_error` formats it.
 pub(crate) fn is_oauth_restricted(err: &str) -> bool {
@@ -350,10 +363,63 @@ fn api_json(
 /// GitHub does **not** count `304 Not Modified` responses against the REST rate
 /// limit, so re-fetching an unchanged resource via `If-None-Match` is free. The
 /// PR list poller hits the same per-PR detail / check-run URLs every few minutes;
-/// once cached, unchanged PRs cost zero quota. Unbounded but bounded in practice
-/// by the set of PR/commit URLs visited in a session (same lifetime model as
-/// `GIT_DIR_CACHE`).
-static ETAG_CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+/// once cached, unchanged PRs cost zero quota. It holds full PR bodies
+/// (get_pr_json) too, so it is bounded: least recently used entries go first,
+/// and the live CI tab's few entries, used every poll, stay.
+static ETAG_CACHE: OnceLock<Mutex<EtagCache>> = OnceLock::new();
+const ETAG_CACHE_MAX: usize = 512;
+
+/// A small LRU of `(etag, body)` by key. Eviction scans for the least recently
+/// used entry: O(n) on insert into a full cache, fine at this size.
+struct EtagCache {
+    map: HashMap<String, (String, String, u64)>,
+    clock: u64,
+    max: usize,
+}
+
+impl EtagCache {
+    fn new(max: usize) -> Self {
+        EtagCache {
+            map: HashMap::new(),
+            clock: 0,
+            max,
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<(String, String)> {
+        self.clock += 1;
+        let now = self.clock;
+        self.map.get_mut(key).map(|e| {
+            e.2 = now;
+            (e.0.clone(), e.1.clone())
+        })
+    }
+
+    fn insert(&mut self, key: String, etag: String, body: String) {
+        self.clock += 1;
+        if self.map.len() >= self.max && !self.map.contains_key(&key) {
+            if let Some(oldest) = self
+                .map
+                .iter()
+                .min_by_key(|(_, e)| e.2)
+                .map(|(k, _)| k.clone())
+            {
+                self.map.remove(&oldest);
+            }
+        }
+        self.map.insert(key, (etag, body, self.clock));
+    }
+}
+
+/// ETAG_CACHE key: the URL and a fingerprint of the token, so a body fetched
+/// with one account is never served on a 304 to another. The token itself is
+/// not kept.
+fn etag_key(url: &str, token: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    token.hash(&mut h);
+    format!("{:016x} {}", h.finish(), url)
+}
 
 /// GET a GitHub JSON endpoint with ETag-based conditional requests.
 ///
@@ -361,8 +427,21 @@ static ETAG_CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock
 /// body without spending rate-limit quota. A `200` refreshes the cache from the
 /// response `ETag`. Falls back to a plain fetch when no ETag is returned.
 fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> {
-    let cache = ETAG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let cached = cache.lock().unwrap().get(url).cloned();
+    let (status, body) = get_cached_raw(url, token)?;
+    if status >= 400 {
+        return Err(map_api_error(status, &body));
+    }
+    parse_json_body(&body)
+}
+
+/// A conditional GET (`If-None-Match` from ETAG_CACHE): a 304 costs nothing
+/// against the rate limit and answers `(200, cached body)`. Other answers come
+/// back as they are; a 2xx with an ETag is cached. The live CI tab polls
+/// through this, so a long matrix doesn't drain the hourly budget.
+fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
+    let cache = ETAG_CACHE.get_or_init(|| Mutex::new(EtagCache::new(ETAG_CACHE_MAX)));
+    let key = etag_key(url, token);
+    let cached = cache.lock().unwrap().get(&key);
 
     let auth = bearer_config(token);
     let inm = cached
@@ -387,24 +466,23 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
         // cache entry exists, so `cached` is Some here; if it's somehow not,
         // fail loudly rather than silently parsing an empty body as data.
         return match cached {
-            Some((_, cached_body)) => parse_json_body(&cached_body),
+            Some((_, cached_body)) => Ok((200, cached_body)),
             None => Err(format!(
                 "304 Not Modified received for {url} with no cached body"
             )),
         };
     }
-    if status >= 400 {
-        return Err(map_api_error(status, &body));
-    }
-    if let Some(etag) = resp_headers.get("etag") {
-        if !etag.is_empty() {
-            cache
-                .lock()
-                .unwrap()
-                .insert(url.to_string(), (etag.clone(), body.clone()));
+    if status < 400 {
+        if let Some(etag) = resp_headers.get("etag") {
+            if !etag.is_empty() {
+                cache
+                    .lock()
+                    .unwrap()
+                    .insert(key, etag.clone(), body.clone());
+            }
         }
     }
-    parse_json_body(&body)
+    Ok((status, body))
 }
 
 // ─── JSON field helpers ─────────────────────────────────────────────────────
@@ -767,7 +845,12 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
     if sha.is_empty() {
         return String::new();
     }
-    let url = format!("{}/repos/{}/commits/{}/check-runs", API_BASE, repo, sha);
+    // per_page=100 like the CI tab's own fetch: a big matrix must not look
+    // finished on its first 30 runs.
+    let url = format!(
+        "{}/repos/{}/commits/{}/check-runs?per_page=100",
+        API_BASE, repo, sha
+    );
     let v = match api_json_cached(&url, token) {
         Ok(v) => v,
         Err(_) => return String::new(),
@@ -862,12 +945,10 @@ pub(crate) fn diff_numstat(cwd: &str, head: &str, base: &str) -> (i64, i64) {
 fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_json::Value), String> {
     let (owner, repo) = owner_repo(cwd)?;
     let origin = format!("{}/{}", owner, repo);
-    let (st, body) = curl_raw(
-        "GET",
+    // Conditional: the live CI tab reads the PR's head on every poll.
+    let (st, body) = get_cached_raw(
         &format!("{}/repos/{}/pulls/{}", API_BASE, origin, number),
-        Some(token),
-        None,
-        "application/vnd.github+json",
+        token,
     )?;
     if st < 400 {
         let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
@@ -988,10 +1069,20 @@ pub(crate) fn rest_pr_checks(cwd: &str, number: i64, token: &str) -> Result<Vec<
     if sha.is_empty() {
         return Ok(Vec::new());
     }
-    let url = format!("{}/repos/{}/commits/{}/check-runs", API_BASE, repo, sha);
-    let v = match api_json("GET", &url, token, None) {
+    // per_page=100 like the gh path and the dev-server: the default 30 would
+    // let a big matrix look finished while its later runs still go.
+    let url = format!(
+        "{}/repos/{}/commits/{}/check-runs?per_page=100",
+        API_BASE, repo, sha
+    );
+    // A commit with no checks answers 200 with an empty list; an error is a
+    // failed fetch, and the CI tab must be able to tell the two apart (it
+    // keeps a running list on screen through a failure, but not through "none").
+    // A token that may not read checks (403/404) just has none to show.
+    let v = match api_json_cached(&url, token) {
         Ok(v) => v,
-        Err(_) => return Ok(Vec::new()), // no checks configured — not fatal
+        Err(e) if checks_unavailable(&e) => return Ok(Vec::new()),
+        Err(e) => return Err(e),
     };
     let runs = v
         .get("check_runs")
@@ -2636,5 +2727,77 @@ mod tests {
             "head": { "ref": "main", "repo": null }
         });
         assert_eq!(head_branch_to_delete(&pr), None);
+    }
+}
+
+#[cfg(test)]
+mod checks_unavailable_tests {
+    use super::checks_unavailable;
+
+    #[test]
+    fn forbidden_or_not_found_means_no_checks_to_show() {
+        assert!(checks_unavailable(
+            "GitHub API error (403): Resource not accessible by personal access token"
+        ));
+        assert!(checks_unavailable("GitHub API error (404): Not Found"));
+        assert!(checks_unavailable(
+            "gh api check-runs: gh: Resource not accessible by integration (HTTP 403)"
+        ));
+    }
+
+    #[test]
+    fn rate_limits_oauth_restrictions_and_other_errors_are_failures() {
+        assert!(!checks_unavailable(
+            "GitHub API error (403): API rate limit exceeded for user"
+        ));
+        assert!(!checks_unavailable(
+            "gh: You have exceeded a secondary rate limit (HTTP 403)"
+        ));
+        assert!(!checks_unavailable(
+            "GitHub API error (403): the `X` organization has enabled OAuth App access restrictions"
+        ));
+        assert!(!checks_unavailable("GitHub API error (500): boom"));
+        assert!(!checks_unavailable("curl: (6) Could not resolve host"));
+    }
+}
+
+#[cfg(test)]
+mod etag_key_tests {
+    use super::etag_key;
+
+    #[test]
+    fn depends_on_the_token_without_containing_it() {
+        let a = etag_key("https://api.github.com/x", "tok-a");
+        let b = etag_key("https://api.github.com/x", "tok-b");
+        assert_ne!(a, b);
+        assert!(!a.contains("tok-a"));
+        assert_eq!(a, etag_key("https://api.github.com/x", "tok-a"));
+    }
+}
+
+#[cfg(test)]
+mod etag_cache_tests {
+    use super::EtagCache;
+
+    #[test]
+    fn evicts_the_least_recently_used_entry_only() {
+        let mut c = EtagCache::new(2);
+        c.insert("a".into(), "ea".into(), "A".into());
+        c.insert("b".into(), "eb".into(), "B".into());
+        assert!(c.get("a").is_some()); // a is now more recent than b
+        c.insert("c".into(), "ec".into(), "C".into());
+        assert!(c.get("b").is_none());
+        assert_eq!(c.get("a"), Some(("ea".into(), "A".into())));
+        assert_eq!(c.get("c"), Some(("ec".into(), "C".into())));
+    }
+
+    #[test]
+    fn replacing_a_key_never_evicts() {
+        let mut c = EtagCache::new(2);
+        c.insert("a".into(), "1".into(), "A".into());
+        c.insert("b".into(), "1".into(), "B".into());
+        c.insert("a".into(), "2".into(), "A2".into());
+        assert!(c.get("b").is_some());
+        assert_eq!(c.get("a"), Some(("2".into(), "A2".into())));
     }
 }
