@@ -675,6 +675,120 @@ describe("usePrPanel — live CI, seventh review", () => {
   });
 });
 
+describe("usePrPanel — live CI, eighth review", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ghPrDetail.mockReset().mockResolvedValue(fakeDetail());
+    ghPrChecks.mockReset();
+  });
+  afterEach(() => {
+    scopes.splice(0).forEach((s) => s.stop());
+    vi.useRealTimers();
+  });
+
+  it("while CI is starting, the banner does not also say checks are failing", async () => {
+    ghPrChecks.mockResolvedValueOnce(done).mockResolvedValue([]);
+    const p = await openChecksTab();
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+    const reason = p.mergeReadiness.value?.reason ?? "";
+    expect(reason).toContain("CI not started yet");
+    expect(reason).not.toContain("failing");
+  });
+
+  it("a load that started before a push neither applies the old head's list nor ends the wait", async () => {
+    window.localStorage.clear();
+    _resetPrCacheForTesting();
+    let release!: (v: unknown) => void;
+    ghPrChecks.mockResolvedValueOnce(done)
+      .mockImplementationOnce(() => new Promise((r) => { release = r; }))
+      .mockResolvedValue([]);
+    const p = await openChecksTab(); // PR 1 loaded: done
+    await p.selectPr({ number: 2 } as any);
+    await flush();
+    await p.selectPr({ number: 1 } as any);
+    p.detailTab.value = "checks"; // loadChecks in flight (cached done shown)
+    await flush();
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail(); // push
+    await flush();
+    release(done); // the old head's answer
+    await flush();
+    expect(p.checksAwaiting.value).toBe(true);
+    expect(p.prChecks.value).toEqual([]); // the refetch for the new head
+  });
+
+  it("a push seen before the CI tab ever loaded re-fetches the cached checks", async () => {
+    ghPrChecks.mockResolvedValue(done);
+    const p = await openChecksTab();
+    await p.selectPr({ number: 2 } as any);
+    await flush();
+    await p.selectPr({ number: 1 } as any); // Info, cached done, checks not loaded
+    await flush();
+    const n = ghPrChecks.mock.calls.length;
+    ghPrChecks.mockResolvedValue(running);
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+    expect(ghPrChecks.mock.calls.length).toBe(n + 1);
+    expect(p.prChecks.value).toEqual(running);
+  });
+
+  it("post-push polling off the CI tab resumes after the window was hidden", async () => {
+    ghPrChecks.mockResolvedValueOnce(done).mockResolvedValue([]);
+    const p = await openChecksTab();
+    p.detailTab.value = "info";
+    await flush();
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+    const hidden = vi.spyOn(document, "hidden", "get");
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 2);
+    const n = ghPrChecks.mock.calls.length;
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flush();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(ghPrChecks.mock.calls.length).toBeGreaterThan(n);
+    hidden.mockRestore();
+  });
+
+  it("a detail answer from another repository is dropped", async () => {
+    let release!: (v: unknown) => void;
+    const cwdRef = ref("/repo");
+    ghPrChecks.mockResolvedValue(done);
+    const scope = effectScope();
+    scopes.push(scope);
+    const p = scope.run(() => usePrPanel(cwdRef))!;
+    p.setDetailVisible(true);
+    ghPrDetail.mockImplementationOnce(() => new Promise((r) => { release = r; }));
+    const first = p.selectPr({ number: 12 } as any); // repo X, in flight
+    cwdRef.value = "/other";
+    await flush();
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), number: 12, headSha: "yyy", checksStatus: "success" });
+    await p.selectPr({ number: 12 } as any); // repo Y
+    p.prs.value = [{ number: 12, checksRollup: "PENDING" } as any];
+    release({ ...fakeDetail(), number: 12, headSha: "xxx", checksStatus: "failure" });
+    await first;
+    await flush();
+    expect(p.prDetail.value?.headSha).toBe("yyy");
+    expect(p.prs.value[0].checksRollup).toBe("PENDING");
+  });
+
+  it("patchListRow does not rewrite storage when the value is unchanged", () => {
+    _resetPrCacheForTesting();
+    const cache = usePrCache();
+    cache.setList(listKey("/r", "open"), [{ number: 1, checksRollup: "SUCCESS" } as any], false);
+    const spy = vi.spyOn(window.localStorage, "setItem");
+    cache.patchListRow("/r", 1, { checksRollup: "SUCCESS" });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
 describe("usePrPanel — one notion of a running check", () => {
   beforeEach(() => {
     ghPrDetail.mockReset().mockResolvedValue(fakeDetail());

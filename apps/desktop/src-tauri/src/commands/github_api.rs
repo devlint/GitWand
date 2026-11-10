@@ -374,6 +374,18 @@ static ETAG_CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock
 /// body without spending rate-limit quota. A `200` refreshes the cache from the
 /// response `ETag`. Falls back to a plain fetch when no ETag is returned.
 fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> {
+    let (status, body) = get_cached_raw(url, token)?;
+    if status >= 400 {
+        return Err(map_api_error(status, &body));
+    }
+    parse_json_body(&body)
+}
+
+/// A conditional GET (`If-None-Match` from ETAG_CACHE): a 304 costs nothing
+/// against the rate limit and answers `(200, cached body)`. Other answers come
+/// back as they are; a 2xx with an ETag is cached. The live CI tab polls
+/// through this, so a long matrix doesn't drain the hourly budget.
+fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
     let cache = ETAG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let cached = cache.lock().unwrap().get(url).cloned();
 
@@ -400,24 +412,23 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
         // cache entry exists, so `cached` is Some here; if it's somehow not,
         // fail loudly rather than silently parsing an empty body as data.
         return match cached {
-            Some((_, cached_body)) => parse_json_body(&cached_body),
+            Some((_, cached_body)) => Ok((200, cached_body)),
             None => Err(format!(
                 "304 Not Modified received for {url} with no cached body"
             )),
         };
     }
-    if status >= 400 {
-        return Err(map_api_error(status, &body));
-    }
-    if let Some(etag) = resp_headers.get("etag") {
-        if !etag.is_empty() {
-            cache
-                .lock()
-                .unwrap()
-                .insert(url.to_string(), (etag.clone(), body.clone()));
+    if status < 400 {
+        if let Some(etag) = resp_headers.get("etag") {
+            if !etag.is_empty() {
+                cache
+                    .lock()
+                    .unwrap()
+                    .insert(url.to_string(), (etag.clone(), body.clone()));
+            }
         }
     }
-    parse_json_body(&body)
+    Ok((status, body))
 }
 
 // ─── JSON field helpers ─────────────────────────────────────────────────────
@@ -880,12 +891,10 @@ pub(crate) fn diff_numstat(cwd: &str, head: &str, base: &str) -> (i64, i64) {
 fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_json::Value), String> {
     let (owner, repo) = owner_repo(cwd)?;
     let origin = format!("{}/{}", owner, repo);
-    let (st, body) = curl_raw(
-        "GET",
+    // Conditional: the live CI tab reads the PR's head on every poll.
+    let (st, body) = get_cached_raw(
         &format!("{}/repos/{}/pulls/{}", API_BASE, origin, number),
-        Some(token),
-        None,
-        "application/vnd.github+json",
+        token,
     )?;
     if st < 400 {
         let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
@@ -1016,7 +1025,7 @@ pub(crate) fn rest_pr_checks(cwd: &str, number: i64, token: &str) -> Result<Vec<
     // failed fetch, and the CI tab must be able to tell the two apart (it
     // keeps a running list on screen through a failure, but not through "none").
     // A token that may not read checks (403/404) just has none to show.
-    let v = match api_json("GET", &url, token, None) {
+    let v = match api_json_cached(&url, token) {
         Ok(v) => v,
         Err(e) if checks_unavailable(&e) => return Ok(Vec::new()),
         Err(e) => return Err(e),

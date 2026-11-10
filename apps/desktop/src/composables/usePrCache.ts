@@ -232,7 +232,10 @@ export function usePrCache() {
     const prefix = `${cwd}::`;
     let changed = false;
     for (const [k, list] of Object.entries(_file.lists)) {
-      if (!k.startsWith(prefix) || !list.prs.some((pr) => pr.number === number)) continue;
+      const differs = (pr: PullRequest) =>
+        pr.number === number &&
+        Object.entries(patch).some(([f, v]) => (pr as unknown as Record<string, unknown>)[f] !== v);
+      if (!k.startsWith(prefix) || !list.prs.some(differs)) continue;
       list.prs = list.prs.map((pr) => (pr.number === number ? { ...pr, ...patch } : pr));
       changed = true;
     }

@@ -1380,6 +1380,19 @@ fn rest_pr_create_comment(cwd: &str, number: i64, body: &str) -> Result<serde_js
 
 /// Map an Azure policy-evaluation `status` to (state, conclusion) in the
 /// vocabulary the frontend merge-readiness logic understands.
+/// A pending policy is "queued" only when a build will move it (a build
+/// validation policy). Any other one (reviewers, comment resolution, work item
+/// linking, a status an external service has not posted) waits on a person or
+/// on someone else: "waiting", which the CI tab shows as pending but does not
+/// poll (utils/ciChecks.ts).
+fn pending_policy_state(is_build: bool, state: &'static str) -> &'static str {
+    if state == "queued" && !is_build {
+        "waiting"
+    } else {
+        state
+    }
+}
+
 fn map_policy_status(status: &str) -> (&'static str, &'static str) {
     match status {
         "approved" => ("completed", "SUCCESS"),
@@ -1586,12 +1599,7 @@ fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
                 None => name.clone(),
             };
             let (mut state, mut conclusion) = map_policy_status(&js(e, "status"));
-            // A reviewer policy that is not met waits on a person, not on a
-            // build: "waiting", which the CI tab shows as pending but does
-            // not poll (utils/ciChecks.ts).
-            if is_reviewer && state == "queued" {
-                state = "waiting";
-            }
+            state = pending_policy_state(build_def_id.is_some(), state);
             let is_expired = e
                 .get("context")
                 .and_then(|c| c.get("isExpired"))
@@ -2524,5 +2532,18 @@ mod az_client_error_tests {
             assert!(!az_policies_unavailable(&e), "{}", code);
         }
         assert!(!az_policies_unavailable("curl: (6) Could not resolve host"));
+    }
+}
+
+#[cfg(test)]
+mod pending_policy_state_tests {
+    use super::pending_policy_state;
+
+    #[test]
+    fn only_build_policies_stay_queued() {
+        assert_eq!(pending_policy_state(true, "queued"), "queued");
+        assert_eq!(pending_policy_state(false, "queued"), "waiting");
+        assert_eq!(pending_policy_state(false, "in_progress"), "in_progress");
+        assert_eq!(pending_policy_state(false, "completed"), "completed");
     }
 }

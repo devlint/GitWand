@@ -459,7 +459,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // an inherited + branch-level "At least 1 reviewer must approve").
     const names = [...new Set(unmet.map((c) => c.name).filter(Boolean))];
     if (names.length) reasons.push(...names);
-    else if (!checksOk) reasons.push(t("pr.ready.reasonChecksFailing"));
+    else if (!checksOk && !ciStarting) reasons.push(t("pr.ready.reasonChecksFailing"));
     if (hasChangesRequested) reasons.push(t("pr.ready.reasonChangesRequested"));
     // A missing approval on its own isn't worth a banner — checks are green and
     // nobody requested changes, so we're just waiting for the merge. Hide it
@@ -896,6 +896,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    */
   async function fetchDetailBundle(pr: PullRequest, { silentError }: { silentError: boolean }) {
     const key = detailKey(cwd.value, pr.number);
+    const repo = cwd.value;
     _lastDetailFetch = { number: pr.number, at: Date.now() };
     detailError.value = null;
     try {
@@ -904,8 +905,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         forge.value.listComments(cwd.value, pr.number).catch(() => [] as PrReviewComment[]),
         forge.value.listReviews(cwd.value, pr.number).catch(() => [] as PrReview[]),
       ]);
-      // Ignore a stale response if the user moved on to another PR meanwhile.
-      if (selectedPr.value?.number !== pr.number) return;
+      // Ignore a stale response if the user moved on to another PR, or to
+      // another repository (same PR number there), meanwhile.
+      if (selectedPr.value?.number !== pr.number || cwd.value !== repo) return;
       // The first fetch after selecting the PR replaces the cached head with
       // the current one: that is the cache catching up, not a push.
       if (!_detailSettled) {
@@ -928,7 +930,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       syncListRollup(pr.number, detail.checksStatus);
     } catch (err: any) {
       // A failed first fetch still settles the head: a later change is a push.
-      if (selectedPr.value?.number === pr.number) _detailSettled = true;
+      if (selectedPr.value?.number === pr.number && cwd.value === repo) _detailSettled = true;
       // Keep the cached bundle on screen if revalidation failed.
       if (!silentError) detailError.value = err.message;
     } finally {
@@ -954,15 +956,17 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // A PR reopened from the cache shows the checks it had then: if they were
     // running and have finished since, revalidate once, like refreshChecks.
     const wasRunning = checksRunning.value;
-    _checksGen++; // a refresh started before this load must not overwrite it
+    const gen = ++_checksGen; // a refresh started before this load must not overwrite it
     _checksFetchedSinceSelect = true;
     checksLoading.value = true;
     try {
       const asked = Date.now();
       const checks = await forge.value.getCIChecks(repo, number);
       // Stale response: the user moved to another PR — don't write PR A's
-      // checks into PR B's refs (or cache key via persistDetailCache).
-      if (!current()) return;
+      // checks into PR B's refs (or cache key via persistDetailCache). Or a
+      // push came in meanwhile: this answer is the old head's, and the
+      // refetch below (_refetchAfterLoad) brings the new one.
+      if (!current() || gen !== _checksGen) return;
       applyChecks(number, checks, wasRunning, asked);
     } catch {
       // Non-fatal: the tab stays empty, or keeps a cached running list, which
@@ -1139,6 +1143,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     else scheduleChecksLive();
   }
 
+  /** Whether coming back (window, detail view) should resume live checks:
+   *  the CI tab with something to follow or retry, or, on any tab, the wait
+   *  for a push's checks. */
+  function liveResumeWanted(): boolean {
+    if (checksAwaiting.value) return true;
+    return detailTab.value === "checks" && checksLoaded.value && (checksLiveWanted() || checksError.value);
+  }
+
   /** Whether the CI tab should follow the checks right now. */
   const checksLiveWanted = () => checksRunning.value || awaitingChecks();
 
@@ -1174,9 +1186,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // The detail view coming back on screen: catch up like a tab switch.
   watch(detailVisible, (visible) => {
     if (!visible) stopChecksLive();
-    else if (detailTab.value === "checks" && checksLoaded.value && (checksLiveWanted() || checksError.value)) {
-      resumeChecksLive();
-    }
+    else if (liveResumeWanted()) resumeChecksLive();
   });
 
   watch(
@@ -1217,15 +1227,18 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       _checksLiveSince = 0;
       // Wait for the new head's checks only where CI exists: the old head had
       // checks. Never loaded, or none: nothing says any will come.
-      if (checksLoaded.value && prChecks.value.length > 0) {
+      // Old head's checks on screen (loaded, or restored from the cache): CI
+      // exists here, wait for the new head's.
+      const hadChecks = prChecks.value.length > 0;
+      if (hadChecks) {
         endChecksAwait();
         _checksAwaitUntil = Date.now() + CHECKS_AWAIT_AFTER_PUSH_MS;
         checksAwaiting.value = true;
         _awaitTimer = setTimeout(endChecksAwait, CHECKS_AWAIT_AFTER_PUSH_MS);
       }
       if (checksLoading.value) _refetchAfterLoad = true;
-      else if (checksLoaded.value) retryChecksLive();
-      // Not loaded yet: the next visit of the CI or Diff tab loads them.
+      else if (checksLoaded.value || hadChecks) retryChecksLive();
+      // Nothing loaded nor cached: the next visit of the CI or Diff tab loads them.
     },
   );
 
@@ -1881,7 +1894,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       startPoll();
       // Live CI: catch up on return if the last fetch is a full interval old,
       // then resume the 15 s cadence. A brief alt-tab costs no extra call.
-      if (detailVisible.value && detailTab.value === "checks" && (checksLiveWanted() || checksError.value)) {
+      if (detailVisible.value && liveResumeWanted()) {
         resumeChecksLive();
       }
       // Catch up immediately if a full interval elapsed while hidden, but don't

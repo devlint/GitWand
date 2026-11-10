@@ -140,6 +140,26 @@ fn bb_curl_raw(
 /// HTTP ≥ 400 maps to an error (preferring the JSON `message` field).
 /// Empty bodies (DELETE / some PUT) return `Null`. Application-level errors
 /// surfaced in a 2xx `{"error":{...}}` envelope are also mapped to errors.
+/// `bb_curl`'s error for an HTTP ≥ 400 answer. The bare `HTTP <code>` form is
+/// kept as is (other callers match on it); a message carries its code in front.
+fn bb_http_error(status: i32, msg: &str) -> String {
+    if msg.starts_with("HTTP ") {
+        format!("Bitbucket API error: {}", msg)
+    } else {
+        format!("Bitbucket API error: HTTP {}: {}", status, msg)
+    }
+}
+
+/// True for a `bb_curl` error from a 403 or 404 answer.
+fn bb_is_forbidden_or_missing(err: &str) -> bool {
+    [
+        "Bitbucket API error: HTTP 403",
+        "Bitbucket API error: HTTP 404",
+    ]
+    .iter()
+    .any(|p| err.starts_with(p))
+}
+
 fn bb_curl(
     method: &str,
     url: &str,
@@ -157,7 +177,7 @@ fn bb_curl(
                     .map(String::from)
             })
             .unwrap_or_else(|| format!("HTTP {}", status));
-        return Err(format!("Bitbucket API error: {}", msg));
+        return Err(bb_http_error(status, &msg));
     }
     if body.trim().is_empty() {
         return Ok(serde_json::Value::Null);
@@ -1192,17 +1212,10 @@ pub(crate) async fn bb_pr_ci_checks(cwd: String, pr_id: i64) -> Result<Vec<CIChe
     );
     // A failure is an error, not "no checks" (the CI tab tells them apart);
     // 403/404 (statuses not visible to this user) just means none to show.
-    let (status, body) = bb_curl_raw("GET", &url, None, &auth_config, "application/json")?;
-    if status == 403 || status == 404 {
-        return Ok(Vec::new());
-    }
-    let resp = if status >= 400 {
-        return Err(format!("Bitbucket API error: HTTP {}", status));
-    } else if body.trim().is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::from_str(body.trim())
-            .map_err(|e| format!("Failed to parse Bitbucket response: {}", e))?
+    let resp = match bb_curl("GET", &url, None, &auth_config) {
+        Ok(v) => v,
+        Err(e) if bb_is_forbidden_or_missing(&e) => return Ok(Vec::new()),
+        Err(e) => return Err(e),
     };
     let values = resp
         .get("values")
@@ -1447,10 +1460,10 @@ pub(crate) async fn bb_list_issues(
         Ok(v) => v,
         // Issue tracker disabled for this repo ⇒ treat as empty, not an error.
         // bb_curl formats 404 as "Bitbucket API error: HTTP 404" (no JSON body)
-        // or "Bitbucket API error: <message>". A repo with the tracker turned
-        // off returns a JSON-bodied 404 whose message mentions the issue
-        // tracker (e.g. "Repository has no issue tracker") and contains neither
-        // "404" nor "not found" — so match that wording too.
+        // or "Bitbucket API error: HTTP 404: <message>" (bb_http_error). A repo
+        // with the tracker turned off returns a JSON-bodied 404 whose message
+        // mentions the issue tracker (e.g. "Repository has no issue tracker");
+        // the wording is matched too.
         Err(e) => {
             let le = e.to_lowercase();
             if e.contains("404") || le.contains("not found") || le.contains("issue track") {
@@ -1806,5 +1819,33 @@ mod bb_page_plan_tests {
         })
         .unwrap();
         assert_eq!(got.len(), 50);
+    }
+}
+
+#[cfg(test)]
+mod bb_http_error_tests {
+    use super::{bb_http_error, bb_is_forbidden_or_missing};
+
+    #[test]
+    fn keeps_the_bare_form_and_prefixes_messages_with_the_code() {
+        assert_eq!(
+            bb_http_error(404, "HTTP 404"),
+            "Bitbucket API error: HTTP 404"
+        );
+        assert_eq!(
+            bb_http_error(403, "Access denied"),
+            "Bitbucket API error: HTTP 403: Access denied"
+        );
+    }
+
+    #[test]
+    fn forbidden_or_missing_whatever_the_message() {
+        assert!(bb_is_forbidden_or_missing(&bb_http_error(
+            403,
+            "Access denied"
+        )));
+        assert!(bb_is_forbidden_or_missing(&bb_http_error(404, "HTTP 404")));
+        assert!(!bb_is_forbidden_or_missing(&bb_http_error(500, "boom")));
+        assert!(!bb_is_forbidden_or_missing(&bb_http_error(429, "HTTP 429")));
     }
 }
