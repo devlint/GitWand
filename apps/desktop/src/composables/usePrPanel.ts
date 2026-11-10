@@ -41,6 +41,7 @@ import { escapeHtml } from "../utils/escapeHtml";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
 import { formatRelativeAge } from "../utils/relativeTime";
+import { isCheckRunning } from "../utils/ciChecks";
 import { t } from "./useI18n";
 import { useReviewIntelligence } from "./useReviewIntelligence";
 import { indexDiffFiles, parseFileDiff, parseUnifiedDiff } from "../utils/unifiedDiff";
@@ -53,6 +54,9 @@ import { indexDiffFiles, parseFileDiff, parseUnifiedDiff } from "../utils/unifie
 export { indexDiffFiles, parseFileDiff, parseUnifiedDiff };
 
 export const PR_PANEL_KEY = Symbol("prPanel");
+
+/** How often the CI tab re-fetches checks while one is still running. */
+export const CHECKS_LIVE_INTERVAL_MS = 15_000;
 
 /** Human-facing forge names for "Open on …" / platform labels. */
 const FORGE_LABELS: Record<string, string> = {
@@ -943,6 +947,57 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
   }
 
+  // ─── Live CI (Checks tab) ───────────────────────────────
+  // While the Checks tab is shown, the window is visible and a check is still
+  // running, re-fetch the checks every CHECKS_LIVE_INTERVAL_MS. A chained
+  // timeout, not an interval: a slow forge never stacks requests. Nothing runs
+  // once every check has finished (perf rules, apps/desktop/CLAUDE.md).
+  let _checksLiveTimer: ReturnType<typeof setTimeout> | null = null;
+  let _checksRefreshing = false;
+  const checksRunning = computed(() => prChecks.value.some(isCheckRunning));
+
+  /** Re-fetch the open PR's checks in the background, keeping the current list
+   *  on error. When the last running check finishes, revalidate the PR detail
+   *  once so mergeability and the Merge button follow. */
+  async function refreshChecks() {
+    if (!selectedPr.value || _checksRefreshing || checksLoading.value) return;
+    const number = selectedPr.value.number;
+    const wasRunning = checksRunning.value;
+    _checksRefreshing = true;
+    try {
+      const checks = await forge.value.getCIChecks(cwd.value, number);
+      if (selectedPr.value?.number !== number) return;
+      prChecks.value = checks;
+      checksLoaded.value = true;
+      persistDetailCache();
+      if (wasRunning && !checksRunning.value) void revalidateOpenDetail();
+    } catch {
+      /* keep the list on screen; the next tick retries */
+    } finally {
+      _checksRefreshing = false;
+    }
+  }
+
+  function stopChecksLive() {
+    if (_checksLiveTimer) {
+      clearTimeout(_checksLiveTimer);
+      _checksLiveTimer = null;
+    }
+  }
+
+  function scheduleChecksLive() {
+    stopChecksLive();
+    if (detailTab.value !== "checks" || !selectedPr.value || !checksRunning.value) return;
+    if (typeof document !== "undefined" && document.hidden) return;
+    _checksLiveTimer = setTimeout(async () => {
+      _checksLiveTimer = null;
+      await refreshChecks();
+      scheduleChecksLive();
+    }, CHECKS_LIVE_INTERVAL_MS);
+  }
+
+  watch([detailTab, () => selectedPr.value?.number, checksRunning], scheduleChecksLive);
+
   async function loadIssueComments() {
     if (!selectedPr.value || issueCommentsLoaded.value || issueCommentsLoading.value) return;
     const number = selectedPr.value.number;
@@ -1093,7 +1148,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
     if (tab === "checks") {
       loadAnnotations();
-      loadChecks();
+      // Already loaded: re-fetch only if a check was still running (a finished
+      // list doesn't change, A3); not loaded yet: the lazy first load.
+      if (checksLoaded.value) {
+        if (checksRunning.value) void refreshChecks();
+      } else {
+        loadChecks();
+      }
     }
     if (tab === "info") {
       loadIssueComments();
@@ -1602,8 +1663,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   function handleVisibilityChange() {
     if (document.hidden) {
       stopPoll();
+      stopChecksLive();
     } else {
       startPoll();
+      // Live CI: catch up at once on return, then resume the 15 s cadence.
+      if (detailTab.value === "checks" && checksRunning.value) {
+        void refreshChecks().then(scheduleChecksLive);
+      }
       // Catch up immediately if a full interval elapsed while hidden, but don't
       // refetch on every brief alt-tab.
       if (Date.now() - _lastPoll >= REVALIDATE_INTERVAL_MS) pollTick();
@@ -1628,6 +1694,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   onUnmounted(() => {
     stopPoll();
+    stopChecksLive();
     if (typeof document !== "undefined" && _visibilityHandler) {
       document.removeEventListener("visibilitychange", _visibilityHandler);
     }

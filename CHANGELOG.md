@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The CI tab of a pull request follows a running CI.** While the tab is shown and a check is still queued or running, GitWand re-fetches the checks every 15 seconds, and once the last one finishes it reloads the pull request once, so mergeability and the Merge button follow. It stops by itself when every check has finished, on another tab or pull request, and while the window is hidden (with an immediate refresh on return). Re-opening the tab also refreshes checks that were still running. Nothing is polled when no CI is running.
+
 ### Fixed
 
 - **On Linux, the Git Tree no longer reloads in a loop (#287).** The Live Repo watcher took GitWand's own reads of the repository for changes: on Linux the system also reports a file being opened, and reading the branches to draw the graph counted as a branch change. That forced a log reload, which read the branches again, so the list kept shrinking back and refilling, the scrollbar jumped and the loading spinner never went away. Reading a file is no longer a change; writing one still is. The background fetch, every 30 seconds, also stopped reloading the log when it brought nothing: the list no longer shrinks and refills twice a minute.
