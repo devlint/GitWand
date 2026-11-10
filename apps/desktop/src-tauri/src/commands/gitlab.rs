@@ -697,7 +697,7 @@ pub(crate) async fn gl_mr_diff(cwd: String, iid: i64) -> Result<String, String> 
 /// Get CI pipeline status for a MR using `glab api`.
 ///
 /// Returns the most-recent pipeline as a single-entry list (GitLab only has
-/// one "active" pipeline per MR at a time). Each job maps to a CICheck entry.
+/// one "active" pipeline per MR at a time); see `gl_pipeline_checks`.
 fn gl_mr_pipelines_inner(cwd: String, iid: i64) -> Result<Vec<CICheck>, String> {
     let endpoint = format!("projects/:fullpath/merge_requests/{}/pipelines", iid);
     let mut cmd = hidden_cmd("glab");
@@ -718,10 +718,19 @@ fn gl_mr_pipelines_inner(cwd: String, iid: i64) -> Result<Vec<CICheck>, String> 
         None => return Ok(Vec::new()),
     };
 
-    // Map each pipeline to a CICheck. `status` in GitLab:
-    // pending, running, success, failed, canceled, skipped, manual, scheduled.
-    Ok(arr
-        .iter()
+    Ok(gl_pipeline_checks(arr))
+}
+
+/// The MR's most recent pipeline as a single check. GitLab lists an MR's
+/// pipelines newest first, and only the newest says where the MR stands (the
+/// list's rollup, `gl_pipeline_rollup`, reads the same one): older pipelines
+/// would show a stale failure, or keep the CI tab polling an old `created` one.
+///
+/// `status` in GitLab: created, waiting_for_resource, preparing, pending,
+/// running, success, failed, canceled, skipped, manual, scheduled.
+fn gl_pipeline_checks(arr: &[serde_json::Value]) -> Vec<CICheck> {
+    arr.iter()
+        .take(1)
         .map(|p| {
             let status = js(p, "status");
             let conclusion = match status.as_str() {
@@ -740,7 +749,7 @@ fn gl_mr_pipelines_inner(cwd: String, iid: i64) -> Result<Vec<CICheck>, String> 
                 details_url: js(p, "web_url"),
             }
         })
-        .collect())
+        .collect()
 }
 
 #[tauri::command]
@@ -2768,5 +2777,45 @@ mod gl_disable_auto_merge_args_tests {
             .any(|a| a.contains("merge_when_pipeline_succeeds=")));
         assert!(!args.iter().any(|a| a == "-f"));
         assert!(!args.iter().any(|a| a == "PUT"));
+    }
+}
+
+#[cfg(test)]
+mod gl_pipeline_checks_tests {
+    use super::gl_pipeline_checks;
+    use serde_json::json;
+
+    #[test]
+    fn keeps_only_the_most_recent_pipeline() {
+        // GitLab lists an MR's pipelines newest first; an old failed one must
+        // not show as a check (nor keep a "created" one polled for ever).
+        let arr = json!([
+            {"id": 30, "status": "success", "web_url": "u30"},
+            {"id": 20, "status": "failed", "web_url": "u20"},
+            {"id": 10, "status": "created", "web_url": "u10"}
+        ]);
+        let checks = gl_pipeline_checks(arr.as_array().unwrap());
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].name, "Pipeline #30");
+        assert_eq!(checks[0].conclusion, "SUCCESS");
+        assert_eq!(checks[0].details_url, "u30");
+    }
+
+    #[test]
+    fn maps_running_and_not_started_states() {
+        let running = json!([{"id": 1, "status": "running", "web_url": ""}]);
+        assert_eq!(
+            gl_pipeline_checks(running.as_array().unwrap())[0].conclusion,
+            "IN_PROGRESS"
+        );
+        let created = json!([{"id": 1, "status": "created", "web_url": ""}]);
+        let c = &gl_pipeline_checks(created.as_array().unwrap())[0];
+        assert_eq!(c.conclusion, "");
+        assert_eq!(c.state, "created");
+    }
+
+    #[test]
+    fn no_pipeline_no_check() {
+        assert!(gl_pipeline_checks(&[]).is_empty());
     }
 }

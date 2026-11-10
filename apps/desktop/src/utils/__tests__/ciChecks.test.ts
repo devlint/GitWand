@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCheckRunning, isCheckFailing } from "../ciChecks";
+import { isCheckRunning, isCheckPending, isCheckFailing, checkIcon } from "../ciChecks";
 
 const chk = (state: string, conclusion: string) => ({ name: "c", state, conclusion, detailsUrl: "" });
 
@@ -46,5 +46,39 @@ describe("isCheckFailing", () => {
     for (const c of ["SUCCESS", "SKIPPED", "NEUTRAL", ""]) {
       expect(isCheckFailing(chk("IN_PROGRESS", c))).toBe(false);
     }
+  });
+});
+
+describe("EXPECTED (a required status that has not reported)", () => {
+  it("is pending (blocks, hourglass) but not running (not polled)", () => {
+    expect(isCheckPending(chk("EXPECTED", ""))).toBe(true);
+    expect(isCheckRunning(chk("EXPECTED", ""))).toBe(false);
+  });
+  it("every running check is pending", () => {
+    expect(isCheckPending(chk("IN_PROGRESS", ""))).toBe(true);
+    expect(isCheckPending(chk("COMPLETED", "SUCCESS"))).toBe(false);
+  });
+});
+
+describe("isCheckFailing reads the state when there is no conclusion", () => {
+  it("is true for a status context in failure or error", () => {
+    expect(isCheckFailing(chk("failure", ""))).toBe(true);
+    expect(isCheckFailing(chk("ERROR", ""))).toBe(true);
+  });
+});
+
+describe("checkIcon", () => {
+  it("is ❌ for every failing conclusion", () => {
+    for (const c of ["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "CANCELLED"]) {
+      expect(checkIcon(chk("COMPLETED", c))).toBe("❌");
+    }
+  });
+  it("is ⏳ for pending, ✅ success, ⚠️ expired, ⏭️ skipped, ❓ otherwise", () => {
+    expect(checkIcon(chk("EXPECTED", ""))).toBe("⏳");
+    expect(checkIcon(chk("created", ""))).toBe("⏳");
+    expect(checkIcon(chk("COMPLETED", "SUCCESS"))).toBe("✅");
+    expect(checkIcon(chk("COMPLETED", "EXPIRED"))).toBe("⚠️");
+    expect(checkIcon(chk("COMPLETED", "SKIPPED"))).toBe("⏭️");
+    expect(checkIcon(chk("COMPLETED", "NEUTRAL"))).toBe("❓");
   });
 });

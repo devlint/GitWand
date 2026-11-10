@@ -278,6 +278,94 @@ describe("usePrPanel — live CI checks", () => {
   });
 });
 
+describe("usePrPanel — live CI, third review", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ghPrDetail.mockReset().mockResolvedValue(fakeDetail());
+    ghPrChecks.mockReset();
+  });
+  afterEach(() => {
+    scopes.splice(0).forEach((s) => s.stop());
+    vi.useRealTimers();
+  });
+
+  it("sets the list rollup to PENDING when a finished list still has an expired check", async () => {
+    const expired = [
+      { name: "build", state: "COMPLETED", conclusion: "SUCCESS", detailsUrl: "" },
+      { name: "old", state: "COMPLETED", conclusion: "EXPIRED", detailsUrl: "" },
+    ];
+    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValue(expired);
+    const p = await openChecksTab();
+    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any];
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(p.prs.value[0].checksRollup).toBe("PENDING");
+  });
+
+  it("loadChecks keeps cached running checks when the fetch comes back empty", async () => {
+    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValueOnce([]).mockResolvedValue(running);
+    const p = await openChecksTab();
+    await p.selectPr({ number: 2 } as any);
+    await flush();
+    p.prs.value = [{ number: 1, checksRollup: "PENDING" } as any];
+    await p.selectPr({ number: 1 } as any); // cached running list
+    p.detailTab.value = "checks";
+    await flush();
+    expect(p.prChecks.value).toEqual(running);
+    expect(p.prs.value[0].checksRollup).toBe("PENDING");
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(ghPrChecks.mock.calls.filter((c) => c[1] === 1).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("empty answers do not count toward the error limit", async () => {
+    ghPrChecks.mockResolvedValueOnce(running).mockResolvedValueOnce([]).mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("x")).mockResolvedValue(running);
+    await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 4);
+    expect(ghPrChecks).toHaveBeenCalledTimes(5); // still polling after 2 empties + 1 error
+  });
+
+  it("a new CI run on the same PR is polled at the fast rate again", async () => {
+    ghPrChecks.mockResolvedValue(running);
+    const p = await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_SLOW_AFTER_MS + CHECKS_LIVE_SLOW_INTERVAL_MS);
+    ghPrChecks.mockResolvedValue(done);
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_SLOW_INTERVAL_MS);
+    expect(p.prChecks.value).toEqual(done);
+    // A push: the detail now reports a new head commit, and CI runs again.
+    ghPrChecks.mockResolvedValue(running);
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail?.();
+    await flush();
+    expect(p.prChecks.value).toEqual(running);
+    const before = ghPrChecks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(ghPrChecks.mock.calls.length).toBe(before + 1);
+  });
+
+  it("drops a refresh whose answer arrives after the repository changed", async () => {
+    let release!: (v: unknown) => void;
+    const cwdRef = ref("/repo");
+    ghPrChecks.mockResolvedValueOnce(running)
+      .mockImplementationOnce(() => new Promise((r) => { release = r; }))
+      .mockResolvedValue(running);
+    const scope = effectScope();
+    scopes.push(scope);
+    const p = scope.run(() => usePrPanel(cwdRef))!;
+    await p.selectPr({ number: 1 } as any);
+    p.detailTab.value = "checks";
+    await flush();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS); // refresh in flight
+    cwdRef.value = "/other";
+    await flush();
+    await p.selectPr({ number: 1 } as any); // PR #1 of the other repo
+    await flush();
+    const before = p.prChecks.value;
+    release(done);
+    await flush();
+    expect(p.prChecks.value).toBe(before);
+  });
+});
+
 describe("usePrPanel — one notion of a running check", () => {
   beforeEach(() => {
     ghPrDetail.mockReset().mockResolvedValue(fakeDetail());
