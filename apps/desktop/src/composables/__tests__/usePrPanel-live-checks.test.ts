@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ref, effectScope } from "vue";
 import { usePrCache, listKey, _resetPrCacheForTesting } from "../usePrCache";
+import { ForgeNotImplementedError } from "../forge/types";
 
 const ghPrDetail = vi.fn();
 const ghPrChecks = vi.fn();
@@ -312,7 +313,9 @@ describe("usePrPanel — live CI, third review", () => {
     expect(p.prChecks.value).toEqual(running);
     const before = ghPrChecks.mock.calls.length;
     await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
-    expect(ghPrChecks.mock.calls.length).toBe(before + 1);
+    // Fast rate: a fetch within 15 s (the slow rate would make none).
+    expect(ghPrChecks.mock.calls.length).toBeGreaterThanOrEqual(before + 1);
+    expect(ghPrChecks.mock.calls.length).toBeLessThanOrEqual(before + 2);
   });
 
   it("after a push, keeps polling the CI tab until the new head's checks appear", async () => {
@@ -786,6 +789,100 @@ describe("usePrPanel — live CI, eighth review", () => {
     cache.patchListRow("/r", 1, { checksRollup: "SUCCESS" });
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+describe("usePrPanel — live CI, ninth review", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ghPrDetail.mockReset().mockResolvedValue(fakeDetail());
+    ghPrChecks.mockReset();
+  });
+  afterEach(() => {
+    scopes.splice(0).forEach((s) => s.stop());
+    vi.useRealTimers();
+  });
+  const push = async (p: any) => {
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "def" });
+    await p.revalidateOpenDetail();
+    await flush();
+  };
+
+  it("the old pipeline's finished result does not end the wait (GitLab, Azure)", async () => {
+    ghPrChecks.mockResolvedValue(done); // the forge still reports the old, green pipeline
+    const p = await openChecksTab();
+    await push(p);
+    expect(p.checksAwaiting.value).toBe(true);
+    expect(p.mergeReadiness.value?.ready).toBe(false);
+  });
+
+  it("a check that starts ends the wait", async () => {
+    ghPrChecks.mockResolvedValueOnce(done).mockResolvedValueOnce(done).mockResolvedValue(running);
+    const p = await openChecksTab();
+    await push(p);
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(p.checksAwaiting.value).toBe(false);
+  });
+
+  it("the banner waits even when the refresh after a push fails", async () => {
+    ghPrChecks.mockResolvedValueOnce(done).mockRejectedValue(new Error("offline"));
+    const p = await openChecksTab();
+    await push(p);
+    expect(p.prChecks.value).toEqual(done); // kept on error
+    expect(p.mergeReadiness.value?.ready).toBe(false);
+  });
+
+  it("a refresh in flight for the same PR number in another repo does not block this one", async () => {
+    let release!: (v: unknown) => void;
+    const cwdRef = ref("/repo");
+    ghPrChecks.mockResolvedValueOnce(running)
+      .mockImplementationOnce(() => new Promise((r) => { release = r; }))
+      .mockResolvedValue(done);
+    const scope = effectScope();
+    scopes.push(scope);
+    const p = scope.run(() => usePrPanel(cwdRef))!;
+    p.setDetailVisible(true);
+    await p.selectPr({ number: 1 } as any);
+    p.detailTab.value = "checks";
+    await flush();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS); // refresh for /repo in flight
+    cwdRef.value = "/other";
+    await flush();
+    await p.selectPr({ number: 1 } as any); // PR #1 of the other repo
+    await flush();
+    const n = ghPrChecks.mock.calls.length;
+    await p.refreshChecks();
+    expect(ghPrChecks.mock.calls.length).toBe(n + 1);
+    release(running);
+  });
+
+  it("a forge without CI checks support reads as 'no checks', not as a load failure", async () => {
+    window.localStorage.clear();
+    _resetPrCacheForTesting();
+    ghPrChecks.mockImplementation(() => { throw new ForgeNotImplementedError("cursor", "getCIChecks"); });
+    const p = await openChecksTab();
+    expect(p.prChecks.value).toEqual([]);
+    expect(p.checksError.value).toBe(false);
+  });
+
+  it("a stale flag from a cache catch-up never hides a later push on another PR", async () => {
+    ghPrChecks.mockResolvedValue(done);
+    const p = await openChecksTab();
+    await p.selectPr({ number: 2 } as any);
+    await flush();
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "zzz" });
+    const reopen = p.selectPr({ number: 1 } as any); // settling fetch will move the head
+    await p.selectPr({ number: 3 } as any); // …but the user moves on in the same tick
+    await reopen;
+    await flush();
+    p.detailTab.value = "checks";
+    await flush();
+    const n = ghPrChecks.mock.calls.length;
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "yyy" });
+    await p.revalidateOpenDetail(); // a real push on PR 3
+    await flush();
+    expect(ghPrChecks.mock.calls.length).toBe(n + 1);
+    expect(p.checksAwaiting.value).toBe(true);
   });
 });
 

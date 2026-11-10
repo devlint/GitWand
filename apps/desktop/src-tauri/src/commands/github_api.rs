@@ -367,6 +367,19 @@ fn api_json(
 /// by the set of PR/commit URLs visited in a session (same lifetime model as
 /// `GIT_DIR_CACHE`).
 static ETAG_CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+/// Entries kept in ETAG_CACHE before it starts over: it now holds full PR
+/// bodies (get_pr_json), so it must not grow for the whole session.
+const ETAG_CACHE_MAX: usize = 256;
+
+/// ETAG_CACHE key: the URL and a fingerprint of the token, so a body fetched
+/// with one account is never served on a 304 to another. The token itself is
+/// not kept.
+fn etag_key(url: &str, token: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    token.hash(&mut h);
+    format!("{:016x} {}", h.finish(), url)
+}
 
 /// GET a GitHub JSON endpoint with ETag-based conditional requests.
 ///
@@ -387,7 +400,8 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
 /// through this, so a long matrix doesn't drain the hourly budget.
 fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
     let cache = ETAG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let cached = cache.lock().unwrap().get(url).cloned();
+    let key = etag_key(url, token);
+    let cached = cache.lock().unwrap().get(&key).cloned();
 
     let auth = bearer_config(token);
     let inm = cached
@@ -421,10 +435,11 @@ fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
     if status < 400 {
         if let Some(etag) = resp_headers.get("etag") {
             if !etag.is_empty() {
-                cache
-                    .lock()
-                    .unwrap()
-                    .insert(url.to_string(), (etag.clone(), body.clone()));
+                let mut map = cache.lock().unwrap();
+                if map.len() >= ETAG_CACHE_MAX && !map.contains_key(&key) {
+                    map.clear();
+                }
+                map.insert(key, (etag.clone(), body.clone()));
             }
         }
     }
@@ -2704,5 +2719,19 @@ mod checks_unavailable_tests {
         ));
         assert!(!checks_unavailable("GitHub API error (500): boom"));
         assert!(!checks_unavailable("curl: (6) Could not resolve host"));
+    }
+}
+
+#[cfg(test)]
+mod etag_key_tests {
+    use super::etag_key;
+
+    #[test]
+    fn depends_on_the_token_without_containing_it() {
+        let a = etag_key("https://api.github.com/x", "tok-a");
+        let b = etag_key("https://api.github.com/x", "tok-b");
+        assert_ne!(a, b);
+        assert!(!a.contains("tok-a"));
+        assert_eq!(a, etag_key("https://api.github.com/x", "tok-a"));
     }
 }

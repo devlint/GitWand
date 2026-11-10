@@ -423,8 +423,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // forge-specific requirements (e.g. Azure "At least 1 reviewer must approve")
     // read clearly in the banner instead of a generic "checks failing".
     const unmet = prChecks.value.filter(isBlocking);
-    // After a push, no checks yet means "not registered yet", not "no CI".
-    const ciStarting = checksAwaiting.value && prChecks.value.length === 0;
+    // After a push, until the new commit's CI starts (or the wait ends), the
+    // list on screen may still be the old commit's: don't read it as ready.
+    const ciStarting = checksAwaiting.value;
     const checksOk = unmet.length === 0 && !ciStarting;
     // Only each reviewer's *latest* verdict counts — a later APPROVED supersedes
     // an earlier CHANGES_REQUESTED (and vice versa). Scanning every historical
@@ -859,6 +860,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     selectedPr.value = pr;
     resetDetail();
     _detailSettled = false;
+    _ignoreShaChange = false;
     _checksFetchedSinceSelect = false;
     // SWR: paint cached detail bundle instantly, revalidate in background.
     const cached = cache.getDetail(detailKey(cwd.value, pr.number));
@@ -968,10 +970,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // refetch below (_refetchAfterLoad) brings the new one.
       if (!current() || gen !== _checksGen) return;
       applyChecks(number, checks, wasRunning, asked);
-    } catch {
+    } catch (err) {
       // Non-fatal: the tab stays empty, or keeps a cached running list, which
-      // live polling then retries.
-      if (current()) {
+      // live polling then retries. A forge without CI checks has none to show.
+      // An answer from before a push doesn't count: the refetch decides.
+      if (current() && gen === _checksGen && err instanceof ForgeNotImplementedError) {
+        checksLoaded.value = true;
+      } else if (current() && gen === _checksGen) {
         checksLoaded.value = true;
         // With a cached list on screen, live polling retries it and flags an
         // error only at the limit (refreshChecks); with nothing to show, say so.
@@ -1004,8 +1009,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // the window tries again. The backends report a failed fetch as an error
   // and "no checks" as an empty list, so an empty list is always applied.
   let _checksLiveTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Refresh in flight, as "<PR>:<generation>": one per PR and generation, so
-   *  PR A's request never blocks B, nor an old head's request the new head's. */
+  /** Refresh in flight, as "<repo>#<PR>:<generation>": PR A's request never
+   *  blocks B (in this repo or another), nor an old head's the new head's. */
   let _checksRefreshing: string | null = null;
   let _checksFailures = 0;
   /** Bumped by loadChecks and by a push: an answer from before is stale. */
@@ -1016,7 +1021,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  tab or PR, window hidden), so only continuous following slows it down. */
   let _checksLiveSince = 0;
   /** Until when to poll after a push, for checks the forge has not registered. */
-  let _checksAwaitUntil = 0;
   /** A push was seen while loadChecks was in flight: fetch again after it. */
   let _refetchAfterLoad = false;
   /** Start of the last detail fetch, for which PR. */
@@ -1036,7 +1040,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       clearTimeout(_awaitTimer);
       _awaitTimer = null;
     }
-    _checksAwaitUntil = 0;
     checksAwaiting.value = false;
   }
   /** The settling fetch moved the head: the next head change is not a push. */
@@ -1053,10 +1056,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     detailVisible.value = visible;
   }
   const checksRunning = computed(() => prChecks.value.some(isCheckRunning));
-  const awaitingChecks = () => Date.now() < _checksAwaitUntil;
-  /** A push was seen and its checks have not shown up yet: the merge banner
-   *  waits for CI rather than read an empty list as "no CI". Cleared when
-   *  checks arrive or the await window ends. */
+  /** A push was seen and the new commit's CI has not started yet: the merge
+   *  banner waits rather than read the list on screen (empty, or still the
+   *  old commit's: GitLab and Azure report per PR, not per commit) as the
+   *  new commit's. Ends when a check starts running, or by its timer after
+   *  CHECKS_AWAIT_AFTER_PUSH_MS. The one source of truth for the wait. */
   const checksAwaiting = ref(false);
 
   /** Show a fetched list. When the last running check finished, revalidate. */
@@ -1065,14 +1069,16 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     _lastChecksFetch = Date.now();
     checksError.value = false;
     checksLoaded.value = true;
-    if (checks.length > 0 && checksAwaiting.value) endChecksAwait();
+    // A running check is the new commit's CI starting; finished results may
+    // still be the old commit's.
+    if (checksAwaiting.value && checks.some(isCheckRunning)) endChecksAwait();
     // Polls mostly bring the same list: don't re-serialize the cache for it.
     if (JSON.stringify(checks) !== JSON.stringify(prChecks.value)) {
       prChecks.value = checks;
       persistDetailCache();
     }
     // After a push, an empty list means "not registered yet", not "finished".
-    const notYet = checks.length === 0 && awaitingChecks();
+    const notYet = checks.length === 0 && checksAwaiting.value;
     if (wasRunning && !checksRunning.value && !notYet) onChecksFinished(number, asked);
   }
 
@@ -1082,10 +1088,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (!selectedPr.value || checksLoading.value) return;
     const number = selectedPr.value.number;
     const gen = _checksGen;
-    const key = `${number}:${gen}`;
+    const repo = cwd.value;
+    const key = `${repo}#${number}:${gen}`;
     if (_checksRefreshing === key) return;
     const wasRunning = checksRunning.value;
-    const repo = cwd.value;
     const current = () =>
       selectedPr.value?.number === number && gen === _checksGen && cwd.value === repo;
     _checksRefreshing = key;
@@ -1152,7 +1158,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
 
   /** Whether the CI tab should follow the checks right now. */
-  const checksLiveWanted = () => checksRunning.value || awaitingChecks();
+  const checksLiveWanted = () => checksRunning.value || checksAwaiting.value;
 
   function stopChecksLive() {
     if (_checksLiveTimer) {
@@ -1169,7 +1175,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // looks for the new head's checks, for the banner (bounded by the window).
     const visible = detailVisible.value && !hidden && !!selectedPr.value;
     const onTab = detailTab.value === "checks" && checksLiveWanted();
-    const awaiting = checksAwaiting.value && awaitingChecks();
+    const awaiting = checksAwaiting.value;
     if (!visible || !(onTab || awaiting)) {
       _checksLiveSince = 0;
       return;
@@ -1232,7 +1238,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       const hadChecks = prChecks.value.length > 0;
       if (hadChecks) {
         endChecksAwait();
-        _checksAwaitUntil = Date.now() + CHECKS_AWAIT_AFTER_PUSH_MS;
         checksAwaiting.value = true;
         _awaitTimer = setTimeout(endChecksAwait, CHECKS_AWAIT_AFTER_PUSH_MS);
       }
@@ -2051,6 +2056,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // Actions
     init, ensurePrsLoaded, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff, loadChecks,
     revalidateOpenDetail,
+    /** Background re-fetch of the open PR's checks (live CI; exposed for tests). */
+    refreshChecks,
     createPr, checkoutPr, mergePr, armAutoMerge, disarmAutoMerge, convertDraftToReady,
     updatePr, forgeSupportsEdit,
     handleCreateComment, handleReplyComment, handleEditComment,

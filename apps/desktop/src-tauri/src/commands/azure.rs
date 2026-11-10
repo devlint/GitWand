@@ -1380,13 +1380,14 @@ fn rest_pr_create_comment(cwd: &str, number: i64, body: &str) -> Result<serde_js
 
 /// Map an Azure policy-evaluation `status` to (state, conclusion) in the
 /// vocabulary the frontend merge-readiness logic understands.
-/// A pending policy is "queued" only when a build will move it (a build
-/// validation policy). Any other one (reviewers, comment resolution, work item
-/// linking, a status an external service has not posted) waits on a person or
-/// on someone else: "waiting", which the CI tab shows as pending but does not
-/// poll (utils/ciChecks.ts).
-fn pending_policy_state(is_build: bool, state: &'static str) -> &'static str {
-    if state == "queued" && !is_build {
+/// A pending policy is "queued" only when a build will move it by itself (a
+/// build validation policy with automatic queueing). Any other one (reviewers,
+/// comment resolution, work item linking, a status an external service has not
+/// posted, a build someone must queue by hand) waits on a person or on someone
+/// else: "waiting", which the CI tab shows as pending but does not poll
+/// (utils/ciChecks.ts).
+fn pending_policy_state(automatic_build: bool, state: &'static str) -> &'static str {
+    if state == "queued" && !automatic_build {
         "waiting"
     } else {
         state
@@ -1599,7 +1600,12 @@ fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
                 None => name.clone(),
             };
             let (mut state, mut conclusion) = map_policy_status(&js(e, "status"));
-            state = pending_policy_state(build_def_id.is_some(), state);
+            // A build policy set to manual queueing waits on a person too.
+            let manual_build = settings
+                .and_then(|s| s.get("manualQueueOnly"))
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false);
+            state = pending_policy_state(build_def_id.is_some() && !manual_build, state);
             let is_expired = e
                 .get("context")
                 .and_then(|c| c.get("isExpired"))

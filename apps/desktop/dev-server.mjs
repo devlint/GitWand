@@ -5451,11 +5451,16 @@ async function handleRequest(req, res) {
         // Get check runs for that commit
         const checksResp = await githubFetch(`/repos/${nwo}/commits/${sha}/check-runs?per_page=100`, token);
         if (!checksResp.ok) {
-          // Same split as the Rust `checks_unavailable`: a 403/404 that is not a
-          // rate limit means the checks are not visible (fine-grained token
-          // without Checks: read) → no checks; anything else is a failure.
+          // Same split as the Rust `checks_unavailable`: a 403/404 that is
+          // neither a rate limit nor an org's OAuth app restriction means the
+          // checks are not visible (fine-grained token without Checks: read) →
+          // no checks; anything else is a failure. (GitLab, Bitbucket and Azure
+          // checks have no dev-server route: see commandRegistry.ts.)
           const body = await checksResp.text();
-          if ((checksResp.status === 403 || checksResp.status === 404) && !/rate limit/i.test(body)) {
+          if (
+            (checksResp.status === 403 || checksResp.status === 404) &&
+            !/rate limit|OAuth App access restrictions/i.test(body)
+          ) {
             return jsonResponse(req, res, []);
           }
           return jsonResponse(req, res, { error: `GitHub API ${checksResp.status}` }, 500);
