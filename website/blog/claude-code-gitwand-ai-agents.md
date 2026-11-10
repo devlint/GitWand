@@ -92,7 +92,7 @@ For the 95%+ of conflicts that are trivial (whitespace changes, one-side additio
 
 For the `pendingHunks`, the agent has the full context — `oursLines`, `theirsLines`, `baseLines`, the classification attempt, and the confidence score that caused the pattern to bail. With that, a capable model can make a real decision rather than a guess.
 
-If the agent resolves a pending hunk, it calls `gitwand_apply_resolution` with the chosen content. GitWand validates the result (no residual markers, valid syntax for JSON/YAML) before writing.
+If the agent resolves a pending hunk, it should write it with `gitwand_resolve_hunk_llm`, which checks the result before writing: no residual conflict markers and, for JSON files, a whole-file parse. `gitwand_apply_resolution` writes the chosen content without checking it, so keep it for cases a person has decided. (An earlier version of this post said `gitwand_apply_resolution` validated; it does not. See [the agent rulebook](/blog/ai-agent-conflict-rules).)
 
 ### Phase 3: when the agent doesn't know either
 

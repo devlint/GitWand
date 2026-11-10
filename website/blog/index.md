@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/ai-agent-conflict-rules" class="blog-card">
+    <div class="blog-meta">November 10, 2026 · 10 min read</div>
+    <h2 class="blog-title">Letting an AI agent resolve Git conflicts without risk: what it must do, and what it must never do</h2>
+    <p class="blog-excerpt">Any agent that can edit files can delete conflict markers; the risk is the operation around them. Nine rules, each mapped to a real tool of the GitWand MCP server: read the state, preview before applying, let a <strong>deterministic resolver that explains itself</strong> go first, set <code>min_confidence_score</code> explicitly, write through the tool that validates, <strong>never continue past a residual, never abort for the human</strong>, and stop with the context a person needs. Plus a block to paste into <code>AGENTS.md</code>, and four gaps we found in our own server while writing it.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/worktrees-step-by-step" class="blog-card">
     <div class="blog-meta">November 9, 2026 · 10 min read</div>
     <h2 class="blog-title">Git worktrees in GitWand, step by step</h2>

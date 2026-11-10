@@ -351,6 +351,7 @@ export default defineConfig({
           text: 'Blog',
           items: [
             { text: 'All articles', link: '/blog/' },
+            { text: 'AI agents and conflicts: the rules', link: '/blog/ai-agent-conflict-rules' },
             { text: 'Git worktrees, step by step (v3.13)', link: '/blog/worktrees-step-by-step' },
             { text: 'Rebase or merge: fewer conflicts?', link: '/blog/rebase-vs-merge-conflicts' },
             { text: 'Trivial conflicts: a taxonomy', link: '/blog/trivial-conflicts-taxonomy' },

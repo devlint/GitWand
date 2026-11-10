@@ -1348,10 +1348,10 @@ onMounted(() => {
         <div class="blog-teaser-header">
           <span class="blog-teaser-label">From the blog</span>
         </div>
-        <a href="/blog/worktrees-step-by-step" class="blog-teaser-card">
-          <div class="blog-teaser-meta">November 9, 2026 · 10 min read</div>
-          <h3 class="blog-teaser-title">Git worktrees in GitWand, step by step</h3>
-          <p class="blog-teaser-excerpt">git worktree add gives you a folder, not the environment that makes it runnable. The whole lifecycle in GitWand 3.13: describe your setup once, create from a fresh base, let an agent work while main moves, merge its work back with its commits intact, remove it with a teardown that has to succeed, and restore it if you change your mind.</p>
+        <a href="/blog/ai-agent-conflict-rules" class="blog-teaser-card">
+          <div class="blog-teaser-meta">November 10, 2026 · 10 min read</div>
+          <h3 class="blog-teaser-title">Letting an AI agent resolve Git conflicts without risk</h3>
+          <p class="blog-teaser-excerpt">Any agent that can edit files can delete conflict markers; the risk is the operation around them. Nine rules, each mapped to a real tool of the GitWand MCP server: preview before applying, let a deterministic resolver that explains itself go first, never continue past a residual, never abort for the human. Plus a block to paste into AGENTS.md, and four gaps we found in our own server.</p>
           <span class="blog-teaser-cta">Read article →</span>
         </a>
       </div>
