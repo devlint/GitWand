@@ -1190,7 +1190,8 @@ pub(crate) async fn bb_pr_ci_checks(cwd: String, pr_id: i64) -> Result<Vec<CIChe
         "https://api.bitbucket.org/2.0/repositories/{}/{}/commit/{}/statuses?pagelen=30",
         workspace, slug, head_sha
     );
-    let resp = bb_curl("GET", &url, None, &auth_config).unwrap_or(serde_json::Value::Null);
+    // A failure is an error, not "no checks" (the CI tab tells them apart).
+    let resp = bb_curl("GET", &url, None, &auth_config)?;
     let values = resp
         .get("values")
         .and_then(|v| v.as_array())

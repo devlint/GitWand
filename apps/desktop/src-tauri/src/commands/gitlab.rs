@@ -705,18 +705,21 @@ fn gl_mr_pipelines_inner(cwd: String, iid: i64) -> Result<Vec<CICheck>, String> 
     let output =
         output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api pipelines: {}", e))?;
 
+    // An MR with no CI answers 200 with `[]`. A failure is reported as one, so
+    // the CI tab can keep a running list on screen instead of emptying it.
     if !output.status.success() {
-        return Ok(Vec::new()); // Non-fatal — no CI configured is common
+        return Err(format!(
+            "glab api pipelines: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let pipelines: serde_json::Value =
-        serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Array(vec![]));
-
-    let arr = match pipelines.as_array() {
-        Some(a) => a,
-        None => return Ok(Vec::new()),
-    };
+        serde_json::from_str(stdout.trim()).map_err(|e| format!("glab api pipelines: {}", e))?;
+    let arr = pipelines
+        .as_array()
+        .ok_or_else(|| "glab api pipelines: not a list".to_string())?;
 
     Ok(gl_pipeline_checks(arr))
 }

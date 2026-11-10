@@ -1484,6 +1484,11 @@ fn rollup_from_checks(checks: &[CICheck]) -> String {
     }
 }
 
+/// True for the error `finalize_json` builds from a 4xx answer.
+fn az_is_client_error(err: &str) -> bool {
+    err.starts_with("Azure DevOps API error (4")
+}
+
 fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
     let (r, pr) = get_pr_json(cwd, number)?;
     let project_id = pr
@@ -1505,10 +1510,13 @@ fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
         urlenc(project_id),
         urlenc(&artifact),
     );
-    // Policies may be disabled on the repo — treat any failure as "no checks".
+    // Policies may be disabled on the repo: a 4xx answer means "no checks".
+    // Anything else (network, 5xx) is a failed fetch and stays an error, so
+    // the CI tab can keep a running list on screen instead of emptying it.
     let v = match az_json("GET", &url, None) {
         Ok(v) => v,
-        Err(_) => return Ok(Vec::new()),
+        Err(e) if az_is_client_error(&e) => return Ok(Vec::new()),
+        Err(e) => return Err(e),
     };
     let evals = v
         .get("value")
@@ -2482,5 +2490,23 @@ mod az_auto_complete_body_tests {
     fn an_unknown_method_falls_back_to_no_fast_forward() {
         let b = az_auto_complete_body(Some("id"), "nonsense");
         assert_eq!(b["completionOptions"]["mergeStrategy"], "noFastForward");
+    }
+}
+
+#[cfg(test)]
+mod az_client_error_tests {
+    use super::{az_is_client_error, finalize_json};
+
+    #[test]
+    fn a_4xx_answer_is_a_client_error() {
+        let e = finalize_json(404, r#"{"message":"not found"}"#).unwrap_err();
+        assert!(az_is_client_error(&e));
+    }
+
+    #[test]
+    fn a_5xx_answer_or_a_network_error_is_not() {
+        let e = finalize_json(503, "").unwrap_err();
+        assert!(!az_is_client_error(&e));
+        assert!(!az_is_client_error("curl: (6) Could not resolve host"));
     }
 }

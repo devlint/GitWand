@@ -5,9 +5,8 @@ import type { CICheck } from "./backend";
  * on where they put it: GitHub leaves `conclusion` empty and sets `state`;
  * GitLab, Bitbucket and Gitea put a running value in `conclusion` itself.
  * GitLab leaves `conclusion` empty before a pipeline starts (`created`,
- * `preparing`, `waiting_for_resource`). Its `manual` and `scheduled` are left
- * out on purpose: they wait on a person or a clock, and polling them would
- * never end.
+ * `preparing`, `waiting_for_resource`). Its `manual` and `scheduled` are not
+ * here: they wait on a person or a clock (see WAITING_ON_SOMEONE).
  */
 const RUNNING = new Set([
   "QUEUED", "IN_PROGRESS", "INPROGRESS", "PENDING", "WAITING", "REQUESTED", "RUNNING",
@@ -19,6 +18,17 @@ const FAILING = new Set([
   "FAILURE", "FAILED", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE",
 ]);
 
+/**
+ * States with no result yet that nothing is working on: a required status
+ * that has not reported (`EXPECTED`), a GitLab pipeline waiting on a manual
+ * job or a schedule. They block the merge and show ⏳, like the backends'
+ * rollups, but polling them could go on for ever.
+ */
+const WAITING_ON_SOMEONE = new Set(["EXPECTED", "MANUAL", "SCHEDULED"]);
+
+/** Final results that count as passing in every backend's rollup. */
+const PASSING = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
+
 function status(check: CICheck): string {
   return (check.conclusion || check.state || "").toUpperCase();
 }
@@ -28,18 +38,22 @@ export function isCheckRunning(check: CICheck): boolean {
   return RUNNING.has(status(check));
 }
 
-/**
- * True while a check has no result yet: running, or `EXPECTED` (a required
- * status that has not reported). These block the merge and show ⏳, but an
- * `EXPECTED` check alone is not polled: nothing says it will ever report.
- */
+/** True while a check has no result yet: running, or waiting on someone. */
 export function isCheckPending(check: CICheck): boolean {
-  return isCheckRunning(check) || status(check) === "EXPECTED";
+  return isCheckRunning(check) || WAITING_ON_SOMEONE.has(status(check));
 }
 
 /** True when a CI check finished and failed (errored, cancelled, timed out…). */
 export function isCheckFailing(check: CICheck): boolean {
   return FAILING.has(status(check));
+}
+
+/**
+ * True when a check stands in the way of a merge: it failed, its build expired
+ * (it needs a re-queue), or it has no result yet. The merge banner's rule.
+ */
+export function isCheckBlocking(check: CICheck): boolean {
+  return isCheckFailing(check) || status(check) === "EXPIRED" || isCheckPending(check);
 }
 
 /** The icon of one check in the CI tab. */
@@ -54,13 +68,18 @@ export function checkIcon(check: CICheck): string {
 }
 
 /**
- * The CI rollup of a finished list of checks, in the PR list's vocabulary
- * (`FAILURE` red, `PENDING` yellow, `SUCCESS` green, `""` no CI). An expired
- * build still blocks the merge, so it reads as pending, like the backends.
+ * The CI rollup of a list of checks, in the PR list's vocabulary and by the
+ * backends' own rule (`rollup_from_check_runs`, `rollup_from_checks`,
+ * `bb_rollup_from_statuses`, `gl_status_to_rollup`): any failure is
+ * `FAILURE`; every check passed (success, neutral, skipped) is `SUCCESS`;
+ * anything else (running, waiting, expired, unknown) is `PENDING`; no checks
+ * is `""`. A list of skipped checks only gives `null`, "don't know": GitHub
+ * reads it as SUCCESS, GitLab as no CI.
  */
-export function checksRollup(checks: CICheck[]): string {
+export function checksRollup(checks: CICheck[]): string | null {
   if (checks.length === 0) return "";
   if (checks.some(isCheckFailing)) return "FAILURE";
-  if (checks.some((c) => isCheckPending(c) || status(c) === "EXPIRED")) return "PENDING";
+  if (!checks.every((c) => PASSING.has(status(c)))) return "PENDING";
+  if (checks.every((c) => status(c) === "SKIPPED")) return null;
   return "SUCCESS";
 }

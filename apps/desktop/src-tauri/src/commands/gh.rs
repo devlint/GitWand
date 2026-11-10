@@ -1537,8 +1537,12 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("gh api pr head sha: {}", e))?;
+    // Errors are errors, not "no checks": see rest_pr_checks.
     if !pr_out.status.success() {
-        return Ok(Vec::new()); // non-fatal: no checks surfaced
+        return Err(format!(
+            "gh api pr head sha: {}",
+            String::from_utf8_lossy(&pr_out.stderr).trim()
+        ));
     }
     let sha = String::from_utf8_lossy(&pr_out.stdout)
         .trim()
@@ -1558,12 +1562,13 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
         .output()
         .map_err(|e| format!("gh api check-runs: {}", e))?;
     if !runs_out.status.success() {
-        return Ok(Vec::new());
+        return Err(format!(
+            "gh api check-runs: {}",
+            String::from_utf8_lossy(&runs_out.stderr).trim()
+        ));
     }
-    let v: serde_json::Value = match serde_json::from_slice(&runs_out.stdout) {
-        Ok(v) => v,
-        Err(_) => return Ok(Vec::new()),
-    };
+    let v: serde_json::Value = serde_json::from_slice(&runs_out.stdout)
+        .map_err(|e| format!("gh api check-runs: {}", e))?;
     let runs = v
         .get("check_runs")
         .and_then(|r| r.as_array())

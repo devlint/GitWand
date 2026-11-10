@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { isCheckRunning, isCheckPending, isCheckFailing, checkIcon } from "../ciChecks";
+import {
+  isCheckRunning, isCheckPending, isCheckFailing, isCheckBlocking, checkIcon, checksRollup,
+} from "../ciChecks";
 
 const chk = (state: string, conclusion: string) => ({ name: "c", state, conclusion, detailsUrl: "" });
 
@@ -25,6 +27,12 @@ describe("isCheckRunning", () => {
   it("is false for GitLab pipelines waiting on a person or a schedule", () => {
     expect(isCheckRunning(chk("manual", ""))).toBe(false);
     expect(isCheckRunning(chk("scheduled", ""))).toBe(false);
+  });
+
+  it("those are still pending: they block and show the hourglass", () => {
+    expect(isCheckPending(chk("manual", ""))).toBe(true);
+    expect(isCheckBlocking(chk("scheduled", ""))).toBe(true);
+    expect(checkIcon(chk("manual", ""))).toBe("⏳");
   });
 
   it("is false once the check has finished", () => {
@@ -80,5 +88,33 @@ describe("checkIcon", () => {
     expect(checkIcon(chk("COMPLETED", "EXPIRED"))).toBe("⚠️");
     expect(checkIcon(chk("COMPLETED", "SKIPPED"))).toBe("⏭️");
     expect(checkIcon(chk("COMPLETED", "NEUTRAL"))).toBe("❓");
+  });
+});
+
+describe("isCheckBlocking", () => {
+  it("blocks on failing, expired and pending checks only", () => {
+    expect(isCheckBlocking(chk("COMPLETED", "FAILURE"))).toBe(true);
+    expect(isCheckBlocking(chk("COMPLETED", "EXPIRED"))).toBe(true);
+    expect(isCheckBlocking(chk("IN_PROGRESS", ""))).toBe(true);
+    expect(isCheckBlocking(chk("COMPLETED", "SUCCESS"))).toBe(false);
+    expect(isCheckBlocking(chk("COMPLETED", "NEUTRAL"))).toBe(false);
+  });
+});
+
+describe("checksRollup follows the backends' rule", () => {
+  it("no checks → empty", () => expect(checksRollup([])).toBe(""));
+  it("any failure → FAILURE", () => {
+    expect(checksRollup([chk("COMPLETED", "SUCCESS"), chk("COMPLETED", "TIMED_OUT")])).toBe("FAILURE");
+  });
+  it("all passed → SUCCESS", () => {
+    expect(checksRollup([chk("COMPLETED", "SUCCESS"), chk("COMPLETED", "SKIPPED"), chk("COMPLETED", "NEUTRAL")])).toBe("SUCCESS");
+  });
+  it("anything else → PENDING (manual, expired, unknown)", () => {
+    expect(checksRollup([chk("manual", "")])).toBe("PENDING");
+    expect(checksRollup([chk("COMPLETED", "SUCCESS"), chk("COMPLETED", "EXPIRED")])).toBe("PENDING");
+    expect(checksRollup([chk("COMPLETED", "WEIRD")])).toBe("PENDING");
+  });
+  it("only skipped → null (forges disagree)", () => {
+    expect(checksRollup([chk("COMPLETED", "SKIPPED")])).toBeNull();
   });
 });

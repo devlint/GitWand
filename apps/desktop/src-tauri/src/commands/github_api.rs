@@ -989,10 +989,10 @@ pub(crate) fn rest_pr_checks(cwd: &str, number: i64, token: &str) -> Result<Vec<
         return Ok(Vec::new());
     }
     let url = format!("{}/repos/{}/commits/{}/check-runs", API_BASE, repo, sha);
-    let v = match api_json("GET", &url, token, None) {
-        Ok(v) => v,
-        Err(_) => return Ok(Vec::new()), // no checks configured — not fatal
-    };
+    // A commit with no checks answers 200 with an empty list; an error is a
+    // failed fetch, and the CI tab must be able to tell the two apart (it
+    // keeps a running list on screen through a failure, but not through "none").
+    let v = api_json("GET", &url, token, None)?;
     let runs = v
         .get("check_runs")
         .and_then(|r| r.as_array())
