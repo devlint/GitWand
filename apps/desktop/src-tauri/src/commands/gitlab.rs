@@ -775,7 +775,8 @@ fn gl_pipeline_checks(arr: &[serde_json::Value]) -> Vec<CICheck> {
 /// (`.../train`): their `sha` is a temporary merge commit, never the head.
 fn gl_pipeline_head_sha(p: &serde_json::Value) -> String {
     let r = js(p, "ref");
-    if r.ends_with("/merge") || r.ends_with("/train") {
+    let mr_ref = r.strip_prefix("refs/merge-requests/").unwrap_or("");
+    if mr_ref.ends_with("/merge") || mr_ref.ends_with("/train") {
         return String::new();
     }
     js(p, "sha")
@@ -2844,11 +2845,16 @@ mod gl_pipeline_checks_tests {
                 r
             );
         }
-        let arr = json!([{"id": 1, "status": "success", "sha": "h", "ref": "refs/merge-requests/7/head"}]);
-        assert_eq!(
-            gl_pipeline_checks(arr.as_array().unwrap())[0].commit_sha,
-            "h"
-        );
+        // A branch pipeline names its head, whatever the branch is called.
+        for r in ["refs/merge-requests/7/head", "fix/merge", "release/train"] {
+            let arr = json!([{"id": 1, "status": "success", "sha": "h", "ref": r}]);
+            assert_eq!(
+                gl_pipeline_checks(arr.as_array().unwrap())[0].commit_sha,
+                "h",
+                "{}",
+                r
+            );
+        }
     }
 
     #[test]

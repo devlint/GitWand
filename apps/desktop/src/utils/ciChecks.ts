@@ -109,8 +109,13 @@ export function isCheckOnOtherCommit(check: CICheck, headSha: string | null | un
   return !!headSha && !!check.commitSha && check.commitSha !== headSha;
 }
 
-/** The first commit, other than `headSha`, that a check ran on; `null` when
- *  every check is the head's or does not say. */
+/** A commit, other than `headSha`, that a check ran on; `null` when every
+ *  check is the head's or does not say. With several, the smallest sha, so the
+ *  answer does not change with the order a forge lists its checks in. */
 export function checksCommitMismatch(checks: CICheck[], headSha: string | null | undefined): string | null {
-  return checks.find((c) => isCheckOnOtherCommit(c, headSha))?.commitSha ?? null;
+  let other: string | null = null;
+  for (const c of checks) {
+    if (isCheckOnOtherCommit(c, headSha) && (other === null || c.commitSha! < other)) other = c.commitSha!;
+  }
+  return other;
 }

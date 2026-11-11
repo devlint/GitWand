@@ -824,19 +824,19 @@ describe("usePrPanel — checks of another commit than the head", () => {
     expect(ghPrChecks).toHaveBeenCalledTimes(calls);
   });
 
-  it("the banner waits for the head's CI without disabling Merge, and auto-merge can be armed", async () => {
-    ghPrChecks.mockResolvedValueOnce(on("old")).mockResolvedValue(on("abc"));
+  it("leaves the merge banner as it is: green checks of another commit read green", async () => {
+    // Which side lags is unknown, and the head may never get CI of its own
+    // (GitLab `[skip ci]`): the banner reads every check, as it always did, and
+    // never offers to arm auto-merge on a PR it calls ready.
+    ghPrChecks.mockResolvedValue(on("old"));
     const p = await openChecksTab();
     approve(p);
-    expect(p.mergeReadiness.value?.ready).toBe(false);
-    expect(p.mergeReadiness.value?.reason).toContain("CI of the latest commit");
+    expect(p.checksOtherCommit.value).toBe("old");
+    expect(p.mergeReadiness.value?.ready).toBe(true);
     expect(p.mergeBlocked.value).toBe(false);
     expect(computeAutoMergeOffer(
       { supported: true } as any, { armed: false, available: true } as any, p.mergeReadiness.value, true,
-    ).kind).toBe("arm");
-
-    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
-    expect(p.mergeReadiness.value?.ready).toBe(true);
+    ).kind).not.toBe("arm");
   });
 
   it("another commit's failed checks still block: which side lags is unknown", async () => {
@@ -894,15 +894,6 @@ describe("usePrPanel — checks of another commit than the head", () => {
     approve(p);
     expect(p.mergeBlocked.value).toBe(true);
     expect(p.mergeReadiness.value?.reason).toContain("At least 1 reviewer must approve");
-  });
-
-  it("a mixed list is not ready on the strength of a check still on the old commit", async () => {
-    ghPrChecks.mockResolvedValue([check("A", "abc"), check("B", "old")]);
-    const p = await openChecksTab();
-    approve(p);
-    expect(p.checksOtherCommit.value).toBe("old");
-    expect(p.mergeReadiness.value?.ready).toBe(false);
-    expect(p.mergeBlocked.value).toBe(false);
   });
 
   it("revalidates the detail once when the checks report a commit it has not seen", async () => {

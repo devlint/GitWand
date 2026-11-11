@@ -151,6 +151,11 @@ describe("checksCommitMismatch", () => {
     expect(checksCommitMismatch([on("new"), on("old")], "new")).toBe("old");
   });
 
+  it("names the same commit whatever the order, so the CI tab's follow window holds", () => {
+    expect(checksCommitMismatch([on("b"), on("a"), on("new")], "new")).toBe("a");
+    expect(checksCommitMismatch([on("a"), on("new"), on("b")], "new")).toBe("a");
+  });
+
   it("isCheckOnOtherCommit judges one check: no commit named is never another's", () => {
     expect(isCheckOnOtherCommit(on("old"), "new")).toBe(true);
     expect(isCheckOnOtherCommit(on("new"), "new")).toBe(false);

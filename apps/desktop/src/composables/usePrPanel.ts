@@ -101,14 +101,6 @@ export function isMergeConflict(mergeable: string | null | undefined): boolean {
   return ["CONFLICTING", "CONFLICTS", "DIRTY"].includes((mergeable || "").toUpperCase());
 }
 
-/** The merge banner. `blocking: false` waits without disabling Merge (the
- *  head's CI has not reported yet, and may never: the forge decides). */
-export interface MergeReadiness {
-  ready: boolean;
-  reason: string;
-  blocking?: boolean;
-}
-
 /** What the PR detail panel should offer for forge-side auto-merge (v3.11.0). */
 export type AutoMergeOffer =
   | { kind: "arm" }
@@ -136,7 +128,7 @@ export type AutoMergeOffer =
 export function computeAutoMergeOffer(
   support: AutoMergeSupport,
   state: AutoMergeState,
-  readiness: MergeReadiness | null,
+  readiness: { ready: boolean; reason: string } | null,
   canMerge?: boolean | null,
 ): AutoMergeOffer {
   if (state.armed) return { kind: "disarm" };
@@ -420,7 +412,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  on (see `checksCommitMismatch`): those say nothing about the head. */
   const checksOtherCommit = computed(() => checksCommitMismatch(prChecks.value, prDetail.value?.headSha));
 
-  const mergeReadiness = computed<MergeReadiness | null>(() => {
+  const mergeReadiness = computed<{ ready: boolean; reason: string } | null>(() => {
     // A merge conflict blocks the PR on its own, even with no checks/reviews.
     const hasConflict = isMergeConflict(prDetail.value?.mergeable);
     if (!prReviews.value.length && !prChecks.value.length && !hasConflict) return null;
@@ -437,12 +429,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // read clearly in the banner instead of a generic "checks failing".
     const unmet = prChecks.value.filter(isBlocking);
     const checksOk = unmet.length === 0;
-    // Checks that ran on another commit than the head never make the PR
-    // "ready": the banner waits for the head's CI instead, without disabling
-    // Merge (the head may never get a pipeline, GitLab `[skip ci]`). They are
-    // not ignored either: which side lags is unknown (a detail fetched before
-    // a push lags behind GitHub's checks), so a red one still blocks.
-    const awaitingHead = checksOtherCommit.value !== null;
     // Only each reviewer's *latest* verdict counts — a later APPROVED supersedes
     // an earlier CHANGES_REQUESTED (and vice versa). Scanning every historical
     // review would keep flagging "changes requested" after the reviewer has
@@ -464,7 +450,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const verdicts = [...latestVerdictByUser.values()];
     const hasApproval = verdicts.includes("APPROVED");
     const hasChangesRequested = verdicts.includes("CHANGES_REQUESTED");
-    if (checksOk && hasApproval && !hasChangesRequested && !hasConflict && !awaitingHead) {
+    if (checksOk && hasApproval && !hasChangesRequested && !hasConflict) {
       return { ready: true, reason: t("pr.ready.ready") };
     }
     const reasons: string[] = [];
@@ -477,14 +463,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (names.length) reasons.push(...names);
     else if (!checksOk) reasons.push(t("pr.ready.reasonChecksFailing"));
     if (hasChangesRequested) reasons.push(t("pr.ready.reasonChangesRequested"));
-    const blocking = reasons.length > 0;
-    if (awaitingHead) reasons.push(t("pr.ready.reasonChecksOtherCommit"));
     // A missing approval on its own isn't worth a banner — checks are green and
     // nobody requested changes, so we're just waiting for the merge. Hide it
     // rather than nag with "waiting: no approval". (Named reviewer *policies*
     // from `unmet` are still surfaced above.)
     if (reasons.length === 0) return null;
-    return { ready: false, reason: t("pr.ready.waitingPrefix", reasons.join(", ")), blocking };
+    return { ready: false, reason: t("pr.ready.waitingPrefix", reasons.join(", ")) };
   });
 
   /**
@@ -496,14 +480,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const mergeBlocked = computed<boolean>(() => {
     if (prDetail.value?.canMerge === false) return true;
     const r = mergeReadiness.value;
-    return !!r && !r.ready && r.blocking !== false;
+    return !!r && !r.ready;
   });
 
   /** Human-readable reason for a disabled merge button (tooltip). */
   const mergeBlockedReason = computed<string>(() => {
     if (prDetail.value?.canMerge === false) return t("pr.detail.mergeNoPermission");
     const r = mergeReadiness.value;
-    return r && !r.ready && r.blocking !== false ? r.reason : "";
+    return r && !r.ready ? r.reason : "";
   });
 
   /**

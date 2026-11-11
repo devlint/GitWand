@@ -1158,7 +1158,6 @@ const es: Locale = {
       ready: "Todos los checks están en verde y la PR está aprobada.",
       waitingPrefix: "Esperando: {0}.",
       reasonChecksFailing: "checks de CI fallando",
-      reasonChecksOtherCommit: "CI del último commit aún no disponible",
       reasonMergeConflict: "conflicto de fusión",
       reasonNoApproval: "sin aprobación",
       reasonChangesRequested: "cambios solicitados",
