@@ -913,6 +913,19 @@ describe("usePrPanel — checks of another commit than the head", () => {
     expect(ghPrDetail).toHaveBeenCalledTimes(2);
   });
 
+  it("checks that finish on another commit revalidate the detail once, not twice", async () => {
+    // The last running check finishes on the same poll that first shows the
+    // other commit: one revalidation serves both, and the follow window starts.
+    ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(on("old"));
+    await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    await flush();
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 3);
+    await flush();
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+  });
+
   it("does not revalidate the detail more than once for checks that lag behind it", async () => {
     ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(runningOn("old"));
     await openChecksTab();

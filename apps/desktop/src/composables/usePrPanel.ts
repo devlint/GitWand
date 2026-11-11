@@ -1041,8 +1041,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       prChecks.value = checks;
       persistDetailCache();
     }
-    if (wasRunning && !checksRunning.value) onChecksFinished(number, asked);
-    else onChecksOtherCommit();
+    // Both may reload the detail: one reload serves both.
+    const reloading = onChecksOtherCommit();
+    if (wasRunning && !checksRunning.value && !reloading) onChecksFinished(number, asked);
   }
 
   /** Some checks ran on a commit that is not the head the detail shows. Either
@@ -1052,18 +1053,19 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  head themselves are always on the latest). Revalidate the detail once
    *  per such commit, to settle which, even right after a detail fetch (that
    *  one may predate the push); a failed revalidation is retried at the next
-   *  fetch. */
+   *  fetch. True when a revalidation was started here. */
   let _otherCommit: { sha: string; since: number; revalidated: boolean } | null = null;
-  function onChecksOtherCommit() {
+  function onChecksOtherCommit(): boolean {
     const sha = checksOtherCommit.value;
-    if (!sha) return;
+    if (!sha) return false;
     if (_otherCommit?.sha !== sha) _otherCommit = { sha, since: Date.now(), revalidated: false };
     const seen = _otherCommit;
-    if (seen.revalidated) return;
+    if (seen.revalidated) return false;
     seen.revalidated = true;
     void revalidateOpenDetail().then((ok) => {
       if (!ok) seen.revalidated = false;
     });
+    return true;
   }
 
   /** Whether the CI tab still follows a list with another commit's checks. */
