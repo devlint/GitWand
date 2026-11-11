@@ -69,6 +69,14 @@ export const CHECKS_LIVE_SLOW_INTERVAL_MS = 60_000;
 /** How long the CI tab follows checks of another commit than the head, which
  *  may never get CI of its own (GitLab `[skip ci]`, a manually queued build). */
 export const OTHER_COMMIT_FOLLOW_MS = 10 * 60_000;
+/** Per (repo, PR, head): when the CI tab first saw checks of another commit
+ *  for that head, and whether the detail was reloaded to settle which side
+ *  lags. Module-level, so re-opening the PR does not restart the window: a
+ *  head that gets no CI (`[skip ci]`) is followed once, not once per visit. */
+const OTHER_COMMIT_SEEN = new Map<string, { since: number; revalidated: boolean }>();
+export function _resetOtherCommitForTesting(): void {
+  OTHER_COMMIT_SEEN.clear();
+}
 
 /** Human-facing forge names for "Open on …" / platform labels. */
 const FORGE_LABELS: Record<string, string> = {
@@ -897,6 +905,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   async function fetchDetailBundle(pr: PullRequest, { silentError }: { silentError: boolean }): Promise<boolean> {
     const key = detailKey(cwd.value, pr.number);
     const repo = cwd.value;
+    const gen = ++_detailGen;
     _lastDetailFetch = { number: pr.number, at: Date.now() };
     detailError.value = null;
     try {
@@ -906,8 +915,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         forge.value.listReviews(cwd.value, pr.number).catch(() => [] as PrReview[]),
       ]);
       // Ignore a stale response if the user moved on to another PR, or to
-      // another repository (same PR number there), meanwhile.
-      if (selectedPr.value?.number !== pr.number || cwd.value !== repo) return true;
+      // another repository (same PR number there), meanwhile; or if a later
+      // fetch started since (two can overlap: an older answer landing last
+      // would move the head backwards, which reads as another push).
+      if (selectedPr.value?.number !== pr.number || cwd.value !== repo || gen !== _detailGen) return true;
       prDetail.value = detail;
       prComments.value = comments;
       prReviews.value = reviews;
@@ -1014,6 +1025,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   let _refetchAfterLoad = false;
   /** Start of the last detail fetch, for which PR. */
   let _lastDetailFetch: { number: number; at: number } = { number: -1, at: 0 };
+  let _detailGen = 0;
   /** A detail fetch started this close before the checks request (or after it)
    *  sees the same CI state: no need for another when the checks finish. */
   const DETAIL_FRESH_MS = 2_000;
@@ -1053,26 +1065,36 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    *  head themselves are always on the latest). Revalidate the detail once
    *  per such commit, to settle which, even right after a detail fetch (that
    *  one may predate the push); a failed revalidation is retried at the next
-   *  fetch. True when a revalidation was started here. */
-  let _otherCommit: { sha: string; since: number; revalidated: boolean } | null = null;
+   *  fetch. One window and one revalidation per head (OTHER_COMMIT_SEEN), not
+   *  per other commit: a list on two older commits (Azure) changes which it
+   *  names as they catch up. True when a revalidation was started here. */
+  function otherCommitKey(): string | null {
+    const d = prDetail.value;
+    return d?.headSha ? `${cwd.value}#${d.number}@${d.headSha}` : null;
+  }
   function onChecksOtherCommit(): boolean {
-    const sha = checksOtherCommit.value;
-    if (!sha) return false;
-    if (_otherCommit?.sha !== sha) _otherCommit = { sha, since: Date.now(), revalidated: false };
-    const seen = _otherCommit;
+    const key = otherCommitKey();
+    if (!checksOtherCommit.value || !key) return false;
+    let seen = OTHER_COMMIT_SEEN.get(key);
+    if (!seen) {
+      seen = { since: Date.now(), revalidated: false };
+      OTHER_COMMIT_SEEN.set(key, seen);
+    }
     if (seen.revalidated) return false;
     seen.revalidated = true;
+    const started = seen;
     void revalidateOpenDetail().then((ok) => {
-      if (!ok) seen.revalidated = false;
+      if (!ok) started.revalidated = false;
     });
     return true;
   }
 
   /** Whether the CI tab still follows a list with another commit's checks. */
   function followingOtherCommit(): boolean {
-    const sha = checksOtherCommit.value;
-    if (!sha) return false;
-    return _otherCommit?.sha !== sha || Date.now() - _otherCommit.since < OTHER_COMMIT_FOLLOW_MS;
+    const key = otherCommitKey();
+    if (!checksOtherCommit.value || !key) return false;
+    const seen = OTHER_COMMIT_SEEN.get(key);
+    return !seen || Date.now() - seen.since < OTHER_COMMIT_FOLLOW_MS;
   }
 
   /** Re-fetch the open PR's checks in the background, keeping the current list
@@ -1188,7 +1210,6 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     [detailTab, () => selectedPr.value?.number, checksRunning, checksOtherCommit],
     ([, number], [, prevNumber]) => {
       if (number !== prevNumber) {
-        _otherCommit = null;
         _checksFailures = 0;
         _lastChecksFetch = 0;
         _checksLiveSince = 0;
@@ -1207,9 +1228,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     [() => prDetail.value?.number, () => prDetail.value?.headSha],
     ([number, sha], [prevNumber, prevSha]) => {
       if (!sha || !prevSha || number !== prevNumber || sha === prevSha) return;
-      _checksGen++;
-      _otherCommit = null; // a new head: follow its CI afresh
       _checksLiveSince = 0;
+      // The detail is the fresh side here: a list still the old head's needs
+      // no detail reload to settle which lags; its follow window starts now.
+      OTHER_COMMIT_SEEN.set(`${cwd.value}#${number}@${sha}`, { since: Date.now(), revalidated: true });
+      // A list already the new head's (GitHub: its backend read the head, and
+      // the checks revealed the push) has nothing to refetch.
+      if (prChecks.value.length > 0 && prChecks.value.every((c) => c.commitSha === sha)) return;
+      _checksGen++;
       if (checksLoading.value) _refetchAfterLoad = true;
       else if (checksLoaded.value || prChecks.value.length > 0) retryChecksLive();
       // Nothing loaded nor cached: the next visit of the CI or Diff tab loads them.
