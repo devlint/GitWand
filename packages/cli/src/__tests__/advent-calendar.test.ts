@@ -5,6 +5,7 @@ import {
   doorUrl,
   isUnlocked,
   opensOn,
+  parisYmd,
   parseDateOverride,
 } from "../advent/calendar.js";
 
@@ -33,6 +34,25 @@ describe("isUnlocked", () => {
     expect(isUnlocked(13, dec12)).toBe(false);
     expect(isUnlocked(24, new Date("2026-11-20T12:00:00Z"))).toBe(false);
     expect(isUnlocked(1, new Date("2027-01-02T12:00:00Z"))).toBe(true);
+  });
+
+  it("never unlocks a day outside 1..24, even once the calendar is over", () => {
+    const dec12 = new Date("2026-12-12T10:00:00Z");
+    const over = new Date("2027-01-02T12:00:00Z");
+    for (const day of [0, -1, 25, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(isUnlocked(day, dec12), `day ${day} running`).toBe(false);
+      expect(isUnlocked(day, over), `day ${day} over`).toBe(false);
+    }
+  });
+});
+
+describe("parisYmd", () => {
+  it("reads the Paris calendar date", () => {
+    expect(parisYmd(new Date("2026-11-30T23:00:00Z"))).toEqual({ year: 2026, month: 12, day: 1 });
+  });
+
+  it("throws on an invalid date instead of returning year 0", () => {
+    expect(() => parisYmd(new Date("nope"))).toThrow();
   });
 });
 

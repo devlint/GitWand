@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { DOORS } from "../advent/doors.js";
@@ -7,6 +7,10 @@ import { parseInline } from "../advent/inline.js";
 
 const ROOT = new URL("../../../../", import.meta.url);
 const exists = (rel: string): boolean => existsSync(new URL(rel, ROOT));
+const resolveEvidencePath = (path: string): string | null =>
+  [path, `apps/desktop/src/${path}`, `apps/desktop/${path}`].find(exists) ?? null;
+const lineCount = (rel: string): number =>
+  readFileSync(new URL(rel, ROOT), "utf8").split("\n").length;
 
 describe("advent doors content", () => {
   it("has 24 doors numbered 1..24", () => {
@@ -30,9 +34,15 @@ describe("advent doors content", () => {
       expect(evidence.length, `day ${d.day} evidence`).toBeGreaterThan(0);
       for (const entry of evidence) {
         const path = entry.split(/[ :]/)[0];
-        const found =
-          exists(path) || exists(`apps/desktop/src/${path}`) || exists(`apps/desktop/${path}`);
-        expect(found, `day ${d.day} evidence path "${path}"`).toBe(true);
+        const resolved = resolveEvidencePath(path);
+        expect(resolved, `day ${d.day} evidence path "${path}"`).not.toBeNull();
+        const line = /^[^ :]+:(\d+)/.exec(entry)?.[1];
+        if (line !== undefined && resolved !== null) {
+          expect(
+            Number(line),
+            `day ${d.day} evidence "${entry}" points past the end of ${resolved}`,
+          ).toBeLessThanOrEqual(lineCount(resolved));
+        }
       }
     }
   });

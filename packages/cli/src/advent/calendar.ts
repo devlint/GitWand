@@ -20,8 +20,14 @@ export function parisYmd(now: Date): { year: number; month: number; day: number 
     month: "2-digit",
     day: "2-digit",
   }).formatToParts(now);
-  const get = (type: string): number =>
-    Number(parts.find((p) => p.type === type)?.value ?? "0");
+  const get = (type: string): number => {
+    const value = parts.find((p) => p.type === type)?.value;
+    const n = Number(value);
+    if (value === undefined || !Number.isInteger(n)) {
+      throw new Error(`parisYmd: no ${type} in the Europe/Paris date parts`);
+    }
+    return n;
+  };
   return { year: get("year"), month: get("month"), day: get("day") };
 }
 
@@ -35,6 +41,7 @@ export function calendarState(now: Date): CalendarState {
 }
 
 export function isUnlocked(day: number, now: Date): boolean {
+  if (!Number.isInteger(day) || day < 1 || day > DOOR_COUNT) return false;
   const state = calendarState(now);
   if (state.phase === "over") return true;
   if (state.phase === "not-started") return false;

@@ -18,6 +18,14 @@ describe("parseInline", () => {
     expect(parseInline("a ** b")).toEqual([{ kind: "text", text: "a ** b" }]);
   });
 
+  it("keeps an empty code span literal", () => {
+    expect(parseInline("a `` b")).toEqual([{ kind: "text", text: "a `` b" }]);
+  });
+
+  it("does not nest markers: the outer one wins, inner backticks stay literal", () => {
+    expect(parseInline("**a `b` c**")).toEqual([{ kind: "strong", text: "a `b` c" }]);
+  });
+
   it("returns nothing for an empty string", () => {
     expect(parseInline("")).toEqual([]);
   });
