@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { AUTO_PATTERN_COUNT } from './patterns'
 import { data as blogPosts } from './blog.data'
 import { adventBadge, adventCta, resolveNow } from './advent/advent-state'
@@ -986,9 +986,11 @@ function cellClass(v: CompareValue | undefined): string {
 // ── Apparition au défilement (thème Nocturne) ────────────────────────────────
 // Posé ici plutôt que dans le template : aucune section n'a à porter l'attribut,
 // et le rendu SSR reste identique.
-onMounted(() => {
+onMounted(async () => {
   if (typeof window === 'undefined' || !('IntersectionObserver' in window)) return
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  // Client-only blocks (the advent card) render on the next tick: wait for them.
+  await nextTick()
   const targets = Array.from(
     document.querySelectorAll('.gw-landing .nc-wrap > *, .gw-landing .nc-bento > *, .gw-landing .nc-trio > *'),
   )
