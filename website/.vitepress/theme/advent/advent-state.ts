@@ -13,6 +13,9 @@ import {
 
 export const STORAGE_KEY = 'gitwand-advent-2026-opened'
 
+/** Where "Download GitWand" points, in the door dialog and the day-page article. */
+export const DOWNLOAD_URL = 'https://github.com/devlint/GitWand/releases/latest'
+
 /** Site path of the calendar index (canonical form, with the trailing slash). */
 export const ADVENT_INDEX_PATH = '/advent/'
 
@@ -86,6 +89,26 @@ export function lockedMessage(day: number): string {
 export function initialDoorAction(day: number | undefined, now: Date): 'open' | 'locked' | 'none' {
   if (!isDoorDay(day)) return 'none'
   return isUnlocked(day, now) ? 'open' : 'locked'
+}
+
+/**
+ * Whether a day page shows its door content as an article below the grid:
+ * only once the season is over (from 25 December, Paris time, in any later
+ * year too). Before that, the content stays behind the door.
+ */
+export function showDoorArticle(now: Date): boolean {
+  return calendarState(now).phase === 'over'
+}
+
+/**
+ * The build time stamped on a day page (frontmatter `adventBuiltAt`, an ISO
+ * string), or null. The server render and the client's first render both
+ * decide from it, so hydration matches; the client re-decides on mount.
+ */
+export function buildTimeNow(value: unknown): Date | null {
+  if (typeof value !== 'string' || value === '') return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 /** Home/nav announcement, shown from 1 to 25 December of the edition year (Paris time). */

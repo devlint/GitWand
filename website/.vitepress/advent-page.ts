@@ -38,11 +38,16 @@ interface PageDataLike {
  * its own), so title, description and share image are derived here. Setting
  * `pageData.description` matters: VitePress builds <meta name="description">
  * from it, not from frontmatter, so without it every page keeps the site default.
+ *
+ * Day pages also get `frontmatter.adventBuiltAt` (the build time, ISO).
  */
-export function applyAdventMeta(pageData: PageDataLike): void {
+export function applyAdventMeta(pageData: PageDataLike, now: Date = new Date()): void {
   const adventDay = pageData.params?.day ? Number(pageData.params.day) : null
   if (pageData.relativePath !== 'advent/index.md' && adventDay === null) return
   const meta = adventPageMeta(adventDay)
+  // Day pages show the door as an article once the season is over; the page
+  // decides from this build time (server and first client render alike).
+  if (adventDay !== null) pageData.frontmatter.adventBuiltAt = now.toISOString()
   pageData.title = meta.title
   pageData.description = meta.description
   pageData.frontmatter.title = meta.title

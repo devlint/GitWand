@@ -10,16 +10,26 @@ import {
 } from '@gitwand/advent'
 import {
   ADVENT_INDEX_PATH,
+  DOWNLOAD_URL,
+  buildTimeNow,
   initialDoorAction,
   lockedMessage,
   markOpened,
   openedUnlockedCount,
   readOpened,
   resolveNow,
+  showDoorArticle,
 } from './advent-state'
+import AdventDoorContent from './AdventDoorContent.vue'
 import AdventDoorDialog from './AdventDoorDialog.vue'
 
-const props = defineProps<{ initialDay?: number }>()
+/**
+ * `initialDay`: the door of a `/advent/<day>` page. `builtAt`: that page's
+ * build time (frontmatter `adventBuiltAt`), which decides the server render.
+ */
+const props = defineProps<{ initialDay?: number; builtAt?: string }>()
+
+const ARTICLE_TITLE_ID = 'advent-article-title'
 
 const FLIP_MS = 400
 const SHAKE_MS = 450
@@ -35,6 +45,12 @@ const flippingDay = ref<number | null>(null)
 const shakingDay = ref<number | null>(null)
 const liveMessage = ref('')
 
+// The day-page article (the door's content, once the season is over). Its first
+// value comes from the build time, so the client's first render matches the
+// static HTML; onMounted re-decides with the visitor's clock (and ?date=).
+const builtAtNow = buildTimeNow(props.builtAt)
+const articleShown = ref(builtAtNow !== null && showDoorArticle(builtAtNow))
+
 const doorButtons = new Map<number, HTMLButtonElement>()
 let returnFocusTo: HTMLButtonElement | null = null
 const timers = new Set<ReturnType<typeof setTimeout>>()
@@ -47,6 +63,9 @@ const doorsByDay = new Map(DOORS.map((d) => [d.day, d]))
 const state = computed<CalendarState | null>(() => (now.value ? calendarState(now.value) : null))
 const openedCount = computed(() =>
   now.value ? openedUnlockedCount(opened.value, now.value) : 0,
+)
+const articleDoor = computed<AdventDoor | null>(() =>
+  articleShown.value && props.initialDay !== undefined ? (doorsByDay.get(props.initialDay) ?? null) : null,
 )
 const activeDoor = computed<AdventDoor | null>(() =>
   activeDay.value === null ? null : (doorsByDay.get(activeDay.value) ?? null),
@@ -182,6 +201,7 @@ function onDialogClose(): void {
 onMounted(() => {
   const current = resolveNow(location.search, new Date())
   now.value = current
+  articleShown.value = showDoorArticle(current)
   opened.value = readOpened(storage())
   const day = props.initialDay
   const action = initialDoorAction(day, current)
@@ -243,6 +263,15 @@ onBeforeUnmount(() => {
         </li>
       </ol>
       <p class="adv-live" aria-live="polite">{{ liveMessage }}</p>
+    </section>
+
+    <section v-if="articleDoor" class="adv-inner adv-article-wrap">
+      <article class="adv-article" :aria-labelledby="ARTICLE_TITLE_ID">
+        <AdventDoorContent :door="articleDoor" :title-id="ARTICLE_TITLE_ID" />
+        <p class="adv-article__footer">
+          <a class="adv-article__download" :href="DOWNLOAD_URL">Download GitWand</a>
+        </p>
+      </article>
     </section>
 
     <AdventDoorDialog :door="activeDoor" @close="onDialogClose" />
@@ -475,6 +504,35 @@ onBeforeUnmount(() => {
   80% { transform: translateX(3px); }
 }
 
+.adv-article-wrap {
+  margin-top: 40px;
+}
+.adv-article {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 28px 28px 22px;
+  background: var(--nc-bg);
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: var(--nc-radius-xl);
+}
+.adv-article__footer {
+  margin: 22px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--nc-rule);
+}
+.adv-article__download {
+  font-size: 13px;
+  color: var(--nc-neutral-400);
+  text-decoration: none;
+}
+.adv-article__download:hover {
+  color: var(--nc-accent-300);
+}
+.adv-article__download:focus-visible {
+  outline: 2px solid var(--nc-accent-300);
+  outline-offset: 2px;
+}
+
 .adv-live {
   min-height: 1.6em;
   margin: 20px 0 0;
@@ -502,6 +560,9 @@ onBeforeUnmount(() => {
   }
   .adv-door__num {
     font-size: 18px;
+  }
+  .adv-article {
+    padding: 22px 18px 18px;
   }
   .adv-door__inside {
     padding: 5px;

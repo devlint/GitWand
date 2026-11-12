@@ -72,6 +72,15 @@ describe('applyAdventMeta', () => {
     expect(heads(p)).toContain('https://gitwand.app/advent/og/index.png')
   })
 
+  it('stamps day pages with the build time, so the client can match the server render', () => {
+    const p = page('advent/[day].md', { day: '12' })
+    applyAdventMeta(p, new Date('2026-12-25T06:00:00Z'))
+    expect(p.frontmatter.adventBuiltAt).toBe('2026-12-25T06:00:00.000Z')
+    const index = page('advent/index.md')
+    applyAdventMeta(index, new Date('2026-12-25T06:00:00Z'))
+    expect(index.frontmatter.adventBuiltAt).toBeUndefined()
+  })
+
   it('leaves other pages alone', () => {
     const p = page('features.md')
     applyAdventMeta(p)

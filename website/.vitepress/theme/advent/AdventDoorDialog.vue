@@ -1,24 +1,20 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import type { AdventDoor } from '@gitwand/advent'
-import AdventInline from './AdventInline.vue'
+import { DOWNLOAD_URL } from './advent-state'
+import AdventDoorContent from './AdventDoorContent.vue'
 
 const props = defineProps<{ door: AdventDoor | null }>()
 const emit = defineEmits<{ close: [] }>()
 
-const DOWNLOAD_URL = 'https://github.com/devlint/GitWand/releases/latest'
 const TITLE_ID = 'advent-door-title'
 
 const dialogEl = ref<HTMLDialogElement | null>(null)
-const titleEl = ref<HTMLElement | null>(null)
-const preEl = ref<HTMLElement | null>(null)
-const copied = ref(false)
-let copiedTimer: ReturnType<typeof setTimeout> | undefined
+const contentEl = ref<InstanceType<typeof AdventDoorContent> | null>(null)
 
 watch(
   () => props.door,
   async (door) => {
-    copied.value = false
     await nextTick()
     const el = dialogEl.value
     if (!el) return
@@ -27,7 +23,7 @@ watch(
       // Initial focus is always the title (tabindex="-1"): it sits at the top,
       // so nothing scrolls, and the browser's own pick (the first focusable,
       // possibly the scrollable snippet) never gets a focus ring on open.
-      titleEl.value?.focus({ preventScroll: true })
+      contentEl.value?.focusTitle()
     } else if (!door && el.open) el.close()
   },
 )
@@ -64,32 +60,6 @@ function onDialogClick(event: MouseEvent): void {
   pressStartedOutside = false
   if (startedOutside && outsideDialog(event)) close()
 }
-
-function selectSnippet(): void {
-  const pre = preEl.value
-  const selection = window.getSelection()
-  if (!pre || !selection) return
-  const range = document.createRange()
-  range.selectNodeContents(pre)
-  selection.removeAllRanges()
-  selection.addRange(range)
-}
-
-async function copySnippet(): Promise<void> {
-  if (!props.door) return
-  try {
-    await navigator.clipboard.writeText(props.door.snippet)
-    copied.value = true
-    clearTimeout(copiedTimer)
-    copiedTimer = setTimeout(() => {
-      copied.value = false
-    }, 1500)
-  } catch {
-    selectSnippet()
-  }
-}
-
-onBeforeUnmount(() => clearTimeout(copiedTimer))
 </script>
 
 <template>
@@ -102,29 +72,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
     @click="onDialogClick"
   >
     <div v-if="door" class="adv-dialog__body">
-      <p class="adv-dialog__day">Day {{ door.day }}</p>
-      <h2 :id="TITLE_ID" ref="titleEl" class="adv-dialog__title" tabindex="-1">{{ door.command }}</h2>
-      <p class="adv-dialog__problem">“<AdventInline :text="door.problem" />”</p>
-
-      <div class="adv-dialog__snippet">
-        <div class="adv-dialog__snippet-bar">
-          <button type="button" class="adv-dialog__copy" @click="copySnippet">
-            {{ copied ? 'Copied' : 'Copy' }}
-          </button>
-        </div>
-        <pre ref="preEl"><code>{{ door.snippet }}</code></pre>
-      </div>
-
-      <p class="adv-dialog__explanation"><AdventInline :text="door.explanation" /></p>
-
-      <p v-if="door.tip" class="adv-dialog__tip">
-        <span class="adv-dialog__wand" aria-hidden="true">🪄</span>
-        <span><AdventInline :text="door.tip" /></span>
-      </p>
-
-      <p v-if="door.readMore" class="adv-dialog__more">
-        <a :href="door.readMore">Read more</a>
-      </p>
+      <AdventDoorContent ref="contentEl" :door="door" :title-id="TITLE_ID" />
 
       <div class="adv-dialog__footer">
         <a class="adv-dialog__download" :href="DOWNLOAD_URL">Download GitWand</a>
@@ -153,114 +101,6 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 }
 .adv-dialog__body {
   padding: 28px 28px 22px;
-}
-.adv-dialog__day {
-  margin: 0 0 6px;
-  font-family: var(--nc-font-mono);
-  font-size: 11.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--nc-waiting);
-}
-.adv-dialog__title {
-  margin: 0 0 14px;
-  font-family: var(--nc-font-mono);
-  font-size: 24px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-  color: var(--nc-accent-100);
-  border: 0;
-  padding: 0;
-}
-.adv-dialog__problem {
-  margin: 0 0 18px;
-  font-size: 16px;
-  font-style: italic;
-  line-height: 1.6;
-  color: var(--nc-neutral-300);
-}
-.adv-dialog__title:focus {
-  /* Programmatic initial focus only (tabindex="-1"): no ring on a heading. */
-  outline: none;
-}
-/* The Copy button lives in a bar above the code, never over it, so a long
-   command scrolls horizontally without anything covering it. */
-.adv-dialog__snippet {
-  margin: 0 0 18px;
-  background: var(--nc-canvas);
-  border: 1px solid var(--nc-neutral-800);
-  border-radius: var(--nc-radius-md);
-  overflow: hidden;
-}
-.adv-dialog__snippet-bar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--nc-rule);
-}
-.adv-dialog__snippet pre {
-  margin: 0;
-  padding: 12px 16px 14px;
-  overflow-x: auto;
-  background: none;
-  border: 0;
-  border-radius: 0 0 var(--nc-radius-md) var(--nc-radius-md);
-  font-family: var(--nc-font-mono);
-  font-size: 13.5px;
-  line-height: 1.65;
-  color: var(--nc-settled);
-  white-space: pre;
-}
-.adv-dialog__snippet code {
-  font-family: inherit;
-  background: none;
-  padding: 0;
-  color: inherit;
-}
-.adv-dialog__copy {
-  padding: 4px 10px;
-  font-family: var(--nc-font-sans);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--nc-neutral-300);
-  background: var(--nc-surface);
-  border: 1px solid var(--nc-neutral-700);
-  border-radius: var(--nc-radius-sm);
-  cursor: pointer;
-}
-.adv-dialog__copy:hover {
-  color: var(--nc-accent-100);
-  border-color: var(--nc-accent-600);
-}
-.adv-dialog__explanation {
-  margin: 0 0 16px;
-  font-size: 15px;
-  line-height: 1.7;
-  color: var(--nc-neutral-200);
-}
-.adv-dialog__tip {
-  display: flex;
-  gap: 10px;
-  margin: 0 0 16px;
-  padding: 12px 14px;
-  font-size: 14.5px;
-  line-height: 1.65;
-  color: var(--nc-neutral-200);
-  background: color-mix(in srgb, var(--nc-accent) 9%, transparent);
-  border: 1px solid color-mix(in srgb, var(--nc-accent) 24%, transparent);
-  border-radius: var(--nc-radius-md);
-}
-.adv-dialog__wand {
-  flex: none;
-}
-.adv-dialog__more {
-  margin: 0 0 16px;
-  font-size: 14.5px;
-}
-.adv-dialog__more a {
-  color: var(--nc-accent-300);
-  text-underline-offset: 3px;
 }
 .adv-dialog__footer {
   display: flex;
@@ -293,26 +133,14 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 .adv-dialog__close:hover {
   background: var(--nc-accent-700);
 }
-.adv-dialog__snippet pre:focus {
-  outline: none;
-}
-/* A scrollable <pre> is keyboard-focusable: an inset ring that stays inside the frame. */
-.adv-dialog__snippet pre:focus-visible {
-  outline: 2px solid var(--nc-accent-300);
-  outline-offset: -2px;
-}
-.adv-dialog__copy:focus-visible,
 .adv-dialog__close:focus-visible,
-.adv-dialog a:focus-visible {
+.adv-dialog__download:focus-visible {
   outline: 2px solid var(--nc-accent-300);
   outline-offset: 2px;
 }
 @media (max-width: 640px) {
   .adv-dialog__body {
     padding: 22px 18px 18px;
-  }
-  .adv-dialog__title {
-    font-size: 20px;
   }
 }
 </style>

@@ -8,6 +8,8 @@ import {
   initialDoorAction,
   adventBadge,
   openedUnlockedCount,
+  showDoorArticle,
+  buildTimeNow,
 } from '../advent/advent-state'
 
 const real = new Date(Date.UTC(2026, 10, 12, 9, 0, 0))
@@ -167,5 +169,35 @@ describe('openedUnlockedCount', () => {
   it('ignores anything that is not a door day', () => {
     const dec26 = new Date(Date.UTC(2026, 11, 26, 12, 0, 0))
     expect(openedUnlockedCount(new Set([0, 25, 2.5, 4]), dec26)).toBe(1)
+  })
+})
+
+describe('showDoorArticle', () => {
+  it('shows the door content from 25 December, Paris time', () => {
+    // 23:00Z on the 24th is already 00:00 on the 25th in Paris (UTC+1).
+    expect(showDoorArticle(new Date('2026-12-24T23:00:00Z'))).toBe(true)
+    expect(showDoorArticle(new Date('2026-12-24T22:59:00Z'))).toBe(false)
+  })
+
+  it('hides it before and during the season', () => {
+    expect(showDoorArticle(nov20)).toBe(false)
+    expect(showDoorArticle(dec12)).toBe(false)
+  })
+
+  it('keeps it in later years', () => {
+    expect(showDoorArticle(new Date('2027-03-01T12:00:00Z'))).toBe(true)
+  })
+})
+
+describe('buildTimeNow', () => {
+  it('parses the ISO timestamp the build stamps on day pages', () => {
+    expect(buildTimeNow('2026-12-25T06:00:00.000Z')?.toISOString()).toBe('2026-12-25T06:00:00.000Z')
+  })
+
+  it('is null for a missing or malformed value', () => {
+    expect(buildTimeNow(undefined)).toBeNull()
+    expect(buildTimeNow('')).toBeNull()
+    expect(buildTimeNow('nope')).toBeNull()
+    expect(buildTimeNow(42)).toBeNull()
   })
 })
