@@ -129,3 +129,10 @@ export function adventBadge(now: Date): { text: string; href: typeof ADVENT_INDE
   }
   return null
 }
+
+/** Label of the home card's link to the calendar, shown in the same window as the badge. */
+export function adventCta(now: Date): string | null {
+  const state = calendarState(now)
+  if (state.phase === 'running') return `Open door ${state.today}`
+  return adventBadge(now) ? `Browse all ${DOOR_COUNT} doors` : null
+}

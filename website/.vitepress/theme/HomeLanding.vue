@@ -2,13 +2,29 @@
 import { ref, computed, onMounted } from 'vue'
 import { AUTO_PATTERN_COUNT } from './patterns'
 import { data as blogPosts } from './blog.data'
-import { adventBadge, resolveNow } from './advent/advent-state'
+import { adventBadge, adventCta, resolveNow } from './advent/advent-state'
 
 // Advent calendar badge: client-only so the server HTML keeps the normal badge.
 const advent = ref<{ text: string; href: string } | null>(null)
+const adventLink = ref<string | null>(null)
 onMounted(() => {
-  advent.value = adventBadge(resolveNow(location.search, new Date()))
+  const now = resolveNow(location.search, new Date())
+  advent.value = adventBadge(now)
+  adventLink.value = adventCta(now)
 })
+
+// Advent card: the CLI command, copyable like the install command.
+const ADVENT_CMD = 'gitwand advent'
+const adventCopied = ref(false)
+async function copyAdvent() {
+  try {
+    await navigator.clipboard.writeText(ADVENT_CMD)
+    adventCopied.value = true
+    setTimeout(() => { adventCopied.value = false }, 1800)
+  } catch {
+    /* clipboard unavailable: the text can still be selected */
+  }
+}
 
 // Newest article, read from website/blog/*.md at build time (see blog.data.ts).
 const latestPost = blogPosts[0]
@@ -1083,6 +1099,30 @@ onMounted(() => {
     </div>
 
     <!-- ══════════════════════════════════════
+         2b · CALENDRIER DE L'AVENT (1–25 décembre, côté client)
+    ══════════════════════════════════════ -->
+    <section v-if="advent && adventLink" class="nc-section" aria-labelledby="nc-advent-title">
+      <div class="nc-wrap">
+        <div class="nc-advent">
+          <div class="nc-advent__text">
+            <span class="nc-eyebrow nc-eyebrow--sm">Git Advent Calendar 🎄</span>
+            <h2 id="nc-advent-title" class="nc-advent__title">24 little-known git commands, one a day until Christmas.</h2>
+            <p class="nc-advent__body">Each door solves a real problem, with a GitWand tip. Open it on the site, or right in your terminal.</p>
+          </div>
+          <div class="nc-advent__actions">
+            <a class="nc-btn nc-btn--primary" :href="advent.href">{{ adventLink }}</a>
+            <button class="nc-cmd" type="button" @click="copyAdvent" :aria-label="`Copy ${ADVENT_CMD}`">
+              <span class="nc-cmd__prompt">$</span>
+              <code>{{ ADVENT_CMD }}</code>
+              <span class="nc-cmd__hint">{{ adventCopied ? 'Copied' : 'Copy' }}</span>
+            </button>
+            <p class="nc-advent__note">No CLI yet? <code>npx @gitwand/cli advent</code></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
          3 · DÉMO DE CONFLIT — le moment « ah oui »
     ══════════════════════════════════════ -->
     <section id="engine" class="nc-section">
@@ -2111,6 +2151,33 @@ onMounted(() => {
   background: transparent;
 }
 .nc-btn--ghost:hover { border-color: var(--nc-accent-500); color: var(--nc-accent-200); }
+
+.nc-advent {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 32px;
+  align-items: center;
+  padding: 28px;
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: var(--nc-radius-lg);
+  background: var(--nc-surface);
+}
+.nc-advent__text { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.nc-advent__title {
+  margin: 0;
+  font-size: clamp(22px, 2.4vw, 28px);
+  line-height: 1.15;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.02em;
+  color: var(--nc-accent-100);
+}
+.nc-advent__body { margin: 0; font-size: 15.5px; line-height: 1.55; color: var(--nc-neutral-300); max-width: 48ch; }
+.nc-advent__actions { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; }
+.nc-advent__note { margin: 0; font-size: 13px; color: var(--nc-neutral-400); }
+.nc-advent__note code { font-family: var(--nc-font-mono); color: var(--nc-neutral-300); background: none; padding: 0; }
+@media (max-width: 760px) {
+  .nc-advent { grid-template-columns: 1fr; gap: 20px; padding: 22px; }
+}
 
 /* ── Hero ── */
 .nc-hero { position: relative; overflow: hidden; }

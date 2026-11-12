@@ -7,6 +7,7 @@ import {
   lockedMessage,
   initialDoorAction,
   adventBadge,
+  adventCta,
   openedUnlockedCount,
   showDoorArticle,
   closeTargetPath,
@@ -219,5 +220,14 @@ describe('closeTargetPath', () => {
   it('returns to the index for a non-door initial day', () => {
     expect(closeTargetPath(undefined, true)).toBe('/advent/')
     expect(closeTargetPath(25, true)).toBe('/advent/')
+  })
+})
+
+describe('adventCta', () => {
+  it('follows the badge window', () => {
+    expect(adventCta(new Date(Date.UTC(2026, 10, 30, 22, 30)))).toBeNull()
+    expect(adventCta(dec12)).toBe('Open door 12')
+    expect(adventCta(new Date(Date.UTC(2026, 11, 25, 12)))).toBe('Browse all 24 doors')
+    expect(adventCta(new Date(Date.UTC(2026, 11, 26, 12)))).toBeNull()
   })
 })
