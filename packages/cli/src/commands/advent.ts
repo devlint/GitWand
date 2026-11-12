@@ -13,7 +13,6 @@ import {
   isUnlocked,
   opensOn,
   parseDateOverride,
-  publicDoor,
 } from "../advent/index.js";
 import {
   renderDoor,
@@ -102,7 +101,7 @@ export function runAdvent(
   const door = DOORS[day - 1];
   return out(0, "stdout", renderDoor(door, { palette: p, width: ctx.width }), {
     status: "door",
-    door: publicDoor(door),
+    door,
   });
 }
 

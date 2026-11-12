@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { DOORS, publicDoor } from "../advent/doors.js";
+import { DOORS } from "../advent/doors.js";
+import { TIP_EVIDENCE } from "../advent/evidence.js";
 import { parseInline } from "../advent/inline.js";
 
 const ROOT = new URL("../../../../", import.meta.url);
@@ -25,14 +26,26 @@ describe("advent doors content", () => {
   it("backs every tip with evidence that still resolves", () => {
     for (const d of DOORS) {
       if (d.tip === undefined) continue;
-      expect(d.tipEvidence?.length ?? 0, `day ${d.day} evidence`).toBeGreaterThan(0);
-      for (const entry of d.tipEvidence ?? []) {
+      const evidence = TIP_EVIDENCE[d.day] ?? [];
+      expect(evidence.length, `day ${d.day} evidence`).toBeGreaterThan(0);
+      for (const entry of evidence) {
         const path = entry.split(/[ :]/)[0];
         const found =
           exists(path) || exists(`apps/desktop/src/${path}`) || exists(`apps/desktop/${path}`);
         expect(found, `day ${d.day} evidence path "${path}"`).toBe(true);
       }
     }
+  });
+
+  it("has no evidence for a door without a tip", () => {
+    const withTip = new Set(DOORS.filter((d) => d.tip !== undefined).map((d) => d.day));
+    for (const key of Object.keys(TIP_EVIDENCE)) {
+      expect(withTip.has(Number(key)), `TIP_EVIDENCE[${key}] without a tip`).toBe(true);
+    }
+  });
+
+  it("keeps evidence off the doors themselves", () => {
+    for (const d of DOORS) expect("tipEvidence" in d, `day ${d.day}`).toBe(false);
   });
 
   it("keeps tips and explanations free of ad copy", () => {
@@ -65,11 +78,5 @@ describe("advent doors content", () => {
         }
       }
     }
-  });
-
-  it("strips tipEvidence from the public door", () => {
-    const pub = publicDoor(DOORS[11]);
-    expect("tipEvidence" in pub).toBe(false);
-    expect(pub.tip).toBe(DOORS[11].tip);
   });
 });

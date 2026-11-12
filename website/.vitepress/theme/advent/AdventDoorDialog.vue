@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { PublicDoor } from '@gitwand/advent'
+import type { AdventDoor } from '@gitwand/advent'
 import AdventInline from './AdventInline.vue'
 
-const props = defineProps<{ door: PublicDoor | null }>()
+const props = defineProps<{ door: AdventDoor | null }>()
 const emit = defineEmits<{ close: [] }>()
 
 const DOWNLOAD_URL = 'https://github.com/devlint/GitWand/releases/latest'

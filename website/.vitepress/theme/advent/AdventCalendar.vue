@@ -5,9 +5,8 @@ import {
   DOOR_COUNT,
   calendarState,
   isUnlocked,
-  publicDoor,
+  type AdventDoor,
   type CalendarState,
-  type PublicDoor,
 } from '@gitwand/advent'
 import {
   ADVENT_INDEX_PATH,
@@ -44,10 +43,9 @@ const doorsByDay = new Map(DOORS.map((d) => [d.day, d]))
 
 const state = computed<CalendarState | null>(() => (now.value ? calendarState(now.value) : null))
 const openedCount = computed(() => opened.value.size)
-const activeDoor = computed<PublicDoor | null>(() => {
-  const door = activeDay.value === null ? undefined : doorsByDay.get(activeDay.value)
-  return door ? publicDoor(door) : null
-})
+const activeDoor = computed<AdventDoor | null>(() =>
+  activeDay.value === null ? null : (doorsByDay.get(activeDay.value) ?? null),
+)
 
 function unlocked(day: number): boolean {
   return now.value !== null && isUnlocked(day, now.value)

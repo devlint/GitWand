@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ADVENT_YEAR, DOORS, opensOn, publicDoor } from "../advent/index.js";
+import { ADVENT_YEAR, DOORS, opensOn } from "../advent/index.js";
 import {
   renderDoor,
   renderInvalid,
@@ -98,14 +98,14 @@ describe("runAdvent --json", () => {
   it("emits the door without tipEvidence", () => {
     const { r, body } = json([], dec12);
     expect(r.code).toBe(0);
-    expect(body).toEqual({ status: "door", door: publicDoor(DOORS[11]) });
+    expect(body).toEqual({ status: "door", door: DOORS[11] });
     expect(body.door).not.toHaveProperty("tipEvidence");
     expect(r.output).not.toContain("\x1b");
   });
 
   it("treats --json=true like --json", () => {
     const r = run([], dec12, { json: "true" });
-    expect(JSON.parse(r.output)).toEqual({ status: "door", door: publicDoor(DOORS[11]) });
+    expect(JSON.parse(r.output)).toEqual({ status: "door", door: DOORS[11] });
   });
 
   it("emits locked", () => {

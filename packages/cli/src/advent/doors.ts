@@ -4,9 +4,9 @@
  * Imports nothing: this file is loaded by `node --experimental-strip-types`
  * and bundled by the website. No enums.
  *
- * `tipEvidence` is internal (checked by the content-lint tests, never rendered
- * or emitted in JSON). Each entry starts with a repo-relative path, optionally
- * followed by ":line" or " — note".
+ * The evidence behind each tip lives in `evidence.ts`, which is internal: it is
+ * not re-exported from `index.ts`, so it never reaches the website bundle or
+ * the CLI's JSON output.
  */
 
 export interface AdventDoor {
@@ -21,13 +21,9 @@ export interface AdventDoor {
   explanation: string;
   /** Inline markup (`code`, **label**). */
   tip?: string;
-  /** Internal: each entry starts with a repo-relative path. */
-  tipEvidence?: string[];
   /** Site path, e.g. "/blog/worktrees-step-by-step". */
   readMore?: string;
 }
-
-export type PublicDoor = Omit<AdventDoor, "tipEvidence">;
 
 export const DOORS: readonly AdventDoor[] = [
   // ── Week 1 — Small gifts ──────────────────────────────────────────────
@@ -47,11 +43,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "Git walks you through the file hunk by hunk: `y` to stage it, `n` to skip, `s` to split a hunk into smaller ones, `e` to edit it by hand. One messy working tree, two clean commits.",
     tip: "In GitWand, every hunk in the diff has a **Stage hunk** button. To go finer than a hunk, click the lines you want, then **Stage (n)**.",
-    tipEvidence: [
-      "apps/desktop/src/components/DiffViewer.vue — stageHunk, toggleLine, stageSelected",
-      "apps/desktop/src-tauri/src/commands/ops.rs:78 — git_stage_patch",
-      "apps/desktop/src/locales/en.ts:425 — stageHunk, stageSelected",
-    ],
   },
   {
     day: 3,
@@ -61,12 +52,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "Instead of whole lines, git marks what changed inside the line: `[-removed-]{+added+}`. It's perfect for prose, config values, and long lines generally. Use `--color-words` for colours only.",
     tip: "GitWand does this automatically. Paired changed lines get word-level highlights in the diff, the file history and the merge editor, with nothing to turn on.",
-    tipEvidence: [
-      "apps/desktop/src/utils/wordDiff.ts",
-      "apps/desktop/src/components/DiffViewer.vue",
-      "apps/desktop/src/components/FileHistoryViewer.vue",
-      "apps/desktop/src/components/MergeEditor.vue",
-    ],
   },
   {
     day: 4,
@@ -80,10 +65,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "`--staged` (git 2.35+) stashes only what's in the index. A pathspec after `--` stashes only those files, and `-p` lets you pick hunks, like `add -p`.",
     tip: "GitWand's stash always takes everything, untracked files included, so this one is for the terminal. What GitWand adds is the message: in the **Stash Manager**, **Suggest a message with AI** writes it from your diff.",
-    tipEvidence: [
-      "apps/desktop/src-tauri/src/commands/ops.rs:1543 — git_stash (stash push --include-untracked)",
-      "apps/desktop/src/locales/en.ts:2201 — Stash Manager, AI message",
-    ],
   },
   {
     day: 5,
@@ -94,12 +75,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "`-n` is a dry run: it lists what would be deleted (`-d` includes directories, `-x` includes ignored files too). `-i` is interactive: pick by number, pattern or one by one.",
     tip: "When you discard untracked files in GitWand, it takes a **Time Machine** snapshot first (untracked files included), so a wrong click can be undone.",
-    tipEvidence: [
-      "apps/desktop/src-tauri/src/commands/ops.rs:1142 — git_discard (snapshot_before first)",
-      "apps/desktop/src-tauri/src/commands/ops.rs:1157 — the git clean -f call",
-      "apps/desktop/src-tauri/src/git/snapshot.rs",
-      "apps/desktop/src/composables/useSettings.ts:591 — snapshotsEnabled true by default",
-    ],
   },
   {
     day: 6,
@@ -109,12 +84,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "Point git at a hooks folder that's committed in the repo (git 2.9+). Everyone who runs this one line gets the same `pre-commit`, `commit-msg` and other hooks, with no extra tooling.",
     tip: "A good first hook: `npx @gitwand/cli scan --staged --strict` blocks a commit that contains something that looks like a secret. The GitWand app runs the same check before every commit (**Potential secrets in this commit**).",
-    tipEvidence: [
-      "packages/cli/src/commands/scan.ts",
-      "packages/core/src/secrets",
-      "apps/desktop/src-tauri/src/commands/secrets.rs",
-      "apps/desktop/src/locales/en.ts:2980 — Potential secrets in this commit",
-    ],
     readMore: "/blog/v3-5-pr-review-2-secrets-scanner",
   },
 
@@ -127,11 +96,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       'The "pickaxe". `-S` finds commits where the number of occurrences of that string changed, in other words where it was added or removed. `-G` takes a regex and matches any diff line. Add `-p` to see the diffs.',
     tip: "In GitWand, open **File history** and type in the search box (**Search string or regex…**). It runs the same pickaxe search, as a literal string or as a regex, following renames.",
-    tipEvidence: [
-      "apps/desktop/src-tauri/src/commands/read.rs:1378 — git_file_log_pickaxe",
-      "apps/desktop/src/components/FileHistoryViewer.vue",
-      "apps/desktop/src/locales/en.ts:2238 — pickaxePlaceholder",
-    ],
   },
   {
     day: 8,
@@ -141,10 +105,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "Shows every commit that touched that function (or that line range), with the diff trimmed to just those lines. It's the history of a piece of code, not of a whole file.",
     tip: "In GitWand's blame view, each block has **Show history for these lines**, which is `git log -L` on that range in one click.",
-    tipEvidence: [
-      "apps/desktop/src-tauri/src/commands/read.rs:1420 — git_file_log_range (line ranges, not :funcname)",
-      "apps/desktop/src/locales/en.ts:2240 — showLineHistory",
-    ],
   },
   {
     day: 9,
@@ -155,10 +115,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "`-w` ignores whitespace changes. Each `-C` looks further for lines copied or moved from elsewhere: first from files changed in the same commit, then from the commit that created the file, then from any commit. Blame then lands on the real author.",
     tip: "GitWand's blame doesn't follow copies yet. On any blame block, though, **Why did this change?** asks the AI to explain the commit behind it.",
-    tipEvidence: [
-      "apps/desktop/src-tauri/src/commands/read.rs:1714 — git_blame (no -w or -C)",
-      "apps/desktop/src/locales/en.ts:2231 — whyThisChange",
-    ],
   },
   {
     day: 10,
@@ -190,11 +146,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       'Git keeps a local log of everywhere `HEAD` has been. Commits no branch points to stay recoverable for 30 days by default. "Lost" commits are almost never lost: find them in the reflog and put a branch on them.',
     tip: "GitWand's undo button opens the **Operation history**, which is built from the reflog. **Rewind** jumps back to any point, and **Time Machine** adds snapshots of uncommitted work on top.",
-    tipEvidence: [
-      "apps/desktop/src/composables/useUndoStack.ts:129 — reads git reflog",
-      "apps/desktop/src/composables/useTimeMachine.ts",
-      "apps/desktop/src/locales/en.ts:2037 — Time Machine, Operation history, Rewind",
-    ],
   },
 
   // ── Week 3 — Rewriting history ────────────────────────────────────────
@@ -206,12 +157,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "`--fixup` creates a commit named `fixup! <original message>`. `--autosquash` moves it under its target and marks it `fixup` in the rebase todo list, so you just save. Set `rebase.autoSquash true` and you can drop the flag.",
     tip: "GitWand finds the `<sha>` for you. Right-click a changed file → **Absorb**. It blames each hunk to find the commit that owns those lines, then creates the fixup commit. Squash it later from the interactive rebase editor.",
-    tipEvidence: [
-      "apps/desktop/src/composables/useAbsorb.ts — absorb, autoSquash = false",
-      "apps/desktop/src/components/RepoSidebar.vue:1981 — Absorb context menu entry (absorb.action)",
-      "apps/desktop/src/locales/en.ts:2111 — Absorb",
-      "apps/desktop/src/components/RebaseEditor.vue:211",
-    ],
   },
   {
     day: 14,
@@ -229,11 +174,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "`--force-with-lease` refuses to push if the remote moved since you last fetched. `--force-if-includes` (git 2.30+) closes the gap a background fetch opens: the remote tip must also be part of your own history. Set `push.useForceIfIncludes true` once.",
     tip: "GitWand's **Force push** never sends a bare `--force`. It uses `--force-with-lease`, pinned to the exact remote commit it showed you, and asks for confirmation if remote commits would be lost.",
-    tipEvidence: [
-      "apps/desktop/src-tauri/src/commands/ops.rs:451 — git_push",
-      "apps/desktop/src/composables/useGitRepo.ts:1225",
-      "apps/desktop/src/locales/en.ts:152 — forcePush",
-    ],
   },
   {
     day: 16,
@@ -243,11 +183,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "It's a second checkout of the same repo in another folder, sharing the same history and objects. Fix, commit and push there, then `git worktree remove ../hotfix`. Your feature branch never moved.",
     tip: "GitWand has a **Worktrees** manager (create, prune, repair). **New AI task** uses one to give a coding agent its own isolated checkout.",
-    tipEvidence: [
-      "apps/desktop/src/components/WorktreeManager.vue",
-      "apps/desktop/src-tauri/src/worktree",
-      "apps/desktop/src/locales/en.ts:2368 — Worktrees, New AI task",
-    ],
     readMore: "/blog/worktrees-step-by-step",
   },
   {
@@ -273,10 +208,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "`edit` stops the rebase on that commit, and `reset HEAD^` un-commits it while keeping the changes. Then you rebuild it as two commits with `add -p` (day 2).",
     tip: "In GitWand, right-click the commit → **Split commit…**, pick the hunks for the first commit, and the rest becomes the second.",
-    tipEvidence: [
-      "apps/desktop/src/components/SplitCommitModal.vue",
-      "apps/desktop/src/locales/en.ts:689 — Split commit",
-    ],
     readMore: "/blog/split-commit-by-hunks",
   },
 
@@ -290,11 +221,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "It adds a third section, `||||||| base`, with the common ancestor. Seeing what each side changed makes most conflicts obvious. `zdiff3` (git 2.35+) also trims lines both sides agree on.",
     tip: "GitWand's merge editor shows the **Base** whenever it's there. With the default style it rebuilds it from the git index (**Common-ancestor base recovered from the git index**), so it works whatever your config.",
-    tipEvidence: [
-      "apps/desktop/src/components/MergeEditor.vue:1442",
-      "apps/desktop/src/composables/useGitWand.ts:720",
-      "apps/desktop/src/locales/en.ts:872 — baseEnrichedBanner",
-    ],
     readMore: "/blog/reading-git-conflict-markers",
   },
   {
@@ -305,10 +231,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "The default (Myers) produces the shortest diff, not always the most readable one. `histogram` anchors on rare, distinctive lines, so moved blocks and functions come out cleaner. Fewer messy diffs also means fewer confusing conflicts.",
     tip: "GitWand's diffs respect your `diff.algorithm`, and the blame view lets you switch algorithm on the fly.",
-    tipEvidence: [
-      "apps/desktop/src-tauri/src/git/libgit2.rs:162 — honours config, falls back to git CLI for histogram",
-      "apps/desktop/src/locales/en.ts:1472 — blame algorithm dropdown",
-    ],
   },
   {
     day: 21,
@@ -318,11 +240,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "As long as the merge isn't committed, git still has all three versions in the index. This rewrites the file with fresh conflict markers, in whichever style you ask for. Do-overs allowed. `git restore --merge src/app.ts` does the same.",
     tip: "If a file is marked as conflicted but has no markers left, GitWand's merge editor offers **Reconstruct conflict**, which rebuilds it from those same three index versions.",
-    tipEvidence: [
-      "apps/desktop/src-tauri/src/commands/ops.rs:4436 — reconstruct_conflict_impl (git merge-file -p --diff3, stages 1/2/3)",
-      "apps/desktop/src/components/MergeEditor.vue:1123",
-      "apps/desktop/src/locales/en.ts:876 — reconstructConflict",
-    ],
   },
   {
     day: 22,
@@ -332,12 +249,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "Git 2.38+. It runs a real merge in memory and prints the resulting tree and any conflicting files, without touching your checkout or index. Exit code 1 means conflicts, which makes it handy in CI.",
     tip: "In GitWand's branch list, **Preview merge** does the same dry run and also tells you how much GitWand can auto-resolve (**Clean merge**, **100 % auto-resolvable**, or **Conflicts to review**). From a terminal: `npx @gitwand/cli preview --branch=feature`.",
-    tipEvidence: [
-      "apps/desktop/src/components/header/BranchRowActions.vue:65",
-      "apps/desktop/src-tauri/src/commands/read.rs:1765 — preview_merge (git merge-file, not merge-tree)",
-      "packages/cli/src/commands/preview.ts",
-      "apps/desktop/src/locales/en.ts:554 — previewMerge",
-    ],
   },
   {
     day: 23,
@@ -348,14 +259,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       'The built-in `union` driver keeps both sides\' lines instead of writing conflict markers. That\'s great for append-only files (check the order afterwards). You can also define your own driver with `git config merge.<name>.driver "<command>"` for any file type.',
     tip: "For lockfiles, don't keep both sides: regenerate the file. GitWand has dedicated resolvers for npm, pnpm, yarn and Cargo lockfiles, as well as for JSON, YAML and a few other formats.",
-    tipEvidence: [
-      "packages/core/src/resolvers/lockfile-npm.ts",
-      "packages/core/src/resolvers/lockfile-pnpm.ts",
-      "packages/core/src/resolvers/lockfile-yarn.ts",
-      "packages/core/src/resolvers/cargo.ts",
-      "packages/core/src/resolvers/json.ts",
-      "packages/core/src/resolvers/yaml.ts",
-    ],
     readMore: "/blog/lockfile-conflicts-by-ecosystem",
   },
   {
@@ -366,17 +269,6 @@ export const DOORS: readonly AdventDoor[] = [
     explanation:
       "Reuse recorded resolution. Once it's enabled, git remembers how you resolved each conflict and replays it automatically the next time the same conflict shows up. `git rerere diff` shows what it recorded, and `git rerere forget <file>` drops a bad one.",
     tip: "rerere remembers your resolutions. GitWand tries to resolve conflicts before you even start: whitespace-only, same change on both sides, non-overlapping edits, lockfiles… Each fix comes with a confidence score. For the ones it can't solve, it offers **Remember this resolution for next time?**",
-    tipEvidence: [
-      "packages/core/src/patterns",
-      "packages/core/src/resolvers",
-      "apps/desktop/src/composables/useResolutionMemory.ts",
-      "apps/desktop/src/locales/en.ts:2150 — memorySaveOffer",
-    ],
     readMore: "/fix/git-rerere",
   },
 ];
-
-export function publicDoor(door: AdventDoor): PublicDoor {
-  const { tipEvidence: _internal, ...pub } = door;
-  return pub;
-}
