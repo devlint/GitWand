@@ -96,3 +96,26 @@ export function checksIcon(status: string): string {
   if (r === "PENDING") return "⏳";
   return "";
 }
+
+/**
+ * True when `check` says it ran on a commit that is not `headSha`: after a
+ * push, a check can still be the previous commit's (GitLab until the new
+ * pipeline is created, an Azure build not re-queued yet), or ahead of a detail
+ * fetched before the push. Judged check by check: one that does not name its
+ * commit (an Azure reviewer policy, a GitLab merged-results pipeline, an old
+ * cache) is never "another commit's", and a forge can mix both in one list.
+ */
+export function isCheckOnOtherCommit(check: CICheck, headSha: string | null | undefined): boolean {
+  return !!headSha && !!check.commitSha && check.commitSha !== headSha;
+}
+
+/** A commit, other than `headSha`, that a check ran on; `null` when every
+ *  check is the head's or does not say. With several, the smallest sha, so the
+ *  answer does not change with the order a forge lists its checks in. */
+export function checksCommitMismatch(checks: CICheck[], headSha: string | null | undefined): string | null {
+  let other: string | null = null;
+  for (const c of checks) {
+    if (isCheckOnOtherCommit(c, headSha) && (other === null || c.commitSha! < other)) other = c.commitSha!;
+  }
+  return other;
+}

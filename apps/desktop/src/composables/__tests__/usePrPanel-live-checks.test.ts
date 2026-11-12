@@ -31,6 +31,7 @@ vi.mock("@/utils/backend", async () => {
 
 import {
   usePrPanel, CHECKS_LIVE_INTERVAL_MS, CHECKS_LIVE_SLOW_AFTER_MS, CHECKS_LIVE_SLOW_INTERVAL_MS,
+  OTHER_COMMIT_FOLLOW_MS, _resetOtherCommitForTesting, computeAutoMergeOffer,
 } from "../usePrPanel";
 
 const running = [{ name: "build", state: "IN_PROGRESS", conclusion: "", detailsUrl: "" }];
@@ -776,5 +777,252 @@ describe("usePrPanel — one notion of a running check", () => {
     for (const [state, conclusion] of [["created", ""], ["WAITING", ""], ["REQUESTED", ""], ["running", "RUNNING"]]) {
       expect(p.checkIcon({ name: "c", state, conclusion, detailsUrl: "" })).toBe("⏳");
     }
+  });
+});
+
+describe("usePrPanel — checks of another commit than the head", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    window.localStorage.clear();
+    _resetPrCacheForTesting();
+    _resetOtherCommitForTesting();
+    ghPrDetail.mockReset().mockResolvedValue(fakeDetail()); // head "abc"
+    ghPrChecks.mockReset();
+  });
+  afterEach(() => {
+    scopes.splice(0).forEach((s) => s.stop());
+    vi.useRealTimers();
+  });
+  const check = (name: string, sha: string, conclusion = "SUCCESS", state = "COMPLETED") =>
+    ({ name, state, conclusion, detailsUrl: "", commitSha: sha });
+  const on = (sha: string, conclusion = "SUCCESS") => [check("build", sha, conclusion)];
+  const runningOn = (sha: string) => [check("build", sha, "", "IN_PROGRESS")];
+  const approve = (p: any) => {
+    p.prReviews.value = [{ state: "APPROVED", user: { login: "x" }, submitted_at: "1" } as any];
+  };
+
+  it("keeps following finished checks of an older commit until the head's come", async () => {
+    ghPrChecks.mockResolvedValueOnce(on("old")).mockResolvedValueOnce(on("old")).mockResolvedValue(on("abc"));
+    const p = await openChecksTab();
+    expect(p.checksOtherCommit.value).toBe("old");
+
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(ghPrChecks).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(ghPrChecks).toHaveBeenCalledTimes(3);
+    expect(p.checksOtherCommit.value).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 4);
+    expect(ghPrChecks).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops following another commit's checks after a while: the head may get no CI", async () => {
+    ghPrChecks.mockResolvedValue(on("old"));
+    await openChecksTab();
+    await vi.advanceTimersByTimeAsync(OTHER_COMMIT_FOLLOW_MS + CHECKS_LIVE_SLOW_INTERVAL_MS);
+    const calls = ghPrChecks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_SLOW_INTERVAL_MS * 5);
+    expect(ghPrChecks).toHaveBeenCalledTimes(calls);
+  });
+
+  it("leaves the merge banner as it is: green checks of another commit read green", async () => {
+    // Which side lags is unknown, and the head may never get CI of its own
+    // (GitLab `[skip ci]`): the banner reads every check, as it always did, and
+    // never offers to arm auto-merge on a PR it calls ready.
+    ghPrChecks.mockResolvedValue(on("old"));
+    const p = await openChecksTab();
+    approve(p);
+    expect(p.checksOtherCommit.value).toBe("old");
+    expect(p.mergeReadiness.value?.ready).toBe(true);
+    expect(p.mergeBlocked.value).toBe(false);
+    expect(computeAutoMergeOffer(
+      { supported: true } as any, { armed: false, available: true } as any, p.mergeReadiness.value, true,
+    ).kind).not.toBe("arm");
+  });
+
+  it("another commit's failed checks still block: which side lags is unknown", async () => {
+    // A detail fetched before a push lags behind GitHub's checks: a red check
+    // "of another commit" may be the head's real one.
+    ghPrChecks.mockResolvedValue(on("new", "FAILURE"));
+    ghPrDetail.mockResolvedValueOnce(fakeDetail()).mockRejectedValue(new Error("offline"));
+    const p = await openChecksTab();
+    approve(p);
+    expect(p.checksOtherCommit.value).toBe("new");
+    expect(p.mergeBlocked.value).toBe(true);
+  });
+
+  it("revalidates the detail even right after fetching it: that fetch may predate the push", async () => {
+    ghPrChecks.mockResolvedValue(on("new"));
+    ghPrDetail.mockResolvedValueOnce(fakeDetail()).mockResolvedValue({ ...fakeDetail(), headSha: "new" });
+    const p = await openChecksTab();
+    await vi.waitFor(() => expect(p.prDetail.value?.headSha).toBe("new"));
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("a push restarts the follow window", async () => {
+    ghPrChecks.mockResolvedValue(on("old"));
+    const p = await openChecksTab();
+    await vi.advanceTimersByTimeAsync(OTHER_COMMIT_FOLLOW_MS + CHECKS_LIVE_SLOW_INTERVAL_MS);
+    const before = ghPrChecks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_SLOW_INTERVAL_MS * 2);
+    expect(ghPrChecks).toHaveBeenCalledTimes(before); // window over
+
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "pushed" });
+    await p.revalidateOpenDetail();
+    await flush();
+    const afterPush = ghPrChecks.mock.calls.length;
+    expect(afterPush).toBe(before + 1); // the push's own refetch
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    expect(ghPrChecks).toHaveBeenCalledTimes(afterPush + 1); // followed again
+  });
+
+  it("re-opening the CI tab after the follow window fetches once more", async () => {
+    ghPrChecks.mockResolvedValue(on("old"));
+    const p = await openChecksTab();
+    await vi.advanceTimersByTimeAsync(OTHER_COMMIT_FOLLOW_MS + CHECKS_LIVE_SLOW_INTERVAL_MS * 2);
+    const before = ghPrChecks.mock.calls.length;
+    p.detailTab.value = "info";
+    await flush();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    p.detailTab.value = "checks";
+    await flush();
+    expect(ghPrChecks).toHaveBeenCalledTimes(before + 1);
+  });
+
+  it("checks that name no commit still block (an Azure reviewer policy)", async () => {
+    ghPrChecks.mockResolvedValue([check("build", "old"), check("At least 1 reviewer must approve", "", "", "waiting")]);
+    const p = await openChecksTab();
+    approve(p);
+    expect(p.mergeBlocked.value).toBe(true);
+    expect(p.mergeReadiness.value?.reason).toContain("At least 1 reviewer must approve");
+  });
+
+  it("revalidates the detail once when the checks report a commit it has not seen", async () => {
+    // The detail was fetched before a push the checks backend already reads.
+    ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(runningOn("new"));
+    const p = await openChecksTab();
+    expect(ghPrDetail).toHaveBeenCalledTimes(1);
+
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "new" });
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    await flush();
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+    expect(p.prDetail.value?.headSha).toBe("new");
+    expect(p.checksOtherCommit.value).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 3);
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks that finish on another commit revalidate the detail once, not twice", async () => {
+    // The last running check finishes on the same poll that first shows the
+    // other commit: one revalidation serves both, and the follow window starts.
+    ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(on("old"));
+    await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    await flush();
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 3);
+    await flush();
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not revalidate the detail more than once for checks that lag behind it", async () => {
+    ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(runningOn("old"));
+    await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    await flush();
+    expect(ghPrDetail).toHaveBeenCalledTimes(2); // once, to settle which side lags
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 4);
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("a slower, older detail answer does not move the head backwards", async () => {
+    ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(runningOn("new"));
+    const p = await openChecksTab();
+    let releaseSlow!: (v: unknown) => void;
+    ghPrDetail
+      .mockImplementationOnce(() => new Promise((r) => { releaseSlow = r; }))
+      .mockResolvedValue({ ...fakeDetail(), headSha: "new" });
+    const slow = p.revalidateOpenDetail(); // a periodic reload, slow
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS); // the checks see the push
+    await flush();
+    expect(p.prDetail.value?.headSha).toBe("new");
+    releaseSlow(fakeDetail()); // head "abc", from before the push
+    await slow;
+    await flush();
+    expect(p.prDetail.value?.headSha).toBe("new");
+  });
+
+  it("a push whose checks are already on screen does not refetch them", async () => {
+    // GitHub: its backend reads the head, so the checks reveal the push first.
+    ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(runningOn("new"));
+    ghPrDetail.mockResolvedValueOnce(fakeDetail()).mockResolvedValue({ ...fakeDetail(), headSha: "new" });
+    const p = await openChecksTab();
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    await flush();
+    expect(p.prDetail.value?.headSha).toBe("new");
+    expect(ghPrChecks).toHaveBeenCalledTimes(2);
+  });
+
+  it("a push does not question the detail that just revealed it", async () => {
+    // GitLab: the detail reveals the push; the pipeline is still the old head's.
+    ghPrChecks.mockResolvedValue(on("abc"));
+    const p = await openChecksTab();
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "new" });
+    await p.revalidateOpenDetail();
+    await flush();
+    expect(ghPrChecks).toHaveBeenCalledTimes(2); // the push's own refetch
+    expect(p.checksOtherCommit.value).toBe("abc");
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 2);
+    expect(ghPrDetail).toHaveBeenCalledTimes(2); // the detail is the fresh side
+  });
+
+  it("two older commits share one follow window and one detail reload", async () => {
+    // Azure: two build policies re-queued at different times.
+    ghPrChecks
+      .mockResolvedValueOnce([check("A", "a1"), check("B", "f3")])
+      .mockResolvedValue([check("A", "abc"), check("B", "f3")]);
+    const p = await openChecksTab();
+    expect(p.checksOtherCommit.value).toBe("a1");
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    await flush();
+    expect(p.checksOtherCommit.value).toBe("f3");
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(OTHER_COMMIT_FOLLOW_MS);
+    const calls = ghPrChecks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_SLOW_INTERVAL_MS * 3);
+    expect(ghPrChecks).toHaveBeenCalledTimes(calls); // one window, from "a1"
+  });
+
+  it("the follow window does not restart when the PR is opened again", async () => {
+    // A head that will never get CI ([skip ci]) is not polled anew per visit.
+    ghPrChecks.mockResolvedValue(on("old"));
+    const p = await openChecksTab();
+    await vi.advanceTimersByTimeAsync(OTHER_COMMIT_FOLLOW_MS + CHECKS_LIVE_SLOW_INTERVAL_MS * 2);
+    await p.selectPr({ number: 2 } as any);
+    await flush();
+    await p.selectPr({ number: 1 } as any);
+    p.detailTab.value = "checks";
+    await flush();
+    const n = ghPrChecks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS * 4);
+    expect(ghPrChecks).toHaveBeenCalledTimes(n);
+  });
+
+  it("a failed revalidation is retried at the next fetch", async () => {
+    ghPrChecks.mockResolvedValueOnce(runningOn("abc")).mockResolvedValue(runningOn("new"));
+    const p = await openChecksTab();
+    ghPrDetail.mockRejectedValueOnce(new Error("offline"));
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    await flush();
+    expect(ghPrDetail).toHaveBeenCalledTimes(2);
+
+    ghPrDetail.mockResolvedValue({ ...fakeDetail(), headSha: "new" });
+    await vi.advanceTimersByTimeAsync(CHECKS_LIVE_INTERVAL_MS);
+    // The retry starts once the checks' answer is applied, then runs its fetch.
+    await vi.waitFor(() => expect(p.prDetail.value?.headSha).toBe("new"));
+    expect(ghPrDetail).toHaveBeenCalledTimes(3);
+    expect(p.checksOtherCommit.value).toBeNull();
   });
 });

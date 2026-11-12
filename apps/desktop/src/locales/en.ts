@@ -1042,6 +1042,7 @@ const en = {
       noChecks: "No CI checks found.",
       checksLoadFailed: "Couldn’t load the CI checks. Reopen this tab to try again.",
       checksStale: "Live updates stopped: the CI checks could not be reached. Reopen this tab to try again.",
+      checksOtherCommit: "These checks ran on commit {0}; the pull request's head shown here is {1}.",
     },
     annotations: {
       badge: "{0} annotation(s)",

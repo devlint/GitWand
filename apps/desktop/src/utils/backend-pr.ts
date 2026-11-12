@@ -661,6 +661,31 @@ export interface CICheck {
   state: string;
   conclusion: string;
   detailsUrl: string;
+  /** The commit this check ran on; "" (or absent, in an old cache) when the
+   *  forge does not say. See `checksCommitMismatch` in `utils/ciChecks.ts`. */
+  commitSha?: string;
+}
+
+/** A check as the Rust backends and the dev-server send it: Rust's `CICheck`
+ *  has no `rename_all = "camelCase"`, so the fields arrive in snake_case. */
+export interface CICheckRaw {
+  name: string;
+  state: string;
+  conclusion: string;
+  details_url: string;
+  commit_sha?: string;
+}
+
+/** Map a snake_case check off the wire. Every forge's wrapper goes through
+ *  it: a raw cast leaves `detailsUrl` undefined, and the link never shows. */
+export function mapCICheck(c: CICheckRaw): CICheck {
+  return {
+    name: c.name,
+    state: c.state,
+    conclusion: c.conclusion,
+    detailsUrl: c.details_url ?? "",
+    commitSha: c.commit_sha ?? "",
+  };
 }
 
 /**
@@ -815,26 +840,14 @@ export async function ghPrDiff(cwd: string, number: number): Promise<string> {
  */
 export async function ghPrChecks(cwd: string, number: number): Promise<CICheck[]> {
   if (isTauri()) {
-    const raw = await tauriInvoke<Array<{
-      name: string;
-      state: string;
-      conclusion: string;
-      details_url: string;
-    }>>("gh_pr_checks", { cwd, number });
-    return raw.map((c) => ({
-      name: c.name,
-      state: c.state,
-      conclusion: c.conclusion,
-      detailsUrl: c.details_url,
-    }));
+    const raw = await tauriInvoke<CICheckRaw[]>("gh_pr_checks", { cwd, number });
+    return raw.map(mapCICheck);
   }
   const res = await devFetch(`${DEV_SERVER}/api/gh-pr-checks?cwd=${encodeURIComponent(cwd)}&number=${number}`);
   if (!res.ok) throw new Error(`gh pr checks failed: ${res.status}`);
   const raw = await res.json();
   if (raw.error) throw new Error(raw.error);
-  return raw.map((c: any) => ({
-    name: c.name, state: c.state, conclusion: c.conclusion, detailsUrl: c.details_url,
-  }));
+  return (raw as CICheckRaw[]).map(mapCICheck);
 }
 
 // ─── PR Review Comments (Phase 9.2) ────────────────────────
@@ -1507,16 +1520,8 @@ export async function azPrCreateComment(cwd: string, number: number, body: strin
 
 export async function azPrChecks(cwd: string, number: number): Promise<CICheck[]> {
   if (isTauri()) {
-    const raw = await tauriInvoke<Array<{ name: string; state: string; conclusion: string; details_url: string }>>(
-      "az_pr_checks",
-      { cwd, number },
-    );
-    return raw.map((c) => ({
-      name: c.name,
-      state: c.state,
-      conclusion: c.conclusion,
-      detailsUrl: c.details_url,
-    }));
+    const raw = await tauriInvoke<CICheckRaw[]>("az_pr_checks", { cwd, number });
+    return raw.map(mapCICheck);
   }
   throw new Error(AZURE_WEB_ONLY);
 }

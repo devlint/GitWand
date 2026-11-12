@@ -1035,6 +1035,7 @@ const fr: Locale = {
       noChecks: "Aucun check CI trouvé.",
       checksLoadFailed: "Impossible de charger les checks CI. Rouvrez cet onglet pour réessayer.",
       checksStale: "Mise à jour en direct interrompue : impossible de joindre les checks CI. Rouvrez cet onglet pour réessayer.",
+      checksOtherCommit: "Ces checks ont tourné sur le commit {0} ; la tête de la PR affichée ici est {1}.",
     },
     annotations: {
       badge: "{0} annotation(s)",

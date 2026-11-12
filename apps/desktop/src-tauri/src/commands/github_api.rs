@@ -1096,6 +1096,7 @@ pub(crate) fn rest_pr_checks(cwd: &str, number: i64, token: &str) -> Result<Vec<
             state: js(run, "status"),
             conclusion: js(run, "conclusion"),
             details_url: js(run, "html_url"),
+            commit_sha: sha.clone(),
         })
         .collect();
     Ok(checks)

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isCheckRunning, isCheckPending, isCheckFailing, isCheckBlocking, checkIcon, checksIcon,
-  rollupFromDetailStatus,
+  rollupFromDetailStatus, checksCommitMismatch, isCheckOnOtherCommit,
 } from "../ciChecks";
 
 const chk = (state: string, conclusion: string) => ({ name: "c", state, conclusion, detailsUrl: "" });
@@ -133,5 +133,41 @@ describe("WAITING (an approval) is pending but not polled", () => {
   it("blocks without polling", () => {
     expect(isCheckRunning(chk("WAITING", ""))).toBe(false);
     expect(isCheckPending(chk("waiting", ""))).toBe(true);
+  });
+});
+
+describe("checksCommitMismatch", () => {
+  const on = (sha: string) => ({ name: "c", state: "COMPLETED", conclusion: "SUCCESS", detailsUrl: "", commitSha: sha });
+
+  it("names the commit the checks ran on when it is not the head", () => {
+    expect(checksCommitMismatch([on("old"), on("old")], "new")).toBe("old");
+  });
+
+  it("is null when the checks ran on the head", () => {
+    expect(checksCommitMismatch([on("new")], "new")).toBeNull();
+  });
+
+  it("names the old commit in a list mixing both (an Azure build not re-queued yet)", () => {
+    expect(checksCommitMismatch([on("new"), on("old")], "new")).toBe("old");
+  });
+
+  it("names the same commit whatever the order, so the CI tab's follow window holds", () => {
+    expect(checksCommitMismatch([on("b"), on("a"), on("new")], "new")).toBe("a");
+    expect(checksCommitMismatch([on("a"), on("new"), on("b")], "new")).toBe("a");
+  });
+
+  it("isCheckOnOtherCommit judges one check: no commit named is never another's", () => {
+    expect(isCheckOnOtherCommit(on("old"), "new")).toBe(true);
+    expect(isCheckOnOtherCommit(on("new"), "new")).toBe(false);
+    expect(isCheckOnOtherCommit(on(""), "new")).toBe(false);
+    expect(isCheckOnOtherCommit(chk("COMPLETED", "SUCCESS"), "new")).toBe(false);
+    expect(isCheckOnOtherCommit(on("old"), "")).toBe(false);
+  });
+
+  it("is null when nothing says: no check names its commit, no checks, no head", () => {
+    expect(checksCommitMismatch([on(""), chk("COMPLETED", "SUCCESS")], "new")).toBeNull();
+    expect(checksCommitMismatch([], "new")).toBeNull();
+    expect(checksCommitMismatch([on("old")], "")).toBeNull();
+    expect(checksCommitMismatch([on("old")], undefined)).toBeNull();
   });
 });
