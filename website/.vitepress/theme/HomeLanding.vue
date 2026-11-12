@@ -3,6 +3,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { AUTO_PATTERN_COUNT } from './patterns'
 import { data as blogPosts } from './blog.data'
 import { adventBadge, adventCta, resolveNow } from './advent/advent-state'
+import AdventSnow from './advent/AdventSnow.vue'
 
 // Advent calendar badge: client-only so the server HTML keeps the normal badge.
 const advent = ref<{ text: string; href: string } | null>(null)
@@ -1070,6 +1071,7 @@ onMounted(async () => {
       <!-- Calendrier de l'Avent (1–25 décembre, côté client) -->
       <div v-if="advent && adventLink" class="nc-wrap nc-hero__advent">
         <section class="nc-advent" aria-labelledby="nc-advent-title">
+          <AdventSnow />
           <div class="nc-advent__text">
             <span class="nc-eyebrow nc-eyebrow--sm">Git Advent Calendar 🎄</span>
             <h2 id="nc-advent-title" class="nc-advent__title">24 little-known git commands, one a day until Christmas.</h2>
@@ -2152,6 +2154,8 @@ onMounted(async () => {
 
 .nc-hero__advent { padding-top: 40px; }
 .nc-advent {
+  position: relative;
+  overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 32px;
@@ -2186,6 +2190,8 @@ onMounted(async () => {
 @media (prefers-reduced-motion: reduce) {
   .nc-advent { animation: none; }
 }
+.nc-advent__text,
+.nc-advent__actions { position: relative; }
 .nc-advent__text { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .nc-advent__title {
   margin: 0;
