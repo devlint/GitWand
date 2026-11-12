@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A Git advent calendar: `gitwand advent` and gitwand.app/advent.** 24 doors, one little-known git command a day from 1 to 24 December, each with the problem it solves, a runnable snippet, an explanation and, for most doors, a GitWand tip. `gitwand advent` opens today's door and `gitwand advent 5` door 5 (`--json` for machine output); future doors stay locked until their day, Paris time. On the site, doors are opened from a grid, each day has its own page at `/advent/<day>` with a share image, and from 25 December every door is open and each day page shows its door's content.
+
 ## [3.13.1] - 2026-11-12
 
 ### Changed
