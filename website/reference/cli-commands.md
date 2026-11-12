@@ -207,6 +207,96 @@ $ gitwand conventions
 
 ---
 
+## `gitwand advent`
+
+Opens a door of the [Git Advent Calendar](/advent/) (December 1–24): one Git tip a day, with a snippet you can run.
+
+```bash
+gitwand advent        # today's door
+gitwand advent 5      # door 5
+```
+
+Doors that are not open yet are reported as locked. Once the calendar is over (December 25 onwards) every door stays open.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `[day]` | Door number, an integer from 1 to 24. Defaults to today's door |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Machine-readable output |
+
+### JSON output
+
+Each call prints one JSON document; its `status` says which shape it is.
+
+**`door`** — an unlocked door:
+
+```json
+{
+  "status": "door",
+  "door": {
+    "day": 8,
+    "command": "git log -L",
+    "problem": "Who broke this function, and when?",
+    "snippet": "git log -L :parseHunk:src/parse.ts\ngit log -L 40,60:src/parse.ts",
+    "explanation": "Shows every commit that touched that function (or that line range), with the diff trimmed to just those lines. It's the history of a piece of code, not of a whole file.",
+    "tip": "In GitWand's blame view, each block has **Show history for these lines**, which is `git log -L` on that range in one click."
+  }
+}
+```
+
+**`locked`** — a door that opens later in December:
+
+```json
+{
+  "status": "locked",
+  "day": 18,
+  "opensOn": "2026-12-18"
+}
+```
+
+**`not-started`** — before December 1:
+
+```json
+{
+  "status": "not-started",
+  "startsOn": "2026-12-01"
+}
+```
+
+**`over`** — `gitwand advent` with no day, from December 25 on:
+
+```json
+{
+  "status": "over"
+}
+```
+
+**`error`** — an unknown door (exit code 2):
+
+```json
+{
+  "status": "error",
+  "error": "Unknown door \"31\" — pick a day from 1 to 24."
+}
+```
+
+`tip` and `readMore` (a site path) appear only on doors that have one; the sample door has no `readMore`.
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | A door, a locked door, or a calendar status message |
+| `2` | Unknown door |
+
+---
+
 ## `gitwand --help`
 
 Show usage information.

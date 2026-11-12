@@ -54,6 +54,17 @@ Auto-resolves trivial conflicts. With no arguments, it picks up every conflicted
 
 Lists conflicted files with per-file counts, detected pattern types, and the share GitWand can handle automatically.
 
+### `gitwand advent [day]`
+
+Opens a door of the Git Advent Calendar (December 1–24): one Git tip a day, with a runnable snippet. With no argument it shows today's door; `gitwand advent 5` shows door 5. Future doors stay locked until their day, and every door is open from December 25 on.
+
+**Flags**
+- `--json` — machine-readable output: `{ "status": "door", "door": {...} }`, `{ "status": "locked", "day": 18, "opensOn": "2026-12-18" }`, `{ "status": "not-started", "startsOn": "2026-12-01" }`, `{ "status": "over" }`, or `{ "status": "error", "error": "..." }`
+
+**Exit codes**
+- `0` — a door, a locked door, or a calendar status message
+- `2` — unknown door (not an integer from 1 to 24), or more than one argument
+
 ### `gitwand --help`
 
 Full help text.

@@ -12,7 +12,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@gitwand/advent": ["../../packages/cli/src/advent/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.vue"],

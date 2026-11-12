@@ -25,6 +25,7 @@ import { cmdStatus } from "./commands/status.js";
 import { cmdPreview } from "./commands/preview.js";
 import { cmdScan } from "./commands/scan.js";
 import { cmdConventions } from "./commands/conventions.js";
+import { cmdAdvent } from "./commands/advent.js";
 import { checkForUpdate } from "./update-check.js";
 
 const CLI_VERSION = (
@@ -32,6 +33,11 @@ const CLI_VERSION = (
     version: string;
   }
 ).version;
+
+/** The advent calendar is a seasonal toy: it never triggers the update check. */
+export function shouldCheckForUpdate(command: string | undefined): boolean {
+  return command !== "advent";
+}
 
 function printHelp(): void {
   printBanner();
@@ -41,6 +47,7 @@ function printHelp(): void {
   console.log(`  gitwand preview                 Predict conflicts before merge/rebase/cherry-pick`);
   console.log(`  gitwand scan                    Scan staged changes for secrets`);
   console.log(`  gitwand conventions             Measure this repo's merge conventions from its own history (--show, --clear, --max-merges=N)`);
+  console.log(`  gitwand advent [day]            Open today's door of the Git Advent Calendar (Dec 1–24)`);
   console.log(`  gitwand --help                  Show this help`);
   console.log();
   console.log(`${c.bold}Options:${c.reset}`);
@@ -118,7 +125,7 @@ export async function main(): Promise<void> {
   // never run for them. Awaited here, before dispatch: a no-op file read
   // on every invocation except roughly once per 24h, when it's a capped
   // ~1.2s network call. Silently skipped outside a TTY (CI, pipes).
-  await checkForUpdate(CLI_VERSION);
+  if (shouldCheckForUpdate(command)) await checkForUpdate(CLI_VERSION);
 
   if (!command || command === "--help" || command === "-h") {
     printHelp();
@@ -132,6 +139,8 @@ export async function main(): Promise<void> {
     await cmdScan(flags);
   } else if (command === "conventions") {
     await cmdConventions(flags);
+  } else if (command === "advent") {
+    await cmdAdvent(positional, flags);
   } else {
     console.error(`${c.red}Unknown command: ${command}${c.reset}`);
     printHelp();

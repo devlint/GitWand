@@ -321,6 +321,16 @@ const zhCN: Locale = {
   },
 
   dashboard: {
+    // Git Advent Calendar card (1–25 December 2026)
+    advent: {
+      eyebrow: "Git 降临节日历",
+      doorOpen: "第 {0} 扇门已打开",
+      allOpen: "全部 {0} 扇门都已打开",
+      allOpenBody: "每天一条鲜为人知的 git 命令，12 月 1 日至 24 日。",
+      open: "打开第 {0} 扇门",
+      browse: "浏览日历",
+      dismiss: "隐藏到明天",
+    },
     loading: "加载仪表盘…",
     heatmapTitle: "活动 — 近 6 个月",
     less: "少",

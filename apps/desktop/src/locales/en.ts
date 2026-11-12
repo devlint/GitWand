@@ -325,6 +325,16 @@ const en = {
 
   // ─── Dashboard ──────────────────────────────────────────
   dashboard: {
+    // Git Advent Calendar card (1–25 December 2026)
+    advent: {
+      eyebrow: "Git Advent Calendar",
+      doorOpen: "Door {0} is open",
+      allOpen: "All {0} doors are open",
+      allOpenBody: "One little-known git command a day, from December 1 to 24.",
+      open: "Open door {0}",
+      browse: "Browse the calendar",
+      dismiss: "Hide until tomorrow",
+    },
     loading: "Loading dashboard\u2026",
     // Heatmap
     heatmapTitle: "Activity — last 6 months",

@@ -318,6 +318,16 @@ const es: Locale = {
 
   // ─── Dashboard ──────────────────────────────────────────
   dashboard: {
+    // Git Advent Calendar card (1–25 December 2026)
+    advent: {
+      eyebrow: "Calendario de Adviento de Git",
+      doorOpen: "La casilla {0} está abierta",
+      allOpen: "Las {0} casillas están abiertas",
+      allOpenBody: "Un comando de git poco conocido cada día, del 1 al 24 de diciembre.",
+      open: "Abrir la casilla {0}",
+      browse: "Ver el calendario",
+      dismiss: "Ocultar hasta mañana",
+    },
     loading: "Cargando panel…",
     heatmapTitle: "Actividad — últimos 6 meses",
     less: "Menos",
