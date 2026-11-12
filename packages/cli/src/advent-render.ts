@@ -4,7 +4,7 @@
  * use a blank one) and the terminal width.
  */
 
-import { DOOR_COUNT, doorUrl, parseInline, type AdventDoor } from "./advent/index.js";
+import { ADVENT_YEAR, DOOR_COUNT, doorUrl, parseInline, type AdventDoor } from "./advent/index.js";
 import type { c } from "./ui.js";
 
 export type Palette = typeof c;
@@ -20,11 +20,18 @@ interface Piece {
   text: string;
 }
 
-/** Split styled segments into whitespace-separated words (pieces kept for styling). */
+/**
+ * Split styled segments into whitespace-separated words (pieces kept for
+ * styling). An inline code span is atomic: its inner spaces never break it.
+ */
 function tokenize(text: string): Piece[][] {
   const words: Piece[][] = [];
   let cur: Piece[] = [];
   for (const seg of parseInline(text)) {
+    if (seg.kind === "code") {
+      cur.push({ kind: "code", text: seg.text });
+      continue;
+    }
     let buf = "";
     const flush = (): void => {
       if (buf) cur.push({ kind: seg.kind, text: buf });
@@ -61,24 +68,32 @@ function styleWord(w: Piece[], p: Palette): string {
  * Wrap at word boundaries to `columns`. A word longer than the column
  * overflows on its own line rather than being split.
  */
-function wrap(text: string, columns: number, p: Palette, firstOffset = 0): string[] {
+function wrap(text: string, columns: number, p: Palette): string[] {
   const lines: string[] = [];
   let line: string[] = [];
   let len = 0;
-  let limit = columns - firstOffset;
   for (const word of tokenize(text)) {
     const wl = wordLen(word);
-    if (line.length && len + 1 + wl > limit) {
+    if (line.length && len + 1 + wl > columns) {
       lines.push(line.join(" "));
       line = [];
       len = 0;
-      limit = columns;
     }
     len += (line.length ? 1 : 0) + wl;
     line.push(styleWord(word, p));
   }
   if (line.length) lines.push(line.join(" "));
   return lines;
+}
+
+/** `$ ` + command in green; a trailing ` # comment` (or a whole `#` line) dimmed. */
+function styleSnippetLine(line: string, p: Palette): string {
+  if (line.startsWith("#")) return `${p.dim}$ ${line}${p.reset}`;
+  const m = /\s+#/.exec(line);
+  if (!m) return `${p.green}$ ${line}${p.reset}`;
+  const cmd = line.slice(0, m.index);
+  const comment = line.slice(m.index);
+  return `${p.green}$ ${cmd}${p.reset}${p.dim}${comment}${p.reset}`;
 }
 
 export function renderDoor(door: AdventDoor, opts: { palette: Palette; width: number }): string {
@@ -101,7 +116,7 @@ export function renderDoor(door: AdventDoor, opts: { palette: Palette; width: nu
   col.push("");
   for (const line of door.snippet.split("\n")) {
     const text = `$ ${line}`;
-    col.push(line.startsWith("#") ? `${p.dim}${text}${p.reset}` : `${p.green}${text}${p.reset}`);
+    col.push(styleSnippetLine(line, p));
   }
   col.push("");
   col.push(...wrap(door.explanation, textCols, p));
@@ -128,7 +143,7 @@ export function renderDoor(door: AdventDoor, opts: { palette: Palette; width: nu
 
   out.push("");
   if (door.tip) {
-    const lines = wrap(door.tip, width - edge - 3, p, 0);
+    const lines = wrap(door.tip, width - edge - 3, p);
     lines.forEach((l, i) => out.push(" ".repeat(edge) + (i === 0 ? "🪄 " : "   ") + l));
     out.push("");
   }
@@ -143,13 +158,13 @@ export function renderLocked(day: number, p: Palette): string {
 }
 
 export function renderNotStarted(p: Palette): string {
-  return `The GitWand Advent Calendar starts on December 1, 2026. Meanwhile: ${p.cyan}${doorUrl()}${p.reset}`;
+  return `The GitWand Advent Calendar starts on December 1, ${ADVENT_YEAR}. Meanwhile: ${p.cyan}${doorUrl()}${p.reset}`;
 }
 
 export function renderOver(p: Palette): string {
-  return `The calendar is over — every door is open: ${p.cyan}gitwand advent <1-24>${p.reset} or ${p.cyan}${doorUrl()}${p.reset}`;
+  return `The calendar is over — every door is open: ${p.cyan}gitwand advent <1-${DOOR_COUNT}>${p.reset} or ${p.cyan}${doorUrl()}${p.reset}`;
 }
 
 export function renderInvalid(arg: string, p: Palette): string {
-  return `${p.red}Unknown door "${arg}" — pick a day from 1 to 24.${p.reset}`;
+  return `${p.red}Unknown door "${arg.replace(/[\u0000-\u001f\u007f-\u009f]/g, "")}" — pick a day from 1 to ${DOOR_COUNT}.${p.reset}`;
 }
