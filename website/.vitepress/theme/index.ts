@@ -16,7 +16,6 @@ export default {
   Layout: () =>
     h(DefaultTheme.Layout, null, {
       'nav-bar-content-after': () => h(AdventNavLink),
-      'nav-screen-content-after': () => h(AdventNavLink),
     }),
   enhanceApp({ app }) {
     app.component('HomeLanding', HomeLanding)

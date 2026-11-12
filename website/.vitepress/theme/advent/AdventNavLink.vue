@@ -28,14 +28,10 @@ onMounted(() => {
 .advent-nav-link:hover {
   color: var(--vp-c-brand-1);
 }
-/* Mobile nav screen: mimic VPNavScreenMenuLink */
-:deep(.VPNavScreen) .advent-nav-link,
-.VPNavScreen .advent-nav-link {
-  display: block;
-  padding: 12px 0 0;
-  line-height: 24px;
-  font-size: 14px;
-  border-top: 1px solid var(--vp-c-divider);
-  margin-top: 12px;
+@media (max-width: 768px) {
+  .advent-nav-link {
+    padding: 0 8px;
+    font-size: 13px;
+  }
 }
 </style>
