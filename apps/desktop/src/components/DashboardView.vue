@@ -21,6 +21,8 @@ import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables
 import { useRepoRemoteImages } from "../composables/useRemoteImages";
 import RemoteImagesNotice from "./RemoteImagesNotice.vue";
 import AiSparkle from "./AiSparkle.vue";
+// Seasonal (1–25 December): lazy so the door content stays out of the dashboard chunk.
+const AdventCard = defineAsyncComponent(() => import("./AdventCard.vue"));
 import BaseModal from "./BaseModal.vue";
 import { forgeForRepo, isForgeConnected } from "../composables/forge/useForge";
 
@@ -1041,6 +1043,8 @@ watch(
     </div>
 
     <template v-else>
+      <AdventCard />
+
       <!-- ─── Contributors + Recent commits ─────────────── -->
       <section v-if="!settings.dashboardHideContributors" class="row-contrib">
         <!-- Contributors -->

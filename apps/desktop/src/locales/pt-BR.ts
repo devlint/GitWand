@@ -319,6 +319,16 @@ const ptBR: Locale = {
 
   // ─── Dashboard ──────────────────────────────────────────
   dashboard: {
+    // Git Advent Calendar card (1–25 December 2026)
+    advent: {
+      eyebrow: "Calendário do Advento do Git",
+      doorOpen: "A porta {0} está aberta",
+      allOpen: "As {0} portas estão abertas",
+      allOpenBody: "Um comando git pouco conhecido por dia, de 1 a 24 de dezembro.",
+      open: "Abrir a porta {0}",
+      browse: "Ver o calendário",
+      dismiss: "Ocultar até amanhã",
+    },
     loading: "Carregando painel…",
     heatmapTitle: "Atividade — últimos 6 meses",
     less: "Menos",
