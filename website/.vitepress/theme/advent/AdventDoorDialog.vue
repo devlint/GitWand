@@ -35,9 +35,28 @@ function close(): void {
   dialogEl.value?.close()
 }
 
-/** The dialog has no padding of its own: a click whose target is the dialog itself hit the backdrop. */
+// Backdrop close: both the press and the release must land outside the
+// dialog box. A text selection dragged out of the body, or a click on the
+// dialog's own scrollbar, also targets the <dialog> but must not close it.
+let pressStartedOutside = false
+
+function outsideDialog(event: MouseEvent): boolean {
+  const el = dialogEl.value
+  if (!el || event.target !== el) return false
+  const r = el.getBoundingClientRect()
+  return (
+    event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom
+  )
+}
+
+function onDialogPointerDown(event: PointerEvent): void {
+  pressStartedOutside = outsideDialog(event)
+}
+
 function onDialogClick(event: MouseEvent): void {
-  if (event.target === dialogEl.value) close()
+  const startedOutside = pressStartedOutside
+  pressStartedOutside = false
+  if (startedOutside && outsideDialog(event)) close()
 }
 
 function selectSnippet(): void {
@@ -73,6 +92,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
     class="adv-dialog"
     :aria-labelledby="TITLE_ID"
     @close="onNativeClose"
+    @pointerdown="onDialogPointerDown"
     @click="onDialogClick"
   >
     <div v-if="door" class="adv-dialog__body">

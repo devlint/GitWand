@@ -37,6 +37,8 @@ const liveMessage = ref('')
 const doorButtons = new Map<number, HTMLButtonElement>()
 let returnFocusTo: HTMLButtonElement | null = null
 const timers = new Set<ReturnType<typeof setTimeout>>()
+let shakeTimer: ReturnType<typeof setTimeout> | undefined
+let shakeGeneration = 0
 
 const days = Array.from({ length: DOOR_COUNT }, (_, i) => i + 1)
 const doorsByDay = new Map(DOORS.map((d) => [d.day, d]))
@@ -64,6 +66,11 @@ function doorLabel(day: number): string {
   if (!now.value) return `Day ${day}`
   if (!unlocked(day)) return `Day ${day}, locked`
   return `Day ${day}, ${doorsByDay.get(day)?.command ?? ''}`
+}
+
+/** The command sits behind the leaf once the door is opened, and while it swings open. */
+function showsCommand(day: number): boolean {
+  return flippingDay.value === day || doorState(day) === 'opened'
 }
 
 function setDoorRef(day: number, el: unknown): void {
@@ -110,21 +117,27 @@ async function announce(message: string): Promise<void> {
   liveMessage.value = message
 }
 
-function refuse(day: number): void {
-  shakingDay.value = null
-  void nextTick(() => {
-    shakingDay.value = day
-    later(() => {
-      if (shakingDay.value === day) shakingDay.value = null
-    }, SHAKE_MS)
-  })
+async function refuse(day: number): Promise<void> {
   void announce(lockedMessage(day))
+  // Restart the shake on every click: drop the class, let Vue patch the DOM,
+  // force a reflow, then add it back. Only the latest click owns the timer.
+  const generation = ++shakeGeneration
+  clearTimeout(shakeTimer)
+  shakingDay.value = null
+  await nextTick()
+  if (generation !== shakeGeneration) return
+  void doorButtons.get(day)?.offsetWidth
+  shakingDay.value = day
+  shakeTimer = setTimeout(() => {
+    if (generation === shakeGeneration) shakingDay.value = null
+  }, SHAKE_MS)
 }
 
 function showDoor(day: number): void {
   const next = markOpened(storage(), day)
   for (const d of opened.value) next.add(d)
   opened.value = next
+  liveMessage.value = ''
   replaceUrl(`/advent/${day}`)
   activeDay.value = day
 }
@@ -132,7 +145,7 @@ function showDoor(day: number): void {
 function onDoorClick(day: number, event: MouseEvent): void {
   if (!now.value || flippingDay.value !== null) return
   if (!unlocked(day)) {
-    refuse(day)
+    void refuse(day)
     return
   }
   returnFocusTo = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null
@@ -151,6 +164,7 @@ function onDialogClose(): void {
   if (activeDay.value === null) return
   const day = activeDay.value
   activeDay.value = null
+  // Intentional: on /advent/12 this rewrites the URL to /advent/ while the day-12 page stays loaded.
   replaceUrl(ADVENT_INDEX_PATH)
   const target = returnFocusTo ?? doorButtons.get(day) ?? null
   returnFocusTo = null
@@ -175,6 +189,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   for (const t of timers) clearTimeout(t)
   timers.clear()
+  clearTimeout(shakeTimer)
 })
 </script>
 
@@ -209,7 +224,7 @@ onBeforeUnmount(() => {
             @click="onDoorClick(day, $event)"
           >
             <span class="adv-door__inside" aria-hidden="true">
-              <span class="adv-door__cmd">{{ doorState(day) === 'opened' ? doorsByDay.get(day)?.command : '' }}</span>
+              <span class="adv-door__cmd">{{ showsCommand(day) ? doorsByDay.get(day)?.command : '' }}</span>
             </span>
             <span class="adv-door__leaf" aria-hidden="true">
               <span v-if="day === 24" class="adv-door__tree">🎄</span>
@@ -319,14 +334,21 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 8px;
+  overflow: hidden;
   border-radius: var(--nc-radius-lg);
   background: var(--nc-bg);
   border: 1px dashed var(--nc-neutral-800);
 }
 .adv-door__cmd {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  max-width: 100%;
+  overflow: hidden;
   font-family: var(--nc-font-mono);
   font-size: 11.5px;
-  line-height: 1.35;
+  line-height: 1.3;
   text-align: center;
   color: var(--nc-settled);
   overflow-wrap: anywhere;
@@ -348,6 +370,7 @@ onBeforeUnmount(() => {
   backface-visibility: hidden;
   transition:
     transform 400ms var(--nc-ease),
+    opacity 400ms var(--nc-ease-out),
     border-color 150ms,
     box-shadow 150ms;
 }
@@ -374,6 +397,19 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--nc-surface) 55%, var(--nc-canvas));
 }
 
+/* Day 24: a quiet accent frame and glow, whatever its state. */
+.adv-door--last .adv-door__leaf {
+  border-color: var(--nc-accent-500);
+  box-shadow: var(--nc-glow-soft);
+}
+.adv-door--last .adv-door__num {
+  color: var(--nc-accent-300);
+}
+.adv-door--last.adv-door--pending .adv-door__num,
+.adv-door--last.adv-door--locked .adv-door__num {
+  color: var(--nc-accent-600);
+}
+
 .adv-door--available .adv-door__leaf {
   border-color: var(--nc-neutral-700);
 }
@@ -393,7 +429,8 @@ onBeforeUnmount(() => {
   transform: rotateY(-12deg);
 }
 
-.adv-door--opened .adv-door__inside {
+.adv-door--opened .adv-door__inside,
+.adv-door--flipping .adv-door__inside {
   border-style: solid;
   border-color: color-mix(in srgb, var(--nc-settled) 35%, transparent);
 }
@@ -405,6 +442,7 @@ onBeforeUnmount(() => {
 
 .adv-door--flipping .adv-door__leaf {
   transform: rotateY(-100deg);
+  opacity: 0;
 }
 
 .adv-door--shake {
@@ -446,8 +484,12 @@ onBeforeUnmount(() => {
   .adv-door__num {
     font-size: 18px;
   }
+  .adv-door__inside {
+    padding: 5px;
+  }
   .adv-door__cmd {
-    font-size: 9.5px;
+    font-size: 9px;
+    line-height: 1.25;
   }
 }
 
