@@ -2155,9 +2155,34 @@ onMounted(() => {
   gap: 32px;
   align-items: center;
   padding: 28px;
-  border: 1px solid var(--nc-neutral-800);
+  /* Rotating border: an opaque fill on the padding box over a turning conic gradient. */
+  border: 1.5px solid transparent;
   border-radius: var(--nc-radius-lg);
-  background: var(--nc-surface);
+  background:
+    linear-gradient(var(--nc-surface), var(--nc-surface)) padding-box,
+    conic-gradient(
+      from var(--nc-advent-angle),
+      var(--nc-neutral-800) 0deg,
+      var(--nc-neutral-800) 180deg,
+      var(--nc-accent) 260deg,
+      var(--nc-accent-300) 320deg,
+      #fff 335deg,
+      var(--nc-accent) 350deg,
+      var(--nc-neutral-800) 360deg
+    ) border-box;
+  box-shadow: var(--nc-glow-soft);
+  animation: nc-advent-spin 6s linear infinite;
+}
+@property --nc-advent-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes nc-advent-spin {
+  to { --nc-advent-angle: 360deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nc-advent { animation: none; }
 }
 .nc-advent__text { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .nc-advent__title {
