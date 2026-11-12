@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/lockfile-conflicts-by-ecosystem" class="blog-card">
+    <div class="blog-meta">November 12, 2026 · 11 min read</div>
+    <h2 class="blog-title">Lockfile conflicts: package-lock, pnpm-lock, yarn.lock, composer.lock, Cargo.lock — the right move for each</h2>
+    <p class="blog-excerpt">Five package managers, five different answers. npm, pnpm and Yarn Berry merge a conflicted lockfile themselves once the manifest is fixed; Composer wants you to take one branch and <code>composer require</code> the other; Cargo's FAQ says to keep the other branch's lock and run any cargo command. The command, the traps for each (an immutable install in CI, <strong>a "fix" that upgrades every dependency</strong>), and what GitWand's regeneration plan actually runs, including the places where it does less than the package manager's own documentation.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/ai-agent-conflict-rules" class="blog-card">
     <div class="blog-meta">November 10, 2026 · 10 min read</div>
     <h2 class="blog-title">Letting an AI agent resolve Git conflicts without risk: what it must do, and what it must never do</h2>

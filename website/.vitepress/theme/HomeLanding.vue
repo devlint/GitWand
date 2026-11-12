@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { AUTO_PATTERN_COUNT } from './patterns'
+import { data as blogPosts } from './blog.data'
+
+// Newest article, read from website/blog/*.md at build time (see blog.data.ts).
+const latestPost = blogPosts[0]
 
 type Locale = 'en' | 'fr' | 'es' | 'pt-BR' | 'zh-CN'
 
@@ -1348,10 +1352,10 @@ onMounted(() => {
         <div class="blog-teaser-header">
           <span class="blog-teaser-label">From the blog</span>
         </div>
-        <a href="/blog/ai-agent-conflict-rules" class="blog-teaser-card">
-          <div class="blog-teaser-meta">November 10, 2026 · 10 min read</div>
-          <h3 class="blog-teaser-title">Letting an AI agent resolve Git conflicts without risk</h3>
-          <p class="blog-teaser-excerpt">Any agent that can edit files can delete conflict markers; the risk is the operation around them. Nine rules, each mapped to a real tool of the GitWand MCP server: preview before applying, let a deterministic resolver that explains itself go first, never continue past a residual, never abort for the human. Plus a block to paste into AGENTS.md, and four gaps we found in our own server.</p>
+        <a v-if="latestPost" :href="latestPost.url" class="blog-teaser-card">
+          <div class="blog-teaser-meta">{{ latestPost.dateLabel }} · {{ latestPost.readingMinutes }} min read</div>
+          <h3 class="blog-teaser-title">{{ latestPost.title }}</h3>
+          <p class="blog-teaser-excerpt">{{ latestPost.description }}</p>
           <span class="blog-teaser-cta">Read article →</span>
         </a>
       </div>
