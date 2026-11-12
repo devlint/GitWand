@@ -207,6 +207,50 @@ $ gitwand conventions
 
 ---
 
+## `gitwand advent`
+
+Opens a door of the [Git Advent Calendar](/advent) (December 1–24): one Git tip a day, with a snippet you can run.
+
+```bash
+gitwand advent        # today's door
+gitwand advent 5      # door 5
+```
+
+Doors that are not open yet are reported as locked. Once the calendar is over (December 25 onwards) every door stays open.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `[day]` | Door number, an integer from 1 to 24. Defaults to today's door |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Machine-readable output |
+
+### JSON output
+
+```json
+{ "status": "door", "door": { "day": 12, "command": "git reflog" } }
+{ "status": "locked", "day": 18, "opensOn": "2026-12-18" }
+{ "status": "not-started", "startsOn": "2026-12-01" }
+{ "status": "over" }
+{ "status": "error", "error": "Unknown door \"31\" — pick a day from 1 to 24." }
+```
+
+The `door` object also carries the door's problem, snippet and explanation (abridged above).
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | A door, a locked door, or a calendar status message |
+| `2` | Unknown door |
+
+---
+
 ## `gitwand --help`
 
 Show usage information.
