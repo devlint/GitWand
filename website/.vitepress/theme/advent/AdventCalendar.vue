@@ -13,6 +13,7 @@ import {
   initialDoorAction,
   lockedMessage,
   markOpened,
+  openedUnlockedCount,
   readOpened,
   resolveNow,
 } from './advent-state'
@@ -44,7 +45,9 @@ const days = Array.from({ length: DOOR_COUNT }, (_, i) => i + 1)
 const doorsByDay = new Map(DOORS.map((d) => [d.day, d]))
 
 const state = computed<CalendarState | null>(() => (now.value ? calendarState(now.value) : null))
-const openedCount = computed(() => opened.value.size)
+const openedCount = computed(() =>
+  now.value ? openedUnlockedCount(opened.value, now.value) : 0,
+)
 const activeDoor = computed<AdventDoor | null>(() =>
   activeDay.value === null ? null : (doorsByDay.get(activeDay.value) ?? null),
 )
@@ -57,15 +60,20 @@ function doorState(day: number): DoorState {
   if (!now.value) return 'pending'
   if (!unlocked(day)) return 'locked'
   if (opened.value.has(day)) return 'opened'
+  return isToday(day) ? 'today' : 'available'
+}
+
+/** Today's door during the run, whether or not it is already opened. */
+function isToday(day: number): boolean {
   const s = state.value
-  if (s?.phase === 'running' && s.today === day) return 'today'
-  return 'available'
+  return s?.phase === 'running' && s.today === day
 }
 
 function doorLabel(day: number): string {
   if (!now.value) return `Day ${day}`
   if (!unlocked(day)) return `Day ${day}, locked`
-  return `Day ${day}, ${doorsByDay.get(day)?.command ?? ''}`
+  const today = isToday(day) ? ', today' : ''
+  return `Day ${day}${today}, ${doorsByDay.get(day)?.command ?? ''}`
 }
 
 /** The command sits behind the leaf once the door is opened, and while it swings open. */
@@ -218,6 +226,7 @@ onBeforeUnmount(() => {
                 'adv-door--flipping': flippingDay === day,
                 'adv-door--shake': shakingDay === day,
                 'adv-door--last': day === 24,
+                'adv-door--is-today': isToday(day),
               },
             ]"
             :aria-label="doorLabel(day)"
@@ -345,6 +354,9 @@ onBeforeUnmount(() => {
   -webkit-line-clamp: 4;
   line-clamp: 4;
   max-width: 100%;
+  /* Fallback where line-clamp is unsupported: cap at 4 lines and cut. */
+  max-height: calc(4 * 1.3em);
+  text-overflow: ellipsis;
   overflow: hidden;
   font-family: var(--nc-font-mono);
   font-size: 11.5px;
@@ -440,6 +452,13 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+/* Today's door keeps its accent ring once opened, so "today" stays identifiable. */
+.adv-door--opened.adv-door--is-today .adv-door__inside {
+  border-style: solid;
+  border-color: var(--nc-waiting);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nc-waiting) 40%, transparent), 0 0 26px color-mix(in srgb, var(--nc-waiting) 22%, transparent);
+}
+
 .adv-door--flipping .adv-door__leaf {
   transform: rotateY(-100deg);
   opacity: 0;
@@ -490,6 +509,7 @@ onBeforeUnmount(() => {
   .adv-door__cmd {
     font-size: 9px;
     line-height: 1.25;
+    max-height: calc(4 * 1.25em);
   }
 }
 

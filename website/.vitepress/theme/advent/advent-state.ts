@@ -68,6 +68,16 @@ export function markOpened(
   return opened
 }
 
+/**
+ * Opened doors that are unlocked at `now`. Storage can hold doors opened on a
+ * later `?date=` preview; those are locked again today and do not count.
+ */
+export function openedUnlockedCount(opened: ReadonlySet<number>, now: Date): number {
+  let count = 0
+  for (const day of opened) if (isDoorDay(day) && isUnlocked(day, now)) count++
+  return count
+}
+
 export function lockedMessage(day: number): string {
   return `Patience — opens on December ${day}`
 }

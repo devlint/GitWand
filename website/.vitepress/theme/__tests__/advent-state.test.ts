@@ -7,6 +7,7 @@ import {
   lockedMessage,
   initialDoorAction,
   adventBadge,
+  openedUnlockedCount,
 } from '../advent/advent-state'
 
 const real = new Date(Date.UTC(2026, 10, 12, 9, 0, 0))
@@ -145,5 +146,26 @@ describe('adventBadge', () => {
   it('is hidden from December 26', () => {
     expect(adventBadge(new Date(Date.UTC(2026, 11, 26, 12)))).toBeNull()
     expect(adventBadge(new Date(Date.UTC(2027, 11, 25, 12)))).toBeNull()
+  })
+})
+
+describe('openedUnlockedCount', () => {
+  it('counts only opened doors that are unlocked now', () => {
+    // Door 15 was opened on a Dec 26 preview; on Dec 12 it is locked again.
+    expect(openedUnlockedCount(new Set([3, 12, 15]), dec12)).toBe(2)
+  })
+
+  it('is 0 before December, whatever storage says', () => {
+    expect(openedUnlockedCount(new Set([1, 15]), nov20)).toBe(0)
+  })
+
+  it('counts every opened door once the calendar is over', () => {
+    const dec26 = new Date(Date.UTC(2026, 11, 26, 12, 0, 0))
+    expect(openedUnlockedCount(new Set([1, 15, 24]), dec26)).toBe(3)
+  })
+
+  it('ignores anything that is not a door day', () => {
+    const dec26 = new Date(Date.UTC(2026, 11, 26, 12, 0, 0))
+    expect(openedUnlockedCount(new Set([0, 25, 2.5, 4]), dec26)).toBe(1)
   })
 })

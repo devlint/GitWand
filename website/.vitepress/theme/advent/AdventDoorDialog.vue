@@ -10,6 +10,7 @@ const DOWNLOAD_URL = 'https://github.com/devlint/GitWand/releases/latest'
 const TITLE_ID = 'advent-door-title'
 
 const dialogEl = ref<HTMLDialogElement | null>(null)
+const titleEl = ref<HTMLElement | null>(null)
 const preEl = ref<HTMLElement | null>(null)
 const copied = ref(false)
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
@@ -21,8 +22,13 @@ watch(
     await nextTick()
     const el = dialogEl.value
     if (!el) return
-    if (door && !el.open) el.showModal()
-    else if (!door && el.open) el.close()
+    if (door && !el.open) {
+      el.showModal()
+      // Initial focus is always the title (tabindex="-1"): it sits at the top,
+      // so nothing scrolls, and the browser's own pick (the first focusable,
+      // possibly the scrollable snippet) never gets a focus ring on open.
+      titleEl.value?.focus({ preventScroll: true })
+    } else if (!door && el.open) el.close()
   },
 )
 
@@ -97,14 +103,16 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
   >
     <div v-if="door" class="adv-dialog__body">
       <p class="adv-dialog__day">Day {{ door.day }}</p>
-      <h2 :id="TITLE_ID" class="adv-dialog__title">{{ door.command }}</h2>
+      <h2 :id="TITLE_ID" ref="titleEl" class="adv-dialog__title" tabindex="-1">{{ door.command }}</h2>
       <p class="adv-dialog__problem">“<AdventInline :text="door.problem" />”</p>
 
       <div class="adv-dialog__snippet">
+        <div class="adv-dialog__snippet-bar">
+          <button type="button" class="adv-dialog__copy" @click="copySnippet">
+            {{ copied ? 'Copied' : 'Copy' }}
+          </button>
+        </div>
         <pre ref="preEl"><code>{{ door.snippet }}</code></pre>
-        <button type="button" class="adv-dialog__copy" @click="copySnippet">
-          {{ copied ? 'Copied' : 'Copy' }}
-        </button>
       </div>
 
       <p class="adv-dialog__explanation"><AdventInline :text="door.explanation" /></p>
@@ -172,17 +180,32 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
   line-height: 1.6;
   color: var(--nc-neutral-300);
 }
-.adv-dialog__snippet {
-  position: relative;
-  margin: 0 0 18px;
+.adv-dialog__title:focus {
+  /* Programmatic initial focus only (tabindex="-1"): no ring on a heading. */
+  outline: none;
 }
-.adv-dialog__snippet pre {
-  margin: 0;
-  padding: 14px 84px 14px 16px;
-  overflow-x: auto;
+/* The Copy button lives in a bar above the code, never over it, so a long
+   command scrolls horizontally without anything covering it. */
+.adv-dialog__snippet {
+  margin: 0 0 18px;
   background: var(--nc-canvas);
   border: 1px solid var(--nc-neutral-800);
   border-radius: var(--nc-radius-md);
+  overflow: hidden;
+}
+.adv-dialog__snippet-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--nc-rule);
+}
+.adv-dialog__snippet pre {
+  margin: 0;
+  padding: 12px 16px 14px;
+  overflow-x: auto;
+  background: none;
+  border: 0;
+  border-radius: 0 0 var(--nc-radius-md) var(--nc-radius-md);
   font-family: var(--nc-font-mono);
   font-size: 13.5px;
   line-height: 1.65;
@@ -196,9 +219,6 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
   color: inherit;
 }
 .adv-dialog__copy {
-  position: absolute;
-  top: 8px;
-  right: 8px;
   padding: 4px 10px;
   font-family: var(--nc-font-sans);
   font-size: 12px;
@@ -272,6 +292,14 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 }
 .adv-dialog__close:hover {
   background: var(--nc-accent-700);
+}
+.adv-dialog__snippet pre:focus {
+  outline: none;
+}
+/* A scrollable <pre> is keyboard-focusable: an inset ring that stays inside the frame. */
+.adv-dialog__snippet pre:focus-visible {
+  outline: 2px solid var(--nc-accent-300);
+  outline-offset: -2px;
 }
 .adv-dialog__copy:focus-visible,
 .adv-dialog__close:focus-visible,
