@@ -3,8 +3,9 @@
  * `tip`, the file(s) that prove the tip is true. Checked by the content-lint
  * tests (advent-doors.test.ts), never rendered or emitted in JSON.
  *
- * Deliberately NOT re-exported from `index.ts`, so the website never bundles
- * it. Imports nothing, no enums.
+ * Lives under `src/__tests__/`, which tsconfig excludes from the build: it never
+ * ships in the npm tarball, and nothing outside the tests imports it, so the
+ * website never bundles it either. Imports nothing, no enums.
  *
  * Each entry starts with a repo-relative path, optionally followed by ":line"
  * or " — note".

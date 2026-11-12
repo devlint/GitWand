@@ -6,6 +6,7 @@ import {
   renderInvalid,
   renderLocked,
   renderNotStarted,
+  renderTooManyArgs,
   renderOver,
   type Palette,
 } from "../advent-render.js";
@@ -53,6 +54,14 @@ describe("runAdvent (human output)", () => {
     expect(r.code).toBe(2);
     expect(r.stream).toBe("stderr");
     expect(r.output).toBe(renderInvalid(arg, plain));
+  });
+
+  it("rejects more than one argument", () => {
+    const r = run(["5", "6"], dec12);
+    expect(r.code).toBe(2);
+    expect(r.stream).toBe("stderr");
+    expect(r.output).toBe(renderTooManyArgs(plain));
+    expect(r.output).toBe("Too many arguments — usage: gitwand advent [day]");
   });
 
   it("rejects an invalid day even before December", () => {
@@ -128,6 +137,16 @@ describe("runAdvent --json", () => {
     expect(r.code).toBe(2);
     expect(r.stream).toBe("stdout");
     expect(body).toEqual({ status: "error", error: renderInvalid("31", plain) });
+  });
+
+  it("emits a plain error for more than one argument", () => {
+    const { r, body } = json(["5", "6"], dec12);
+    expect(r.code).toBe(2);
+    expect(r.stream).toBe("stdout");
+    expect(body).toEqual({ status: "error", error: "Too many arguments — usage: gitwand advent [day]" });
+    const red = { ...plain, red: "\x1b[31m", reset: "\x1b[0m" };
+    const coloured = runAdvent(["5", "6"], { json: true }, { now: dec12, width: 80, palette: red });
+    expect(coloured.output).not.toContain("\x1b");
   });
 });
 

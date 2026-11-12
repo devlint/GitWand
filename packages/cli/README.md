@@ -63,7 +63,7 @@ Opens a door of the Git Advent Calendar (December 1–24): one Git tip a day, wi
 
 **Exit codes**
 - `0` — a door, a locked door, or a calendar status message
-- `2` — unknown door (not an integer from 1 to 24)
+- `2` — unknown door (not an integer from 1 to 24), or more than one argument
 
 ### `gitwand --help`
 

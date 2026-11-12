@@ -115,7 +115,6 @@ export function renderDoor(door: AdventDoor, opts: { palette: Palette; width: nu
   col.push(...problem);
   col.push("");
   for (const line of door.snippet.split("\n")) {
-    const text = `$ ${line}`;
     col.push(styleSnippetLine(line, p));
   }
   col.push("");
@@ -163,6 +162,10 @@ export function renderNotStarted(p: Palette): string {
 
 export function renderOver(p: Palette): string {
   return `The calendar is over — every door is open: ${p.cyan}gitwand advent <1-${DOOR_COUNT}>${p.reset} or ${p.cyan}${doorUrl()}${p.reset}`;
+}
+
+export function renderTooManyArgs(p: Palette): string {
+  return `${p.red}Too many arguments — usage: gitwand advent [day]${p.reset}`;
 }
 
 export function renderInvalid(arg: string, p: Palette): string {

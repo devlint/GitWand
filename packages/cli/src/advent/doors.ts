@@ -4,9 +4,9 @@
  * Imports nothing: this file is loaded by `node --experimental-strip-types`
  * and bundled by the website. No enums.
  *
- * The evidence behind each tip lives in `evidence.ts`, which is internal: it is
- * not re-exported from `index.ts`, so it never reaches the website bundle or
- * the CLI's JSON output.
+ * The evidence behind each tip lives in the test fixture
+ * `src/__tests__/fixtures/advent-evidence.ts`: it is not part of the build, so
+ * it never reaches the npm package, the website bundle or the CLI's JSON output.
  */
 
 export interface AdventDoor {

@@ -20,6 +20,7 @@ import {
   renderLocked,
   renderNotStarted,
   renderOver,
+  renderTooManyArgs,
   type Palette,
 } from "../advent-render.js";
 import { c } from "../ui.js";
@@ -57,6 +58,13 @@ export function runAdvent(
     stream: json ? "stdout" : stream,
     output: json ? JSON.stringify(body, null, 2) : human,
   });
+
+  if (positional.length > 1) {
+    return out(2, "stderr", renderTooManyArgs(p), {
+      status: "error",
+      error: renderTooManyArgs(PLAIN),
+    });
+  }
 
   const arg = positional[0];
   const state = calendarState(ctx.now);

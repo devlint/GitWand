@@ -2,15 +2,26 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { DOORS } from "../advent/doors.js";
-import { TIP_EVIDENCE } from "../advent/evidence.js";
+import { TIP_EVIDENCE } from "./fixtures/advent-evidence.js";
 import { parseInline } from "../advent/inline.js";
 
 const ROOT = new URL("../../../../", import.meta.url);
 const exists = (rel: string): boolean => existsSync(new URL(rel, ROOT));
 const resolveEvidencePath = (path: string): string | null =>
   [path, `apps/desktop/src/${path}`, `apps/desktop/${path}`].find(exists) ?? null;
-const lineCount = (rel: string): number =>
-  readFileSync(new URL(rel, ROOT), "utf8").split("\n").length;
+/** Lines in `text`; a trailing newline ends the last line, it does not start a new one. */
+const countLines = (text: string): number =>
+  text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
+const lineCount = (rel: string): number => countLines(readFileSync(new URL(rel, ROOT), "utf8"));
+
+describe("countLines", () => {
+  it("does not count a trailing newline as a line", () => {
+    expect(countLines("a\nb\n")).toBe(2);
+    expect(countLines("a\nb")).toBe(2);
+    expect(countLines("a\n\n")).toBe(2);
+    expect(countLines("")).toBe(0);
+  });
+});
 
 describe("advent doors content", () => {
   it("has 24 doors numbered 1..24", () => {
