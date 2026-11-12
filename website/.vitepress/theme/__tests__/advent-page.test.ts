@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { adventPageMeta, applyAdventMeta, applyShareImage, DEFAULT_OG_IMAGE } from '../../advent-page'
 import { DOORS, plainText } from '../../../../packages/cli/src/advent/index.ts'
 
@@ -95,5 +97,15 @@ describe('applyShareImage', () => {
     applyShareImage(p)
     expect(p.frontmatter.head.filter(([, a]: any) => a.property === 'og:image')).toHaveLength(1)
     expect(p.frontmatter.head.filter(([, a]: any) => a.name === 'twitter:image')).toHaveLength(1)
+  })
+})
+
+describe('advent OG images', () => {
+  const dir = fileURLToPath(new URL('../../../public/advent/og/', import.meta.url))
+  const names = ['index.png', ...Array.from({ length: 24 }, (_, i) => `day-${String(i + 1).padStart(2, '0')}.png`)]
+
+  it.each(names)('%s exists and is a PNG', (name) => {
+    const head = readFileSync(dir + name).subarray(0, 4)
+    expect([...head]).toEqual([0x89, 0x50, 0x4e, 0x47])
   })
 })
