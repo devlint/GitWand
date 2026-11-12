@@ -104,8 +104,11 @@ describe('advent OG images', () => {
   const dir = fileURLToPath(new URL('../../../public/advent/og/', import.meta.url))
   const names = ['index.png', ...Array.from({ length: 24 }, (_, i) => `day-${String(i + 1).padStart(2, '0')}.png`)]
 
-  it.each(names)('%s exists and is a PNG', (name) => {
-    const head = readFileSync(dir + name).subarray(0, 4)
-    expect([...head]).toEqual([0x89, 0x50, 0x4e, 0x47])
+  it.each(names)('%s is a 1200×630 PNG', (name) => {
+    const png = readFileSync(dir + name)
+    expect([...png.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+    // The first chunk is IHDR: width and height are big-endian at bytes 16–23.
+    expect(png.subarray(12, 16).toString('latin1')).toBe('IHDR')
+    expect({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) }).toEqual({ width: 1200, height: 630 })
   })
 })

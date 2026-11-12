@@ -38,12 +38,29 @@ body{background:#0d0f1a;color:#e8e8f0;font-family:Inter,-apple-system,"Segoe UI"
 .grid{position:absolute;right:72px;top:150px;display:grid;grid-template-columns:repeat(6,60px);gap:10px}
 .door{width:60px;height:60px;border-radius:10px;background:#232532;border:1px solid #3a3d52;
   display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#d2cefd}
-.door.on{background:#d2cefd;color:#0d0f1a}
+.door.last{border-color:#968ae0;box-shadow:0 0 22px rgba(150,138,224,.35)}
 `;
+
+const FONTS_URL =
+  "https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@600&display=swap";
+
+// Chrome silently falls back to system fonts when the stylesheet is unreachable:
+// say so, then render anyway.
+async function checkFonts(): Promise<void> {
+  try {
+    const res = await fetch(FONTS_URL, { method: "HEAD", signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    console.warn(
+      `warning: cannot reach the Google Fonts stylesheet (${err instanceof Error ? err.message : String(err)});` +
+        " the images will use fallback fonts.",
+    );
+  }
+}
 
 function page(body: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@600&display=swap">
+<link rel="stylesheet" href="${FONTS_URL}">
 <style>${CSS}</style></head><body>${body}</body></html>`;
 }
 
@@ -67,8 +84,11 @@ function render(name: string, html: string): void {
   console.log("wrote", out);
 }
 
+await checkFonts();
+
+// Only door 24 is accented, as on the site; no door is shown as opened.
 const doorsGrid = DOORS.map(
-  (d, i) => `<div class="door${i % 5 === 0 ? " on" : ""}">${d.day}</div>`,
+  (d) => `<div class="door${d.day === 24 ? " last" : ""}">${d.day}</div>`,
 ).join("");
 render(
   "index",
