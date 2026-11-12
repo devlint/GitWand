@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitepress'
 import { extractFaq } from './seo'
 import { fileURLToPath } from 'node:url'
-import { adventPageMeta, DEFAULT_OG_IMAGE } from './advent-page'
+import { applyAdventMeta, applyShareImage } from './advent-page'
 
 
 export default defineConfig({
@@ -169,38 +169,16 @@ export default defineConfig({
       ([tag, attrs]: [string, Record<string, string>]) => tag === 'link' && attrs?.rel === 'canonical'
     )
 
-    pageData.frontmatter.head ??= []
-
-    // Advent pages are generated from DOORS (a dynamic route has no frontmatter
-    // of its own), so title, description and share image are derived here, before
-    // the canonical block and the structured data read them.
-    const adventDay = pageData.params?.day ? Number(pageData.params.day) : null
-    if (pageData.relativePath === 'advent/index.md' || adventDay !== null) {
-      const meta = adventPageMeta(adventDay)
-      pageData.title = meta.title
-      pageData.frontmatter.title = meta.title
-      pageData.frontmatter.description = meta.description
-      pageData.frontmatter.ogImage = meta.ogImage
-      pageData.frontmatter.head.push(
-        ['meta', { property: 'og:title', content: meta.title }],
-        ['meta', { property: 'og:description', content: meta.description }],
-        ['meta', { name: 'twitter:title', content: meta.title }],
-      )
-    }
-
-    // Every page names its share image (the default one unless frontmatter or
-    // the advent block above chose another), now that the head has no global one.
-    const ogImage = pageData.frontmatter.ogImage ?? DEFAULT_OG_IMAGE
-    pageData.frontmatter.head.push(
-      ['meta', { property: 'og:image', content: ogImage }],
-      ['meta', { name: 'twitter:image', content: ogImage }],
-    )
+    // Advent title/description/share image come from DOORS, before the canonical
+    // block and the structured data read them; every page then gets its share
+    // image (the global head entries are gone).
+    applyAdventMeta(pageData)
+    applyShareImage(pageData)
 
     const canonicalUrl = `https://gitwand.app/${pageData.relativePath}`
       .replace(/\/?index\.md$/, '/')
       .replace(/\.md$/, '')
 
-    pageData.frontmatter.head ??= []
     // A page that already declares its own canonical (a post cross-posted from
     // elsewhere, pointing back at the original) keeps it — but it still gets the
     // structured data below. An earlier version of this returned here, which
