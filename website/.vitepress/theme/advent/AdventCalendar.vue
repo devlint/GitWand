@@ -1,0 +1,468 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  DOORS,
+  DOOR_COUNT,
+  calendarState,
+  isUnlocked,
+  publicDoor,
+  type CalendarState,
+  type PublicDoor,
+} from '@gitwand/advent'
+import {
+  ADVENT_INDEX_PATH,
+  initialDoorAction,
+  lockedMessage,
+  markOpened,
+  readOpened,
+  resolveNow,
+} from './advent-state'
+import AdventDoorDialog from './AdventDoorDialog.vue'
+
+const props = defineProps<{ initialDay?: number }>()
+
+const FLIP_MS = 400
+const SHAKE_MS = 450
+
+type DoorState = 'pending' | 'opened' | 'today' | 'available' | 'locked'
+
+// Everything below stays neutral until onMounted: the server has no clock
+// override, no storage and no idea of the visitor's time zone.
+const now = ref<Date | null>(null)
+const opened = ref<Set<number>>(new Set())
+const activeDay = ref<number | null>(null)
+const flippingDay = ref<number | null>(null)
+const shakingDay = ref<number | null>(null)
+const liveMessage = ref('')
+
+const doorButtons = new Map<number, HTMLButtonElement>()
+let returnFocusTo: HTMLButtonElement | null = null
+const timers = new Set<ReturnType<typeof setTimeout>>()
+
+const days = Array.from({ length: DOOR_COUNT }, (_, i) => i + 1)
+const doorsByDay = new Map(DOORS.map((d) => [d.day, d]))
+
+const state = computed<CalendarState | null>(() => (now.value ? calendarState(now.value) : null))
+const openedCount = computed(() => opened.value.size)
+const activeDoor = computed<PublicDoor | null>(() => {
+  const door = activeDay.value === null ? undefined : doorsByDay.get(activeDay.value)
+  return door ? publicDoor(door) : null
+})
+
+function unlocked(day: number): boolean {
+  return now.value !== null && isUnlocked(day, now.value)
+}
+
+function doorState(day: number): DoorState {
+  if (!now.value) return 'pending'
+  if (!unlocked(day)) return 'locked'
+  if (opened.value.has(day)) return 'opened'
+  const s = state.value
+  if (s?.phase === 'running' && s.today === day) return 'today'
+  return 'available'
+}
+
+function doorLabel(day: number): string {
+  if (!now.value) return `Day ${day}`
+  if (!unlocked(day)) return `Day ${day}, locked`
+  return `Day ${day}, ${doorsByDay.get(day)?.command ?? ''}`
+}
+
+function setDoorRef(day: number, el: unknown): void {
+  if (el instanceof HTMLButtonElement) doorButtons.set(day, el)
+  else doorButtons.delete(day)
+}
+
+function later(fn: () => void, ms: number): void {
+  const t = setTimeout(() => {
+    timers.delete(t)
+    fn()
+  }, ms)
+  timers.add(t)
+}
+
+function storage(): Storage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
+
+function replaceUrl(path: string): void {
+  try {
+    history.replaceState(history.state, '', path + location.search)
+  } catch {
+    // A refused replaceState only costs the shareable URL.
+  }
+}
+
+async function announce(message: string): Promise<void> {
+  // Clear first so a repeated message is announced again.
+  liveMessage.value = ''
+  await nextTick()
+  liveMessage.value = message
+}
+
+function refuse(day: number): void {
+  shakingDay.value = null
+  void nextTick(() => {
+    shakingDay.value = day
+    later(() => {
+      if (shakingDay.value === day) shakingDay.value = null
+    }, SHAKE_MS)
+  })
+  void announce(lockedMessage(day))
+}
+
+function showDoor(day: number): void {
+  const next = markOpened(storage(), day)
+  for (const d of opened.value) next.add(d)
+  opened.value = next
+  replaceUrl(`/advent/${day}`)
+  activeDay.value = day
+}
+
+function onDoorClick(day: number, event: MouseEvent): void {
+  if (!now.value || flippingDay.value !== null) return
+  if (!unlocked(day)) {
+    refuse(day)
+    return
+  }
+  returnFocusTo = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null
+  if (opened.value.has(day) || prefersReducedMotion()) {
+    showDoor(day)
+    return
+  }
+  flippingDay.value = day
+  later(() => {
+    flippingDay.value = null
+    showDoor(day)
+  }, FLIP_MS)
+}
+
+function onDialogClose(): void {
+  if (activeDay.value === null) return
+  const day = activeDay.value
+  activeDay.value = null
+  replaceUrl(ADVENT_INDEX_PATH)
+  const target = returnFocusTo ?? doorButtons.get(day) ?? null
+  returnFocusTo = null
+  void nextTick(() => target?.focus())
+}
+
+onMounted(() => {
+  const current = resolveNow(location.search, new Date())
+  now.value = current
+  opened.value = readOpened(storage())
+  const day = props.initialDay
+  const action = initialDoorAction(day, current)
+  if (day === undefined) return
+  if (action === 'open') {
+    returnFocusTo = doorButtons.get(day) ?? null
+    showDoor(day)
+  } else if (action === 'locked') {
+    void announce(lockedMessage(day))
+  }
+})
+
+onBeforeUnmount(() => {
+  for (const t of timers) clearTimeout(t)
+  timers.clear()
+})
+</script>
+
+<template>
+  <div class="gw-page adv">
+    <section class="adv-hero">
+      <div class="adv-inner">
+        <h1 class="adv-title">Git Advent Calendar</h1>
+        <p class="adv-sub">24 little-known git commands, one a day until Christmas.</p>
+        <p class="adv-progress">{{ openedCount }}/{{ DOOR_COUNT }} opened</p>
+        <p v-if="state?.phase === 'not-started'" class="adv-phase">Doors open on December 1.</p>
+        <p v-else-if="state?.phase === 'over'" class="adv-phase">Every door is open — merry Christmas.</p>
+      </div>
+    </section>
+
+    <section class="adv-inner adv-grid-wrap">
+      <ol class="adv-grid">
+        <li v-for="day in days" :key="day" class="adv-cell">
+          <button
+            :ref="(el) => setDoorRef(day, el)"
+            type="button"
+            class="adv-door"
+            :class="[
+              `adv-door--${doorState(day)}`,
+              {
+                'adv-door--flipping': flippingDay === day,
+                'adv-door--shake': shakingDay === day,
+                'adv-door--last': day === 24,
+              },
+            ]"
+            :aria-label="doorLabel(day)"
+            @click="onDoorClick(day, $event)"
+          >
+            <span class="adv-door__inside" aria-hidden="true">
+              <span class="adv-door__cmd">{{ doorState(day) === 'opened' ? doorsByDay.get(day)?.command : '' }}</span>
+            </span>
+            <span class="adv-door__leaf" aria-hidden="true">
+              <span v-if="day === 24" class="adv-door__tree">🎄</span>
+              <span class="adv-door__num">{{ day }}</span>
+            </span>
+          </button>
+        </li>
+      </ol>
+      <p class="adv-live" aria-live="polite">{{ liveMessage }}</p>
+    </section>
+
+    <AdventDoorDialog :door="activeDoor" @close="onDialogClose" />
+  </div>
+</template>
+
+<style scoped>
+.adv {
+  background: var(--nc-canvas);
+  color: var(--nc-text);
+  font-family: var(--nc-font-sans);
+  padding-bottom: 72px;
+}
+.adv-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+.adv-hero {
+  padding: 72px 0 36px;
+  text-align: center;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% -10%, color-mix(in srgb, var(--nc-accent) 18%, transparent) 0%, transparent 70%),
+    var(--nc-canvas);
+}
+.adv-title {
+  margin: 0 0 12px;
+  font-size: 44px;
+  line-height: 1.15;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: var(--nc-track-title);
+  color: var(--nc-accent-100);
+}
+.adv-sub {
+  margin: 0 auto 18px;
+  max-width: 560px;
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--nc-neutral-400);
+}
+.adv-progress {
+  display: inline-block;
+  margin: 0;
+  padding: 4px 12px;
+  font-family: var(--nc-font-mono);
+  font-size: 12.5px;
+  color: var(--nc-accent-300);
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: 999px;
+}
+.adv-phase {
+  margin: 14px 0 0;
+  font-size: 15px;
+  color: var(--nc-neutral-300);
+}
+
+.adv-grid-wrap {
+  padding-top: 12px;
+}
+.adv-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+.adv-cell {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.adv-door {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  perspective: 700px;
+  border-radius: var(--nc-radius-lg);
+}
+.adv-door:focus-visible {
+  outline: 2px solid var(--nc-accent-300);
+  outline-offset: 3px;
+}
+
+/* What is behind the door. */
+.adv-door__inside {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: var(--nc-radius-lg);
+  background: var(--nc-bg);
+  border: 1px dashed var(--nc-neutral-800);
+}
+.adv-door__cmd {
+  font-family: var(--nc-font-mono);
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--nc-settled);
+  overflow-wrap: anywhere;
+}
+
+/* The door leaf, hinged on its left edge. */
+.adv-door__leaf {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: var(--nc-radius-lg);
+  background: var(--nc-surface);
+  border: 1px solid var(--nc-neutral-800);
+  transform-origin: left center;
+  backface-visibility: hidden;
+  transition:
+    transform 400ms var(--nc-ease),
+    border-color 150ms,
+    box-shadow 150ms;
+}
+.adv-door__num {
+  font-family: var(--nc-font-mono);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--nc-neutral-300);
+}
+.adv-door__tree {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.adv-door--pending,
+.adv-door--locked {
+  cursor: default;
+}
+.adv-door--pending .adv-door__num,
+.adv-door--locked .adv-door__num {
+  color: var(--nc-neutral-600);
+}
+.adv-door--locked .adv-door__leaf {
+  background: color-mix(in srgb, var(--nc-surface) 55%, var(--nc-canvas));
+}
+
+.adv-door--available .adv-door__leaf {
+  border-color: var(--nc-neutral-700);
+}
+.adv-door--available:hover .adv-door__leaf {
+  border-color: var(--nc-accent-600);
+}
+
+.adv-door--today .adv-door__leaf {
+  background: color-mix(in srgb, var(--nc-accent) 16%, var(--nc-surface));
+  border-color: var(--nc-waiting);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nc-waiting) 40%, transparent), 0 0 26px color-mix(in srgb, var(--nc-waiting) 22%, transparent);
+}
+.adv-door--today .adv-door__num {
+  color: var(--nc-waiting);
+}
+.adv-door--today:hover .adv-door__leaf {
+  transform: rotateY(-12deg);
+}
+
+.adv-door--opened .adv-door__inside {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--nc-settled) 35%, transparent);
+}
+.adv-door--opened .adv-door__leaf {
+  transform: rotateY(-100deg);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.adv-door--flipping .adv-door__leaf {
+  transform: rotateY(-100deg);
+}
+
+.adv-door--shake {
+  animation: adv-shake 450ms var(--nc-ease-out);
+}
+@keyframes adv-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+.adv-live {
+  min-height: 1.6em;
+  margin: 20px 0 0;
+  text-align: center;
+  font-size: 15px;
+  color: var(--nc-waiting);
+}
+
+@media (max-width: 640px) {
+  .adv-hero {
+    padding: 48px 0 28px;
+  }
+  .adv-title {
+    font-size: 32px;
+  }
+  .adv-sub {
+    font-size: 16px;
+  }
+  .adv-inner {
+    padding: 0 16px;
+  }
+  .adv-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .adv-door__num {
+    font-size: 18px;
+  }
+  .adv-door__cmd {
+    font-size: 9.5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adv-door__leaf {
+    transition: none;
+  }
+  .adv-door--today:hover .adv-door__leaf,
+  .adv-door--flipping .adv-door__leaf {
+    transform: none;
+  }
+  .adv-door--shake {
+    animation: none;
+  }
+}
+</style>

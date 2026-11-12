@@ -1,19 +1,13 @@
 import DefaultTheme from 'vitepress/theme'
 import type { Theme } from 'vitepress'
-import { defineComponent } from 'vue'
 import HomeLanding from './HomeLanding.vue'
 import FeaturesPage from './FeaturesPage.vue'
 import ConflictEnginePage from './ConflictEnginePage.vue'
 import AiAgentsPage from './AiAgentsPage.vue'
 import AgentPage from './AgentPage.vue'
 import CompareMatrix from './CompareMatrix.vue'
+import AdventCalendar from './advent/AdventCalendar.vue'
 import './custom.css'
-
-// Placeholder so the /advent pages build; Task 6 replaces it with the real calendar.
-const AdventCalendar = defineComponent({
-  props: { initialDay: Number },
-  setup: () => () => null,
-})
 
 export default {
   extends: DefaultTheme,
