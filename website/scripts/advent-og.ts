@@ -45,7 +45,9 @@ const FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@600&display=swap";
 
 // Chrome silently falls back to system fonts when the stylesheet is unreachable:
-// say so, then render anyway.
+// say so, then render anyway. Advisory only: a HEAD that succeeds does not prove
+// that headless Chrome loaded the fonts (it fetches the stylesheet and the font
+// files itself, and may still time out or fall back) — check the images by eye.
 async function checkFonts(): Promise<void> {
   try {
     const res = await fetch(FONTS_URL, { method: "HEAD", signal: AbortSignal.timeout(5000) });

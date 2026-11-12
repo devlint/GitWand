@@ -42,6 +42,7 @@ interface PageDataLike {
  * Day pages also get `frontmatter.adventBuiltAt` (the build time, ISO).
  */
 export function applyAdventMeta(pageData: PageDataLike, now: Date = new Date()): void {
+  if (!pageData.relativePath.startsWith('advent/')) return
   const adventDay = pageData.params?.day ? Number(pageData.params.day) : null
   if (pageData.relativePath !== 'advent/index.md' && adventDay === null) return
   const meta = adventPageMeta(adventDay)

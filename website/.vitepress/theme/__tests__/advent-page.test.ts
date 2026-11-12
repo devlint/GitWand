@@ -81,6 +81,14 @@ describe('applyAdventMeta', () => {
     expect(index.frontmatter.adventBuiltAt).toBeUndefined()
   })
 
+  it('ignores a day param outside advent/', () => {
+    const p = page('foo/[day].md', { day: '12' })
+    applyAdventMeta(p)
+    expect(p.frontmatter).toEqual({})
+    expect(p.title).toBe('')
+    expect(p.description).toBe('')
+  })
+
   it('leaves other pages alone', () => {
     const p = page('features.md')
     applyAdventMeta(p)

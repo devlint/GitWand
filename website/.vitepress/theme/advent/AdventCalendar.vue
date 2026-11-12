@@ -382,14 +382,14 @@ onBeforeUnmount(() => {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
   line-clamp: 4;
+  --cmd-lh: 1.3;
   max-width: 100%;
   /* Fallback where line-clamp is unsupported: cap at 4 lines and cut. */
-  max-height: calc(4 * 1.3em);
-  text-overflow: ellipsis;
+  max-height: calc(4 * var(--cmd-lh) * 1em);
   overflow: hidden;
   font-family: var(--nc-font-mono);
   font-size: 11.5px;
-  line-height: 1.3;
+  line-height: var(--cmd-lh);
   text-align: center;
   color: var(--nc-settled);
   overflow-wrap: anywhere;
@@ -568,9 +568,8 @@ onBeforeUnmount(() => {
     padding: 5px;
   }
   .adv-door__cmd {
+    --cmd-lh: 1.25;
     font-size: 9px;
-    line-height: 1.25;
-    max-height: calc(4 * 1.25em);
   }
 }
 
