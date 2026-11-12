@@ -2158,7 +2158,7 @@ onMounted(async () => {
   align-items: center;
   padding: 28px;
   /* Rotating border: an opaque fill on the padding box over a turning conic gradient. */
-  border: 1.5px solid transparent;
+  border: 2px solid transparent;
   border-radius: var(--nc-radius-lg);
   background:
     linear-gradient(var(--nc-surface), var(--nc-surface)) padding-box,
