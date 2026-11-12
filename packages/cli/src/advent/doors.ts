@@ -95,7 +95,8 @@ export const DOORS: readonly AdventDoor[] = [
       "`-n` is a dry run: it lists what would be deleted (`-d` includes directories, `-x` includes ignored files too). `-i` is interactive: pick by number, pattern or one by one.",
     tip: "When you discard untracked files in GitWand, it takes a **Time Machine** snapshot first (untracked files included), so a wrong click can be undone.",
     tipEvidence: [
-      "apps/desktop/src-tauri/src/commands/ops.rs:1157 — git_discard, snapshot_before, then git clean -f",
+      "apps/desktop/src-tauri/src/commands/ops.rs:1142 — git_discard (snapshot_before first)",
+      "apps/desktop/src-tauri/src/commands/ops.rs:1157 — the git clean -f call",
       "apps/desktop/src-tauri/src/git/snapshot.rs",
       "apps/desktop/src/composables/useSettings.ts:591 — snapshotsEnabled true by default",
     ],
@@ -207,7 +208,7 @@ export const DOORS: readonly AdventDoor[] = [
     tip: "GitWand finds the `<sha>` for you. Right-click a changed file → **Absorb**. It blames each hunk to find the commit that owns those lines, then creates the fixup commit. Squash it later from the interactive rebase editor.",
     tipEvidence: [
       "apps/desktop/src/composables/useAbsorb.ts — absorb, autoSquash = false",
-      "apps/desktop/src/components/RepoSidebar.vue:1969 — Absorb context menu entry",
+      "apps/desktop/src/components/RepoSidebar.vue:1981 — Absorb context menu entry (absorb.action)",
       "apps/desktop/src/locales/en.ts:2111 — Absorb",
       "apps/desktop/src/components/RebaseEditor.vue:211",
     ],
@@ -229,7 +230,7 @@ export const DOORS: readonly AdventDoor[] = [
       "`--force-with-lease` refuses to push if the remote moved since you last fetched. `--force-if-includes` (git 2.30+) closes the gap a background fetch opens: the remote tip must also be part of your own history. Set `push.useForceIfIncludes true` once.",
     tip: "GitWand's **Force push** never sends a bare `--force`. It uses `--force-with-lease`, pinned to the exact remote commit it showed you, and asks for confirmation if remote commits would be lost.",
     tipEvidence: [
-      "apps/desktop/src-tauri/src/commands/ops.rs:449 — git_push",
+      "apps/desktop/src-tauri/src/commands/ops.rs:451 — git_push",
       "apps/desktop/src/composables/useGitRepo.ts:1225",
       "apps/desktop/src/locales/en.ts:152 — forcePush",
     ],
@@ -353,6 +354,7 @@ export const DOORS: readonly AdventDoor[] = [
       "packages/core/src/resolvers/lockfile-yarn.ts",
       "packages/core/src/resolvers/cargo.ts",
       "packages/core/src/resolvers/json.ts",
+      "packages/core/src/resolvers/yaml.ts",
     ],
     readMore: "/blog/lockfile-conflicts-by-ecosystem",
   },

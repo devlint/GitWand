@@ -2,7 +2,7 @@
 
 Companion to `2026-11-12-git-advent-calendar-design.md`. English only.
 
-> **Source of truth:** from the commit that introduced `packages/cli/src/advent/doors.ts`, that file is the source of truth for the copy. This document is the original draft and is no longer kept in sync.
+> **Source of truth:** from the commit that introduced `packages/cli/src/advent/doors.ts`, that file is the source of truth for the copy. This document is the original draft and is no longer kept in sync. Single-asterisk italics were dropped in `doors.ts` because `parseInline` supports only `code` and **strong**.
 
 Every tip was checked against the code on 2026-11-12. The **Evidence** line is internal and never shown to readers. UI labels are quoted exactly as they appear in `apps/desktop/src/locales/en.ts`.
 
