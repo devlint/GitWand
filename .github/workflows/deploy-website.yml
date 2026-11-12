@@ -6,6 +6,12 @@ on:
     paths:
       - 'website/**'
       - 'packages/core/**'
+      # The advent calendar's door copy lives with the CLI and is bundled by the site.
+      - 'packages/cli/src/advent/**'
+  # Christmas morning (06:00 UTC on 25 December): rebuild so the advent day
+  # pages carry their door content in the static HTML once the season is over.
+  schedule:
+    - cron: '0 6 25 12 *'
   # Allow manual re-deploy without touching website/ (e.g. to republish
   # /update/latest.json after fixing a workflow bug).
   workflow_dispatch:
