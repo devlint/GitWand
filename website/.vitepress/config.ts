@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
 import { extractFaq } from './seo'
 import { fileURLToPath } from 'node:url'
+import { adventPageMeta, DEFAULT_OG_IMAGE } from './advent-page'
 
 
 export default defineConfig({
@@ -26,6 +27,10 @@ export default defineConfig({
         // with no `pnpm --filter @gitwand/core build` step, so dist/ does not
         // exist in CI. Same reasoning as apps/desktop/vite.config.ts.
         '@gitwand/core': fileURLToPath(new URL('../../packages/core/src/index.ts', import.meta.url)),
+        // The advent calendar data is shared with the CLI (`gitwand advent`) and
+        // lives in packages/cli/src/advent, which imports nothing from Node, so
+        // the browser bundle can use it directly instead of a copy that drifts.
+        '@gitwand/advent': fileURLToPath(new URL('../../packages/cli/src/advent/index.ts', import.meta.url)),
       },
     },
     build: {
@@ -58,12 +63,12 @@ export default defineConfig({
     // Open Graph
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:site_name', content: 'GitWand' }],
-    ['meta', { property: 'og:image', content: 'https://gitwand.app/og-image.png' }],
+    // og:image / twitter:image are added per page in transformPageData: a global
+    // entry would sit next to a page-specific one and crawlers keep the first.
     ['meta', { property: 'og:image:width', content: '1200' }],
     ['meta', { property: 'og:image:height', content: '630' }],
     // Twitter / X
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
-    ['meta', { name: 'twitter:image', content: 'https://gitwand.app/og-image.png' }],
     // Misc
     ['meta', { name: 'theme-color', content: '#0d0f1a' }],
     // Google Search Console verification
@@ -162,6 +167,33 @@ export default defineConfig({
   transformPageData(pageData) {
     const hasOwnCanonical = (pageData.frontmatter.head || []).some(
       ([tag, attrs]: [string, Record<string, string>]) => tag === 'link' && attrs?.rel === 'canonical'
+    )
+
+    pageData.frontmatter.head ??= []
+
+    // Advent pages are generated from DOORS (a dynamic route has no frontmatter
+    // of its own), so title, description and share image are derived here, before
+    // the canonical block and the structured data read them.
+    const adventDay = pageData.params?.day ? Number(pageData.params.day) : null
+    if (pageData.relativePath === 'advent/index.md' || adventDay !== null) {
+      const meta = adventPageMeta(adventDay)
+      pageData.title = meta.title
+      pageData.frontmatter.title = meta.title
+      pageData.frontmatter.description = meta.description
+      pageData.frontmatter.ogImage = meta.ogImage
+      pageData.frontmatter.head.push(
+        ['meta', { property: 'og:title', content: meta.title }],
+        ['meta', { property: 'og:description', content: meta.description }],
+        ['meta', { name: 'twitter:title', content: meta.title }],
+      )
+    }
+
+    // Every page names its share image (the default one unless frontmatter or
+    // the advent block above chose another), now that the head has no global one.
+    const ogImage = pageData.frontmatter.ogImage ?? DEFAULT_OG_IMAGE
+    pageData.frontmatter.head.push(
+      ['meta', { property: 'og:image', content: ogImage }],
+      ['meta', { name: 'twitter:image', content: ogImage }],
     )
 
     const canonicalUrl = `https://gitwand.app/${pageData.relativePath}`

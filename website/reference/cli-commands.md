@@ -209,7 +209,7 @@ $ gitwand conventions
 
 ## `gitwand advent`
 
-Opens a door of the [Git Advent Calendar](/advent) (December 1–24): one Git tip a day, with a snippet you can run.
+Opens a door of the [Git Advent Calendar](/advent/) (December 1–24): one Git tip a day, with a snippet you can run.
 
 ```bash
 gitwand advent        # today's door
