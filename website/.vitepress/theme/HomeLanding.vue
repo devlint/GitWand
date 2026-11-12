@@ -2,16 +2,16 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { AUTO_PATTERN_COUNT } from './patterns'
 import { data as blogPosts } from './blog.data'
-import { adventBadge, adventCta, resolveNow } from './advent/advent-state'
+import { adventBadge, adventHomeCard, resolveNow, ADVENT_INDEX_PATH, type AdventHomeCard } from './advent/advent-state'
 import AdventSnow from './advent/AdventSnow.vue'
 
 // Advent calendar badge: client-only so the server HTML keeps the normal badge.
 const advent = ref<{ text: string; href: string } | null>(null)
-const adventLink = ref<string | null>(null)
+const adventCard = ref<AdventHomeCard | null>(null)
 onMounted(() => {
   const now = resolveNow(location.search, new Date())
   advent.value = adventBadge(now)
-  adventLink.value = adventCta(now)
+  adventCard.value = adventHomeCard(now)
 })
 
 // Advent card: the CLI command, copyable like the install command.
@@ -1069,7 +1069,7 @@ onMounted(async () => {
       </div>
 
       <!-- Calendrier de l'Avent (1–25 décembre, côté client) -->
-      <div v-if="advent && adventLink" class="nc-wrap nc-hero__advent">
+      <div v-if="adventCard" class="nc-wrap nc-hero__advent">
         <section class="nc-advent" aria-labelledby="nc-advent-title">
           <AdventSnow />
           <div class="nc-advent__text">
@@ -1077,8 +1077,17 @@ onMounted(async () => {
             <h2 id="nc-advent-title" class="nc-advent__title">24 little-known git commands, one a day until Christmas.</h2>
             <p class="nc-advent__body">Each door solves a real problem, with a GitWand tip. Open it on the site, or right in your terminal.</p>
           </div>
-          <div class="nc-advent__actions">
-            <a class="nc-btn nc-btn--primary" :href="advent.href">{{ adventLink }}</a>
+          <div v-if="adventCard.kind === 'teaser'" class="nc-advent__teaser">
+            <span class="nc-advent__teaser-label">The first door opens in</span>
+            <span class="nc-advent__count">
+              <span class="nc-advent__count-n">{{ adventCard.daysLeft }}</span>
+              {{ adventCard.daysLeft === 1 ? 'day' : 'days' }}
+            </span>
+            <span class="nc-advent__note">December 1, Paris time</span>
+            <a class="nc-btn nc-btn--ghost" :href="ADVENT_INDEX_PATH">Peek at the calendar →</a>
+          </div>
+          <div v-else class="nc-advent__actions">
+            <a class="nc-btn nc-btn--primary" :href="ADVENT_INDEX_PATH">{{ adventCard.cta }}</a>
             <button class="nc-cmd" type="button" @click="copyAdvent" :aria-label="`Copy ${ADVENT_CMD}`">
               <span class="nc-cmd__prompt">$</span>
               <code>{{ ADVENT_CMD }}</code>
@@ -2203,6 +2212,30 @@ onMounted(async () => {
 }
 .nc-advent__body { margin: 0; font-size: 15.5px; line-height: 1.55; color: var(--nc-neutral-300); max-width: 48ch; }
 .nc-advent__actions { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; }
+.nc-advent__teaser { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.nc-advent__teaser-label {
+  font-family: var(--nc-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--nc-neutral-400);
+}
+.nc-advent__count {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 20px;
+  color: var(--nc-neutral-300);
+}
+.nc-advent__count-n {
+  font-size: clamp(48px, 5vw, 64px);
+  line-height: 1;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.03em;
+  color: var(--nc-accent-100);
+  font-variant-numeric: tabular-nums;
+}
+.nc-advent__teaser .nc-btn--ghost { margin-top: 6px; }
 .nc-advent__note { margin: 0; font-size: 13px; color: var(--nc-neutral-400); }
 .nc-advent__note code { font-family: var(--nc-font-mono); color: var(--nc-neutral-300); background: none; padding: 0; }
 @media (max-width: 760px) {

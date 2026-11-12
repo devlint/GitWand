@@ -130,9 +130,24 @@ export function adventBadge(now: Date): { text: string; href: typeof ADVENT_INDE
   return null
 }
 
-/** Label of the home card's link to the calendar, shown in the same window as the badge. */
-export function adventCta(now: Date): string | null {
+/** First Paris day of November on which the home card starts teasing the calendar. */
+export const TEASER_FROM_DAY = 25
+
+export type AdventHomeCard =
+  | { kind: 'teaser'; daysLeft: number }
+  | { kind: 'open'; cta: string }
+
+/**
+ * The home card: a countdown from 25 November, then a link to the calendar
+ * in the badge's window (1 to 25 December). Null the rest of the year.
+ */
+export function adventHomeCard(now: Date): AdventHomeCard | null {
+  const { year, month, day } = parisYmd(now)
+  if (year === ADVENT_YEAR && month === 11 && day >= TEASER_FROM_DAY) {
+    // November has 30 days: the 30th is one day before door 1.
+    return { kind: 'teaser', daysLeft: 31 - day }
+  }
   const state = calendarState(now)
-  if (state.phase === 'running') return `Open door ${state.today}`
-  return adventBadge(now) ? `Browse all ${DOOR_COUNT} doors` : null
+  if (state.phase === 'running') return { kind: 'open', cta: `Open door ${state.today}` }
+  return adventBadge(now) ? { kind: 'open', cta: `Browse all ${DOOR_COUNT} doors` } : null
 }

@@ -7,7 +7,7 @@ import {
   lockedMessage,
   initialDoorAction,
   adventBadge,
-  adventCta,
+  adventHomeCard,
   openedUnlockedCount,
   showDoorArticle,
   closeTargetPath,
@@ -223,11 +223,26 @@ describe('closeTargetPath', () => {
   })
 })
 
-describe('adventCta', () => {
-  it('follows the badge window', () => {
-    expect(adventCta(new Date(Date.UTC(2026, 10, 30, 22, 30)))).toBeNull()
-    expect(adventCta(dec12)).toBe('Open door 12')
-    expect(adventCta(new Date(Date.UTC(2026, 11, 25, 12)))).toBe('Browse all 24 doors')
-    expect(adventCta(new Date(Date.UTC(2026, 11, 26, 12)))).toBeNull()
+describe('adventHomeCard', () => {
+  it('is hidden before 25 November (Paris time)', () => {
+    expect(adventHomeCard(new Date(Date.UTC(2026, 10, 24, 12)))).toBeNull()
+    // 22:30 UTC on Nov 24 is still Nov 24 in Paris; 23:30 UTC is Nov 25.
+    expect(adventHomeCard(new Date(Date.UTC(2026, 10, 24, 22, 30)))).toBeNull()
+    expect(adventHomeCard(new Date(Date.UTC(2026, 10, 24, 23, 30)))).toEqual({ kind: 'teaser', daysLeft: 6 })
+  })
+
+  it('counts down to December 1', () => {
+    expect(adventHomeCard(new Date(Date.UTC(2026, 10, 25, 12)))).toEqual({ kind: 'teaser', daysLeft: 6 })
+    expect(adventHomeCard(new Date(Date.UTC(2026, 10, 30, 12)))).toEqual({ kind: 'teaser', daysLeft: 1 })
+  })
+
+  it('links to the calendar in the badge window', () => {
+    expect(adventHomeCard(dec12)).toEqual({ kind: 'open', cta: 'Open door 12' })
+    expect(adventHomeCard(new Date(Date.UTC(2026, 11, 25, 12)))).toEqual({ kind: 'open', cta: 'Browse all 24 doors' })
+  })
+
+  it('is hidden after Christmas and in other years', () => {
+    expect(adventHomeCard(new Date(Date.UTC(2026, 11, 26, 12)))).toBeNull()
+    expect(adventHomeCard(new Date(Date.UTC(2027, 10, 28, 12)))).toBeNull()
   })
 })
