@@ -2,4 +2,4 @@
 layout: page
 ---
 
-<AdventCalendar :initial-day="Number($params.day)" :built-at="$frontmatter.adventBuiltAt" />
+<AdventCalendar :initial-day="Number($params.day)" :built-over="$frontmatter.adventOver" />

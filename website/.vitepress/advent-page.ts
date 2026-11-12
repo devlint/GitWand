@@ -1,5 +1,5 @@
 // Imported by config.ts, which is not under the Vite alias, hence the relative path.
-import { DOORS, plainText } from '../../packages/cli/src/advent/index.ts'
+import { DOORS, calendarState, plainText } from '../../packages/cli/src/advent/index.ts'
 
 export const DEFAULT_OG_IMAGE = 'https://gitwand.app/og-image.png'
 
@@ -39,16 +39,18 @@ interface PageDataLike {
  * `pageData.description` matters: VitePress builds <meta name="description">
  * from it, not from frontmatter, so without it every page keeps the site default.
  *
- * Day pages also get `frontmatter.adventBuiltAt` (the build time, ISO).
+ * Day pages also get `frontmatter.adventOver`: whether the calendar was over
+ * when the page was built. It decides the server render of the door article.
  */
 export function applyAdventMeta(pageData: PageDataLike, now: Date = new Date()): void {
   if (!pageData.relativePath.startsWith('advent/')) return
   const adventDay = pageData.params?.day ? Number(pageData.params.day) : null
   if (pageData.relativePath !== 'advent/index.md' && adventDay === null) return
   const meta = adventPageMeta(adventDay)
-  // Day pages show the door as an article once the season is over; the page
-  // decides from this build time (server and first client render alike).
-  if (adventDay !== null) pageData.frontmatter.adventBuiltAt = now.toISOString()
+  // Day pages show the door as an article once the season is over. The server
+  // render and the client's first render both read this flag, so hydration
+  // matches; a boolean (not the build time) keeps page chunks stable between builds.
+  if (adventDay !== null) pageData.frontmatter.adventOver = calendarState(now).phase === 'over'
   pageData.title = meta.title
   pageData.description = meta.description
   pageData.frontmatter.title = meta.title

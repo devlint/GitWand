@@ -9,25 +9,26 @@ import {
   type CalendarState,
 } from '@gitwand/advent'
 import {
-  ADVENT_INDEX_PATH,
   DOWNLOAD_URL,
-  buildTimeNow,
+  closeTargetPath,
   initialDoorAction,
   lockedMessage,
   markOpened,
   openedUnlockedCount,
   readOpened,
   resolveNow,
+  shouldAutoOpen,
   showDoorArticle,
 } from './advent-state'
 import AdventDoorContent from './AdventDoorContent.vue'
 import AdventDoorDialog from './AdventDoorDialog.vue'
 
 /**
- * `initialDay`: the door of a `/advent/<day>` page. `builtAt`: that page's
- * build time (frontmatter `adventBuiltAt`), which decides the server render.
+ * `initialDay`: the door of a `/advent/<day>` page. `builtOver`: whether the
+ * calendar was over when that page was built (frontmatter `adventOver`),
+ * which decides the server render of the door article.
  */
-const props = defineProps<{ initialDay?: number; builtAt?: string }>()
+const props = defineProps<{ initialDay?: number; builtOver?: boolean }>()
 
 const ARTICLE_TITLE_ID = 'advent-article-title'
 
@@ -46,10 +47,9 @@ const shakingDay = ref<number | null>(null)
 const liveMessage = ref('')
 
 // The day-page article (the door's content, once the season is over). Its first
-// value comes from the build time, so the client's first render matches the
-// static HTML; onMounted re-decides with the visitor's clock (and ?date=).
-const builtAtNow = buildTimeNow(props.builtAt)
-const articleShown = ref(builtAtNow !== null && showDoorArticle(builtAtNow))
+// value comes from the build, so the client's first render matches the static
+// HTML; onMounted re-decides with the visitor's clock (and ?date=).
+const articleShown = ref(props.builtOver === true)
 
 const doorButtons = new Map<number, HTMLButtonElement>()
 let returnFocusTo: HTMLButtonElement | null = null
@@ -191,8 +191,9 @@ function onDialogClose(): void {
   if (activeDay.value === null) return
   const day = activeDay.value
   activeDay.value = null
-  // Intentional: on /advent/12 this rewrites the URL to /advent/ while the day-12 page stays loaded.
-  replaceUrl(ADVENT_INDEX_PATH)
+  // Intentional: on /advent/12 this rewrites the URL to /advent/ while the
+  // day-12 page stays loaded, unless that page shows its article (then it stays /advent/12).
+  replaceUrl(closeTargetPath(props.initialDay, articleShown.value))
   const target = returnFocusTo ?? doorButtons.get(day) ?? null
   returnFocusTo = null
   void nextTick(() => target?.focus())
@@ -206,7 +207,7 @@ onMounted(() => {
   const day = props.initialDay
   const action = initialDoorAction(day, current)
   if (day === undefined) return
-  if (action === 'open') {
+  if (shouldAutoOpen(action, articleShown.value)) {
     returnFocusTo = doorButtons.get(day) ?? null
     showDoor(day)
   } else if (action === 'locked') {

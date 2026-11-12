@@ -9,7 +9,8 @@ import {
   adventBadge,
   openedUnlockedCount,
   showDoorArticle,
-  buildTimeNow,
+  closeTargetPath,
+  shouldAutoOpen,
 } from '../advent/advent-state'
 
 const real = new Date(Date.UTC(2026, 10, 12, 9, 0, 0))
@@ -189,15 +190,34 @@ describe('showDoorArticle', () => {
   })
 })
 
-describe('buildTimeNow', () => {
-  it('parses the ISO timestamp the build stamps on day pages', () => {
-    expect(buildTimeNow('2026-12-25T06:00:00.000Z')?.toISOString()).toBe('2026-12-25T06:00:00.000Z')
+describe('shouldAutoOpen', () => {
+  it('opens an unlocked day URL when the page has no article', () => {
+    expect(shouldAutoOpen('open', false)).toBe(true)
   })
 
-  it('is null for a missing or malformed value', () => {
-    expect(buildTimeNow(undefined)).toBeNull()
-    expect(buildTimeNow('')).toBeNull()
-    expect(buildTimeNow('nope')).toBeNull()
-    expect(buildTimeNow(42)).toBeNull()
+  it('does not open the dialog over the article', () => {
+    expect(shouldAutoOpen('open', true)).toBe(false)
+  })
+
+  it('never opens a locked door or a non-door URL', () => {
+    expect(shouldAutoOpen('locked', false)).toBe(false)
+    expect(shouldAutoOpen('none', false)).toBe(false)
+    expect(shouldAutoOpen('none', true)).toBe(false)
+  })
+})
+
+describe('closeTargetPath', () => {
+  it('returns to the index when the page has no article', () => {
+    expect(closeTargetPath(undefined, false)).toBe('/advent/')
+    expect(closeTargetPath(12, false)).toBe('/advent/')
+  })
+
+  it('returns to the day page whose article is shown', () => {
+    expect(closeTargetPath(12, true)).toBe('/advent/12')
+  })
+
+  it('returns to the index for a non-door initial day', () => {
+    expect(closeTargetPath(undefined, true)).toBe('/advent/')
+    expect(closeTargetPath(25, true)).toBe('/advent/')
   })
 })

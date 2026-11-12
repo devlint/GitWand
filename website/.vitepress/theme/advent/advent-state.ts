@@ -101,14 +101,20 @@ export function showDoorArticle(now: Date): boolean {
 }
 
 /**
- * The build time stamped on a day page (frontmatter `adventBuiltAt`, an ISO
- * string), or null. The server render and the client's first render both
- * decide from it, so hydration matches; the client re-decides on mount.
+ * Whether a `/advent/<day>` URL opens its door dialog on mount. Not when the
+ * page already shows the door as an article: that would show it twice.
  */
-export function buildTimeNow(value: unknown): Date | null {
-  if (typeof value !== 'string' || value === '') return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
+export function shouldAutoOpen(action: 'open' | 'locked' | 'none', articleShown: boolean): boolean {
+  return action === 'open' && !articleShown
+}
+
+/**
+ * Where the URL goes back to when the dialog closes: the index, or the day
+ * page itself while that page shows its door as an article (the article
+ * stays on screen, so the URL must keep naming it).
+ */
+export function closeTargetPath(initialDay: number | undefined, articleShown: boolean): string {
+  return articleShown && isDoorDay(initialDay) ? `/advent/${initialDay}` : ADVENT_INDEX_PATH
 }
 
 /** Home/nav announcement, shown from 1 to 25 December of the edition year (Paris time). */

@@ -72,13 +72,19 @@ describe('applyAdventMeta', () => {
     expect(heads(p)).toContain('https://gitwand.app/advent/og/index.png')
   })
 
-  it('stamps day pages with the build time, so the client can match the server render', () => {
-    const p = page('advent/[day].md', { day: '12' })
-    applyAdventMeta(p, new Date('2026-12-25T06:00:00Z'))
-    expect(p.frontmatter.adventBuiltAt).toBe('2026-12-25T06:00:00.000Z')
+  it('flags day pages built once the season is over', () => {
+    const over = page('advent/[day].md', { day: '12' })
+    applyAdventMeta(over, new Date('2026-12-25T06:00:00Z'))
+    expect(over.frontmatter.adventOver).toBe(true)
+    const before = page('advent/[day].md', { day: '12' })
+    applyAdventMeta(before, new Date('2026-11-12T12:00:00Z'))
+    expect(before.frontmatter.adventOver).toBe(false)
+    const lastNight = page('advent/[day].md', { day: '12' })
+    applyAdventMeta(lastNight, new Date('2026-12-24T22:59:00Z'))
+    expect(lastNight.frontmatter.adventOver).toBe(false)
     const index = page('advent/index.md')
     applyAdventMeta(index, new Date('2026-12-25T06:00:00Z'))
-    expect(index.frontmatter.adventBuiltAt).toBeUndefined()
+    expect(index.frontmatter.adventOver).toBeUndefined()
   })
 
   it('ignores a day param outside advent/', () => {
