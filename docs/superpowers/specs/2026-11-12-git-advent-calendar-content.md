@@ -2,6 +2,8 @@
 
 Companion to `2026-11-12-git-advent-calendar-design.md`. English only.
 
+> **Source of truth:** from the commit that introduced `packages/cli/src/advent/doors.ts`, that file is the source of truth for the copy. This document is the original draft and is no longer kept in sync.
+
 Every tip was checked against the code on 2026-11-12. The **Evidence** line is internal and never shown to readers. UI labels are quoted exactly as they appear in `apps/desktop/src/locales/en.ts`.
 
 Five doors have **no tip**, on purpose (1, 10, 11, 14, 17). Either GitWand has nothing to add there, or it only touches the subject loosely. That's the honesty rule from the design.
@@ -212,7 +214,7 @@ CHANGELOG.md merge=union
 **Explanation:** *Reuse recorded resolution.* Once it's enabled, git remembers how you resolved each conflict and replays it automatically the next time the same conflict shows up. `git rerere diff` shows what it recorded, and `git rerere forget <file>` drops a bad one.
 **Tip:** rerere remembers your resolutions. GitWand tries to resolve conflicts before you even start: whitespace-only, same change on both sides, non-overlapping edits, lockfiles… Each fix comes with a confidence score. For the ones it can't solve, it offers **Remember this resolution for next time?**
 **Evidence:** `packages/core/src/patterns/`, `packages/core/src/resolvers/`, confidence scores in core, `composables/useResolutionMemory.ts`, `en.ts:2145-2151`.
-**Read more:** `/blog/automatic-merge-conflict-resolution`
+**Read more:** `/fix/git-rerere`
 
 ---
 
