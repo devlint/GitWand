@@ -232,6 +232,10 @@ Doors that are not open yet are reported as locked. Once the calendar is over (D
 
 ### JSON output
 
+Each call prints one JSON document; its `status` says which shape it is.
+
+**`door`** — an unlocked door:
+
 ```json
 {
   "status": "door",
@@ -244,10 +248,42 @@ Doors that are not open yet are reported as locked. Once the calendar is over (D
     "tip": "In GitWand's blame view, each block has **Show history for these lines**, which is `git log -L` on that range in one click."
   }
 }
-{ "status": "locked", "day": 18, "opensOn": "2026-12-18" }
-{ "status": "not-started", "startsOn": "2026-12-01" }
-{ "status": "over" }
-{ "status": "error", "error": "Unknown door \"31\" — pick a day from 1 to 24." }
+```
+
+**`locked`** — a door that opens later in December:
+
+```json
+{
+  "status": "locked",
+  "day": 18,
+  "opensOn": "2026-12-18"
+}
+```
+
+**`not-started`** — before December 1:
+
+```json
+{
+  "status": "not-started",
+  "startsOn": "2026-12-01"
+}
+```
+
+**`over`** — `gitwand advent` with no day, from December 25 on:
+
+```json
+{
+  "status": "over"
+}
+```
+
+**`error`** — an unknown door (exit code 2):
+
+```json
+{
+  "status": "error",
+  "error": "Unknown door \"31\" — pick a day from 1 to 24."
+}
 ```
 
 `tip` and `readMore` (a site path) appear only on doors that have one; the sample door has no `readMore`.
