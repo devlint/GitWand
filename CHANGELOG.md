@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.1] - 2026-11-12
+
 ### Changed
 
 - **The CI tab of a pull request follows a running CI.** While the tab is shown and a check is still queued or running, GitWand re-fetches the checks every 15 seconds, then once a minute after ten minutes (some queued checks wait on a person: Azure reviewer policies, GitHub environment approvals). When the last check finishes, it reloads the pull request once, so mergeability and the Merge button follow; the pull request's CI dot in the list now follows each reload of the pull request, with the backend's own rule. Polling stops when every check has finished, on another tab, pull request or view, while the window is hidden, and after three failed fetches in a row (a failed fetch keeps the list on screen, and the tab then says it stopped updating); re-opening the tab or the window resumes it, fetching only if the last fetch is older than 15 seconds. When the checks cannot be loaded at all, the tab says so instead of "No CI checks found", and re-opening it tries again. A push to the pull request re-fetches its checks once, on any tab. Checks that wait on someone (a required status that has not reported, an approval such as a GitHub environment, an Azure policy other than an automatically queued build: reviewers, comments, work items, a build queued by hand) block the merge and show ⏳ but are not polled; a GitLab `manual` or `scheduled` pipeline shows ⏳ without blocking (GitLab's own mergeability decides) and is not polled either; GitLab pipelines that have not started (`created`, `preparing`, `waiting_for_resource`) are polled. The merge banner, the check icons, the list dot and the live CI tab now share one definition of a running, failing and blocking check, so the banner no longer says "ready" while a GitLab, Bitbucket or Gitea pipeline is still running, and `TIMED_OUT` or `STARTUP_FAILURE` checks show ❌ instead of ❓.
@@ -1737,7 +1739,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.13.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.13.1...HEAD
+[3.13.1]: https://github.com/devlint/GitWand/compare/v3.13.0...v3.13.1
 [3.13.0]: https://github.com/devlint/GitWand/compare/v3.12.5...v3.13.0
 [3.12.5]: https://github.com/devlint/GitWand/compare/v3.12.4...v3.12.5
 [3.12.4]: https://github.com/devlint/GitWand/compare/v3.12.3...v3.12.4

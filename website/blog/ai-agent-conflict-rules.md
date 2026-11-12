@@ -70,10 +70,10 @@ That is the input an agent should reason from. A `complex` hunk whose trace show
 
 There are two ways for an agent's own resolution to reach disk, and they are not equivalent:
 
-- `gitwand_resolve_hunk_llm` replaces the block, then checks the answer for residual conflict markers and, for JSON files, parses the whole file once no other hunk remains in it. It supports `dry_run`, returns an audit record, and refuses to write if a check fails.
+- `gitwand_resolve_hunk_llm` replaces the block, then checks the answer for residual conflict markers and, for JSON, YAML and TOML files, parses the whole file once no other hunk remains in it. It supports `dry_run`, returns an audit record, and refuses to write if a check fails.
 - `gitwand_apply_resolution` replaces the block and writes. No validation. It reports how many conflicts remain in the file afterwards, and that is all.
 
-Use the first, with `dry_run: true` before the real call. Be clear about what the check is: a pass/fail gate scored 0 or 100, not a grade of the merge's correctness. It catches the mechanical failures — markers pasted back in, a broken JSON file — not a wrong decision.
+Use the first, with `dry_run: true` before the real call. Be clear about what the check is: a pass/fail gate scored 0 or 100, not a grade of the merge's correctness. It catches the mechanical failures — markers pasted back in, a broken JSON, YAML or TOML file — not a wrong decision.
 
 `gitwand_resolve_hunk` is easy to misread: it calls no model. It formats a prompt from base, ours and theirs, with constraints (no markers, valid for the file's format, don't invent unrelated code), and the agent that called it answers. It is a way of making the agent reason from the three versions instead of from the markers.
 
@@ -119,11 +119,11 @@ This block can go in a `CLAUDE.md` or `AGENTS.md` as it is:
 
 ## What we found in our own server while writing this
 
-Checking each rule against the code turned up four things that do not match how we had been describing the server. None of them makes an agent apply something wrong without saying so, but an agent author should know them.
+Checking each rule against the code turned up four things that did not match how we had been describing the server. None of them made an agent apply something wrong without saying so, but an agent author should know them. Three are fixed in [v3.13.1](/changelog); one is a design choice that stays.
 
-- **`rebase` and `cherry-pick` previews are pessimistic.** They classify the simulated hunks without running the resolution, so every conflicting hunk counts as remaining and any conflicting file reads as `high` risk. The error is in the safe direction, but the counts are not comparable with `merge` mode. Fixing this is now on our list.
-- **`gitwand_apply_resolution` does not validate.** An earlier post said it did. It does not, which is why rule 6 says to use the other tool.
-- **YAML is not syntax-checked by `gitwand_resolve_hunk_llm`.** Only JSON is. The core engine validates YAML on its own resolutions; the MCP write path does not.
-- **An empty resolution is rejected by both write tools.** When the right answer is to remove the block entirely, the agent has to edit the file itself — and then rules 7 and 9 apply to that edit like any other.
+- **`rebase` and `cherry-pick` previews were pessimistic.** They classified the simulated hunks without running the resolution, so every conflicting hunk counted as remaining and any conflicting file read as `high` risk. *Fixed in v3.13.1:* those previews now run the same resolution as `merge` mode, with the repository's `.gitwandrc` settings and `min_confidence_score`, so the counts are comparable.
+- **`gitwand_apply_resolution` does not validate.** An earlier post said it did. It still does not, by design, and its tool description now says so. That is why rule 6 says to use the other tool.
+- **YAML was not syntax-checked by `gitwand_resolve_hunk_llm`.** Only JSON was. *Fixed in v3.13.1:* YAML and TOML go through the core engine's parsers, like JSON.
+- **An empty resolution was rejected by both write tools.** When the right answer was to remove the block entirely, the agent had to edit the file itself. *Fixed in v3.13.1:* an empty string now removes the conflict block.
 
-The rules above do not depend on these being fixed. They are what keeps an agent safe with the server as it ships today: preview, let the deterministic part go first, write through the validating door, and leave the two irreversible moves — continuing past a residual and aborting — out of the agent's hands unless a person says otherwise.
+The rules above never depended on these being fixed. They are what keeps an agent safe with the server as it ships: preview, let the deterministic part go first, write through the validating door, and leave the two irreversible moves — continuing past a residual and aborting — out of the agent's hands unless a person says otherwise.

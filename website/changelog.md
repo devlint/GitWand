@@ -5,6 +5,22 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.13.1 — November 2026
+
+### The CI tab follows a running CI
+
+A pull request's CI tab used to show the checks as they were when you opened it. While a check is queued or running, it now refreshes them every 15 seconds, then once a minute after ten minutes, and stops when everything has finished, when you look elsewhere or when the window is hidden. When the last check finishes, the pull request reloads once, so the Merge button and its mergeability catch up on their own. A check that waits on a person, such as an approval or a required status that never reported, shows ⏳ and blocks the merge without being polled. When the checks cannot be loaded at all, the tab now says so instead of "No CI checks found".
+
+The tab also knows which commit its checks ran on. Right after a push, GitLab and Azure can still show the previous commit's pipeline for a while. GitWand names it in the tab and keeps following until the new commit's checks arrive, for up to ten minutes. The merge banner itself still reads every check, whichever commit it ran on. On Bitbucket and Gitea, each check now links to its build.
+
+### Fixes
+
+On Linux, the Git Tree no longer reloads in a loop: the file watcher took GitWand's own reads of the repository for changes, so the list kept emptying and refilling (#287). Publishing the same new branch twice at once no longer fails with "reference already exists", because pushes to one repository now run one after the other (reported and fixed by Guillaume Huard Hughes). A GitHub organization that has not approved GitWand's OAuth app no longer answers with a 403: GitWand goes through the GitHub CLI for that repository when it is signed in, and otherwise explains how to fix it.
+
+### For agents using the MCP server
+
+The rebase and cherry-pick previews now count what GitWand would resolve, as merge mode does, instead of reporting every conflict as remaining. `gitwand_resolve_hunk_llm` checks YAML and TOML files as well as JSON, and an empty resolution removes the conflict block. These were three of the four gaps listed in [our rulebook for AI agents](/blog/ai-agent-conflict-rules).
+
 ## v3.13.0 — November 2026
 
 ### Worktrees become environments
