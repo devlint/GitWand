@@ -2,6 +2,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { AUTO_PATTERN_COUNT } from './patterns'
 import { data as blogPosts } from './blog.data'
+import { adventBadge, resolveNow } from './advent/advent-state'
+
+// Advent calendar badge: client-only so the server HTML keeps the normal badge.
+const advent = ref<{ text: string; href: string } | null>(null)
+onMounted(() => {
+  advent.value = adventBadge(resolveNow(location.search, new Date()))
+})
 
 // Newest article, read from website/blog/*.md at build time (see blog.data.ts).
 const latestPost = blogPosts[0]
@@ -999,9 +1006,9 @@ onMounted(() => {
 
       <div class="nc-wrap nc-hero__body">
         <div class="nc-hero__top">
-          <a class="nc-pill" href="/changelog">
+          <a class="nc-pill" :href="advent?.href ?? '/changelog'">
             <span class="nc-pill__dot"></span>
-            {{ nt.badge }}
+            {{ advent?.text ?? nt.badge }}
             <span class="nc-pill__arrow">→</span>
           </a>
 
