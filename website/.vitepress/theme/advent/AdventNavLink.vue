@@ -28,6 +28,16 @@ onMounted(() => {
 .advent-nav-link:hover {
   color: var(--vp-c-brand-1);
 }
+/* Same divider VitePress draws between nav groups (appearance, social links). */
+@media (min-width: 768px) {
+  .advent-nav-link::before {
+    content: '';
+    width: 1px;
+    height: 24px;
+    margin-right: 12px;
+    background-color: var(--vp-c-divider);
+  }
+}
 @media (max-width: 768px) {
   .advent-nav-link {
     padding: 0 8px;
