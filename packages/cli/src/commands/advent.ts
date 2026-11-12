@@ -76,6 +76,7 @@ export function runAdvent(
     day = state.today;
   } else {
     const parsed = parseDay(arg);
+    // Rejected in every phase, before December included: a typo is an error, not a teaser.
     if (parsed === null) {
       return out(2, "stderr", renderInvalid(arg, p), {
         status: "error",
@@ -110,13 +111,12 @@ export async function cmdAdvent(
   flags: Record<string, boolean | string>,
 ): Promise<void> {
   const now = parseDateOverride(process.env.GITWAND_ADVENT_DATE) ?? new Date();
-  // Piped output gets no colour even when NO_COLOR/CI are unset.
-  const palette = process.stdout.isTTY ? c : PLAIN;
-  const result = runAdvent(positional, flags, {
-    now,
-    width: process.stdout.columns ?? 80,
-    palette,
-  });
-  const stream = result.stream === "stdout" ? process.stdout : process.stderr;
-  stream.write(result.output + "\n", () => process.exit(result.code));
+  const run = (palette: Palette): AdventResult =>
+    runAdvent(positional, flags, { now, width: process.stdout.columns ?? 80, palette });
+  // Colour follows the TTY-ness of the stream actually written to; runAdvent
+  // decides the stream, so learn it from a plain run first.
+  let result = run(PLAIN);
+  const target = result.stream === "stdout" ? process.stdout : process.stderr;
+  if (target.isTTY) result = run(c);
+  target.write(result.output + "\n", () => process.exit(result.code));
 }

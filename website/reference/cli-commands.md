@@ -233,14 +233,24 @@ Doors that are not open yet are reported as locked. Once the calendar is over (D
 ### JSON output
 
 ```json
-{ "status": "door", "door": { "day": 12, "command": "git reflog" } }
+{
+  "status": "door",
+  "door": {
+    "day": 8,
+    "command": "git log -L",
+    "problem": "Who broke this function, and when?",
+    "snippet": "git log -L :parseHunk:src/parse.ts\ngit log -L 40,60:src/parse.ts",
+    "explanation": "Shows every commit that touched that function (or that line range), with the diff trimmed to just those lines. It's the history of a piece of code, not of a whole file.",
+    "tip": "In GitWand's blame view, each block has **Show history for these lines**, which is `git log -L` on that range in one click."
+  }
+}
 { "status": "locked", "day": 18, "opensOn": "2026-12-18" }
 { "status": "not-started", "startsOn": "2026-12-01" }
 { "status": "over" }
 { "status": "error", "error": "Unknown door \"31\" — pick a day from 1 to 24." }
 ```
 
-The `door` object also carries the door's problem, snippet and explanation (abridged above).
+`tip` and `readMore` (a site path) appear only on doors that have one; the sample door has no `readMore`.
 
 ### Exit Codes
 

@@ -55,6 +55,27 @@ describe("runAdvent (human output)", () => {
     expect(r.output).toBe(renderInvalid(arg, plain));
   });
 
+  it("rejects an invalid day even before December", () => {
+    const r = run(["31"], at(`${ADVENT_YEAR}-11-20`));
+    expect(r.code).toBe(2);
+    expect(r.stream).toBe("stderr");
+    expect(r.output).toBe(renderInvalid("31", plain));
+  });
+
+  it("opens door 1 on December 1 (Paris)", () => {
+    const r = run([], at(`${ADVENT_YEAR}-12-01`));
+    expect(r.code).toBe(0);
+    expect(r.output).toContain(`Day 1 · ${DOORS[0].command}`);
+  });
+
+  it("is over on December 25", () => {
+    expect(run([], at(`${ADVENT_YEAR}-12-25`))).toEqual({
+      code: 0,
+      stream: "stdout",
+      output: renderOver(plain),
+    });
+  });
+
   it("says the calendar has not started before December", () => {
     const nov = at(`${ADVENT_YEAR}-11-20`);
     expect(run([], nov)).toEqual({ code: 0, stream: "stdout", output: renderNotStarted(plain) });
@@ -80,6 +101,11 @@ describe("runAdvent --json", () => {
     expect(body).toEqual({ status: "door", door: publicDoor(DOORS[11]) });
     expect(body.door).not.toHaveProperty("tipEvidence");
     expect(r.output).not.toContain("\x1b");
+  });
+
+  it("treats --json=true like --json", () => {
+    const r = run([], dec12, { json: "true" });
+    expect(JSON.parse(r.output)).toEqual({ status: "door", door: publicDoor(DOORS[11]) });
   });
 
   it("emits locked", () => {
