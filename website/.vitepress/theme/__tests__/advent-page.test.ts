@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { adventPageMeta, applyAdventMeta, applyShareImage, DEFAULT_OG_IMAGE } from '../../advent-page'
-import { DOORS } from '../../../../packages/cli/src/advent/index.ts'
+import { DOORS, plainText } from '../../../../packages/cli/src/advent/index.ts'
 
 describe('adventPageMeta', () => {
   it('describes the index page', () => {
@@ -14,10 +14,19 @@ describe('adventPageMeta', () => {
   it('describes a day page from DOORS', () => {
     const door = DOORS.find((d) => d.day === 12)!
     expect(adventPageMeta(12)).toEqual({
-      title: `Day 12 · ${door.command} — Git Advent Calendar`,
-      description: `${door.problem} ${door.command}: day 12 of the GitWand Git Advent Calendar.`,
+      title: `Day 12 · ${plainText(door.command)} — Git Advent Calendar`,
+      description: `${plainText(door.problem)} ${plainText(door.command)}: day 12 of the GitWand Git Advent Calendar.`,
       ogImage: 'https://gitwand.app/advent/og/day-12.png',
     })
+  })
+
+  it('keeps inline markup out of day 12 meta', () => {
+    const { description, title } = adventPageMeta(12)
+    expect(description).not.toContain('`')
+    expect(title).not.toContain('`')
+    expect(description).toBe(
+      'I did a reset --hard and my commits are gone. git reflog: day 12 of the GitWand Git Advent Calendar.',
+    )
   })
 
   it('zero-pads the OG image only', () => {

@@ -36,3 +36,10 @@ export function parseInline(text: string): Segment[] {
   flush();
   return out;
 }
+
+/** The text with inline markup removed (for meta tags and other plain contexts). */
+export function plainText(text: string): string {
+  return parseInline(text)
+    .map((s) => s.text)
+    .join("");
+}

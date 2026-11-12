@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseInline } from "../advent/inline.js";
+import { parseInline, plainText } from "../advent/inline.js";
 
 describe("parseInline", () => {
   it("splits code and strong segments", () => {
@@ -20,5 +20,15 @@ describe("parseInline", () => {
 
   it("returns nothing for an empty string", () => {
     expect(parseInline("")).toEqual([]);
+  });
+});
+
+describe("plainText", () => {
+  it("drops code and strong markers", () => {
+    expect(plainText("Run `git add -p` then **Stage hunk**.")).toBe("Run git add -p then Stage hunk.");
+  });
+
+  it("keeps an unmatched marker literal", () => {
+    expect(plainText("a ` b")).toBe("a ` b");
   });
 });

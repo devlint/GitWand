@@ -1,5 +1,5 @@
 // Imported by config.ts, which is not under the Vite alias, hence the relative path.
-import { DOORS } from '../../packages/cli/src/advent/index.ts'
+import { DOORS, plainText } from '../../packages/cli/src/advent/index.ts'
 
 export const DEFAULT_OG_IMAGE = 'https://gitwand.app/og-image.png'
 
@@ -15,9 +15,11 @@ export function adventPageMeta(day: number | null): { title: string; description
   if (!door) {
     throw new Error(`No advent door for day ${day}: advent/[day].paths.ts must only list days present in DOORS`)
   }
+  // Door copy carries inline markup (`code`, **strong**); meta text is plain.
+  const command = plainText(door.command)
   return {
-    title: `Day ${day} · ${door.command} — Git Advent Calendar`,
-    description: `${door.problem} ${door.command}: day ${day} of the GitWand Git Advent Calendar.`,
+    title: `Day ${day} · ${command} — Git Advent Calendar`,
+    description: `${plainText(door.problem)} ${command}: day ${day} of the GitWand Git Advent Calendar.`,
     ogImage: `https://gitwand.app/advent/og/day-${String(day).padStart(2, '0')}.png`,
   }
 }
