@@ -1065,6 +1065,26 @@ onMounted(() => {
         </div>
       </div>
 
+      <!-- Calendrier de l'Avent (1–25 décembre, côté client) -->
+      <div v-if="advent && adventLink" class="nc-wrap nc-hero__advent">
+        <section class="nc-advent" aria-labelledby="nc-advent-title">
+          <div class="nc-advent__text">
+            <span class="nc-eyebrow nc-eyebrow--sm">Git Advent Calendar 🎄</span>
+            <h2 id="nc-advent-title" class="nc-advent__title">24 little-known git commands, one a day until Christmas.</h2>
+            <p class="nc-advent__body">Each door solves a real problem, with a GitWand tip. Open it on the site, or right in your terminal.</p>
+          </div>
+          <div class="nc-advent__actions">
+            <a class="nc-btn nc-btn--primary" :href="advent.href">{{ adventLink }}</a>
+            <button class="nc-cmd" type="button" @click="copyAdvent" :aria-label="`Copy ${ADVENT_CMD}`">
+              <span class="nc-cmd__prompt">$</span>
+              <code>{{ ADVENT_CMD }}</code>
+              <span class="nc-cmd__hint">{{ adventCopied ? 'Copied' : 'Copy' }}</span>
+            </button>
+            <p class="nc-advent__note">No CLI yet? <code>npx @gitwand/cli advent</code></p>
+          </div>
+        </section>
+      </div>
+
       <!-- Capture inclinée : la fenêtre « sort » du fond, puis se fond dedans -->
       <div class="nc-wrap nc-shot">
         <div class="nc-shot__frame">
@@ -1097,30 +1117,6 @@ onMounted(() => {
         </div>
       </div>
     </div>
-
-    <!-- ══════════════════════════════════════
-         2b · CALENDRIER DE L'AVENT (1–25 décembre, côté client)
-    ══════════════════════════════════════ -->
-    <section v-if="advent && adventLink" class="nc-section" aria-labelledby="nc-advent-title">
-      <div class="nc-wrap">
-        <div class="nc-advent">
-          <div class="nc-advent__text">
-            <span class="nc-eyebrow nc-eyebrow--sm">Git Advent Calendar 🎄</span>
-            <h2 id="nc-advent-title" class="nc-advent__title">24 little-known git commands, one a day until Christmas.</h2>
-            <p class="nc-advent__body">Each door solves a real problem, with a GitWand tip. Open it on the site, or right in your terminal.</p>
-          </div>
-          <div class="nc-advent__actions">
-            <a class="nc-btn nc-btn--primary" :href="advent.href">{{ adventLink }}</a>
-            <button class="nc-cmd" type="button" @click="copyAdvent" :aria-label="`Copy ${ADVENT_CMD}`">
-              <span class="nc-cmd__prompt">$</span>
-              <code>{{ ADVENT_CMD }}</code>
-              <span class="nc-cmd__hint">{{ adventCopied ? 'Copied' : 'Copy' }}</span>
-            </button>
-            <p class="nc-advent__note">No CLI yet? <code>npx @gitwand/cli advent</code></p>
-          </div>
-        </div>
-      </div>
-    </section>
 
     <!-- ══════════════════════════════════════
          3 · DÉMO DE CONFLIT — le moment « ah oui »
@@ -2152,6 +2148,7 @@ onMounted(() => {
 }
 .nc-btn--ghost:hover { border-color: var(--nc-accent-500); color: var(--nc-accent-200); }
 
+.nc-hero__advent { padding-top: 40px; }
 .nc-advent {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
