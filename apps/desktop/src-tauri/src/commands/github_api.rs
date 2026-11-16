@@ -172,7 +172,11 @@ pub(crate) fn oauth_restricted_message(err: &str) -> String {
 
 /// The GitWand token to use for `cwd`, unless its organization refused it.
 fn token_for_repo(cwd: &str, settings_token: Option<String>) -> Option<String> {
-    if is_marked_restricted(cwd) {
+    // Checked only when there is a token: an `origin` on a GitHub Enterprise
+    // host goes to `gh`, which is signed in there — the Settings sign-in only
+    // covers github.com.
+    if settings_token.is_none() || is_marked_restricted(cwd) || super::gh::origin_is_enterprise(cwd)
+    {
         None
     } else {
         settings_token
@@ -241,9 +245,9 @@ pub(crate) fn with_rest_using<T>(
 /// Parse `(owner, repo)` from `git remote get-url origin` in `cwd`.
 ///
 /// Same parser as the `gh` path (`gh::gh_repo_from_remote_url`), so both
-/// read `origin` alike (HTTPS, SSH, SSH aliases, ports). This REST path only
-/// talks to api.github.com: an `origin` on another host is an error, not a
-/// call to github.com for a same-named repo.
+/// read `origin` alike (HTTPS, SSH with any user, SSH aliases, ports). This
+/// REST path only talks to api.github.com: an `origin` on another host is an
+/// error, not a call to github.com for a same-named repo.
 fn owner_repo(cwd: &str) -> Result<(String, String), String> {
     let output = hidden_cmd("git")
         .args(["remote", "get-url", "origin"])
@@ -256,6 +260,8 @@ fn owner_repo(cwd: &str) -> Result<(String, String), String> {
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let repo = super::gh::gh_repo_from_remote_url(&url)
         .ok_or_else(|| format!("Could not parse GitHub owner/repo from remote URL: {}", url))?;
+    // Unreachable through `with_rest`, which sends Enterprise origins to `gh`
+    // (`token_for_repo`); kept for direct callers.
     if let Some(host) = repo.enterprise_host() {
         return Err(format!(
             "origin is on {}, not github.com: the GitHub sign-in in Settings only covers github.com",

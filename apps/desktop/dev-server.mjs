@@ -1112,12 +1112,11 @@ function sshResolvedHost(host) {
 
 const isGithubCom = (host) => host === "github.com" || host.endsWith(".github.com");
 
-/** `owner/repo` from a github.com remote URL, or null — the dev-server's REST
- *  routes only talk to api.github.com. Same reading as `gh_repo_from_remote_url`
- *  in `commands/gh.rs`: an SSH host is resolved through `ssh -G` (an alias in
- *  `~/.ssh/config` stands for its `HostName`); without `ssh`, a host that
- *  looks like an alias (no dot, or `github.com-<name>`) is taken for github.com.
- *  Ports are skipped (`ssh://git@ssh.github.com:443/o/r`). */
+/** `owner/repo` from a github.com remote URL, or null. Same reading as
+ *  `gh_repo_from_remote_url` in `commands/gh.rs` (scp-style with any user or
+ *  none, ports skipped, an SSH host resolved through `ssh -G`), restricted to
+ *  github.com: the dev-server's REST routes only talk to api.github.com, so a
+ *  GitHub Enterprise origin gives null here and `gh` picks the repo itself. */
 function githubNwoFromUrl(rawUrl) {
   const url = rawUrl.trim();
   let host, path;
@@ -1125,20 +1124,14 @@ function githubNwoFromUrl(rawUrl) {
   if (scheme) {
     [, host, path] = scheme;
   } else {
-    const scp = url.match(/^(?:[^@\s]+@)?([^:/\s]+):(.*)$/);
+    const scp = url.match(/^(?:[^@\s/\\]+@)?([^:/\\\s]+):(.*)$/);
     if (!scp) return null;
     [, host, path] = scp;
   }
   host = host.toLowerCase();
-  const isSsh = url.startsWith("ssh://") || !scheme;
-  let resolved = false;
-  if (isSsh && !isGithubCom(host)) {
-    // `ssh -G` echoes a host it has no entry for: that is not a resolution.
-    const r = sshResolvedHost(host)?.toLowerCase();
-    if (r && r !== host) { host = r; resolved = true; }
-  }
-  const looksLikeAlias = isSsh && !resolved && (!host.includes(".") || host.startsWith("github.com-"));
-  if (!isGithubCom(host) && !looksLikeAlias) return null;
+  const isSsh = scheme ? /ssh/i.test(url.slice(0, url.indexOf("://"))) : true;
+  if (isSsh && !isGithubCom(host)) host = sshResolvedHost(host)?.toLowerCase() ?? host;
+  if (!isGithubCom(host)) return null;
   const m = path.replace(/\/+$/, "").replace(/\.git$/, "").match(/^([^/]+)\/([^/]+)$/);
   return m ? `${m[1]}/${m[2]}` : null;
 }
