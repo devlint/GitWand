@@ -1100,31 +1100,41 @@ function getGithubToken() {
  * Return "owner/repo" from the git remote origin URL in `cwd`.
  * Handles both https://github.com/owner/repo.git and git@github.com:owner/repo.git
  */
+/** `owner/repo` from a GitHub remote URL, or null. Accepts github.com and the
+ *  SSH aliases that stand for it (`git@github.com-work:…`, a dotless
+ *  `git@gh-perso:…`), as `gh_repo_from_remote_url` in `commands/gh.rs` does. */
+function githubNwoFromUrl(url) {
+  const m = url.match(/github\.com(?:-[^:/]*)?[:/](.+?)\/(.+?)(?:\.git)?\/?$/)
+    || url.match(/^(?:ssh:\/\/)?[^@\s]+@[^.:/\s]+[:/](.+?)\/(.+?)(?:\.git)?\/?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
 function getRepoNwo(cwd) {
   // Strategy 1: read .git/config directly — no binary needed
   try {
     const gitConfig = readFileSync(join(cwd, ".git", "config"), "utf-8");
     const m = gitConfig.match(/\[remote\s+"origin"\][\s\S]*?url\s*=\s*(.+)/);
     if (m) {
-      const url = m[1].trim();
-      const rm = url.match(/github\.com[:/](.+?)\/(.+?)(?:\.git)?$/);
-      if (rm) return `${rm[1]}/${rm[2]}`;
+      const nwo = githubNwoFromUrl(m[1].trim());
+      if (nwo) return nwo;
     }
   } catch { /* ignore */ }
   // Strategy 2: git binary fallback
   const r = spawnSync(GIT, ["remote", "get-url", "origin"], { cwd, encoding: "utf-8" });
   if (r.status !== 0) return null;
-  const url = r.stdout.trim();
-  const m = url.match(/github\.com[:/](.+?)\/(.+?)(?:\.git)?$/);
-  return m ? `${m[1]}/${m[2]}` : null;
+  return githubNwoFromUrl(r.stdout.trim());
 }
 
-/** `["--repo", "owner/repo"]` for `origin`, or `[]` when it can't be read.
- *  Without it, `gh` picks an `upstream` remote over `origin`, even an
- *  unrelated one (#298) — mirrors `push_repo_flag` in `commands/gh.rs`. */
-function ghRepoArgs(cwd) {
-  const nwo = getRepoNwo(cwd);
-  return nwo ? ["--repo", nwo] : [];
+/** Environment for a `gh` spawn about PR `number`: `GH_REPO` names the repo
+ *  the PR lives in (origin, or its fork parent — `resolvePrNwo`). Left to
+ *  itself, `gh` picks an `upstream` remote over `origin`, even an unrelated
+ *  one (#298). `GH_REPO` rather than `--repo`, as in `commands/gh.rs`
+ *  (`gh_cmd`): `gh pr merge` skips deleting the local branch whenever `--repo`
+ *  is given. Without a readable origin, `gh` chooses, as before. */
+async function ghPrEnv(cwd, number) {
+  const token = getGithubToken();
+  const nwo = token ? await resolvePrNwo(cwd, number, token) : getRepoNwo(cwd);
+  return nwo ? { ...process.env, GH_REPO: nwo } : process.env;
 }
 
 /** Cache of resolved PR repo nwo, keyed by `<origin>#<number>`. The repo a PR
@@ -6843,8 +6853,9 @@ async function handleRequest(req, res) {
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
-        const r = spawnSync(GH, ["pr", "merge", String(number), mergeFlag, "--delete-branch", ...ghRepoArgs(resolve(cwd))], {
+        const r = spawnSync(GH, ["pr", "merge", String(number), mergeFlag, "--delete-branch"], {
           cwd: resolve(cwd),
+          env: await ghPrEnv(resolve(cwd), number),
           encoding: "utf-8",
         });
         if (r.status !== 0) {
@@ -6867,8 +6878,8 @@ async function handleRequest(req, res) {
           : "--merge";
         const r = spawnSync(
           GH,
-          ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch", ...ghRepoArgs(resolve(cwd))],
-          { cwd: resolve(cwd), encoding: "utf-8" },
+          ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch"],
+          { cwd: resolve(cwd), env: await ghPrEnv(resolve(cwd), number), encoding: "utf-8" },
         );
         if (r.status !== 0) {
           const detail = spawnFailureDetail(r, "gh pr merge --auto failed");
@@ -6885,8 +6896,9 @@ async function handleRequest(req, res) {
       try {
         const { cwd, number } = await readBody(req);
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
-        const r = spawnSync(GH, ["pr", "merge", String(number), "--disable-auto", ...ghRepoArgs(resolve(cwd))], {
+        const r = spawnSync(GH, ["pr", "merge", String(number), "--disable-auto"], {
           cwd: resolve(cwd),
+          env: await ghPrEnv(resolve(cwd), number),
           encoding: "utf-8",
         });
         if (r.status !== 0) {
@@ -8854,8 +8866,8 @@ async function handleRequest(req, res) {
       try {
         const raw = execFileSync(
           GH,
-          ["pr", "view", prNumber, "--json", "files", "--jq", "[.files[].path]", ...ghRepoArgs(repoPath)],
-          { cwd: repoPath, encoding: "utf-8" }
+          ["pr", "view", prNumber, "--json", "files", "--jq", "[.files[].path]"],
+          { cwd: repoPath, env: await ghPrEnv(repoPath, prNumber), encoding: "utf-8" }
         );
         return jsonResponse(req, res, JSON.parse(raw.trim() || "[]"));
       } catch (err) {

@@ -203,15 +203,17 @@ pub(crate) async fn workspace_prs_all(repos: Vec<WorkspaceRepo>) -> Vec<Workspac
         // on the background Launchpad poller (~60 s), so the extra cost is
         // acceptable. `statusCheckRollup`/`reviewDecision`/`reviewRequests`/
         // `comments` are exactly the diff inputs.
-        let mut cmd = hidden_cmd("gh");
+        // The base repo, not `gh`'s remote-name guess (#298).
+        let mut cmd = match gh::gh_base_cmd(&repo_path) {
+            Ok(cmd) => cmd,
+            Err(e) => return WorkspaceRepoPrs { repo_path, repo_name, prs: vec![], error: Some(e) },
+        };
         cmd.args([
             "pr", "list",
             "--state", "open",
             "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,labels,assignees,reviewRequests,reviewDecision,mergeStateStatus,statusCheckRollup,comments",
             "--limit", "10",
         ]);
-        // The base repo, not `gh`'s remote-name guess (#298).
-        gh::push_repo_flag(&mut cmd, gh::gh_base_repo(&repo_path).as_ref());
         let output = cmd.current_dir(&repo_path).output();
 
         match output {
@@ -331,10 +333,9 @@ pub(crate) async fn workspace_issues_all(
                 _ => {} // "" or unknown = no extra filter
             }
 
-            let mut cmd = hidden_cmd("gh");
-            cmd.args(&args);
             // Issues live on `origin`, as on the REST path (#298).
-            gh::push_repo_flag(&mut cmd, gh::gh_origin_repo(&repo_path).as_ref());
+            let mut cmd = gh::gh_origin_cmd(&repo_path);
+            cmd.args(&args);
             let output = cmd.current_dir(&repo_path).output();
 
             match output {

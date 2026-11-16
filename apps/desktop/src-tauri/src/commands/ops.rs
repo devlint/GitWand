@@ -4870,7 +4870,8 @@ pub(crate) async fn pr_files(cwd: String, number: i64) -> Result<Vec<String>, St
     }) {
         return r;
     }
-    let mut cmd = hidden_cmd("gh");
+    // The base repo, not `gh`'s remote-name guess (#298).
+    let mut cmd = crate::commands::gh::gh_base_cmd(&cwd)?;
     cmd.args([
         "pr",
         "view",
@@ -4880,8 +4881,6 @@ pub(crate) async fn pr_files(cwd: String, number: i64) -> Result<Vec<String>, St
         "--jq",
         "[.files[].path]",
     ]);
-    // The base repo, not `gh`'s remote-name guess (#298).
-    crate::commands::gh::push_repo_flag(&mut cmd, crate::commands::gh::gh_base_repo(&cwd).as_ref());
     let output = cmd
         .current_dir(&cwd)
         .output()
