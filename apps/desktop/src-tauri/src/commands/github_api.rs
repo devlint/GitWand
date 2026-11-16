@@ -249,17 +249,25 @@ pub(crate) fn with_rest_using<T>(
 /// REST path only talks to api.github.com: an `origin` on another host is an
 /// error, not a call to github.com for a same-named repo.
 fn owner_repo(cwd: &str) -> Result<(String, String), String> {
-    let output = hidden_cmd("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("git remote get-url: {}", e))?;
-    if !output.status.success() {
-        return Err("No 'origin' remote found in this repo.".to_string());
-    }
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let repo = super::gh::gh_repo_from_remote_url(&url)
-        .ok_or_else(|| format!("Could not parse GitHub owner/repo from remote URL: {}", url))?;
+    // Cached with `token_for_repo`'s own lookup (`gh_origin_repo`).
+    let repo = match super::gh::gh_origin_repo(cwd) {
+        Some(r) => r,
+        None => {
+            let output = hidden_cmd("git")
+                .args(["remote", "get-url", "origin"])
+                .current_dir(cwd)
+                .output()
+                .map_err(|e| format!("git remote get-url: {}", e))?;
+            if !output.status.success() {
+                return Err("No 'origin' remote found in this repo.".to_string());
+            }
+            let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return Err(format!(
+                "Could not parse GitHub owner/repo from remote URL: {}",
+                redact_url_userinfo(&url)
+            ));
+        }
+    };
     // `with_rest` sends Enterprise origins to `gh` (`token_for_repo`), but the
     // review-comment commands, which only speak REST, still get here with the
     // `gh` token (`with_review_token`).
@@ -272,8 +280,25 @@ fn owner_repo(cwd: &str) -> Result<(String, String), String> {
     let (owner, name) = repo
         .nwo
         .split_once('/')
-        .ok_or_else(|| format!("Could not parse GitHub owner/repo from remote URL: {}", url))?;
+        .ok_or_else(|| "Could not parse GitHub owner/repo from origin".to_string())?;
     Ok((owner.to_string(), name.to_string()))
+}
+
+/// `url` without the `user[:password]@` of a `scheme://` URL, which can carry
+/// a token (`https://oauth2:glpat-…@host/…`): safe to show in an error.
+fn redact_url_userinfo(url: &str) -> String {
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+            let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+            if path.is_empty() && !rest.contains('/') {
+                format!("{}://{}", scheme, host)
+            } else {
+                format!("{}://{}/{}", scheme, host, path)
+            }
+        }
+        None => url.to_string(),
+    }
 }
 
 /// Current branch name (`git rev-parse --abbrev-ref HEAD`).
@@ -2795,5 +2820,26 @@ mod etag_cache_tests {
         c.insert("a".into(), "2".into(), "A2".into());
         assert!(c.get("b").is_some());
         assert_eq!(c.get("a"), Some(("2".into(), "A2".into())));
+    }
+}
+
+#[cfg(test)]
+mod redact_url_tests {
+    use super::redact_url_userinfo;
+
+    #[test]
+    fn a_remote_url_shows_without_its_credentials() {
+        assert_eq!(
+            redact_url_userinfo("https://oauth2:glpat-SECRET@gitlab.example/team/app.git"),
+            "https://gitlab.example/team/app.git"
+        );
+        assert_eq!(
+            redact_url_userinfo("https://github.com/me/app.git"),
+            "https://github.com/me/app.git"
+        );
+        assert_eq!(
+            redact_url_userinfo("git@host:me/app.git"),
+            "git@host:me/app.git"
+        );
     }
 }

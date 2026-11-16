@@ -333,8 +333,20 @@ pub(crate) async fn workspace_issues_all(
                 _ => {} // "" or unknown = no extra filter
             }
 
-            // Issues live on `origin`, as on the REST path (#298).
-            let mut cmd = gh::gh_origin_cmd(&repo_path);
+            // The base repo, not `gh`'s remote-name guess (#298): a fork's
+            // issues are its parent's.
+            let mut cmd = match gh::gh_base_cmd(&repo_path) {
+                Ok(cmd) => cmd,
+                Err(e) => {
+                    return WorkspaceRepoIssues {
+                        repo_path,
+                        repo_name,
+                        issues: vec![],
+                        filter: filter.clone(),
+                        error: Some(e),
+                    }
+                }
+            };
             cmd.args(&args);
             let output = cmd.current_dir(&repo_path).output();
 

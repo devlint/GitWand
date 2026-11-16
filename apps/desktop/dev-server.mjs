@@ -6944,11 +6944,10 @@ async function handleRequest(req, res) {
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
-        const r = spawnSync(
-          GH,
-          ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch"],
-          { cwd: resolve(cwd), env: await ghPrEnv(resolve(cwd), number), encoding: "utf-8" },
-        );
+        // Through ghMergeSpawn: an already-mergeable PR is merged at once and
+        // then gets the same --delete-branch local cleanup.
+        const spawn = await ghMergeSpawn(resolve(cwd), number, ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch"]);
+        const r = spawnSync(GH, spawn.args, { cwd: resolve(cwd), env: spawn.env, encoding: "utf-8" });
         if (r.status !== 0) {
           const detail = spawnFailureDetail(r, "gh pr merge --auto failed");
           return jsonResponse(req, res, { error: detail }, 500);

@@ -213,9 +213,11 @@ fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
         .args([
             "api",
             "graphql",
-            "-F",
+            // `-f`: raw strings (`-F` would send `2048` as an integer and
+            // read an `@…` value from a file).
+            "-f",
             &format!("owner={}", owner),
-            "-F",
+            "-f",
             &format!("name={}", name),
             "-f",
             &format!("query={}", query),
@@ -389,14 +391,27 @@ fn gh_create_pr_inner(
         .map(str::trim)
         .filter(|r| !r.is_empty())
         .map(str::to_string);
+    // A requested `owner/repo` is on origin's host; `host/owner/repo` names
+    // its own. Without a usable origin, `--repo` as before, the host left to `gh`.
+    let mut repo_flag = None;
     let target = match (requested, origin.as_ref()) {
-        (Some(nwo), Some(o)) => Some(o.sibling(nwo)),
-        (Some(nwo), None) => Some(GhRepo {
-            host_prefix: String::new(),
-            nwo,
-        }),
+        (Some(r), Some(o)) => match r.split('/').count() {
+            2 => Some(o.sibling(r)),
+            _ => {
+                repo_flag = Some(r);
+                None
+            }
+        },
+        (Some(r), None) => {
+            repo_flag = Some(r);
+            None
+        }
         (None, o) => o.cloned(),
     };
+    if let Some(r) = repo_flag {
+        args.push("--repo".to_string());
+        args.push(r);
+    }
 
     if !base.is_empty() {
         args.push("--base".to_string());
@@ -777,15 +792,13 @@ fn gh_enable_auto_merge_inner(cwd: String, number: i64, method: String) -> Resul
         "rebase" => "--rebase",
         _ => "--merge",
     };
-    let mut cmd = gh_base_cmd(&cwd)?;
-    cmd.args([
-        "pr",
-        "merge",
-        &number.to_string(),
-        "--auto",
-        merge_flag,
-        "--delete-branch",
-    ]);
+    // Through `gh_merge_cmd`: a PR that is already mergeable is merged at
+    // once, and then gets the same `--delete-branch` local cleanup.
+    let num = number.to_string();
+    let mut cmd = gh_merge_cmd(
+        &cwd,
+        &["pr", "merge", &num, "--auto", merge_flag, "--delete-branch"],
+    )?;
     let output = cmd
         .current_dir(&cwd)
         .output()
@@ -1161,8 +1174,9 @@ fn gh_issue_detail_inner(cwd: String, number: i64) -> Result<IssueDetail, String
         return r;
     }
     let num = number.to_string();
-    // Issues live on `origin`, as on the REST path (`rest_issue_detail`).
-    let mut cmd = gh_origin_cmd(&cwd);
+    // The base repo: a fork's issues are its parent's (forks usually have
+    // issues disabled), as `gh` picked for a GitWand-made fork before #298.
+    let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args([
         "issue", "view", &num,
         "--json", "number,title,body,state,author,assignees,labels,url,createdAt,updatedAt,milestone,comments",
@@ -1210,7 +1224,7 @@ fn gh_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::V
     }) {
         return r;
     }
-    let nwo = gh_origin_nwo(&cwd)?;
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/issues/{}/comments?per_page=100", nwo, number);
     let output = gh_api_cmd(&cwd)
         .args(["api", &path])
@@ -1249,7 +1263,7 @@ fn gh_issue_add_comment_inner(
     }) {
         return r;
     }
-    let nwo = gh_origin_nwo(&cwd)?;
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/issues/{}/comments", nwo, number);
     let field = format!("body={}", body);
     let output = gh_api_cmd(&cwd)
@@ -1289,7 +1303,7 @@ fn gh_issue_set_state_inner(cwd: String, number: i64, state: String) -> Result<(
     let num = number.to_string();
     // "closed" → `gh issue close`, anything else → `gh issue reopen`.
     let sub = if state == "closed" { "close" } else { "reopen" };
-    let mut cmd = gh_origin_cmd(&cwd);
+    let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args(["issue", sub, &num]);
     let output = cmd
         .current_dir(&cwd)
@@ -1597,12 +1611,20 @@ fn gh_repo_is_a_remote(cwd: &str, repo: &GhRepo) -> bool {
         return false;
     };
     let want = repo.selector();
-    String::from_utf8_lossy(&out.stdout).lines().any(|line| {
-        // `<name>\t<url> (fetch|push)`
-        line.split_once('\t')
-            .and_then(|(_, rest)| rest.rsplit_once(' '))
-            .and_then(|(url, _)| gh_repo_from_remote_url(url))
-            .is_some_and(|r| r.selector().eq_ignore_ascii_case(&want))
+    let needle = repo.nwo.to_ascii_lowercase();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // `<name>\t<url> (fetch|push)`. Only URLs naming the repo are parsed (each
+    // once), so other forges' remotes cost no `ssh -G` / `gh auth status`.
+    let mut urls: Vec<&str> = stdout
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter_map(|(_, rest)| rest.rsplit_once(' '))
+        .map(|(url, _)| url)
+        .filter(|url| url.to_ascii_lowercase().contains(&needle))
+        .collect();
+    urls.dedup();
+    urls.into_iter().any(|url| {
+        gh_repo_from_remote_url(url).is_some_and(|r| r.selector().eq_ignore_ascii_case(&want))
     })
 }
 
@@ -1739,11 +1761,6 @@ pub(crate) fn gh_base_cmd(cwd: &str) -> Result<std::process::Command, String> {
     Ok(gh_cmd(gh_base_repo(cwd)?.as_ref()))
 }
 
-/// A `gh` command aimed at `origin`: issues, as on the REST path.
-pub(crate) fn gh_origin_cmd(cwd: &str) -> std::process::Command {
-    gh_cmd(gh_origin_repo(cwd).as_ref())
-}
-
 /// A `gh api` command for `cwd`'s host (see `gh_host_cmd`). Commands that
 /// make several calls resolve the repo once and use `gh_host_cmd` instead.
 fn gh_api_cmd(cwd: &str) -> std::process::Command {
@@ -1815,15 +1832,6 @@ fn gh_base_target(cwd: &str) -> Result<(Option<GhRepo>, String), String> {
 /// base repo (see `gh_base_repo`).
 fn gh_base_nwo(cwd: &str) -> Result<String, String> {
     gh_base_target(cwd).map(|(_, nwo)| nwo)
-}
-
-/// `owner/repo` for a `gh api repos/{nwo}/…` path that addresses an issue:
-/// `origin`, as the REST path does.
-fn gh_origin_nwo(cwd: &str) -> Result<String, String> {
-    gh_origin_repo(cwd)
-        .map(|r| r.nwo)
-        .or_else(|| gh_inferred_nwo(cwd))
-        .ok_or_else(|| UNRESOLVED_REPO.to_string())
 }
 
 /// Resolve whether the current viewer can merge this PR, and whether the base
@@ -2512,8 +2520,8 @@ fn gh_list_issues_inner(
     }
 
     // Fallback: shell `gh issue list` (mirrors workspace_issues_all gh path).
-    // Issues live on `origin`, as on the REST path (`rest_list_issues`).
-    let mut cmd = gh_origin_cmd(&cwd);
+    // The base repo, as for `gh_issue_detail`.
+    let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args([
         "issue",
         "list",
