@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **GitHub CLI: pull requests no longer target an `upstream` remote instead of `origin` (#298).** Without a GitHub token in Settings and without `gh repo set-default`, `gh` picks the repository by remote name, `upstream` before `origin`, so a clone with an unrelated `upstream` remote listed that repository's pull requests and opened new ones against it, which failed. Every `gh` call now names its repository: the parent when `origin` is a fork, else `origin`, as the token path already did; issues stay on `origin`. A pull request opened on another repository than `origin` (the "open against upstream" choice on a fork) names its head as `origin-owner:branch`. GitHub Enterprise remotes keep their host. Reported by Pannboo.
+
 ## [3.13.1] - 2026-11-12
 
 ### Changed

@@ -95,9 +95,10 @@ fn gh_list_prs_inner(
     let off = offset.unwrap_or(0).max(0);
     let total = (page + off).to_string();
 
-    // For forks, `gh pr list` without --repo targets the fork itself (0 PRs).
-    // Resolve the upstream parent so the list matches the OAuth/REST path.
-    let target_repo = gh_fork_upstream(&cwd);
+    // Name the repo explicitly: without --repo, `gh` would list a fork's own
+    // PRs (none) or an unrelated `upstream` remote's (#298). The base repo
+    // matches what the OAuth/REST path lists.
+    let target_repo = gh_base_repo(&cwd);
 
     // GH_TOKEN propagation is handled centrally by `hidden_cmd` (cf. git/cmd.rs).
     let mut cmd = hidden_cmd("gh");
@@ -107,9 +108,7 @@ fn gh_list_prs_inner(
         "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,labels,assignees,mergeStateStatus,statusCheckRollup,autoMergeRequest",
         "--limit", &total,
     ]);
-    if let Some(ref nwo) = target_repo {
-        cmd.args(["--repo", nwo]);
-    }
+    push_repo_flag(&mut cmd, target_repo.as_ref());
     cmd.current_dir(&cwd);
     let output = output_with_timeout(cmd, GH_TIMEOUT)
         .map_err(|e| format!("Failed to run gh pr list (is GitHub CLI installed?): {}", e))?;
@@ -203,9 +202,7 @@ fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
     // canonical "org/repo" slug — splittable by '/' without ambiguity.
     // v2.17: include isFork and parent to correctly count PRs in the base repo
     // (the target repo that `gh pr list` would use by default).
-    let view = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "nameWithOwner,isFork,parent"])
-        .current_dir(&cwd)
+    let view = gh_repo_view_cmd(&cwd, "nameWithOwner,isFork,parent")
         .output()
         .map_err(|e| format!("gh repo view (for pr count): {}", e))?;
     if !view.status.success() {
@@ -339,7 +336,7 @@ fn gh_pr_freshness_signal_inner(cwd: String) -> Result<Option<PrFreshnessSignal>
     // No sort flag is used by the main gh_list_prs_inner list fetch (its
     // order doesn't matter there) — this probe needs updated-desc
     // specifically, via a `-S` search-query sort, requested only here.
-    let target_repo = gh_fork_upstream(&cwd);
+    let target_repo = gh_base_repo(&cwd);
     let mut cmd = hidden_cmd("gh");
     cmd.args([
         "pr",
@@ -353,9 +350,7 @@ fn gh_pr_freshness_signal_inner(cwd: String) -> Result<Option<PrFreshnessSignal>
         "-S",
         "sort:updated-desc",
     ]);
-    if let Some(ref nwo) = target_repo {
-        cmd.args(["--repo", nwo]);
-    }
+    push_repo_flag(&mut cmd, target_repo.as_ref());
     let output = cmd
         .current_dir(&cwd)
         .output()
@@ -423,12 +418,34 @@ fn gh_create_pr_inner(
         body,
     ];
 
-    // Cross-fork target: `gh pr create --repo owner/repo` opens the PR against
-    // that repo, using the current fork branch as head automatically.
-    if let Some(repo) = base_repo {
-        if !repo.trim().is_empty() {
-            args.push("--repo".to_string());
-            args.push(repo.trim().to_string());
+    // Target repo: the caller-supplied one (cross-fork), else `origin` — as on
+    // the REST path (`rest_create_pr`). Always named: without --repo, `gh`
+    // would pick an `upstream` remote over `origin`, even an unrelated one
+    // (#298). A cross-repo PR qualifies its head as `origin-owner:branch`, so
+    // `gh` does not have to guess which remote the branch was pushed to.
+    let origin = gh_origin_repo(&cwd);
+    let requested = base_repo
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .map(str::to_string);
+    let target = match (requested, origin.as_ref()) {
+        (Some(nwo), Some(o)) => Some(o.sibling(nwo)),
+        (Some(nwo), None) => Some(GhRepo {
+            host_prefix: String::new(),
+            nwo,
+        }),
+        (None, o) => o.cloned(),
+    };
+    if let Some(t) = target.as_ref() {
+        args.push("--repo".to_string());
+        args.push(t.selector());
+    }
+    if let (Some(t), Some(o)) = (target.as_ref(), origin.as_ref()) {
+        if t.nwo != o.nwo {
+            let branch = github_api::current_branch(&cwd)?;
+            args.push("--head".to_string());
+            args.push(format!("{}:{}", o.owner(), branch));
         }
     }
 
@@ -551,9 +568,7 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
         return r;
     }
     // Discover owner/repo from the current repo.
-    let view = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "owner,name"])
-        .current_dir(&cwd)
+    let view = gh_repo_view_cmd(&cwd, "owner,name")
         .output()
         .map_err(|e| format!("Failed to inspect repo: {}", e))?;
     if !view.status.success() {
@@ -656,9 +671,7 @@ fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {
         return r;
     }
     // Discover owner/repo from the current repo.
-    let view = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "owner,name"])
-        .current_dir(&cwd)
+    let view = gh_repo_view_cmd(&cwd, "owner,name")
         .output()
         .map_err(|e| format!("Failed to inspect repo: {}", e))?;
     if !view.status.success() {
@@ -746,8 +759,10 @@ fn gh_checkout_pr_inner(cwd: String, number: i64) -> Result<(), String> {
     if github_api::rest_token_for(&cwd).is_some() {
         return github_api::rest_checkout_pr(&cwd, number);
     }
-    let output = hidden_cmd("gh")
-        .args(["pr", "checkout", &number.to_string()])
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["pr", "checkout", &number.to_string()]);
+    push_repo_flag(&mut cmd, gh_base_repo(&cwd).as_ref());
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to checkout PR: {}", e))?;
@@ -780,14 +795,16 @@ fn gh_merge_pr_inner(cwd: String, number: i64, method: String) -> Result<(), Str
         _ => "--merge",
     };
 
-    let output = hidden_cmd("gh")
-        .args([
-            "pr",
-            "merge",
-            &number.to_string(),
-            merge_flag,
-            "--delete-branch",
-        ])
+    let mut cmd = hidden_cmd("gh");
+    cmd.args([
+        "pr",
+        "merge",
+        &number.to_string(),
+        merge_flag,
+        "--delete-branch",
+    ]);
+    push_repo_flag(&mut cmd, gh_base_repo(&cwd).as_ref());
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to merge PR: {}", e))?;
@@ -819,15 +836,17 @@ fn gh_enable_auto_merge_inner(cwd: String, number: i64, method: String) -> Resul
         "rebase" => "--rebase",
         _ => "--merge",
     };
-    let output = hidden_cmd("gh")
-        .args([
-            "pr",
-            "merge",
-            &number.to_string(),
-            "--auto",
-            merge_flag,
-            "--delete-branch",
-        ])
+    let mut cmd = hidden_cmd("gh");
+    cmd.args([
+        "pr",
+        "merge",
+        &number.to_string(),
+        "--auto",
+        merge_flag,
+        "--delete-branch",
+    ]);
+    push_repo_flag(&mut cmd, gh_base_repo(&cwd).as_ref());
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to enable auto-merge: {}", e))?;
@@ -863,8 +882,10 @@ fn gh_disable_auto_merge_inner(cwd: String, number: i64) -> Result<(), String> {
     }) {
         return r;
     }
-    let output = hidden_cmd("gh")
-        .args(["pr", "merge", &number.to_string(), "--disable-auto"])
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["pr", "merge", &number.to_string(), "--disable-auto"]);
+    push_repo_flag(&mut cmd, gh_base_repo(&cwd).as_ref());
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to disable auto-merge: {}", e))?;
@@ -890,15 +911,12 @@ fn gh_pr_ready_inner(cwd: String, number: i64) -> Result<(), String> {
     {
         return r;
     }
-    // On a fork the PR number comes from the upstream's list, so name the repo
-    // explicitly (as `gh_pr_edit_inner` does) rather than rely on gh's default.
-    let mut args = vec!["pr".to_string(), "ready".to_string(), number.to_string()];
-    if let Some(upstream) = gh_fork_upstream(&cwd) {
-        args.push("--repo".to_string());
-        args.push(upstream);
-    }
-    let output = hidden_cmd("gh")
-        .args(&args)
+    // The PR number comes from the base repo's list, so name that repo
+    // explicitly rather than rely on gh's remote-name default (#298).
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["pr", "ready", &number.to_string()]);
+    push_repo_flag(&mut cmd, gh_base_repo(&cwd).as_ref());
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run gh pr ready: {}", e))?;
@@ -935,7 +953,7 @@ fn gh_pr_edit_inner(
         return r;
     }
     // `-f` sends each value as a raw string — no `@file` expansion, unlike `-F`.
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/pulls/{}", nwo, number);
     gh_api_write(&cwd, "PATCH", &path, &fields)?;
     Ok(())
@@ -965,7 +983,7 @@ fn gh_dismiss_review_inner(
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!(
         "repos/{}/pulls/{}/reviews/{}/dismissals",
         nwo, number, review_id
@@ -1115,7 +1133,7 @@ fn gh_request_reviewers_inner(cwd: String, number: i64, logins: Vec<String>) -> 
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/pulls/{}/requested_reviewers", nwo, number);
     let mut cmd = hidden_cmd("gh");
     cmd.args(["api", "-X", "POST", &path]);
@@ -1153,16 +1171,14 @@ fn gh_pr_detail_inner(cwd: String, number: i64) -> Result<PullRequestDetail, Str
     {
         return r;
     }
-    let upstream = gh_fork_upstream(&cwd);
+    let upstream = gh_base_repo(&cwd);
     let num = number.to_string();
     let mut cmd = hidden_cmd("gh");
     cmd.args([
         "pr", "view", &num,
         "--json", "number,title,body,state,author,headRefName,headRefOid,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,labels,reviews,mergeable,statusCheckRollup,autoMergeRequest",
     ]);
-    if let Some(ref nwo) = upstream {
-        cmd.args(["--repo", nwo]);
-    }
+    push_repo_flag(&mut cmd, upstream.as_ref());
     let output = cmd
         .current_dir(&cwd)
         .output()
@@ -1209,11 +1225,14 @@ fn gh_issue_detail_inner(cwd: String, number: i64) -> Result<IssueDetail, String
         return r;
     }
     let num = number.to_string();
-    let output = hidden_cmd("gh")
-        .args([
-            "issue", "view", &num,
-            "--json", "number,title,body,state,author,assignees,labels,url,createdAt,updatedAt,milestone,comments",
-        ])
+    // Issues live on `origin`, as on the REST path (`rest_issue_detail`).
+    let mut cmd = hidden_cmd("gh");
+    cmd.args([
+        "issue", "view", &num,
+        "--json", "number,title,body,state,author,assignees,labels,url,createdAt,updatedAt,milestone,comments",
+    ]);
+    push_repo_flag(&mut cmd, gh_origin_repo(&cwd).as_ref());
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("gh issue view: {}", e))?;
@@ -1256,7 +1275,7 @@ fn gh_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::V
     }) {
         return r;
     }
-    let nwo = gh_current_nwo(&cwd).ok_or_else(|| "Could not resolve owner/repo".to_string())?;
+    let nwo = gh_origin_nwo(&cwd)?;
     let path = format!("repos/{}/issues/{}/comments?per_page=100", nwo, number);
     let output = hidden_cmd("gh")
         .args(["api", &path])
@@ -1295,7 +1314,7 @@ fn gh_issue_add_comment_inner(
     }) {
         return r;
     }
-    let nwo = gh_current_nwo(&cwd).ok_or_else(|| "Could not resolve owner/repo".to_string())?;
+    let nwo = gh_origin_nwo(&cwd)?;
     let path = format!("repos/{}/issues/{}/comments", nwo, number);
     let field = format!("body={}", body);
     let output = hidden_cmd("gh")
@@ -1335,8 +1354,10 @@ fn gh_issue_set_state_inner(cwd: String, number: i64, state: String) -> Result<(
     let num = number.to_string();
     // "closed" → `gh issue close`, anything else → `gh issue reopen`.
     let sub = if state == "closed" { "close" } else { "reopen" };
-    let output = hidden_cmd("gh")
-        .args(["issue", sub, &num])
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["issue", sub, &num]);
+    push_repo_flag(&mut cmd, gh_origin_repo(&cwd).as_ref());
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("gh issue {}: {}", sub, e))?;
@@ -1364,36 +1385,149 @@ pub(crate) async fn gh_issue_set_state(
 
 // ─── Private sync helpers ────────────────────────────────────────────────────
 
-/// When `cwd` is a GitHub fork, returns the upstream parent `owner/repo` slug.
-/// Returns `None` for regular (non-fork) repos or on any failure — callers
-/// fall back to `gh`'s default repo inference, which is correct for non-forks.
-fn gh_fork_upstream(cwd: &str) -> Option<String> {
-    let out = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "isFork,parent"])
+// ─── Repository targeting (#298) ─────────────────────────────────────────────
+//
+// Without `gh repo set-default`, `gh` picks the repo it acts on by remote
+// *name*: `upstream` > `github` > `origin`. A clone with an unrelated
+// `upstream` remote therefore had its PR list, PR creation and every other
+// `gh` call aimed at that other repo. The REST path has always read `origin`
+// (`github_api::owner_repo`); these helpers make the `gh` path do the same and
+// pass the repo explicitly (`--repo`, `gh repo view <repo>`, `repos/<nwo>/…`).
+//
+// Only when `origin` is missing or unparseable do callers still leave the
+// choice to `gh` — the behavior every repo had before.
+
+/// A GitHub repository as `gh` addresses it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GhRepo {
+    /// `"host/"` for a GitHub Enterprise host, empty for github.com.
+    host_prefix: String,
+    /// `owner/repo`, the form REST paths (`gh api repos/{nwo}/…`) take.
+    pub(crate) nwo: String,
+}
+
+impl GhRepo {
+    /// The `[HOST/]OWNER/REPO` form `--repo` and `gh repo view` take.
+    pub(crate) fn selector(&self) -> String {
+        format!("{}{}", self.host_prefix, self.nwo)
+    }
+
+    fn owner(&self) -> &str {
+        self.nwo.split('/').next().unwrap_or("")
+    }
+
+    /// Another repository on the same host (a fork's parent).
+    fn sibling(&self, nwo: String) -> GhRepo {
+        GhRepo {
+            host_prefix: self.host_prefix.clone(),
+            nwo,
+        }
+    }
+}
+
+/// Parse a git remote URL into the repo `gh` should address.
+///
+/// The host is kept only when it is a real Enterprise host. github.com — and
+/// any host that names it (`ssh.github.com`, an SSH alias such as
+/// `github.com-work`) or has no dot at all (an SSH alias such as `gh-perso`) —
+/// is left implicit: `gh` cannot resolve SSH aliases, and github.com is its
+/// default host anyway.
+pub(crate) fn gh_repo_from_remote_url(url: &str) -> Option<GhRepo> {
+    let (owner, repo) = parse_remote_owner_repo(url.trim());
+    let repo = repo.trim_end_matches('/').trim_end_matches(".git");
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        return None;
+    }
+    let host = extract_remote_host(url.trim()).unwrap_or_default();
+    let host_prefix = if host.is_empty() || host.contains("github.com") || !host.contains('.') {
+        String::new()
+    } else {
+        format!("{}/", host)
+    };
+    Some(GhRepo {
+        host_prefix,
+        nwo: format!("{}/{}", owner, repo),
+    })
+}
+
+/// The repo `origin` points at, or `None` when there is no parseable `origin`.
+pub(crate) fn gh_origin_repo(cwd: &str) -> Option<GhRepo> {
+    let out = hidden_cmd("git")
+        .args(["remote", "get-url", "origin"])
         .current_dir(cwd)
         .output()
         .ok()
         .filter(|o| o.status.success())?;
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    gh_repo_from_remote_url(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `owner/name` of the `parent` in a `gh repo view --json isFork,parent`
+/// response, when the repo is a fork.
+fn fork_parent_nwo(v: &serde_json::Value) -> Option<String> {
     if !v.get("isFork").and_then(|b| b.as_bool()).unwrap_or(false) {
         return None;
     }
-    v.get("parent").and_then(|p| {
-        let owner = p
-            .get("owner")
-            .and_then(|o| o.get("login"))
-            .and_then(|s| s.as_str())?;
-        let name = p.get("name").and_then(|s| s.as_str())?;
-        Some(format!("{}/{}", owner, name))
+    let p = v.get("parent")?;
+    let owner = p
+        .get("owner")
+        .and_then(|o| o.get("login"))
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())?;
+    let name = p
+        .get("name")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())?;
+    Some(format!("{}/{}", owner, name))
+}
+
+/// `gh repo view` of `origin` (or of `gh`'s own pick when there is no usable
+/// `origin`), with the given `--json` fields. Not yet run.
+fn gh_repo_view_cmd(cwd: &str, fields: &str) -> std::process::Command {
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["repo", "view"]);
+    if let Some(origin) = gh_origin_repo(cwd) {
+        cmd.arg(origin.selector());
+    }
+    cmd.args(["--json", fields]).current_dir(cwd);
+    cmd
+}
+
+/// The repo PRs are listed from and act on: the fork parent when `origin` is
+/// a fork, else `origin` itself — what `github_api`'s REST path uses. When the
+/// fork lookup fails, `origin` (never `gh`'s remote-name guess). `None` only
+/// without a usable `origin`.
+pub(crate) fn gh_base_repo(cwd: &str) -> Option<GhRepo> {
+    let origin = gh_origin_repo(cwd)?;
+    let parent = hidden_cmd("gh")
+        .args([
+            "repo",
+            "view",
+            &origin.selector(),
+            "--json",
+            "isFork,parent",
+        ])
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+        .and_then(|v| fork_parent_nwo(&v));
+    Some(match parent {
+        Some(nwo) => origin.sibling(nwo),
+        None => origin,
     })
 }
 
-/// Resolve the current repo's `owner/repo` via `gh repo view`. Used as the
-/// fallback for non-fork repos instead of the literal placeholder string
-/// `"{owner}/{repo}"`: that string only "works" because `gh api` happens to
-/// expand `{owner}`/`{repo}` templates from the cwd, which is fragile and
-/// reads like unfinished code. Returns `None` on any failure.
-fn gh_current_nwo(cwd: &str) -> Option<String> {
+/// Append `--repo <selector>` when a repo was resolved.
+pub(crate) fn push_repo_flag(cmd: &mut std::process::Command, repo: Option<&GhRepo>) {
+    if let Some(r) = repo {
+        cmd.args(["--repo", &r.selector()]);
+    }
+}
+
+/// `owner/repo` that `gh` itself would pick, for the no-`origin` fallback of
+/// the `gh api repos/{nwo}/…` paths below. `None` on any failure.
+fn gh_inferred_nwo(cwd: &str) -> Option<String> {
     let out = hidden_cmd("gh")
         .args([
             "repo",
@@ -1408,11 +1542,25 @@ fn gh_current_nwo(cwd: &str) -> Option<String> {
         .ok()
         .filter(|o| o.status.success())?;
     let nwo = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if nwo.is_empty() {
-        None
-    } else {
-        Some(nwo)
-    }
+    (!nwo.is_empty()).then_some(nwo)
+}
+
+/// `owner/repo` for a `gh api repos/{nwo}/…` path that addresses a PR: the
+/// base repo (see `gh_base_repo`).
+fn gh_base_nwo(cwd: &str) -> Result<String, String> {
+    gh_base_repo(cwd)
+        .map(|r| r.nwo)
+        .or_else(|| gh_inferred_nwo(cwd))
+        .ok_or_else(|| "Could not resolve the GitHub owner/repo of this repository".to_string())
+}
+
+/// `owner/repo` for a `gh api repos/{nwo}/…` path that addresses an issue:
+/// `origin`, as the REST path does.
+fn gh_origin_nwo(cwd: &str) -> Result<String, String> {
+    gh_origin_repo(cwd)
+        .map(|r| r.nwo)
+        .or_else(|| gh_inferred_nwo(cwd))
+        .ok_or_else(|| "Could not resolve the GitHub owner/repo of this repository".to_string())
 }
 
 /// Resolve whether the current viewer can merge this PR, and whether the base
@@ -1485,13 +1633,11 @@ fn gh_pr_diff_inner(cwd: String, number: i64) -> Result<String, String> {
     {
         return r;
     }
-    let upstream = gh_fork_upstream(&cwd);
+    let upstream = gh_base_repo(&cwd);
     let num = number.to_string();
     let mut cmd = hidden_cmd("gh");
     cmd.args(["pr", "diff", &num]);
-    if let Some(ref nwo) = upstream {
-        cmd.args(["--repo", nwo]);
-    }
+    push_repo_flag(&mut cmd, upstream.as_ref());
     let output = cmd
         .current_dir(&cwd)
         .output()
@@ -1522,9 +1668,7 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
         return r;
     }
     // Resolve the canonical repo NWO (upstream for forks, own for regular repos).
-    let nwo = gh_fork_upstream(&cwd)
-        .or_else(|| gh_current_nwo(&cwd))
-        .unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
 
     // Step 1 — head commit SHA for this PR.
     let pr_out = hidden_cmd("gh")
@@ -1625,9 +1769,7 @@ fn gh_pr_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Valu
     {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd)
-        .or_else(|| gh_current_nwo(&cwd))
-        .unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let json = gh_api_json(
         &cwd,
         &format!("repos/{}/pulls/{}/comments?per_page=100", nwo, number),
@@ -1653,9 +1795,7 @@ fn gh_pr_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd)
-        .or_else(|| gh_current_nwo(&cwd))
-        .unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let json = gh_api_json(
         &cwd,
         &format!("repos/{}/issues/{}/comments?per_page=100", nwo, number),
@@ -1681,9 +1821,7 @@ fn gh_pr_reviews_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Value
     {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd)
-        .or_else(|| gh_current_nwo(&cwd))
-        .unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let json = gh_api_json(
         &cwd,
         &format!("repos/{}/pulls/{}/reviews?per_page=100", nwo, number),
@@ -1811,7 +1949,7 @@ fn gh_list_reactions_inner(
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = reactions_api_path(&nwo, &target_type, target_id);
     let json = gh_api_json(&cwd, &path)?;
     Ok(json
@@ -1849,7 +1987,7 @@ fn gh_add_reaction_inner(
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = reactions_api_path(&nwo, &target_type, target_id);
     gh_api_write(&cwd, "POST", &path, &[("content", &content)])
 }
@@ -1882,7 +2020,7 @@ fn gh_delete_reaction_inner(
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!(
         "{}/{}",
         reactions_api_path(&nwo, &target_type, target_id),
@@ -1912,9 +2050,7 @@ fn gh_fork_info_inner(cwd: String) -> Result<ForkInfo, String> {
     if let Some(r) = github_api::with_rest(&cwd, |tok| github_api::rest_fork_info(&cwd, tok)) {
         return r;
     }
-    let output = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "isFork,parent,nameWithOwner"])
-        .current_dir(&cwd)
+    let output = gh_repo_view_cmd(&cwd, "isFork,parent,nameWithOwner")
         .output()
         .map_err(|e| format!("gh repo view (fork info): {}", e))?;
     if !output.status.success() {
@@ -1961,16 +2097,28 @@ pub(crate) async fn gh_fork_info(cwd: String) -> Result<ForkInfo, String> {
 ///
 /// Flow:
 ///   1. `gh pr view --json headRefOid` → head commit SHA
-///   2. `gh api repos/{owner}/{repo}/commits/{sha}/check-runs` → runs with
-///      `output.annotations_count` (gh resolves `{owner}/{repo}` from cwd)
+///   2. `gh api repos/{nwo}/commits/{sha}/check-runs` → runs with
+///      `output.annotations_count`, `{nwo}` being the base repo (`gh_base_repo`)
 ///   3. For each run with annotations: `gh api .../check-runs/{id}/annotations`
 ///
 /// Non-fatal everywhere: a repo without checks/annotations returns `[]`.
 #[tauri::command]
 pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnnotation>, String> {
+    // The base repo, named explicitly on every call (#298).
+    let base = gh_base_repo(&cwd);
+    let nwo = match base.as_ref() {
+        Some(r) => r.nwo.clone(),
+        None => match gh_inferred_nwo(&cwd) {
+            Some(n) => n,
+            None => return Ok(Vec::new()),
+        },
+    };
+
     // 1. Head SHA of the PR.
-    let output = hidden_cmd("gh")
-        .args(["pr", "view", &number.to_string(), "--json", "headRefOid"])
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["pr", "view", &number.to_string(), "--json", "headRefOid"]);
+    push_repo_flag(&mut cmd, base.as_ref());
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("gh pr view: {}", e))?;
@@ -1987,10 +2135,7 @@ pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnn
     let output = hidden_cmd("gh")
         .args([
             "api",
-            &format!(
-                "repos/{{owner}}/{{repo}}/commits/{}/check-runs?per_page=100",
-                sha
-            ),
+            &format!("repos/{}/commits/{}/check-runs?per_page=100", nwo, sha),
         ])
         .current_dir(&cwd)
         .output()
@@ -2036,8 +2181,8 @@ pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnn
             .args([
                 "api",
                 &format!(
-                    "repos/{{owner}}/{{repo}}/check-runs/{}/annotations?per_page=100",
-                    run_id
+                    "repos/{}/check-runs/{}/annotations?per_page=100",
+                    nwo, run_id
                 ),
             ])
             .current_dir(&cwd)
@@ -2121,6 +2266,8 @@ fn gh_list_issues_inner(
         }
         _ => {}
     }
+    // Issues live on `origin`, as on the REST path (`rest_list_issues`).
+    push_repo_flag(&mut cmd, gh_origin_repo(&cwd).as_ref());
     let output = cmd
         .current_dir(&cwd)
         .output()
@@ -2319,5 +2466,111 @@ mod gh_auto_merge_tests {
         // that could.
         let v: serde_json::Value = serde_json::from_str(r#"{}"#).unwrap();
         assert!(!gh_auto_merge_support(&v).supported);
+    }
+}
+
+#[cfg(test)]
+mod repo_targeting_tests {
+    use super::*;
+
+    fn nwo(url: &str) -> Option<(String, String)> {
+        gh_repo_from_remote_url(url).map(|r| (r.selector(), r.nwo))
+    }
+
+    #[test]
+    fn github_com_remotes_need_no_host() {
+        for url in [
+            "https://github.com/me/project.git",
+            "https://github.com/me/project",
+            "https://github.com/me/project/",
+            "https://user@github.com/me/project.git",
+            "git@github.com:me/project.git",
+            "ssh://git@github.com/me/project.git",
+            "ssh://git@ssh.github.com:443/me/project.git",
+            "git@github.com-work:me/project.git",
+            "git@gh-perso:me/project.git",
+            "https://github.com/me/project.git\n",
+        ] {
+            assert_eq!(
+                nwo(url),
+                Some(("me/project".to_string(), "me/project".to_string())),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_enterprise_host_is_named_in_the_selector_only() {
+        assert_eq!(
+            nwo("https://github.acme.corp/team/app.git"),
+            Some((
+                "github.acme.corp/team/app".to_string(),
+                "team/app".to_string()
+            ))
+        );
+        assert_eq!(
+            nwo("git@acme.ghe.com:team/app.git"),
+            Some(("acme.ghe.com/team/app".to_string(), "team/app".to_string()))
+        );
+    }
+
+    #[test]
+    fn an_unparseable_remote_resolves_to_nothing() {
+        assert_eq!(nwo(""), None);
+        assert_eq!(nwo("/srv/git/project.git"), None);
+        assert_eq!(nwo("https://github.com/only-owner"), None);
+    }
+
+    #[test]
+    fn a_fork_parent_is_read_only_for_a_fork() {
+        let fork = serde_json::json!({
+            "isFork": true,
+            "parent": { "owner": { "login": "up" }, "name": "project" }
+        });
+        assert_eq!(fork_parent_nwo(&fork), Some("up/project".to_string()));
+        let not_fork = serde_json::json!({ "isFork": false, "parent": null });
+        assert_eq!(fork_parent_nwo(&not_fork), None);
+        let broken = serde_json::json!({ "isFork": true, "parent": null });
+        assert_eq!(fork_parent_nwo(&broken), None);
+    }
+
+    #[test]
+    fn a_sibling_keeps_the_host() {
+        let origin = gh_repo_from_remote_url("https://github.acme.corp/me/app.git").unwrap();
+        assert_eq!(
+            origin.sibling("team/app".to_string()).selector(),
+            "github.acme.corp/team/app"
+        );
+        assert_eq!(origin.owner(), "me");
+    }
+
+    /// #298: an unrelated `upstream` remote must not pull the target away
+    /// from `origin` (`gh` alone would pick `upstream` first).
+    #[test]
+    fn origin_wins_over_an_upstream_remote() {
+        let dir = std::env::temp_dir().join(format!("gw-298-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let ok = hidden_cmd("git")
+                .args(args)
+                .current_dir(&dir)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {:?}", args);
+        };
+        git(&["init", "-q"]);
+        git(&[
+            "remote",
+            "add",
+            "upstream",
+            "https://github.com/other/unrelated.git",
+        ]);
+        git(&["remote", "add", "origin", "git@github.com:me/project.git"]);
+        let cwd = dir.to_string_lossy().to_string();
+        let origin = gh_origin_repo(&cwd).map(|r| r.selector());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(origin, Some("me/project".to_string()));
     }
 }

@@ -282,7 +282,7 @@ fn owner_repo(cwd: &str) -> Result<(String, String), String> {
 }
 
 /// Current branch name (`git rev-parse --abbrev-ref HEAD`).
-fn current_branch(cwd: &str) -> Result<String, String> {
+pub(crate) fn current_branch(cwd: &str) -> Result<String, String> {
     let output = hidden_cmd("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(cwd)

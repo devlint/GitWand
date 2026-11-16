@@ -1119,6 +1119,14 @@ function getRepoNwo(cwd) {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
+/** `["--repo", "owner/repo"]` for `origin`, or `[]` when it can't be read.
+ *  Without it, `gh` picks an `upstream` remote over `origin`, even an
+ *  unrelated one (#298) — mirrors `push_repo_flag` in `commands/gh.rs`. */
+function ghRepoArgs(cwd) {
+  const nwo = getRepoNwo(cwd);
+  return nwo ? ["--repo", nwo] : [];
+}
+
 /** Cache of resolved PR repo nwo, keyed by `<origin>#<number>`. The repo a PR
  *  lives in is stable for the PR's lifetime, so one resolution per dev-server
  *  process is enough — without this the 3 per-PR endpoints each re-resolve
@@ -6835,7 +6843,7 @@ async function handleRequest(req, res) {
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
-        const r = spawnSync(GH, ["pr", "merge", String(number), mergeFlag, "--delete-branch"], {
+        const r = spawnSync(GH, ["pr", "merge", String(number), mergeFlag, "--delete-branch", ...ghRepoArgs(resolve(cwd))], {
           cwd: resolve(cwd),
           encoding: "utf-8",
         });
@@ -6859,7 +6867,7 @@ async function handleRequest(req, res) {
           : "--merge";
         const r = spawnSync(
           GH,
-          ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch"],
+          ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch", ...ghRepoArgs(resolve(cwd))],
           { cwd: resolve(cwd), encoding: "utf-8" },
         );
         if (r.status !== 0) {
@@ -6877,7 +6885,7 @@ async function handleRequest(req, res) {
       try {
         const { cwd, number } = await readBody(req);
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
-        const r = spawnSync(GH, ["pr", "merge", String(number), "--disable-auto"], {
+        const r = spawnSync(GH, ["pr", "merge", String(number), "--disable-auto", ...ghRepoArgs(resolve(cwd))], {
           cwd: resolve(cwd),
           encoding: "utf-8",
         });
@@ -8846,7 +8854,7 @@ async function handleRequest(req, res) {
       try {
         const raw = execFileSync(
           GH,
-          ["pr", "view", prNumber, "--json", "files", "--jq", "[.files[].path]"],
+          ["pr", "view", prNumber, "--json", "files", "--jq", "[.files[].path]", ...ghRepoArgs(repoPath)],
           { cwd: repoPath, encoding: "utf-8" }
         );
         return jsonResponse(req, res, JSON.parse(raw.trim() || "[]"));

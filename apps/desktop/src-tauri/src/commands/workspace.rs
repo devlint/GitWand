@@ -11,7 +11,7 @@
 //!
 //! See `src/git/libgit2.rs` for the per-repo helpers used here.
 
-use crate::commands::github_api;
+use crate::commands::{gh, github_api};
 use crate::git::*;
 use crate::types::*;
 use rayon::prelude::*;
@@ -203,15 +203,16 @@ pub(crate) async fn workspace_prs_all(repos: Vec<WorkspaceRepo>) -> Vec<Workspac
         // on the background Launchpad poller (~60 s), so the extra cost is
         // acceptable. `statusCheckRollup`/`reviewDecision`/`reviewRequests`/
         // `comments` are exactly the diff inputs.
-        let output = hidden_cmd("gh")
-            .args([
-                "pr", "list",
-                "--state", "open",
-                "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,labels,assignees,reviewRequests,reviewDecision,mergeStateStatus,statusCheckRollup,comments",
-                "--limit", "10",
-            ])
-            .current_dir(&repo_path)
-            .output();
+        let mut cmd = hidden_cmd("gh");
+        cmd.args([
+            "pr", "list",
+            "--state", "open",
+            "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,labels,assignees,reviewRequests,reviewDecision,mergeStateStatus,statusCheckRollup,comments",
+            "--limit", "10",
+        ]);
+        // The base repo, not `gh`'s remote-name guess (#298).
+        gh::push_repo_flag(&mut cmd, gh::gh_base_repo(&repo_path).as_ref());
+        let output = cmd.current_dir(&repo_path).output();
 
         match output {
             Err(e) => WorkspaceRepoPrs {
@@ -330,10 +331,11 @@ pub(crate) async fn workspace_issues_all(
                 _ => {} // "" or unknown = no extra filter
             }
 
-            let output = hidden_cmd("gh")
-                .args(&args)
-                .current_dir(&repo_path)
-                .output();
+            let mut cmd = hidden_cmd("gh");
+            cmd.args(&args);
+            // Issues live on `origin`, as on the REST path (#298).
+            gh::push_repo_flag(&mut cmd, gh::gh_origin_repo(&repo_path).as_ref());
+            let output = cmd.current_dir(&repo_path).output();
 
             match output {
                 Err(e) => WorkspaceRepoIssues {
