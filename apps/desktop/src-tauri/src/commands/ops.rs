@@ -4870,16 +4870,18 @@ pub(crate) async fn pr_files(cwd: String, number: i64) -> Result<Vec<String>, St
     }) {
         return r;
     }
-    let output = hidden_cmd("gh")
-        .args([
-            "pr",
-            "view",
-            &number.to_string(),
-            "--json",
-            "files",
-            "--jq",
-            "[.files[].path]",
-        ])
+    // The base repo, not `gh`'s remote-name guess (#298).
+    let mut cmd = crate::commands::gh::gh_base_cmd(&cwd)?;
+    cmd.args([
+        "pr",
+        "view",
+        &number.to_string(),
+        "--json",
+        "files",
+        "--jq",
+        "[.files[].path]",
+    ]);
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run gh pr view: {}", e))?;
