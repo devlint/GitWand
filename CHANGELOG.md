@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.2] - 2026-11-16
+
 ### Fixed
 
 - **GitHub CLI: pull requests no longer target an `upstream` remote instead of `origin` (#298).** Without a GitHub token in Settings and without `gh repo set-default`, `gh` picks the repository by remote name, `upstream` before `origin`, so a clone with an unrelated `upstream` remote listed that repository's pull requests and opened new ones against it, which failed. Every `gh` call now names its repository: the parent when `origin` is a fork, else `origin`, as the token path already did (issues included: a fork's issues are its parent's); a new pull request goes to `origin` unless you choose the parent. If GitWand cannot tell whether `origin` is a fork, the pull request list and actions fail with the error instead of possibly showing or acting on a same-numbered pull request in the other repository. Merging still deletes the local branch when the repository it merges into is one of the clone's remotes; otherwise the merge leaves the local branch alone instead of failing after the pull request is merged. `origin` is read as `gh` reads remotes: SSH aliases from `~/.ssh/config` are resolved, any SSH user is accepted (`alice@github.com:…`), and a host counts only when it is github.com or one `gh` is signed in to, so a GitHub Enterprise `origin` keeps its host and goes to `gh` even with a github.com sign-in in Settings, which does not cover it. Reported by Pannboo.
@@ -1743,7 +1745,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.13.1...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.13.2...HEAD
+[3.13.2]: https://github.com/devlint/GitWand/compare/v3.13.1...v3.13.2
 [3.13.1]: https://github.com/devlint/GitWand/compare/v3.13.0...v3.13.1
 [3.13.0]: https://github.com/devlint/GitWand/compare/v3.12.5...v3.13.0
 [3.12.5]: https://github.com/devlint/GitWand/compare/v3.12.4...v3.12.5

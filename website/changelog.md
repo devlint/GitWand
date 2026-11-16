@@ -5,6 +5,12 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.13.2 — November 2026
+
+### Pull requests stay on your repository
+
+Without a GitHub token in Settings, GitWand goes through the GitHub CLI, which picks the repository by remote name and prefers `upstream` over `origin`. A clone with an unrelated `upstream` remote then listed that repository's pull requests, and creating one failed. Every `gh` call now names its repository, as the token path already did: the parent when `origin` is a fork, otherwise `origin` itself. A new pull request goes to `origin` unless you pick the parent, and merging still deletes the local branch. SSH aliases from `~/.ssh/config` and GitHub Enterprise remotes are read the way `gh` reads them. Reported by Pannboo (#298).
+
 ## v3.13.1 — November 2026
 
 ### The CI tab follows a running CI
