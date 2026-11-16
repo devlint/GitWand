@@ -240,7 +240,10 @@ pub(crate) fn with_rest_using<T>(
 
 /// Parse `(owner, repo)` from `git remote get-url origin` in `cwd`.
 ///
-/// Handles HTTPS and SSH GitHub remote URL formats.
+/// Same parser as the `gh` path (`gh::gh_repo_from_remote_url`), so both
+/// read `origin` alike (HTTPS, SSH, SSH aliases, ports). This REST path only
+/// talks to api.github.com: an `origin` on another host is an error, not a
+/// call to github.com for a same-named repo.
 fn owner_repo(cwd: &str) -> Result<(String, String), String> {
     let output = hidden_cmd("git")
         .args(["remote", "get-url", "origin"])
@@ -251,34 +254,19 @@ fn owner_repo(cwd: &str) -> Result<(String, String), String> {
         return Err("No 'origin' remote found in this repo.".to_string());
     }
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-    let path = if url.starts_with("git@") || url.contains("@github.com:") {
-        // git@github.com:owner/repo.git → owner/repo
-        url.split_once(':')
-            .map(|x| x.1)
-            .unwrap_or("")
-            .trim_end_matches(".git")
-            .to_string()
-    } else {
-        // https://github.com/owner/repo.git → owner/repo
-        url.trim_end_matches('/')
-            .trim_end_matches(".git")
-            .split_once("github.com/")
-            .map(|x| x.1)
-            .unwrap_or("")
-            .to_string()
-    };
-
-    let mut parts = path.splitn(2, '/');
-    let owner = parts.next().unwrap_or("").to_string();
-    let repo = parts.next().unwrap_or("").to_string();
-    if owner.is_empty() || repo.is_empty() {
+    let repo = super::gh::gh_repo_from_remote_url(&url)
+        .ok_or_else(|| format!("Could not parse GitHub owner/repo from remote URL: {}", url))?;
+    if let Some(host) = repo.enterprise_host() {
         return Err(format!(
-            "Could not parse GitHub owner/repo from remote URL: {}",
-            url
+            "origin is on {}, not github.com: the GitHub sign-in in Settings only covers github.com",
+            host
         ));
     }
-    Ok((owner, repo))
+    let (owner, name) = repo
+        .nwo
+        .split_once('/')
+        .ok_or_else(|| format!("Could not parse GitHub owner/repo from remote URL: {}", url))?;
+    Ok((owner.to_string(), name.to_string()))
 }
 
 /// Current branch name (`git rev-parse --abbrev-ref HEAD`).
