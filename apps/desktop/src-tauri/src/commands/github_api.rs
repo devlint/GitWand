@@ -260,11 +260,12 @@ fn owner_repo(cwd: &str) -> Result<(String, String), String> {
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let repo = super::gh::gh_repo_from_remote_url(&url)
         .ok_or_else(|| format!("Could not parse GitHub owner/repo from remote URL: {}", url))?;
-    // Unreachable through `with_rest`, which sends Enterprise origins to `gh`
-    // (`token_for_repo`); kept for direct callers.
+    // `with_rest` sends Enterprise origins to `gh` (`token_for_repo`), but the
+    // review-comment commands, which only speak REST, still get here with the
+    // `gh` token (`with_review_token`).
     if let Some(host) = repo.enterprise_host() {
         return Err(format!(
-            "origin is on {}, not github.com: the GitHub sign-in in Settings only covers github.com",
+            "origin is on {}: GitWand's GitHub REST requests only reach github.com",
             host
         ));
     }

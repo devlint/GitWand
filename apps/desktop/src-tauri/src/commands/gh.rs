@@ -1435,23 +1435,31 @@ fn gh_repo_from_url_with(
     })
 }
 
-/// `ssh -G` and `gh auth status` answers, per host, for the session.
-fn host_answer_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+/// How long a negative `ssh -G` / `gh auth status` answer is reused. A
+/// positive one is kept for the session; a negative one may be a timeout, an
+/// offline start or a `gh auth login` still to come, so it is asked again.
+const HOST_NEGATIVE_TTL: Duration = Duration::from_secs(60);
+
+type HostAnswerCache = HashMap<String, (Option<String>, Instant)>;
+
+fn host_answer_cache() -> &'static Mutex<HostAnswerCache> {
+    static CACHE: OnceLock<Mutex<HostAnswerCache>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn cached_host_answer(key: String, compute: impl FnOnce() -> Option<String>) -> Option<String> {
-    if let Some(hit) = host_answer_cache()
+    let hit = host_answer_cache()
         .lock()
         .ok()
-        .and_then(|m| m.get(&key).cloned())
-    {
-        return hit;
+        .and_then(|m| m.get(&key).cloned());
+    if let Some((answer, at)) = hit {
+        if answer.is_some() || at.elapsed() < HOST_NEGATIVE_TTL {
+            return answer;
+        }
     }
     let answer = compute();
     if let Ok(mut m) = host_answer_cache().lock() {
-        m.insert(key, answer.clone());
+        m.insert(key, (answer.clone(), Instant::now()));
     }
     answer
 }
@@ -1476,6 +1484,35 @@ fn ssh_resolved_host(host: &str) -> Option<String> {
     }
     cached_host_answer(format!("ssh:{}", host), || {
         let mut cmd = hidden_cmd("ssh");
+        // Only what `ssh` needs to find and read its config: no forge token
+        // (which `hidden_cmd` passes on) reaches it, nor a `Match exec`
+        // command it runs.
+        let path = cmd
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("PATH"))
+            .and_then(|(_, v)| v.map(|v| v.to_os_string()))
+            .or_else(|| std::env::var_os("PATH"));
+        cmd.env_clear();
+        if let Some(path) = path {
+            cmd.env("PATH", path);
+        }
+        for var in [
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "USERPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "SystemRoot",
+            "windir",
+            "TMPDIR",
+            "TEMP",
+            "TMP",
+        ] {
+            if let Some(v) = std::env::var_os(var) {
+                cmd.env(var, v);
+            }
+        }
         cmd.args(["-G", host]);
         let out = output_with_timeout(cmd, GH_PROBE_TIMEOUT)
             .ok()
@@ -1512,16 +1549,34 @@ pub(crate) fn gh_repo_from_remote_url(url: &str) -> Option<GhRepo> {
     gh_repo_from_url_with(url, ssh_resolved_host, gh_signed_in_to)
 }
 
+/// How long `gh_origin_repo` reuses its answer for a repo: one PR command
+/// resolves `origin` several times (token routing, the request path, the
+/// host), the Launchpad does it for every repo each minute, and `origin`
+/// practically never changes.
+const GH_ORIGIN_TTL: Duration = Duration::from_secs(30);
+
 /// The repo `origin` points at, or `None` when `origin` is missing or not a
 /// GitHub remote.
 pub(crate) fn gh_origin_repo(cwd: &str) -> Option<GhRepo> {
-    let out = hidden_cmd("git")
+    type OriginCache = HashMap<String, (Option<GhRepo>, Instant)>;
+    static CACHE: OnceLock<Mutex<OriginCache>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((repo, at)) = cache.lock().ok().and_then(|m| m.get(cwd).cloned()) {
+        if at.elapsed() < GH_ORIGIN_TTL {
+            return repo;
+        }
+    }
+    let repo = hidden_cmd("git")
         .args(["remote", "get-url", "origin"])
         .current_dir(cwd)
         .output()
         .ok()
-        .filter(|o| o.status.success())?;
-    gh_repo_from_remote_url(&String::from_utf8_lossy(&out.stdout))
+        .filter(|o| o.status.success())
+        .and_then(|out| gh_repo_from_remote_url(&String::from_utf8_lossy(&out.stdout)));
+    if let Ok(mut m) = cache.lock() {
+        m.insert(cwd.to_string(), (repo.clone(), Instant::now()));
+    }
+    repo
 }
 
 /// Whether `origin` is on a GitHub Enterprise host — which the Settings
@@ -1530,10 +1585,12 @@ pub(crate) fn origin_is_enterprise(cwd: &str) -> bool {
     gh_origin_repo(cwd).is_some_and(|r| r.enterprise_host().is_some())
 }
 
-/// Whether one of `cwd`'s remotes points at `repo`.
+/// Whether one of `cwd`'s remotes points at `repo`. Read from `git remote -v`,
+/// which applies `url.*.insteadOf` rewrites as `git remote get-url` and `gh`
+/// do (raw `remote.*.url` config does not).
 fn gh_repo_is_a_remote(cwd: &str, repo: &GhRepo) -> bool {
     let Ok(out) = hidden_cmd("git")
-        .args(["config", "--get-regexp", r"^remote\..*\.url$"])
+        .args(["remote", "-v"])
         .current_dir(cwd)
         .output()
     else {
@@ -1541,8 +1598,10 @@ fn gh_repo_is_a_remote(cwd: &str, repo: &GhRepo) -> bool {
     };
     let want = repo.selector();
     String::from_utf8_lossy(&out.stdout).lines().any(|line| {
-        line.split_once(' ')
-            .and_then(|(_, url)| gh_repo_from_remote_url(url))
+        // `<name>\t<url> (fetch|push)`
+        line.split_once('\t')
+            .and_then(|(_, rest)| rest.rsplit_once(' '))
+            .and_then(|(url, _)| gh_repo_from_remote_url(url))
             .is_some_and(|r| r.selector().eq_ignore_ascii_case(&want))
     })
 }
@@ -1825,11 +1884,13 @@ fn gh_viewer_can_merge_and_auto_merge_support(
 /// Extract `owner/repo` from a GitHub PR url such as
 /// `https://github.com/owner/repo/pull/123`.
 fn github_nwo_from_pr_url(url: &str) -> Option<String> {
-    let rest = url.split("github.com/").nth(1)?;
-    let mut parts = rest.split('/');
+    // `https://<host>/owner/repo/pull/N`, github.com or an Enterprise host
+    // (whose `gh api` host comes from `origin`, see `gh_api_cmd`).
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let mut parts = rest.split('/').skip(1);
     let owner = parts.next().filter(|s| !s.is_empty())?;
     let repo = parts.next().filter(|s| !s.is_empty())?;
-    Some(format!("{}/{}", owner, repo))
+    (parts.next() == Some("pull")).then(|| format!("{}/{}", owner, repo))
 }
 
 fn gh_pr_diff_inner(cwd: String, number: i64) -> Result<String, String> {
@@ -2926,6 +2987,63 @@ mod repo_targeting_tests {
             gh_origin_repo(&repo.cwd()).map(|r| r.selector()),
             Some("me/project".to_string())
         );
+    }
+
+    #[test]
+    fn a_pr_url_gives_its_repo_on_any_host() {
+        assert_eq!(
+            github_nwo_from_pr_url("https://github.com/up/project/pull/12"),
+            Some("up/project".to_string())
+        );
+        assert_eq!(
+            github_nwo_from_pr_url("https://github.acme.corp/team/app/pull/5"),
+            Some("team/app".to_string())
+        );
+        assert_eq!(
+            github_nwo_from_pr_url("https://github.com/up/project"),
+            None
+        );
+        assert_eq!(github_nwo_from_pr_url(""), None);
+    }
+
+    #[test]
+    fn a_positive_host_answer_is_kept_and_a_negative_one_asked_again() {
+        let kept = "test:kept-298".to_string();
+        assert_eq!(
+            cached_host_answer(kept.clone(), || Some("a".into())),
+            Some("a".into())
+        );
+        assert_eq!(
+            cached_host_answer(kept, || Some("b".into())),
+            Some("a".into())
+        );
+
+        let fresh_miss = "test:miss-298".to_string();
+        assert_eq!(cached_host_answer(fresh_miss.clone(), || None), None);
+        // Within the negative TTL the miss is reused…
+        assert_eq!(cached_host_answer(fresh_miss, || Some("late".into())), None);
+        // …and once it is older, asked again.
+        let stale_miss = "test:stale-298".to_string();
+        let old = Instant::now()
+            .checked_sub(HOST_NEGATIVE_TTL + Duration::from_secs(1))
+            .unwrap();
+        host_answer_cache()
+            .lock()
+            .unwrap()
+            .insert(stale_miss.clone(), (None, old));
+        assert_eq!(
+            cached_host_answer(stale_miss, || Some("now".into())),
+            Some("now".into())
+        );
+    }
+
+    #[test]
+    fn a_remote_is_read_after_its_insteadof_rewrite() {
+        let repo = TempRepo::new("insteadof", &[]);
+        repo.git(&["config", "url.https://github.com/.insteadOf", "gh:"]);
+        repo.git(&["remote", "add", "origin", "gh:me/project"]);
+        let me = gh_repo("https://github.com/me/project", &[]);
+        assert!(gh_repo_is_a_remote(&repo.cwd(), &me));
     }
 
     #[test]

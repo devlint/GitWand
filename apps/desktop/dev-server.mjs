@@ -1097,16 +1097,21 @@ function getGithubToken() {
 }
 
 /** `HostName` that `ssh` connects to for `host` (`ssh -G` reads the config
- *  without connecting), cached per host; null when `ssh` can't be asked.
- *  Mirrors `ssh_resolved_host` in `commands/gh.rs`. */
+ *  without connecting); null when `ssh` can't be asked. A positive answer is
+ *  kept, a negative one asked again after a minute. `ssh` gets only what it
+ *  needs to read its config, no token. Mirrors `ssh_resolved_host` in
+ *  `commands/gh.rs`. */
 const sshHostCache = new Map();
+const SSH_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SystemRoot", "windir", "TMPDIR", "TEMP", "TMP"];
 function sshResolvedHost(host) {
   if (!/^[A-Za-z0-9._-]+$/.test(host) || host.startsWith("-")) return null;
-  if (sshHostCache.has(host)) return sshHostCache.get(host);
-  const r = spawnSync("ssh", ["-G", host], { encoding: "utf-8" });
+  const hit = sshHostCache.get(host);
+  if (hit && (hit.resolved || Date.now() - hit.at < 60_000)) return hit.resolved;
+  const env = Object.fromEntries(SSH_ENV_KEYS.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
+  const r = spawnSync("ssh", ["-G", host], { encoding: "utf-8", env, timeout: 5000 });
   const line = r.status === 0 ? (r.stdout || "").split("\n").find((l) => l.startsWith("hostname ")) : null;
   const resolved = line ? line.slice("hostname ".length).trim() || null : null;
-  sshHostCache.set(host, resolved);
+  sshHostCache.set(host, { resolved, at: Date.now() });
   return resolved;
 }
 
@@ -1132,7 +1137,7 @@ function githubNwoFromUrl(rawUrl) {
   const isSsh = scheme ? /ssh/i.test(url.slice(0, url.indexOf("://"))) : true;
   if (isSsh && !isGithubCom(host)) host = sshResolvedHost(host)?.toLowerCase() ?? host;
   if (!isGithubCom(host)) return null;
-  const m = path.replace(/\/+$/, "").replace(/\.git$/, "").match(/^([^/]+)\/([^/]+)$/);
+  const m = path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "").match(/^([^/]+)\/([^/]+)$/);
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
@@ -1156,57 +1161,47 @@ function getRepoNwo(cwd) {
   return githubNwoFromUrl(r.stdout);
 }
 
-/** Fork parent per origin (null: not a fork), with its fetch time. Only
- *  answers are cached, for 10 minutes — mirrors `gh_fork_parent` in
- *  `commands/gh.rs`. */
-const ghForkParentCache = new Map();
-
-/** The base repo of `cwd` for `gh` PR commands: the fork parent when origin is
- *  a fork, else origin — `gh_base_repo` in `commands/gh.rs`. null without a
- *  github.com origin (then `gh` chooses, as before #298). Throws when the fork
- *  lookup fails rather than guess: a PR number from the parent's list sent to
- *  the fork would act on a different pull request. */
-function ghBaseNwo(cwd) {
-  const origin = getRepoNwo(cwd);
-  if (!origin) return null;
-  const hit = ghForkParentCache.get(origin);
-  if (hit && Date.now() - hit.at < 600_000) return hit.parent ?? origin;
-  const r = spawnSync(GH, ["repo", "view", origin, "--json", "isFork,parent"], { cwd, encoding: "utf-8" });
-  if (r.status !== 0) {
-    throw new Error(`gh repo view ${origin} failed: ${(r.stderr || "").trim()}`);
-  }
-  const v = JSON.parse(r.stdout);
-  const p = v.isFork ? v.parent : null;
-  const parent = p?.owner?.login && p?.name ? `${p.owner.login}/${p.name}` : null;
-  ghForkParentCache.set(origin, { parent, at: Date.now() });
-  return parent ?? origin;
+/** The repo a `gh` command about PR `number` must target in the dev-server:
+ *  where that number comes from. The dev-server lists `origin`'s pull requests
+ *  (/api/gh-list-prs) and its per-PR routes resolve them with `resolvePrNwo`
+ *  (origin, then the fork parent when the PR is not on origin), so the `gh`
+ *  routes do the same. (The Tauri build lists the fork parent's for a fork:
+ *  `gh_base_repo` in `commands/gh.rs`, consistently with its own list.)
+ *  Without a token, origin. null without a github.com origin: `gh` chooses. */
+async function ghPrNwo(cwd, number) {
+  const token = getGithubToken();
+  return token ? resolvePrNwo(cwd, number, token) : getRepoNwo(cwd);
 }
 
-/** Environment for a `gh` PR command: `GH_REPO` names the base repo
- *  (`ghBaseNwo`). Left to itself, `gh` picks an `upstream` remote over
- *  `origin`, even an unrelated one (#298). `GH_REPO` rather than `--repo`, as
- *  in `commands/gh.rs` (`gh_cmd`): `gh pr merge` skips deleting the local
- *  branch whenever `--repo` is given. */
-function ghPrEnv(cwd) {
-  const nwo = ghBaseNwo(cwd);
-  return nwo ? { ...process.env, GH_REPO: nwo } : process.env;
+/** `GH_REPO` (and `GH_HOST`, so a user's `GH_HOST` cannot redirect it) for a
+ *  github.com repo — `gh_cmd` in `commands/gh.rs`. `GH_REPO` rather than
+ *  `--repo`: `gh pr merge` skips deleting the local branch whenever `--repo` is
+ *  given. Left to itself, `gh` picks an `upstream` remote over `origin`, even
+ *  an unrelated one (#298). */
+function ghRepoEnv(nwo) {
+  return nwo ? { ...process.env, GH_REPO: nwo, GH_HOST: "github.com" } : process.env;
+}
+
+async function ghPrEnv(cwd, number) {
+  return ghRepoEnv(await ghPrNwo(cwd, number));
 }
 
 /** `{ args, env }` for `gh pr merge …` — `gh_merge_cmd` in `commands/gh.rs`.
  *  `GH_REPO` keeps gh's local cleanup, but that cleanup needs a remote for
- *  the base repo (looked up after the merge, so its absence fails an already
- *  merged PR); for a base repo that is not a remote, `--repo`, which skips it. */
-function ghMergeSpawn(cwd, args) {
-  const nwo = ghBaseNwo(cwd);
+ *  the target repo (looked up after the merge, so its absence fails an already
+ *  merged PR); for a target that is not a remote, `--repo`, which skips it.
+ *  Remotes are read from `git remote -v`, which applies `insteadOf`. */
+async function ghMergeSpawn(cwd, number, args) {
+  const nwo = await ghPrNwo(cwd, number);
   if (!nwo) return { args, env: process.env };
-  const r = spawnSync(GIT, ["config", "--get-regexp", "^remote\\..*\\.url$"], { cwd, encoding: "utf-8" });
+  const r = spawnSync(GIT, ["remote", "-v"], { cwd, encoding: "utf-8" });
   const isRemote = (r.stdout || "").split("\n").some((line) => {
-    const sp = line.indexOf(" ");
-    return sp > 0 && githubNwoFromUrl(line.slice(sp + 1))?.toLowerCase() === nwo.toLowerCase();
+    const url = line.split("\t")[1]?.replace(/ \((fetch|push)\)$/, "");
+    return url && githubNwoFromUrl(url)?.toLowerCase() === nwo.toLowerCase();
   });
   return isRemote
-    ? { args, env: { ...process.env, GH_REPO: nwo } }
-    : { args: [...args, "--repo", nwo], env: process.env };
+    ? { args, env: ghRepoEnv(nwo) }
+    : { args: [...args, "--repo", nwo], env: { ...process.env, GH_HOST: "github.com" } };
 }
 
 /** Cache of resolved PR repo nwo, keyed by `<origin>#<number>`. The repo a PR
@@ -6925,7 +6920,7 @@ async function handleRequest(req, res) {
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
-        const spawn = ghMergeSpawn(resolve(cwd), ["pr", "merge", String(number), mergeFlag, "--delete-branch"]);
+        const spawn = await ghMergeSpawn(resolve(cwd), number, ["pr", "merge", String(number), mergeFlag, "--delete-branch"]);
         const r = spawnSync(GH, spawn.args, {
           cwd: resolve(cwd),
           env: spawn.env,
@@ -6952,7 +6947,7 @@ async function handleRequest(req, res) {
         const r = spawnSync(
           GH,
           ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch"],
-          { cwd: resolve(cwd), env: ghPrEnv(resolve(cwd)), encoding: "utf-8" },
+          { cwd: resolve(cwd), env: await ghPrEnv(resolve(cwd), number), encoding: "utf-8" },
         );
         if (r.status !== 0) {
           const detail = spawnFailureDetail(r, "gh pr merge --auto failed");
@@ -6971,7 +6966,7 @@ async function handleRequest(req, res) {
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
         const r = spawnSync(GH, ["pr", "merge", String(number), "--disable-auto"], {
           cwd: resolve(cwd),
-          env: ghPrEnv(resolve(cwd)),
+          env: await ghPrEnv(resolve(cwd), number),
           encoding: "utf-8",
         });
         if (r.status !== 0) {
@@ -8940,7 +8935,7 @@ async function handleRequest(req, res) {
         const raw = execFileSync(
           GH,
           ["pr", "view", prNumber, "--json", "files", "--jq", "[.files[].path]"],
-          { cwd: repoPath, env: ghPrEnv(repoPath), encoding: "utf-8" }
+          { cwd: repoPath, env: await ghPrEnv(repoPath, prNumber), encoding: "utf-8" }
         );
         return jsonResponse(req, res, JSON.parse(raw.trim() || "[]"));
       } catch (err) {
