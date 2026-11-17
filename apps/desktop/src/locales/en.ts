@@ -715,6 +715,7 @@ const en = {
 
   // ─── Commit context menu (v1.9) ─────────────────────────
   commitCtx: {
+    createIssue: "Create issue from commit…",
     checkout: "Checkout commit\u2026",
     checkoutBranch: "Checkout branch\u2026",
     checkoutHint: "Switch to this commit (detached HEAD)",
@@ -2714,6 +2715,37 @@ const en = {
   },
 
   // \u2500\u2500\u2500 In-app help view \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  createIssue: {
+    title: "New issue",
+    loading: "Checking where this issue can go…",
+    targetsFailed: "Could not read this repository on GitHub. Check your connection or your GitHub sign-in, then try again.",
+    noTarget: "Issues are turned off on this repository (and on its parent, if it is a fork).",
+    target: "Repository",
+    targetOrigin: "this repository",
+    targetParent: "parent of this fork",
+    issuesOff: "issues turned off",
+    titleLabel: "Title",
+    titlePlaceholder: "Short summary of the issue",
+    tabWrite: "Write",
+    tabPreview: "Preview",
+    bodyLabel: "Description",
+    bodyPlaceholder: "Describe the issue (Markdown supported)",
+    previewEmpty: "Nothing to preview",
+    labels: "Labels",
+    assignees: "Assignees",
+    milestone: "Milestone",
+    noMilestone: "No milestone",
+    discardConfirm: "Discard this issue? What you typed will be lost.",
+    cancel: "Cancel",
+    create: "Create issue",
+    creating: "Creating…",
+    submitHint: "⌘Enter to create",
+    toolbar: "New issue",
+    toolbarTitle: "Create a GitHub issue on this repository",
+    paletteLabel: "New GitHub issue",
+    created: "Issue #{0} created",
+    open: "Open",
+  },
   help: {
     title: "Help",
     close: "Close",
@@ -2753,6 +2785,7 @@ const en = {
       openRepo: "Open repository",
       settings: "Settings",
       commandPalette: "Command palette",
+      newIssue: "New issue",
       fetch: "Fetch",
       push: "Push",
       newBranch: "New branch",

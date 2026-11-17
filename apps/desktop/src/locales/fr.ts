@@ -708,6 +708,7 @@ const fr: Locale = {
 
   // ─── Commit context menu (v1.9) ─────────────────────────
   commitCtx: {
+    createIssue: "Créer une issue depuis ce commit…",
     checkout: "Checkout ce commit…",
     checkoutBranch: "Checkout la branche…",
     checkoutHint: "Basculer sur ce commit (HEAD détaché)",
@@ -2683,6 +2684,37 @@ const fr: Locale = {
   },
 
   // ─── Vue d'aide intégrée ─────────────────────────────────
+  createIssue: {
+    title: "Nouvelle issue",
+    loading: "Recherche du dépôt cible…",
+    targetsFailed: "Impossible de lire ce dépôt sur GitHub. Vérifiez votre connexion ou votre compte GitHub, puis réessayez.",
+    noTarget: "Les issues sont désactivées sur ce dépôt (et sur son parent, s’il s’agit d’un fork).",
+    target: "Dépôt",
+    targetOrigin: "ce dépôt",
+    targetParent: "parent de ce fork",
+    issuesOff: "issues désactivées",
+    titleLabel: "Titre",
+    titlePlaceholder: "Résumé court de l’issue",
+    tabWrite: "Écrire",
+    tabPreview: "Aperçu",
+    bodyLabel: "Description",
+    bodyPlaceholder: "Décrivez l’issue (Markdown accepté)",
+    previewEmpty: "Rien à prévisualiser",
+    labels: "Labels",
+    assignees: "Assignés",
+    milestone: "Milestone",
+    noMilestone: "Aucune milestone",
+    discardConfirm: "Abandonner cette issue ? Le texte saisi sera perdu.",
+    cancel: "Annuler",
+    create: "Créer l’issue",
+    creating: "Création…",
+    submitHint: "⌘Entrée pour créer",
+    toolbar: "Nouvelle issue",
+    toolbarTitle: "Créer une issue GitHub sur ce dépôt",
+    paletteLabel: "Nouvelle issue GitHub",
+    created: "Issue #{0} créée",
+    open: "Ouvrir",
+  },
   help: {
     title: "Aide",
     close: "Fermer",
@@ -2722,6 +2754,7 @@ const fr: Locale = {
       openRepo: "Ouvrir un dépôt",
       settings: "Paramètres",
       commandPalette: "Palette de commandes",
+      newIssue: "Nouvelle issue",
       fetch: "Fetch",
       push: "Push",
       newBranch: "Nouvelle branche",
