@@ -131,6 +131,8 @@ const props = defineProps<{
   stashCount?: number;
   /** Submodules with new upstream commits — drives the badge on the Submodules button. */
   submoduleUpdateCount?: number;
+  /** The repository can take a new GitHub issue (#301). */
+  canCreateIssue?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -190,6 +192,8 @@ const emit = defineEmits<{
   openStash: [];
   openTags: [];
   openReleaseNotes: [];
+  /** "New issue" (#301). */
+  openNewIssue: [];
   /** v3.8: the rewind popover's footer link opens the full Time Machine. */
   openTimeMachine: [];
   discardAll: [];
@@ -660,7 +664,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           class="btn btn--secondary header-action-btn"
           :class="{ 'header-action-btn--icon': isCollapsed('stash') }"
           data-collapse-key="stash"
-          data-collapse-order="5"
+          data-collapse-order="6"
           v-tooltip="iconTooltip('stash', t('stash.title'))"
           :aria-label="t('stash.title')"
           @click="emit('openStash')"
@@ -679,7 +683,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           class="btn btn--secondary header-action-btn"
           :class="{ 'header-action-btn--icon': isCollapsed('tags') }"
           data-collapse-key="tags"
-          data-collapse-order="4"
+          data-collapse-order="5"
           v-tooltip="iconTooltip('tags', t('tags.title'))"
           :aria-label="t('tags.title')"
           @click="emit('openTags')"
@@ -696,7 +700,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           class="btn btn--secondary header-action-btn"
           :class="{ 'header-action-btn--icon': isCollapsed('worktrees') }"
           data-collapse-key="worktrees"
-          data-collapse-order="3"
+          data-collapse-order="4"
           v-tooltip="iconTooltip('worktrees', t('worktree.title'))"
           :aria-label="t('worktree.title')"
           @click="emit('openWorktrees')"
@@ -715,7 +719,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           class="btn btn--secondary header-action-btn"
           :class="{ 'header-action-btn--icon': isCollapsed('submodules') }"
           data-collapse-key="submodules"
-          data-collapse-order="2"
+          data-collapse-order="3"
           v-tooltip="iconTooltip('submodules', t('submodule.title'))"
           :aria-label="t('submodule.title')"
           @click="emit('openSubmodules')"
@@ -726,6 +730,24 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           </svg>
           <span class="header-action-btn__label">{{ t('submodule.title') }}</span>
           <span v-if="(submoduleUpdateCount ?? 0) > 0" class="header-action-btn__count">{{ submoduleUpdateCount }}</span>
+        </button>
+
+        <!-- New issue button (#301) -->
+        <button
+          v-if="canCreateIssue"
+          class="btn btn--secondary header-action-btn"
+          :class="{ 'header-action-btn--icon': isCollapsed('newIssue') }"
+          data-collapse-key="newIssue"
+          data-collapse-order="2"
+          v-tooltip="iconTooltip('newIssue', t('createIssue.toolbarTitle'))"
+          :aria-label="t('createIssue.toolbarTitle')"
+          @click="emit('openNewIssue')"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/>
+            <circle cx="8" cy="8" r="1.3" fill="currentColor"/>
+          </svg>
+          <span class="header-action-btn__label">{{ t('createIssue.toolbar') }}</span>
         </button>
 
         <!-- Release notes button -->

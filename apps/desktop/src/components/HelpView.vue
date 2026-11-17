@@ -47,6 +47,7 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   { action: "help.keyboardShortcuts.openRepo",    keys: ["⌘O"] },
   { action: "help.keyboardShortcuts.settings",    keys: ["⌘,"] },
   { action: "help.keyboardShortcuts.commandPalette", keys: ["⌘K"] },
+  { action: "help.keyboardShortcuts.newIssue", keys: ["⌘⇧I"] },
   { action: "help.keyboardShortcuts.fetch",       keys: ["⌘⇧F"] },
   { action: "help.keyboardShortcuts.push",        keys: ["⌘P"] },
   { action: "help.keyboardShortcuts.newBranch",   keys: ["⌘⇧B"] },

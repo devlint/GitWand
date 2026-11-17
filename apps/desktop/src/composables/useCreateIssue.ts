@@ -56,8 +56,8 @@ function message(e: unknown): string {
 }
 
 export function useCreateIssue(deps: {
-  cwd: Ref<string | null>;
-  provider: Ref<ForgeProvider | null>;
+  cwd: Readonly<Ref<string | null>>;
+  provider: Readonly<Ref<ForgeProvider | null>>;
   onCreated: (issue: CreatedIssue) => void;
 }): CreateIssueApi {
   const isOpen = ref(false);
