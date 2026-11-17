@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { IS_MAC } from "../utils/platform";
 /**
  * HelpView — full-screen in-app help panel.
  *
@@ -48,7 +49,7 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   { action: "help.keyboardShortcuts.openRepo",    keys: ["⌘O"] },
   { action: "help.keyboardShortcuts.settings",    keys: ["⌘,"] },
   { action: "help.keyboardShortcuts.commandPalette", keys: ["⌘K"] },
-  { action: "help.keyboardShortcuts.newIssue", keys: [newIssueShortcutLabel(navigator.platform.toLowerCase().includes("mac"))] },
+  { action: "help.keyboardShortcuts.newIssue", keys: [newIssueShortcutLabel(IS_MAC)] },
   { action: "help.keyboardShortcuts.fetch",       keys: ["⌘⇧F"] },
   { action: "help.keyboardShortcuts.push",        keys: ["⌘P"] },
   { action: "help.keyboardShortcuts.newBranch",   keys: ["⌘⇧B"] },

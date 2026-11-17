@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { IS_MAC } from "../utils/platform";
 /**
  * "New issue" (#301) — a modal over whatever the user was looking at, so the
  * commit or the diff stays on screen behind it. All state lives in
@@ -20,7 +21,7 @@ type AskConfirm = (o: { title: string; message: string; confirmLabel?: string; d
 const askConfirm = inject<AskConfirm>("askConfirm", async (o) => window.confirm(o.message));
 
 const tab = ref<"write" | "preview">("write");
-const submitKeys = navigator.platform.toLowerCase().includes("mac") ? "⌘Enter" : "Ctrl+Enter";
+const submitKeys = IS_MAC ? "⌘Enter" : "Ctrl+Enter";
 const imagesShown = ref(false);
 const titleInput = ref<HTMLInputElement | null>(null);
 
@@ -98,12 +99,10 @@ function onMilestone(e: Event) {
   >
     <div class="ci" @keydown="onKeydown">
       <p v-if="form.loading.value" class="ci-status">{{ t("createIssue.loading") }}</p>
-      <p v-else-if="form.targetsFailed.value" class="ci-status ci-status--error" role="alert">
-        {{ t("createIssue.targetsFailed") }}
-      </p>
-      <p v-if="!form.loading.value && form.targetsFailed.value && form.targetsError.value" class="ci-status ci-detail">
-        {{ form.targetsError.value }}
-      </p>
+      <template v-else-if="form.targetsFailed.value">
+        <p class="ci-status ci-status--error" role="alert">{{ t("createIssue.targetsFailed") }}</p>
+        <p v-if="form.targetsError.value" class="ci-status ci-detail">{{ form.targetsError.value }}</p>
+      </template>
       <p v-else-if="!form.repo.value" class="ci-status" role="alert">
         {{ t("createIssue.noTarget") }}
       </p>

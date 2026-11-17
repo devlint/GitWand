@@ -93,6 +93,21 @@ describe("CreateIssueModal", () => {
     expect(document.querySelector<HTMLInputElement>("#ci-title")!.maxLength).toBe(256);
   });
 
+  it("shows only the loading line while the targets are read", async () => {
+    const pending = new Promise<IssueTargets>(() => {});
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const p = { name: "github", issueTargets: vi.fn(() => pending) } as unknown as ForgeProvider;
+    const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(p), onCreated: vi.fn() });
+    app = createApp(CreateIssueModal);
+    app.provide(CREATE_ISSUE_KEY, form);
+    app.mount(host);
+    void form.open();
+    await flush();
+    expect(document.body.textContent).toContain("createIssue.loading");
+    expect(document.body.textContent).not.toContain("createIssue.noTarget");
+  });
+
   it("shows no target selector when there is one target", async () => {
     await mount();
     expect(document.querySelectorAll("input[name=ci-target]")).toHaveLength(0);

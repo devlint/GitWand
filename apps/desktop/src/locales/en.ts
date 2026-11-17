@@ -2741,7 +2741,7 @@ const en = {
     create: "Create issue",
     creating: "Creating…",
     submitHint: "{0} to create",
-    maybeCreated: "The request timed out, but GitHub may have created the issue. Check before creating it again.",
+    maybeCreated: "The request failed after it was sent: GitHub may have created the issue. Check before creating it again.",
     checkOnGitHub: "Check on GitHub",
     createAnyway: "Create anyway",
     toolbar: "New issue",

@@ -2701,7 +2701,7 @@ const ptBR: Locale = {
     create: "Criar issue",
     creating: "Criando…",
     submitHint: "{0} para criar",
-    maybeCreated: "A solicitação expirou, mas o GitHub pode ter criado a issue. Verifique antes de criá-la de novo.",
+    maybeCreated: "A solicitação falhou depois de enviada: o GitHub pode ter criado a issue. Verifique antes de criá-la de novo.",
     checkOnGitHub: "Verificar no GitHub",
     createAnyway: "Criar mesmo assim",
     toolbar: "Nova issue",

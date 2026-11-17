@@ -101,3 +101,16 @@ export function devMilestonesFrom(items) {
     .filter((m) => Number.isInteger(m?.number) && nonEmpty(m.title))
     .map((m) => ({ number: m.number, title: m.title, dueOn: nonEmpty(m.due_on) }));
 }
+
+/** Prefixed (as `MAY_HAVE_BEEN_CREATED` in Rust) when GitHub may have filed the issue. */
+export const MAY_HAVE_BEEN_CREATED = "[may-have-been-created] ";
+
+/**
+ * The create route's error for a failed POST answer, as `create_issue_inner`
+ * words it: a 5xx after sending may have created the issue (marked), a 4xx is
+ * GitHub's refusal.
+ */
+export function devCreateFailure(status, json) {
+  const msg = devGithubError(status, json);
+  return status >= 500 ? MAY_HAVE_BEEN_CREATED + msg : msg;
+}

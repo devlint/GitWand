@@ -94,11 +94,12 @@ export interface CreateIssueApi {
   submitting: Ref<boolean>;
   error: Ref<string | null>;
   /**
-   * The create request timed out: GitHub may have filed the issue anyway.
+   * The create failed after it was sent (a timeout, a dropped connection, a
+   * 5xx): GitHub may have filed the issue anyway.
    * Create stays off until the user checks, or chooses to send it again.
    */
   outcomeUnknown: Ref<boolean>;
-  /** Send the issue again after a timeout (the user checked GitHub). */
+  /** Send the issue again after an unknown outcome (the user checked GitHub). */
   retryAnyway(): void;
   /** Something was typed or picked since the form opened. */
   dirty: ComputedRef<boolean>;
@@ -324,6 +325,7 @@ export function useCreateIssue(deps: {
 
   function retryAnyway() {
     outcomeUnknown.value = false;
+    error.value = null;
   }
 
   function close() {
@@ -355,8 +357,6 @@ export function useCreateIssue(deps: {
     } catch (e) {
       if (gen !== generation) return;
       error.value = message(e);
-      // A timeout (curl exit 28, gh killed) after the request left: GitHub
-      // may have created the issue. A plain retry could file it twice.
       // The backend marks a create that may have reached GitHub (a timeout
       // after sending): a plain retry could file the issue twice.
       outcomeUnknown.value = error.value.startsWith(MAY_HAVE_BEEN_CREATED);

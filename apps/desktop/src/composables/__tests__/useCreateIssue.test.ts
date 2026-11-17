@@ -350,6 +350,7 @@ describe("useCreateIssue", () => {
     expect(api.canSubmit.value).toBe(false);
     api.retryAnyway();
     expect(api.canSubmit.value).toBe(true);
+    expect(api.error.value).toBeNull();
     await api.submit();
     expect(onCreated).toHaveBeenCalledWith({ number: 3, url: "u" });
   });

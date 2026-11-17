@@ -2701,7 +2701,7 @@ const es: Locale = {
     create: "Crear issue",
     creating: "Creando…",
     submitHint: "{0} para crear",
-    maybeCreated: "La solicitud expiró, pero GitHub puede haber creado la issue. Compruébalo antes de crearla de nuevo.",
+    maybeCreated: "La solicitud falló después de enviarse: GitHub puede haber creado la issue. Compruébalo antes de crearla de nuevo.",
     checkOnGitHub: "Comprobar en GitHub",
     createAnyway: "Crear de todos modos",
     toolbar: "Nueva issue",

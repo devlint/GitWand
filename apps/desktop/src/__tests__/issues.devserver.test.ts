@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom } from "../../dev-issues.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,
@@ -107,5 +107,14 @@ describe("devIssueTargetsFrom — archived", () => {
     const t = devIssueTargetsFrom({ ...origin(true, false), archived: true });
     expect(t.targets[0].hasIssues).toBe(false);
     expect(t.defaultRepo).toBeNull();
+  });
+});
+
+describe("devCreateFailure", () => {
+  it("marks a 5xx after the POST as 'may have been created', like the Rust create", () => {
+    expect(devCreateFailure(502, { message: "Server Error" })).toBe("[may-have-been-created] GitHub API error (502): Server Error");
+  });
+  it("keeps a refusal a plain error", () => {
+    expect(devCreateFailure(422, { message: "Validation Failed" })).toBe("GitHub API error (422): Validation Failed");
   });
 });

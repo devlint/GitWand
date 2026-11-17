@@ -2710,7 +2710,7 @@ const fr: Locale = {
     create: "Créer l’issue",
     creating: "Création…",
     submitHint: "{0} pour créer",
-    maybeCreated: "La requête a expiré, mais GitHub a peut-être créé l’issue. Vérifiez avant de la recréer.",
+    maybeCreated: "La requête a échoué après son envoi : GitHub a peut-être créé l’issue. Vérifiez avant de la recréer.",
     checkOnGitHub: "Vérifier sur GitHub",
     createAnyway: "Créer quand même",
     toolbar: "Nouvelle issue",

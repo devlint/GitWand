@@ -144,7 +144,8 @@ const TARGETS_TTL: Duration = Duration::from_secs(5 * 60);
 /// The Settings token for the issue commands, read from the keychain at most
 /// every 30 s: opening the form runs the targets read and three picker
 /// commands at once, and each keychain read is slow (and may prompt on
-/// macOS). A sign-out is seen within 30 s.
+/// macOS). A sign-out is seen within 30 s; a sign-in at once (no token is
+/// never cached).
 fn issue_token() -> Option<String> {
     /// The token read (or its absence) and when.
     type TokenRead = (Option<String>, Instant);
@@ -158,7 +159,8 @@ fn issue_token() -> Option<String> {
         }
     }
     let tok = settings_github_token();
-    if let Ok(mut guard) = cache.lock() {
+    // Only a token is kept: a sign-in from Settings is seen on the next call.
+    if let (Some(_), Ok(mut guard)) = (&tok, cache.lock()) {
         *guard = Some((tok.clone(), Instant::now()));
     }
     tok
@@ -339,14 +341,23 @@ pub(crate) const MAY_HAVE_BEEN_CREATED: &str = "[may-have-been-created] ";
 /// created behind it). A connect timeout or an unresolved host means nothing
 /// reached GitHub; a 4xx is GitHub's refusal.
 fn post_may_have_landed(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    // curl (REST path).
     err.contains("Operation timed out")
-        || err.starts_with("gh api: timed out")
         || ["(exit 52)", "(exit 56)", "(exit 92)"]
             .iter()
             .any(|c| err.contains(c))
         || ["(500)", "(502)", "(503)", "(504)"]
             .iter()
             .any(|c| err.starts_with("GitHub API error ") && err.contains(c))
+        // `gh` (no Settings token): killed by its timeout, a 5xx without a
+        // JSON answer, a connection dropped mid-answer.
+        || err.starts_with("gh api: timed out")
+        || ["(http 500)", "(http 502)", "(http 503)", "(http 504)", "http 502", "http 504"]
+            .iter()
+            .any(|c| lower.contains(c))
+        || lower.contains("connection reset")
+        || lower.contains("unexpected eof")
 }
 
 fn create_issue_inner(cwd: &str, input: &CreateIssueInput) -> Result<CreatedIssue, String> {
@@ -405,12 +416,19 @@ pub(crate) fn api_get_pages(
     max_pages: u32,
 ) -> Result<Vec<serde_json::Value>, String> {
     fetch_pages(max_pages, |page| {
-        api_get(
-            cwd,
-            token,
-            repo,
-            &format!("{}?{}per_page=100&page={}", path, query, page),
-        )
+        let page_path = format!("{}?{}per_page=100&page={}", path, query, page);
+        // Lists (labels, people, milestones) go through the ETag cache: an
+        // unchanged page costs a 304 and no rate limit.
+        let cached = |tok: &str| rest_api_json_cached(&page_path, tok);
+        let attempt = if gh_origin_repo(cwd).is_some_and(|o| same_repo(&o, repo)) {
+            with_rest_using(cwd, token, cached)
+        } else {
+            with_rest_other_repo_using(cwd, &repo.nwo, token, cached)
+        };
+        match attempt {
+            Some(r) => r,
+            None => gh_api_on(cwd, repo, "GET", &page_path, None, Duration::from_secs(30)),
+        }
     })
 }
 
@@ -834,5 +852,20 @@ mod tests {
         })
         .unwrap();
         assert_eq!(asked, [1, 2]);
+    }
+
+    #[test]
+    fn gh_path_failures_after_sending_may_have_created_the_issue() {
+        for err in [
+            "gh api POST repos/o/r/issues: gh: Bad Gateway (HTTP 502)",
+            "gh api POST repos/o/r/issues: gh: HTTP 504",
+            "gh api POST repos/o/r/issues: Post \"https://api.github.com/repos/o/r/issues\": read tcp: connection reset by peer",
+            "gh api POST repos/o/r/issues: Post \"…\": unexpected EOF",
+        ] {
+            assert!(post_may_have_landed(err), "{err}");
+        }
+        assert!(!post_may_have_landed(
+            "gh api POST repos/o/r/issues: gh: Not Found (HTTP 404)"
+        ));
     }
 }

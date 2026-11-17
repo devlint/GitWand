@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom } from "./dev-issues.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -1290,8 +1290,12 @@ async function devIssueTargetsRead(nwo, token) {
   const origin = await resp.json();
   // As in Rust: the embedded parent may lack the viewer's permissions.
   if (origin.fork === true && origin.parent?.full_name) {
+    // As in Rust, a failed parent read keeps the copy embedded in origin's answer.
     const p = await githubFetch(`/repos/${origin.parent.full_name}`, token).catch(() => null);
-    if (p?.ok) origin.parent = await p.json();
+    if (p?.ok) {
+      const parent = await p.json().catch(() => null);
+      if (parent) origin.parent = parent;
+    }
   }
   return devIssueTargetsFrom(origin);
 }
@@ -5503,12 +5507,18 @@ async function handleRequest(req, res) {
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
         const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), input.repo);
         if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
-        const resp = await githubFetch(`/repos/${target.repo}/issues`, token, undefined, {
-          method: "POST",
-          body: JSON.stringify(built.payload),
-        });
+        let resp;
+        try {
+          resp = await githubFetch(`/repos/${target.repo}/issues`, token, undefined, {
+            method: "POST",
+            body: JSON.stringify(built.payload),
+          });
+        } catch (err) {
+          // The request may have left before the failure: as in Rust, say so.
+          return jsonResponse(req, res, { error: MAY_HAVE_BEEN_CREATED + err.message }, 502);
+        }
         const created = await resp.json().catch(() => ({}));
-        if (!resp.ok) return jsonResponse(req, res, { error: devGithubError(resp.status, created) }, resp.status);
+        if (!resp.ok) return jsonResponse(req, res, { error: devCreateFailure(resp.status, created) }, resp.status);
         return jsonResponse(req, res, { number: created.number, url: created.html_url || "" });
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);

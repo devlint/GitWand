@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { IS_MAC } from "./utils/platform";
 import { ref, computed, watch, onMounted, onUnmounted, provide, defineAsyncComponent, nextTick } from "vue";
 
 // ─── Eager imports — main views & shared building blocks ─────────────────────
@@ -2175,7 +2176,7 @@ const paletteActions = computed<PaletteAction[]>(() => {
   // Universal: always available
   out.push({ id: "new-tab", label: t("header.paletteNewTab") });
 
-  if (createIssue.available.value) out.push({ id: "new-issue", label: t("createIssue.paletteLabel"), hint: newIssueShortcutLabel(navigator.platform.toLowerCase().includes("mac")) });
+  if (createIssue.available.value) out.push({ id: "new-issue", label: t("createIssue.paletteLabel"), hint: newIssueShortcutLabel(IS_MAC) });
 
   // Theme toggle — label reflects the target mode (what you'll flip TO).
   out.push({
@@ -4174,7 +4175,7 @@ function onKeyDown(e: KeyboardEvent) {
   }
   if (
     createIssue.available.value &&
-    isNewIssueShortcut(e, navigator.platform.toLowerCase().includes("mac")) &&
+    isNewIssueShortcut(e, IS_MAC) &&
     // Not over another dialog (Settings, a confirm…).
     !document.querySelector('[aria-modal="true"]')
   ) {

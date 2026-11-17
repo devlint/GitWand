@@ -2711,7 +2711,7 @@ const zhCN: Locale = {
     create: "创建 Issue",
     creating: "正在创建…",
     submitHint: "{0} 创建",
-    maybeCreated: "请求超时，但 GitHub 可能已创建该 Issue。再次创建前请先确认。",
+    maybeCreated: "请求发出后失败：GitHub 可能已创建该 Issue。再次创建前请先确认。",
     checkOnGitHub: "在 GitHub 上查看",
     createAnyway: "仍然创建",
     toolbar: "新建 Issue",
