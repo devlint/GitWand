@@ -890,6 +890,7 @@ pub fn run() {
             commands::gh::gh_pr_freshness_signal,
             commands::gh::gh_create_pr,
             commands::gh::gh_list_reviewer_candidates,
+            commands::gh_issues::gh_issue_targets,
             commands::gh::gh_branches,
             commands::gh::gh_checkout_pr,
             commands::gh::gh_merge_pr,

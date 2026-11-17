@@ -446,6 +446,17 @@ fn etag_key(url: &str, token: &str) -> String {
 /// Sends `If-None-Match` when a cached ETag exists; a `304` serves the cached
 /// body without spending rate-limit quota. A `200` refreshes the cache from the
 /// response `ETag`. Falls back to a plain fetch when no ETag is returned.
+/// `method {API_BASE}/{path}` with `token`, for callers outside this module
+/// (`path` without a leading slash, e.g. `repos/o/r/labels`).
+pub(crate) fn rest_api_json(
+    method: &str,
+    path: &str,
+    token: &str,
+    body_json: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    api_json(method, &format!("{}/{}", API_BASE, path), token, body_json)
+}
+
 fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> {
     let (status, body) = get_cached_raw(url, token)?;
     if status >= 400 {

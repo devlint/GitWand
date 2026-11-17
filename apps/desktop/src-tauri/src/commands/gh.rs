@@ -1424,7 +1424,7 @@ impl GhRepo {
     }
 
     /// Another repository on the same host (a fork's parent).
-    fn sibling(&self, nwo: String) -> GhRepo {
+    pub(crate) fn sibling(&self, nwo: String) -> GhRepo {
         GhRepo {
             host_prefix: self.host_prefix.clone(),
             nwo,
@@ -2191,6 +2191,42 @@ fn gh_api_json_accept(
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
         return Ok(serde_json::Value::Array(Vec::new()));
+    }
+    serde_json::from_str(trimmed).map_err(|e| format!("parse gh api response: {}", e))
+}
+
+/// `gh api -X {method} {path}` on `repo`'s host, `stdin` sent as the request
+/// body (`--input -`) when given — never in argv, where any local user can read
+/// it. The answer parsed as JSON (`Null` when empty).
+pub(crate) fn gh_api_on(
+    cwd: &str,
+    repo: &GhRepo,
+    method: &str,
+    path: &str,
+    stdin: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let mut cmd = gh_host_cmd(Some(repo));
+    cmd.args(["api", "-X", method, path]).current_dir(cwd);
+    let output = match stdin {
+        Some(body) => {
+            cmd.args(["--input", "-"]);
+            super::ai::output_with_stdin(cmd, body)
+        }
+        None => output_with_timeout(cmd, GH_TIMEOUT),
+    }
+    .map_err(|e| format!("gh api: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh api {} {}: {}",
+            method,
+            path,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Ok(serde_json::Value::Null);
     }
     serde_json::from_str(trimmed).map_err(|e| format!("parse gh api response: {}", e))
 }
