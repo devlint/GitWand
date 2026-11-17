@@ -101,6 +101,9 @@ function onMilestone(e: Event) {
       <p v-else-if="form.targetsFailed.value" class="ci-status ci-status--error" role="alert">
         {{ t("createIssue.targetsFailed") }}
       </p>
+      <p v-if="!form.loading.value && form.targetsFailed.value && form.targetsError.value" class="ci-status ci-detail">
+        {{ form.targetsError.value }}
+      </p>
       <p v-else-if="!form.repo.value" class="ci-status" role="alert">
         {{ t("createIssue.noTarget") }}
       </p>
@@ -119,7 +122,7 @@ function onMilestone(e: Event) {
               name="ci-target"
               :value="target.repo"
               :checked="form.repo.value === target.repo"
-              :disabled="!target.hasIssues || form.submitting.value"
+              :disabled="!target.hasIssues || form.submitting.value || form.outcomeUnknown.value"
               @change="form.setRepo(target.repo)"
             />
             <span class="ci-target-repo">{{ target.repo }}</span>
@@ -362,6 +365,11 @@ function onMilestone(e: Event) {
 .ci-status {
   margin: 0;
   color: var(--color-text-muted);
+}
+.ci-detail {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm, 12px);
+  overflow-wrap: anywhere;
 }
 .ci-unknown-actions {
   display: flex;

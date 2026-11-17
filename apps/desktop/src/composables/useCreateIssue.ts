@@ -19,11 +19,20 @@ import type {
 } from "../utils/backend";
 import { commitIssuePrefill, commitUrlFor, type IssuePrefill } from "../utils/issuePrefill";
 
-/** True when a remote-tracking branch of `origin` contains `sha`. */
-async function gitCommitOnOrigin(cwd: string, sha: string): Promise<boolean> {
-  const r = await gitExec(cwd, ["for-each-ref", "--contains", sha, "--count=1", "--format=%(refname)", "refs/remotes/origin/"]);
-  return r.exitCode === 0 && r.stdout.trim() !== "";
+type GitRun = (cwd: string, args: string[]) => Promise<{ stdout: string; exitCode: number }>;
+
+/**
+ * Whether a remote-tracking branch of `origin` contains a commit, run with
+ * `exec` (the app's `gitExec`; tests give a real git).
+ */
+export function commitOnOriginWith(exec: GitRun) {
+  return async (cwd: string, sha: string): Promise<boolean> => {
+    const r = await exec(cwd, ["for-each-ref", "--contains", sha, "--count=1", "--format=%(refname)", "refs/remotes/origin/"]);
+    return r.exitCode === 0 && r.stdout.trim() !== "";
+  };
 }
+
+const gitCommitOnOrigin = commitOnOriginWith(gitExec);
 
 /** Prefixed by `gh_create_issue` (Rust `MAY_HAVE_BEEN_CREATED`) to an error
  *  after which GitHub may have filed the issue anyway. */
@@ -68,6 +77,8 @@ export interface CreateIssueApi {
   loading: Ref<boolean>;
   /** Reading the targets failed: nothing can be filed until the form reopens. */
   targetsFailed: Ref<boolean>;
+  /** Why the targets could not be read (the backend's message: sign in…). */
+  targetsError: Ref<string | null>;
   /** The open form's targets (those of the repository it was opened for). */
   targets: Ref<IssueTarget[]>;
   /** The selected target, `null` when none has issues turned on. */
@@ -132,6 +143,7 @@ export function useCreateIssue(deps: {
   const available = ref(false);
   const loading = ref(false);
   const targetsFailed = ref(false);
+  const targetsError = ref<string | null>(null);
   const targets = ref<IssueTarget[]>([]);
   const repo = ref<string | null>(null);
   const title = ref("");
@@ -177,7 +189,8 @@ export function useCreateIssue(deps: {
     if (!p?.issueTargets || !cwd) return { targets: [], defaultRepo: null };
     try {
       return await p.issueTargets(cwd);
-    } catch {
+    } catch (e) {
+      targetsError.value = message(e);
       return null;
     }
   }
@@ -233,6 +246,7 @@ export function useCreateIssue(deps: {
     error.value = null;
     outcomeUnknown.value = false;
     targetsFailed.value = false;
+    targetsError.value = null;
     submitting.value = false;
     // The previous form's targets (maybe another repository's) must not
     // build this one's links if its own read fails.
@@ -296,7 +310,9 @@ export function useCreateIssue(deps: {
   function setRepo(next: string) {
     // The issue being created goes where it was sent; switching now would
     // drop its answer (and the notice that it was created).
-    if (submitting.value || next === repo.value) return;
+    // Nor after a timeout: the warning, and its link to check GitHub, are
+    // about the repository the issue may have reached.
+    if (submitting.value || outcomeUnknown.value || next === repo.value) return;
     const target = targets.value.find((t) => t.repo === next);
     if (!target?.hasIssues) return;
     generation++;
@@ -355,6 +371,7 @@ export function useCreateIssue(deps: {
     available,
     loading,
     targetsFailed,
+    targetsError,
     targets,
     repo,
     title,

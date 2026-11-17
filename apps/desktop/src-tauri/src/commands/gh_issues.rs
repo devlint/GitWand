@@ -7,7 +7,8 @@
 
 use super::gh::{gh_api_on, gh_origin_repo, GhRepo};
 use super::github_api::{
-    rest_api_json, settings_github_token, with_rest_other_repo_using, with_rest_using,
+    rest_api_json, rest_api_json_cached, settings_github_token, with_rest_other_repo_using,
+    with_rest_using,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -46,10 +47,12 @@ fn target_from(v: &serde_json::Value, is_origin: bool) -> Option<IssueTarget> {
             .and_then(|u| u.as_str())
             .unwrap_or_default()
             .to_string(),
+        // An archived repository is read-only: it takes no new issue.
         has_issues: v
             .get("has_issues")
             .and_then(|b| b.as_bool())
-            .unwrap_or(false),
+            .unwrap_or(false)
+            && !v.get("archived").and_then(|b| b.as_bool()).unwrap_or(false),
         can_triage: ["triage", "push", "maintain", "admin"].iter().any(|k| {
             v.pointer(&format!("/permissions/{}", k))
                 .and_then(|b| b.as_bool())
@@ -138,6 +141,29 @@ pub(crate) fn api_get(
 
 const TARGETS_TTL: Duration = Duration::from_secs(5 * 60);
 
+/// The Settings token for the issue commands, read from the keychain at most
+/// every 30 s: opening the form runs the targets read and three picker
+/// commands at once, and each keychain read is slow (and may prompt on
+/// macOS). A sign-out is seen within 30 s.
+fn issue_token() -> Option<String> {
+    /// The token read (or its absence) and when.
+    type TokenRead = (Option<String>, Instant);
+    static CACHE: OnceLock<Mutex<Option<TokenRead>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    if let Ok(guard) = cache.lock() {
+        if let Some((tok, at)) = guard.as_ref() {
+            if at.elapsed() < Duration::from_secs(30) {
+                return tok.clone();
+            }
+        }
+    }
+    let tok = settings_github_token();
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some((tok.clone(), Instant::now()));
+    }
+    tok
+}
+
 /// The issue targets of `cwd`, cached for five minutes per checkout *and*
 /// `origin` (every form action re-validates against them; a changed `origin`
 /// never reuses the previous one's targets). `fresh` reads them again, as the
@@ -225,7 +251,7 @@ pub(crate) fn resolve_issue_target(
 #[tauri::command]
 pub(crate) async fn gh_issue_targets(cwd: String) -> Result<IssueTargets, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        issue_targets_inner(&cwd, true, settings_github_token().as_deref())
+        issue_targets_inner(&cwd, true, issue_token().as_deref())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -306,17 +332,27 @@ fn created_from(v: &serde_json::Value) -> Result<CreatedIssue, String> {
 /// exist instead of offering a plain retry that could file it twice.
 pub(crate) const MAY_HAVE_BEEN_CREATED: &str = "[may-have-been-created] ";
 
-/// True for a timeout that hit after the request was sent: curl's
-/// `--max-time` ("Operation timed out"), or the `gh` call killed by its
-/// timeout. A connect timeout means nothing reached GitHub.
+/// True for a failure after which GitHub may have filed the issue: a timeout
+/// while waiting for the answer (curl `--max-time`, the `gh` call killed), the
+/// connection dropped mid-answer (curl 52 empty reply, 56 receive failure,
+/// 92 HTTP/2 stream), or a 5xx from GitHub's front end (the issue may be
+/// created behind it). A connect timeout or an unresolved host means nothing
+/// reached GitHub; a 4xx is GitHub's refusal.
 fn post_may_have_landed(err: &str) -> bool {
-    err.contains("Operation timed out") || err.starts_with("gh api: timed out")
+    err.contains("Operation timed out")
+        || err.starts_with("gh api: timed out")
+        || ["(exit 52)", "(exit 56)", "(exit 92)"]
+            .iter()
+            .any(|c| err.contains(c))
+        || ["(500)", "(502)", "(503)", "(504)"]
+            .iter()
+            .any(|c| err.starts_with("GitHub API error ") && err.contains(c))
 }
 
 fn create_issue_inner(cwd: &str, input: &CreateIssueInput) -> Result<CreatedIssue, String> {
     // Checked before any call: a blank title costs no request.
     let payload = issue_payload(input)?.to_string();
-    let token = settings_github_token();
+    let token = issue_token();
     let token = token.as_deref();
     let repo = resolve_issue_target(cwd, &input.repo, true, token)?;
     let path = format!("repos/{}/issues", repo.nwo);
@@ -340,24 +376,15 @@ pub(crate) async fn gh_create_issue(
 
 // ─── Pickers: labels, milestones, assignees ────────────────────────────────
 
-/// Up to `max_pages` pages of 100 of the array at `path` (no query string).
-pub(crate) fn api_get_pages(
-    cwd: &str,
-    token: Option<&str>,
-    repo: &GhRepo,
-    path: &str,
-    query: &str,
+/// Pages of 100 from `fetch(page)`, up to `max_pages`, stopping at the first
+/// short page: the one pagination loop of the issue and reviewer reads.
+fn fetch_pages(
     max_pages: u32,
+    mut fetch: impl FnMut(u32) -> Result<serde_json::Value, String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut all = Vec::new();
     for page in 1..=max_pages {
-        let v = api_get(
-            cwd,
-            token,
-            repo,
-            &format!("{}?{}per_page=100&page={}", path, query, page),
-        )?;
-        let arr = v.as_array().cloned().unwrap_or_default();
+        let arr = fetch(page)?.as_array().cloned().unwrap_or_default();
         let n = arr.len();
         all.extend(arr);
         if n < 100 {
@@ -367,29 +394,36 @@ pub(crate) fn api_get_pages(
     Ok(all)
 }
 
-/// Up to `max_pages` pages of 100 at `path`, over REST only.
+/// Up to `max_pages` pages of 100 of the array at `path` (`query` ends with
+/// `&` when given), REST or `gh` like [`api_get`].
+pub(crate) fn api_get_pages(
+    cwd: &str,
+    token: Option<&str>,
+    repo: &GhRepo,
+    path: &str,
+    query: &str,
+    max_pages: u32,
+) -> Result<Vec<serde_json::Value>, String> {
+    fetch_pages(max_pages, |page| {
+        api_get(
+            cwd,
+            token,
+            repo,
+            &format!("{}?{}per_page=100&page={}", path, query, page),
+        )
+    })
+}
+
+/// Up to `max_pages` pages of 100 at `path`, over REST only, through the ETag
+/// cache (a 304 costs no rate limit).
 pub(crate) fn rest_pages(
     path: &str,
     token: &str,
     max_pages: u32,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let mut all = Vec::new();
-    for page in 1..=max_pages {
-        let v = rest_api_json(
-            "GET",
-            &format!("{}?per_page=100&page={}", path, page),
-            token,
-            None,
-            Some(30),
-        )?;
-        let arr = v.as_array().cloned().unwrap_or_default();
-        let n = arr.len();
-        all.extend(arr);
-        if n < 100 {
-            break;
-        }
-    }
-    Ok(all)
+    fetch_pages(max_pages, |page| {
+        rest_api_json_cached(&format!("{}?per_page=100&page={}", path, page), token)
+    })
 }
 
 fn opt_str(v: &serde_json::Value, key: &str) -> Option<String> {
@@ -464,7 +498,7 @@ pub(crate) fn assignees_from(items: &[serde_json::Value]) -> Vec<crate::types::R
 #[tauri::command]
 pub(crate) async fn gh_list_labels(cwd: String, repo: String) -> Result<Vec<RepoLabel>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let token = settings_github_token();
+        let token = issue_token();
         let token = token.as_deref();
         let r = resolve_issue_target(&cwd, &repo, true, token)?;
         let items = api_get_pages(&cwd, token, &r, &format!("repos/{}/labels", r.nwo), "", 3)?;
@@ -481,7 +515,7 @@ pub(crate) async fn gh_list_milestones(
     repo: String,
 ) -> Result<Vec<RepoMilestone>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let token = settings_github_token();
+        let token = issue_token();
         let token = token.as_deref();
         let r = resolve_issue_target(&cwd, &repo, true, token)?;
         let items = api_get_pages(
@@ -505,7 +539,7 @@ pub(crate) async fn gh_list_assignees(
     repo: String,
 ) -> Result<Vec<crate::types::ReviewerCandidate>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let token = settings_github_token();
+        let token = issue_token();
         let token = token.as_deref();
         let r = resolve_issue_target(&cwd, &repo, true, token)?;
         let items = api_get_pages(
@@ -752,5 +786,53 @@ mod tests {
     fn check_target_gives_githubs_spelling() {
         let t = targets_from(&origin(true, false), None);
         assert_eq!(check_target(&t, "ME/APP", true).unwrap().repo, "me/app");
+    }
+
+    #[test]
+    fn a_failure_after_sending_may_have_created_the_issue() {
+        for err in [
+            "GitHub API error (502): Server Error",
+            "GitHub API error (504): HTTP 504",
+            "curl request failed (exit 56): Recv failure: Connection reset by peer",
+            "curl request failed (exit 52): Empty reply from server",
+            "curl request failed (exit 92): HTTP/2 stream 1 was not closed cleanly",
+        ] {
+            assert!(post_may_have_landed(err), "{err}");
+        }
+        assert!(!post_may_have_landed("GitHub API error (403): Forbidden"));
+        assert!(!post_may_have_landed(
+            "curl request failed (exit 6): Could not resolve host"
+        ));
+    }
+
+    #[test]
+    fn an_archived_repository_takes_no_issue() {
+        let mut o = origin(true, false);
+        o["archived"] = json!(true);
+        let t = targets_from(&o, None);
+        assert!(!t.targets[0].has_issues);
+        assert_eq!(t.default_repo, None);
+    }
+
+    #[test]
+    fn pages_stop_on_a_short_page_and_at_the_cap() {
+        let mut asked = Vec::new();
+        let items = fetch_pages(3, |page| {
+            asked.push(page);
+            Ok(json!(vec![
+                json!({"n": page});
+                if page < 2 { 100 } else { 5 }
+            ]))
+        })
+        .unwrap();
+        assert_eq!(asked, [1, 2]);
+        assert_eq!(items.len(), 105);
+        let mut asked = Vec::new();
+        fetch_pages(2, |page| {
+            asked.push(page);
+            Ok(json!(vec![json!({}); 100]))
+        })
+        .unwrap();
+        assert_eq!(asked, [1, 2]);
     }
 }

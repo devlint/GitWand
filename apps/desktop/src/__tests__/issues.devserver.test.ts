@@ -101,3 +101,11 @@ describe("devLabelsFrom / devMilestonesFrom", () => {
   });
 });
 
+
+describe("devIssueTargetsFrom — archived", () => {
+  it("offers an archived repository as taking no issue, like targets_from", () => {
+    const t = devIssueTargetsFrom({ ...origin(true, false), archived: true });
+    expect(t.targets[0].hasIssues).toBe(false);
+    expect(t.defaultRepo).toBeNull();
+  });
+});

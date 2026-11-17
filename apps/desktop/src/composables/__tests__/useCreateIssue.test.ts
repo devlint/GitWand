@@ -1,6 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { ref } from "vue";
-import { useCreateIssue, isNewIssueShortcut, newIssueShortcutLabel } from "../useCreateIssue";
+import { useCreateIssue, isNewIssueShortcut, newIssueShortcutLabel, commitOnOriginWith } from "../useCreateIssue";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ForgeProvider } from "../forge/types";
 import type { IssueTargets, CreatedIssue, RepoLabel } from "../../utils/backend";
 
@@ -384,6 +388,56 @@ describe("useCreateIssue", () => {
     await api.open();
     expect(api.targets.value).toEqual([]);
     expect(api.originHtmlUrl.value).toBeNull();
+  });
+
+  it("keeps the target where a timed-out issue may exist until the user chooses", async () => {
+    const createIssue = vi.fn().mockRejectedValueOnce(new Error("[may-have-been-created] GitHub API error (502): Server Error"));
+    const { api } = setup(provider({ createIssue }, { targets: [ORIGIN, PARENT], defaultRepo: "me/app" }));
+    await api.open();
+    api.title.value = "t";
+    await api.submit();
+    api.setRepo("org/app");
+    expect(api.repo.value).toBe("me/app");
+    api.retryAnyway();
+    api.setRepo("org/app");
+    expect(api.repo.value).toBe("org/app");
+  });
+
+  it("keeps the backend's reason when the targets cannot be read", async () => {
+    const { api } = setup(provider({ issueTargets: vi.fn(async () => { throw new Error("gh: To get started with GitHub CLI, please run: gh auth login"); }) }));
+    await api.open();
+    expect(api.targetsFailed.value).toBe(true);
+    expect(api.targetsError.value).toContain("gh auth login");
+  });
+});
+
+describe("commitOnOriginWith — real git repository", () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+  const exec = async (cwd: string, args: string[]) => {
+    try {
+      return { stdout: execFileSync("git", args, { cwd, encoding: "utf-8" }), stderr: "", exitCode: 0 };
+    } catch (e) {
+      const err = e as { stdout?: string; status?: number };
+      return { stdout: err.stdout ?? "", stderr: "", exitCode: err.status ?? 1 };
+    }
+  };
+  let dir = "";
+  afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+  it("is true for a commit an origin branch contains, false for a local one", async () => {
+    dir = mkdtempSync(join(tmpdir(), "gw-issue-"));
+    git(dir, "init", "-q");
+    git(dir, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "pushed");
+    const pushed = git(dir, "rev-parse", "HEAD");
+    git(dir, "update-ref", "refs/remotes/origin/main", pushed);
+    git(dir, "update-ref", "refs/remotes/upstream/main", pushed);
+    git(dir, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "local");
+    const local = git(dir, "rev-parse", "HEAD");
+    git(dir, "update-ref", "refs/remotes/upstream/feature", local);
+    const onOrigin = commitOnOriginWith(exec);
+    expect(await onOrigin(dir, pushed)).toBe(true);
+    // Only on another remote: origin's page would answer 404.
+    expect(await onOrigin(dir, local)).toBe(false);
   });
 });
 

@@ -40,12 +40,23 @@ pub(crate) fn run_curl(
         // curl reads the whole config (auth header, request body) before it
         // sends anything, so a synchronous write can't deadlock against the
         // stdout pipe.
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| "failed to open curl stdin".to_string())?
-            .write_all(cfg.as_bytes())
-            .map_err(|e| format!("failed to write curl config: {}", e))?;
+        let written = match child.stdin.take() {
+            Some(mut stdin) => stdin.write_all(cfg.as_bytes()),
+            None => Err(std::io::Error::other("failed to open curl stdin")),
+        };
+        if let Err(e) = written {
+            // curl stopped reading (a bad config, an early exit): reap it and
+            // report its own diagnostic rather than the broken pipe.
+            let stderr = child
+                .wait_with_output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stderr).trim().to_string())
+                .filter(|s| !s.is_empty());
+            return Err(match stderr {
+                Some(diag) => format!("curl failed: {}", diag),
+                None => format!("failed to write curl config: {}", e),
+            });
+        }
     }
     child
         .wait_with_output()
@@ -113,11 +124,14 @@ const MARKER: &str = "\n__GW_HTTP_STATUS__";
 
 /// How a [`curl_request`] reads its answer and how long it may take.
 #[derive(Clone, Copy, Default)]
-struct RequestOpts {
+pub(crate) struct RequestOpts {
     /// Dump the response headers to stdout (`-D -`).
-    dump_headers: bool,
+    pub(crate) dump_headers: bool,
     /// curl `--max-time`; `None` leaves the duration unbounded.
-    max_time_secs: Option<u32>,
+    pub(crate) max_time_secs: Option<u32>,
+    /// Follow redirects (`-L`). Off by default: a write must not be re-sent
+    /// to another address.
+    pub(crate) follow_redirects: bool,
 }
 
 /// The curl argv and `--config -` stdin for a request. The auth header and the
@@ -136,6 +150,7 @@ fn curl_request(
     let RequestOpts {
         dump_headers,
         max_time_secs,
+        follow_redirects,
     } = opts;
     let mut args: Vec<String> = vec![
         "-s".to_string(),
@@ -143,6 +158,9 @@ fn curl_request(
         "--connect-timeout".to_string(),
         "20".to_string(),
     ];
+    if follow_redirects {
+        args.push("-L".to_string());
+    }
     if let Some(secs) = max_time_secs {
         // Only where the caller asks: a forge write (a large merge) may
         // legitimately take longer than any fixed limit.
@@ -203,11 +221,11 @@ pub(crate) fn curl_with_status(
         body_json,
         extra_headers,
         accept,
-        None,
+        RequestOpts::default(),
     )
 }
 
-/// [`curl_with_status`] that gives up after `max_time_secs` (curl `--max-time`).
+/// [`curl_with_status`] with [`RequestOpts`]: a duration bound, redirects.
 pub(crate) fn curl_with_status_bounded(
     method: &str,
     url: &str,
@@ -215,7 +233,7 @@ pub(crate) fn curl_with_status_bounded(
     body_json: Option<&str>,
     extra_headers: &[&str],
     accept: &str,
-    max_time_secs: Option<u32>,
+    opts: RequestOpts,
 ) -> Result<(i32, String), String> {
     let (args, stdin) = curl_request(
         method,
@@ -226,7 +244,7 @@ pub(crate) fn curl_with_status_bounded(
         accept,
         RequestOpts {
             dump_headers: false,
-            max_time_secs,
+            ..opts
         },
     );
     let output = run_curl(&args, stdin.as_deref())?;
@@ -273,7 +291,7 @@ pub(crate) fn curl_with_headers(
         accept,
         RequestOpts {
             dump_headers: true,
-            max_time_secs: None,
+            ..RequestOpts::default()
         },
     );
     let output = run_curl(&args, stdin.as_deref())?;
@@ -422,7 +440,7 @@ mod tests {
             "a",
             RequestOpts {
                 dump_headers: true,
-                max_time_secs: None,
+                ..RequestOpts::default()
             },
         );
         let (without, _) = curl_request("GET", "u", None, None, &[], "a", RequestOpts::default());
@@ -508,8 +526,8 @@ mod tests {
             &[],
             "a",
             RequestOpts {
-                dump_headers: false,
                 max_time_secs: Some(60),
+                ..RequestOpts::default()
             },
         );
         assert!(has(&get, "--connect-timeout", "20"));
@@ -518,5 +536,12 @@ mod tests {
         // may legitimately take longer than any fixed limit.
         assert!(!post.iter().any(|a| a == "--max-time"));
         assert!(has(&bounded, "--max-time", "60"));
+        assert!(!post.iter().any(|a| a == "-L"));
+        let follow = RequestOpts {
+            follow_redirects: true,
+            ..RequestOpts::default()
+        };
+        let (followed, _) = curl_request("GET", "u", None, None, &[], "a", follow);
+        assert!(followed.iter().any(|a| a == "-L"));
     }
 }

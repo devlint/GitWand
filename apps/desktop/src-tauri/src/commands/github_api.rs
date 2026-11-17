@@ -37,7 +37,7 @@
 //! never logged or included in error messages.
 
 use super::curl_util::{
-    bearer_config, curl_with_headers, curl_with_status, curl_with_status_bounded,
+    bearer_config, curl_with_headers, curl_with_status, curl_with_status_bounded, RequestOpts,
 };
 use crate::git::{git_cmd, hidden_cmd};
 use crate::types::*;
@@ -518,12 +518,25 @@ pub(crate) fn rest_api_json(
         body_json,
         &["User-Agent: GitWand", "X-GitHub-Api-Version: 2022-11-28"],
         "application/vnd.github+json",
-        max_time_secs,
+        RequestOpts {
+            max_time_secs,
+            // A renamed or transferred repository answers a read with a 301
+            // to its new name, which the `gh` path follows too. A write is
+            // never re-sent to another address.
+            follow_redirects: method == "GET",
+            ..RequestOpts::default()
+        },
     )?;
     if status >= 400 {
         return Err(map_api_error(status, &body));
     }
     parse_json_body(&body)
+}
+
+/// [`api_json_cached`] for callers outside this module (`path` without a
+/// leading slash).
+pub(crate) fn rest_api_json_cached(path: &str, token: &str) -> Result<serde_json::Value, String> {
+    api_json_cached(&format!("{}/{}", API_BASE, path), token)
 }
 
 /// GET a GitHub JSON endpoint with ETag-based conditional requests.

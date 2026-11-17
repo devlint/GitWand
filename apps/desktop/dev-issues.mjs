@@ -9,7 +9,9 @@ function issueTarget(v, isOrigin) {
   if (!v || typeof v.full_name !== "string") return null;
   const perms = v.permissions || {};
   const canTriage = ["triage", "push", "maintain", "admin"].some((k) => perms[k] === true);
-  return { repo: v.full_name, htmlUrl: v.html_url || "", hasIssues: v.has_issues === true, isOrigin, canTriage };
+  // An archived repository is read-only: it takes no new issue.
+  const hasIssues = v.has_issues === true && v.archived !== true;
+  return { repo: v.full_name, htmlUrl: v.html_url || "", hasIssues, isOrigin, canTriage };
 }
 
 /** `targets_from`: origin, then its parent (carried in origin's JSON) when it is a fork. */
