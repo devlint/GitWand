@@ -85,6 +85,8 @@ export function usePrAttachments(opts: {
   let inFlight = false;
   /** Keys whose image failed while a fetch ran, re-examined when it lands. */
   let pendingKeys = new Set<string>();
+  /** Keys whose image failed in this PR: only a new one restarts the retries. */
+  let failedKeys = new Set<string>();
   let lastFailure = -Infinity;
   let lastFetch = -Infinity;
   /**
@@ -93,8 +95,9 @@ export function usePrAttachments(opts: {
    * again.
    */
   let asked = new Set<string>();
-  /** The one scheduled fetch: a retry, or a trigger deferred past the gap. */
+  /** The one scheduled fetch (a retry, or a trigger deferred past the gap) and when it fires. */
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let timerAt = 0;
   let retries = 0;
 
   function clearTimer(): void {
@@ -102,14 +105,26 @@ export function usePrAttachments(opts: {
     timer = null;
   }
 
-  /** Fetch in `delay` ms for the PR shown now, unless a fetch is already scheduled. */
+  /** Fetch in `delay` ms for the PR shown now — or sooner, if already scheduled sooner. */
   function schedule(delay: number): void {
-    if (timer !== null) return;
+    const at = now() + delay;
+    if (timer !== null && timerAt <= at) return;
+    clearTimer();
+    timerAt = at;
     const key = prKey;
     timer = setTimeout(() => {
       timer = null;
       if (!disposed && key === prKey) load(true);
     }, delay);
+  }
+
+  /** Schedule the next retry of a fetch that failed (or only partly succeeded). */
+  function scheduleRetry(): void {
+    if (retries >= MAX_RETRIES) return;
+    const delay = FETCH_GAP_MS * 2 ** retries;
+    retries++;
+    clearTimer();
+    schedule(delay);
   }
 
   /** Attachment keys the bodies reference, as a stable string for the watcher. */
@@ -127,7 +142,7 @@ export function usePrAttachments(opts: {
     return entry ? entry.expiresAt - EXPIRY_MARGIN_MS <= now() : !asked.has(k);
   }
 
-  /** `scheduled`: the gap was already waited out (timer, or `trigger`'s check). */
+  /** `scheduled`: the gap was already waited out (timer, or `fetchSoon`'s check). */
   function load(scheduled = false): void {
     const cwd = opts.cwd.value;
     const n = opts.number.value;
@@ -141,9 +156,9 @@ export function usePrAttachments(opts: {
     ghPrAttachmentUrls(cwd, n)
       .then((res) => {
         if (disposed || key !== prKey) return;
-        retries = 0;
         clearTimer(); // a deferred trigger this fetch answers
         if (res.private === true) privateCheckouts.add(cwd);
+        if (res.private === false) privateCheckouts.delete(cwd);
         foundPublic = res.private === false;
         // Unknown (the repository could not be read): this fetch was asked
         // for because something failed, so use the URLs.
@@ -153,16 +168,19 @@ export function usePrAttachments(opts: {
         const next = new Map(signed.value);
         for (const [k, v] of indexSignedAttachments(res.urls, sentAt)) next.set(k, v);
         signed.value = next;
-        for (const k of keys) asked.add(k);
+        if (res.complete) {
+          retries = 0;
+          for (const k of keys) asked.add(k);
+        } else {
+          // A body list failed: a key missing from the answer may be in it.
+          for (const k of keys) if (next.has(k)) asked.add(k);
+          if (!foundPublic) scheduleRetry();
+        }
       })
       .catch(() => {
         if (disposed || key !== prKey) return;
         lastFailure = now();
-        if (retries >= MAX_RETRIES) return;
-        const delay = FETCH_GAP_MS * 2 ** retries;
-        retries++;
-        clearTimer();
-        schedule(delay);
+        scheduleRetry();
       })
       .finally(() => {
         inFlight = false;
@@ -170,7 +188,7 @@ export function usePrAttachments(opts: {
         // Images that failed meanwhile: fetch again only if this one did not fix them.
         const still = [...pendingKeys].some(fetchWouldHelp);
         pendingKeys = new Set();
-        if (still) trigger();
+        if (still) fetchSoon();
         else check(); // bodies or the PR may have changed while this ran
       });
   }
@@ -178,12 +196,11 @@ export function usePrAttachments(opts: {
   /** Up front, in a checkout found private: fetch for attachments not asked for yet. */
   function check(): void {
     if (!isPrivate.value || foundPublic) return;
-    if (wantedKeys().some((k) => !signed.value.has(k) && !asked.has(k))) load();
+    if (wantedKeys().some((k) => !signed.value.has(k) && !asked.has(k))) fetchSoon();
   }
 
-  /** Fetch now, or at the end of the gap — deferred, not dropped. */
-  function trigger(): void {
-    retries = 0; // a new trigger starts a new series of retries
+  /** Fetch now, or at the end of the gap after the last fetch — deferred, not dropped. */
+  function fetchSoon(): void {
     const wait = Math.max(lastFetch, lastFailure) + FETCH_GAP_MS - now();
     if (wait > 0) schedule(wait);
     else load(true);
@@ -200,6 +217,7 @@ export function usePrAttachments(opts: {
         foundPublic = false;
         asked = new Set();
         pendingKeys = new Set();
+        failedKeys = new Set();
         lastFailure = -Infinity;
         lastFetch = -Infinity;
         retries = 0;
@@ -241,12 +259,19 @@ export function usePrAttachments(opts: {
         // render) or GitHub did not sign this file.
         !entry && !asked.has(k);
     if (!fixable) return;
+    // A newly failing image starts a new series of retries; one re-created
+    // by each re-render during an outage does not undo the backoff.
+    if (!failedKeys.has(k)) {
+      failedKeys.add(k);
+      retries = 0;
+    }
     if (inFlight) pendingKeys.add(k);
-    else trigger();
+    else fetchSoon();
   }
 
   /** `resolveImage` for `renderMarkdown`: the signed URL of `src`, if any. */
   function resolveImage(src: string): string | null {
+    if (!opts.enabled.value) return null;
     // Pure check first: only bodies with attachments depend on the map.
     const k = attachmentKey(src);
     if (!k) return null;

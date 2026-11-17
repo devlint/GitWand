@@ -2515,10 +2515,10 @@ pub(crate) fn signed_attachment_urls<'a>(htmls: impl IntoIterator<Item = &'a str
 /// [`pr_attachment_html_paths`]. Best effort: an endpoint that failed (a
 /// token not allowed to read reviews, a transient error) does not cost the
 /// URLs the others returned; only when every one failed is the first error
-/// returned.
+/// returned. The flag says whether every one succeeded.
 pub(crate) fn signed_urls_from_fetches(
     fetches: Vec<Result<Vec<String>, String>>,
-) -> Result<Vec<String>, String> {
+) -> Result<(Vec<String>, bool), String> {
     let mut first_err = None;
     let mut htmls = Vec::new();
     let mut any_ok = false;
@@ -2535,7 +2535,10 @@ pub(crate) fn signed_urls_from_fetches(
     }
     match first_err {
         Some(e) if !any_ok => Err(e),
-        _ => Ok(signed_attachment_urls(htmls.iter().map(String::as_str))),
+        _ => Ok((
+            signed_attachment_urls(htmls.iter().map(String::as_str)),
+            first_err.is_none(),
+        )),
     }
 }
 
@@ -2548,6 +2551,23 @@ pub(crate) struct PrAttachmentUrls {
     /// `None` when it could not be read: the URLs are still returned.
     pub private: Option<bool>,
     pub urls: Vec<String>,
+    /// Every body list was read. When not, an attachment missing from `urls`
+    /// may just be in a list that failed — not one GitHub did not sign.
+    pub complete: bool,
+}
+
+impl PrAttachmentUrls {
+    pub(crate) fn from_fetches(
+        private: Option<bool>,
+        fetches: Vec<Result<Vec<String>, String>>,
+    ) -> Result<Self, String> {
+        let (urls, complete) = signed_urls_from_fetches(fetches)?;
+        Ok(PrAttachmentUrls {
+            private,
+            urls,
+            complete,
+        })
+    }
 }
 
 /// Signed URLs of the attachments in PR `number`'s bodies (REST).
@@ -2569,10 +2589,7 @@ pub(crate) fn rest_pr_attachment_urls(
             Ok(body_htmls(&parse_json_body(&body)?))
         })
         .collect();
-    Ok(PrAttachmentUrls {
-        private,
-        urls: signed_urls_from_fetches(fetches)?,
-    })
+    PrAttachmentUrls::from_fetches(private, fetches)
 }
 
 #[cfg(test)]
@@ -2615,13 +2632,16 @@ mod tests {
         let ok = Ok(vec![format!(r#"<img src="{a}">"#)]);
         assert_eq!(
             signed_urls_from_fetches(vec![Err("403".into()), ok]),
-            Ok(vec![a.to_string()])
+            Ok((vec![a.to_string()], false))
         );
         assert_eq!(
             signed_urls_from_fetches(vec![Err("403".into()), Err("502".into())]),
             Err("403".to_string())
         );
-        assert_eq!(signed_urls_from_fetches(vec![Ok(vec![])]), Ok(vec![]));
+        assert_eq!(
+            signed_urls_from_fetches(vec![Ok(vec![])]),
+            Ok((vec![], true))
+        );
     }
 
     #[test]

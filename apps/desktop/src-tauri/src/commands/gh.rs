@@ -1360,10 +1360,7 @@ fn gh_pr_attachment_urls_inner(
     let private = repo
         .ok()
         .and_then(|pr| pr.pointer("/base/repo/private").and_then(|v| v.as_bool()));
-    Ok(github_api::PrAttachmentUrls {
-        private,
-        urls: github_api::signed_urls_from_fetches(fetches)?,
-    })
+    github_api::PrAttachmentUrls::from_fetches(private, fetches)
 }
 
 /// Signed, short-lived URLs of the files uploaded to PR `number`'s

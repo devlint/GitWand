@@ -3403,6 +3403,11 @@ export interface PrAttachmentUrls {
    */
   private: boolean | null;
   urls: string[];
+  /**
+   * Every body list was read. When not, an attachment missing from `urls` may
+   * be in a list that failed, rather than one GitHub did not sign.
+   */
+  complete: boolean;
 }
 
 /**

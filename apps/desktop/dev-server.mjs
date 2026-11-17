@@ -5738,7 +5738,7 @@ async function handleRequest(req, res) {
             if (!urls.includes(u)) urls.push(u);
           }
         }
-        return jsonResponse(req, res, { private: isPrivate, urls });
+        return jsonResponse(req, res, { private: isPrivate, urls, complete: firstError === null });
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);
       }

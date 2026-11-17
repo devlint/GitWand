@@ -18,8 +18,8 @@ function signed(uuid: string, tag = 1): string {
   const payload = btoa(JSON.stringify({ nbf: 1000 * tag, exp: 1000 * tag + 300 })).replace(/=+$/, "");
   return `https://private-user-images.githubusercontent.com/1/2-${uuid}.png?jwt=h.${payload}.s`;
 }
-const priv = (...urls: string[]) => ({ private: true, urls });
-const pub = (...urls: string[]) => ({ private: false, urls });
+const priv = (...urls: string[]) => ({ private: true, urls, complete: true });
+const pub = (...urls: string[]) => ({ private: false, urls, complete: true });
 
 /** The `error` event of an `<img>` showing `src`. */
 const imgError = (src: string) =>
@@ -103,7 +103,8 @@ describe("usePrAttachments", () => {
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
   });
 
-  it("fetches for a new attachment, not for one GitHub already left out", async () => {
+  it("fetches for a new attachment (after the gap), not for one GitHub already left out", async () => {
+    vi.useFakeTimers();
     ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
     const s = setup([md(A), md(B)]); // B is not returned (say, past the first page)
     s.onImageError(imgError(asset(A)));
@@ -115,6 +116,10 @@ describe("usePrAttachments", () => {
     ghPrAttachmentUrls.mockResolvedValue(priv(signed(C)));
     s.bodies.value = [md(A), md(B), md(C)];
     await flush();
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1); // inside the gap: deferred
+    s.tick(30_000);
+    vi.advanceTimersByTime(30_000);
+    await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
     expect(s.resolveImage(asset(C))).toBe(signed(C));
     // Merged: A keeps the URL it had though this answer left it out.
@@ -122,6 +127,7 @@ describe("usePrAttachments", () => {
   });
 
   it("picks up a body that changed while a fetch ran", async () => {
+    vi.useFakeTimers();
     let answer!: (v: unknown) => void;
     ghPrAttachmentUrls.mockReturnValueOnce(new Promise((r) => (answer = r)));
     ghPrAttachmentUrls.mockResolvedValue(priv(signed(B)));
@@ -131,6 +137,9 @@ describe("usePrAttachments", () => {
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
     answer(priv(signed(A)));
+    await flush();
+    s.tick(30_000);
+    vi.advanceTimersByTime(30_000);
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
     expect(s.resolveImage(asset(B))).toBe(signed(B));
@@ -240,7 +249,7 @@ describe("usePrAttachments", () => {
   });
 
   it("uses the URLs when the visibility could not be read, without remembering it", async () => {
-    ghPrAttachmentUrls.mockResolvedValue({ private: null, urls: [signed(A)] });
+    ghPrAttachmentUrls.mockResolvedValue({ private: null, urls: [signed(A)], complete: true });
     const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
     await flush();
@@ -302,5 +311,53 @@ describe("usePrAttachments", () => {
     await flush();
     expect(s.currentUrl(signed(A, 1))).toBe(signed(A, 2));
     expect(s.currentUrl("https://example.com/x.png")).toBe("https://example.com/x.png");
+  });
+
+  it("a partial answer keeps the missing keys askable and retries", async () => {
+    vi.useFakeTimers();
+    ghPrAttachmentUrls.mockResolvedValueOnce({ private: true, urls: [signed(A)], complete: false });
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A), signed(B)));
+    const s = setup([md(A), md(B)]);
+    s.onImageError(imgError(asset(A)));
+    await flush();
+    expect(s.resolveImage(asset(B))).toBeNull();
+    s.tick(30_000);
+    vi.advanceTimersByTime(30_000);
+    await flush();
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+    expect(s.resolveImage(asset(B))).toBe(signed(B));
+  });
+
+  it("a nearer trigger shortens a pending retry", async () => {
+    vi.useFakeTimers();
+    const fail = async () => {
+      throw new Error("502");
+    };
+    ghPrAttachmentUrls.mockImplementationOnce(fail).mockImplementationOnce(fail);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A), signed(B)));
+    const s = setup([md(A), md(B)]);
+    s.onImageError(imgError(asset(A)));
+    await flush();
+    s.tick(30_000);
+    vi.advanceTimersByTime(30_000); // retry 1 fails: next retry in 60 s
+    await flush();
+    s.tick(20_000);
+    vi.advanceTimersByTime(20_000);
+    s.onImageError(imgError(asset(B))); // a new failure, 20 s after: due at the gap's end
+    s.tick(10_000);
+    vi.advanceTimersByTime(10_000);
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(3);
+  });
+
+  it("a found-public checkout stops fetching up front", async () => {
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
+    const first = setup([md(A)]);
+    first.onImageError(imgError(asset(A)));
+    await flush();
+    ghPrAttachmentUrls.mockResolvedValue(pub(signed(B)));
+    setup([md(B)]); // up front: the checkout was private…
+    await flush();
+    setup([md(B)]); // …but is public now
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
   });
 });
