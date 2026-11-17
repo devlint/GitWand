@@ -141,6 +141,19 @@ describe("CreateIssueModal", () => {
     finish({ number: 1, url: "u" });
   });
 
+  it("locks the pickers while the issue is being created", async () => {
+    let finish!: (v: { number: number; url: string }) => void;
+    const { form } = await mount(undefined, undefined, () => new Promise((r) => { finish = r; }));
+    form.labelOptions.value = [{ name: "bug", color: "f00", description: null }];
+    form.milestoneOptions.value = [{ number: 1, title: "v1", dueOn: null }];
+    form.title.value = "t";
+    void form.submit();
+    await nextTick();
+    expect(document.querySelector<HTMLButtonElement>(".ci-chip")!.disabled).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>("#ci-milestone")!.disabled).toBe(true);
+    finish({ number: 1, url: "u" });
+  });
+
   it("keeps editing shortcuts (⌘Z, ⌘⇧I) inside the form away from the app", async () => {
     await mount();
     const appKeys = vi.fn();

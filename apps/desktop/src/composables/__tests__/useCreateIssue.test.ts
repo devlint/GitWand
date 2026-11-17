@@ -332,6 +332,44 @@ describe("useCreateIssue", () => {
     await api.openFromCommit({ ...COMMIT, message: "other" });
     expect(api.title.value).toBe("edited");
   });
+
+  it("after a timeout, says the issue may exist and holds Create until the user chooses", async () => {
+    const createIssue = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("curl request failed (exit 28): Operation timed out after 60001 milliseconds"))
+      .mockResolvedValueOnce({ number: 3, url: "u" });
+    const { api, onCreated } = setup(provider({ createIssue }));
+    await api.open();
+    api.title.value = "t";
+    await api.submit();
+    expect(api.outcomeUnknown.value).toBe(true);
+    expect(api.canSubmit.value).toBe(false);
+    api.retryAnyway();
+    expect(api.canSubmit.value).toBe(true);
+    await api.submit();
+    expect(onCreated).toHaveBeenCalledWith({ number: 3, url: "u" });
+  });
+
+  it("an ordinary error does not count as an unknown outcome", async () => {
+    const { api } = setup(provider({ createIssue: vi.fn(async () => { throw new Error("GitHub API error (422): Validation Failed"); }) }));
+    await api.open();
+    api.title.value = "t";
+    await api.submit();
+    expect(api.outcomeUnknown.value).toBe(false);
+    expect(api.canSubmit.value).toBe(true);
+  });
+
+  it("forgets the previous form's targets when it opens again", async () => {
+    let fail = false;
+    const issueTargets = vi.fn(async () => { if (fail) throw new Error("offline"); return { targets: [ORIGIN], defaultRepo: "me/app" }; });
+    const { api } = setup(provider({ issueTargets }));
+    await api.open();
+    api.close();
+    fail = true;
+    await api.open();
+    expect(api.targets.value).toEqual([]);
+    expect(api.originHtmlUrl.value).toBeNull();
+  });
 });
 
 describe("isNewIssueShortcut", () => {

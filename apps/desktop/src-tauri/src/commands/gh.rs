@@ -2135,6 +2135,22 @@ fn gh_api_json(cwd: &str, path: &str) -> Result<serde_json::Value, String> {
     gh_api_json_accept(cwd, path, None)
 }
 
+/// The error of a failed `gh api` call. `gh` prints GitHub's JSON answer on
+/// stdout and only "Validation Failed (HTTP 422)" on stderr: when stdout holds
+/// the answer, it is worded like the REST path's (`map_api_error`), field
+/// details included.
+fn gh_api_failure(what: &str, stderr: &str, stdout: &str) -> String {
+    let answer = serde_json::from_str::<serde_json::Value>(stdout.trim()).ok();
+    let status = stderr
+        .rsplit_once("(HTTP ")
+        .and_then(|(_, rest)| rest.split(')').next())
+        .and_then(|n| n.trim().parse::<i32>().ok());
+    match (answer.filter(|a| a.get("message").is_some()), status) {
+        (Some(_), Some(code)) => github_api::map_api_error(code, stdout),
+        _ => format!("{}: {}", what, stderr.trim()),
+    }
+}
+
 /// A finished `gh api` call: its stderr as the error on failure, else stdout
 /// parsed as JSON — `empty` when there is none (a 204, an empty list).
 fn gh_api_parse(
@@ -2143,10 +2159,10 @@ fn gh_api_parse(
     empty: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     if !output.status.success() {
-        return Err(format!(
-            "{}: {}",
+        return Err(gh_api_failure(
             what,
-            String::from_utf8_lossy(&output.stderr).trim()
+            &String::from_utf8_lossy(&output.stderr),
+            &String::from_utf8_lossy(&output.stdout),
         ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -3131,5 +3147,32 @@ mod repo_targeting_tests {
         assert!(gh_repo_is_a_remote(&cwd, &as_repo("up/project")));
         assert!(gh_repo_is_a_remote(&cwd, &as_repo("me/fork")));
         assert!(!gh_repo_is_a_remote(&cwd, &as_repo("someone/else")));
+    }
+}
+
+#[cfg(test)]
+mod gh_api_failure_tests {
+    use super::gh_api_failure;
+
+    #[test]
+    fn gh_api_failure_keeps_githubs_validation_details() {
+        let stdout =
+            r#"{"message":"Validation Failed","errors":[{"field":"assignees","code":"invalid"}]}"#;
+        assert_eq!(
+            gh_api_failure(
+                "gh api POST repos/o/r/issues",
+                "gh: Validation Failed (HTTP 422)\n",
+                stdout
+            ),
+            "GitHub API error (422): Validation Failed (assignees: invalid)"
+        );
+    }
+
+    #[test]
+    fn gh_api_failure_without_a_json_answer_keeps_stderr() {
+        assert_eq!(
+            gh_api_failure("gh api GET x", "error connecting to api.github.com\n", ""),
+            "gh api GET x: error connecting to api.github.com"
+        );
     }
 }

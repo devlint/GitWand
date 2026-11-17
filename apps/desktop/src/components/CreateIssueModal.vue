@@ -11,6 +11,7 @@ import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
 import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables/useSafeHtml";
 import { useI18n } from "../composables/useI18n";
 import { ISSUE_TITLE_MAX } from "../utils/issuePrefill";
+import { openExternalUrl } from "../utils/backend";
 
 const { t } = useI18n();
 const form = inject(CREATE_ISSUE_KEY)!;
@@ -71,6 +72,12 @@ function onKeydown(e: KeyboardEvent) {
     e.preventDefault();
     void form.submit();
   }
+}
+
+/** The target's issue list, to see whether a timed-out create went through. */
+function openIssuesPage() {
+  const target = form.targets.value.find((x) => x.repo === form.repo.value);
+  if (target?.htmlUrl) void openExternalUrl(`${target.htmlUrl}/issues`);
 }
 
 function onMilestone(e: Event) {
@@ -172,6 +179,7 @@ function onMilestone(e: Event) {
               type="button"
               class="ci-chip"
               :aria-pressed="form.labels.value.includes(label.name)"
+              :disabled="form.submitting.value"
               :title="label.description ?? ''"
               @click="form.labels.value = toggle(form.labels.value, label.name)"
             >
@@ -190,6 +198,7 @@ function onMilestone(e: Event) {
               type="button"
               class="ci-chip"
               :aria-pressed="form.assignees.value.includes(user.login)"
+              :disabled="form.submitting.value"
               @click="form.assignees.value = toggle(form.assignees.value, user.login)"
             >@{{ user.login }}</button>
           </div>
@@ -197,13 +206,26 @@ function onMilestone(e: Event) {
 
         <div v-if="form.milestoneOptions.value.length" class="ci-group">
           <label class="ci-label" for="ci-milestone">{{ t("createIssue.milestone") }}</label>
-          <select id="ci-milestone" class="ci-select" :value="form.milestone.value ?? ''" @change="onMilestone">
+          <select
+            id="ci-milestone"
+            class="ci-select"
+            :value="form.milestone.value ?? ''"
+            :disabled="form.submitting.value"
+            @change="onMilestone"
+          >
             <option value="">{{ t("createIssue.noMilestone") }}</option>
             <option v-for="m in form.milestoneOptions.value" :key="m.number" :value="m.number">{{ m.title }}</option>
           </select>
         </div>
 
-        <p v-if="form.error.value" class="ci-status ci-status--error" role="alert">{{ form.error.value }}</p>
+        <div v-if="form.outcomeUnknown.value" class="ci-unknown" role="alert">
+          <p class="ci-status ci-status--error">{{ t("createIssue.maybeCreated") }}</p>
+          <div class="ci-unknown-actions">
+            <button type="button" class="bm-btn bm-btn--ghost" @click="openIssuesPage">{{ t("createIssue.checkOnGitHub") }}</button>
+            <button type="button" class="bm-btn bm-btn--ghost" @click="form.retryAnyway()">{{ t("createIssue.createAnyway") }}</button>
+          </div>
+        </div>
+        <p v-else-if="form.error.value" class="ci-status ci-status--error" role="alert">{{ form.error.value }}</p>
       </template>
     </div>
 
@@ -338,6 +360,11 @@ function onMilestone(e: Event) {
 .ci-status {
   margin: 0;
   color: var(--color-text-muted);
+}
+.ci-unknown-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
 }
 .ci-status--error {
   color: var(--color-danger, #d73a4a);

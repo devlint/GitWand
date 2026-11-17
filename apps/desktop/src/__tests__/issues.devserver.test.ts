@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom } from "../../dev-issues.mjs";
+import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCanonicalTarget } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,
@@ -40,6 +40,9 @@ describe("devCheckIssueTarget", () => {
   });
   it("accepts a target with issues", () => {
     expect(devCheckIssueTarget(t, "me/app")).toBeNull();
+  });
+  it("matches whatever the case, like the Rust check", () => {
+    expect(devCheckIssueTarget(t, "ME/App")).toBeNull();
   });
 });
 
@@ -98,5 +101,13 @@ describe("devLabelsFrom / devMilestonesFrom", () => {
     expect(devMilestonesFrom([{ number: 3, title: "v4", due_on: "2026-12-01T00:00:00Z" }, { number: 4 }])).toEqual([
       { number: 3, title: "v4", dueOn: "2026-12-01T00:00:00Z" },
     ]);
+  });
+});
+
+describe("devCanonicalTarget", () => {
+  it("gives GitHub's spelling of a target, null for another repository", () => {
+    const t = devIssueTargetsFrom(origin(true, false));
+    expect(devCanonicalTarget(t, "ME/APP")).toBe("me/app");
+    expect(devCanonicalTarget(t, "evil/repo")).toBeNull();
   });
 });

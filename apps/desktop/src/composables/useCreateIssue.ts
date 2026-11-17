@@ -77,6 +77,13 @@ export interface CreateIssueApi {
   milestoneOptions: Ref<RepoMilestone[]>;
   submitting: Ref<boolean>;
   error: Ref<string | null>;
+  /**
+   * The create request timed out: GitHub may have filed the issue anyway.
+   * Create stays off until the user checks, or chooses to send it again.
+   */
+  outcomeUnknown: Ref<boolean>;
+  /** Send the issue again after a timeout (the user checked GitHub). */
+  retryAnyway(): void;
   /** Something was typed or picked since the form opened. */
   dirty: ComputedRef<boolean>;
   canSubmit: ComputedRef<boolean>;
@@ -132,6 +139,7 @@ export function useCreateIssue(deps: {
   const milestoneOptions = ref<RepoMilestone[]>([]);
   const submitting = ref(false);
   const error = ref<string | null>(null);
+  const outcomeUnknown = ref(false);
   const initial = ref<IssuePrefill>({ title: "", body: "" });
   // The repository the open form files on: an app tab switch while it is open
   // must not send the issue (or its picker reads) somewhere else.
@@ -154,7 +162,8 @@ export function useCreateIssue(deps: {
       milestone.value !== null,
   );
   const canSubmit = computed(
-    () => isOpen.value && !!repo.value && title.value.trim() !== "" && !submitting.value,
+    () =>
+      isOpen.value && !!repo.value && title.value.trim() !== "" && !submitting.value && !outcomeUnknown.value,
   );
   const originHtmlUrl = computed(() => targets.value.find((t) => t.isOrigin)?.htmlUrl || null);
 
@@ -217,8 +226,12 @@ export function useCreateIssue(deps: {
     title.value = "";
     body.value = "";
     error.value = null;
+    outcomeUnknown.value = false;
     targetsFailed.value = false;
     submitting.value = false;
+    // The previous form's targets (maybe another repository's) must not
+    // build this one's links if its own read fails.
+    targets.value = [];
     initial.value = { title: "", body: "" };
     clearPickers();
   }
@@ -288,6 +301,10 @@ export function useCreateIssue(deps: {
     loadPickers(next);
   }
 
+  function retryAnyway() {
+    outcomeUnknown.value = false;
+  }
+
   function close() {
     isOpen.value = false;
     loading.value = false;
@@ -317,6 +334,9 @@ export function useCreateIssue(deps: {
     } catch (e) {
       if (gen !== generation) return;
       error.value = message(e);
+      // A timeout (curl exit 28, gh killed) after the request left: GitHub
+      // may have created the issue. A plain retry could file it twice.
+      outcomeUnknown.value = /timed out|timeout|\(exit 28\)/i.test(error.value);
     } finally {
       if (gen === generation) submitting.value = false;
     }
@@ -339,6 +359,8 @@ export function useCreateIssue(deps: {
     milestoneOptions,
     submitting,
     error,
+    outcomeUnknown,
+    retryAnyway,
     dirty,
     canSubmit,
     originHtmlUrl,

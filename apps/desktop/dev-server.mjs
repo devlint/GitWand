@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom } from "./dev-issues.mjs";
+import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCanonicalTarget } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -1265,10 +1265,26 @@ async function githubFetch(path, token, accept = "application/vnd.github+json", 
 
 // ─── Issue creation (#301) — mirrors `commands/gh_issues.rs` ────────────────
 
-/** Same rules as `targets_from`: origin, then its parent when it is a fork. */
-async function devIssueTargets(cwd, token) {
+/** Issue targets per `cwd` + origin, for 5 minutes, as `issue_targets_inner`. */
+const devIssueTargetsCache = new Map();
+
+/**
+ * Same rules as `targets_from`: origin, then its parent when it is a fork.
+ * `fresh` (the form opening) reads GitHub; the picker and create routes take
+ * the cached answer, as the Rust commands do.
+ */
+async function devIssueTargets(cwd, token, fresh = false) {
   const nwo = getRepoNwo(cwd);
   if (!nwo) return { targets: [], defaultRepo: null };
+  const key = `${cwd}\u0000${nwo}`;
+  const hit = devIssueTargetsCache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.targets;
+  const targets = await devIssueTargetsRead(nwo, token);
+  devIssueTargetsCache.set(key, { targets, at: Date.now() });
+  return targets;
+}
+
+async function devIssueTargetsRead(nwo, token) {
   const resp = await githubFetch(`/repos/${nwo}`, token);
   if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
   const origin = await resp.json();
@@ -5469,7 +5485,7 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        return jsonResponse(req, res, await devIssueTargets(resolve(cwd), token));
+        return jsonResponse(req, res, await devIssueTargets(resolve(cwd), token, true));
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);
       }
@@ -5488,7 +5504,7 @@ async function handleRequest(req, res) {
         const targets = await devIssueTargets(resolve(cwd), token);
         const refused = devCheckIssueTarget(targets, input.repo);
         if (refused) return jsonResponse(req, res, { error: refused }, 400);
-        const resp = await githubFetch(`/repos/${input.repo}/issues`, token, undefined, {
+        const resp = await githubFetch(`/repos/${devCanonicalTarget(targets, input.repo)}/issues`, token, undefined, {
           method: "POST",
           body: JSON.stringify(built.payload),
         });
@@ -5521,9 +5537,10 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const refused = devCheckIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
+        const targets = await devIssueTargets(resolve(cwd), token);
+        const refused = devCheckIssueTarget(targets, repo);
         if (refused) return jsonResponse(req, res, { error: refused }, 400);
-        const items = await devGithubPages(`/repos/${repo}/${issuePicker.suffix}`, issuePicker.query, token, issuePicker.pages);
+        const items = await devGithubPages(`/repos/${devCanonicalTarget(targets, repo)}/${issuePicker.suffix}`, issuePicker.query, token, issuePicker.pages);
         return jsonResponse(req, res, issuePicker.map(items));
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);

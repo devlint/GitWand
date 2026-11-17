@@ -367,7 +367,7 @@ fn curl_raw(
 
 /// Map an HTTP ≥ 400 response to a user-facing error, preferring GitHub's
 /// `message` field over the bare status code.
-fn map_api_error(status: i32, body: &str) -> String {
+pub(crate) fn map_api_error(status: i32, body: &str) -> String {
     let v = serde_json::from_str::<serde_json::Value>(body.trim()).ok();
     let msg = v
         .as_ref()

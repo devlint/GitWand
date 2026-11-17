@@ -24,7 +24,8 @@ export function devIssueTargetsFrom(origin) {
 
 /** `check_target` with issues required: the error text, or null when allowed. */
 export function devCheckIssueTarget(targets, repo) {
-  const t = targets.targets.find((x) => x.repo === repo);
+  // GitHub names are case-insensitive, as in the Rust check.
+  const t = targets.targets.find((x) => typeof repo === "string" && x.repo.toLowerCase() === repo.toLowerCase());
   if (!t) return `Not an issue target for this repository: ${repo}`;
   if (!t.hasIssues) return `Issues are disabled on ${repo}`;
   return null;
@@ -94,4 +95,10 @@ export function devMilestonesFrom(items) {
   return items
     .filter((m) => Number.isInteger(m?.number) && nonEmpty(m.title))
     .map((m) => ({ number: m.number, title: m.title, dueOn: nonEmpty(m.due_on) }));
+}
+
+/** The target's own `owner/repo` (GitHub's case) for `repo`, or null. */
+export function devCanonicalTarget(targets, repo) {
+  const t = targets.targets.find((x) => typeof repo === "string" && x.repo.toLowerCase() === repo.toLowerCase());
+  return t ? t.repo : null;
 }

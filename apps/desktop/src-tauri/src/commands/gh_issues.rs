@@ -173,7 +173,13 @@ pub(crate) fn issue_targets_inner(cwd: &str, fresh: bool) -> Result<IssueTargets
 /// `Ok` when `repo` is one of `targets` — with issues turned on when
 /// `need_issues` (creating, reading labels and milestones).
 fn check_target(targets: &IssueTargets, repo: &str, need_issues: bool) -> Result<(), String> {
-    match targets.targets.iter().find(|t| t.repo == repo) {
+    // GitHub names are case-insensitive (the remote URL and `full_name` may
+    // differ in case), as in `same_repo`.
+    match targets
+        .targets
+        .iter()
+        .find(|t| t.repo.eq_ignore_ascii_case(repo))
+    {
         None => Err(format!("Not an issue target for this repository: {}", repo)),
         Some(t) if need_issues && !t.has_issues => Err(format!("Issues are disabled on {}", repo)),
         Some(_) => Ok(()),
@@ -189,8 +195,14 @@ pub(crate) fn resolve_issue_target(
 ) -> Result<GhRepo, String> {
     let targets = issue_targets_inner(cwd, false)?;
     check_target(&targets, repo, need_issues)?;
+    let canonical = targets
+        .targets
+        .iter()
+        .find(|t| t.repo.eq_ignore_ascii_case(repo))
+        .map(|t| t.repo.clone())
+        .unwrap_or_else(|| repo.to_string());
     let origin = gh_origin_repo(cwd).ok_or("No GitHub 'origin' remote in this repository.")?;
-    Ok(origin.sibling(repo.to_string()))
+    Ok(origin.sibling(canonical))
 }
 
 /// Where an issue can be filed from `cwd` (#301), read fresh: the form calls
@@ -203,8 +215,10 @@ pub(crate) async fn gh_issue_targets(cwd: String) -> Result<IssueTargets, String
 }
 
 /// Whether `cwd`'s `origin` is a GitHub repository: what shows the "New
-/// issue" entry points. Local (the remote URL), no request: it runs on every
-/// repository switch. Whether issues are turned on is read when the form opens.
+/// issue" entry points. No GitHub API request: it reads the remote URL
+/// (`gh_origin_repo`, cached 30 s), which for a host other than github.com
+/// may ask `ssh -G` and `gh auth status` whether `gh` knows it — off the UI
+/// thread. Whether issues are turned on is read when the form opens.
 #[tauri::command]
 pub(crate) async fn gh_issue_available(cwd: String) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || gh_origin_repo(&cwd).is_some())
@@ -630,5 +644,11 @@ mod tests {
             &GhRepo::for_test("ghe.example.com/", "devlint/gitwand")
         ));
         assert!(!same_repo(&a, &GhRepo::for_test("", "devlint/other")));
+    }
+
+    #[test]
+    fn a_target_matches_whatever_the_case() {
+        let t = targets_from(&origin(true, false), None);
+        assert!(check_target(&t, "ME/App", true).is_ok());
     }
 }
