@@ -120,8 +120,8 @@ export class GitHubProvider implements ForgeProvider {
 
   // ── Issue creation (#301) ──────────────────────────────────────────────────
 
-  issueTargets(cwd: string): Promise<IssueTargets> {
-    return ghIssueTargets(cwd);
+  issueTargets(cwd: string, fresh = true): Promise<IssueTargets> {
+    return ghIssueTargets(cwd, fresh);
   }
 
   createIssue(cwd: string, input: CreateIssueInput): Promise<CreatedIssue> {

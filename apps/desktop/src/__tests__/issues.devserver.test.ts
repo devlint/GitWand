@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload } from "../../dev-issues.mjs";
+import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,
@@ -59,5 +59,21 @@ describe("devIssuePayload", () => {
     expect(devIssuePayload({ title: "t", body: "b", labels: ["bug"], assignees: ["me"], milestone: 3 }).payload).toEqual({
       title: "t", body: "b", labels: ["bug"], assignees: ["me"], milestone: 3,
     });
+  });
+});
+
+describe("devIssueTargetsFrom — triage rights", () => {
+  it("reads triage or push rights from permissions", () => {
+    const t = devIssueTargetsFrom({ ...origin(true, true, { ...parent(true), permissions: { triage: false, pull: true } }), permissions: { push: true } });
+    expect(t.targets.map((x: { canTriage: boolean }) => x.canTriage)).toEqual([true, false]);
+  });
+});
+
+describe("devAssigneesFrom", () => {
+  it("deduplicates, sorts by login and keeps the Rust shape", () => {
+    expect(devAssigneesFrom([{ login: "zed" }, { login: "Amy", avatar_url: "a" }, { login: "zed" }, {}])).toEqual([
+      { login: "Amy", name: null, avatar_url: "a" },
+      { login: "zed", name: null, avatar_url: null },
+    ]);
   });
 });

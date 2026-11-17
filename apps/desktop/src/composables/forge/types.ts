@@ -197,7 +197,7 @@ export interface ForgeProvider {
 
   // ── Issue creation (#301) — GitHub only for now ─────────────────────────
   /** Where an issue can be filed: `origin`, or a fork's parent. */
-  issueTargets?(cwd: string): Promise<IssueTargets>;
+  issueTargets?(cwd: string, fresh?: boolean): Promise<IssueTargets>;
   createIssue?(cwd: string, input: CreateIssueInput): Promise<CreatedIssue>;
   listLabels?(cwd: string, repo: string): Promise<RepoLabel[]>;
   listMilestones?(cwd: string, repo: string): Promise<RepoMilestone[]>;

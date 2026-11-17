@@ -6,7 +6,7 @@
 //! here, so the frontend cannot aim a write anywhere else.
 
 use super::gh::{gh_api_on, gh_origin_repo, GhRepo};
-use super::github_api::{rest_api_json, with_rest};
+use super::github_api::{rest_api_json, with_rest, with_rest_other_repo};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -21,6 +21,10 @@ pub(crate) struct IssueTarget {
     pub(crate) html_url: String,
     pub(crate) has_issues: bool,
     pub(crate) is_origin: bool,
+    /// The signed-in user may set labels, assignees and a milestone (triage
+    /// rights or more). GitHub silently drops them otherwise, so the form
+    /// does not offer them.
+    pub(crate) can_triage: bool,
 }
 
 /// Where an issue can go from a repository, and where it goes by default:
@@ -44,6 +48,11 @@ fn target_from(v: &serde_json::Value, is_origin: bool) -> Option<IssueTarget> {
             .get("has_issues")
             .and_then(|b| b.as_bool())
             .unwrap_or(false),
+        can_triage: ["triage", "push", "maintain", "admin"].iter().any(|k| {
+            v.pointer(&format!("/permissions/{}", k))
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false)
+        }),
         repo,
         is_origin,
     })
@@ -72,12 +81,32 @@ fn targets_from(origin: &serde_json::Value, parent: Option<&serde_json::Value>) 
     }
 }
 
-/// `GET {path}` on `repo`'s host: REST with the Settings token, else `gh api`.
-pub(crate) fn api_get(cwd: &str, repo: &GhRepo, path: &str) -> Result<serde_json::Value, String> {
-    if let Some(r) = with_rest(cwd, |tok| rest_api_json("GET", path, tok, None)) {
-        return r;
+/// `method {path}` on `repo`'s host: REST with the Settings token, else `gh
+/// api` (`body` sent on stdin). A refusal by the parent's organization does
+/// not mark the checkout restricted (see [`with_rest_other_repo`]).
+fn api_call(
+    cwd: &str,
+    repo: &GhRepo,
+    method: &str,
+    path: &str,
+    body: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let rest = |tok: &str| rest_api_json(method, path, tok, body.as_deref());
+    let is_origin = gh_origin_repo(cwd).as_ref() == Some(repo);
+    let attempt = if is_origin {
+        with_rest(cwd, rest)
+    } else {
+        with_rest_other_repo(cwd, rest)
+    };
+    match attempt {
+        Some(r) => r,
+        None => gh_api_on(cwd, repo, method, path, body),
     }
-    gh_api_on(cwd, repo, "GET", path, None)
+}
+
+/// `GET {path}` on `repo`'s host.
+pub(crate) fn api_get(cwd: &str, repo: &GhRepo, path: &str) -> Result<serde_json::Value, String> {
+    api_call(cwd, repo, "GET", path, None)
 }
 
 const TARGETS_TTL: Duration = Duration::from_secs(5 * 60);
@@ -131,10 +160,17 @@ pub(crate) fn resolve_issue_target(
     Ok(origin.sibling(repo.to_string()))
 }
 
-/// Where an issue can be filed from `cwd` (#301).
+/// Where an issue can be filed from `cwd` (#301). `fresh` (default) re-reads
+/// GitHub; `false` accepts the five-minute cache.
 #[tauri::command]
-pub(crate) async fn gh_issue_targets(cwd: String) -> Result<IssueTargets, String> {
-    tauri::async_runtime::spawn_blocking(move || issue_targets_inner(&cwd, true))
+pub(crate) async fn gh_issue_targets(
+    cwd: String,
+    fresh: Option<bool>,
+) -> Result<IssueTargets, String> {
+    // Fresh when the form opens; the availability check (every repository
+    // switch) takes the cached answer.
+    let fresh = fresh.unwrap_or(true);
+    tauri::async_runtime::spawn_blocking(move || issue_targets_inner(&cwd, fresh))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -202,11 +238,7 @@ fn create_issue_inner(cwd: &str, input: &CreateIssueInput) -> Result<CreatedIssu
     let payload = issue_payload(input)?.to_string();
     let repo = resolve_issue_target(cwd, &input.repo, true)?;
     let path = format!("repos/{}/issues", repo.nwo);
-    let created = match with_rest(cwd, |tok| rest_api_json("POST", &path, tok, Some(&payload))) {
-        Some(r) => r?,
-        None => gh_api_on(cwd, &repo, "POST", &path, Some(payload))?,
-    };
-    created_from(&created)
+    created_from(&api_call(cwd, &repo, "POST", &path, Some(payload))?)
 }
 
 /// File an issue on one of `cwd`'s issue targets (#301).
@@ -295,7 +327,9 @@ fn milestones_from(items: &[serde_json::Value]) -> Vec<RepoMilestone> {
         .collect()
 }
 
-fn assignees_from(items: &[serde_json::Value]) -> Vec<crate::types::ReviewerCandidate> {
+/// Users from GitHub's `/assignees` pages: deduplicated, sorted by login
+/// (case-insensitive). Shared with the pull request reviewer candidates.
+pub(crate) fn assignees_from(items: &[serde_json::Value]) -> Vec<crate::types::ReviewerCandidate> {
     let mut seen = std::collections::HashSet::new();
     let mut out: Vec<_> = items
         .iter()
@@ -528,5 +562,25 @@ mod tests {
             a.iter().map(|x| x.login.as_str()).collect::<Vec<_>>(),
             ["Amy", "zed"]
         );
+    }
+
+    #[test]
+    fn triage_rights_read_from_permissions() {
+        let mut o = origin(true, true);
+        o["permissions"] =
+            json!({"admin": false, "maintain": false, "push": false, "triage": true, "pull": true});
+        let mut p = parent(true);
+        p["permissions"] = json!({"admin": false, "push": false, "triage": false, "pull": true});
+        let t = targets_from(&o, Some(&p));
+        assert!(t.targets[0].can_triage);
+        assert!(!t.targets[1].can_triage);
+    }
+
+    #[test]
+    fn push_rights_count_as_triage_and_missing_permissions_do_not() {
+        let mut o = origin(true, false);
+        o["permissions"] = json!({"push": true});
+        assert!(targets_from(&o, None).targets[0].can_triage);
+        assert!(!targets_from(&origin(true, false), None).targets[0].can_triage);
     }
 }

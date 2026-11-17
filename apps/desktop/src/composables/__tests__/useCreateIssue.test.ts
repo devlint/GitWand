@@ -11,8 +11,8 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-const ORIGIN = { repo: "me/app", htmlUrl: "https://github.com/me/app", hasIssues: true, isOrigin: true };
-const PARENT = { repo: "org/app", htmlUrl: "https://github.com/org/app", hasIssues: true, isOrigin: false };
+const ORIGIN = { repo: "me/app", htmlUrl: "https://github.com/me/app", hasIssues: true, isOrigin: true, canTriage: true };
+const PARENT = { repo: "org/app", htmlUrl: "https://github.com/org/app", hasIssues: true, isOrigin: false, canTriage: true };
 
 function provider(over: Partial<ForgeProvider> = {}, targets: IssueTargets = { targets: [ORIGIN], defaultRepo: "me/app" }) {
   return {
@@ -26,10 +26,10 @@ function provider(over: Partial<ForgeProvider> = {}, targets: IssueTargets = { t
   } as unknown as ForgeProvider;
 }
 
-function setup(p: ForgeProvider) {
+function setup(p: ForgeProvider, cwd = ref<string | null>("/repo")) {
   const onCreated = vi.fn();
-  const api = useCreateIssue({ cwd: ref("/repo"), provider: ref(p), onCreated });
-  return { api, onCreated };
+  const api = useCreateIssue({ cwd, provider: ref(p), onCreated });
+  return { api, onCreated, cwd };
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -211,5 +211,53 @@ describe("useCreateIssue", () => {
     await pending;
     expect(onCreated).toHaveBeenCalledWith({ number: 9, url: "u" });
     expect(api.isOpen.value).toBe(false);
+  });
+
+  it("loads no pickers for a target where the user cannot triage", async () => {
+    const p = provider({}, { targets: [{ ...ORIGIN, canTriage: false }], defaultRepo: "me/app" });
+    const { api } = setup(p);
+    await api.open();
+    await flush();
+    expect(p.listLabels).not.toHaveBeenCalled();
+    expect(p.listAssignees).not.toHaveBeenCalled();
+    expect(p.listMilestones).not.toHaveBeenCalled();
+  });
+
+  it("files the issue on the repository it was opened for, even after the app switches", async () => {
+    const p = provider();
+    const { api, cwd } = setup(p);
+    await api.open();
+    cwd.value = "/other";
+    api.title.value = "t";
+    await api.submit();
+    expect((p.createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe("/repo");
+  });
+
+  it("opens at once and fills the prefill when it is ready", async () => {
+    const prefill = deferred<{ title: string; body: string }>();
+    const { api } = setup(provider());
+    const opening = api.open(prefill.promise);
+    expect(api.isOpen.value).toBe(true);
+    prefill.resolve({ title: "from commit", body: "b" });
+    await opening;
+    expect(api.title.value).toBe("from commit");
+    expect(api.dirty.value).toBe(false);
+  });
+
+  it("asks for cached targets to decide availability, fresh ones when opening", async () => {
+    const p = provider();
+    const { api } = setup(p);
+    await api.refreshAvailability();
+    expect(p.issueTargets).toHaveBeenLastCalledWith("/repo", false);
+    await api.open();
+    expect(p.issueTargets).toHaveBeenLastCalledWith("/repo", true);
+  });
+
+  it("forgets the previous repository's targets", async () => {
+    const { api } = setup(provider());
+    await api.refreshAvailability();
+    api.forgetTargets();
+    expect(api.available.value).toBe(false);
+    expect(api.originHtmlUrl.value).toBeNull();
   });
 });

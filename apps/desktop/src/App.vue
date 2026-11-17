@@ -516,26 +516,43 @@ const createIssue = useCreateIssue({
 });
 provide(CREATE_ISSUE_KEY, createIssue);
 watch(repoFolderPath, () => {
-  createIssue.close();
+  // The previous repository's targets must not decide anything here (a
+  // commit link built from its page, an entry point it allowed).
+  createIssue.forgetTargets();
+  // An open form keeps the repository it was opened for: close it only when
+  // nothing would be lost (no typed text, no create in flight).
+  if (createIssue.isOpen.value && !createIssue.dirty.value && !createIssue.submitting.value) createIssue.close();
   void createIssue.refreshAvailability();
 }, { immediate: true });
+
+// Offline at start, or GitHub signed in later: look again when the window
+// comes back, as long as the action is not available yet.
+function onWindowFocusIssues() {
+  if (!createIssue.available.value && repoFolderPath.value) void createIssue.refreshAvailability();
+}
+onMounted(() => window.addEventListener("focus", onWindowFocusIssues));
+onUnmounted(() => window.removeEventListener("focus", onWindowFocusIssues));
 
 function openNewIssue() {
   if (createIssue.available.value) void createIssue.open();
 }
 
 /** "Create issue from commit": the commit is linked only once `origin` has it
- *  (the link goes to origin's page; a commit only on another remote would 404). */
-async function openIssueFromCommit(entry: IssueCommitEntry) {
+ *  (the link goes to origin's page; a commit only on another remote would 404).
+ *  The form opens at once; the prefill lands when the git check answers. */
+function openIssueFromCommit(entry: IssueCommitEntry) {
   const cwd = repoFolderPath.value;
-  if (!cwd || !createIssue.available.value) return;
-  let pushed = false;
-  try {
-    const r = await gitExec(cwd, ["for-each-ref", "--contains", entry.hashFull, "--count=1", "--format=%(refname)", "refs/remotes/origin/"]);
-    pushed = r.exitCode === 0 && r.stdout.trim() !== "";
-  } catch { /* unknown → unlinked, never a 404 link */ }
   const origin = createIssue.originHtmlUrl.value;
-  await createIssue.open(commitIssuePrefill(entry, pushed && origin ? commitUrlFor(origin, entry.hashFull) : null));
+  if (!cwd || !createIssue.available.value) return;
+  const prefill = (async () => {
+    let pushed = false;
+    try {
+      const r = await gitExec(cwd, ["for-each-ref", "--contains", entry.hashFull, "--count=1", "--format=%(refname)", "refs/remotes/origin/"]);
+      pushed = r.exitCode === 0 && r.stdout.trim() !== "";
+    } catch { /* unknown → unlinked, never a 404 link */ }
+    return commitIssuePrefill(entry, pushed && origin ? commitUrlFor(origin, entry.hashFull) : null);
+  })();
+  void createIssue.open(prefill);
 }
 const issuePanel = useIssuePanel(prCwd);
 provide(ISSUE_PANEL_KEY, issuePanel);

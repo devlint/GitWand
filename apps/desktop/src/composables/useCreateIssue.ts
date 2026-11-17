@@ -43,7 +43,13 @@ export interface CreateIssueApi {
   /** `origin`'s page, for commit links (GitHub Enterprise included). */
   originHtmlUrl: ComputedRef<string | null>;
   refreshAvailability(): Promise<void>;
-  open(prefill?: IssuePrefill): Promise<void>;
+  /** Drop the targets of the repository being left, before the next one is read. */
+  forgetTargets(): void;
+  /**
+   * Open the form. A prefill given as a promise (a commit's, which needs a
+   * git check first) lands when ready: the form shows at once.
+   */
+  open(prefill?: IssuePrefill | Promise<IssuePrefill>): Promise<void>;
   close(): void;
   setRepo(repo: string): void;
   submit(): Promise<void>;
@@ -77,6 +83,9 @@ export function useCreateIssue(deps: {
   const submitting = ref(false);
   const error = ref<string | null>(null);
   const initial = ref<IssuePrefill>({ title: "", body: "" });
+  // The repository the open form files on: an app tab switch while it is open
+  // must not send the issue (or its picker reads) somewhere else.
+  let formCwd: string | null = null;
 
   // Bumped by every open, target switch and close: an answer that comes back
   // under an older value belongs to a form that is no longer on screen.
@@ -89,12 +98,11 @@ export function useCreateIssue(deps: {
   );
   const originHtmlUrl = computed(() => targets.value.find((t) => t.isOrigin)?.htmlUrl || null);
 
-  async function readTargets(): Promise<IssueTarget[] | null> {
+  async function readTargets(cwd: string | null, fresh: boolean): Promise<IssueTarget[] | null> {
     const p = deps.provider.value;
-    const cwd = deps.cwd.value;
     if (!p?.issueTargets || !cwd) return [];
     try {
-      const t = await p.issueTargets(cwd);
+      const t = await p.issueTargets(cwd, fresh);
       return t.targets;
     } catch {
       return null;
@@ -103,12 +111,19 @@ export function useCreateIssue(deps: {
 
   async function refreshAvailability(): Promise<void> {
     const seq = ++availabilitySeq;
-    const t = await readTargets();
+    // The backend's cached answer: this runs on every repository switch.
+    const t = await readTargets(deps.cwd.value, false);
     // A failed read keeps the last answer: one network error must not hide
     // the action until the repository is switched.
     if (seq !== availabilitySeq || t === null) return;
     targets.value = t;
     available.value = t.length > 0;
+  }
+
+  function forgetTargets() {
+    availabilitySeq++;
+    if (!isOpen.value) targets.value = [];
+    available.value = false;
   }
 
   function clearPickers() {
@@ -122,8 +137,11 @@ export function useCreateIssue(deps: {
 
   function loadPickers(target: string) {
     const p = deps.provider.value;
-    const cwd = deps.cwd.value;
-    if (!p || !cwd) return;
+    const cwd = formCwd;
+    // Without triage rights GitHub drops labels, assignees and milestone
+    // silently: not offering them is better than a success that lost them.
+    const canTriage = targets.value.find((t) => t.repo === target)?.canTriage ?? false;
+    if (!p || !cwd || !canTriage) return;
     const gen = generation;
     const current = () => gen === generation && repo.value === target;
     // Each list is optional: a read GitHub refuses (no triage rights) leaves it empty.
@@ -144,19 +162,23 @@ export function useCreateIssue(deps: {
     clearPickers();
   }
 
-  async function open(prefill?: IssuePrefill): Promise<void> {
+  async function open(prefill?: IssuePrefill | Promise<IssuePrefill>): Promise<void> {
     // Already open (⌘⇧I again, the palette): never wipe what is being typed,
     // nor drop the answer of a create in flight.
     if (isOpen.value) return;
     reset();
     const gen = generation;
-    initial.value = { title: prefill?.title ?? "", body: prefill?.body ?? "" };
-    title.value = initial.value.title;
-    body.value = initial.value.body;
+    formCwd = deps.cwd.value;
     isOpen.value = true;
     loading.value = true;
-    const t = await readTargets();
+    const [t, filled] = await Promise.all([
+      readTargets(formCwd, true),
+      Promise.resolve(prefill).catch(() => undefined),
+    ]);
     if (gen !== generation) return;
+    initial.value = { title: filled?.title ?? "", body: filled?.body ?? "" };
+    title.value = initial.value.title;
+    body.value = initial.value.body;
     loading.value = false;
     targetsFailed.value = t === null;
     if (t === null) return;
@@ -188,7 +210,7 @@ export function useCreateIssue(deps: {
 
   async function submit(): Promise<void> {
     const p = deps.provider.value;
-    const cwd = deps.cwd.value;
+    const cwd = formCwd;
     if (!canSubmit.value || !p?.createIssue || !cwd || !repo.value) return;
     // Set before the first await: a second call in the same tick sees it.
     submitting.value = true;
@@ -235,6 +257,7 @@ export function useCreateIssue(deps: {
     canSubmit,
     originHtmlUrl,
     refreshAvailability,
+    forgetTargets,
     open,
     close,
     setRepo,

@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload } from "./dev-issues.mjs";
+import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -5488,13 +5488,14 @@ async function handleRequest(req, res) {
 
     // GET /api/gh-list-{labels,milestones,assignees}?cwd=<path>&repo=<owner/repo>
     // — mirror `gh_list_labels` / `gh_list_milestones` / `gh_list_assignees`.
+    // (The condition below names each route literally: commandRegistry.test
+    // reads the served routes from `url.pathname === "…"` comparisons.)
     const issuePicker = {
       "/api/gh-list-labels": { suffix: "labels", query: "", pages: 3,
         map: (l) => (l.name ? { name: l.name, color: l.color || "", description: l.description || null } : null) },
       "/api/gh-list-milestones": { suffix: "milestones", query: "state=open&", pages: 1,
         map: (m) => (Number.isInteger(m.number) && m.title ? { number: m.number, title: m.title, dueOn: m.due_on || null } : null) },
-      "/api/gh-list-assignees": { suffix: "assignees", query: "", pages: 3,
-        map: (u) => (u.login ? { login: u.login, name: u.name || null, avatar_url: u.avatar_url || null } : null) },
+      "/api/gh-list-assignees": { suffix: "assignees", query: "", pages: 3, all: devAssigneesFrom },
     }[url.pathname];
     if (
       (url.pathname === "/api/gh-list-labels" ||
@@ -5511,12 +5512,7 @@ async function handleRequest(req, res) {
         const refused = devCheckIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
         if (refused) return jsonResponse(req, res, { error: refused }, 400);
         const items = await devGithubPages(`/repos/${repo}/${issuePicker.suffix}`, issuePicker.query, token, issuePicker.pages);
-        let out = items.map(issuePicker.map).filter(Boolean);
-        if (issuePicker.suffix === "assignees") {
-          const seen = new Set();
-          out = out.filter((u) => !seen.has(u.login) && seen.add(u.login))
-            .sort((a, b) => { const x = a.login.toLowerCase(), y = b.login.toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; });
-        }
+        const out = issuePicker.all ? issuePicker.all(items) : items.map(issuePicker.map).filter(Boolean);
         return jsonResponse(req, res, out);
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);
@@ -5534,26 +5530,16 @@ async function handleRequest(req, res) {
         const nwo = getRepoNwo(resolve(cwd));
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         // Paginate up to 3 pages of 100 = 300 candidates.
-        const all = [];
-        const seen = new Set();
+        const items = [];
         for (let page = 1; page <= 3; page++) {
           const resp = await githubFetch(`/repos/${nwo}/assignees?per_page=100&page=${page}`, token);
           if (!resp.ok) break;
           const raw = await resp.json();
           if (!Array.isArray(raw) || raw.length === 0) break;
-          for (const u of raw) {
-            if (!u.login || seen.has(u.login)) continue;
-            seen.add(u.login);
-            all.push({
-              login: u.login,
-              name: u.name ?? null,
-              avatar_url: u.avatar_url ?? null,
-            });
-          }
+          items.push(...raw);
           if (raw.length < 100) break;
         }
-        all.sort((a, b) => a.login.toLowerCase().localeCompare(b.login.toLowerCase()));
-        return jsonResponse(req, res, all);
+        return jsonResponse(req, res, devAssigneesFrom(items));
       } catch (err) {
         console.error("[gh-reviewer-candidates]", err.message);
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);

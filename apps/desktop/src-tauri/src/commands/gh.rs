@@ -578,44 +578,13 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
     }
 
     // --paginate concatenates JSON arrays page-by-page (one per line).
-    // Parse each non-empty line as a JSON array and flatten.
     let raw = String::from_utf8_lossy(&output.stdout);
-    let mut all: Vec<ReviewerCandidate> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for chunk in raw.split('\n') {
-        let trimmed = chunk.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        // gh might return either a single array per chunk (--jq with array wrapper)
-        // or NDJSON of arrays. Try to parse as Value and walk.
-        let value: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if let Some(arr) = value.as_array() {
-            for item in arr {
-                let login = item.get("login").and_then(|v| v.as_str()).unwrap_or("");
-                if login.is_empty() || !seen.insert(login.to_string()) {
-                    continue;
-                }
-                all.push(ReviewerCandidate {
-                    login: login.to_string(),
-                    name: item
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    avatar_url: item
-                        .get("avatar_url")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                });
-            }
-        }
-    }
-    // Sort alphabetically by login for stable UX.
-    all.sort_by_key(|a| a.login.to_lowercase());
-    Ok(all)
+    let items: Vec<serde_json::Value> = raw
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l.trim()).ok())
+        .flat_map(|v| v.as_array().cloned().unwrap_or_default())
+        .collect();
+    Ok(super::gh_issues::assignees_from(&items))
 }
 
 /// List candidate reviewers for the current repo using `gh` CLI.

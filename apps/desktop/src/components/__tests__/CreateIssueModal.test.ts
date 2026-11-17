@@ -10,8 +10,8 @@ vi.mock("../../composables/useI18n", () => ({
   useI18n: () => ({ t: (key: string, ...args: unknown[]) => (args.length ? `${key}:${args.join(",")}` : key) }),
 }));
 
-const ORIGIN = { repo: "me/app", htmlUrl: "https://github.com/me/app", hasIssues: true, isOrigin: true };
-const PARENT_OFF = { repo: "org/app", htmlUrl: "https://github.com/org/app", hasIssues: false, isOrigin: false };
+const ORIGIN = { repo: "me/app", htmlUrl: "https://github.com/me/app", hasIssues: true, isOrigin: true, canTriage: true };
+const PARENT_OFF = { repo: "org/app", htmlUrl: "https://github.com/org/app", hasIssues: false, isOrigin: false, canTriage: false };
 
 let app: App | null = null;
 

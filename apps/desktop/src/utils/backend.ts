@@ -4595,6 +4595,8 @@ export interface IssueTarget {
   htmlUrl: string;
   hasIssues: boolean;
   isOrigin: boolean;
+  /** The user may set labels, assignees and a milestone (GitHub drops them otherwise). */
+  canTriage: boolean;
 }
 
 /** Result of `ghIssueTargets`: empty `targets` when `origin` is not GitHub. */
@@ -4637,30 +4639,29 @@ async function devJson<T>(res: Response, what: string): Promise<T> {
   return raw as T;
 }
 
-export async function ghIssueTargets(cwd: string): Promise<IssueTargets> {
-  if (isTauri()) return tauriInvoke<IssueTargets>("gh_issue_targets", { cwd });
+/** `fresh` re-reads GitHub (the form opening); `false` accepts the backend's cache. */
+export async function ghIssueTargets(cwd: string, fresh = true): Promise<IssueTargets> {
+  if (isTauri()) return tauriInvoke<IssueTargets>("gh_issue_targets", { cwd, fresh }, IPC_TIMEOUT.NETWORK);
   const res = await devFetch(`${DEV_SERVER}/api/gh-issue-targets?cwd=${encodeURIComponent(cwd)}`);
   return devJson<IssueTargets>(res, "gh issue targets");
 }
 
 export async function ghCreateIssue(cwd: string, input: CreateIssueInput): Promise<CreatedIssue> {
-  if (isTauri()) return tauriInvoke<CreatedIssue>("gh_create_issue", { cwd, input });
-  const res = await devFetch(`${DEV_SERVER}/api/gh-create-issue`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, input }),
-  });
-  return devJson<CreatedIssue>(res, "gh create issue");
+  // NETWORK, not the 30 s default: the backend may take longer (the `gh`
+  // path allows 60 s), and a frontend timeout while the POST still lands
+  // would invite a second, duplicate issue.
+  if (isTauri()) return tauriInvoke<CreatedIssue>("gh_create_issue", { cwd, input }, IPC_TIMEOUT.NETWORK);
+  return devPost<CreatedIssue>("/api/gh-create-issue", { cwd, input }, "gh create issue");
 }
 
 export async function ghListLabels(cwd: string, repo: string): Promise<RepoLabel[]> {
-  if (isTauri()) return tauriInvoke<RepoLabel[]>("gh_list_labels", { cwd, repo });
+  if (isTauri()) return tauriInvoke<RepoLabel[]>("gh_list_labels", { cwd, repo }, IPC_TIMEOUT.NETWORK);
   const res = await devFetch(`${DEV_SERVER}/api/gh-list-labels?cwd=${encodeURIComponent(cwd)}&repo=${encodeURIComponent(repo)}`);
   return devJson<RepoLabel[]>(res, "gh list labels");
 }
 
 export async function ghListMilestones(cwd: string, repo: string): Promise<RepoMilestone[]> {
-  if (isTauri()) return tauriInvoke<RepoMilestone[]>("gh_list_milestones", { cwd, repo });
+  if (isTauri()) return tauriInvoke<RepoMilestone[]>("gh_list_milestones", { cwd, repo }, IPC_TIMEOUT.NETWORK);
   const res = await devFetch(`${DEV_SERVER}/api/gh-list-milestones?cwd=${encodeURIComponent(cwd)}&repo=${encodeURIComponent(repo)}`);
   return devJson<RepoMilestone[]>(res, "gh list milestones");
 }
@@ -4669,7 +4670,7 @@ export async function ghListMilestones(cwd: string, repo: string): Promise<RepoM
 export async function ghListAssignees(cwd: string, repo: string): Promise<ReviewerCandidate[]> {
   type Raw = { login: string; name?: string | null; avatar_url?: string | null };
   const raw = isTauri()
-    ? await tauriInvoke<Raw[]>("gh_list_assignees", { cwd, repo })
+    ? await tauriInvoke<Raw[]>("gh_list_assignees", { cwd, repo }, IPC_TIMEOUT.NETWORK)
     : await devJson<Raw[]>(
         await devFetch(`${DEV_SERVER}/api/gh-list-assignees?cwd=${encodeURIComponent(cwd)}&repo=${encodeURIComponent(repo)}`),
         "gh list assignees",

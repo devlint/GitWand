@@ -7,7 +7,9 @@
 /** A repository JSON (`GET /repos/{nwo}`) → its issue target, or null. */
 function issueTarget(v, isOrigin) {
   if (!v || typeof v.full_name !== "string") return null;
-  return { repo: v.full_name, htmlUrl: v.html_url || "", hasIssues: v.has_issues === true, isOrigin };
+  const perms = v.permissions || {};
+  const canTriage = ["triage", "push", "maintain", "admin"].some((k) => perms[k] === true);
+  return { repo: v.full_name, htmlUrl: v.html_url || "", hasIssues: v.has_issues === true, isOrigin, canTriage };
 }
 
 /** `targets_from`: origin, then its parent (carried in origin's JSON) when it is a fork. */
@@ -37,4 +39,23 @@ export function devIssuePayload(input) {
   if (Array.isArray(input.assignees) && input.assignees.length) p.assignees = input.assignees;
   if (Number.isInteger(input.milestone)) p.milestone = input.milestone;
   return { payload: p };
+}
+
+/**
+ * GitHub `/assignees` items → `{login, name, avatar_url}`, deduplicated and
+ * sorted by login (case-insensitive, byte order like the Rust
+ * `assignees_from`). Shared by the reviewer-candidate and assignee routes.
+ */
+export function devAssigneesFrom(items) {
+  const seen = new Set();
+  const out = [];
+  for (const u of items) {
+    if (!u?.login || seen.has(u.login)) continue;
+    seen.add(u.login);
+    out.push({ login: u.login, name: u.name || null, avatar_url: u.avatar_url || null });
+  }
+  return out.sort((a, b) => {
+    const x = a.login.toLowerCase(), y = b.login.toLowerCase();
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
 }

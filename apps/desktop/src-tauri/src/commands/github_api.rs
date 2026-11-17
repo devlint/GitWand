@@ -190,9 +190,13 @@ pub(crate) fn rest_token_for(cwd: &str) -> Option<String> {
 }
 
 /// Testable core of [`with_rest`]: `token` is the Settings token and
-/// `gh_signed_in` says whether the `gh` CLI can take over.
+/// `gh_signed_in` says whether the `gh` CLI can take over. `remember` marks
+/// `cwd` as restricted after a refusal; off when the call was about another
+/// repository than `cwd`'s `origin` (a fork's parent), whose organization says
+/// nothing about the checkout's own.
 fn rest_attempt<T>(
     cwd: &str,
+    remember: bool,
     token: Option<String>,
     gh_signed_in: impl FnOnce() -> bool,
     call: impl FnOnce(&str) -> Result<T, String>,
@@ -201,7 +205,9 @@ fn rest_attempt<T>(
     match call(&tok) {
         Err(e) if is_oauth_restricted(&e) => {
             if gh_signed_in() {
-                mark_restricted(cwd);
+                if remember {
+                    mark_restricted(cwd);
+                }
                 None
             } else {
                 Some(Err(oauth_restricted_message(&e)))
@@ -234,7 +240,24 @@ pub(crate) fn with_rest_using<T>(
 ) -> Option<Result<T, String>> {
     rest_attempt(
         cwd,
+        true,
         token.map(String::from),
+        || super::gh::gh_auth_token().is_some(),
+        call,
+    )
+}
+
+/// [`with_rest`] for a call about another repository than `cwd`'s `origin`
+/// (a fork's parent): an OAuth App refusal from that repository's organization
+/// falls back to `gh` for this call only, without marking `cwd` restricted.
+pub(crate) fn with_rest_other_repo<T>(
+    cwd: &str,
+    call: impl FnOnce(&str) -> Result<T, String>,
+) -> Option<Result<T, String>> {
+    rest_attempt(
+        cwd,
+        false,
+        settings_github_token(),
         || super::gh::gh_auth_token().is_some(),
         call,
     )
@@ -1194,8 +1217,7 @@ pub(crate) fn rest_reviewer_candidates(
     token: &str,
 ) -> Result<Vec<ReviewerCandidate>, String> {
     let (owner, repo) = owner_repo(cwd)?;
-    let mut all: Vec<ReviewerCandidate> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut items: Vec<serde_json::Value> = Vec::new();
     for page in 1..=3 {
         let url = format!(
             "{}/repos/{}/{}/assignees?per_page=100&page={}",
@@ -1203,32 +1225,16 @@ pub(crate) fn rest_reviewer_candidates(
         );
         let v = api_json("GET", &url, token, None)?;
         let arr = match v.as_array() {
-            Some(a) if !a.is_empty() => a,
+            Some(a) if !a.is_empty() => a.clone(),
             _ => break,
         };
         let count = arr.len();
-        for u in arr {
-            let login = js(u, "login");
-            if login.is_empty() || !seen.insert(login.clone()) {
-                continue;
-            }
-            let name = u.get("name").and_then(|n| n.as_str()).map(String::from);
-            let avatar_url = u
-                .get("avatar_url")
-                .and_then(|a| a.as_str())
-                .map(String::from);
-            all.push(ReviewerCandidate {
-                login,
-                name,
-                avatar_url,
-            });
-        }
+        items.extend(arr);
         if count < 100 {
             break;
         }
     }
-    all.sort_by_key(|a| a.login.to_lowercase());
-    Ok(all)
+    Ok(super::gh_issues::assignees_from(&items))
 }
 
 /// List branch names (heads) for the repo via the REST API (tokenless path).
@@ -2793,10 +2799,27 @@ mod tests {
     }
 
     #[test]
+    fn a_restricted_call_on_another_repo_does_not_mark_this_checkout() {
+        // A fork's parent in an org that restricts OAuth apps: fall back to
+        // `gh` for that call, but keep the GitWand token for the fork itself.
+        let cwd = "/tmp/gitwand-test-restricted-parent";
+        let out: Option<Result<(), String>> = rest_attempt(
+            cwd,
+            false,
+            Some("tok".into()),
+            || true,
+            |_| Err(RESTRICTED.to_string()),
+        );
+        assert!(out.is_none());
+        assert!(!is_marked_restricted(cwd));
+    }
+
+    #[test]
     fn a_restricted_call_falls_back_to_gh_and_marks_the_repo() {
         let cwd = "/tmp/gitwand-test-restricted-a";
         let out: Option<Result<(), String>> = rest_attempt(
             cwd,
+            true,
             Some("tok".into()),
             || true,
             |_| Err(RESTRICTED.to_string()),
@@ -2816,6 +2839,7 @@ mod tests {
         let cwd = "/tmp/gitwand-test-restricted-b";
         let out: Option<Result<(), String>> = rest_attempt(
             cwd,
+            true,
             Some("tok".into()),
             || false,
             |_| Err(RESTRICTED.to_string()),
@@ -2834,10 +2858,11 @@ mod tests {
     fn other_results_pass_through_untouched() {
         let cwd = "/tmp/gitwand-test-restricted-c";
         let ok: Option<Result<i32, String>> =
-            rest_attempt(cwd, Some("tok".into()), || true, |_| Ok(7));
+            rest_attempt(cwd, true, Some("tok".into()), || true, |_| Ok(7));
         assert_eq!(ok, Some(Ok(7)));
         let err: Option<Result<i32, String>> = rest_attempt(
             cwd,
+            true,
             Some("tok".into()),
             || true,
             |_| Err("GitHub API error (404): Not Found".to_string()),
@@ -2847,7 +2872,7 @@ mod tests {
             Some(Err("GitHub API error (404): Not Found".to_string()))
         );
         assert!(!is_marked_restricted(cwd));
-        let none: Option<Result<i32, String>> = rest_attempt(cwd, None, || true, |_| Ok(1));
+        let none: Option<Result<i32, String>> = rest_attempt(cwd, true, None, || true, |_| Ok(1));
         assert_eq!(none, None, "no GitWand token: the gh path runs");
     }
 

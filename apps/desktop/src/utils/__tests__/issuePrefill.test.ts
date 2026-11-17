@@ -36,18 +36,31 @@ describe("commitIssuePrefill", () => {
     expect(b).not.toContain("](");
   });
 
-  it("quotes every line of the full message, body included", () => {
+  it("puts the full message, body included, in a code block", () => {
     const b = commitIssuePrefill(entry({ message: "s", body: "l1\n\nl2" }), null).body;
-    expect(b).toContain("> s\n>\n> l1\n>\n> l2");
+    expect(b).toContain("```text\ns\n\nl1\n\nl2\n```");
+  });
+
+  it("keeps mentions and issue references inert (inside the code block)", () => {
+    const b = commitIssuePrefill(entry({ message: "Fix race (#123), thanks @alice" }), null).body;
+    const block = b.slice(b.indexOf("```"));
+    expect(block).toContain("Fix race (#123), thanks @alice");
+    expect(b.slice(0, b.indexOf("```"))).not.toMatch(/@alice|#123/);
+  });
+
+  it("uses a longer fence than any backtick run in the message", () => {
+    const b = commitIssuePrefill(entry({ message: "s", body: "see ```js\nx\n```" }), null).body;
+    expect(b).toContain("````text\n");
+    expect(b.trimEnd().endsWith("````")).toBe(true);
   });
 
   it("names the author", () => {
     expect(commitIssuePrefill(entry(), null).body).toContain("Ada Lovelace");
   });
 
-  it("does not leave a trailing blank quote line when the body ends with a newline", () => {
+  it("does not leave a trailing blank line inside the block when the body ends with a newline", () => {
     const b = commitIssuePrefill(entry({ message: "s", body: "l1\n" }), null).body;
-    expect(b.trimEnd().endsWith("> l1")).toBe(true);
+    expect(b).toContain("l1\n```");
   });
 });
 
