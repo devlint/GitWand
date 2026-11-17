@@ -5708,14 +5708,17 @@ async function handleRequest(req, res) {
         const htmls = [];
         let firstError = null;
         let anyOk = false;
-        const repoResp = await githubFetch(`/repos/${nwo}`, token);
-        if (!repoResp.ok) return jsonResponse(req, res, { error: `GitHub API ${repoResp.status}` }, 500);
-        const isPrivate = (await repoResp.json()).private === true;
-        const fetches = await Promise.allSettled(paths.map(async (p) => {
-          const resp = await githubFetch(p, token, "application/vnd.github.html+json");
-          if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
-          return resp.json();
-        }));
+        // Visibility alongside the bodies, best effort (null when unreadable).
+        const [repoResult, ...fetches] = await Promise.allSettled([
+          githubFetch(`/repos/${nwo}`, token).then((r) => (r.ok ? r.json() : null)),
+          ...paths.map(async (p) => {
+            const resp = await githubFetch(p, token, "application/vnd.github.html+json");
+            if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+            return resp.json();
+          }),
+        ]);
+        const priv = repoResult.status === "fulfilled" ? repoResult.value?.private : undefined;
+        const isPrivate = typeof priv === "boolean" ? priv : null;
         for (const f of fetches) {
           if (f.status === "rejected") {
             firstError ??= f.reason?.message ?? String(f.reason);

@@ -1354,10 +1354,11 @@ fn gh_pr_attachment_urls_inner(
                 .collect()
         },
     );
-    let private = repo?
-        .get("private")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    // Best effort, like the URLs: a repository that cannot be read (SSO,
+    // a transient error) does not cost the URLs fetched.
+    let private = repo
+        .ok()
+        .and_then(|r| r.get("private").and_then(|v| v.as_bool()));
     Ok(github_api::PrAttachmentUrls {
         private,
         urls: github_api::signed_urls_from_fetches(fetches)?,

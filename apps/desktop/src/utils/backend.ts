@@ -3397,8 +3397,11 @@ export async function ghIssueDetail(cwd: string, number: number): Promise<IssueD
 
 /** Result of `ghPrAttachmentUrls`. */
 export interface PrAttachmentUrls {
-  /** The PR's repository is private: only then are the signed URLs needed. */
-  private: boolean;
+  /**
+   * The PR's repository is private: only then are the signed URLs needed.
+   * Null when it could not be read.
+   */
+  private: boolean | null;
   urls: string[];
 }
 

@@ -2545,7 +2545,8 @@ pub(crate) struct PrAttachmentUrls {
     /// Whether the PR's repository is private: only then does the webview
     /// need the signed URLs (a public repository serves the originals, which
     /// never expire, though GitHub signs its attachments in `body_html` too).
-    pub private: bool,
+    /// `None` when it could not be read: the URLs are still returned.
+    pub private: Option<bool>,
     pub urls: Vec<String>,
 }
 
@@ -2556,10 +2557,7 @@ pub(crate) fn rest_pr_attachment_urls(
     token: &str,
 ) -> Result<PrAttachmentUrls, String> {
     let (repo, pr) = get_pr_json(cwd, number, token)?;
-    let private = pr
-        .pointer("/base/repo/private")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let private = pr.pointer("/base/repo/private").and_then(|v| v.as_bool());
     let fetches = pr_attachment_html_paths(&repo, number)
         .par_iter()
         .map(|path| {

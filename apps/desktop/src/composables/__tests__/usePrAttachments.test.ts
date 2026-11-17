@@ -149,18 +149,60 @@ describe("usePrAttachments", () => {
     expect(s.resolveImage(asset(A))).toBe(signed(A, 2));
   });
 
-  it("does not loop on images that keep failing", async () => {
-    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
+  it("does not loop on images a fetch cannot fix", async () => {
+    vi.useFakeTimers();
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A))); // B: deleted, not signed
+    const s = setup([md(A), md(B)]);
+    s.onImageError(imgError(asset(A)));
+    await flush();
+    for (let i = 0; i < 3; i++) {
+      s.tick(31_000);
+      vi.advanceTimersByTime(31_000);
+      s.onImageError(imgError(asset(B))); // re-created by each re-render
+      s.onImageError(imgError(signed(A))); // current URL failing (network)
+      await flush();
+    }
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
+    // An expired signed URL failing is fixable.
+    s.tick(300_000);
+    s.onImageError(imgError(signed(A)));
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+  });
+
+  it("defers a trigger inside the gap after a fetch instead of dropping it", async () => {
+    vi.useFakeTimers();
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 1)));
     const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
     await flush();
-    s.onImageError(imgError(signed(A)));
-    s.onImageError(imgError(signed(A)));
+    // The answer was already stale (say, a slow response): the URL is expired at once.
+    s.tick(290_000);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 2)));
+    s.onImageError(imgError(signed(A, 1)));
     await flush();
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
-    s.tick(31_000);
-    s.onImageError(imgError(signed(A)));
+    s.tick(5_000);
+    s.onImageError(imgError(signed(A, 1))); // superseded URL, inside the gap
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+    s.tick(25_000);
+    vi.advanceTimersByTime(25_000);
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(3);
+  });
+
+  it("ignores an attachment that is not in the PR's stored bodies", async () => {
+    const s = setup([md(A)]);
+    s.onImageError(imgError(asset(B))); // pasted in the editor, say
+    await flush();
+    expect(ghPrAttachmentUrls).not.toHaveBeenCalled();
+  });
+
+  it("uses the URLs when the visibility could not be read, without remembering it", async () => {
+    ghPrAttachmentUrls.mockResolvedValue({ private: null, urls: [signed(A)] });
+    const s = setup([md(A)]);
+    s.onImageError(imgError(asset(A)));
+    await flush();
+    expect(s.resolveImage(asset(A))).toBe(signed(A));
+    setup([md(B)]); // another PR: not fetched up front
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
   });
 
   it("retries a failing fetch a few times with a growing delay, then stops", async () => {

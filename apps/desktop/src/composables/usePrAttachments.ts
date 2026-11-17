@@ -27,6 +27,11 @@
  * fresh URLs. A failed fetch is retried a few times with a growing delay:
  * images that already failed do not fire `error` again.
  *
+ * A trigger inside the gap after the last fetch is deferred to the end of the
+ * gap, never dropped. An image whose failure a fetch cannot fix — a file
+ * GitHub did not sign (deleted), a current signed URL — triggers nothing, so a
+ * broken image re-created by each re-render does not loop.
+ *
  * Without a signed URL (before the fetch lands, a failed fetch, no GitHub
  * account) the original URL is kept. An expired one stays in use until its
  * replacement arrives.
@@ -54,6 +59,8 @@ const FETCH_GAP_MS = 30_000;
 const EXPIRY_MARGIN_MS = 15_000;
 /** Retries of a failing fetch (30 s, 1 min, 2 min, 4 min), then it waits for the next trigger. */
 const MAX_RETRIES = 4;
+/** Host of the signed URLs. */
+const SIGNED_PREFIX = "https://private-user-images.githubusercontent.com/";
 
 /** Repository visibility learned this session, by cwd. */
 const visibility = new Map<string, "private" | "public">();
@@ -89,12 +96,25 @@ export function usePrAttachments(opts: {
    * not fetched again for being new — only if its image fails.
    */
   let asked = new Set<string>();
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The one scheduled fetch: a retry, or a refresh deferred past the gap. */
+  let timer: ReturnType<typeof setTimeout> | null = null;
   let retries = 0;
 
-  function clearRetry(): void {
-    if (retryTimer !== null) clearTimeout(retryTimer);
-    retryTimer = null;
+  function clearTimer(): void {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  }
+
+  /** Fetch in `delay` ms for the PR shown now, unless a fetch is already scheduled. */
+  function schedule(delay: number): void {
+    if (timer !== null) return;
+    const key = prKey;
+    timer = setTimeout(() => {
+      timer = null;
+      if (key !== prKey) return;
+      lastRefresh = now();
+      load(true, true);
+    }, delay);
   }
 
   /** Attachment keys the bodies reference, as a stable string for the watcher. */
@@ -106,7 +126,7 @@ export function usePrAttachments(opts: {
   });
   const wantedKeys = () => (wanted.value ? wanted.value.split(",") : []);
 
-  /** `retry`: from the retry timer, which already waited out the failure gap. */
+  /** `retry`: from the timer, which already waited out the gap. */
   function load(refresh: boolean, retry = false): void {
     const cwd = opts.cwd.value;
     const n = opts.number.value;
@@ -124,8 +144,14 @@ export function usePrAttachments(opts: {
       .then((res) => {
         if (key !== prKey) return;
         retries = 0;
-        visibility.set(cwd, res.private ? "private" : "public");
-        isPrivate.value = res.private;
+        if (res.private === null) {
+          // Unknown (the repository could not be read): this fetch was asked
+          // for because something failed, so use the URLs, but learn nothing.
+          isPrivate.value = visibility.get(cwd) !== "public";
+        } else {
+          visibility.set(cwd, res.private ? "private" : "public");
+          isPrivate.value = res.private;
+        }
         // Merged, not replaced: an attachment whose endpoint failed this time
         // keeps the URL it had.
         const next = new Map(signed.value);
@@ -141,11 +167,8 @@ export function usePrAttachments(opts: {
         if (retries >= MAX_RETRIES) return;
         const delay = FETCH_GAP_MS * 2 ** retries;
         retries++;
-        clearRetry();
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          if (key === prKey) load(true, true);
-        }, delay);
+        clearTimer();
+        schedule(delay);
       })
       .finally(() => {
         inFlight = false;
@@ -164,12 +187,17 @@ export function usePrAttachments(opts: {
     if (wantedKeys().some((k) => !signed.value.has(k) && !asked.has(k))) load(false);
   }
 
-  /** Fetch again because an image failed or a URL expired — at most once per gap. */
+  /**
+   * Fetch again because an image failed or a URL expired: now, or at the end
+   * of the gap after the last fetch or failure — deferred, not dropped.
+   */
   function refresh(): void {
-    if (!opts.enabled.value || now() - lastRefresh < FETCH_GAP_MS) return;
-    // During a failure gap the retry timer covers it: keep the slot.
-    if (now() - lastFailure < FETCH_GAP_MS) return;
-    lastRefresh = now();
+    if (!opts.enabled.value) return;
+    retries = 0; // a new trigger starts a new series of retries
+    const t = now();
+    const wait = Math.max(lastRefresh, lastFailure) + FETCH_GAP_MS - t;
+    if (wait > 0) return schedule(wait);
+    lastRefresh = t;
     load(true);
   }
 
@@ -185,14 +213,14 @@ export function usePrAttachments(opts: {
         lastFailure = -Infinity;
         lastRefresh = -Infinity;
         retries = 0;
-        clearRetry();
+        clearTimer();
       }
       check();
     },
     { immediate: true },
   );
 
-  if (getCurrentScope()) onScopeDispose(clearRetry);
+  if (getCurrentScope()) onScopeDispose(clearTimer);
 
   /**
    * `error` listener, in the capture phase (the event does not bubble), on
@@ -202,10 +230,22 @@ export function usePrAttachments(opts: {
     const el = e.target as Element | null;
     if (el?.tagName !== "IMG") return;
     const src = el.getAttribute("src");
-    if (!src || !attachmentKey(src)) return;
+    const k = src ? attachmentKey(src) : null;
+    // Only the PR's stored bodies are in its body_html: an attachment pasted
+    // in the editor, say, cannot be signed by fetching.
+    if (!src || !k || !wantedKeys().includes(k)) return;
     // A public repository serves its attachments: a failure there (a deleted
     // file, the network) is not one signed URLs would fix.
     if (visibility.get(opts.cwd.value) === "public") return;
+    const entry = signed.value.get(k);
+    if (src.startsWith(SIGNED_PREFIX)) {
+      // A signed URL failed: only an expired or superseded one is fixable.
+      if (entry && entry.url === src && entry.expiresAt - EXPIRY_MARGIN_MS > now()) return;
+    } else if (entry ? isPrivate.value : asked.has(k)) {
+      // An original failed, but its signed URL is already in use (a stale
+      // render), or GitHub did not sign this file (deleted): nothing to fetch.
+      return;
+    }
     refresh();
   }
 
