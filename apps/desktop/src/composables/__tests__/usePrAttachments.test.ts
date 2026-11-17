@@ -32,6 +32,7 @@ const scopes: ReturnType<typeof effectScope>[] = [];
 afterEach(() => {
   scopes.splice(0).forEach((s) => s.stop());
   _resetSigningRepos();
+  vi.useRealTimers();
 });
 
 function setup(bodies: string[], { enabled = true, cwd = "/repo" } = {}) {
@@ -174,10 +175,56 @@ describe("usePrAttachments", () => {
     s.onImageError(imgError(asset(A)));
     s.number.value = 8;
     await flush();
+    s.onImageError(imgError(asset(A))); // #8's image fails too
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1); // #8 waits for #7's fetch
     answer([signed(A, 1)]);
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenLastCalledWith("/repo", 8);
     expect(s.resolveImage(asset(A))).toBe(signed(A, 3));
+  });
+
+  it("retries a failed fetch once, after the gap", async () => {
+    vi.useFakeTimers();
+    ghPrAttachmentUrls.mockImplementationOnce(async () => {
+      throw new Error("502");
+    });
+    ghPrAttachmentUrls.mockResolvedValue([signed(A)]);
+    const s = setup([md(A)]);
+    s.onImageError(imgError(asset(A)));
+    await flush();
+    s.tick(30_000);
+    vi.advanceTimersByTime(30_000);
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+    await flush();
+    expect(s.resolveImage(asset(A))).toBe(signed(A));
+  });
+
+  it("does not mark a repository whose failed file GitHub did not sign (deleted, public)", async () => {
+    ghPrAttachmentUrls.mockResolvedValue([signed(B)]);
+    const s = setup([md(A), md(B)]);
+    s.onImageError(imgError(asset(A)));
+    await flush();
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
+    setup([md(B)]); // another PR of the same repository
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
+    // An expired signed URL failing is not a sign either.
+    s.tick(31_000);
+    s.onImageError(imgError(signed(B)));
+    await flush();
+    setup([md(B)]);
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives the full-screen viewer the current signed URL", async () => {
+    ghPrAttachmentUrls.mockResolvedValue([signed(A, 1)]);
+    const s = setup([md(A)]);
+    s.onImageError(imgError(asset(A)));
+    await flush();
+    s.tick(300_000);
+    ghPrAttachmentUrls.mockResolvedValue([signed(A, 2)]);
+    s.onImageError(imgError(signed(A, 1)));
+    await flush();
+    expect(s.currentUrl(signed(A, 1))).toBe(signed(A, 2));
+    expect(s.currentUrl("https://example.com/x.png")).toBe("https://example.com/x.png");
   });
 });

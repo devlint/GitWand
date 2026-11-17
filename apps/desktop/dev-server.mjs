@@ -5708,19 +5708,24 @@ async function handleRequest(req, res) {
         const htmls = [];
         let firstError = null;
         let anyOk = false;
-        for (const resp of await Promise.all(paths.map((p) => githubFetch(p, token, "application/vnd.github.html+json")))) {
-          if (!resp.ok) {
-            firstError ??= `GitHub API ${resp.status}`;
+        const fetches = await Promise.allSettled(paths.map(async (p) => {
+          const resp = await githubFetch(p, token, "application/vnd.github.html+json");
+          if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+          return resp.json();
+        }));
+        for (const f of fetches) {
+          if (f.status === "rejected") {
+            firstError ??= f.reason?.message ?? String(f.reason);
             continue;
           }
           anyOk = true;
-          const v = await resp.json();
+          const v = f.value;
           for (const item of Array.isArray(v) ? v : [v]) if (typeof item?.body_html === "string") htmls.push(item.body_html);
         }
         if (!anyOk) return jsonResponse(req, res, { error: firstError }, 500);
         const urls = [];
         for (const html of htmls) {
-          for (const m of html.matchAll(/src="([^"]*)"/g)) {
+          for (const m of html.matchAll(/\ssrc="([^"]*)"/g)) {
             if (!m[1].startsWith("https://private-user-images.githubusercontent.com/")) continue;
             const u = m[1].replace(/&amp;/g, "&");
             if (!urls.includes(u)) urls.push(u);

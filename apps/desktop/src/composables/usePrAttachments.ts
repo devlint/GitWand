@@ -15,17 +15,20 @@
  *   references an attachment not fetched yet — up front, so its images do not
  *   fail first.
  *
- * No timer: refreshing on a clock would re-render every body of the PR (the
- * new URLs change the HTML), collapsing what the reader opened. An image
- * already on screen stays loaded after its URL expires; one re-created later
- * from cached HTML fails, and that failure fetches fresh URLs.
+ * No clock-driven refresh: new URLs change the HTML, so every fetch
+ * re-renders the PR's bodies with attachments, collapsing what the reader
+ * opened — acceptable when an image is broken anyway, not every five minutes
+ * for nothing. An image already on screen stays loaded after its URL expires;
+ * one re-created later from cached HTML fails, and that failure fetches
+ * fresh URLs. A failed fetch is retried once, after `FETCH_GAP_MS`: images
+ * that already failed do not fire `error` again.
  *
  * Without a signed URL (before the fetch lands, a failed fetch, no GitHub
  * account) the original URL is kept. An expired one stays in use until its
  * replacement arrives: a private repository serves neither, and the expired
  * one at least keeps the request on the right host.
  */
-import { computed, shallowRef, watch, type InjectionKey, type Ref } from "vue";
+import { computed, getCurrentScope, onScopeDispose, shallowRef, watch, type InjectionKey, type Ref } from "vue";
 import { ghPrAttachmentUrls } from "../utils/backend";
 import {
   attachmentKey,
@@ -79,6 +82,16 @@ export function usePrAttachments(opts: {
    * not fetched again for being new — only if its image fails.
    */
   let asked = new Set<string>();
+  /** Keys whose original (unsigned) URL failed to load: a sign the repository is private. */
+  let failedOriginals = new Set<string>();
+  /** The one retry after a failed fetch, for this PR. */
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retried = false;
+
+  function clearRetry(): void {
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    retryTimer = null;
+  }
 
   /** Attachment keys the bodies reference, as a stable string for the watcher. */
   const wanted = computed(() => {
@@ -107,13 +120,27 @@ export function usePrAttachments(opts: {
         if (key !== prKey) return;
         // Merged, not replaced: an attachment whose endpoint failed this time
         // keeps the URL it had.
+        const fresh = indexSignedAttachments(urls, sentAt);
         const next = new Map(signed.value);
-        for (const [k, v] of indexSignedAttachments(urls, sentAt)) next.set(k, v);
+        for (const [k, v] of fresh) next.set(k, v);
         signed.value = next;
         for (const k of keys) asked.add(k);
+        // An original URL failed and GitHub signed that very file: the
+        // repository needs signing, so its other PRs fetch up front. (A
+        // deleted file or a network blip on a public one does not qualify.)
+        if ([...failedOriginals].some((k) => fresh.has(k))) signingRepos.add(cwd);
       })
       .catch(() => {
-        if (key === prKey) lastFailure = now();
+        if (key !== prKey) return;
+        lastFailure = now();
+        if (!retried) {
+          retried = true;
+          clearRetry();
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (key === prKey) load(true);
+          }, FETCH_GAP_MS);
+        }
       })
       .finally(() => {
         inFlight = false;
@@ -125,9 +152,12 @@ export function usePrAttachments(opts: {
       });
   }
 
-  /** Up front, for a repository known to need it: fetch for attachments not asked for yet. */
+  /**
+   * Fetch for attachments not asked for yet — up front in a repository known
+   * to need it, or in this PR once an original URL has failed.
+   */
   function check(): void {
-    if (!signingRepos.has(opts.cwd.value)) return;
+    if (!signingRepos.has(opts.cwd.value) && !failedOriginals.size) return;
     if (wantedKeys().some((k) => !signed.value.has(k) && !asked.has(k))) load(false);
   }
 
@@ -135,7 +165,6 @@ export function usePrAttachments(opts: {
   function refresh(): void {
     if (!opts.enabled.value || now() - lastRefresh < FETCH_GAP_MS) return;
     lastRefresh = now();
-    signingRepos.add(opts.cwd.value);
     load(true);
   }
 
@@ -150,6 +179,9 @@ export function usePrAttachments(opts: {
         lastFailure = -Infinity;
         lastRefresh = -Infinity;
         pendingRefresh = false;
+        failedOriginals = new Set();
+        retried = false;
+        clearRetry();
       }
       check();
     },
@@ -164,8 +196,13 @@ export function usePrAttachments(opts: {
     const el = e.target as Element | null;
     if (el?.tagName !== "IMG") return;
     const src = el.getAttribute("src");
-    if (src && attachmentKey(src)) refresh();
+    const k = src ? attachmentKey(src) : null;
+    if (!src || !k) return;
+    if (!src.includes("private-user-images.githubusercontent.com")) failedOriginals.add(k);
+    refresh();
   }
+
+  if (getCurrentScope()) onScopeDispose(clearRetry);
 
   /** `resolveImage` for `renderMarkdown`: the signed URL of `src`, if any. */
   function resolveImage(src: string): string | null {
@@ -178,5 +215,13 @@ export function usePrAttachments(opts: {
     return e.url;
   }
 
-  return { resolveImage, onImageError, signed };
+  /**
+   * The URL to show for `url` now: an attachment's current signed URL, for
+   * a value kept outside the rendered HTML (the full-screen viewer).
+   */
+  function currentUrl(url: string): string {
+    return resolveImage(url) ?? url;
+  }
+
+  return { resolveImage, currentUrl, onImageError, signed };
 }

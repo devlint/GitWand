@@ -1339,24 +1339,11 @@ fn gh_pr_attachment_urls_inner(cwd: String, number: i64) -> Result<Vec<String>, 
     }
     use rayon::prelude::*;
     let nwo = gh_base_nwo(&cwd)?;
-    let accept = format!("Accept: {}", github_api::HTML_ACCEPT);
     let fetches = github_api::pr_attachment_html_paths(&nwo, number)
         .par_iter()
         .map(|path| {
-            let output = gh_api_cmd(&cwd)
-                .args(["api", "-H", &accept, path])
-                .current_dir(&cwd)
-                .output()
-                .map_err(|e| format!("gh api: {}", e))?;
-            if !output.status.success() {
-                return Err(format!(
-                    "gh api failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-            let v: serde_json::Value = serde_json::from_slice(&output.stdout)
-                .map_err(|e| format!("parse gh api response: {}", e))?;
-            Ok(github_api::body_htmls(&v))
+            gh_api_json_accept(&cwd, path, Some(github_api::HTML_ACCEPT))
+                .map(|v| github_api::body_htmls(&v))
         })
         .collect();
     github_api::signed_urls_from_fetches(fetches)
@@ -2157,8 +2144,22 @@ pub(crate) async fn gh_pr_reviews(
 /// Run `gh api <path>` in `cwd` and parse stdout as JSON. Shared by the
 /// comment-list fallbacks when no token is configured.
 fn gh_api_json(cwd: &str, path: &str) -> Result<serde_json::Value, String> {
-    let output = gh_api_cmd(cwd)
-        .args(["api", path])
+    gh_api_json_accept(cwd, path, None)
+}
+
+/// [`gh_api_json`] with an `Accept` media type (e.g. [`github_api::HTML_ACCEPT`]).
+fn gh_api_json_accept(
+    cwd: &str,
+    path: &str,
+    accept: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let mut cmd = gh_api_cmd(cwd);
+    cmd.arg("api");
+    if let Some(a) = accept {
+        cmd.args(["-H", &format!("Accept: {}", a)]);
+    }
+    let output = cmd
+        .arg(path)
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("gh api: {}", e))?;

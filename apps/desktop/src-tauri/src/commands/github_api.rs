@@ -2493,11 +2493,13 @@ pub(crate) fn signed_attachment_urls<'a>(htmls: impl IntoIterator<Item = &'a str
     for html in htmls {
         let mut rest = html;
         while let Some(i) = rest.find("src=\"") {
+            // The attribute itself, not `data-canonical-src="`: preceded by whitespace.
+            let attr = rest[..i].ends_with(|c: char| c.is_ascii_whitespace());
             rest = &rest[i + 5..];
             let Some(end) = rest.find('"') else { break };
             let raw = &rest[..end];
             rest = &rest[end..];
-            if !raw.starts_with(SIGNED_ATTACHMENT_PREFIX) {
+            if !attr || !raw.starts_with(SIGNED_ATTACHMENT_PREFIX) {
                 continue;
             }
             let url = raw.replace("&amp;", "&");
@@ -2572,7 +2574,9 @@ mod tests {
         let html1 = format!(
             r#"<p><a href="{a}"><img alt="x" src="{a}" style="max-width: 100%;"></a></p><img src="https://camo.githubusercontent.com/abc">"#
         );
-        let html2 = format!(r#"<img src="{a}"><img data-x="1" src="{b}">"#);
+        let html2 = format!(
+            r#"<img src="{a}"><img data-canonical-src="https://private-user-images.githubusercontent.com/9/9-zzzz.png" src="{b}">"#
+        );
         assert_eq!(
             signed_attachment_urls([html1.as_str(), html2.as_str()]),
             vec![
@@ -2582,6 +2586,12 @@ mod tests {
             ]
         );
         assert!(signed_attachment_urls(["<img src=\"unterminated"]).is_empty());
+        assert_eq!(
+            signed_attachment_urls([
+                "<img\tsrc=\"https://private-user-images.githubusercontent.com/x\">"
+            ]),
+            vec!["https://private-user-images.githubusercontent.com/x".to_string()]
+        );
     }
 
     #[test]
