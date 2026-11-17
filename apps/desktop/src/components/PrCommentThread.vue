@@ -111,10 +111,10 @@ const suggLabel = computed(() => t("pr.comment.suggestionLabel"));
 // renders this thread (withheld when there is none).
 const prImagesShown = inject(PR_REMOTE_IMAGES_KEY, null);
 // Signed URLs of GitHub attachments, from the same PR detail view (#302).
-const resolveImage = inject(PR_ATTACHMENTS_KEY, undefined);
+const resolveImage = inject(PR_ATTACHMENTS_KEY, null);
 const bodyHtmlById = computed(() => {
   const m = new Map<number, string>();
-  const opts = { allowRemoteImages: prImagesShown?.value === true, resolveImage };
+  const opts = { allowRemoteImages: prImagesShown?.value === true, resolveImage: resolveImage?.value };
   for (const c of props.comments) m.set(c.id, renderMarkdown(c.body, opts));
   return m;
 });

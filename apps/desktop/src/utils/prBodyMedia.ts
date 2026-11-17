@@ -11,6 +11,8 @@
  * is not lost: its media is appended at the end of the new body.
  */
 
+import { ATTACHMENT_URL_START } from "./githubAttachments";
+
 export interface MaskedMedia {
   /** The body with every media snippet replaced by `[[IMAGE_n]]` (1-based). */
   text: string;
@@ -50,7 +52,7 @@ const MEDIA_ALTERNATIVES = [
   String.raw`\[!\[[^\]]*\]` + PAREN + String.raw`\]` + PAREN,
   String.raw`!\[[^\]]*\]` + PAREN,
   // GitHub renders a bare attachment URL on its own line as an image/video.
-  String.raw`^[ \t]*https?:\/\/(?:github\.com\/user-attachments\/assets\/|(?:private-)?user-images\.githubusercontent\.com\/)\S+[ \t]*$`,
+  String.raw`^[ \t]*` + ATTACHMENT_URL_START + String.raw`\S+[ \t]*$`,
   // Any other bare media URL on its own line.
   String.raw`^[ \t]*https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg|mp4|mov|webm)(?:\?\S*)?[ \t]*$`,
 ];

@@ -5690,6 +5690,8 @@ async function handleRequest(req, res) {
       const cwd = url.searchParams.get("cwd");
       const number = url.searchParams.get("number");
       if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+      // The Rust command takes an i64: refuse here what it cannot receive.
+      if (!/^\d+$/.test(number)) return jsonResponse(req, res, { error: "Invalid number" }, 400);
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);

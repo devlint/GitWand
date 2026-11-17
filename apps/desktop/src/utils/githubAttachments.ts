@@ -14,9 +14,16 @@
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
+/**
+ * Regex source of the start of an attachment URL (any scheme, for callers that
+ * match loosely; `isGithubAttachmentUrl` is what decides). Shared with
+ * `prBodyMedia.ts`, so both recognise the same uploads.
+ */
+export const ATTACHMENT_URL_START =
+  String.raw`https?:\/\/(?:github\.com\/user-attachments\/assets\/|(?:private-)?user-images\.githubusercontent\.com\/)`;
+
 /** Every attachment URL in a markdown body, for `attachmentKeysIn`. */
-const ATTACHMENT_URL_RE =
-  /https:\/\/(?:github\.com\/user-attachments\/assets\/|(?:private-)?user-images\.githubusercontent\.com\/)[^\s"'<>)]+/gi;
+const ATTACHMENT_URL_RE = new RegExp(ATTACHMENT_URL_START + String.raw`[^\s"'<>)]+`, "gi");
 
 /**
  * True when `src` is a file uploaded to GitHub, served by GitHub itself.

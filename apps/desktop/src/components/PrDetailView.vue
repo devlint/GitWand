@@ -125,10 +125,13 @@ watch([() => p.cwd.value, () => p.prDetail.value?.number], () => {
 });
 // Files uploaded to GitHub (screenshots…) load through signed URLs, which a
 // private repository needs (#302); the inline threads get the same resolver.
+// GitHub only: the resolver's presence is what lets attachments skip the
+// remote-image consent.
+const isGithubPr = computed(() => p.forge.value.name === "github");
 const attachments = usePrAttachments({
   cwd: computed(() => p.cwd.value),
   number: computed(() => p.prDetail.value?.number),
-  enabled: computed(() => p.forge.value.name === "github"),
+  enabled: isGithubPr,
   bodies: computed(() => [
     p.prDetail.value?.body,
     ...p.prComments.value.map((c) => c.body),
@@ -136,11 +139,12 @@ const attachments = usePrAttachments({
     ...p.prReviews.value.map((r) => r.body),
   ]),
 });
-provide(PR_ATTACHMENTS_KEY, attachments.resolveImage);
+const resolveImage = computed(() => (isGithubPr.value ? attachments.resolveImage : undefined));
+provide(PR_ATTACHMENTS_KEY, resolveImage);
 /** Render options for every markdown body of this PR. */
 const mdOpts = computed(() => ({
   allowRemoteImages: prImagesShown.value,
-  resolveImage: attachments.resolveImage,
+  resolveImage: resolveImage.value,
 }));
 
 /** Which editor the description panel shows: the AI draft wins over a manual edit. */
@@ -392,7 +396,7 @@ const timelineCount = computed(() =>
 // PrCommentThread, which follows `prImagesShown` (provided above). Offer the
 // same button there, or their withheld images could not be revealed.
 const inlineImagesBlocked = computed(() =>
-  commentsWithheldImages(p.commentsForFile.value, prImagesShown.value, p.forge.value.name === "github"),
+  commentsWithheldImages(p.commentsForFile.value, prImagesShown.value, isGithubPr.value),
 );
 
 const fullscreenImageUrl = ref<string | null>(null);
@@ -651,7 +655,9 @@ function submitRequestReviewers() {
 </script>
 
 <template>
-  <div class="pdv-root">
+  <!-- An attachment image that fails to load (private repository, expired
+       signed URL) fetches signed URLs: `error` does not bubble, hence capture. -->
+  <div class="pdv-root" @error.capture="attachments.onImageError">
     <!-- Merge dialog -->
     <div v-if="p.mergingPr.value" class="pdv-merge-dialog">
       <p class="pdv-merge-prompt">
