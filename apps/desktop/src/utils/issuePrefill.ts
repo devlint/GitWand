@@ -34,11 +34,20 @@ function codeBlock(text: string): string {
  * when the commit is not on `origin`: the full SHA is then written unlinked,
  * so the issue never carries a link that answers 404.
  */
+/** GitHub refuses an issue title longer than this (422). */
+export const ISSUE_TITLE_MAX = 256;
+
+/** `text` cut to GitHub's title limit (by code points), with an ellipsis. */
+function issueTitle(text: string): string {
+  const chars = [...text];
+  return chars.length <= ISSUE_TITLE_MAX ? text : chars.slice(0, ISSUE_TITLE_MAX - 1).join("") + "…";
+}
+
 export function commitIssuePrefill(entry: GitLogEntry, commitUrl: string | null): IssuePrefill {
   const sha = commitUrl ? `[\`${entry.hash}\`](${commitUrl})` : `\`${entry.hashFull}\``;
   const message = [entry.message, entry.body.trim()].filter(Boolean).join("\n\n");
   return {
-    title: entry.message,
+    title: issueTitle(entry.message),
     body: `Commit ${sha} by ${entry.author}\n\n${codeBlock(message)}\n`,
   };
 }

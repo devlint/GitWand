@@ -21,7 +21,7 @@
 //! - Because the webview no longer talks to arbitrary AI hosts itself, the CSP
 //!   `connect-src` can be limited to a short list of fixed hosts.
 
-use crate::commands::curl_util::{curl_transport_check, run_curl};
+use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl};
 
 /// Keychain service holding the AI provider API key. Backend-only: see
 /// `credentials::BACKEND_ONLY_SERVICES`.
@@ -191,27 +191,6 @@ pub(crate) async fn ai_api_key_hint() -> Result<Option<AiKeyInfo>, String> {
     tauri::async_runtime::spawn_blocking(|| Ok(read_key().map(|k| k.info())))
         .await
         .map_err(|e| e.to_string())?
-}
-
-/// Quote a value for a curl config file. Inside double quotes curl recognises
-/// `\\`, `\"`, `\n`, `\r`, `\t`; escaping exactly those means no value — a
-/// prompt full of quotes and newlines included — can close the string and
-/// inject a directive of its own.
-fn quote_config(v: &str) -> String {
-    let mut out = String::with_capacity(v.len() + 2);
-    out.push('"');
-    for c in v.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            _ => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 /// Auth headers for `auth` ("anthropic" | "bearer" | "none"), with the key.

@@ -85,10 +85,12 @@ pub(crate) fn curl_transport_check(
     }
 }
 
-/// `s` as a double-quoted curl config value: curl unescapes `\\`, `\"`, `\n`,
-/// `\r` and `\t` inside quotes, so those are escaped and everything else is
-/// kept as is.
-fn config_quote(s: &str) -> String {
+/// Quote a value for a curl config file. Inside double quotes curl recognises
+/// `\\`, `\"`, `\n`, `\r`, `\t`; escaping exactly those means no value — a
+/// prompt or an issue body full of quotes and newlines included — can close
+/// the string and inject a directive of its own. Shared by every curl caller
+/// that writes a config (forge requests, AI HTTP providers).
+pub(crate) fn quote_config(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {
@@ -122,7 +124,16 @@ fn curl_request(
     let mut args: Vec<String> = vec![
         "-s".to_string(),
         "-S".to_string(), // --show-error: keep stderr diagnostics under -s
+        "--connect-timeout".to_string(),
+        "20".to_string(),
     ];
+    if method != "GET" {
+        // A write is bounded: a POST stalled after sending would otherwise
+        // outlive the UI's wait, and a retry would duplicate it. Reads are
+        // not (some are large downloads).
+        args.push("--max-time".to_string());
+        args.push("60".to_string());
+    }
     if dump_headers {
         args.push("-D".to_string());
         args.push("-".to_string()); // dump response headers to stdout
@@ -142,7 +153,7 @@ fn curl_request(
         args.push("-H".to_string());
         args.push("Content-Type: application/json".to_string());
         // `data-raw`: sent as is, no `@file` reading.
-        config.push_str(&format!("data-raw = {}\n", config_quote(b)));
+        config.push_str(&format!("data-raw = {}\n", quote_config(b)));
     }
     let stdin = (!config.is_empty()).then_some(config);
     if stdin.is_some() {
@@ -347,7 +358,7 @@ mod tests {
     #[test]
     fn config_quoting_escapes_what_curl_unescapes() {
         assert_eq!(
-            config_quote("a\\b\"c\nd\re\tf"),
+            quote_config("a\\b\"c\nd\re\tf"),
             "\"a\\\\b\\\"c\\nd\\re\\tf\""
         );
     }
@@ -413,5 +424,20 @@ mod tests {
         .unwrap();
         assert_eq!(status, 200);
         assert_eq!(server.join().unwrap(), payload);
+    }
+
+    #[test]
+    fn every_request_bounds_its_connection_and_writes_their_duration() {
+        let (get, _) = curl_request("GET", "u", None, None, &[], "a", false);
+        let (post, _) = curl_request("POST", "u", None, Some("{}"), &[], "a", false);
+        let has = |args: &[String], flag: &str, v: &str| {
+            args.windows(2).any(|w| w[0] == flag && w[1] == v)
+        };
+        assert!(has(&get, "--connect-timeout", "20"));
+        assert!(has(&post, "--connect-timeout", "20"));
+        // A write is bounded (a stalled POST would otherwise outlive the UI's
+        // wait, inviting a retry that duplicates it); a read is not (downloads).
+        assert!(has(&post, "--max-time", "60"));
+        assert!(!get.iter().any(|a| a == "--max-time"));
     }
 }

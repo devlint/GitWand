@@ -192,10 +192,9 @@ let pendingCommitReviewTrailers = "";
 const { isOffline: navIsOffline } = useNetworkStatus();
 const { isOnline: probedOnline, probeConnectivity } = useConnectivity();
 const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
-import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment, gitExec, type GitLogEntry as IssueCommitEntry } from "./utils/backend";
+import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment, type GitLogEntry as IssueCommitEntry } from "./utils/backend";
 import { useCreateIssue, CREATE_ISSUE_KEY } from "./composables/useCreateIssue";
 import { githubProvider } from "./composables/forge/useForge";
-import { commitIssuePrefill, commitUrlFor } from "./utils/issuePrefill";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
@@ -537,23 +536,6 @@ function openNewIssue() {
   if (createIssue.available.value) void createIssue.open();
 }
 
-/** "Create issue from commit": the commit is linked only once `origin` has it
- *  (the link goes to origin's page; a commit only on another remote would 404).
- *  The form opens at once; the prefill lands when the git check answers. */
-function openIssueFromCommit(entry: IssueCommitEntry) {
-  const cwd = repoFolderPath.value;
-  const origin = createIssue.originHtmlUrl.value;
-  if (!cwd || !createIssue.available.value) return;
-  const prefill = (async () => {
-    let pushed = false;
-    try {
-      const r = await gitExec(cwd, ["for-each-ref", "--contains", entry.hashFull, "--count=1", "--format=%(refname)", "refs/remotes/origin/"]);
-      pushed = r.exitCode === 0 && r.stdout.trim() !== "";
-    } catch { /* unknown → unlinked, never a 404 link */ }
-    return commitIssuePrefill(entry, pushed && origin ? commitUrlFor(origin, entry.hashFull) : null);
-  })();
-  void createIssue.open(prefill);
-}
 const issuePanel = useIssuePanel(prCwd);
 provide(ISSUE_PANEL_KEY, issuePanel);
 
@@ -5016,7 +4998,7 @@ onUnmounted(() => {
                   @cherry-pick-commit="handleCherryPickCommit"
                   @cherry-pick-commit-wip="handleCherryPickCommitAsWip"
                   @view-on-forge="handleViewOnForge"
-                  :can-create-issue="createIssue.available.value" @create-issue="openIssueFromCommit"
+                  :can-create-issue="createIssue.available.value" @create-issue="(entry: IssueCommitEntry) => createIssue.openFromCommit(entry)"
                   @delete-branch="handleDeleteBranchRequest"
                   @delete-worktree="handleTreeDeleteWorktree"
                   @merge-delete-worktree="handleTreeMergeDeleteWorktree"

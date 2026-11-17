@@ -87,6 +87,12 @@ describe("CreateIssueModal", () => {
     expect(provider.createIssue).toHaveBeenCalledTimes(1);
   });
 
+  it("renders the preview only on its tab, and caps the title at GitHub's limit", async () => {
+    await mount();
+    expect(document.querySelector("[data-testid=ci-preview]")).toBeNull();
+    expect(document.querySelector<HTMLInputElement>("#ci-title")!.maxLength).toBe(256);
+  });
+
   it("shows no target selector when there is one target", async () => {
     await mount();
     expect(document.querySelectorAll("input[name=ci-target]")).toHaveLength(0);

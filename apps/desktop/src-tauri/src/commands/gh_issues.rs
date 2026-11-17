@@ -130,7 +130,22 @@ pub(crate) fn issue_targets_inner(cwd: &str, fresh: bool) -> Result<IssueTargets
         return Ok(IssueTargets::default());
     };
     let o = api_get(cwd, &origin, &format!("repos/{}", origin.nwo))?;
-    let t = targets_from(&o, o.get("parent"));
+    // The parent embedded in a fork's answer may lack the viewer's
+    // `permissions` (and so its triage rights): read it on its own, keeping
+    // the embedded copy when that read fails.
+    let parent_name = o.pointer("/parent/full_name").and_then(|n| n.as_str());
+    let parent = match parent_name.filter(|_| o.get("fork").and_then(|f| f.as_bool()) == Some(true))
+    {
+        Some(name) => api_get(
+            cwd,
+            &origin.sibling(name.to_string()),
+            &format!("repos/{}", name),
+        )
+        .ok()
+        .or_else(|| o.get("parent").cloned()),
+        None => None,
+    };
+    let t = targets_from(&o, parent.as_ref());
     if let Ok(mut m) = cache.lock() {
         m.insert(cwd.to_string(), (t.clone(), Instant::now()));
     }

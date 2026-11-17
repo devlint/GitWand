@@ -26,11 +26,20 @@ function provider(over: Partial<ForgeProvider> = {}, targets: IssueTargets = { t
   } as unknown as ForgeProvider;
 }
 
-function setup(p: ForgeProvider, cwd = ref<string | null>("/repo")) {
+function setup(
+  p: ForgeProvider,
+  cwd = ref<string | null>("/repo"),
+  commitOnOrigin: (cwd: string, sha: string) => Promise<boolean> = async () => false,
+) {
   const onCreated = vi.fn();
-  const api = useCreateIssue({ cwd, provider: ref(p), onCreated });
+  const api = useCreateIssue({ cwd, provider: ref(p), onCreated, commitOnOrigin });
   return { api, onCreated, cwd };
 }
+
+const COMMIT = {
+  hash: "abc1234", hashFull: "abc1234".padEnd(40, "f"), author: "Ada", email: "a@b", date: "",
+  message: "fix: x", body: "", parents: [], refs: "",
+};
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -259,5 +268,62 @@ describe("useCreateIssue", () => {
     api.forgetTargets();
     expect(api.available.value).toBe(false);
     expect(api.originHtmlUrl.value).toBeNull();
+  });
+
+  it("keeps the open form's targets when availability is read for another repository", async () => {
+    const other = { targets: [{ ...ORIGIN, repo: "b/b", htmlUrl: "https://github.com/b/b" }], defaultRepo: "b/b" };
+    const issueTargets = vi.fn(async (c: string) => (c === "/repo" ? { targets: [ORIGIN, PARENT], defaultRepo: "me/app" } : other));
+    const { api, cwd } = setup(provider({ issueTargets }));
+    await api.open();
+    api.title.value = "typed";
+    cwd.value = "/b";
+    api.forgetTargets();
+    await api.refreshAvailability();
+    expect(api.targets.value.map((t) => t.repo)).toEqual(["me/app", "org/app"]);
+    api.setRepo("org/app");
+    expect(api.repo.value).toBe("org/app");
+    expect(api.available.value).toBe(true);
+  });
+
+  it("counts picked labels, assignees and milestone as unsaved work", async () => {
+    const { api } = setup(provider());
+    await api.open();
+    expect(api.dirty.value).toBe(false);
+    api.labels.value = ["bug"];
+    expect(api.dirty.value).toBe(true);
+    api.labels.value = [];
+    api.milestone.value = 1;
+    expect(api.dirty.value).toBe(true);
+    api.milestone.value = null;
+    api.assignees.value = ["me"];
+    expect(api.dirty.value).toBe(true);
+  });
+
+  it("openFromCommit links the commit when origin has it", async () => {
+    const onOrigin = vi.fn(async () => true);
+    const { api } = setup(provider(), undefined, onOrigin);
+    await api.refreshAvailability();
+    await api.openFromCommit(COMMIT);
+    expect(onOrigin).toHaveBeenCalledWith("/repo", COMMIT.hashFull);
+    expect(api.body.value).toContain(`(https://github.com/me/app/commit/${COMMIT.hashFull})`);
+  });
+
+  it("openFromCommit leaves an unpushed commit unlinked, and a failed check too", async () => {
+    const a = setup(provider(), undefined, async () => false);
+    await a.api.refreshAvailability();
+    await a.api.openFromCommit(COMMIT);
+    expect(a.api.body.value).not.toContain("](");
+    const b = setup(provider(), undefined, async () => { throw new Error("git"); });
+    await b.api.refreshAvailability();
+    await b.api.openFromCommit(COMMIT);
+    expect(b.api.isOpen.value).toBe(true);
+    expect(b.api.body.value).not.toContain("](");
+  });
+
+  it("openFromCommit does nothing when the repository cannot take an issue", async () => {
+    const { api } = setup(provider({}, { targets: [], defaultRepo: null }));
+    await api.refreshAvailability();
+    await api.openFromCommit(COMMIT);
+    expect(api.isOpen.value).toBe(false);
   });
 });

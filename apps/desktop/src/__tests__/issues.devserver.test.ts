@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom } from "../../dev-issues.mjs";
+import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,
@@ -75,5 +75,15 @@ describe("devAssigneesFrom", () => {
       { login: "Amy", name: null, avatar_url: "a" },
       { login: "zed", name: null, avatar_url: null },
     ]);
+  });
+});
+
+describe("devGithubError", () => {
+  it("keeps the 422 field details, as the Rust map_api_error does", () => {
+    const body = { message: "Validation Failed", errors: [{ resource: "Issue", field: "assignees", code: "invalid" }, { message: "milestone not found" }] };
+    expect(devGithubError(422, body)).toBe("GitHub API error (422): Validation Failed (assignees: invalid; milestone not found)");
+  });
+  it("falls back to the status", () => {
+    expect(devGithubError(500, {})).toBe("GitHub API error (500): HTTP 500");
   });
 });

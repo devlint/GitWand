@@ -59,3 +59,23 @@ export function devAssigneesFrom(items) {
     return x < y ? -1 : x > y ? 1 : 0;
   });
 }
+
+/**
+ * GitHub's error answer as the Rust `map_api_error` words it: the `message`,
+ * plus a 422's `errors[]` details (which field was refused), so `dev:web`
+ * shows the error text that ships.
+ */
+export function devGithubError(status, json) {
+  const msg = typeof json?.message === "string" && json.message ? json.message : `HTTP ${status}`;
+  const details = (Array.isArray(json?.errors) ? json.errors : [])
+    .map((e) => {
+      const s = (k) => (typeof e?.[k] === "string" && e[k] ? e[k] : null);
+      if (s("message")) return s("message");
+      if (s("field") && s("code")) return `${s("field")}: ${s("code")}`;
+      return s("code");
+    })
+    .filter(Boolean);
+  return details.length
+    ? `GitHub API error (${status}): ${msg} (${details.join("; ")})`
+    : `GitHub API error (${status}): ${msg}`;
+}

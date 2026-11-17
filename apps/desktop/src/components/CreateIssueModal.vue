@@ -10,6 +10,7 @@ import RemoteImagesNotice from "./RemoteImagesNotice.vue";
 import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
 import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables/useSafeHtml";
 import { useI18n } from "../composables/useI18n";
+import { ISSUE_TITLE_MAX } from "../utils/issuePrefill";
 
 const { t } = useI18n();
 const form = inject(CREATE_ISSUE_KEY)!;
@@ -30,7 +31,10 @@ watch(showForm, async (shown) => {
   titleInput.value?.focus();
 }, { immediate: true });
 
+// Rendered only while the Preview tab is shown: no markdown + sanitiser pass
+// on every keystroke of a long body.
 const preview = computed(() => {
+  if (tab.value !== "preview") return "";
   const src = form.body.value;
   if (!src.trim()) return `<p class="ci-preview-empty">${t("createIssue.previewEmpty")}</p>`;
   return safeHtml(renderMarkdown(src, { allowRemoteImages: imagesShown.value }), {
@@ -123,6 +127,7 @@ function onMilestone(e: Event) {
           v-model="form.title.value"
           class="ci-input"
           type="text"
+          :maxlength="ISSUE_TITLE_MAX"
           :placeholder="t('createIssue.titlePlaceholder')"
           :disabled="form.submitting.value"
         />
@@ -155,7 +160,7 @@ function onMilestone(e: Event) {
           :disabled="form.submitting.value"
         />
         <RemoteImagesNotice v-if="tab === 'preview' && imagesBlocked" @allow="imagesShown = true" />
-        <div v-show="tab === 'preview'" class="ci-preview" data-testid="ci-preview" v-html="preview" />
+        <div v-if="tab === 'preview'" class="ci-preview" data-testid="ci-preview" v-html="preview" />
 
         <div v-if="form.labelOptions.value.length" class="ci-group">
           <span class="ci-label">{{ t("createIssue.labels") }}</span>

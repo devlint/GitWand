@@ -54,6 +54,13 @@ describe("commitIssuePrefill", () => {
     expect(b.trimEnd().endsWith("````")).toBe(true);
   });
 
+  it("keeps the title within GitHub's 256-character limit", () => {
+    const t = commitIssuePrefill(entry({ message: "x".repeat(300) }), null).title;
+    expect([...t].length).toBeLessThanOrEqual(256);
+    expect(t.endsWith("…")).toBe(true);
+    expect(commitIssuePrefill(entry({ message: "short" }), null).title).toBe("short");
+  });
+
   it("names the author", () => {
     expect(commitIssuePrefill(entry(), null).body).toContain("Ada Lovelace");
   });

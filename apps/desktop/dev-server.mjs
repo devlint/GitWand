@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom } from "./dev-issues.mjs";
+import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -1271,7 +1271,13 @@ async function devIssueTargets(cwd, token) {
   if (!nwo) return { targets: [], defaultRepo: null };
   const resp = await githubFetch(`/repos/${nwo}`, token);
   if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
-  return devIssueTargetsFrom(await resp.json());
+  const origin = await resp.json();
+  // As in Rust: the embedded parent may lack the viewer's permissions.
+  if (origin.fork === true && origin.parent?.full_name) {
+    const p = await githubFetch(`/repos/${origin.parent.full_name}`, token).catch(() => null);
+    if (p?.ok) origin.parent = await p.json();
+  }
+  return devIssueTargetsFrom(origin);
 }
 
 /** Up to `maxPages` pages of 100 of the array at `path` (`query` ends with `&`). */
@@ -5479,7 +5485,7 @@ async function handleRequest(req, res) {
           body: JSON.stringify(built.payload),
         });
         const created = await resp.json().catch(() => ({}));
-        if (!resp.ok) return jsonResponse(req, res, { error: created.message || `GitHub API ${resp.status}` }, resp.status);
+        if (!resp.ok) return jsonResponse(req, res, { error: devGithubError(resp.status, created) }, resp.status);
         return jsonResponse(req, res, { number: created.number, url: created.html_url || "" });
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);
