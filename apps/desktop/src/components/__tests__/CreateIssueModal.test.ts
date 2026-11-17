@@ -141,6 +141,21 @@ describe("CreateIssueModal", () => {
     finish({ number: 1, url: "u" });
   });
 
+  it("does not close the form when a create started while the discard question was open", async () => {
+    let answer!: (v: boolean) => void;
+    let finish!: (v: { number: number; url: string }) => void;
+    const ask = vi.fn(() => new Promise<boolean>((r) => { answer = r; }));
+    const { form } = await mount(undefined, ask, () => new Promise((r) => { finish = r; }));
+    form.title.value = "typed";
+    await nextTick();
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "createIssue.cancel")!.click();
+    void form.submit();
+    answer(true);
+    await flush();
+    expect(form.isOpen.value).toBe(true);
+    finish({ number: 1, url: "u" });
+  });
+
   it("locks the pickers while the issue is being created", async () => {
     let finish!: (v: { number: number; url: string }) => void;
     const { form } = await mount(undefined, undefined, () => new Promise((r) => { finish = r; }));

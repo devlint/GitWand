@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCanonicalTarget } from "../../dev-issues.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,
@@ -30,19 +30,16 @@ describe("devIssueTargetsFrom", () => {
   });
 });
 
-describe("devCheckIssueTarget", () => {
+describe("devResolveIssueTarget", () => {
   const t = devIssueTargetsFrom(origin(true, true, parent(false)));
   it("refuses a repository that is not a target", () => {
-    expect(devCheckIssueTarget(t, "evil/repo")).toBe("Not an issue target for this repository: evil/repo");
+    expect(devResolveIssueTarget(t, "evil/repo")).toEqual({ error: "Not an issue target for this repository: evil/repo" });
   });
   it("refuses a target with issues off", () => {
-    expect(devCheckIssueTarget(t, "org/app")).toBe("Issues are disabled on org/app");
+    expect(devResolveIssueTarget(t, "org/app")).toEqual({ error: "Issues are disabled on org/app" });
   });
-  it("accepts a target with issues", () => {
-    expect(devCheckIssueTarget(t, "me/app")).toBeNull();
-  });
-  it("matches whatever the case, like the Rust check", () => {
-    expect(devCheckIssueTarget(t, "ME/App")).toBeNull();
+  it("gives GitHub's spelling of a target with issues, whatever the case asked", () => {
+    expect(devResolveIssueTarget(t, "ME/App")).toEqual({ repo: "me/app" });
   });
 });
 
@@ -104,10 +101,3 @@ describe("devLabelsFrom / devMilestonesFrom", () => {
   });
 });
 
-describe("devCanonicalTarget", () => {
-  it("gives GitHub's spelling of a target, null for another repository", () => {
-    const t = devIssueTargetsFrom(origin(true, false));
-    expect(devCanonicalTarget(t, "ME/APP")).toBe("me/app");
-    expect(devCanonicalTarget(t, "evil/repo")).toBeNull();
-  });
-});

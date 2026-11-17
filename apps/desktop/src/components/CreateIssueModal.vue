@@ -58,7 +58,9 @@ async function onCancel() {
       confirmLabel: t("createIssue.discard"),
       danger: true,
     });
-    if (!discard) return;
+    // A create may have started while the question was open (⌘Enter):
+    // closing now would drop its answer and the notice that it was created.
+    if (!discard || form.submitting.value) return;
   }
   form.close();
 }

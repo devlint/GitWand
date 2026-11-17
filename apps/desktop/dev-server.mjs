@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCanonicalTarget } from "./dev-issues.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -5501,10 +5501,9 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const targets = await devIssueTargets(resolve(cwd), token);
-        const refused = devCheckIssueTarget(targets, input.repo);
-        if (refused) return jsonResponse(req, res, { error: refused }, 400);
-        const resp = await githubFetch(`/repos/${devCanonicalTarget(targets, input.repo)}/issues`, token, undefined, {
+        const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), input.repo);
+        if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
+        const resp = await githubFetch(`/repos/${target.repo}/issues`, token, undefined, {
           method: "POST",
           body: JSON.stringify(built.payload),
         });
@@ -5537,10 +5536,9 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const targets = await devIssueTargets(resolve(cwd), token);
-        const refused = devCheckIssueTarget(targets, repo);
-        if (refused) return jsonResponse(req, res, { error: refused }, 400);
-        const items = await devGithubPages(`/repos/${devCanonicalTarget(targets, repo)}/${issuePicker.suffix}`, issuePicker.query, token, issuePicker.pages);
+        const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
+        if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
+        const items = await devGithubPages(`/repos/${target.repo}/${issuePicker.suffix}`, issuePicker.query, token, issuePicker.pages);
         return jsonResponse(req, res, issuePicker.map(items));
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);

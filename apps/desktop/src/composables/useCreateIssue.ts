@@ -12,6 +12,7 @@ import type {
   CreatedIssue,
   GitLogEntry,
   IssueTarget,
+  IssueTargets,
   RepoLabel,
   RepoMilestone,
   ReviewerCandidate,
@@ -23,6 +24,10 @@ async function gitCommitOnOrigin(cwd: string, sha: string): Promise<boolean> {
   const r = await gitExec(cwd, ["for-each-ref", "--contains", sha, "--count=1", "--format=%(refname)", "refs/remotes/origin/"]);
   return r.exitCode === 0 && r.stdout.trim() !== "";
 }
+
+/** Prefixed by `gh_create_issue` (Rust `MAY_HAVE_BEEN_CREATED`) to an error
+ *  after which GitHub may have filed the issue anyway. */
+const MAY_HAVE_BEEN_CREATED = "[may-have-been-created] ";
 
 /** The "New issue" shortcut as shown to the user. */
 export function newIssueShortcutLabel(mac: boolean): string {
@@ -167,11 +172,11 @@ export function useCreateIssue(deps: {
   );
   const originHtmlUrl = computed(() => targets.value.find((t) => t.isOrigin)?.htmlUrl || null);
 
-  async function readTargets(cwd: string | null): Promise<IssueTarget[] | null> {
+  async function readTargets(cwd: string | null): Promise<IssueTargets | null> {
     const p = deps.provider.value;
-    if (!p?.issueTargets || !cwd) return [];
+    if (!p?.issueTargets || !cwd) return { targets: [], defaultRepo: null };
     try {
-      return (await p.issueTargets(cwd)).targets;
+      return await p.issueTargets(cwd);
     } catch {
       return null;
     }
@@ -253,9 +258,9 @@ export function useCreateIssue(deps: {
     loading.value = false;
     targetsFailed.value = t === null;
     if (t !== null) {
-      targets.value = t;
-      const first = targets.value.find((x) => x.hasIssues);
-      repo.value = first?.repo ?? null;
+      targets.value = t.targets;
+      // The backend decides the default (the same rule for every caller).
+      repo.value = t.defaultRepo;
       if (repo.value) loadPickers(repo.value);
     }
     // The form is on screen; the prefill (a commit's, after its git check)
@@ -336,7 +341,10 @@ export function useCreateIssue(deps: {
       error.value = message(e);
       // A timeout (curl exit 28, gh killed) after the request left: GitHub
       // may have created the issue. A plain retry could file it twice.
-      outcomeUnknown.value = /timed out|timeout|\(exit 28\)/i.test(error.value);
+      // The backend marks a create that may have reached GitHub (a timeout
+      // after sending): a plain retry could file the issue twice.
+      outcomeUnknown.value = error.value.startsWith(MAY_HAVE_BEEN_CREATED);
+      if (outcomeUnknown.value) error.value = error.value.slice(MAY_HAVE_BEEN_CREATED.length);
     } finally {
       if (gen === generation) submitting.value = false;
     }

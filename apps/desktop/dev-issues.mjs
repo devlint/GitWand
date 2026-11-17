@@ -22,13 +22,16 @@ export function devIssueTargetsFrom(origin) {
   return { targets, defaultRepo: targets.find((t) => t.hasIssues)?.repo ?? null };
 }
 
-/** `check_target` with issues required: the error text, or null when allowed. */
-export function devCheckIssueTarget(targets, repo) {
-  // GitHub names are case-insensitive, as in the Rust check.
+/**
+ * `check_target` with issues required: `{ repo }` (GitHub's spelling, which
+ * the request then uses) or `{ error }`. One lookup for both, case-insensitive
+ * like the Rust check.
+ */
+export function devResolveIssueTarget(targets, repo) {
   const t = targets.targets.find((x) => typeof repo === "string" && x.repo.toLowerCase() === repo.toLowerCase());
-  if (!t) return `Not an issue target for this repository: ${repo}`;
-  if (!t.hasIssues) return `Issues are disabled on ${repo}`;
-  return null;
+  if (!t) return { error: `Not an issue target for this repository: ${repo}` };
+  if (!t.hasIssues) return { error: `Issues are disabled on ${repo}` };
+  return { repo: t.repo };
 }
 
 /** `issue_payload`: the title trimmed and required, the body verbatim, empty optionals left out. */
@@ -95,10 +98,4 @@ export function devMilestonesFrom(items) {
   return items
     .filter((m) => Number.isInteger(m?.number) && nonEmpty(m.title))
     .map((m) => ({ number: m.number, title: m.title, dueOn: nonEmpty(m.due_on) }));
-}
-
-/** The target's own `owner/repo` (GitHub's case) for `repo`, or null. */
-export function devCanonicalTarget(targets, repo) {
-  const t = targets.targets.find((x) => typeof repo === "string" && x.repo.toLowerCase() === repo.toLowerCase());
-  return t ? t.repo : null;
 }

@@ -525,23 +525,24 @@ pub(crate) async fn gh_create_pr(
 }
 
 fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
-    // Users with push access — the set GitHub allows as reviewers — read like
-    // an issue's assignees: REST with the Settings token, else `gh api`.
-    let Some(origin) = gh_origin_repo(&cwd) else {
-        return gh_reviewer_candidates_via_view(&cwd);
-    };
-    let items = super::gh_issues::api_get_pages(
-        &cwd,
-        &origin,
-        &format!("repos/{}/assignees", origin.nwo),
-        "",
-        3,
-    )?;
-    Ok(super::gh_issues::assignees_from(&items))
+    // Users with push access — the set GitHub allows as reviewers. With the
+    // Settings token: `origin`'s, over REST. Without: `gh repo view` names the
+    // repository, which follows `gh repo set-default` (a fork set to its
+    // parent lists the parent's maintainers), as before.
+    if let Some(origin) = gh_origin_repo(&cwd) {
+        let token = github_api::settings_github_token();
+        let path = format!("repos/{}/assignees", origin.nwo);
+        if let Some(r) = github_api::with_rest_using(&cwd, token.as_deref(), |tok| {
+            super::gh_issues::rest_pages(&path, tok, 3)
+        }) {
+            return r.map(|items| super::gh_issues::assignees_from(&items));
+        }
+    }
+    gh_reviewer_candidates_via_view(&cwd)
 }
 
-/// Reviewer candidates when `origin` cannot be parsed (an exotic remote, a
-/// `gh repo set-default`): `gh repo view` names the repository, as before.
+/// Reviewer candidates over `gh`: `gh repo view` names the repository (it
+/// follows `gh repo set-default`).
 fn gh_reviewer_candidates_via_view(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
     let view = gh_repo_view_cmd(cwd, "nameWithOwner")
         .output()

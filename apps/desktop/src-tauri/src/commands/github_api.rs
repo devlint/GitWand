@@ -250,19 +250,20 @@ pub(crate) fn with_rest_using<T>(
     )
 }
 
-/// [`with_rest`] for a call about `nwo`, another repository than `cwd`'s
+/// [`with_rest_using`] for a call about `nwo`, another repository than `cwd`'s
 /// `origin` (a fork's parent): an OAuth App refusal from its organization is
 /// remembered for `nwo` (later calls about it go straight to `gh`) without
 /// marking `cwd` restricted.
-pub(crate) fn with_rest_other_repo<T>(
+pub(crate) fn with_rest_other_repo_using<T>(
     cwd: &str,
     nwo: &str,
+    token: Option<&str>,
     call: impl FnOnce(&str) -> Result<T, String>,
 ) -> Option<Result<T, String>> {
     rest_attempt(
         cwd,
         &format!("repo:{}", nwo),
-        settings_github_token(),
+        token.map(String::from),
         || super::gh::gh_auth_token().is_some(),
         call,
     )

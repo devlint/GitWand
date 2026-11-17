@@ -6,7 +6,9 @@
 //! here, so the frontend cannot aim a write anywhere else.
 
 use super::gh::{gh_api_on, gh_origin_repo, GhRepo};
-use super::github_api::{rest_api_json, with_rest, with_rest_other_repo};
+use super::github_api::{
+    rest_api_json, settings_github_token, with_rest_other_repo_using, with_rest_using,
+};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -83,9 +85,10 @@ fn targets_from(origin: &serde_json::Value, parent: Option<&serde_json::Value>) 
 
 /// `method {path}` on `repo`'s host: REST with the Settings token, else `gh
 /// api` (`body` sent on stdin). A refusal by the parent's organization does
-/// not mark the checkout restricted (see [`with_rest_other_repo`]).
+/// not mark the checkout restricted (see [`with_rest_other_repo_using`]).
 fn api_call(
     cwd: &str,
+    token: Option<&str>,
     repo: &GhRepo,
     method: &str,
     path: &str,
@@ -98,9 +101,9 @@ fn api_call(
     let rest = |tok: &str| rest_api_json(method, path, tok, body.as_deref(), Some(secs));
     let is_origin = gh_origin_repo(cwd).is_some_and(|o| same_repo(&o, repo));
     let attempt = if is_origin {
-        with_rest(cwd, rest)
+        with_rest_using(cwd, token, rest)
     } else {
-        with_rest_other_repo(cwd, &repo.nwo, rest)
+        with_rest_other_repo_using(cwd, &repo.nwo, token, rest)
     };
     match attempt {
         Some(r) => r,
@@ -122,8 +125,15 @@ fn same_repo(a: &GhRepo, b: &GhRepo) -> bool {
 }
 
 /// `GET {path}` on `repo`'s host.
-pub(crate) fn api_get(cwd: &str, repo: &GhRepo, path: &str) -> Result<serde_json::Value, String> {
-    api_call(cwd, repo, "GET", path, None)
+/// `token` is the Settings token, read once by the command (a keychain read
+/// per page would be slow, and may prompt on macOS).
+pub(crate) fn api_get(
+    cwd: &str,
+    token: Option<&str>,
+    repo: &GhRepo,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    api_call(cwd, token, repo, "GET", path, None)
 }
 
 const TARGETS_TTL: Duration = Duration::from_secs(5 * 60);
@@ -132,7 +142,11 @@ const TARGETS_TTL: Duration = Duration::from_secs(5 * 60);
 /// `origin` (every form action re-validates against them; a changed `origin`
 /// never reuses the previous one's targets). `fresh` reads them again, as the
 /// form does when it opens. Empty when `origin` is not GitHub.
-pub(crate) fn issue_targets_inner(cwd: &str, fresh: bool) -> Result<IssueTargets, String> {
+pub(crate) fn issue_targets_inner(
+    cwd: &str,
+    fresh: bool,
+    token: Option<&str>,
+) -> Result<IssueTargets, String> {
     type Cache = HashMap<(String, String), (IssueTargets, Instant)>;
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -147,7 +161,7 @@ pub(crate) fn issue_targets_inner(cwd: &str, fresh: bool) -> Result<IssueTargets
             }
         }
     }
-    let o = api_get(cwd, &origin, &format!("repos/{}", origin.nwo))?;
+    let o = api_get(cwd, token, &origin, &format!("repos/{}", origin.nwo))?;
     // The parent embedded in a fork's answer may lack the viewer's
     // `permissions` (and so its triage rights): read it on its own, keeping
     // the embedded copy when that read fails.
@@ -156,6 +170,7 @@ pub(crate) fn issue_targets_inner(cwd: &str, fresh: bool) -> Result<IssueTargets
     {
         Some(name) => api_get(
             cwd,
+            token,
             &origin.sibling(name.to_string()),
             &format!("repos/{}", name),
         )
@@ -172,9 +187,14 @@ pub(crate) fn issue_targets_inner(cwd: &str, fresh: bool) -> Result<IssueTargets
 
 /// `Ok` when `repo` is one of `targets` — with issues turned on when
 /// `need_issues` (creating, reading labels and milestones).
-fn check_target(targets: &IssueTargets, repo: &str, need_issues: bool) -> Result<(), String> {
+fn check_target<'a>(
+    targets: &'a IssueTargets,
+    repo: &str,
+    need_issues: bool,
+) -> Result<&'a IssueTarget, String> {
     // GitHub names are case-insensitive (the remote URL and `full_name` may
-    // differ in case), as in `same_repo`.
+    // differ in case), as in `same_repo`. The target found carries GitHub's
+    // spelling, which the request then uses: one lookup for both.
     match targets
         .targets
         .iter()
@@ -182,7 +202,7 @@ fn check_target(targets: &IssueTargets, repo: &str, need_issues: bool) -> Result
     {
         None => Err(format!("Not an issue target for this repository: {}", repo)),
         Some(t) if need_issues && !t.has_issues => Err(format!("Issues are disabled on {}", repo)),
-        Some(_) => Ok(()),
+        Some(t) => Ok(t),
     }
 }
 
@@ -192,15 +212,10 @@ pub(crate) fn resolve_issue_target(
     cwd: &str,
     repo: &str,
     need_issues: bool,
+    token: Option<&str>,
 ) -> Result<GhRepo, String> {
-    let targets = issue_targets_inner(cwd, false)?;
-    check_target(&targets, repo, need_issues)?;
-    let canonical = targets
-        .targets
-        .iter()
-        .find(|t| t.repo.eq_ignore_ascii_case(repo))
-        .map(|t| t.repo.clone())
-        .unwrap_or_else(|| repo.to_string());
+    let targets = issue_targets_inner(cwd, false, token)?;
+    let canonical = check_target(&targets, repo, need_issues)?.repo.clone();
     let origin = gh_origin_repo(cwd).ok_or("No GitHub 'origin' remote in this repository.")?;
     Ok(origin.sibling(canonical))
 }
@@ -209,9 +224,11 @@ pub(crate) fn resolve_issue_target(
 /// it when it opens.
 #[tauri::command]
 pub(crate) async fn gh_issue_targets(cwd: String) -> Result<IssueTargets, String> {
-    tauri::async_runtime::spawn_blocking(move || issue_targets_inner(&cwd, true))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        issue_targets_inner(&cwd, true, settings_github_token().as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Whether `cwd`'s `origin` is a GitHub repository: what shows the "New
@@ -284,12 +301,30 @@ fn created_from(v: &serde_json::Value) -> Result<CreatedIssue, String> {
     Ok(CreatedIssue { number, url })
 }
 
+/// Prefixed to a create error when the POST may have reached GitHub (it
+/// timed out while waiting for the answer): the form then says the issue may
+/// exist instead of offering a plain retry that could file it twice.
+pub(crate) const MAY_HAVE_BEEN_CREATED: &str = "[may-have-been-created] ";
+
+/// True for a timeout that hit after the request was sent: curl's
+/// `--max-time` ("Operation timed out"), or the `gh` call killed by its
+/// timeout. A connect timeout means nothing reached GitHub.
+fn post_may_have_landed(err: &str) -> bool {
+    err.contains("Operation timed out") || err.starts_with("gh api: timed out")
+}
+
 fn create_issue_inner(cwd: &str, input: &CreateIssueInput) -> Result<CreatedIssue, String> {
     // Checked before any call: a blank title costs no request.
     let payload = issue_payload(input)?.to_string();
-    let repo = resolve_issue_target(cwd, &input.repo, true)?;
+    let token = settings_github_token();
+    let token = token.as_deref();
+    let repo = resolve_issue_target(cwd, &input.repo, true, token)?;
     let path = format!("repos/{}/issues", repo.nwo);
-    created_from(&api_call(cwd, &repo, "POST", &path, Some(payload))?)
+    match api_call(cwd, token, &repo, "POST", &path, Some(payload)) {
+        Ok(created) => created_from(&created),
+        Err(e) if post_may_have_landed(&e) => Err(format!("{}{}", MAY_HAVE_BEEN_CREATED, e)),
+        Err(e) => Err(e),
+    }
 }
 
 /// File an issue on one of `cwd`'s issue targets (#301).
@@ -308,6 +343,7 @@ pub(crate) async fn gh_create_issue(
 /// Up to `max_pages` pages of 100 of the array at `path` (no query string).
 pub(crate) fn api_get_pages(
     cwd: &str,
+    token: Option<&str>,
     repo: &GhRepo,
     path: &str,
     query: &str,
@@ -317,8 +353,34 @@ pub(crate) fn api_get_pages(
     for page in 1..=max_pages {
         let v = api_get(
             cwd,
+            token,
             repo,
             &format!("{}?{}per_page=100&page={}", path, query, page),
+        )?;
+        let arr = v.as_array().cloned().unwrap_or_default();
+        let n = arr.len();
+        all.extend(arr);
+        if n < 100 {
+            break;
+        }
+    }
+    Ok(all)
+}
+
+/// Up to `max_pages` pages of 100 at `path`, over REST only.
+pub(crate) fn rest_pages(
+    path: &str,
+    token: &str,
+    max_pages: u32,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut all = Vec::new();
+    for page in 1..=max_pages {
+        let v = rest_api_json(
+            "GET",
+            &format!("{}?per_page=100&page={}", path, page),
+            token,
+            None,
+            Some(30),
         )?;
         let arr = v.as_array().cloned().unwrap_or_default();
         let n = arr.len();
@@ -402,8 +464,10 @@ pub(crate) fn assignees_from(items: &[serde_json::Value]) -> Vec<crate::types::R
 #[tauri::command]
 pub(crate) async fn gh_list_labels(cwd: String, repo: String) -> Result<Vec<RepoLabel>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let r = resolve_issue_target(&cwd, &repo, true)?;
-        let items = api_get_pages(&cwd, &r, &format!("repos/{}/labels", r.nwo), "", 3)?;
+        let token = settings_github_token();
+        let token = token.as_deref();
+        let r = resolve_issue_target(&cwd, &repo, true, token)?;
+        let items = api_get_pages(&cwd, token, &r, &format!("repos/{}/labels", r.nwo), "", 3)?;
         Ok(labels_from(&items))
     })
     .await
@@ -417,9 +481,12 @@ pub(crate) async fn gh_list_milestones(
     repo: String,
 ) -> Result<Vec<RepoMilestone>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let r = resolve_issue_target(&cwd, &repo, true)?;
+        let token = settings_github_token();
+        let token = token.as_deref();
+        let r = resolve_issue_target(&cwd, &repo, true, token)?;
         let items = api_get_pages(
             &cwd,
+            token,
             &r,
             &format!("repos/{}/milestones", r.nwo),
             "state=open&",
@@ -438,8 +505,17 @@ pub(crate) async fn gh_list_assignees(
     repo: String,
 ) -> Result<Vec<crate::types::ReviewerCandidate>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let r = resolve_issue_target(&cwd, &repo, true)?;
-        let items = api_get_pages(&cwd, &r, &format!("repos/{}/assignees", r.nwo), "", 3)?;
+        let token = settings_github_token();
+        let token = token.as_deref();
+        let r = resolve_issue_target(&cwd, &repo, true, token)?;
+        let items = api_get_pages(
+            &cwd,
+            token,
+            &r,
+            &format!("repos/{}/assignees", r.nwo),
+            "",
+            3,
+        )?;
         Ok(assignees_from(&items))
     })
     .await
@@ -650,5 +726,31 @@ mod tests {
     fn a_target_matches_whatever_the_case() {
         let t = targets_from(&origin(true, false), None);
         assert!(check_target(&t, "ME/App", true).is_ok());
+    }
+
+    #[test]
+    fn only_a_timeout_after_sending_may_have_created_the_issue() {
+        // curl --max-time while waiting for the answer: the POST left.
+        assert!(post_may_have_landed(
+            "curl request failed (exit 28): Operation timed out after 60001 milliseconds with 0 bytes received"
+        ));
+        // The gh path killed by its timeout, after spawning the request.
+        assert!(post_may_have_landed("gh api: timed out after 60s"));
+        // Never connected: nothing reached GitHub.
+        assert!(!post_may_have_landed(
+            "curl request failed (exit 28): Connection timed out after 20001 milliseconds"
+        ));
+        assert!(!post_may_have_landed(
+            "curl request failed (exit 28): Failed to connect to api.github.com port 443 after 20002 ms: Timeout was reached"
+        ));
+        assert!(!post_may_have_landed(
+            "GitHub API error (422): Validation Failed"
+        ));
+    }
+
+    #[test]
+    fn check_target_gives_githubs_spelling() {
+        let t = targets_from(&origin(true, false), None);
+        assert_eq!(check_target(&t, "ME/APP", true).unwrap().repo, "me/app");
     }
 }

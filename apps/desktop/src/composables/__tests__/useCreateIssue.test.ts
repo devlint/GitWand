@@ -336,7 +336,7 @@ describe("useCreateIssue", () => {
   it("after a timeout, says the issue may exist and holds Create until the user chooses", async () => {
     const createIssue = vi
       .fn()
-      .mockRejectedValueOnce(new Error("curl request failed (exit 28): Operation timed out after 60001 milliseconds"))
+      .mockRejectedValueOnce(new Error("[may-have-been-created] curl request failed (exit 28): Operation timed out after 60001 milliseconds"))
       .mockResolvedValueOnce({ number: 3, url: "u" });
     const { api, onCreated } = setup(provider({ createIssue }));
     await api.open();
@@ -348,6 +348,21 @@ describe("useCreateIssue", () => {
     expect(api.canSubmit.value).toBe(true);
     await api.submit();
     expect(onCreated).toHaveBeenCalledWith({ number: 3, url: "u" });
+  });
+
+  it("a timeout before anything was sent is an ordinary error", async () => {
+    const { api } = setup(provider({ createIssue: vi.fn(async () => { throw new Error("curl request failed (exit 28): Connection timed out after 20001 milliseconds"); }) }));
+    await api.open();
+    api.title.value = "t";
+    await api.submit();
+    expect(api.outcomeUnknown.value).toBe(false);
+    expect(api.canSubmit.value).toBe(true);
+  });
+
+  it("uses the backend's default target", async () => {
+    const { api } = setup(provider({}, { targets: [ORIGIN, PARENT], defaultRepo: "org/app" }));
+    await api.open();
+    expect(api.repo.value).toBe("org/app");
   });
 
   it("an ordinary error does not count as an unknown outcome", async () => {
