@@ -5708,16 +5708,17 @@ async function handleRequest(req, res) {
         const htmls = [];
         let firstError = null;
         let anyOk = false;
-        // Visibility alongside the bodies, best effort (null when unreadable).
+        // Visibility alongside the bodies, best effort (null when unreadable),
+        // read from the PR's base repository as the Rust command does.
         const [repoResult, ...fetches] = await Promise.allSettled([
-          githubFetch(`/repos/${nwo}`, token).then((r) => (r.ok ? r.json() : null)),
+          githubFetch(`/repos/${nwo}/pulls/${number}`, token).then((r) => (r.ok ? r.json() : null)),
           ...paths.map(async (p) => {
             const resp = await githubFetch(p, token, "application/vnd.github.html+json");
             if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
             return resp.json();
           }),
         ]);
-        const priv = repoResult.status === "fulfilled" ? repoResult.value?.private : undefined;
+        const priv = repoResult.status === "fulfilled" ? repoResult.value?.base?.repo?.private : undefined;
         const isPrivate = typeof priv === "boolean" ? priv : null;
         for (const f of fetches) {
           if (f.status === "rejected") {

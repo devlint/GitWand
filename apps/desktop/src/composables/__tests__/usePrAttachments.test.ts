@@ -136,17 +136,61 @@ describe("usePrAttachments", () => {
     expect(s.resolveImage(asset(B))).toBe(signed(B));
   });
 
-  it("refreshes an expired URL on render, keeping it until the new one lands", async () => {
+  it("an expired URL is fetched again when its image fails, not when it is rendered", async () => {
     ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 1)));
     const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
     await flush();
     s.tick(300_000);
     ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 2)));
-    expect(s.resolveImage(asset(A))).toBe(signed(A, 1));
+    expect(s.resolveImage(asset(A))).toBe(signed(A, 1)); // a re-render (the PR poll)
+    await flush();
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
+    s.onImageError(imgError(signed(A, 1)));
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
     expect(s.resolveImage(asset(A))).toBe(signed(A, 2));
+  });
+
+  it("images failing together cost one fetch", async () => {
+    vi.useFakeTimers();
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A), signed(B)));
+    const s = setup([md(A), md(B)]);
+    s.onImageError(imgError(asset(A)));
+    s.onImageError(imgError(asset(B)));
+    await flush();
+    vi.advanceTimersByTime(10 * 60_000);
+    await flush();
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
+    expect(s.resolveImage(asset(B))).toBe(signed(B));
+  });
+
+  it("an image failing during the up-front fetch that brings its URL costs nothing more", async () => {
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
+    const first = setup([md(A)]);
+    first.onImageError(imgError(asset(A)));
+    await flush();
+    let answer!: (v: unknown) => void;
+    ghPrAttachmentUrls.mockReturnValueOnce(new Promise((r) => (answer = r)));
+    const next = setup([md(B)]); // fetched up front: the checkout was found private
+    next.onImageError(imgError(asset(B))); // the original 404s before the answer
+    answer(priv(signed(B)));
+    await flush();
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+    expect(next.resolveImage(asset(B))).toBe(signed(B));
+  });
+
+  it("stops retrying once the view is gone", async () => {
+    vi.useFakeTimers();
+    let fail!: (e: Error) => void;
+    ghPrAttachmentUrls.mockReturnValueOnce(new Promise((_, r) => (fail = r)));
+    const s = setup([md(A)]);
+    s.onImageError(imgError(asset(A)));
+    scopes.splice(0).forEach((sc) => sc.stop());
+    fail(new Error("offline"));
+    await flush();
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
   });
 
   it("does not loop on images a fetch cannot fix", async () => {

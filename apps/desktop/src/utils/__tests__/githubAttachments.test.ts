@@ -4,6 +4,7 @@ import {
   attachmentKeysIn,
   indexSignedAttachments,
   isGithubAttachmentUrl,
+  isSignedAttachmentUrl,
 } from "../githubAttachments";
 
 const UUID = "e56beadb-c31a-4dee-bcd2-973dae719016";
@@ -73,5 +74,14 @@ describe("indexSignedAttachments", () => {
 
   it("ignores URLs that are not attachments", () => {
     expect(indexSignedAttachments(["https://example.com/x.png", "garbage"]).size).toBe(0);
+  });
+});
+
+describe("isSignedAttachmentUrl", () => {
+  it("tells signed URLs from the markdown's, host case aside", () => {
+    expect(isSignedAttachmentUrl(signed(UUID))).toBe(true);
+    expect(isSignedAttachmentUrl(signed(UUID).replace("private-user-images", "PRIVATE-USER-IMAGES"))).toBe(true);
+    expect(isSignedAttachmentUrl(`https://github.com/user-attachments/assets/${UUID}`)).toBe(false);
+    expect(isSignedAttachmentUrl("https://private-user-images.githubusercontent.com.evil.example/x")).toBe(false);
   });
 });

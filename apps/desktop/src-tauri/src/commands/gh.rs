@@ -1343,7 +1343,8 @@ fn gh_pr_attachment_urls_inner(
     use rayon::prelude::*;
     let nwo = gh_base_nwo(&cwd)?;
     let (repo, fetches) = rayon::join(
-        || gh_api_json(&cwd, &format!("repos/{}", nwo)),
+        // The PR's base repository, as the REST path reads it (`get_pr_json`).
+        || gh_api_json(&cwd, &format!("repos/{}/pulls/{}", nwo, number)),
         || {
             github_api::pr_attachment_html_paths(&nwo, number)
                 .par_iter()
@@ -1358,7 +1359,7 @@ fn gh_pr_attachment_urls_inner(
     // a transient error) does not cost the URLs fetched.
     let private = repo
         .ok()
-        .and_then(|r| r.get("private").and_then(|v| v.as_bool()));
+        .and_then(|pr| pr.pointer("/base/repo/private").and_then(|v| v.as_bool()));
     Ok(github_api::PrAttachmentUrls {
         private,
         urls: github_api::signed_urls_from_fetches(fetches)?,

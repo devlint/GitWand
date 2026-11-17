@@ -52,6 +52,11 @@ function parseAttachmentUrl(src: string): URL | null {
   return ok ? u : null;
 }
 
+/** True when `src` is a signed URL (`private-user-images…?jwt=…`) rather than the markdown's. */
+export function isSignedAttachmentUrl(src: string): boolean {
+  return parseAttachmentUrl(src)?.hostname.toLowerCase() === "private-user-images.githubusercontent.com";
+}
+
 /** The UUID naming the attachment at `src` (lower-case), or null when it is not one. */
 export function attachmentKey(src: string): string | null {
   const m = parseAttachmentUrl(src)?.pathname.match(UUID_RE);
