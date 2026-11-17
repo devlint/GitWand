@@ -183,18 +183,26 @@ describe("usePrAttachments", () => {
     expect(s.resolveImage(asset(A))).toBe(signed(A, 3));
   });
 
-  it("retries a failed fetch once, after the gap", async () => {
+  it("retries a failed fetch with a growing delay while images are broken", async () => {
     vi.useFakeTimers();
-    ghPrAttachmentUrls.mockImplementationOnce(async () => {
+    const fail = async () => {
       throw new Error("502");
-    });
+    };
+    ghPrAttachmentUrls.mockImplementationOnce(fail).mockImplementationOnce(fail);
     ghPrAttachmentUrls.mockResolvedValue([signed(A)]);
     const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
     await flush();
-    s.tick(30_000);
+    // The timer may fire a hair before the clock shows the gap: the retry
+    // must not be refused by the failure gap it waited out.
+    s.tick(29_999);
     vi.advanceTimersByTime(30_000);
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+    await flush();
+    vi.advanceTimersByTime(30_000);
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2); // now 60 s
+    vi.advanceTimersByTime(30_000);
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(3);
     await flush();
     expect(s.resolveImage(asset(A))).toBe(signed(A));
   });
@@ -205,6 +213,8 @@ describe("usePrAttachments", () => {
     s.onImageError(imgError(asset(A)));
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
+    // B's original URL works and never expires: it is not swapped for a signed one.
+    expect(s.resolveImage(asset(B))).toBeNull();
     setup([md(B)]); // another PR of the same repository
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
     // An expired signed URL failing is not a sign either.

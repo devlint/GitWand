@@ -123,30 +123,6 @@ provide(PR_REMOTE_IMAGES_KEY, prImagesShown);
 watch([() => p.cwd.value, () => p.prDetail.value?.number], () => {
   prImagesShown.value = false;
 });
-// Files uploaded to GitHub (screenshots…) load through signed URLs, which a
-// private repository needs (#302); the inline threads get the same resolver.
-// GitHub only: the resolver's presence is what lets attachments skip the
-// remote-image consent.
-const isGithubPr = computed(() => p.forge.value.name === "github");
-const attachments = usePrAttachments({
-  cwd: computed(() => p.cwd.value),
-  number: computed(() => p.prDetail.value?.number),
-  enabled: isGithubPr,
-  bodies: computed(() => [
-    p.prDetail.value?.body,
-    ...p.prComments.value.map((c) => c.body),
-    ...p.prIssueComments.value.map((c) => c.body),
-    ...p.prReviews.value.map((r) => r.body),
-  ]),
-});
-const resolveImage = computed(() => (isGithubPr.value ? attachments.resolveImage : undefined));
-provide(PR_ATTACHMENTS_KEY, resolveImage);
-/** Render options for every markdown body of this PR. */
-const mdOpts = computed(() => ({
-  allowRemoteImages: prImagesShown.value,
-  resolveImage: resolveImage.value,
-}));
-
 /** Which editor the description panel shows: the AI draft wins over a manual edit. */
 const bodyEditor = computed<"ai" | "manual" | null>(() =>
   descriptionDraft.value ? "ai" : editingBody.value !== null ? "manual" : null,
@@ -165,6 +141,31 @@ const editorBody = computed({
     }
   },
 });
+// Files uploaded to GitHub (screenshots…) load through signed URLs, which a
+// private repository needs (#302); the inline threads get the same resolver.
+const isGithubPr = computed(() => p.forge.value.name === "github");
+const attachments = usePrAttachments({
+  cwd: computed(() => p.cwd.value),
+  number: computed(() => p.prDetail.value?.number),
+  enabled: isGithubPr,
+  bodies: computed(() => [
+    p.prDetail.value?.body,
+    ...p.prComments.value.map((c) => c.body),
+    ...p.prIssueComments.value.map((c) => c.body),
+    ...p.prReviews.value.map((r) => r.body),
+    // Also rendered with the resolver: the AI summary and the description editor.
+    p.prSummary.value,
+    editorBody.value,
+  ]),
+});
+const resolveImage = computed(() => (isGithubPr.value ? attachments.resolveImage : undefined));
+provide(PR_ATTACHMENTS_KEY, resolveImage);
+/** Render options for every markdown body of this PR. */
+const mdOpts = computed(() => ({
+  allowRemoteImages: prImagesShown.value,
+  githubAttachments: isGithubPr.value,
+  resolveImage: resolveImage.value,
+}));
 const editorHtml = computed(() => renderMarkdown(editorBody.value, mdOpts.value));
 
 /** Extra-context scope of the "ctx" segment: one context per PR. */

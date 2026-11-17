@@ -20,8 +20,13 @@
  * opened — acceptable when an image is broken anyway, not every five minutes
  * for nothing. An image already on screen stays loaded after its URL expires;
  * one re-created later from cached HTML fails, and that failure fetches
- * fresh URLs. A failed fetch is retried once, after `FETCH_GAP_MS`: images
- * that already failed do not fire `error` again.
+ * fresh URLs. A failed fetch is retried with a growing delay while images
+ * of the PR are broken: images that already failed do not fire `error` again.
+ *
+ * Signed URLs replace the originals only once the repository is known to need
+ * them (a failed original URL that GitHub then signed). On a public
+ * repository the originals load and never expire; a fetch there (a deleted
+ * file failing) must not swap them for URLs that break five minutes later.
  *
  * Without a signed URL (before the fetch lands, a failed fetch, no GitHub
  * account) the original URL is kept. An expired one stays in use until its
@@ -49,6 +54,8 @@ export const PR_ATTACHMENTS_KEY: InjectionKey<Ref<ResolveImage | undefined>> = S
 const FETCH_GAP_MS = 30_000;
 /** A signed URL this close to its expiry is treated as expired. */
 const EXPIRY_MARGIN_MS = 15_000;
+/** Longest wait between retries of a failing fetch. */
+const MAX_RETRY_MS = 5 * 60_000;
 
 /** Repositories (cwd) whose attachments needed signed URLs during this session. */
 const signingRepos = new Set<string>();
@@ -70,6 +77,8 @@ export function usePrAttachments(opts: {
 }) {
   const now = opts.now ?? Date.now;
   const signed = shallowRef<Map<string, SignedAttachment>>(new Map());
+  /** This repository needs signed URLs (reactive mirror of `signingRepos`). */
+  const needsSigning = shallowRef(false);
   let prKey = "";
   let inFlight = false;
   /** A refresh was asked for while a fetch was running. */
@@ -84,9 +93,9 @@ export function usePrAttachments(opts: {
   let asked = new Set<string>();
   /** Keys whose original (unsigned) URL failed to load: a sign the repository is private. */
   let failedOriginals = new Set<string>();
-  /** The one retry after a failed fetch, for this PR. */
+  /** The pending retry of a failed fetch, and its next delay. */
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
-  let retried = false;
+  let retryDelay = FETCH_GAP_MS;
 
   function clearRetry(): void {
     if (retryTimer !== null) clearTimeout(retryTimer);
@@ -102,7 +111,8 @@ export function usePrAttachments(opts: {
   });
   const wantedKeys = () => (wanted.value ? wanted.value.split(",") : []);
 
-  function load(refresh: boolean): void {
+  /** `retry`: the retry timer, which skips the failure gap it already waited out. */
+  function load(refresh: boolean, retry = false): void {
     const cwd = opts.cwd.value;
     const n = opts.number.value;
     const keys = wantedKeys();
@@ -111,7 +121,7 @@ export function usePrAttachments(opts: {
       if (refresh) pendingRefresh = true;
       return;
     }
-    if (now() - lastFailure < FETCH_GAP_MS) return;
+    if (!retry && now() - lastFailure < FETCH_GAP_MS) return;
     inFlight = true;
     const key = `${cwd}#${n}`;
     const sentAt = now();
@@ -125,22 +135,28 @@ export function usePrAttachments(opts: {
         for (const [k, v] of fresh) next.set(k, v);
         signed.value = next;
         for (const k of keys) asked.add(k);
+        retryDelay = FETCH_GAP_MS;
         // An original URL failed and GitHub signed that very file: the
         // repository needs signing, so its other PRs fetch up front. (A
         // deleted file or a network blip on a public one does not qualify.)
-        if ([...failedOriginals].some((k) => fresh.has(k))) signingRepos.add(cwd);
+        if ([...failedOriginals].some((k) => fresh.has(k))) {
+          signingRepos.add(cwd);
+          needsSigning.value = true;
+        }
       })
       .catch(() => {
         if (key !== prKey) return;
         lastFailure = now();
-        if (!retried) {
-          retried = true;
-          clearRetry();
-          retryTimer = setTimeout(() => {
-            retryTimer = null;
-            if (key === prKey) load(true);
-          }, FETCH_GAP_MS);
-        }
+        // Retry while something is broken: failed originals, or signed URLs
+        // in use that need replacing. Growing delay, so a lasting failure
+        // (no token, rate limit) costs little.
+        if (!failedOriginals.size && !needsSigning.value) return;
+        clearRetry();
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          if (key === prKey) load(true, true);
+        }, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
       })
       .finally(() => {
         inFlight = false;
@@ -157,13 +173,15 @@ export function usePrAttachments(opts: {
    * to need it, or in this PR once an original URL has failed.
    */
   function check(): void {
-    if (!signingRepos.has(opts.cwd.value) && !failedOriginals.size) return;
+    if (!needsSigning.value && !failedOriginals.size) return;
     if (wantedKeys().some((k) => !signed.value.has(k) && !asked.has(k))) load(false);
   }
 
   /** Fetch again because an image failed or a URL expired — at most once per gap. */
   function refresh(): void {
     if (!opts.enabled.value || now() - lastRefresh < FETCH_GAP_MS) return;
+    // While a failure gap runs, the retry timer covers it: keep the slot.
+    if (now() - lastFailure < FETCH_GAP_MS) return;
     lastRefresh = now();
     load(true);
   }
@@ -180,8 +198,9 @@ export function usePrAttachments(opts: {
         lastRefresh = -Infinity;
         pendingRefresh = false;
         failedOriginals = new Set();
-        retried = false;
+        retryDelay = FETCH_GAP_MS;
         clearRetry();
+        needsSigning.value = signingRepos.has(cwd);
       }
       check();
     },
@@ -206,10 +225,12 @@ export function usePrAttachments(opts: {
 
   /** `resolveImage` for `renderMarkdown`: the signed URL of `src`, if any. */
   function resolveImage(src: string): string | null {
+    // Reactive reads first: renders re-run when new URLs arrive.
+    const map = signed.value;
+    if (!needsSigning.value) return null;
     const k = attachmentKey(src);
     if (!k) return null;
-    // Reactive read: renders re-run when new URLs arrive.
-    const e = signed.value.get(k);
+    const e = map.get(k);
     if (!e) return null;
     if (e.expiresAt - EXPIRY_MARGIN_MS <= now()) queueMicrotask(refresh);
     return e.url;

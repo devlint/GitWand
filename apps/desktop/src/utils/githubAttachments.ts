@@ -32,22 +32,29 @@ const ATTACHMENT_URL_RE = new RegExp(ATTACHMENT_URL_START + String.raw`[^\s"'<>)
  * third-party host is.
  */
 export function isGithubAttachmentUrl(src: string): boolean {
+  return parseAttachmentUrl(src) !== null;
+}
+
+/** `src` parsed, when it is a GitHub attachment URL. */
+function parseAttachmentUrl(src: string): URL | null {
   let u: URL;
   try {
     u = new URL(src);
   } catch {
-    return false;
+    return null;
   }
-  if (u.protocol !== "https:" || u.username || u.password || u.port) return false;
+  if (u.protocol !== "https:" || u.username || u.password || u.port) return null;
   const host = u.hostname.toLowerCase();
-  if (host === "github.com") return u.pathname.startsWith("/user-attachments/assets/");
-  return host === "user-images.githubusercontent.com" || host === "private-user-images.githubusercontent.com";
+  const ok =
+    host === "github.com"
+      ? u.pathname.startsWith("/user-attachments/assets/")
+      : host === "user-images.githubusercontent.com" || host === "private-user-images.githubusercontent.com";
+  return ok ? u : null;
 }
 
 /** The UUID naming the attachment at `src` (lower-case), or null when it is not one. */
 export function attachmentKey(src: string): string | null {
-  if (!isGithubAttachmentUrl(src)) return null;
-  const m = new URL(src).pathname.match(UUID_RE);
+  const m = parseAttachmentUrl(src)?.pathname.match(UUID_RE);
   return m ? m[0].toLowerCase() : null;
 }
 

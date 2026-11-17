@@ -114,7 +114,12 @@ const prImagesShown = inject(PR_REMOTE_IMAGES_KEY, null);
 const resolveImage = inject(PR_ATTACHMENTS_KEY, null);
 const bodyHtmlById = computed(() => {
   const m = new Map<number, string>();
-  const opts = { allowRemoteImages: prImagesShown?.value === true, resolveImage: resolveImage?.value };
+  // A resolver is provided for GitHub PRs only.
+  const opts = {
+    allowRemoteImages: prImagesShown?.value === true,
+    githubAttachments: !!resolveImage?.value,
+    resolveImage: resolveImage?.value,
+  };
   for (const c of props.comments) m.set(c.id, renderMarkdown(c.body, opts));
   return m;
 });

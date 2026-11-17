@@ -45,6 +45,8 @@ let remoteImagesOverride = false;
 
 /** Per-call image URL rewrite, set by `safeHtml(raw, { resolveImage })` like the override above. */
 let imageResolver: ((src: string) => string | null) | null = null;
+/** Per-call `githubAttachments`, likewise. */
+let githubAttachmentsAllowed = false;
 
 /** Options shared by `safeHtml` and `renderMarkdown`. */
 export interface SafeHtmlOptions {
@@ -54,12 +56,16 @@ export interface SafeHtmlOptions {
    */
   allowRemoteImages?: boolean;
   /**
-   * Set when rendering a GitHub PR (`usePrAttachments`): files uploaded to
-   * GitHub load without the remote-image consent, and this may swap an image
-   * URL for another before it is checked — the signed URL of an attachment,
-   * which a private repository's markdown URL is not served under. `null`
-   * keeps `src`. Elsewhere (a README, another forge's PR) an attachment URL
-   * is a remote image like any other.
+   * Rendering a GitHub PR: files uploaded to GitHub load without the
+   * remote-image consent. GitHub serves them, and already serves the PR being
+   * read, so no third party learns it was opened. Elsewhere (a README,
+   * another forge's PR) an attachment URL is a remote image like any other.
+   */
+  githubAttachments?: boolean;
+  /**
+   * Swap an image URL for another before it is checked — the signed URL of a
+   * GitHub attachment, which a private repository's markdown URL is not
+   * served under (`usePrAttachments`). `null` keeps `src`.
    */
   resolveImage?: (src: string) => string | null;
 }
@@ -179,9 +185,7 @@ function hardenLinksAndImages(node: Element) {
     } else if (
       src
       && isRemoteImageSrc(norm)
-      // In a GitHub PR, a file uploaded to GitHub is served by GitHub, which
-      // already serves the PR being read: no third party learns anything.
-      && !(imageResolver && isGithubAttachmentUrl(norm))
+      && !(githubAttachmentsAllowed && isGithubAttachmentUrl(norm))
       && !remoteImagesAllowed()
     ) {
       // Remote image, not allowed: keep a visible placeholder (alt text) and
@@ -230,11 +234,13 @@ export function safeHtml(raw: string | null | undefined, options: SafeHtmlOption
   ensureHooks();
   remoteImagesOverride = options.allowRemoteImages === true;
   imageResolver = options.resolveImage ?? null;
+  githubAttachmentsAllowed = options.githubAttachments === true;
   try {
     return DOMPurify.sanitize(raw, PURIFY_CONFIG) as string;
   } finally {
     remoteImagesOverride = false;
     imageResolver = null;
+    githubAttachmentsAllowed = false;
   }
 }
 
@@ -257,7 +263,11 @@ export function renderMarkdown(
 ): string {
   if (!src) return "";
   const rawHtml = markdownToHtml(src, { breaks: options.breaks ?? true });
-  return safeHtml(rawHtml, { allowRemoteImages: options.allowRemoteImages, resolveImage: options.resolveImage });
+  return safeHtml(rawHtml, {
+    allowRemoteImages: options.allowRemoteImages,
+    githubAttachments: options.githubAttachments,
+    resolveImage: options.resolveImage,
+  });
 }
 
 /**

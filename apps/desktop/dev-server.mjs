@@ -5733,7 +5733,7 @@ async function handleRequest(req, res) {
         }
         return jsonResponse(req, res, urls);
       } catch (err) {
-        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+        return jsonResponse(req, res, { error: err.message }, 500);
       }
     }
 

@@ -64,9 +64,6 @@ export function useRepoRemoteImages(cwd: Ref<string | null | undefined>) {
 const withheldByBody = new Map<string, boolean>();
 const WITHHELD_CACHE_MAX = 500;
 
-/** A resolver that changes nothing: renders as a GitHub PR does, attachments allowed. */
-const noResolve = () => null;
-
 function bodyWithholdsImages(body: string, github: boolean): boolean {
   // With remote images allowed globally nothing is withheld. Read through the
   // reactive settings, so a computed using this re-runs on toggle.
@@ -75,7 +72,7 @@ function bodyWithholdsImages(body: string, github: boolean): boolean {
   let v = withheldByBody.get(key);
   if (v === undefined) {
     v = hasBlockedRemoteImages(
-      renderMarkdown(body, { allowRemoteImages: false, resolveImage: github ? noResolve : undefined }),
+      renderMarkdown(body, { allowRemoteImages: false, githubAttachments: github }),
     );
     if (withheldByBody.size >= WITHHELD_CACHE_MAX) withheldByBody.clear();
     withheldByBody.set(key, v);
