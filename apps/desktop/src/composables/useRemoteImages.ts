@@ -62,20 +62,22 @@ export function useRepoRemoteImages(cwd: Ref<string | null | undefined>) {
  * consent, global setting off), so it is cached by body. Bounded: dropped wholesale when full.
  */
 const withheldByBody = new Map<string, boolean>();
+/** Same, rendered as in a GitHub PR (its attachments are not withheld). */
+const withheldByGithubBody = new Map<string, boolean>();
 const WITHHELD_CACHE_MAX = 500;
 
 function bodyWithholdsImages(body: string, github: boolean): boolean {
   // With remote images allowed globally nothing is withheld. Read through the
   // reactive settings, so a computed using this re-runs on toggle.
   if (useSettings().settings.value.allowRemoteImages === true) return false;
-  const key = `${github ? "gh" : "-"}:${body}`;
-  let v = withheldByBody.get(key);
+  const cache = github ? withheldByGithubBody : withheldByBody;
+  let v = cache.get(body);
   if (v === undefined) {
     v = hasBlockedRemoteImages(
       renderMarkdown(body, { allowRemoteImages: false, githubAttachments: github }),
     );
-    if (withheldByBody.size >= WITHHELD_CACHE_MAX) withheldByBody.clear();
-    withheldByBody.set(key, v);
+    if (cache.size >= WITHHELD_CACHE_MAX) cache.clear();
+    cache.set(body, v);
   }
   return v;
 }

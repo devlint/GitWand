@@ -222,22 +222,24 @@ describe("usePrAttachments", () => {
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
   });
 
-  it("defers a trigger inside the gap after a fetch instead of dropping it", async () => {
+  it("a superseded URL failing does not fetch; an expired one does", async () => {
     vi.useFakeTimers();
-    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 1)));
-    const s = setup([md(A)]);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A), signed(B, 1)));
+    const s = setup([md(A), md(B)]);
     s.onImageError(imgError(asset(A)));
     await flush();
-    // The answer was already stale (say, a slow response): the URL is expired at once.
+    // B's URL expires while A's fetch is 290 s old; the next fetch is due at once.
     s.tick(290_000);
-    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 2)));
-    s.onImageError(imgError(signed(A, 1)));
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 2), signed(B, 2)));
+    s.onImageError(imgError(signed(B, 1)));
     await flush();
-    s.tick(5_000);
-    s.onImageError(imgError(signed(A, 1))); // superseded URL, inside the gap
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
-    s.tick(25_000);
-    vi.advanceTimersByTime(25_000);
+    // A superseded URL still on screen: the re-render fixes it, no fetch.
+    s.onImageError(imgError(signed(A)));
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(B, 3)));
+    s.tick(290_000); // B,2 expires
+    s.onImageError(imgError(signed(B, 2)));
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(3);
   });
 
@@ -359,5 +361,34 @@ describe("usePrAttachments", () => {
     await flush();
     setup([md(B)]); // …but is public now
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+  });
+
+  it("a fetch that keeps failing backs off and stops, even in a private checkout", async () => {
+    vi.useFakeTimers();
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
+    const first = setup([md(A)]);
+    first.onImageError(imgError(asset(A)));
+    await flush();
+    ghPrAttachmentUrls.mockImplementation(async () => {
+      throw new Error("offline");
+    });
+    setup([md(B)]); // up front, fails
+    await flush();
+    for (let i = 0; i < 20; i++) {
+      vi.advanceTimersByTime(60_000);
+      await flush();
+    }
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1 + 1 + 4);
+  });
+
+  it("a partial answer that misses nothing is not retried", async () => {
+    vi.useFakeTimers();
+    ghPrAttachmentUrls.mockResolvedValue({ private: true, urls: [signed(A)], complete: false });
+    const s = setup([md(A)]);
+    s.onImageError(imgError(asset(A)));
+    await flush();
+    vi.advanceTimersByTime(10 * 60_000);
+    await flush();
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
   });
 });

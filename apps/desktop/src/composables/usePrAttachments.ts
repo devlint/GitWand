@@ -95,6 +95,8 @@ export function usePrAttachments(opts: {
    * again.
    */
   let asked = new Set<string>();
+  /** Keys some fetch was sent for: the up-front check fetches only others. */
+  let attempted = new Set<string>();
   /** The one scheduled fetch (a retry, or a trigger deferred past the gap) and when it fires. */
   let timer: ReturnType<typeof setTimeout> | null = null;
   let timerAt = 0;
@@ -114,7 +116,7 @@ export function usePrAttachments(opts: {
     const key = prKey;
     timer = setTimeout(() => {
       timer = null;
-      if (!disposed && key === prKey) load(true);
+      if (!disposed && key === prKey) load();
     }, delay);
   }
 
@@ -142,20 +144,22 @@ export function usePrAttachments(opts: {
     return entry ? entry.expiresAt - EXPIRY_MARGIN_MS <= now() : !asked.has(k);
   }
 
-  /** `scheduled`: the gap was already waited out (timer, or `fetchSoon`'s check). */
-  function load(scheduled = false): void {
+  /** Send a fetch. Callers enforce the gap (`fetchSoon`, `schedule`'s timer). */
+  function load(): void {
     const cwd = opts.cwd.value;
     const n = opts.number.value;
     const keys = wantedKeys();
     if (disposed || inFlight || !cwd || n == null || !keys.length) return;
-    if (!scheduled && now() - lastFailure < FETCH_GAP_MS) return;
+    for (const k of keys) attempted.add(k);
     inFlight = true;
     lastFetch = now();
     const key = `${cwd}#${n}`;
     const sentAt = lastFetch;
+    let ok = false;
     ghPrAttachmentUrls(cwd, n)
       .then((res) => {
         if (disposed || key !== prKey) return;
+        ok = true;
         clearTimer(); // a deferred trigger this fetch answers
         if (res.private === true) privateCheckouts.add(cwd);
         if (res.private === false) privateCheckouts.delete(cwd);
@@ -172,9 +176,11 @@ export function usePrAttachments(opts: {
           retries = 0;
           for (const k of keys) asked.add(k);
         } else {
-          // A body list failed: a key missing from the answer may be in it.
+          // A body list failed: a key missing from the answer may be in it,
+          // so it stays askable, and is retried — if one is missing at all.
           for (const k of keys) if (next.has(k)) asked.add(k);
-          if (!foundPublic) scheduleRetry();
+          if (!foundPublic && keys.some((k) => !next.has(k))) scheduleRetry();
+          else retries = 0;
         }
       })
       .catch(() => {
@@ -189,21 +195,23 @@ export function usePrAttachments(opts: {
         const still = [...pendingKeys].some(fetchWouldHelp);
         pendingKeys = new Set();
         if (still) fetchSoon();
-        else check(); // bodies or the PR may have changed while this ran
+        // Bodies or the PR may have changed while this ran. Not after a
+        // failure of this PR's fetch: its retries are scheduled already.
+        else if (ok || key !== prKey) check();
       });
   }
 
   /** Up front, in a checkout found private: fetch for attachments not asked for yet. */
   function check(): void {
     if (!isPrivate.value || foundPublic) return;
-    if (wantedKeys().some((k) => !signed.value.has(k) && !asked.has(k))) fetchSoon();
+    if (wantedKeys().some((k) => !signed.value.has(k) && !attempted.has(k))) fetchSoon();
   }
 
   /** Fetch now, or at the end of the gap after the last fetch — deferred, not dropped. */
   function fetchSoon(): void {
     const wait = Math.max(lastFetch, lastFailure) + FETCH_GAP_MS - now();
     if (wait > 0) schedule(wait);
-    else load(true);
+    else load();
   }
 
   watch(
@@ -216,6 +224,7 @@ export function usePrAttachments(opts: {
         isPrivate.value = privateCheckouts.has(cwd);
         foundPublic = false;
         asked = new Set();
+        attempted = new Set();
         pendingKeys = new Set();
         failedKeys = new Set();
         lastFailure = -Infinity;
@@ -253,8 +262,9 @@ export function usePrAttachments(opts: {
     if (foundPublic) return;
     const entry = signed.value.get(k);
     const fixable = isSignedAttachmentUrl(src)
-      ? // A signed URL: only an expired or superseded one.
-        !entry || entry.url !== src || entry.expiresAt - EXPIRY_MARGIN_MS <= now()
+      ? // A signed URL: only when no current one is held. (A superseded URL
+        // still on screen is fixed by the re-render, not by fetching.)
+        fetchWouldHelp(k)
       : // An original: unless its signed URL is in use already (a stale
         // render) or GitHub did not sign this file.
         !entry && !asked.has(k);
