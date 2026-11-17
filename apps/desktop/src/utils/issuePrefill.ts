@@ -34,6 +34,15 @@ function codeBlock(text: string): string {
  * when the commit is not on `origin`: the full SHA is then written unlinked,
  * so the issue never carries a link that answers 404.
  */
+/** `text` as an inline code span (inert: no mention, reference or link). */
+function codeSpan(text: string): string {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  const fence = "`".repeat(longest + 1);
+  // A span that starts or ends with a backtick needs a space inside its fence.
+  const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
+
 /** GitHub refuses an issue title longer than this (422). */
 export const ISSUE_TITLE_MAX = 256;
 
@@ -48,6 +57,6 @@ export function commitIssuePrefill(entry: GitLogEntry, commitUrl: string | null)
   const message = [entry.message, entry.body.trim()].filter(Boolean).join("\n\n");
   return {
     title: issueTitle(entry.message),
-    body: `Commit ${sha} by ${entry.author}\n\n${codeBlock(message)}\n`,
+    body: `Commit ${sha} by ${codeSpan(entry.author)}\n\n${codeBlock(message)}\n`,
   };
 }

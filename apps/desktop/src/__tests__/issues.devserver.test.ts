@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError } from "../../dev-issues.mjs";
+import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,
@@ -85,5 +85,18 @@ describe("devGithubError", () => {
   });
   it("falls back to the status", () => {
     expect(devGithubError(500, {})).toBe("GitHub API error (500): HTTP 500");
+  });
+});
+
+describe("devLabelsFrom / devMilestonesFrom", () => {
+  it("map labels like labels_from (empty description → null, nameless dropped)", () => {
+    expect(devLabelsFrom([{ name: "bug", color: "d73a4a", description: "" }, { color: "x" }])).toEqual([
+      { name: "bug", color: "d73a4a", description: null },
+    ]);
+  });
+  it("map milestones like milestones_from (dueOn, untitled dropped)", () => {
+    expect(devMilestonesFrom([{ number: 3, title: "v4", due_on: "2026-12-01T00:00:00Z" }, { number: 4 }])).toEqual([
+      { number: 3, title: "v4", dueOn: "2026-12-01T00:00:00Z" },
+    ]);
   });
 });

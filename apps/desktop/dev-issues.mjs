@@ -79,3 +79,19 @@ export function devGithubError(status, json) {
     ? `GitHub API error (${status}): ${msg} (${details.join("; ")})`
     : `GitHub API error (${status}): ${msg}`;
 }
+
+const nonEmpty = (v) => (typeof v === "string" && v ? v : null);
+
+/** `labels_from`: name required, empty description → null. */
+export function devLabelsFrom(items) {
+  return items
+    .filter((l) => nonEmpty(l?.name))
+    .map((l) => ({ name: l.name, color: nonEmpty(l.color) ?? "", description: nonEmpty(l.description) }));
+}
+
+/** `milestones_from`: number and title required, `due_on` → `dueOn`. */
+export function devMilestonesFrom(items) {
+  return items
+    .filter((m) => Number.isInteger(m?.number) && nonEmpty(m.title))
+    .map((m) => ({ number: m.number, title: m.title, dueOn: nonEmpty(m.due_on) }));
+}

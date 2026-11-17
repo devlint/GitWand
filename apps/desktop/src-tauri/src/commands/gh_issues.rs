@@ -91,12 +91,16 @@ fn api_call(
     path: &str,
     body: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let rest = |tok: &str| rest_api_json(method, path, tok, body.as_deref());
+    // A write is bounded like the `gh` path (GH_WRITE_TIMEOUT): a POST
+    // stalled after sending would outlive the form's wait and invite a retry
+    // that duplicates it.
+    let max_time = (method != "GET").then_some(60);
+    let rest = |tok: &str| rest_api_json(method, path, tok, body.as_deref(), max_time);
     let is_origin = gh_origin_repo(cwd).as_ref() == Some(repo);
     let attempt = if is_origin {
         with_rest(cwd, rest)
     } else {
-        with_rest_other_repo(cwd, rest)
+        with_rest_other_repo(cwd, &repo.nwo, rest)
     };
     match attempt {
         Some(r) => r,
@@ -270,7 +274,7 @@ pub(crate) async fn gh_create_issue(
 // ─── Pickers: labels, milestones, assignees ────────────────────────────────
 
 /// Up to `max_pages` pages of 100 of the array at `path` (no query string).
-fn api_get_pages(
+pub(crate) fn api_get_pages(
     cwd: &str,
     repo: &GhRepo,
     path: &str,

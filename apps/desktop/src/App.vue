@@ -193,7 +193,7 @@ const { isOffline: navIsOffline } = useNetworkStatus();
 const { isOnline: probedOnline, probeConnectivity } = useConnectivity();
 const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
 import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment, type GitLogEntry as IssueCommitEntry } from "./utils/backend";
-import { useCreateIssue, CREATE_ISSUE_KEY } from "./composables/useCreateIssue";
+import { useCreateIssue, CREATE_ISSUE_KEY, isNewIssueShortcut } from "./composables/useCreateIssue";
 import { githubProvider } from "./composables/forge/useForge";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import type { ForgeName } from "./composables/forge/types";
@@ -525,9 +525,9 @@ watch(repoFolderPath, () => {
 }, { immediate: true });
 
 // Offline at start, or GitHub signed in later: look again when the window
-// comes back, as long as the action is not available yet.
+// comes back, as long as the action is not available yet (at most once a minute).
 function onWindowFocusIssues() {
-  if (!createIssue.available.value && repoFolderPath.value) void createIssue.refreshAvailability();
+  void createIssue.refreshOnFocus();
 }
 onMounted(() => window.addEventListener("focus", onWindowFocusIssues));
 onUnmounted(() => window.removeEventListener("focus", onWindowFocusIssues));
@@ -4180,8 +4180,13 @@ function onKeyDown(e: KeyboardEvent) {
     commitReviewNav.dispatch(commitReviewAction);
     return;
   }
-  if (mod && e.shiftKey && (e.key === "I" || e.key === "i") && createIssue.available.value) {
-    // Cmd+Shift+I — new GitHub issue (#301)
+  if (
+    createIssue.available.value &&
+    isNewIssueShortcut(e, navigator.platform.toLowerCase().includes("mac")) &&
+    // Not over another dialog (Settings, a confirm…).
+    !document.querySelector('[aria-modal="true"]')
+  ) {
+    // ⌘⇧I (Ctrl+Alt+I off macOS) — new GitHub issue (#301)
     e.preventDefault();
     openNewIssue();
     return;

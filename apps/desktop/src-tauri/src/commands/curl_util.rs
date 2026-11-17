@@ -107,6 +107,15 @@ pub(crate) fn quote_config(s: &str) -> String {
     out
 }
 
+/// How a [`curl_request`] reads its answer and how long it may take.
+#[derive(Clone, Copy, Default)]
+struct RequestOpts {
+    /// Dump the response headers to stdout (`-D -`).
+    dump_headers: bool,
+    /// curl `--max-time`; `None` leaves the duration unbounded.
+    max_time_secs: Option<u32>,
+}
+
 /// The curl argv and `--config -` stdin for a request. The auth header and the
 /// request body both go through the stdin config, never argv: a body can be
 /// long (Windows caps a command line at 32 767 characters) and carries user
@@ -118,8 +127,12 @@ fn curl_request(
     body_json: Option<&str>,
     extra_headers: &[&str],
     accept: &str,
-    dump_headers: bool,
+    opts: RequestOpts,
 ) -> (Vec<String>, Option<String>) {
+    let RequestOpts {
+        dump_headers,
+        max_time_secs,
+    } = opts;
     const MARKER: &str = "\n__GW_HTTP_STATUS__";
     let mut args: Vec<String> = vec![
         "-s".to_string(),
@@ -127,12 +140,11 @@ fn curl_request(
         "--connect-timeout".to_string(),
         "20".to_string(),
     ];
-    if method != "GET" {
-        // A write is bounded: a POST stalled after sending would otherwise
-        // outlive the UI's wait, and a retry would duplicate it. Reads are
-        // not (some are large downloads).
+    if let Some(secs) = max_time_secs {
+        // Only where the caller asks: a forge write (a large merge) may
+        // legitimately take longer than any fixed limit.
         args.push("--max-time".to_string());
-        args.push("60".to_string());
+        args.push(secs.to_string());
     }
     if dump_headers {
         args.push("-D".to_string());
@@ -181,6 +193,27 @@ pub(crate) fn curl_with_status(
     extra_headers: &[&str],
     accept: &str,
 ) -> Result<(i32, String), String> {
+    curl_with_status_bounded(
+        method,
+        url,
+        auth_config,
+        body_json,
+        extra_headers,
+        accept,
+        None,
+    )
+}
+
+/// [`curl_with_status`] that gives up after `max_time_secs` (curl `--max-time`).
+pub(crate) fn curl_with_status_bounded(
+    method: &str,
+    url: &str,
+    auth_config: Option<&str>,
+    body_json: Option<&str>,
+    extra_headers: &[&str],
+    accept: &str,
+    max_time_secs: Option<u32>,
+) -> Result<(i32, String), String> {
     const MARKER: &str = "\n__GW_HTTP_STATUS__";
     let (args, stdin) = curl_request(
         method,
@@ -189,7 +222,10 @@ pub(crate) fn curl_with_status(
         body_json,
         extra_headers,
         accept,
-        false,
+        RequestOpts {
+            dump_headers: false,
+            max_time_secs,
+        },
     );
     let output = run_curl(&args, stdin.as_deref())?;
     // A non-zero curl exit is a transport failure (DNS/TLS/connection/library
@@ -234,7 +270,10 @@ pub(crate) fn curl_with_headers(
         body_json,
         extra_headers,
         accept,
-        true,
+        RequestOpts {
+            dump_headers: true,
+            max_time_secs: None,
+        },
     );
     let output = run_curl(&args, stdin.as_deref())?;
     curl_transport_check(
@@ -332,7 +371,7 @@ mod tests {
             Some(body),
             &[],
             "application/json",
-            false,
+            RequestOpts::default(),
         );
         assert!(args.iter().all(|a| !a.contains("secret")), "{:?}", args);
         assert!(args.windows(2).any(|w| w[0] == "--config" && w[1] == "-"));
@@ -343,14 +382,22 @@ mod tests {
 
     #[test]
     fn body_without_auth_still_uses_stdin_config() {
-        let (args, cfg) = curl_request("POST", "u", None, Some("{}"), &[], "a", false);
+        let (args, cfg) = curl_request(
+            "POST",
+            "u",
+            None,
+            Some("{}"),
+            &[],
+            "a",
+            RequestOpts::default(),
+        );
         assert!(args.windows(2).any(|w| w[0] == "--config" && w[1] == "-"));
         assert_eq!(cfg.as_deref(), Some("data-raw = \"{}\"\n"));
     }
 
     #[test]
     fn no_body_no_auth_no_stdin() {
-        let (args, cfg) = curl_request("GET", "u", None, None, &[], "a", false);
+        let (args, cfg) = curl_request("GET", "u", None, None, &[], "a", RequestOpts::default());
         assert!(!args.iter().any(|a| a == "--config"));
         assert!(cfg.is_none());
     }
@@ -365,8 +412,19 @@ mod tests {
 
     #[test]
     fn header_dump_flag_only_when_asked() {
-        let (with, _) = curl_request("GET", "u", None, None, &[], "a", true);
-        let (without, _) = curl_request("GET", "u", None, None, &[], "a", false);
+        let (with, _) = curl_request(
+            "GET",
+            "u",
+            None,
+            None,
+            &[],
+            "a",
+            RequestOpts {
+                dump_headers: true,
+                max_time_secs: None,
+            },
+        );
+        let (without, _) = curl_request("GET", "u", None, None, &[], "a", RequestOpts::default());
         assert!(with.windows(2).any(|w| w[0] == "-D" && w[1] == "-"));
         assert!(!without.iter().any(|a| a == "-D"));
     }
@@ -427,17 +485,37 @@ mod tests {
     }
 
     #[test]
-    fn every_request_bounds_its_connection_and_writes_their_duration() {
-        let (get, _) = curl_request("GET", "u", None, None, &[], "a", false);
-        let (post, _) = curl_request("POST", "u", None, Some("{}"), &[], "a", false);
+    fn every_request_bounds_its_connection_and_only_asked_ones_their_duration() {
         let has = |args: &[String], flag: &str, v: &str| {
             args.windows(2).any(|w| w[0] == flag && w[1] == v)
         };
+        let (get, _) = curl_request("GET", "u", None, None, &[], "a", RequestOpts::default());
+        let (post, _) = curl_request(
+            "POST",
+            "u",
+            None,
+            Some("{}"),
+            &[],
+            "a",
+            RequestOpts::default(),
+        );
+        let (bounded, _) = curl_request(
+            "POST",
+            "u",
+            None,
+            Some("{}"),
+            &[],
+            "a",
+            RequestOpts {
+                dump_headers: false,
+                max_time_secs: Some(60),
+            },
+        );
         assert!(has(&get, "--connect-timeout", "20"));
         assert!(has(&post, "--connect-timeout", "20"));
-        // A write is bounded (a stalled POST would otherwise outlive the UI's
-        // wait, inviting a retry that duplicates it); a read is not (downloads).
-        assert!(has(&post, "--max-time", "60"));
-        assert!(!get.iter().any(|a| a == "--max-time"));
+        // Only a caller that asks is bounded: a forge write (a large merge)
+        // may legitimately take longer than any fixed limit.
+        assert!(!post.iter().any(|a| a == "--max-time"));
+        assert!(has(&bounded, "--max-time", "60"));
     }
 }

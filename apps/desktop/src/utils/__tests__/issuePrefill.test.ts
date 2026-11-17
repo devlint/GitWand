@@ -65,6 +65,11 @@ describe("commitIssuePrefill", () => {
     expect(commitIssuePrefill(entry(), null).body).toContain("Ada Lovelace");
   });
 
+  it("keeps the author name inert (no mention, reference or link)", () => {
+    const b = commitIssuePrefill(entry({ author: "Jane (@jane) #1 [x](http://e)" }), null).body;
+    expect(b).toContain("by `Jane (@jane) #1 [x](http://e)`");
+  });
+
   it("does not leave a trailing blank line inside the block when the body ends with a newline", () => {
     const b = commitIssuePrefill(entry({ message: "s", body: "l1\n" }), null).body;
     expect(b).toContain("l1\n```");

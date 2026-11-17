@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError } from "./dev-issues.mjs";
+import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -5496,19 +5496,17 @@ async function handleRequest(req, res) {
     // — mirror `gh_list_labels` / `gh_list_milestones` / `gh_list_assignees`.
     // (The condition below names each route literally: commandRegistry.test
     // reads the served routes from `url.pathname === "…"` comparisons.)
-    const issuePicker = {
-      "/api/gh-list-labels": { suffix: "labels", query: "", pages: 3,
-        map: (l) => (l.name ? { name: l.name, color: l.color || "", description: l.description || null } : null) },
-      "/api/gh-list-milestones": { suffix: "milestones", query: "state=open&", pages: 1,
-        map: (m) => (Number.isInteger(m.number) && m.title ? { number: m.number, title: m.title, dueOn: m.due_on || null } : null) },
-      "/api/gh-list-assignees": { suffix: "assignees", query: "", pages: 3, all: devAssigneesFrom },
-    }[url.pathname];
     if (
       (url.pathname === "/api/gh-list-labels" ||
         url.pathname === "/api/gh-list-milestones" ||
         url.pathname === "/api/gh-list-assignees") &&
       req.method === "GET"
     ) {
+      const issuePicker = {
+        "/api/gh-list-labels": { suffix: "labels", query: "", pages: 3, map: devLabelsFrom },
+        "/api/gh-list-milestones": { suffix: "milestones", query: "state=open&", pages: 1, map: devMilestonesFrom },
+        "/api/gh-list-assignees": { suffix: "assignees", query: "", pages: 3, map: devAssigneesFrom },
+      }[url.pathname];
       const cwd = url.searchParams.get("cwd");
       const repo = url.searchParams.get("repo");
       if (!cwd || !repo) return jsonResponse(req, res, { error: "Missing cwd or repo" }, 400);
@@ -5518,8 +5516,7 @@ async function handleRequest(req, res) {
         const refused = devCheckIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
         if (refused) return jsonResponse(req, res, { error: refused }, 400);
         const items = await devGithubPages(`/repos/${repo}/${issuePicker.suffix}`, issuePicker.query, token, issuePicker.pages);
-        const out = issuePicker.all ? issuePicker.all(items) : items.map(issuePicker.map).filter(Boolean);
-        return jsonResponse(req, res, out);
+        return jsonResponse(req, res, issuePicker.map(items));
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);
       }

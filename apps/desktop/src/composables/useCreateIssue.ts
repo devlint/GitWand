@@ -5,12 +5,6 @@
  * ⌘K, ⌘⇧I) calls `open(prefill?)`, a commit's menu `openFromCommit(entry)`.
  */
 
-/** True when a remote-tracking branch of `origin` contains `sha`. */
-async function gitCommitOnOrigin(cwd: string, sha: string): Promise<boolean> {
-  const r = await gitExec(cwd, ["for-each-ref", "--contains", sha, "--count=1", "--format=%(refname)", "refs/remotes/origin/"]);
-  return r.exitCode === 0 && r.stdout.trim() !== "";
-}
-
 import { computed, ref, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec } from "../utils/backend";
@@ -23,6 +17,26 @@ import type {
   ReviewerCandidate,
 } from "../utils/backend";
 import { commitIssuePrefill, commitUrlFor, type IssuePrefill } from "../utils/issuePrefill";
+
+/** True when a remote-tracking branch of `origin` contains `sha`. */
+async function gitCommitOnOrigin(cwd: string, sha: string): Promise<boolean> {
+  const r = await gitExec(cwd, ["for-each-ref", "--contains", sha, "--count=1", "--format=%(refname)", "refs/remotes/origin/"]);
+  return r.exitCode === 0 && r.stdout.trim() !== "";
+}
+
+/**
+ * The "New issue" shortcut: ⌘⇧I on macOS; Ctrl+Alt+I elsewhere, where
+ * Ctrl+Shift+I belongs to the WebView's inspector.
+ */
+export function isNewIssueShortcut(e: KeyboardEvent, mac: boolean): boolean {
+  if (e.key !== "I" && e.key !== "i") return false;
+  return mac
+    ? e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey
+    : e.ctrlKey && e.altKey && !e.metaKey;
+}
+
+/** A failed availability check is retried on window focus at most this often. */
+const FOCUS_RETRY_MS = 60_000;
 
 export interface CreateIssueApi {
   isOpen: Ref<boolean>;
@@ -52,6 +66,8 @@ export interface CreateIssueApi {
   /** The current repository's `origin` page, for commit links (GitHub Enterprise included). */
   originHtmlUrl: ComputedRef<string | null>;
   refreshAvailability(): Promise<void>;
+  /** On window focus: retry a failed or negative check, at most once a minute. */
+  refreshOnFocus(): Promise<void>;
   /** Drop the targets of the repository being left, before the next one is read. */
   forgetTargets(): void;
   /**
@@ -82,7 +98,11 @@ export function useCreateIssue(deps: {
   onCreated: (issue: CreatedIssue) => void;
   /** Whether `origin` has the commit (tests replace the git check). */
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
+  /** Clock, for the focus retry interval (tests replace it). */
+  now?: () => number;
 }): CreateIssueApi {
+  const now = deps.now ?? Date.now;
+  let lastFocusCheck = -Infinity;
   const commitOnOrigin = deps.commitOnOrigin ?? gitCommitOnOrigin;
   const isOpen = ref(false);
   const available = ref(false);
@@ -148,6 +168,13 @@ export function useCreateIssue(deps: {
     available.value = t.length > 0;
   }
 
+  async function refreshOnFocus(): Promise<void> {
+    if (available.value || !deps.cwd.value) return;
+    if (now() - lastFocusCheck < FOCUS_RETRY_MS) return;
+    lastFocusCheck = now();
+    await refreshAvailability();
+  }
+
   function forgetTargets() {
     availabilitySeq++;
     repoTargets.value = [];
@@ -199,28 +226,35 @@ export function useCreateIssue(deps: {
     formCwd = deps.cwd.value;
     isOpen.value = true;
     loading.value = true;
-    const [t, filled] = await Promise.all([
-      readTargets(formCwd, true),
-      Promise.resolve(prefill).catch(() => undefined),
-    ]);
+    // A cached availability read still in flight is older than this one.
+    const seq = ++availabilitySeq;
+    const pending = Promise.resolve(prefill).catch(() => undefined);
+    const t = await readTargets(formCwd, true);
     if (gen !== generation) return;
-    initial.value = { title: filled?.title ?? "", body: filled?.body ?? "" };
-    title.value = initial.value.title;
-    body.value = initial.value.body;
     loading.value = false;
     targetsFailed.value = t === null;
-    if (t === null) return;
-    targets.value = t;
-    // A fresh answer for the repository still on screen also refreshes its
-    // availability.
-    if (formCwd === deps.cwd.value) {
-      repoTargets.value = t;
-      available.value = t.length > 0;
+    if (t !== null) {
+      targets.value = t;
+      // A fresh answer for the repository still on screen also refreshes its
+      // availability.
+      if (formCwd === deps.cwd.value && seq === availabilitySeq) {
+        repoTargets.value = t;
+        available.value = t.length > 0;
+      }
+      const first = targets.value.find((x) => x.hasIssues);
+      repo.value = first?.repo ?? null;
+      if (repo.value) loadPickers(repo.value);
     }
-    const first = targets.value.find((x) => x.hasIssues);
-    repo.value = first?.repo ?? null;
-    if (repo.value) loadPickers(repo.value);
+    // The form is on screen; the prefill (a commit's, after its git check)
+    // lands when ready, unless the user has started typing meanwhile.
+    const filled = await pending;
+    if (gen !== generation || !filled) return;
+    if (title.value !== initial.value.title || body.value !== initial.value.body) return;
+    initial.value = { title: filled.title, body: filled.body };
+    title.value = filled.title;
+    body.value = filled.body;
   }
+
 
   async function openFromCommit(entry: GitLogEntry): Promise<void> {
     const cwd = deps.cwd.value;
@@ -306,6 +340,7 @@ export function useCreateIssue(deps: {
     canSubmit,
     originHtmlUrl,
     refreshAvailability,
+    refreshOnFocus,
     forgetTargets,
     open,
     openFromCommit,

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { ref } from "vue";
-import { useCreateIssue } from "../useCreateIssue";
+import { useCreateIssue, isNewIssueShortcut } from "../useCreateIssue";
 import type { ForgeProvider } from "../forge/types";
 import type { IssueTargets, CreatedIssue, RepoLabel } from "../../utils/backend";
 
@@ -325,5 +325,72 @@ describe("useCreateIssue", () => {
     await api.refreshAvailability();
     await api.openFromCommit(COMMIT);
     expect(api.isOpen.value).toBe(false);
+  });
+
+  it("a fresh read on open is not overwritten by an older cached availability answer", async () => {
+    const cached = deferred<IssueTargets>();
+    let call = 0;
+    const issueTargets = vi.fn((_c: string, fresh: boolean) => {
+      call++;
+      return fresh ? Promise.resolve({ targets: [ORIGIN], defaultRepo: "me/app" }) : cached.promise;
+    });
+    const { api } = setup(provider({ issueTargets }));
+    const refreshing = api.refreshAvailability();
+    await api.open();
+    expect(api.available.value).toBe(true);
+    cached.resolve({ targets: [], defaultRepo: null });
+    await refreshing;
+    expect(call).toBe(2);
+    expect(api.available.value).toBe(true);
+    expect(api.originHtmlUrl.value).toBe("https://github.com/me/app");
+  });
+
+  it("shows the form once the targets are read, the prefill landing after", async () => {
+    const prefill = deferred<{ title: string; body: string }>();
+    const { api } = setup(provider());
+    const opening = api.open(prefill.promise);
+    await flush();
+    expect(api.loading.value).toBe(false);
+    expect(api.repo.value).toBe("me/app");
+    prefill.resolve({ title: "from commit", body: "b" });
+    await opening;
+    expect(api.title.value).toBe("from commit");
+    expect(api.dirty.value).toBe(false);
+  });
+
+  it("does not overwrite what the user typed with a late prefill", async () => {
+    const prefill = deferred<{ title: string; body: string }>();
+    const { api } = setup(provider());
+    const opening = api.open(prefill.promise);
+    await flush();
+    api.title.value = "mine";
+    prefill.resolve({ title: "from commit", body: "b" });
+    await opening;
+    expect(api.title.value).toBe("mine");
+  });
+
+  it("retries a failed availability check on focus at most once a minute", async () => {
+    let now = 1_000_000;
+    const issueTargets = vi.fn(async () => { throw new Error("offline"); });
+    const onCreated = vi.fn();
+    const api = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider({ issueTargets })), onCreated, now: () => now });
+    await api.refreshOnFocus();
+    await api.refreshOnFocus();
+    expect(issueTargets).toHaveBeenCalledTimes(1);
+    now += 61_000;
+    await api.refreshOnFocus();
+    expect(issueTargets).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("isNewIssueShortcut", () => {
+  const ev = (o: Partial<KeyboardEvent>) => ({ key: "I", metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...o }) as KeyboardEvent;
+  it("is ⌘⇧I on macOS", () => {
+    expect(isNewIssueShortcut(ev({ metaKey: true, shiftKey: true }), true)).toBe(true);
+    expect(isNewIssueShortcut(ev({ ctrlKey: true, shiftKey: true }), true)).toBe(false);
+  });
+  it("leaves Ctrl+Shift+I to the WebView inspector elsewhere, using Ctrl+Alt+I", () => {
+    expect(isNewIssueShortcut(ev({ ctrlKey: true, shiftKey: true }), false)).toBe(false);
+    expect(isNewIssueShortcut(ev({ ctrlKey: true, altKey: true, key: "i" }), false)).toBe(true);
   });
 });

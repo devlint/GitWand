@@ -527,63 +527,16 @@ pub(crate) async fn gh_create_pr(
 }
 
 fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
-    // Settings-managed OAuth token present → tokenless REST path (no `gh` needed).
-    if let Some(r) =
-        github_api::with_rest(&cwd, |tok| github_api::rest_reviewer_candidates(&cwd, tok))
-    {
-        return r;
-    }
-    // Discover owner/repo from the current repo.
-    let view = gh_repo_view_cmd(&cwd, "owner,name")
-        .output()
-        .map_err(|e| format!("Failed to inspect repo: {}", e))?;
-    if !view.status.success() {
-        return Err(format!(
-            "gh repo view failed: {}",
-            String::from_utf8_lossy(&view.stderr)
-        ));
-    }
-    #[derive(serde::Deserialize)]
-    struct OwnerLogin {
-        login: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct RepoView {
-        owner: OwnerLogin,
-        name: String,
-    }
-    let repo: RepoView = serde_json::from_slice(&view.stdout)
-        .map_err(|e| format!("Failed to parse repo view: {}", e))?;
-    let endpoint = format!("/repos/{}/{}/assignees", repo.owner.login, repo.name);
-
-    // Fetch up to ~300 candidates (3 pages of 100). Plenty for typical repos.
-    let output = gh_api_cmd(&cwd)
-        .args([
-            "api",
-            "--paginate",
-            "-H",
-            "Accept: application/vnd.github+json",
-            &endpoint,
-            "--jq",
-            "[.[] | {login: .login, name: .name, avatar_url: .avatar_url}]",
-        ])
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("Failed to list reviewer candidates: {}", e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh api assignees failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    // --paginate concatenates JSON arrays page-by-page (one per line).
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let items: Vec<serde_json::Value> = raw
-        .lines()
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l.trim()).ok())
-        .flat_map(|v| v.as_array().cloned().unwrap_or_default())
-        .collect();
+    // Users with push access — the set GitHub allows as reviewers — read like
+    // an issue's assignees: REST with the Settings token, else `gh api`.
+    let origin = gh_origin_repo(&cwd).ok_or("No GitHub 'origin' remote in this repository.")?;
+    let items = super::gh_issues::api_get_pages(
+        &cwd,
+        &origin,
+        &format!("repos/{}/assignees", origin.nwo),
+        "",
+        3,
+    )?;
     Ok(super::gh_issues::assignees_from(&items))
 }
 
