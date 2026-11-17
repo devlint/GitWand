@@ -4583,3 +4583,90 @@ export * from './backend-bitbucket';
 export * from './backend-gitea';
 export * from './backend-ai';
 
+
+// ─── Issue creation (#301) ──────────────────────────────────────────────────
+
+import type { ReviewerCandidate } from "./backend-pr";
+
+/** A repository an issue can be filed on: `origin`, or a fork's parent. */
+export interface IssueTarget {
+  /** `owner/repo`. */
+  repo: string;
+  htmlUrl: string;
+  hasIssues: boolean;
+  isOrigin: boolean;
+}
+
+/** Result of `ghIssueTargets`: empty `targets` when `origin` is not GitHub. */
+export interface IssueTargets {
+  targets: IssueTarget[];
+  /** The first target with issues turned on, `null` when none has. */
+  defaultRepo: string | null;
+}
+
+export interface CreateIssueInput {
+  repo: string;
+  title: string;
+  body: string;
+  labels: string[];
+  assignees: string[];
+  /** Milestone number, not title. */
+  milestone: number | null;
+}
+
+export interface CreatedIssue {
+  number: number;
+  url: string;
+}
+
+export interface RepoLabel {
+  name: string;
+  color: string;
+  description: string | null;
+}
+
+export interface RepoMilestone {
+  number: number;
+  title: string;
+  dueOn: string | null;
+}
+
+async function devJson<T>(res: Response, what: string): Promise<T> {
+  const raw = await res.json().catch(() => ({}));
+  if (!res.ok || raw.error) throw new Error(raw.error || `${what} failed: ${res.status}`);
+  return raw as T;
+}
+
+export async function ghIssueTargets(cwd: string): Promise<IssueTargets> {
+  if (isTauri()) return tauriInvoke<IssueTargets>("gh_issue_targets", { cwd });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-issue-targets?cwd=${encodeURIComponent(cwd)}`);
+  return devJson<IssueTargets>(res, "gh issue targets");
+}
+
+export async function ghCreateIssue(cwd: string, input: CreateIssueInput): Promise<CreatedIssue> {
+  if (isTauri()) return tauriInvoke<CreatedIssue>("gh_create_issue", { cwd, input });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-create-issue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, input }),
+  });
+  return devJson<CreatedIssue>(res, "gh create issue");
+}
+
+export async function ghListLabels(cwd: string, repo: string): Promise<RepoLabel[]> {
+  if (isTauri()) return tauriInvoke<RepoLabel[]>("gh_list_labels", { cwd, repo });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-list-labels?cwd=${encodeURIComponent(cwd)}&repo=${encodeURIComponent(repo)}`);
+  return devJson<RepoLabel[]>(res, "gh list labels");
+}
+
+export async function ghListMilestones(cwd: string, repo: string): Promise<RepoMilestone[]> {
+  if (isTauri()) return tauriInvoke<RepoMilestone[]>("gh_list_milestones", { cwd, repo });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-list-milestones?cwd=${encodeURIComponent(cwd)}&repo=${encodeURIComponent(repo)}`);
+  return devJson<RepoMilestone[]>(res, "gh list milestones");
+}
+
+export async function ghListAssignees(cwd: string, repo: string): Promise<ReviewerCandidate[]> {
+  if (isTauri()) return tauriInvoke<ReviewerCandidate[]>("gh_list_assignees", { cwd, repo });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-list-assignees?cwd=${encodeURIComponent(cwd)}&repo=${encodeURIComponent(repo)}`);
+  return devJson<ReviewerCandidate[]>(res, "gh list assignees");
+}

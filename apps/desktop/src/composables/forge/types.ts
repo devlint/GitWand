@@ -29,6 +29,12 @@ import type {
   AutoMergeState,
   AutoMergeSupport,
   PrEdit,
+  IssueTargets,
+  IssueTarget,
+  CreateIssueInput,
+  CreatedIssue,
+  RepoLabel,
+  RepoMilestone,
 } from "../../utils/backend";
 import type { Account } from "../useAccounts";
 
@@ -51,6 +57,12 @@ export type {
   AutoMergeState,
   AutoMergeSupport,
   PrEdit,
+  IssueTargets,
+  IssueTarget,
+  CreateIssueInput,
+  CreatedIssue,
+  RepoLabel,
+  RepoMilestone,
 };
 
 // ─── Options / Inputs ───────────────────────────────────────────────────────
@@ -182,6 +194,14 @@ export interface ForgeProvider {
    * (Azure → Work Items) omit it; callers treat absence as "unsupported".
    */
   listIssues?(cwd: string, opts?: ListIssuesOptions): Promise<Issue[]>;
+
+  // ── Issue creation (#301) — GitHub only for now ─────────────────────────
+  /** Where an issue can be filed: `origin`, or a fork's parent. */
+  issueTargets?(cwd: string): Promise<IssueTargets>;
+  createIssue?(cwd: string, input: CreateIssueInput): Promise<CreatedIssue>;
+  listLabels?(cwd: string, repo: string): Promise<RepoLabel[]>;
+  listMilestones?(cwd: string, repo: string): Promise<RepoMilestone[]>;
+  listAssignees?(cwd: string, repo: string): Promise<ReviewerCandidate[]>;
 
   getPRCount(cwd: string, state?: string): Promise<number>;
 

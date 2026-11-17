@@ -44,6 +44,11 @@ import {
   ghPrReady,
   ghPrEdit,
   ghListIssues,
+  ghIssueTargets,
+  ghCreateIssue,
+  ghListLabels,
+  ghListMilestones,
+  ghListAssignees,
 } from "../../utils/backend";
 import { withThreadState } from "../../utils/prCommentThreads";
 
@@ -68,6 +73,11 @@ import type {
   Issue,
   Account,
   PrEdit,
+  IssueTargets,
+  CreateIssueInput,
+  CreatedIssue,
+  RepoLabel,
+  RepoMilestone,
 } from "./types";
 
 export class GitHubProvider implements ForgeProvider {
@@ -106,6 +116,28 @@ export class GitHubProvider implements ForgeProvider {
 
   listIssues(cwd: string, opts: ListIssuesOptions = {}): Promise<Issue[]> {
     return ghListIssues(cwd, opts.filter ?? "", opts.limit ?? 100);
+  }
+
+  // ── Issue creation (#301) ──────────────────────────────────────────────────
+
+  issueTargets(cwd: string): Promise<IssueTargets> {
+    return ghIssueTargets(cwd);
+  }
+
+  createIssue(cwd: string, input: CreateIssueInput): Promise<CreatedIssue> {
+    return ghCreateIssue(cwd, input);
+  }
+
+  listLabels(cwd: string, repo: string): Promise<RepoLabel[]> {
+    return ghListLabels(cwd, repo);
+  }
+
+  listMilestones(cwd: string, repo: string): Promise<RepoMilestone[]> {
+    return ghListMilestones(cwd, repo);
+  }
+
+  listAssignees(cwd: string, repo: string): Promise<ReviewerCandidate[]> {
+    return ghListAssignees(cwd, repo);
   }
 
   getPRCount(cwd: string, state: string = "open"): Promise<number> {

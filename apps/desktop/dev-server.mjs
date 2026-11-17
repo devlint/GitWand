@@ -1250,14 +1250,72 @@ async function resolvePrNwo(cwd, number, token) {
 }
 
 /** Fetch from GitHub REST API with auth. `accept` overrides the default JSON accept header. */
-async function githubFetch(path, token, accept = "application/vnd.github+json") {
+async function githubFetch(path, token, accept = "application/vnd.github+json", init = {}) {
   return fetch(`https://api.github.com${path}`, {
+    ...init,
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: accept,
       "X-GitHub-Api-Version": "2022-11-28",
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
     },
   });
+}
+
+// ─── Issue creation (#301) — mirrors `commands/gh_issues.rs` ────────────────
+
+/** `GET /repos/{nwo}` JSON → the issue target, or null. */
+function devIssueTarget(v, isOrigin) {
+  if (!v || typeof v.full_name !== "string") return null;
+  return { repo: v.full_name, htmlUrl: v.html_url || "", hasIssues: v.has_issues === true, isOrigin };
+}
+
+/** Same rules as `targets_from`: origin, then its parent when it is a fork. */
+async function devIssueTargets(cwd, token) {
+  const nwo = getRepoNwo(cwd);
+  if (!nwo) return { targets: [], defaultRepo: null };
+  const resp = await githubFetch(`/repos/${nwo}`, token);
+  if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+  const o = await resp.json();
+  const targets = [devIssueTarget(o, true)].filter(Boolean);
+  if (o.fork === true) {
+    const p = devIssueTarget(o.parent, false);
+    if (p) targets.push(p);
+  }
+  return { targets, defaultRepo: targets.find((t) => t.hasIssues)?.repo ?? null };
+}
+
+/** `check_target` with `need_issues`: the error text, or null when allowed. */
+function devCheckIssueTarget(targets, repo) {
+  const t = targets.targets.find((x) => x.repo === repo);
+  if (!t) return `Not an issue target for this repository: ${repo}`;
+  if (!t.hasIssues) return `Issues are disabled on ${repo}`;
+  return null;
+}
+
+/** `issue_payload`: the title trimmed and required, empty optionals left out. */
+function devIssuePayload(input) {
+  const title = typeof input?.title === "string" ? input.title.trim() : "";
+  if (!title) return { error: "Title is required" };
+  const p = { title, body: typeof input.body === "string" ? input.body : "" };
+  if (Array.isArray(input.labels) && input.labels.length) p.labels = input.labels;
+  if (Array.isArray(input.assignees) && input.assignees.length) p.assignees = input.assignees;
+  if (Number.isInteger(input.milestone)) p.milestone = input.milestone;
+  return { payload: p };
+}
+
+/** Up to `maxPages` pages of 100 of the array at `path` (`query` ends with `&`). */
+async function devGithubPages(path, query, token, maxPages) {
+  const all = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const resp = await githubFetch(`${path}?${query}per_page=100&page=${page}`, token);
+    if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+    const arr = await resp.json();
+    if (!Array.isArray(arr)) break;
+    all.push(...arr);
+    if (arr.length < 100) break;
+  }
+  return all;
 }
 
 /** Run a GitHub GraphQL operation; returns `data`, throws on the first `errors[]` entry. */
@@ -5417,6 +5475,81 @@ async function handleRequest(req, res) {
       } catch (err) {
         console.error("[gh-create-pr]", err.message);
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-issue-targets?cwd=<path> — mirrors `gh_issue_targets`.
+    if (url.pathname === "/api/gh-issue-targets" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        return jsonResponse(req, res, await devIssueTargets(resolve(cwd), token));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-create-issue { cwd, input } — mirrors `gh_create_issue`.
+    if (url.pathname === "/api/gh-create-issue" && req.method === "POST") {
+      const { cwd, input } = await readBody(req);
+      if (!cwd || !input) return jsonResponse(req, res, { error: "Missing cwd or input" }, 400);
+      // Checked before any call, as in Rust: a blank title costs no request.
+      const built = devIssuePayload(input);
+      if (built.error) return jsonResponse(req, res, { error: built.error }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const targets = await devIssueTargets(resolve(cwd), token);
+        const refused = devCheckIssueTarget(targets, input.repo);
+        if (refused) return jsonResponse(req, res, { error: refused }, 400);
+        const resp = await githubFetch(`/repos/${input.repo}/issues`, token, undefined, {
+          method: "POST",
+          body: JSON.stringify(built.payload),
+        });
+        const created = await resp.json().catch(() => ({}));
+        if (!resp.ok) return jsonResponse(req, res, { error: created.message || `GitHub API ${resp.status}` }, resp.status);
+        return jsonResponse(req, res, { number: created.number, url: created.html_url || "" });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-list-{labels,milestones,assignees}?cwd=<path>&repo=<owner/repo>
+    // — mirror `gh_list_labels` / `gh_list_milestones` / `gh_list_assignees`.
+    const issuePicker = {
+      "/api/gh-list-labels": { suffix: "labels", query: "", pages: 3,
+        map: (l) => (l.name ? { name: l.name, color: l.color || "", description: l.description || null } : null) },
+      "/api/gh-list-milestones": { suffix: "milestones", query: "state=open&", pages: 1,
+        map: (m) => (Number.isInteger(m.number) && m.title ? { number: m.number, title: m.title, dueOn: m.due_on || null } : null) },
+      "/api/gh-list-assignees": { suffix: "assignees", query: "", pages: 3,
+        map: (u) => (u.login ? { login: u.login, name: u.name || null, avatar_url: u.avatar_url || null } : null) },
+    }[url.pathname];
+    if (
+      (url.pathname === "/api/gh-list-labels" ||
+        url.pathname === "/api/gh-list-milestones" ||
+        url.pathname === "/api/gh-list-assignees") &&
+      req.method === "GET"
+    ) {
+      const cwd = url.searchParams.get("cwd");
+      const repo = url.searchParams.get("repo");
+      if (!cwd || !repo) return jsonResponse(req, res, { error: "Missing cwd or repo" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const refused = devCheckIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
+        if (refused) return jsonResponse(req, res, { error: refused }, 400);
+        const items = await devGithubPages(`/repos/${repo}/${issuePicker.suffix}`, issuePicker.query, token, issuePicker.pages);
+        let out = items.map(issuePicker.map).filter(Boolean);
+        if (issuePicker.suffix === "assignees") {
+          const seen = new Set();
+          out = out.filter((u) => !seen.has(u.login) && seen.add(u.login))
+            .sort((a, b) => { const x = a.login.toLowerCase(), y = b.login.toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; });
+        }
+        return jsonResponse(req, res, out);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
       }
     }
 
@@ -9658,6 +9791,11 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    GET  /api/gh-pr-count?cwd=<path>&state=<state>`);
   console.log(`    GET  /api/gh-pr-freshness?cwd=<path>`);
   console.log(`    POST /api/gh-create-pr  { cwd, title, body, base?, draft?, reviewers? }`);
+  console.log(`    GET  /api/gh-issue-targets?cwd=<path>`);
+  console.log(`    POST /api/gh-create-issue  { cwd, input }`);
+  console.log(`    GET  /api/gh-list-labels?cwd=<path>&repo=<owner/repo>`);
+  console.log(`    GET  /api/gh-list-milestones?cwd=<path>&repo=<owner/repo>`);
+  console.log(`    GET  /api/gh-list-assignees?cwd=<path>&repo=<owner/repo>`);
   console.log(`    GET  /api/gh-reviewer-candidates?cwd=<path>`);
   console.log(`    GET  /api/gh-pr-detail?cwd=<path>&number=<n>`);
   console.log(`    GET  /api/gh-pr-diff?cwd=<path>&number=<n>`);

@@ -101,6 +101,31 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
     cliPathOnly:
       "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured, so the two run different code.",
   },
+  gh_issue_targets: {
+    route: "/api/gh-issue-targets",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured, so the two run different code.",
+  },
+  gh_create_issue: {
+    route: "/api/gh-create-issue",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command sends the same JSON through `gh api --input -` when no Settings token is configured.",
+  },
+  gh_list_labels: {
+    route: "/api/gh-list-labels",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured.",
+  },
+  gh_list_milestones: {
+    route: "/api/gh-list-milestones",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured.",
+  },
+  gh_list_assignees: {
+    route: "/api/gh-list-assignees",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured.",
+  },
   gh_list_issues: { route: "/api/gh-list-issues" },
   gh_list_prs: { route: "/api/gh-list-prs" },
   gh_merge_pr: {
