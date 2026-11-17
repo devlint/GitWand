@@ -2486,6 +2486,49 @@ pub(crate) fn body_htmls(v: &serde_json::Value) -> Vec<String> {
     }
 }
 
+/// Decode the character references an attribute value may hold: `&amp;`,
+/// `&quot;`, `&#39;`, `&lt;`, `&gt;` and numeric ones (`&#61;`, `&#x3D;`).
+/// Anything else is kept as written.
+fn decode_html_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let Some(end) = rest.find(';').filter(|&e| e <= 10) else {
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        };
+        let name = &rest[1..end];
+        let ch = match name {
+            "amp" => Some('&'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            _ => name
+                .strip_prefix("#x")
+                .or_else(|| name.strip_prefix("#X"))
+                .and_then(|h| u32::from_str_radix(h, 16).ok())
+                .or_else(|| name.strip_prefix('#').and_then(|d| d.parse().ok()))
+                .and_then(char::from_u32),
+        };
+        match ch {
+            Some(c) => {
+                out.push(c);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The signed attachment URLs in the `src` attributes of `htmls`, entity-decoded
 /// and deduplicated, in order of appearance.
 pub(crate) fn signed_attachment_urls<'a>(htmls: impl IntoIterator<Item = &'a str>) -> Vec<String> {
@@ -2502,7 +2545,7 @@ pub(crate) fn signed_attachment_urls<'a>(htmls: impl IntoIterator<Item = &'a str
             if !attr || !raw.starts_with(SIGNED_ATTACHMENT_PREFIX) {
                 continue;
             }
-            let url = raw.replace("&amp;", "&");
+            let url = decode_html_entities(raw);
             if !out.contains(&url) {
                 out.push(url);
             }
@@ -2624,6 +2667,15 @@ mod tests {
             ]),
             vec!["https://private-user-images.githubusercontent.com/x".to_string()]
         );
+    }
+
+    #[test]
+    fn decodes_the_character_references_of_an_attribute() {
+        assert_eq!(
+            decode_html_entities("a&amp;b&#x3D;c&#61;d&quot;&#39;&lt;&gt;"),
+            "a&b=c=d\"'<>"
+        );
+        assert_eq!(decode_html_entities("x&unknown;y & z&"), "x&unknown;y & z&");
     }
 
     #[test]

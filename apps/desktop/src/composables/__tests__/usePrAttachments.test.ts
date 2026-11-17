@@ -212,14 +212,22 @@ describe("usePrAttachments", () => {
       s.tick(31_000);
       vi.advanceTimersByTime(31_000);
       s.onImageError(imgError(asset(B))); // re-created by each re-render
-      s.onImageError(imgError(signed(A))); // current URL failing (network)
+      s.onImageError(imgError(signed(A))); // current URL failing (network): one fetch only
       await flush();
     }
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
     // An expired signed URL failing is fixable.
     s.tick(300_000);
     s.onImageError(imgError(signed(A)));
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(3);
+  });
+
+  it("unknown visibility, a deleted file failing: the originals are kept", async () => {
+    ghPrAttachmentUrls.mockResolvedValue({ private: null, urls: [signed(B)], complete: true });
+    const s = setup([md(A), md(B)]);
+    s.onImageError(imgError(asset(A))); // deleted: GitHub does not sign it
+    await flush();
+    expect(s.resolveImage(asset(B))).toBeNull();
   });
 
   it("a superseded URL failing does not fetch; an expired one does", async () => {

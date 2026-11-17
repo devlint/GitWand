@@ -87,6 +87,13 @@ export function usePrAttachments(opts: {
   let pendingKeys = new Set<string>();
   /** Keys whose image failed in this PR: only a new one restarts the retries. */
   let failedKeys = new Set<string>();
+  /** Keys whose original (unsigned) URL failed to load in this PR. */
+  let failedOriginals = new Set<string>();
+  /**
+   * Keys whose current signed URL failed before its estimated expiry (a
+   * network blip, a token minted earlier than we think): one fetch each.
+   */
+  let refetchedEarly = new Set<string>();
   let lastFailure = -Infinity;
   let lastFetch = -Infinity;
   /**
@@ -164,13 +171,17 @@ export function usePrAttachments(opts: {
         if (res.private === true) privateCheckouts.add(cwd);
         if (res.private === false) privateCheckouts.delete(cwd);
         foundPublic = res.private === false;
-        // Unknown (the repository could not be read): this fetch was asked
-        // for because something failed, so use the URLs.
-        isPrivate.value = res.private !== false;
         // Merged, not replaced: an attachment whose endpoint failed this time
         // keeps the URL it had.
+        const fresh = indexSignedAttachments(res.urls, sentAt);
         const next = new Map(signed.value);
-        for (const [k, v] of indexSignedAttachments(res.urls, sentAt)) next.set(k, v);
+        for (const [k, v] of fresh) next.set(k, v);
+        // Unknown visibility (the repository could not be read): sign only if
+        // an original URL failed for a file GitHub has just signed — not on a
+        // public repository's deleted file, whose originals keep working.
+        isPrivate.value =
+          res.private ??
+          (isPrivate.value || [...failedOriginals].some((k) => fresh.has(k)));
         signed.value = next;
         if (res.complete) {
           retries = 0;
@@ -227,6 +238,8 @@ export function usePrAttachments(opts: {
         attempted = new Set();
         pendingKeys = new Set();
         failedKeys = new Set();
+        failedOriginals = new Set();
+        refetchedEarly = new Set();
         lastFailure = -Infinity;
         lastFetch = -Infinity;
         retries = 0;
@@ -261,13 +274,22 @@ export function usePrAttachments(opts: {
     // file, the network) is not one signed URLs would fix.
     if (foundPublic) return;
     const entry = signed.value.get(k);
-    const fixable = isSignedAttachmentUrl(src)
-      ? // A signed URL: only when no current one is held. (A superseded URL
-        // still on screen is fixed by the re-render, not by fetching.)
-        fetchWouldHelp(k)
-      : // An original: unless its signed URL is in use already (a stale
-        // render) or GitHub did not sign this file.
-        !entry && !asked.has(k);
+    let fixable: boolean;
+    if (isSignedAttachmentUrl(src)) {
+      // A signed URL: when no current one is held (a superseded URL still on
+      // screen is fixed by the re-render, not by fetching) — or once, when the
+      // current one fails before its estimated expiry.
+      fixable = fetchWouldHelp(k);
+      if (!fixable && entry?.url === src && !refetchedEarly.has(k)) {
+        refetchedEarly.add(k);
+        fixable = true;
+      }
+    } else {
+      failedOriginals.add(k);
+      // An original: unless its signed URL is in use already (a stale
+      // render) or GitHub did not sign this file.
+      fixable = !entry && !asked.has(k);
+    }
     if (!fixable) return;
     // A newly failing image starts a new series of retries; one re-created
     // by each re-render during an outage does not undo the backoff.

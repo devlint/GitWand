@@ -5734,7 +5734,13 @@ async function handleRequest(req, res) {
         for (const html of htmls) {
           for (const m of html.matchAll(/\ssrc="([^"]*)"/g)) {
             if (!m[1].startsWith("https://private-user-images.githubusercontent.com/")) continue;
-            const u = m[1].replace(/&amp;/g, "&");
+            // Same references as `decode_html_entities` in Rust.
+            const u = m[1].replace(/&(#x[0-9a-f]+|#[0-9]+|amp|quot|apos|lt|gt);/gi, (all, n) => {
+              const named = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">" }[n.toLowerCase()];
+              if (named) return named;
+              const code = n[1] === "x" || n[1] === "X" ? parseInt(n.slice(2), 16) : parseInt(n.slice(1), 10);
+              return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : all;
+            });
             if (!urls.includes(u)) urls.push(u);
           }
         }

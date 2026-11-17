@@ -164,6 +164,11 @@ const mdOpts = computed(() => ({
   resolveImage: resolveImage.value,
 }));
 const editorHtml = computed(() => renderMarkdown(editorBody.value, mdOpts.value));
+/**
+ * The AI summary is model output, not one of the PR's GitHub bodies: its
+ * images follow the plain remote-image rule.
+ */
+const summaryMdOpts = computed(() => ({ allowRemoteImages: prImagesShown.value }));
 
 /** Extra-context scope of the "ctx" segment: one context per PR. */
 function aiCtxScope(prNumber: number): string {
@@ -1046,7 +1051,7 @@ function submitRequestReviewers() {
             <div v-if="p.prSummaryLoading.value && !p.prSummary.value" class="pdv-summary-loading ai-loading">
               {{ t('pr.summary.loading') }}
             </div>
-            <div v-else class="pdv-summary-body" v-html="renderMarkdown(p.prSummary.value, mdOpts)" />
+            <div v-else class="pdv-summary-body" v-html="renderMarkdown(p.prSummary.value, summaryMdOpts)" />
           </section>
 
           <!-- Stat cards -->
