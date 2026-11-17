@@ -7,14 +7,18 @@
  * (`ghPrAttachmentUrls`). This loads them when the PR's bodies reference an
  * attachment, and gives the renderer a `resolveImage` that swaps them in.
  *
- * Without a signed URL (public repository before the fetch lands, a failed
- * fetch, no GitHub account) the original URL is kept: on a public repository
- * it works as is. A signed URL past its expiry is not used — the image would
- * not load — and triggers one refetch; the render that follows picks up the
- * new URLs. No timer: an image already on screen stays loaded after its URL
- * expires, so there is nothing to refresh until something renders again.
+ * Without a signed URL (before the fetch lands, a failed fetch, no GitHub
+ * account) the original URL is kept: on a public repository it works as is.
+ *
+ * Rendered bodies are cached in computeds, which re-run on data changes, not
+ * with time: HTML holding an expired URL would be reused the next time a
+ * section is re-created. So the URLs are fetched again shortly before they
+ * expire — one timer, while the PR is open and has attachments, held while
+ * the window is hidden — and the new map re-renders everything that used
+ * them. Until then the previous URL stays in use: a re-render never falls
+ * back to a URL a private repository does not serve.
  */
-import { computed, shallowRef, watch, type InjectionKey, type Ref } from "vue";
+import { computed, getCurrentScope, onScopeDispose, shallowRef, watch, type InjectionKey, type Ref } from "vue";
 import { ghPrAttachmentUrls } from "../utils/backend";
 import {
   attachmentKey,
@@ -26,8 +30,8 @@ import {
 /** Provided by the PR detail view for the inline comment threads it renders. */
 export const PR_ATTACHMENTS_KEY: InjectionKey<(src: string) => string | null> = Symbol("prAttachments");
 
-/** A signed URL this close to its expiry is treated as expired. */
-const EXPIRY_MARGIN_MS = 15_000;
+/** Fetch fresh URLs this long before the current ones expire. */
+const EXPIRY_MARGIN_MS = 30_000;
 /** After a failed fetch, wait this long before the next one, so it does not loop. */
 const RETRY_GAP_MS = 30_000;
 
@@ -44,8 +48,17 @@ export function usePrAttachments(opts: {
   const now = opts.now ?? Date.now;
   const signed = shallowRef<Map<string, SignedAttachment>>(new Map());
   let prKey = "";
-  let inFlight: Promise<void> | null = null;
+  let inFlight = false;
   let lastFailure = -Infinity;
+  /**
+   * Keys the bodies referenced when the last successful fetch was sent. One
+   * of them GitHub did not return (a body past the first page of comments, a
+   * file that is not an image) will not come back by asking again.
+   */
+  let asked = new Set<string>();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  /** The refresh timer fired while the window was hidden. */
+  let refreshDue = false;
 
   /** Attachment keys the bodies reference, as a stable string for the watcher. */
   const wanted = computed(() => {
@@ -54,56 +67,105 @@ export function usePrAttachments(opts: {
     for (const b of opts.bodies.value) for (const k of attachmentKeysIn(b)) keys.add(k);
     return [...keys].sort().join(",");
   });
+  const wantedKeys = () => (wanted.value ? wanted.value.split(",") : []);
+
+  function clearTimer(): void {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    refreshDue = false;
+  }
+
+  function arm(delay: number): void {
+    clearTimer();
+    timer = setTimeout(() => {
+      timer = null;
+      if (typeof document !== "undefined" && document.hidden) refreshDue = true;
+      else load();
+    }, Math.max(delay, 0));
+  }
+
+  /** Refresh before the first URL in use expires. */
+  function schedule(): void {
+    if (!signed.value.size) return clearTimer();
+    let first = Infinity;
+    for (const e of signed.value.values()) first = Math.min(first, e.expiresAt);
+    arm(Math.max(first - EXPIRY_MARGIN_MS - now(), RETRY_GAP_MS));
+  }
 
   function load(): void {
     const cwd = opts.cwd.value;
     const n = opts.number.value;
-    if (!cwd || n == null || inFlight || now() - lastFailure < RETRY_GAP_MS) return;
+    const keys = wantedKeys();
+    if (!cwd || n == null || !keys.length || inFlight || now() - lastFailure < RETRY_GAP_MS) return;
+    inFlight = true;
     const key = `${cwd}#${n}`;
-    inFlight = ghPrAttachmentUrls(cwd, n)
+    const sentAt = now();
+    ghPrAttachmentUrls(cwd, n)
       .then((urls) => {
-        if (key === prKey) signed.value = indexSignedAttachments(urls, now());
+        if (key !== prKey) return;
+        signed.value = indexSignedAttachments(urls, sentAt);
+        asked = new Set(keys);
+        schedule();
       })
       .catch(() => {
-        // Keep the original URLs: they work on a public repository.
-        if (key === prKey) lastFailure = now();
+        // Keep what is shown; try again later if there are URLs to keep fresh.
+        if (key !== prKey) return;
+        lastFailure = now();
+        if (signed.value.size) arm(RETRY_GAP_MS);
       })
       .finally(() => {
-        inFlight = null;
+        inFlight = false;
+        // The PR changed while this fetch ran: its own fetch was skipped.
+        if (key !== prKey) check();
       });
+  }
+
+  /** Fetch when a referenced attachment is new or its URL is about to expire. */
+  function check(): void {
+    const t = now();
+    const stale = wantedKeys().some((k) => {
+      const e = signed.value.get(k);
+      return e ? e.expiresAt - EXPIRY_MARGIN_MS <= t : !asked.has(k);
+    });
+    if (stale) load();
   }
 
   watch(
     [() => opts.cwd.value, () => opts.number.value, wanted],
-    ([cwd, n, keys]) => {
+    ([cwd, n]) => {
       const key = `${cwd}#${n}`;
       if (key !== prKey) {
         prKey = key;
         signed.value = new Map();
+        asked = new Set();
         lastFailure = -Infinity;
+        clearTimer();
       }
-      if (!keys) return;
-      const t = now();
-      const missing = keys.split(",").some((k) => {
-        const e = signed.value.get(k);
-        return !e || e.expiresAt - EXPIRY_MARGIN_MS <= t;
-      });
-      if (missing) load();
+      check();
     },
     { immediate: true },
   );
 
-  /** `resolveImage` for `renderMarkdown`: the live signed URL of `src`, if any. */
+  function onVisibility(): void {
+    if (refreshDue && !document.hidden) {
+      refreshDue = false;
+      load();
+    }
+  }
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      clearTimer();
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
+    });
+  }
+
+  /** `resolveImage` for `renderMarkdown`: the signed URL of `src`, if any. */
   function resolveImage(src: string): string | null {
     const k = attachmentKey(src);
     if (!k) return null;
-    const e = signed.value.get(k); // reactive read: renders re-run when URLs arrive
-    if (!e) return null;
-    if (e.expiresAt - EXPIRY_MARGIN_MS <= now()) {
-      queueMicrotask(load);
-      return null;
-    }
-    return e.url;
+    // Reactive read: renders re-run when new URLs arrive.
+    return signed.value.get(k)?.url ?? null;
   }
 
   return { resolveImage, signed };

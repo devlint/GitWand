@@ -5701,12 +5701,21 @@ async function handleRequest(req, res) {
           `/repos/${nwo}/pulls/${number}/comments?per_page=100`,
           `/repos/${nwo}/pulls/${number}/reviews?per_page=100`,
         ];
+        // Best effort, like `signed_urls_from_fetches`: one failed endpoint
+        // does not cost the others' URLs; all failing is the error.
         const htmls = [];
+        let firstError = null;
+        let anyOk = false;
         for (const resp of await Promise.all(paths.map((p) => githubFetch(p, token, "application/vnd.github.html+json")))) {
-          if (!resp.ok) return jsonResponse(req, res, { error: `GitHub API ${resp.status}` }, 500);
+          if (!resp.ok) {
+            firstError ??= `GitHub API ${resp.status}`;
+            continue;
+          }
+          anyOk = true;
           const v = await resp.json();
           for (const item of Array.isArray(v) ? v : [v]) if (typeof item?.body_html === "string") htmls.push(item.body_html);
         }
+        if (!anyOk) return jsonResponse(req, res, { error: firstError }, 500);
         const urls = [];
         for (const html of htmls) {
           for (const m of html.matchAll(/src="([^"]*)"/g)) {

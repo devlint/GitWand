@@ -8,9 +8,9 @@ import {
 
 const UUID = "e56beadb-c31a-4dee-bcd2-973dae719016";
 
-/** A signed URL whose JWT expires at `exp` (seconds). */
-function signed(uuid: string, exp?: number): string {
-  const payload = btoa(JSON.stringify(exp === undefined ? { iss: "github.com" } : { exp }))
+/** A signed URL whose JWT carries `claims`. */
+function signed(uuid: string, claims: Record<string, unknown> = { iss: "github.com" }): string {
+  const payload = btoa(JSON.stringify(claims))
     .replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
   return `https://private-user-images.githubusercontent.com/12479055/672752852-${uuid}.png?jwt=eyJhbGciOiJIUzI1NiJ9.${payload}.sig`;
 }
@@ -53,11 +53,22 @@ describe("attachmentKeysIn", () => {
 });
 
 describe("indexSignedAttachments", () => {
-  it("indexes by UUID with the JWT expiry, or five minutes when unreadable", () => {
-    const now = 1_000_000;
-    const m = indexSignedAttachments([signed(UUID, 1794902805), signed("11111111-2222-3333-4444-555555555555")], now);
-    expect(m.get(UUID)).toEqual({ url: signed(UUID, 1794902805), expiresAt: 1794902805_000 });
-    expect(m.get("11111111-2222-3333-4444-555555555555")?.expiresAt).toBe(now + 5 * 60 * 1000);
+  it("expires each URL its JWT lifetime after the fetch, whatever the local clock says", () => {
+    const fetchedAt = 1_000_000; // far from the JWT's absolute times
+    const B = "11111111-2222-3333-4444-555555555555";
+    const C = "99999999-2222-3333-4444-555555555555";
+    const m = indexSignedAttachments(
+      [
+        signed(UUID, { nbf: 1794902505, exp: 1794902805 }),
+        signed(B, { iat: 100, exp: 160 }),
+        signed(C, { exp: 1794902805 }),
+      ],
+      fetchedAt,
+    );
+    expect(m.get(UUID)).toEqual({ url: signed(UUID, { nbf: 1794902505, exp: 1794902805 }), expiresAt: fetchedAt + 300_000 });
+    expect(m.get(B)?.expiresAt).toBe(fetchedAt + 60_000);
+    // No start claim: the five-minute default.
+    expect(m.get(C)?.expiresAt).toBe(fetchedAt + 300_000);
   });
 
   it("ignores URLs that are not attachments", () => {

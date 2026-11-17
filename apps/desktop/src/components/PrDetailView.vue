@@ -134,7 +134,6 @@ const attachments = usePrAttachments({
     ...p.prComments.value.map((c) => c.body),
     ...p.prIssueComments.value.map((c) => c.body),
     ...p.prReviews.value.map((r) => r.body),
-    ...p.commentsForFile.value.map((c) => c.body),
   ]),
 });
 provide(PR_ATTACHMENTS_KEY, attachments.resolveImage);
@@ -393,7 +392,7 @@ const timelineCount = computed(() =>
 // PrCommentThread, which follows `prImagesShown` (provided above). Offer the
 // same button there, or their withheld images could not be revealed.
 const inlineImagesBlocked = computed(() =>
-  commentsWithheldImages(p.commentsForFile.value, prImagesShown.value),
+  commentsWithheldImages(p.commentsForFile.value, prImagesShown.value, p.forge.value.name === "github"),
 );
 
 const fullscreenImageUrl = ref<string | null>(null);

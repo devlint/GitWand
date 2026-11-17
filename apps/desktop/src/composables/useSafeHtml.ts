@@ -54,9 +54,12 @@ export interface SafeHtmlOptions {
    */
   allowRemoteImages?: boolean;
   /**
-   * Swap an image URL for another before it is checked — the signed URL of a
-   * GitHub attachment, which a private repository's markdown URL is not
-   * served under (`usePrAttachments`). `null` keeps `src`.
+   * Set when rendering a GitHub PR (`usePrAttachments`): files uploaded to
+   * GitHub load without the remote-image consent, and this may swap an image
+   * URL for another before it is checked — the signed URL of an attachment,
+   * which a private repository's markdown URL is not served under. `null`
+   * keeps `src`. Elsewhere (a README, another forge's PR) an attachment URL
+   * is a remote image like any other.
    */
   resolveImage?: (src: string) => string | null;
 }
@@ -173,9 +176,14 @@ function hardenLinksAndImages(node: Element) {
       node.removeAttribute("src");
     } else if (/^data:/i.test(norm)) {
       // Inline image: nothing is fetched, so the remote-image rule doesn't apply.
-    } else if (src && isRemoteImageSrc(norm) && !isGithubAttachmentUrl(norm) && !remoteImagesAllowed()) {
-      // (A file uploaded to GitHub is served by GitHub, which already knows the
-      // PR is being read: no third party learns anything, so it is not withheld.)
+    } else if (
+      src
+      && isRemoteImageSrc(norm)
+      // In a GitHub PR, a file uploaded to GitHub is served by GitHub, which
+      // already serves the PR being read: no third party learns anything.
+      && !(imageResolver && isGithubAttachmentUrl(norm))
+      && !remoteImagesAllowed()
+    ) {
       // Remote image, not allowed: keep a visible placeholder (alt text) and
       // the URL in a title so the reader knows what was withheld.
       node.removeAttribute("src");

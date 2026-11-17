@@ -1340,7 +1340,7 @@ fn gh_pr_attachment_urls_inner(cwd: String, number: i64) -> Result<Vec<String>, 
     use rayon::prelude::*;
     let nwo = gh_base_nwo(&cwd)?;
     let accept = format!("Accept: {}", github_api::HTML_ACCEPT);
-    let htmls = github_api::pr_attachment_html_paths(&nwo, number)
+    let fetches = github_api::pr_attachment_html_paths(&nwo, number)
         .par_iter()
         .map(|path| {
             let output = gh_api_cmd(&cwd)
@@ -1358,10 +1358,8 @@ fn gh_pr_attachment_urls_inner(cwd: String, number: i64) -> Result<Vec<String>, 
                 .map_err(|e| format!("parse gh api response: {}", e))?;
             Ok(github_api::body_htmls(&v))
         })
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok(github_api::signed_attachment_urls(
-        htmls.iter().flatten().map(String::as_str),
-    ))
+        .collect();
+    github_api::signed_urls_from_fetches(fetches)
 }
 
 /// Signed, short-lived URLs of the files uploaded to PR `number`'s

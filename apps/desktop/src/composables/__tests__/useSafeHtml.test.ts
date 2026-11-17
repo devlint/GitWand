@@ -14,6 +14,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../useSafeHtml";
 import { useSettings } from "../useSettings";
+import { commentsWithheldImages } from "../useRemoteImages";
 
 afterEach(() => {
   useSettings().settings.value.allowRemoteImages = false;
@@ -289,11 +290,17 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
 describe("GitHub attachments (#302)", () => {
   const asset = "https://github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016";
 
-  it("loads a file uploaded to GitHub without the remote-image consent", () => {
-    const out = renderMarkdown(`![shot](${asset}) ![t](https://tracker.example/p.png)`);
+  const gh = { resolveImage: () => null };
+
+  it("loads a file uploaded to GitHub without consent when rendering a GitHub PR", () => {
+    const out = renderMarkdown(`![shot](${asset}) ![t](https://tracker.example/p.png)`, gh);
     expect(out).toContain(`src="${asset}"`);
     expect(out).not.toContain(`src="https://tracker.example`);
     expect(hasBlockedRemoteImages(out)).toBe(true);
+  });
+
+  it("withholds it like any remote image elsewhere (README, other forges)", () => {
+    expect(hasBlockedRemoteImages(renderMarkdown(`![shot](${asset})`))).toBe(true);
   });
 
   it("still withholds look-alike hosts and other github.com paths", () => {
@@ -303,7 +310,7 @@ describe("GitHub attachments (#302)", () => {
       "http://github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016",
       "https://user@github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016",
     ]) {
-      expect(hasBlockedRemoteImages(renderMarkdown(`![x](${src})`))).toBe(true);
+      expect(hasBlockedRemoteImages(renderMarkdown(`![x](${src})`, gh))).toBe(true);
     }
   });
 
@@ -325,6 +332,15 @@ describe("GitHub attachments (#302)", () => {
 
   it("drops the resolver once the call returns", () => {
     renderMarkdown(`![x](${asset})`, { resolveImage: () => "https://tracker.example/p.png" });
-    expect(renderMarkdown(`![x](${asset})`)).toContain(`src="${asset}"`);
+    expect(renderMarkdown(`![x](${asset})`, gh)).toContain(`src="${asset}"`);
+    expect(hasBlockedRemoteImages(renderMarkdown(`![x](${asset})`))).toBe(true);
+  });
+});
+
+describe("commentsWithheldImages — GitHub attachments (#302)", () => {
+  it("does not count them as withheld on a GitHub PR, does elsewhere", () => {
+    const comments = [{ body: "![x](https://github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016)" }];
+    expect(commentsWithheldImages(comments, false, true)).toBe(false);
+    expect(commentsWithheldImages(comments, false, false)).toBe(true);
   });
 });

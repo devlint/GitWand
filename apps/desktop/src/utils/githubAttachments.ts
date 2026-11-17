@@ -64,30 +64,40 @@ export interface SignedAttachment {
 /** Signed URLs are valid for five minutes; assumed when the token can't be read. */
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
-/** `exp` of the `jwt` query parameter, in ms — null when it can't be read. */
-function jwtExpiry(url: URL): number | null {
+/**
+ * How long the `jwt` of `url` is valid, in ms: `exp` minus `nbf` (or `iat`).
+ * A duration, not GitHub's absolute `exp`, so a local clock that is off does
+ * not make a fresh URL look expired. Null when it can't be read.
+ */
+function jwtLifetime(url: URL): number | null {
   const jwt = url.searchParams.get("jwt");
   const payload = jwt?.split(".")[1];
   if (!payload) return null;
   try {
     const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const exp = JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))).exp;
-    return typeof exp === "number" ? exp * 1000 : null;
+    const claims = JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4)));
+    const start = typeof claims.nbf === "number" ? claims.nbf : claims.iat;
+    if (typeof claims.exp !== "number" || typeof start !== "number" || claims.exp <= start) return null;
+    return (claims.exp - start) * 1000;
   } catch {
     return null;
   }
 }
 
-/** Index the signed URLs returned by `ghPrAttachmentUrls` by attachment key. */
+/**
+ * Index the signed URLs returned by `ghPrAttachmentUrls` by attachment key.
+ * `fetchedAt` is when the request was sent, by the local clock: each URL
+ * expires its lifetime after that.
+ */
 export function indexSignedAttachments(
   urls: readonly string[],
-  now: number = Date.now(),
+  fetchedAt: number = Date.now(),
 ): Map<string, SignedAttachment> {
   const out = new Map<string, SignedAttachment>();
   for (const url of urls) {
     const key = attachmentKey(url);
     if (!key) continue;
-    out.set(key, { url, expiresAt: jwtExpiry(new URL(url)) ?? now + DEFAULT_TTL_MS });
+    out.set(key, { url, expiresAt: fetchedAt + (jwtLifetime(new URL(url)) ?? DEFAULT_TTL_MS) });
   }
   return out;
 }

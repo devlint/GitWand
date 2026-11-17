@@ -2509,6 +2509,34 @@ pub(crate) fn signed_attachment_urls<'a>(htmls: impl IntoIterator<Item = &'a str
     out
 }
 
+/// The signed URLs in the `body_html` lists fetched from
+/// [`pr_attachment_html_paths`]. Best effort: an endpoint that failed (a
+/// token not allowed to read reviews, a transient error) does not cost the
+/// URLs the others returned; only when every one failed is the first error
+/// returned.
+pub(crate) fn signed_urls_from_fetches(
+    fetches: Vec<Result<Vec<String>, String>>,
+) -> Result<Vec<String>, String> {
+    let mut first_err = None;
+    let mut htmls = Vec::new();
+    let mut any_ok = false;
+    for f in fetches {
+        match f {
+            Ok(h) => {
+                any_ok = true;
+                htmls.extend(h);
+            }
+            Err(e) => {
+                first_err.get_or_insert(e);
+            }
+        }
+    }
+    match first_err {
+        Some(e) if !any_ok => Err(e),
+        _ => Ok(signed_attachment_urls(htmls.iter().map(String::as_str))),
+    }
+}
+
 /// Signed URLs of the attachments in PR `number`'s bodies (REST).
 pub(crate) fn rest_pr_attachment_urls(
     cwd: &str,
@@ -2516,7 +2544,7 @@ pub(crate) fn rest_pr_attachment_urls(
     token: &str,
 ) -> Result<Vec<String>, String> {
     let (repo, _pr) = get_pr_json(cwd, number, token)?;
-    let htmls = pr_attachment_html_paths(&repo, number)
+    let fetches = pr_attachment_html_paths(&repo, number)
         .par_iter()
         .map(|path| {
             let url = format!("{}/{}", API_BASE, path);
@@ -2526,10 +2554,8 @@ pub(crate) fn rest_pr_attachment_urls(
             }
             Ok(body_htmls(&parse_json_body(&body)?))
         })
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok(signed_attachment_urls(
-        htmls.iter().flatten().map(String::as_str),
-    ))
+        .collect();
+    signed_urls_from_fetches(fetches)
 }
 
 #[cfg(test)]
@@ -2556,6 +2582,21 @@ mod tests {
             ]
         );
         assert!(signed_attachment_urls(["<img src=\"unterminated"]).is_empty());
+    }
+
+    #[test]
+    fn one_failed_endpoint_does_not_cost_the_others_urls() {
+        let a = "https://private-user-images.githubusercontent.com/1/2-aaaa.png?jwt=x";
+        let ok = Ok(vec![format!(r#"<img src="{a}">"#)]);
+        assert_eq!(
+            signed_urls_from_fetches(vec![Err("403".into()), ok]),
+            Ok(vec![a.to_string()])
+        );
+        assert_eq!(
+            signed_urls_from_fetches(vec![Err("403".into()), Err("502".into())]),
+            Err("403".to_string())
+        );
+        assert_eq!(signed_urls_from_fetches(vec![Ok(vec![])]), Ok(vec![]));
     }
 
     #[test]

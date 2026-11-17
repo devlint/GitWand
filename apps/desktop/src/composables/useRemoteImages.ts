@@ -64,15 +64,21 @@ export function useRepoRemoteImages(cwd: Ref<string | null | undefined>) {
 const withheldByBody = new Map<string, boolean>();
 const WITHHELD_CACHE_MAX = 500;
 
-function bodyWithholdsImages(body: string): boolean {
+/** A resolver that changes nothing: renders as a GitHub PR does, attachments allowed. */
+const noResolve = () => null;
+
+function bodyWithholdsImages(body: string, github: boolean): boolean {
   // With remote images allowed globally nothing is withheld. Read through the
   // reactive settings, so a computed using this re-runs on toggle.
   if (useSettings().settings.value.allowRemoteImages === true) return false;
-  let v = withheldByBody.get(body);
+  const key = `${github ? "gh" : "-"}:${body}`;
+  let v = withheldByBody.get(key);
   if (v === undefined) {
-    v = hasBlockedRemoteImages(renderMarkdown(body, { allowRemoteImages: false }));
+    v = hasBlockedRemoteImages(
+      renderMarkdown(body, { allowRemoteImages: false, resolveImage: github ? noResolve : undefined }),
+    );
     if (withheldByBody.size >= WITHHELD_CACHE_MAX) withheldByBody.clear();
-    withheldByBody.set(body, v);
+    withheldByBody.set(key, v);
   }
   return v;
 }
@@ -81,9 +87,14 @@ function bodyWithholdsImages(body: string): boolean {
  * Whether any of `comments` has remote images withheld while the PR's images
  * are not `shown` — the cue for the "Show images" button above the inline
  * review threads, which render through PrCommentThread and follow
- * `PR_REMOTE_IMAGES_KEY`.
+ * `PR_REMOTE_IMAGES_KEY`. `github`: the PR is on GitHub, whose uploaded
+ * files are not withheld there (see `usePrAttachments`).
  */
-export function commentsWithheldImages(comments: readonly { body: string }[], shown: boolean): boolean {
+export function commentsWithheldImages(
+  comments: readonly { body: string }[],
+  shown: boolean,
+  github = false,
+): boolean {
   if (shown) return false;
-  return comments.some((c) => bodyWithholdsImages(c.body ?? ""));
+  return comments.some((c) => bodyWithholdsImages(c.body ?? "", github));
 }
