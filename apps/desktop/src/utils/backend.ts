@@ -3395,6 +3395,35 @@ export async function ghIssueDetail(cwd: string, number: number): Promise<IssueD
   return raw as IssueDetail;
 }
 
+/** Result of `ghPrAttachmentUrls`. */
+export interface PrAttachmentUrls {
+  /**
+   * The PR's repository is private: only then are the signed URLs needed.
+   * Null when it could not be read.
+   */
+  private: boolean | null;
+  urls: string[];
+  /**
+   * Every body list was read. When not, an attachment missing from `urls` may
+   * be in a list that failed, rather than one GitHub did not sign.
+   */
+  complete: boolean;
+}
+
+/**
+ * Signed, short-lived URLs of the files uploaded to PR `number`'s description,
+ * comments and reviews — what a private repository serves its attachments
+ * under (#302). Indexed by `indexSignedAttachments`.
+ */
+export async function ghPrAttachmentUrls(cwd: string, number: number): Promise<PrAttachmentUrls> {
+  if (isTauri()) return tauriInvoke<PrAttachmentUrls>("gh_pr_attachment_urls", { cwd, number });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-pr-attachment-urls?cwd=${encodeURIComponent(cwd)}&number=${number}`);
+  if (!res.ok) throw new Error(`gh PR attachment URLs failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as PrAttachmentUrls;
+}
+
 /** List the conversation comments on an issue. */
 export async function ghIssueComments(cwd: string, number: number): Promise<IssueComment[]> {
   if (isTauri()) return tauriInvoke<IssueComment[]>("gh_issue_comments", { cwd, number });

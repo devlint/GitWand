@@ -5683,6 +5683,73 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/gh-pr-attachment-urls?cwd=<path>&number=<n>
+    // Signed URLs of the PR's uploaded files, from `body_html` (#302) —
+    // mirrors `gh_pr_attachment_urls` / `signed_attachment_urls` in Rust.
+    if (url.pathname === "/api/gh-pr-attachment-urls" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+      // The Rust command takes an i64: refuse here what it cannot receive.
+      if (!/^\d+$/.test(number)) return jsonResponse(req, res, { error: "Invalid number" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = await resolvePrNwo(resolve(cwd), number, token);
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const paths = [
+          `/repos/${nwo}/issues/${number}`,
+          `/repos/${nwo}/issues/${number}/comments?per_page=100`,
+          `/repos/${nwo}/pulls/${number}/comments?per_page=100`,
+          `/repos/${nwo}/pulls/${number}/reviews?per_page=100`,
+        ];
+        // Best effort, like `signed_urls_from_fetches`: one failed endpoint
+        // does not cost the others' URLs; all failing is the error.
+        const htmls = [];
+        let firstError = null;
+        let anyOk = false;
+        // Visibility alongside the bodies, best effort (null when unreadable),
+        // read from the PR's base repository as the Rust command does.
+        const [repoResult, ...fetches] = await Promise.allSettled([
+          githubFetch(`/repos/${nwo}/pulls/${number}`, token).then((r) => (r.ok ? r.json() : null)),
+          ...paths.map(async (p) => {
+            const resp = await githubFetch(p, token, "application/vnd.github.html+json");
+            if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+            return resp.json();
+          }),
+        ]);
+        const priv = repoResult.status === "fulfilled" ? repoResult.value?.base?.repo?.private : undefined;
+        const isPrivate = typeof priv === "boolean" ? priv : null;
+        for (const f of fetches) {
+          if (f.status === "rejected") {
+            firstError ??= f.reason?.message ?? String(f.reason);
+            continue;
+          }
+          anyOk = true;
+          const v = f.value;
+          for (const item of Array.isArray(v) ? v : [v]) if (typeof item?.body_html === "string") htmls.push(item.body_html);
+        }
+        if (!anyOk) return jsonResponse(req, res, { error: firstError }, 500);
+        const urls = [];
+        for (const html of htmls) {
+          for (const m of html.matchAll(/\ssrc="([^"]*)"/g)) {
+            if (!m[1].startsWith("https://private-user-images.githubusercontent.com/")) continue;
+            // Same references as `decode_html_entities` in Rust.
+            const u = m[1].replace(/&(#x[0-9a-f]+|#[0-9]+|amp|quot|apos|lt|gt);/gi, (all, n) => {
+              const named = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">" }[n.toLowerCase()];
+              if (named) return named;
+              const code = n[1] === "x" || n[1] === "X" ? parseInt(n.slice(2), 16) : parseInt(n.slice(1), 10);
+              return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : all;
+            });
+            if (!urls.includes(u)) urls.push(u);
+          }
+        }
+        return jsonResponse(req, res, { private: isPrivate, urls, complete: firstError === null });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
     // ─── Issues (detail / comments / comment / state) ─────────────────────
     // GET /api/gh-issue-detail?cwd=<path>&number=<n>
     if (url.pathname === "/api/gh-issue-detail" && req.method === "GET") {

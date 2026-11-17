@@ -1331,6 +1331,53 @@ pub(crate) async fn gh_issue_set_state(
         .map_err(|e| e.to_string())?
 }
 
+fn gh_pr_attachment_urls_inner(
+    cwd: String,
+    number: i64,
+) -> Result<github_api::PrAttachmentUrls, String> {
+    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+        github_api::rest_pr_attachment_urls(&cwd, number, tok)
+    }) {
+        return r;
+    }
+    use rayon::prelude::*;
+    let nwo = gh_base_nwo(&cwd)?;
+    let (repo, fetches) = rayon::join(
+        // The PR's base repository, as the REST path reads it (`get_pr_json`).
+        || gh_api_json(&cwd, &format!("repos/{}/pulls/{}", nwo, number)),
+        || {
+            github_api::pr_attachment_html_paths(&nwo, number)
+                .par_iter()
+                .map(|path| {
+                    gh_api_json_accept(&cwd, path, Some(github_api::HTML_ACCEPT))
+                        .map(|v| github_api::body_htmls(&v))
+                })
+                .collect()
+        },
+    );
+    // Best effort, like the URLs: a repository that cannot be read (SSO,
+    // a transient error) does not cost the URLs fetched.
+    let private = repo
+        .ok()
+        .and_then(|pr| pr.pointer("/base/repo/private").and_then(|v| v.as_bool()));
+    github_api::PrAttachmentUrls::from_fetches(private, fetches)
+}
+
+/// Signed, short-lived URLs of the files uploaded to PR `number`'s
+/// description, comments and reviews (#302), and whether its repository is
+/// private. GitHub only hands them out in `body_html`; for a private
+/// repository the frontend swaps them in for the `user-attachments` URLs of
+/// the markdown, which it does not serve to the webview.
+#[tauri::command]
+pub(crate) async fn gh_pr_attachment_urls(
+    cwd: String,
+    number: i64,
+) -> Result<github_api::PrAttachmentUrls, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_pr_attachment_urls_inner(cwd, number))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ─── Private sync helpers ────────────────────────────────────────────────────
 
 // ─── Repository targeting (#298) ─────────────────────────────────────────────
@@ -2115,8 +2162,22 @@ pub(crate) async fn gh_pr_reviews(
 /// Run `gh api <path>` in `cwd` and parse stdout as JSON. Shared by the
 /// comment-list fallbacks when no token is configured.
 fn gh_api_json(cwd: &str, path: &str) -> Result<serde_json::Value, String> {
-    let output = gh_api_cmd(cwd)
-        .args(["api", path])
+    gh_api_json_accept(cwd, path, None)
+}
+
+/// [`gh_api_json`] with an `Accept` media type (e.g. [`github_api::HTML_ACCEPT`]).
+fn gh_api_json_accept(
+    cwd: &str,
+    path: &str,
+    accept: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let mut cmd = gh_api_cmd(cwd);
+    cmd.arg("api");
+    if let Some(a) = accept {
+        cmd.args(["-H", &format!("Accept: {}", a)]);
+    }
+    let output = cmd
+        .arg(path)
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("gh api: {}", e))?;

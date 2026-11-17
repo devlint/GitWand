@@ -902,6 +902,7 @@ pub fn run() {
             commands::gh::gh_pr_issue_comments,
             commands::gh::gh_issue_detail,
             commands::gh::gh_issue_comments,
+            commands::gh::gh_pr_attachment_urls,
             commands::gh::gh_issue_add_comment,
             commands::gh::gh_issue_set_state,
             commands::gh::gh_list_issues,

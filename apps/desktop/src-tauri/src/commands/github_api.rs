@@ -2448,10 +2448,266 @@ pub(crate) async fn github_token_present() -> Result<bool, String> {
     Ok(settings_github_token().is_some())
 }
 
+// ─── Signed URLs of uploaded attachments (#302) ─────────────────────────────
+
+/// Media type that makes GitHub add a rendered `body_html` to the issue,
+/// comment and review objects it returns.
+pub(crate) const HTML_ACCEPT: &str = "application/vnd.github.html+json";
+
+/// Where `body_html` points the files uploaded through GitHub's editor
+/// (`github.com/user-attachments/assets/<uuid>` in the markdown): short-lived
+/// URLs signed with a `jwt` query parameter, which load without credentials —
+/// the only way to show an attachment of a private repository, whose
+/// markdown URL answers 404 to anyone but a signed-in browser.
+const SIGNED_ATTACHMENT_PREFIX: &str = "https://private-user-images.githubusercontent.com/";
+
+/// The API paths whose `body_html` covers every markdown body of PR `number`
+/// in `nwo`: its description, conversation comments, inline review comments
+/// and review summaries. Same page size as the comment lists GitWand shows.
+pub(crate) fn pr_attachment_html_paths(nwo: &str, number: i64) -> [String; 4] {
+    [
+        format!("repos/{}/issues/{}", nwo, number),
+        format!("repos/{}/issues/{}/comments?per_page=100", nwo, number),
+        format!("repos/{}/pulls/{}/comments?per_page=100", nwo, number),
+        format!("repos/{}/pulls/{}/reviews?per_page=100", nwo, number),
+    ]
+}
+
+/// The `body_html` of `v` — one object, or each element of an array.
+pub(crate) fn body_htmls(v: &serde_json::Value) -> Vec<String> {
+    let one = |x: &serde_json::Value| {
+        x.get("body_html")
+            .and_then(|h| h.as_str())
+            .map(String::from)
+    };
+    match v {
+        serde_json::Value::Array(items) => items.iter().filter_map(one).collect(),
+        other => one(other).into_iter().collect(),
+    }
+}
+
+/// Decode the character references an attribute value may hold: `&amp;`,
+/// `&quot;`, `&#39;`, `&lt;`, `&gt;` and numeric ones (`&#61;`, `&#x3D;`).
+/// Anything else is kept as written.
+fn decode_html_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let Some(end) = rest.find(';').filter(|&e| e <= 10) else {
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        };
+        let name = &rest[1..end];
+        let ch = match name {
+            "amp" => Some('&'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            _ => name
+                .strip_prefix("#x")
+                .or_else(|| name.strip_prefix("#X"))
+                .and_then(|h| u32::from_str_radix(h, 16).ok())
+                .or_else(|| name.strip_prefix('#').and_then(|d| d.parse().ok()))
+                .and_then(char::from_u32),
+        };
+        match ch {
+            Some(c) => {
+                out.push(c);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The signed attachment URLs in the `src` attributes of `htmls`, entity-decoded
+/// and deduplicated, in order of appearance.
+pub(crate) fn signed_attachment_urls<'a>(htmls: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for html in htmls {
+        let mut rest = html;
+        while let Some(i) = rest.find("src=\"") {
+            // The attribute itself, not `data-canonical-src="`: preceded by whitespace.
+            let attr = rest[..i].ends_with(|c: char| c.is_ascii_whitespace());
+            rest = &rest[i + 5..];
+            let Some(end) = rest.find('"') else { break };
+            let raw = &rest[..end];
+            rest = &rest[end..];
+            if !attr || !raw.starts_with(SIGNED_ATTACHMENT_PREFIX) {
+                continue;
+            }
+            let url = decode_html_entities(raw);
+            if !out.contains(&url) {
+                out.push(url);
+            }
+        }
+    }
+    out
+}
+
+/// The signed URLs in the `body_html` lists fetched from
+/// [`pr_attachment_html_paths`]. Best effort: an endpoint that failed (a
+/// token not allowed to read reviews, a transient error) does not cost the
+/// URLs the others returned; only when every one failed is the first error
+/// returned. The flag says whether every one succeeded.
+pub(crate) fn signed_urls_from_fetches(
+    fetches: Vec<Result<Vec<String>, String>>,
+) -> Result<(Vec<String>, bool), String> {
+    let mut first_err = None;
+    let mut htmls = Vec::new();
+    let mut any_ok = false;
+    for f in fetches {
+        match f {
+            Ok(h) => {
+                any_ok = true;
+                htmls.extend(h);
+            }
+            Err(e) => {
+                first_err.get_or_insert(e);
+            }
+        }
+    }
+    match first_err {
+        Some(e) if !any_ok => Err(e),
+        _ => Ok((
+            signed_attachment_urls(htmls.iter().map(String::as_str)),
+            first_err.is_none(),
+        )),
+    }
+}
+
+/// What [`gh_pr_attachment_urls`](super::gh::gh_pr_attachment_urls) returns.
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub(crate) struct PrAttachmentUrls {
+    /// Whether the PR's repository is private: only then does the webview
+    /// need the signed URLs (a public repository serves the originals, which
+    /// never expire, though GitHub signs its attachments in `body_html` too).
+    /// `None` when it could not be read: the URLs are still returned.
+    pub private: Option<bool>,
+    pub urls: Vec<String>,
+    /// Every body list was read. When not, an attachment missing from `urls`
+    /// may just be in a list that failed — not one GitHub did not sign.
+    pub complete: bool,
+}
+
+impl PrAttachmentUrls {
+    pub(crate) fn from_fetches(
+        private: Option<bool>,
+        fetches: Vec<Result<Vec<String>, String>>,
+    ) -> Result<Self, String> {
+        let (urls, complete) = signed_urls_from_fetches(fetches)?;
+        Ok(PrAttachmentUrls {
+            private,
+            urls,
+            complete,
+        })
+    }
+}
+
+/// Signed URLs of the attachments in PR `number`'s bodies (REST).
+pub(crate) fn rest_pr_attachment_urls(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<PrAttachmentUrls, String> {
+    let (repo, pr) = get_pr_json(cwd, number, token)?;
+    let private = pr.pointer("/base/repo/private").and_then(|v| v.as_bool());
+    let fetches = pr_attachment_html_paths(&repo, number)
+        .par_iter()
+        .map(|path| {
+            let url = format!("{}/{}", API_BASE, path);
+            let (status, body) = curl_raw("GET", &url, Some(token), None, HTML_ACCEPT)?;
+            if status >= 400 {
+                return Err(map_api_error(status, &body));
+            }
+            Ok(body_htmls(&parse_json_body(&body)?))
+        })
+        .collect();
+    PrAttachmentUrls::from_fetches(private, fetches)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ─── Signed attachment URLs (#302) ───────────────────────────────────────
+
+    #[test]
+    fn collects_signed_attachment_urls_from_body_html() {
+        let a = "https://private-user-images.githubusercontent.com/1/2-aaaa.png?jwt=x.y.z";
+        let b = "https://private-user-images.githubusercontent.com/1/3-bbbb.gif?jwt=p&amp;q=1";
+        let html1 = format!(
+            r#"<p><a href="{a}"><img alt="x" src="{a}" style="max-width: 100%;"></a></p><img src="https://camo.githubusercontent.com/abc">"#
+        );
+        let html2 = format!(
+            r#"<img src="{a}"><img data-canonical-src="https://private-user-images.githubusercontent.com/9/9-zzzz.png" src="{b}">"#
+        );
+        assert_eq!(
+            signed_attachment_urls([html1.as_str(), html2.as_str()]),
+            vec![
+                a.to_string(),
+                "https://private-user-images.githubusercontent.com/1/3-bbbb.gif?jwt=p&q=1"
+                    .to_string()
+            ]
+        );
+        assert!(signed_attachment_urls(["<img src=\"unterminated"]).is_empty());
+        assert_eq!(
+            signed_attachment_urls([
+                "<img\tsrc=\"https://private-user-images.githubusercontent.com/x\">"
+            ]),
+            vec!["https://private-user-images.githubusercontent.com/x".to_string()]
+        );
+    }
+
+    #[test]
+    fn decodes_the_character_references_of_an_attribute() {
+        assert_eq!(
+            decode_html_entities("a&amp;b&#x3D;c&#61;d&quot;&#39;&lt;&gt;"),
+            "a&b=c=d\"'<>"
+        );
+        assert_eq!(decode_html_entities("x&unknown;y & z&"), "x&unknown;y & z&");
+    }
+
+    #[test]
+    fn one_failed_endpoint_does_not_cost_the_others_urls() {
+        let a = "https://private-user-images.githubusercontent.com/1/2-aaaa.png?jwt=x";
+        let ok = Ok(vec![format!(r#"<img src="{a}">"#)]);
+        assert_eq!(
+            signed_urls_from_fetches(vec![Err("403".into()), ok]),
+            Ok((vec![a.to_string()], false))
+        );
+        assert_eq!(
+            signed_urls_from_fetches(vec![Err("403".into()), Err("502".into())]),
+            Err("403".to_string())
+        );
+        assert_eq!(
+            signed_urls_from_fetches(vec![Ok(vec![])]),
+            Ok((vec![], true))
+        );
+    }
+
+    #[test]
+    fn reads_body_html_from_an_object_or_an_array() {
+        assert_eq!(
+            body_htmls(&json!({ "body_html": "<p>a</p>" })),
+            vec!["<p>a</p>"]
+        );
+        assert_eq!(
+            body_htmls(&json!([{ "body_html": "1" }, { "body": "no html" }, { "body_html": "2" }])),
+            vec!["1", "2"]
+        );
+        assert!(body_htmls(&serde_json::Value::Null).is_empty());
+    }
 
     // ─── OAuth App access restrictions (org-level 403) ───────────────────────
 

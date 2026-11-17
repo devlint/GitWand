@@ -11,6 +11,7 @@ import { ref, computed, inject } from "vue";
 import type { PrReviewComment } from "../utils/backend";
 import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
 import { PR_REMOTE_IMAGES_KEY } from "../composables/useRemoteImages";
+import { PR_ATTACHMENTS_KEY } from "../composables/usePrAttachments";
 import { useI18n } from "../composables/useI18n";
 import { formatRelativeAge } from "../utils/relativeTime";
 import Avatar from "./Avatar.vue";
@@ -109,9 +110,16 @@ const suggLabel = computed(() => t("pr.comment.suggestionLabel"));
 // Remote images follow the "Show images" choice of the PR detail view that
 // renders this thread (withheld when there is none).
 const prImagesShown = inject(PR_REMOTE_IMAGES_KEY, null);
+// Signed URLs of GitHub attachments, from the same PR detail view (#302).
+const resolveImage = inject(PR_ATTACHMENTS_KEY, null);
 const bodyHtmlById = computed(() => {
   const m = new Map<number, string>();
-  const opts = { allowRemoteImages: prImagesShown?.value === true };
+  // A resolver is provided for GitHub PRs only.
+  const opts = {
+    allowRemoteImages: prImagesShown?.value === true,
+    githubAttachments: !!resolveImage?.value,
+    resolveImage: resolveImage?.value,
+  };
   for (const c of props.comments) m.set(c.id, renderMarkdown(c.body, opts));
   return m;
 });

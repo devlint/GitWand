@@ -32,6 +32,7 @@ import DOMPurify from "dompurify";
 import { openExternalUrl } from "../utils/backend";
 import { markdownToHtml } from "../utils/markdown";
 import { isSafeUrl, normalizeUrlText } from "../utils/urlSafety";
+import { isGithubAttachmentUrl } from "../utils/githubAttachments";
 import { useSettings } from "./useSettings";
 import { t } from "./useI18n";
 
@@ -42,6 +43,11 @@ import { t } from "./useI18n";
  */
 let remoteImagesOverride = false;
 
+/** Per-call image URL rewrite, set by `safeHtml(raw, { resolveImage })` like the override above. */
+let imageResolver: ((src: string) => string | null) | null = null;
+/** Per-call `githubAttachments`, likewise. */
+let githubAttachmentsAllowed = false;
+
 /** Options shared by `safeHtml` and `renderMarkdown`. */
 export interface SafeHtmlOptions {
   /**
@@ -49,6 +55,19 @@ export interface SafeHtmlOptions {
    * the user accepted them for this PR or project.
    */
   allowRemoteImages?: boolean;
+  /**
+   * Rendering a GitHub PR: files uploaded to GitHub load without the
+   * remote-image consent. GitHub serves them, and already serves the PR being
+   * read, so no third party learns it was opened. Elsewhere (a README,
+   * another forge's PR) an attachment URL is a remote image like any other.
+   */
+  githubAttachments?: boolean;
+  /**
+   * Swap an image URL for another before it is checked — the signed URL of a
+   * GitHub attachment, which a private repository's markdown URL is not
+   * served under (`usePrAttachments`). `null` keeps `src`.
+   */
+  resolveImage?: (src: string) => string | null;
 }
 
 /**
@@ -151,14 +170,24 @@ function hardenLinksAndImages(node: Element) {
     }
   }
   if (node.tagName === "IMG") {
-    const src = node.getAttribute("src") ?? "";
+    let src = node.getAttribute("src") ?? "";
     // Decide on what the browser will actually fetch, not on the raw text.
-    const norm = normalizeUrlText(src);
+    let norm = normalizeUrlText(src);
+    const resolved = src && imageResolver ? imageResolver(norm) : null;
+    if (resolved) {
+      src = norm = resolved;
+      node.setAttribute("src", resolved);
+    }
     if (!isSafeUrl(norm, "image")) {
       node.removeAttribute("src");
     } else if (/^data:/i.test(norm)) {
       // Inline image: nothing is fetched, so the remote-image rule doesn't apply.
-    } else if (src && isRemoteImageSrc(norm) && !remoteImagesAllowed()) {
+    } else if (
+      src
+      && isRemoteImageSrc(norm)
+      && !(githubAttachmentsAllowed && isGithubAttachmentUrl(norm))
+      && !remoteImagesAllowed()
+    ) {
       // Remote image, not allowed: keep a visible placeholder (alt text) and
       // the URL in a title so the reader knows what was withheld.
       node.removeAttribute("src");
@@ -204,10 +233,14 @@ export function safeHtml(raw: string | null | undefined, options: SafeHtmlOption
   if (!raw) return "";
   ensureHooks();
   remoteImagesOverride = options.allowRemoteImages === true;
+  imageResolver = options.resolveImage ?? null;
+  githubAttachmentsAllowed = options.githubAttachments === true;
   try {
     return DOMPurify.sanitize(raw, PURIFY_CONFIG) as string;
   } finally {
     remoteImagesOverride = false;
+    imageResolver = null;
+    githubAttachmentsAllowed = false;
   }
 }
 
@@ -230,7 +263,11 @@ export function renderMarkdown(
 ): string {
   if (!src) return "";
   const rawHtml = markdownToHtml(src, { breaks: options.breaks ?? true });
-  return safeHtml(rawHtml, { allowRemoteImages: options.allowRemoteImages });
+  return safeHtml(rawHtml, {
+    allowRemoteImages: options.allowRemoteImages,
+    githubAttachments: options.githubAttachments,
+    resolveImage: options.resolveImage,
+  });
 }
 
 /**

@@ -15,6 +15,7 @@ import { computed, inject, nextTick, provide, ref, onMounted, onUnmounted, watch
 import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables/usePrPanel";
 import { renderMarkdown, onMarkdownLinkClick, hasBlockedRemoteImages } from "../composables/useSafeHtml";
 import { PR_REMOTE_IMAGES_KEY, commentsWithheldImages } from "../composables/useRemoteImages";
+import { PR_ATTACHMENTS_KEY, usePrAttachments } from "../composables/usePrAttachments";
 import RemoteImagesNotice from "./RemoteImagesNotice.vue";
 import Avatar from "./Avatar.vue";
 import { forgeAvatarUrl } from "../composables/useAvatar";
@@ -122,9 +123,6 @@ provide(PR_REMOTE_IMAGES_KEY, prImagesShown);
 watch([() => p.cwd.value, () => p.prDetail.value?.number], () => {
   prImagesShown.value = false;
 });
-/** Render options for every markdown body of this PR. */
-const mdOpts = computed(() => ({ allowRemoteImages: prImagesShown.value }));
-
 /** Which editor the description panel shows: the AI draft wins over a manual edit. */
 const bodyEditor = computed<"ai" | "manual" | null>(() =>
   descriptionDraft.value ? "ai" : editingBody.value !== null ? "manual" : null,
@@ -143,7 +141,34 @@ const editorBody = computed({
     }
   },
 });
+// Files uploaded to GitHub (screenshots…) load through signed URLs, which a
+// private repository needs (#302); the inline threads get the same resolver.
+const isGithubPr = computed(() => p.forge.value.name === "github");
+const attachments = usePrAttachments({
+  cwd: computed(() => p.cwd.value),
+  number: computed(() => p.prDetail.value?.number),
+  enabled: isGithubPr,
+  bodies: computed(() => [
+    p.prDetail.value?.body,
+    ...p.prComments.value.map((c) => c.body),
+    ...p.prIssueComments.value.map((c) => c.body),
+    ...p.prReviews.value.map((r) => r.body),
+  ]),
+});
+const resolveImage = computed(() => (isGithubPr.value ? attachments.resolveImage : undefined));
+provide(PR_ATTACHMENTS_KEY, resolveImage);
+/** Render options for every markdown body of this PR. */
+const mdOpts = computed(() => ({
+  allowRemoteImages: prImagesShown.value,
+  githubAttachments: isGithubPr.value,
+  resolveImage: resolveImage.value,
+}));
 const editorHtml = computed(() => renderMarkdown(editorBody.value, mdOpts.value));
+/**
+ * The AI summary is model output, not one of the PR's GitHub bodies: its
+ * images follow the plain remote-image rule.
+ */
+const summaryMdOpts = computed(() => ({ allowRemoteImages: prImagesShown.value }));
 
 /** Extra-context scope of the "ctx" segment: one context per PR. */
 function aiCtxScope(prNumber: number): string {
@@ -374,7 +399,7 @@ const timelineCount = computed(() =>
 // PrCommentThread, which follows `prImagesShown` (provided above). Offer the
 // same button there, or their withheld images could not be revealed.
 const inlineImagesBlocked = computed(() =>
-  commentsWithheldImages(p.commentsForFile.value, prImagesShown.value),
+  commentsWithheldImages(p.commentsForFile.value, prImagesShown.value, isGithubPr.value),
 );
 
 const fullscreenImageUrl = ref<string | null>(null);
@@ -633,7 +658,9 @@ function submitRequestReviewers() {
 </script>
 
 <template>
-  <div class="pdv-root">
+  <!-- An attachment image that fails to load (private repository, expired
+       signed URL) fetches signed URLs: `error` does not bubble, hence capture. -->
+  <div class="pdv-root" @error.capture="attachments.onImageError">
     <!-- Merge dialog -->
     <div v-if="p.mergingPr.value" class="pdv-merge-dialog">
       <p class="pdv-merge-prompt">
@@ -1024,7 +1051,7 @@ function submitRequestReviewers() {
             <div v-if="p.prSummaryLoading.value && !p.prSummary.value" class="pdv-summary-loading ai-loading">
               {{ t('pr.summary.loading') }}
             </div>
-            <div v-else class="pdv-summary-body" v-html="renderMarkdown(p.prSummary.value, mdOpts)" />
+            <div v-else class="pdv-summary-body" v-html="renderMarkdown(p.prSummary.value, summaryMdOpts)" />
           </section>
 
           <!-- Stat cards -->
@@ -1664,8 +1691,10 @@ function submitRequestReviewers() {
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
+        <!-- Re-resolved: a GitHub attachment's signed URL may have been
+             replaced since the click (#302). -->
         <img
-          :src="fullscreenImageUrl"
+          :src="attachments.currentUrl(fullscreenImageUrl)"
           class="pdv-image-overlay-content"
         />
       </div>

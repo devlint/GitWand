@@ -96,6 +96,11 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
     cliPathOnly:
       "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
   },
+  gh_pr_attachment_urls: {
+    route: "/api/gh-pr-attachment-urls",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured, so the two run different code.",
+  },
   gh_list_issues: { route: "/api/gh-list-issues" },
   gh_list_prs: { route: "/api/gh-list-prs" },
   gh_merge_pr: {
