@@ -1331,7 +1331,10 @@ pub(crate) async fn gh_issue_set_state(
         .map_err(|e| e.to_string())?
 }
 
-fn gh_pr_attachment_urls_inner(cwd: String, number: i64) -> Result<Vec<String>, String> {
+fn gh_pr_attachment_urls_inner(
+    cwd: String,
+    number: i64,
+) -> Result<github_api::PrAttachmentUrls, String> {
     if let Some(r) = github_api::with_rest(&cwd, |tok| {
         github_api::rest_pr_attachment_urls(&cwd, number, tok)
     }) {
@@ -1339,22 +1342,38 @@ fn gh_pr_attachment_urls_inner(cwd: String, number: i64) -> Result<Vec<String>, 
     }
     use rayon::prelude::*;
     let nwo = gh_base_nwo(&cwd)?;
-    let fetches = github_api::pr_attachment_html_paths(&nwo, number)
-        .par_iter()
-        .map(|path| {
-            gh_api_json_accept(&cwd, path, Some(github_api::HTML_ACCEPT))
-                .map(|v| github_api::body_htmls(&v))
-        })
-        .collect();
-    github_api::signed_urls_from_fetches(fetches)
+    let (repo, fetches) = rayon::join(
+        || gh_api_json(&cwd, &format!("repos/{}", nwo)),
+        || {
+            github_api::pr_attachment_html_paths(&nwo, number)
+                .par_iter()
+                .map(|path| {
+                    gh_api_json_accept(&cwd, path, Some(github_api::HTML_ACCEPT))
+                        .map(|v| github_api::body_htmls(&v))
+                })
+                .collect()
+        },
+    );
+    let private = repo?
+        .get("private")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    Ok(github_api::PrAttachmentUrls {
+        private,
+        urls: github_api::signed_urls_from_fetches(fetches)?,
+    })
 }
 
 /// Signed, short-lived URLs of the files uploaded to PR `number`'s
-/// description, comments and reviews (#302). GitHub only hands them out in
-/// `body_html`; the frontend swaps them in for the `user-attachments` URLs of
-/// the markdown, which a private repository does not serve to the webview.
+/// description, comments and reviews (#302), and whether its repository is
+/// private. GitHub only hands them out in `body_html`; for a private
+/// repository the frontend swaps them in for the `user-attachments` URLs of
+/// the markdown, which it does not serve to the webview.
 #[tauri::command]
-pub(crate) async fn gh_pr_attachment_urls(cwd: String, number: i64) -> Result<Vec<String>, String> {
+pub(crate) async fn gh_pr_attachment_urls(
+    cwd: String,
+    number: i64,
+) -> Result<github_api::PrAttachmentUrls, String> {
     tauri::async_runtime::spawn_blocking(move || gh_pr_attachment_urls_inner(cwd, number))
         .await
         .map_err(|e| e.to_string())?

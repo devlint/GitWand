@@ -153,9 +153,6 @@ const attachments = usePrAttachments({
     ...p.prComments.value.map((c) => c.body),
     ...p.prIssueComments.value.map((c) => c.body),
     ...p.prReviews.value.map((r) => r.body),
-    // Also rendered with the resolver: the AI summary and the description editor.
-    p.prSummary.value,
-    editorBody.value,
   ]),
 });
 const resolveImage = computed(() => (isGithubPr.value ? attachments.resolveImage : undefined));

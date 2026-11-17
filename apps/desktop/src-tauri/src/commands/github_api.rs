@@ -2539,13 +2539,27 @@ pub(crate) fn signed_urls_from_fetches(
     }
 }
 
+/// What [`gh_pr_attachment_urls`](super::gh::gh_pr_attachment_urls) returns.
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub(crate) struct PrAttachmentUrls {
+    /// Whether the PR's repository is private: only then does the webview
+    /// need the signed URLs (a public repository serves the originals, which
+    /// never expire, though GitHub signs its attachments in `body_html` too).
+    pub private: bool,
+    pub urls: Vec<String>,
+}
+
 /// Signed URLs of the attachments in PR `number`'s bodies (REST).
 pub(crate) fn rest_pr_attachment_urls(
     cwd: &str,
     number: i64,
     token: &str,
-) -> Result<Vec<String>, String> {
-    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+) -> Result<PrAttachmentUrls, String> {
+    let (repo, pr) = get_pr_json(cwd, number, token)?;
+    let private = pr
+        .pointer("/base/repo/private")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let fetches = pr_attachment_html_paths(&repo, number)
         .par_iter()
         .map(|path| {
@@ -2557,7 +2571,10 @@ pub(crate) fn rest_pr_attachment_urls(
             Ok(body_htmls(&parse_json_body(&body)?))
         })
         .collect();
-    signed_urls_from_fetches(fetches)
+    Ok(PrAttachmentUrls {
+        private,
+        urls: signed_urls_from_fetches(fetches)?,
+    })
 }
 
 #[cfg(test)]

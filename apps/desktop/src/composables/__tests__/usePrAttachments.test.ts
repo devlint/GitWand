@@ -4,7 +4,7 @@ import { effectScope, nextTick, ref } from "vue";
 const ghPrAttachmentUrls = vi.fn();
 vi.mock("../../utils/backend", () => ({ ghPrAttachmentUrls: (...a: unknown[]) => ghPrAttachmentUrls(...a) }));
 
-import { _resetSigningRepos, usePrAttachments } from "../usePrAttachments";
+import { _resetRepoVisibility, usePrAttachments } from "../usePrAttachments";
 
 // No mockReset: config `clearMocks` resets calls, and each test sets its own implementation.
 
@@ -18,6 +18,8 @@ function signed(uuid: string, tag = 1): string {
   const payload = btoa(JSON.stringify({ nbf: 1000 * tag, exp: 1000 * tag + 300 })).replace(/=+$/, "");
   return `https://private-user-images.githubusercontent.com/1/2-${uuid}.png?jwt=h.${payload}.s`;
 }
+const priv = (...urls: string[]) => ({ private: true, urls });
+const pub = (...urls: string[]) => ({ private: false, urls });
 
 /** The `error` event of an `<img>` showing `src`. */
 const imgError = (src: string) =>
@@ -31,7 +33,7 @@ const flush = async () => {
 const scopes: ReturnType<typeof effectScope>[] = [];
 afterEach(() => {
   scopes.splice(0).forEach((s) => s.stop());
-  _resetSigningRepos();
+  _resetRepoVisibility();
   vi.useRealTimers();
 });
 
@@ -50,21 +52,34 @@ function setup(bodies: string[], { enabled = true, cwd = "/repo" } = {}) {
 }
 
 describe("usePrAttachments", () => {
-  it("fetches nothing while attachment images load (public repository)", async () => {
+  it("fetches nothing while attachment images load", async () => {
     const s = setup([md(A)]);
     await flush();
     expect(ghPrAttachmentUrls).not.toHaveBeenCalled();
     expect(s.resolveImage(asset(A))).toBeNull();
   });
 
-  it("fetches when an attachment image fails, then resolves it", async () => {
-    ghPrAttachmentUrls.mockResolvedValue([signed(A)]);
+  it("private repository: an image failing fetches signed URLs, then they are used", async () => {
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
     const s = setup([md(A), "no image"]);
     s.onImageError(imgError(asset(A)));
     expect(ghPrAttachmentUrls).toHaveBeenCalledWith("/repo", 7);
     await flush();
     expect(s.resolveImage(asset(A))).toBe(signed(A));
     expect(s.resolveImage("https://example.com/x.png")).toBeNull();
+  });
+
+  it("public repository: originals are kept, and later failures fetch nothing", async () => {
+    ghPrAttachmentUrls.mockResolvedValue(pub(signed(A), signed(B)));
+    const s = setup([md(A), md(B)]);
+    s.onImageError(imgError(asset(A))); // a deleted file, say
+    await flush();
+    expect(s.resolveImage(asset(B))).toBeNull();
+    s.tick(60_000);
+    s.onImageError(imgError(asset(B)));
+    setup([md(B)]); // another PR of the same repository
+    await flush();
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
   });
 
   it("ignores other images, and attachments on another forge", async () => {
@@ -76,22 +91,20 @@ describe("usePrAttachments", () => {
     expect(ghPrAttachmentUrls).not.toHaveBeenCalled();
   });
 
-  it("fetches up front for the next PR of a repository that needed it", async () => {
-    ghPrAttachmentUrls.mockResolvedValue([signed(A)]);
+  it("fetches up front for the next PR of a private repository, not of another", async () => {
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
     const first = setup([md(A)]);
     first.onImageError(imgError(asset(A)));
     await flush();
-    const next = setup([md(B)]);
+    setup([md(B)]);
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
     await flush();
-    // …but not for another repository.
-    setup([md(B)], { cwd: "/public" });
+    setup([md(B)], { cwd: "/other" });
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
-    void next;
   });
 
   it("fetches for a new attachment, not for one GitHub already left out", async () => {
-    ghPrAttachmentUrls.mockResolvedValue([signed(A)]);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
     const s = setup([md(A), md(B)]); // B is not returned (say, past the first page)
     s.onImageError(imgError(asset(A)));
     await flush();
@@ -99,7 +112,7 @@ describe("usePrAttachments", () => {
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
     const C = "99999999-2222-3333-4444-555555555555";
-    ghPrAttachmentUrls.mockResolvedValue([signed(C)]);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(C)));
     s.bodies.value = [md(A), md(B), md(C)];
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
@@ -109,27 +122,27 @@ describe("usePrAttachments", () => {
   });
 
   it("picks up a body that changed while a fetch ran", async () => {
-    let answer!: (v: string[]) => void;
+    let answer!: (v: unknown) => void;
     ghPrAttachmentUrls.mockReturnValueOnce(new Promise((r) => (answer = r)));
-    ghPrAttachmentUrls.mockResolvedValue([signed(B)]);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(B)));
     const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
     s.bodies.value = [md(A), md(B)];
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
-    answer([signed(A)]);
+    answer(priv(signed(A)));
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
     expect(s.resolveImage(asset(B))).toBe(signed(B));
   });
 
   it("refreshes an expired URL on render, keeping it until the new one lands", async () => {
-    ghPrAttachmentUrls.mockResolvedValue([signed(A, 1)]);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 1)));
     const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
     await flush();
     s.tick(300_000);
-    ghPrAttachmentUrls.mockResolvedValue([signed(A, 2)]);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 2)));
     expect(s.resolveImage(asset(A))).toBe(signed(A, 1));
     await flush();
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
@@ -137,7 +150,7 @@ describe("usePrAttachments", () => {
   });
 
   it("does not loop on images that keep failing", async () => {
-    ghPrAttachmentUrls.mockResolvedValue([signed(A)]);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
     const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
     await flush();
@@ -150,46 +163,11 @@ describe("usePrAttachments", () => {
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the original URL on failure and waits before trying again", async () => {
-    ghPrAttachmentUrls.mockImplementation(async () => {
-      throw new Error("no token");
-    });
-    const s = setup([md(A)]);
-    s.onImageError(imgError(asset(A)));
-    await flush();
-    expect(s.resolveImage(asset(A))).toBeNull();
-    s.bodies.value = [md(A), md(B)];
-    await flush();
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
-    s.tick(31_000);
-    s.bodies.value = [md(B)];
-    await flush();
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
-  });
-
-  it("drops a late answer for the previous PR and then fetches the new one's", async () => {
-    let answer!: (v: string[]) => void;
-    ghPrAttachmentUrls.mockReturnValueOnce(new Promise((r) => (answer = r)));
-    ghPrAttachmentUrls.mockResolvedValue([signed(A, 3)]);
-    const s = setup([md(A)]);
-    s.onImageError(imgError(asset(A)));
-    s.number.value = 8;
-    await flush();
-    s.onImageError(imgError(asset(A))); // #8's image fails too
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1); // #8 waits for #7's fetch
-    answer([signed(A, 1)]);
-    await flush();
-    expect(ghPrAttachmentUrls).toHaveBeenLastCalledWith("/repo", 8);
-    expect(s.resolveImage(asset(A))).toBe(signed(A, 3));
-  });
-
-  it("retries a failed fetch with a growing delay while images are broken", async () => {
+  it("retries a failing fetch a few times with a growing delay, then stops", async () => {
     vi.useFakeTimers();
-    const fail = async () => {
-      throw new Error("502");
-    };
-    ghPrAttachmentUrls.mockImplementationOnce(fail).mockImplementationOnce(fail);
-    ghPrAttachmentUrls.mockResolvedValue([signed(A)]);
+    ghPrAttachmentUrls.mockImplementation(async () => {
+      throw new Error("No GitHub token");
+    });
     const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
     await flush();
@@ -200,38 +178,40 @@ describe("usePrAttachments", () => {
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
     await flush();
     vi.advanceTimersByTime(30_000);
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2); // now 60 s
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2); // next one at 60 s
     vi.advanceTimersByTime(30_000);
     expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(3);
-    await flush();
-    expect(s.resolveImage(asset(A))).toBe(signed(A));
+    for (let i = 0; i < 4; i++) {
+      await flush();
+      vi.advanceTimersByTime(10 * 60_000);
+    }
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(5); // 1 + 4 retries
+    expect(s.resolveImage(asset(A))).toBeNull();
   });
 
-  it("does not mark a repository whose failed file GitHub did not sign (deleted, public)", async () => {
-    ghPrAttachmentUrls.mockResolvedValue([signed(B)]);
-    const s = setup([md(A), md(B)]);
+  it("drops a late answer for the previous PR and then fetches the new one's", async () => {
+    let answer!: (v: unknown) => void;
+    ghPrAttachmentUrls.mockReturnValueOnce(new Promise((r) => (answer = r)));
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 3)));
+    const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
+    s.number.value = 8;
     await flush();
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
-    // B's original URL works and never expires: it is not swapped for a signed one.
-    expect(s.resolveImage(asset(B))).toBeNull();
-    setup([md(B)]); // another PR of the same repository
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1);
-    // An expired signed URL failing is not a sign either.
-    s.tick(31_000);
-    s.onImageError(imgError(signed(B)));
+    s.onImageError(imgError(asset(A))); // #8's image fails too
+    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(1); // #8 waits for #7's fetch
+    answer(priv(signed(A, 1)));
     await flush();
-    setup([md(B)]);
-    expect(ghPrAttachmentUrls).toHaveBeenCalledTimes(2);
+    expect(ghPrAttachmentUrls).toHaveBeenLastCalledWith("/repo", 8);
+    expect(s.resolveImage(asset(A))).toBe(signed(A, 3));
   });
 
   it("gives the full-screen viewer the current signed URL", async () => {
-    ghPrAttachmentUrls.mockResolvedValue([signed(A, 1)]);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 1)));
     const s = setup([md(A)]);
     s.onImageError(imgError(asset(A)));
     await flush();
     s.tick(300_000);
-    ghPrAttachmentUrls.mockResolvedValue([signed(A, 2)]);
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A, 2)));
     s.onImageError(imgError(signed(A, 1)));
     await flush();
     expect(s.currentUrl(signed(A, 1))).toBe(signed(A, 2));

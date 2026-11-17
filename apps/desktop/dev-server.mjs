@@ -5708,6 +5708,9 @@ async function handleRequest(req, res) {
         const htmls = [];
         let firstError = null;
         let anyOk = false;
+        const repoResp = await githubFetch(`/repos/${nwo}`, token);
+        if (!repoResp.ok) return jsonResponse(req, res, { error: `GitHub API ${repoResp.status}` }, 500);
+        const isPrivate = (await repoResp.json()).private === true;
         const fetches = await Promise.allSettled(paths.map(async (p) => {
           const resp = await githubFetch(p, token, "application/vnd.github.html+json");
           if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
@@ -5731,7 +5734,7 @@ async function handleRequest(req, res) {
             if (!urls.includes(u)) urls.push(u);
           }
         }
-        return jsonResponse(req, res, urls);
+        return jsonResponse(req, res, { private: isPrivate, urls });
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);
       }
