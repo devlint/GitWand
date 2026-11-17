@@ -135,6 +135,228 @@ pub(crate) async fn gh_issue_targets(cwd: String) -> Result<IssueTargets, String
         .map_err(|e| e.to_string())?
 }
 
+// ─── Create ─────────────────────────────────────────────────────────────────
+
+/// The new issue's fields, as the form sends them.
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreateIssueInput {
+    /// `owner/repo`, one of [`issue_targets_inner`]'s targets.
+    pub(crate) repo: String,
+    pub(crate) title: String,
+    pub(crate) body: String,
+    #[serde(default)]
+    pub(crate) labels: Vec<String>,
+    #[serde(default)]
+    pub(crate) assignees: Vec<String>,
+    /// The milestone's number (what `POST /issues` takes, not its title).
+    #[serde(default)]
+    pub(crate) milestone: Option<i64>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub(crate) struct CreatedIssue {
+    pub(crate) number: i64,
+    pub(crate) url: String,
+}
+
+/// The `POST /repos/{o}/{r}/issues` body: the title trimmed (refused when
+/// empty), the body verbatim, empty lists and no milestone left out.
+fn issue_payload(input: &CreateIssueInput) -> Result<serde_json::Value, String> {
+    let title = input.title.trim();
+    if title.is_empty() {
+        return Err("Title is required".to_string());
+    }
+    let mut p = serde_json::json!({ "title": title, "body": input.body });
+    if !input.labels.is_empty() {
+        p["labels"] = serde_json::json!(input.labels);
+    }
+    if !input.assignees.is_empty() {
+        p["assignees"] = serde_json::json!(input.assignees);
+    }
+    if let Some(m) = input.milestone {
+        p["milestone"] = serde_json::json!(m);
+    }
+    Ok(p)
+}
+
+fn created_from(v: &serde_json::Value) -> Result<CreatedIssue, String> {
+    let number = v
+        .get("number")
+        .and_then(|n| n.as_i64())
+        .ok_or("GitHub did not return the new issue's number")?;
+    let url = v
+        .get("html_url")
+        .and_then(|u| u.as_str())
+        .unwrap_or_default()
+        .to_string();
+    Ok(CreatedIssue { number, url })
+}
+
+fn create_issue_inner(cwd: &str, input: &CreateIssueInput) -> Result<CreatedIssue, String> {
+    // Checked before any call: a blank title costs no request.
+    let payload = issue_payload(input)?.to_string();
+    let repo = resolve_issue_target(cwd, &input.repo, true)?;
+    let path = format!("repos/{}/issues", repo.nwo);
+    let created = match with_rest(cwd, |tok| rest_api_json("POST", &path, tok, Some(&payload))) {
+        Some(r) => r?,
+        None => gh_api_on(cwd, &repo, "POST", &path, Some(payload))?,
+    };
+    created_from(&created)
+}
+
+/// File an issue on one of `cwd`'s issue targets (#301).
+#[tauri::command]
+pub(crate) async fn gh_create_issue(
+    cwd: String,
+    input: CreateIssueInput,
+) -> Result<CreatedIssue, String> {
+    tauri::async_runtime::spawn_blocking(move || create_issue_inner(&cwd, &input))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+// ─── Pickers: labels, milestones, assignees ────────────────────────────────
+
+/// Up to `max_pages` pages of 100 of the array at `path` (no query string).
+fn api_get_pages(
+    cwd: &str,
+    repo: &GhRepo,
+    path: &str,
+    query: &str,
+    max_pages: u32,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut all = Vec::new();
+    for page in 1..=max_pages {
+        let v = api_get(
+            cwd,
+            repo,
+            &format!("{}?{}per_page=100&page={}", path, query, page),
+        )?;
+        let arr = v.as_array().cloned().unwrap_or_default();
+        let n = arr.len();
+        all.extend(arr);
+        if n < 100 {
+            break;
+        }
+    }
+    Ok(all)
+}
+
+fn opt_str(v: &serde_json::Value, key: &str) -> Option<String> {
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .filter(|x| !x.is_empty())
+        .map(String::from)
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub(crate) struct RepoLabel {
+    pub(crate) name: String,
+    pub(crate) color: String,
+    pub(crate) description: Option<String>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RepoMilestone {
+    pub(crate) number: i64,
+    pub(crate) title: String,
+    pub(crate) due_on: Option<String>,
+}
+
+fn labels_from(items: &[serde_json::Value]) -> Vec<RepoLabel> {
+    items
+        .iter()
+        .filter_map(|l| {
+            Some(RepoLabel {
+                name: opt_str(l, "name")?,
+                color: opt_str(l, "color").unwrap_or_default(),
+                description: opt_str(l, "description"),
+            })
+        })
+        .collect()
+}
+
+fn milestones_from(items: &[serde_json::Value]) -> Vec<RepoMilestone> {
+    items
+        .iter()
+        .filter_map(|m| {
+            Some(RepoMilestone {
+                number: m.get("number")?.as_i64()?,
+                title: opt_str(m, "title")?,
+                due_on: opt_str(m, "due_on"),
+            })
+        })
+        .collect()
+}
+
+fn assignees_from(items: &[serde_json::Value]) -> Vec<crate::types::ReviewerCandidate> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<_> = items
+        .iter()
+        .filter_map(|u| {
+            let login = opt_str(u, "login")?;
+            seen.insert(login.clone())
+                .then(|| crate::types::ReviewerCandidate {
+                    login,
+                    name: opt_str(u, "name"),
+                    avatar_url: opt_str(u, "avatar_url"),
+                })
+        })
+        .collect();
+    out.sort_by_key(|a| a.login.to_lowercase());
+    out
+}
+
+/// Labels of an issue target (up to 300).
+#[tauri::command]
+pub(crate) async fn gh_list_labels(cwd: String, repo: String) -> Result<Vec<RepoLabel>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let r = resolve_issue_target(&cwd, &repo, true)?;
+        let items = api_get_pages(&cwd, &r, &format!("repos/{}/labels", r.nwo), "", 3)?;
+        Ok(labels_from(&items))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Open milestones of an issue target (up to 100).
+#[tauri::command]
+pub(crate) async fn gh_list_milestones(
+    cwd: String,
+    repo: String,
+) -> Result<Vec<RepoMilestone>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let r = resolve_issue_target(&cwd, &repo, true)?;
+        let items = api_get_pages(
+            &cwd,
+            &r,
+            &format!("repos/{}/milestones", r.nwo),
+            "state=open&",
+            1,
+        )?;
+        Ok(milestones_from(&items))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Users an issue on a target can be assigned to (up to 300).
+#[tauri::command]
+pub(crate) async fn gh_list_assignees(
+    cwd: String,
+    repo: String,
+) -> Result<Vec<crate::types::ReviewerCandidate>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let r = resolve_issue_target(&cwd, &repo, true)?;
+        let items = api_get_pages(&cwd, &r, &format!("repos/{}/assignees", r.nwo), "", 3)?;
+        Ok(assignees_from(&items))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,5 +427,102 @@ mod tests {
     fn parent_ignored_when_origin_is_not_a_fork() {
         let t = targets_from(&origin(true, false), Some(&parent(true)));
         assert_eq!(repos(&t), ["me/app"]);
+    }
+
+    fn input(
+        title: &str,
+        body: &str,
+        labels: Vec<&str>,
+        assignees: Vec<&str>,
+        milestone: Option<i64>,
+    ) -> CreateIssueInput {
+        CreateIssueInput {
+            repo: "me/app".into(),
+            title: title.into(),
+            body: body.into(),
+            labels: labels.into_iter().map(String::from).collect(),
+            assignees: assignees.into_iter().map(String::from).collect(),
+            milestone,
+        }
+    }
+
+    #[test]
+    fn payload_omits_empty_optionals() {
+        let p = issue_payload(&input("  Bug  ", "", vec![], vec![], None)).unwrap();
+        assert_eq!(p, json!({"title": "Bug", "body": ""}));
+    }
+
+    #[test]
+    fn payload_keeps_body_verbatim() {
+        let body = "a \"q\" \\ $HOME\n--flag\n".repeat(2000);
+        let p = issue_payload(&input("t", &body, vec![], vec![], None)).unwrap();
+        assert_eq!(p["body"].as_str().unwrap(), body);
+    }
+
+    #[test]
+    fn payload_carries_labels_assignees_milestone() {
+        let p = issue_payload(&input("t", "b", vec!["bug"], vec!["me"], Some(3))).unwrap();
+        assert_eq!(p["labels"], json!(["bug"]));
+        assert_eq!(p["assignees"], json!(["me"]));
+        assert_eq!(p["milestone"], json!(3));
+    }
+
+    #[test]
+    fn whitespace_title_is_refused() {
+        assert_eq!(
+            issue_payload(&input(" \n ", "", vec![], vec![], None)).unwrap_err(),
+            "Title is required"
+        );
+    }
+
+    #[test]
+    fn created_issue_read_from_response() {
+        let c =
+            created_from(&json!({"number": 12, "html_url": "https://github.com/o/r/issues/12"}))
+                .unwrap();
+        assert_eq!(c.number, 12);
+        assert_eq!(c.url, "https://github.com/o/r/issues/12");
+    }
+
+    #[test]
+    fn created_issue_without_number_is_an_error() {
+        assert!(created_from(&json!({})).is_err());
+    }
+
+    #[test]
+    fn labels_keep_name_color_description() {
+        let l = labels_from(&[
+            json!({"name":"bug","color":"d73a4a","description":""}),
+            json!({"color":"x"}),
+        ]);
+        assert_eq!(
+            l,
+            vec![RepoLabel {
+                name: "bug".into(),
+                color: "d73a4a".into(),
+                description: None
+            }]
+        );
+    }
+
+    #[test]
+    fn milestones_keep_number_title_due_date() {
+        let m =
+            milestones_from(&[json!({"number":3,"title":"v4","due_on":"2026-12-01T00:00:00Z"})]);
+        assert_eq!(m[0].number, 3);
+        assert_eq!(m[0].due_on.as_deref(), Some("2026-12-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn assignees_deduplicated_and_sorted() {
+        let a = assignees_from(&[
+            json!({"login":"zed"}),
+            json!({"login":"Amy"}),
+            json!({"login":"zed"}),
+        ]);
+        assert_eq!(
+            a.iter().map(|x| x.login.as_str()).collect::<Vec<_>>(),
+            ["Amy", "zed"]
+        );
     }
 }
