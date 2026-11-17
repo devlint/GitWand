@@ -139,10 +139,12 @@ entry and a `dev-server.mjs` route:
   `{ number, url }`; `repo` must be one of `gh_issue_targets`.
   - REST: `POST /repos/{o}/{r}/issues` with `title`, `body`, `labels`,
     `assignees`, `milestone` (number).
-  - `gh` fallback: `gh issue create --repo <origin> --title … --body-file -`
-    (body on stdin, never in argv: it can be long and contain anything),
-    `--label` / `--assignee` repeated, `--milestone <title>`. The URL is read
-    from stdout, the number parsed from it.
+  - `gh` fallback: `gh api -X POST repos/{nwo}/issues --input -` on the target's
+    host, the same JSON payload on stdin (never in argv: it can be long and
+    contain anything). Same payload as REST, and the JSON answer gives
+    `number` and `html_url` directly. *(Planning refinement of the earlier
+    `gh issue create` idea, which would have needed milestone titles and
+    stdout parsing.)*
   - Empty title refused before any call.
 - `gh_list_labels(cwd, repo)` → `{ name, color, description? }[]`
   (`/repos/{o}/{r}/labels`, paginated up to a bound).
