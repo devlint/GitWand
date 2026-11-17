@@ -104,9 +104,11 @@ export function useCreateIssue(deps: {
   async function refreshAvailability(): Promise<void> {
     const seq = ++availabilitySeq;
     const t = await readTargets();
-    if (seq !== availabilitySeq) return;
-    targets.value = t ?? [];
-    available.value = (t?.length ?? 0) > 0;
+    // A failed read keeps the last answer: one network error must not hide
+    // the action until the repository is switched.
+    if (seq !== availabilitySeq || t === null) return;
+    targets.value = t;
+    available.value = t.length > 0;
   }
 
   function clearPickers() {
@@ -143,6 +145,9 @@ export function useCreateIssue(deps: {
   }
 
   async function open(prefill?: IssuePrefill): Promise<void> {
+    // Already open (⌘⇧I again, the palette): never wipe what is being typed,
+    // nor drop the answer of a create in flight.
+    if (isOpen.value) return;
     reset();
     const gen = generation;
     initial.value = { title: prefill?.title ?? "", body: prefill?.body ?? "" };
@@ -153,17 +158,19 @@ export function useCreateIssue(deps: {
     const t = await readTargets();
     if (gen !== generation) return;
     loading.value = false;
-    targets.value = t ?? [];
-    available.value = targets.value.length > 0;
     targetsFailed.value = t === null;
     if (t === null) return;
+    targets.value = t;
+    available.value = t.length > 0;
     const first = targets.value.find((x) => x.hasIssues);
     repo.value = first?.repo ?? null;
     if (repo.value) loadPickers(repo.value);
   }
 
   function setRepo(next: string) {
-    if (next === repo.value) return;
+    // The issue being created goes where it was sent; switching now would
+    // drop its answer (and the notice that it was created).
+    if (submitting.value || next === repo.value) return;
     const target = targets.value.find((t) => t.repo === next);
     if (!target?.hasIssues) return;
     generation++;

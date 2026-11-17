@@ -340,11 +340,42 @@ fn curl_raw(
 /// Map an HTTP ≥ 400 response to a user-facing error, preferring GitHub's
 /// `message` field over the bare status code.
 fn map_api_error(status: i32, body: &str) -> String {
-    let msg = serde_json::from_str::<serde_json::Value>(body.trim())
-        .ok()
+    let v = serde_json::from_str::<serde_json::Value>(body.trim()).ok();
+    let msg = v
+        .as_ref()
         .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from))
         .unwrap_or_else(|| format!("HTTP {}", status));
-    format!("GitHub API error ({}): {}", status, msg)
+    // A 422 says which field it refused in `errors[]` ("Validation Failed"
+    // alone does not tell an invalid assignee from an unknown milestone).
+    let details: Vec<String> = v
+        .as_ref()
+        .and_then(|v| v.get("errors"))
+        .and_then(|e| e.as_array())
+        .map(|errs| {
+            errs.iter()
+                .filter_map(|e| {
+                    let s = |k: &str| e.get(k).and_then(|x| x.as_str()).filter(|x| !x.is_empty());
+                    s("message")
+                        .map(String::from)
+                        .or_else(|| match (s("field"), s("code")) {
+                            (Some(f), Some(c)) => Some(format!("{}: {}", f, c)),
+                            (None, Some(c)) => Some(c.to_string()),
+                            _ => None,
+                        })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if details.is_empty() {
+        format!("GitHub API error ({}): {}", status, msg)
+    } else {
+        format!(
+            "GitHub API error ({}): {} ({})",
+            status,
+            msg,
+            details.join("; ")
+        )
+    }
 }
 
 /// Parse a (possibly empty) JSON response body. An empty body maps to `Null` so
@@ -441,11 +472,6 @@ fn etag_key(url: &str, token: &str) -> String {
     format!("{:016x} {}", h.finish(), url)
 }
 
-/// GET a GitHub JSON endpoint with ETag-based conditional requests.
-///
-/// Sends `If-None-Match` when a cached ETag exists; a `304` serves the cached
-/// body without spending rate-limit quota. A `200` refreshes the cache from the
-/// response `ETag`. Falls back to a plain fetch when no ETag is returned.
 /// `method {API_BASE}/{path}` with `token`, for callers outside this module
 /// (`path` without a leading slash, e.g. `repos/o/r/labels`).
 pub(crate) fn rest_api_json(
@@ -457,6 +483,11 @@ pub(crate) fn rest_api_json(
     api_json(method, &format!("{}/{}", API_BASE, path), token, body_json)
 }
 
+/// GET a GitHub JSON endpoint with ETag-based conditional requests.
+///
+/// Sends `If-None-Match` when a cached ETag exists; a `304` serves the cached
+/// body without spending rate-limit quota. A `200` refreshes the cache from the
+/// response `ETag`. Falls back to a plain fetch when no ETag is returned.
 fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> {
     let (status, body) = get_cached_raw(url, token)?;
     if status >= 400 {
@@ -2648,6 +2679,23 @@ pub(crate) fn rest_pr_attachment_urls(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn api_error_keeps_validation_details() {
+        let body = r#"{"message":"Validation Failed","errors":[{"resource":"Issue","field":"assignees","code":"invalid"},{"message":"milestone not found"}]}"#;
+        assert_eq!(
+            map_api_error(422, body),
+            "GitHub API error (422): Validation Failed (assignees: invalid; milestone not found)"
+        );
+    }
+
+    #[test]
+    fn api_error_without_details_is_unchanged() {
+        assert_eq!(
+            map_api_error(404, r#"{"message":"Not Found"}"#),
+            "GitHub API error (404): Not Found"
+        );
+    }
+
     use super::*;
     use serde_json::json;
 

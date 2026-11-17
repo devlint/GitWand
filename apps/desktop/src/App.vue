@@ -524,13 +524,14 @@ function openNewIssue() {
   if (createIssue.available.value) void createIssue.open();
 }
 
-/** "Create issue from commit": the commit is linked only once it is on a remote. */
+/** "Create issue from commit": the commit is linked only once `origin` has it
+ *  (the link goes to origin's page; a commit only on another remote would 404). */
 async function openIssueFromCommit(entry: IssueCommitEntry) {
   const cwd = repoFolderPath.value;
   if (!cwd || !createIssue.available.value) return;
   let pushed = false;
   try {
-    const r = await gitExec(cwd, ["for-each-ref", "--contains", entry.hashFull, "--count=1", "--format=%(refname)", "refs/remotes/"]);
+    const r = await gitExec(cwd, ["for-each-ref", "--contains", entry.hashFull, "--count=1", "--format=%(refname)", "refs/remotes/origin/"]);
     pushed = r.exitCode === 0 && r.stdout.trim() !== "";
   } catch { /* unknown → unlinked, never a 404 link */ }
   const origin = createIssue.originHtmlUrl.value;

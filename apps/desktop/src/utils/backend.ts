@@ -4665,8 +4665,14 @@ export async function ghListMilestones(cwd: string, repo: string): Promise<RepoM
   return devJson<RepoMilestone[]>(res, "gh list milestones");
 }
 
+/** Same shape as `ghListReviewerCandidates` (`avatar_url` → `avatarUrl`). */
 export async function ghListAssignees(cwd: string, repo: string): Promise<ReviewerCandidate[]> {
-  if (isTauri()) return tauriInvoke<ReviewerCandidate[]>("gh_list_assignees", { cwd, repo });
-  const res = await devFetch(`${DEV_SERVER}/api/gh-list-assignees?cwd=${encodeURIComponent(cwd)}&repo=${encodeURIComponent(repo)}`);
-  return devJson<ReviewerCandidate[]>(res, "gh list assignees");
+  type Raw = { login: string; name?: string | null; avatar_url?: string | null };
+  const raw = isTauri()
+    ? await tauriInvoke<Raw[]>("gh_list_assignees", { cwd, repo })
+    : await devJson<Raw[]>(
+        await devFetch(`${DEV_SERVER}/api/gh-list-assignees?cwd=${encodeURIComponent(cwd)}&repo=${encodeURIComponent(repo)}`),
+        "gh list assignees",
+      );
+  return raw.map((u) => ({ login: u.login, name: u.name ?? null, avatarUrl: u.avatar_url ?? null }));
 }

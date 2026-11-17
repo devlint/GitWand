@@ -542,7 +542,7 @@ pub(crate) fn ai_cmd(binary: &str, cli: AiCli) -> std::process::Command {
 /// any local user can read it with `ps`. The write happens on its own thread:
 /// a CLI that starts printing before it has drained stdin would otherwise
 /// deadlock against a full stdout pipe.
-pub(crate) fn output_with_stdin(
+fn output_with_stdin(
     mut cmd: std::process::Command,
     input: String,
 ) -> std::io::Result<std::process::Output> {

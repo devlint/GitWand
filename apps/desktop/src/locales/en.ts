@@ -2714,7 +2714,6 @@ const en = {
     checkForUpdates: "Check for Updates\u2026",
   },
 
-  // \u2500\u2500\u2500 In-app help view \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   createIssue: {
     title: "New issue",
     loading: "Checking where this issue can go…",
@@ -2735,7 +2734,9 @@ const en = {
     assignees: "Assignees",
     milestone: "Milestone",
     noMilestone: "No milestone",
-    discardConfirm: "Discard this issue? What you typed will be lost.",
+    discardTitle: "Discard this issue?",
+    discardConfirm: "What you typed will be lost.",
+    discard: "Discard",
     cancel: "Cancel",
     create: "Create issue",
     creating: "Creating…",
@@ -2746,6 +2747,7 @@ const en = {
     created: "Issue #{0} created",
     open: "Open",
   },
+  // \u2500\u2500\u2500 In-app help view \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   help: {
     title: "Help",
     close: "Close",

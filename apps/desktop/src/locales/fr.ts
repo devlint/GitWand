@@ -2683,7 +2683,6 @@ const fr: Locale = {
     checkForUpdates: "Rechercher les mises à jour…",
   },
 
-  // ─── Vue d'aide intégrée ─────────────────────────────────
   createIssue: {
     title: "Nouvelle issue",
     loading: "Recherche du dépôt cible…",
@@ -2704,7 +2703,9 @@ const fr: Locale = {
     assignees: "Assignés",
     milestone: "Milestone",
     noMilestone: "Aucune milestone",
-    discardConfirm: "Abandonner cette issue ? Le texte saisi sera perdu.",
+    discardTitle: "Abandonner cette issue ?",
+    discardConfirm: "Le texte saisi sera perdu.",
+    discard: "Abandonner",
     cancel: "Annuler",
     create: "Créer l’issue",
     creating: "Création…",
@@ -2715,6 +2716,7 @@ const fr: Locale = {
     created: "Issue #{0} créée",
     open: "Ouvrir",
   },
+  // ─── Vue d'aide intégrée ─────────────────────────────────
   help: {
     title: "Aide",
     close: "Fermer",

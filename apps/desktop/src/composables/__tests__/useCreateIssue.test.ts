@@ -173,4 +173,43 @@ describe("useCreateIssue", () => {
     await api.open();
     expect(api.originHtmlUrl.value).toBe("https://github.com/me/app");
   });
+
+  it("ignores open() while the form is already open, keeping what was typed", async () => {
+    const p = provider();
+    const { api } = setup(p);
+    await api.open();
+    api.title.value = "typed";
+    await api.open({ title: "other", body: "" });
+    expect(api.title.value).toBe("typed");
+    expect(p.issueTargets).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the entry points after a failed availability read", async () => {
+    let fail = false;
+    const p = provider({ issueTargets: vi.fn(async () => { if (fail) throw new Error("offline"); return { targets: [ORIGIN], defaultRepo: "me/app" }; }) });
+    const { api } = setup(p);
+    await api.refreshAvailability();
+    expect(api.available.value).toBe(true);
+    fail = true;
+    await api.refreshAvailability();
+    expect(api.available.value).toBe(true);
+    await api.open();
+    expect(api.targetsFailed.value).toBe(true);
+    expect(api.available.value).toBe(true);
+  });
+
+  it("does not switch target while an issue is being created", async () => {
+    const created = deferred<CreatedIssue>();
+    const p = provider({ createIssue: vi.fn(() => created.promise) }, { targets: [ORIGIN, PARENT], defaultRepo: "me/app" });
+    const { api, onCreated } = setup(p);
+    await api.open();
+    api.title.value = "t";
+    const pending = api.submit();
+    api.setRepo("org/app");
+    expect(api.repo.value).toBe("me/app");
+    created.resolve({ number: 9, url: "u" });
+    await pending;
+    expect(onCreated).toHaveBeenCalledWith({ number: 9, url: "u" });
+    expect(api.isOpen.value).toBe(false);
+  });
 });

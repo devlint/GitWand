@@ -444,18 +444,40 @@ pub(crate) fn git_cmd() -> std::process::Command {
 /// stdin (interactive auth re-prompt, pager, TTY probe) never hangs waiting
 /// on input the caller has no way to supply.
 pub(crate) fn output_with_timeout(
-    mut cmd: std::process::Command,
+    cmd: std::process::Command,
     timeout: std::time::Duration,
 ) -> std::io::Result<std::process::Output> {
-    use std::io::Read;
+    output_with_timeout_input(cmd, timeout, None)
+}
+
+/// [`output_with_timeout`] with `input` written to the child's stdin (on its
+/// own thread, so a child that prints before draining stdin cannot deadlock
+/// against a full stdout pipe). `None` keeps stdin closed.
+pub(crate) fn output_with_timeout_input(
+    mut cmd: std::process::Command,
+    timeout: std::time::Duration,
+    input: Option<String>,
+) -> std::io::Result<std::process::Output> {
+    use std::io::{Read, Write};
     use std::process::Stdio;
     use std::time::{Duration, Instant};
 
-    cmd.stdin(Stdio::null());
+    cmd.stdin(if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
     let mut child = cmd.spawn()?;
+    if let (Some(text), Some(mut stdin)) = (input, child.stdin.take()) {
+        // A child that exits without reading closes the pipe: its exit status
+        // is the answer, not this write's error.
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(text.as_bytes());
+        });
+    }
     let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
     let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
 
@@ -628,6 +650,32 @@ pub(crate) fn resolve_git_dir(cwd: &str) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn timeout_with_input_feeds_stdin() {
+        let out = output_with_timeout_input(
+            std::process::Command::new("cat"),
+            std::time::Duration::from_secs(5),
+            Some("x".repeat(200_000)),
+        )
+        .unwrap();
+        assert_eq!(out.stdout.len(), 200_000);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_with_input_kills_a_hung_child() {
+        let mut cmd = std::process::Command::new("sleep");
+        cmd.arg("5");
+        let err = output_with_timeout_input(
+            cmd,
+            std::time::Duration::from_millis(100),
+            Some("ignored".to_string()),
+        )
+        .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    }
+
     use super::*;
     use std::collections::HashMap;
 

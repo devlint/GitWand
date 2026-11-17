@@ -13,6 +13,9 @@ import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
 const form = inject(CREATE_ISSUE_KEY)!;
+type AskConfirm = (o: { title: string; message: string; confirmLabel?: string; danger?: boolean }) => Promise<boolean>;
+// The app's in-app confirm (App.vue provides it); native confirm() only as a fallback.
+const askConfirm = inject<AskConfirm>("askConfirm", async (o) => window.confirm(o.message));
 
 const tab = ref<"write" | "preview">("write");
 const imagesShown = ref(false);
@@ -40,14 +43,26 @@ function toggle(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
-function onCancel() {
+async function onCancel() {
   if (form.submitting.value) return;
-  if (form.dirty.value && !window.confirm(t("createIssue.discardConfirm"))) return;
+  if (form.dirty.value) {
+    const discard = await askConfirm({
+      title: t("createIssue.discardTitle"),
+      message: t("createIssue.discardConfirm"),
+      confirmLabel: t("createIssue.discard"),
+      danger: true,
+    });
+    if (!discard) return;
+  }
   form.close();
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  // App shortcuts stay outside the form: ⌘Z here undoes typing, not the last
+  // git operation; ⌘⇧I does not reopen the form.
+  e.stopPropagation();
+  if (e.key === "Enter") {
     e.preventDefault();
     void form.submit();
   }
@@ -90,7 +105,7 @@ function onMilestone(e: Event) {
               name="ci-target"
               :value="target.repo"
               :checked="form.repo.value === target.repo"
-              :disabled="!target.hasIssues"
+              :disabled="!target.hasIssues || form.submitting.value"
               @change="form.setRepo(target.repo)"
             />
             <span class="ci-target-repo">{{ target.repo }}</span>

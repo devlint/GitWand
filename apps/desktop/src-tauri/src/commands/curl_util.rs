@@ -37,8 +37,9 @@ pub(crate) fn run_curl(
         .spawn()
         .map_err(|e| format!("curl not found or failed to spawn: {}", e))?;
     if let Some(cfg) = stdin_config {
-        // Config is tiny; curl drains stdin before producing output, so a
-        // synchronous write here can't deadlock against the stdout pipe.
+        // curl reads the whole config (auth header, request body) before it
+        // sends anything, so a synchronous write can't deadlock against the
+        // stdout pipe.
         child
             .stdin
             .take()
@@ -84,6 +85,76 @@ pub(crate) fn curl_transport_check(
     }
 }
 
+/// `s` as a double-quoted curl config value: curl unescapes `\\`, `\"`, `\n`,
+/// `\r` and `\t` inside quotes, so those are escaped and everything else is
+/// kept as is.
+fn config_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The curl argv and `--config -` stdin for a request. The auth header and the
+/// request body both go through the stdin config, never argv: a body can be
+/// long (Windows caps a command line at 32 767 characters) and carries user
+/// text any local user could read with `ps` while curl runs.
+fn curl_request(
+    method: &str,
+    url: &str,
+    auth_config: Option<&str>,
+    body_json: Option<&str>,
+    extra_headers: &[&str],
+    accept: &str,
+    dump_headers: bool,
+) -> (Vec<String>, Option<String>) {
+    const MARKER: &str = "\n__GW_HTTP_STATUS__";
+    let mut args: Vec<String> = vec![
+        "-s".to_string(),
+        "-S".to_string(), // --show-error: keep stderr diagnostics under -s
+    ];
+    if dump_headers {
+        args.push("-D".to_string());
+        args.push("-".to_string()); // dump response headers to stdout
+    }
+    args.extend([
+        "-X".to_string(),
+        method.to_string(),
+        "-H".to_string(),
+        format!("Accept: {}", accept),
+    ]);
+    for h in extra_headers {
+        args.push("-H".to_string());
+        args.push(h.to_string());
+    }
+    let mut config = auth_config.unwrap_or_default().to_string();
+    if let Some(b) = body_json {
+        args.push("-H".to_string());
+        args.push("Content-Type: application/json".to_string());
+        // `data-raw`: sent as is, no `@file` reading.
+        config.push_str(&format!("data-raw = {}\n", config_quote(b)));
+    }
+    let stdin = (!config.is_empty()).then_some(config);
+    if stdin.is_some() {
+        args.push("--config".to_string());
+        args.push("-".to_string());
+    }
+    args.push("-w".to_string());
+    args.push(format!("{}%{{http_code}}", MARKER));
+    args.push(url.to_string());
+    (args, stdin)
+}
+
 /// Execute a curl request and return `(http_status, body_text)`.
 ///
 /// Appends `-w "\n__GW_HTTP_STATUS__%{http_code}"` so the HTTP status is
@@ -100,33 +171,16 @@ pub(crate) fn curl_with_status(
     accept: &str,
 ) -> Result<(i32, String), String> {
     const MARKER: &str = "\n__GW_HTTP_STATUS__";
-    let mut args: Vec<String> = vec![
-        "-s".to_string(),
-        "-S".to_string(), // --show-error: keep stderr diagnostics under -s
-        "-X".to_string(),
-        method.to_string(),
-        "-H".to_string(),
-        format!("Accept: {}", accept),
-    ];
-    for h in extra_headers {
-        args.push("-H".to_string());
-        args.push(h.to_string());
-    }
-    if auth_config.is_some() {
-        args.push("--config".to_string());
-        args.push("-".to_string());
-    }
-    if let Some(b) = body_json {
-        args.push("-H".to_string());
-        args.push("Content-Type: application/json".to_string());
-        args.push("-d".to_string());
-        args.push(b.to_string());
-    }
-    args.push("-w".to_string());
-    args.push(format!("{}%{{http_code}}", MARKER));
-    args.push(url.to_string());
-
-    let output = run_curl(&args, auth_config)?;
+    let (args, stdin) = curl_request(
+        method,
+        url,
+        auth_config,
+        body_json,
+        extra_headers,
+        accept,
+        false,
+    );
+    let output = run_curl(&args, stdin.as_deref())?;
     // A non-zero curl exit is a transport failure (DNS/TLS/connection/library
     // load) — surface it instead of letting an empty body reach the JSON
     // parser as a cryptic "EOF" error.
@@ -162,35 +216,16 @@ pub(crate) fn curl_with_headers(
     accept: &str,
 ) -> Result<(i32, std::collections::HashMap<String, String>, String), String> {
     const MARKER: &str = "\n__GW_HTTP_STATUS__";
-    let mut args: Vec<String> = vec![
-        "-s".to_string(),
-        "-S".to_string(),
-        "-D".to_string(),
-        "-".to_string(), // dump response headers to stdout
-        "-X".to_string(),
-        method.to_string(),
-        "-H".to_string(),
-        format!("Accept: {}", accept),
-    ];
-    for h in extra_headers {
-        args.push("-H".to_string());
-        args.push(h.to_string());
-    }
-    if auth_config.is_some() {
-        args.push("--config".to_string());
-        args.push("-".to_string());
-    }
-    if let Some(b) = body_json {
-        args.push("-H".to_string());
-        args.push("Content-Type: application/json".to_string());
-        args.push("-d".to_string());
-        args.push(b.to_string());
-    }
-    args.push("-w".to_string());
-    args.push(format!("{}%{{http_code}}", MARKER));
-    args.push(url.to_string());
-
-    let output = run_curl(&args, auth_config)?;
+    let (args, stdin) = curl_request(
+        method,
+        url,
+        auth_config,
+        body_json,
+        extra_headers,
+        accept,
+        true,
+    );
+    let output = run_curl(&args, stdin.as_deref())?;
     curl_transport_check(
         output.status.success(),
         output.status.code(),
@@ -274,5 +309,109 @@ mod tests {
     fn transport_error_handles_signal_kill() {
         let err = curl_transport_check(false, None, "").unwrap_err();
         assert!(err.contains("signal"), "got: {err}");
+    }
+
+    #[test]
+    fn request_body_goes_to_stdin_config_not_argv() {
+        let body = "{\"body\":\"secret \\\" text\\n--flag\"}";
+        let (args, cfg) = curl_request(
+            "POST",
+            "https://api.github.com/x",
+            Some("header = \"Authorization: Bearer t\"\n"),
+            Some(body),
+            &[],
+            "application/json",
+            false,
+        );
+        assert!(args.iter().all(|a| !a.contains("secret")), "{:?}", args);
+        assert!(args.windows(2).any(|w| w[0] == "--config" && w[1] == "-"));
+        let cfg = cfg.unwrap();
+        assert!(cfg.starts_with("header = \"Authorization: Bearer t\"\n"));
+        assert!(cfg.contains("data-raw = "));
+    }
+
+    #[test]
+    fn body_without_auth_still_uses_stdin_config() {
+        let (args, cfg) = curl_request("POST", "u", None, Some("{}"), &[], "a", false);
+        assert!(args.windows(2).any(|w| w[0] == "--config" && w[1] == "-"));
+        assert_eq!(cfg.as_deref(), Some("data-raw = \"{}\"\n"));
+    }
+
+    #[test]
+    fn no_body_no_auth_no_stdin() {
+        let (args, cfg) = curl_request("GET", "u", None, None, &[], "a", false);
+        assert!(!args.iter().any(|a| a == "--config"));
+        assert!(cfg.is_none());
+    }
+
+    #[test]
+    fn config_quoting_escapes_what_curl_unescapes() {
+        assert_eq!(
+            config_quote("a\\b\"c\nd\re\tf"),
+            "\"a\\\\b\\\"c\\nd\\re\\tf\""
+        );
+    }
+
+    #[test]
+    fn header_dump_flag_only_when_asked() {
+        let (with, _) = curl_request("GET", "u", None, None, &[], "a", true);
+        let (without, _) = curl_request("GET", "u", None, None, &[], "a", false);
+        assert!(with.windows(2).any(|w| w[0] == "-D" && w[1] == "-"));
+        assert!(!without.iter().any(|a| a == "-D"));
+    }
+
+    /// Real curl against a local server: the body read back from the config
+    /// file is byte-for-byte what was sent (quotes, backslashes, newlines,
+    /// `$`, `--flag` lines, non-ASCII, 60 KB).
+    #[test]
+    fn curl_sends_the_config_body_verbatim() {
+        use std::io::{Read, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 65536];
+            loop {
+                let n = sock.read(&mut chunk).unwrap();
+                buf.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&buf).to_string();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let len: usize = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if body.len() >= len {
+                        let _ = sock.write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                        );
+                        return body[..len].to_string();
+                    }
+                }
+                if n == 0 {
+                    return String::new();
+                }
+            }
+        });
+        let payload = serde_json::json!({
+            "title": "t",
+            "body": "a \"q\" \\ $HOME\n--flag\r\n\té — 日本\n".repeat(2000),
+        })
+        .to_string();
+        let (status, _) = curl_with_status(
+            "POST",
+            &format!("http://127.0.0.1:{}/x", port),
+            None,
+            Some(&payload),
+            &[],
+            "application/json",
+        )
+        .unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(server.join().unwrap(), payload);
     }
 }

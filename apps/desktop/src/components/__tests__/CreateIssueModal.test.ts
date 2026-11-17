@@ -27,20 +27,25 @@ const flush = async () => {
   await nextTick();
 };
 
-async function mount(targets: IssueTargets = { targets: [ORIGIN], defaultRepo: "me/app" }) {
+async function mount(
+  targets: IssueTargets = { targets: [ORIGIN], defaultRepo: "me/app" },
+  askConfirm: (o: { title: string; message: string }) => Promise<boolean> = async () => true,
+  createIssue: () => Promise<{ number: number; url: string }> = async () => ({ number: 1, url: "u" }),
+) {
   const provider = {
     name: "github",
     issueTargets: vi.fn(async () => targets),
     listLabels: vi.fn(async () => []),
     listMilestones: vi.fn(async () => []),
     listAssignees: vi.fn(async () => []),
-    createIssue: vi.fn(async () => ({ number: 1, url: "u" })),
+    createIssue: vi.fn(createIssue),
   } as unknown as ForgeProvider;
   const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn() });
   const host = document.createElement("div");
   document.body.appendChild(host);
   app = createApp(CreateIssueModal);
   app.provide(CREATE_ISSUE_KEY, form);
+  app.provide("askConfirm", askConfirm);
   app.mount(host);
   await form.open();
   await flush();
@@ -94,21 +99,51 @@ describe("CreateIssueModal", () => {
     expect(document.body.textContent).toContain("createIssue.issuesOff");
   });
 
-  it("asks before discarding typed text, and closes a clean form directly", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const { form } = await mount();
+  it("asks before discarding typed text (in-app confirm), and closes a clean form directly", async () => {
+    const ask = vi.fn(async () => false);
+    const native = vi.spyOn(window, "confirm");
+    const { form } = await mount(undefined, ask);
     const cancel = () =>
       [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "createIssue.cancel")!.click();
     form.title.value = "typed";
     await nextTick();
     cancel();
-    expect(confirm).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(native).not.toHaveBeenCalled();
     expect(form.isOpen.value).toBe(true);
     form.title.value = "";
     await nextTick();
     cancel();
-    expect(confirm).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(ask).toHaveBeenCalledTimes(1);
     expect(form.isOpen.value).toBe(false);
+  });
+
+  it("locks the target choice while the issue is being created", async () => {
+    let finish!: (v: { number: number; url: string }) => void;
+    const { form } = await mount(
+      { targets: [ORIGIN, { ...PARENT_OFF, hasIssues: true }], defaultRepo: "me/app" },
+      undefined,
+      () => new Promise((r) => { finish = r; }),
+    );
+    form.title.value = "t";
+    void form.submit();
+    await nextTick();
+    const radios = [...document.querySelectorAll<HTMLInputElement>("input[name=ci-target]")];
+    expect(radios.every((r) => r.disabled)).toBe(true);
+    finish({ number: 1, url: "u" });
+  });
+
+  it("keeps editing shortcuts (⌘Z, ⌘⇧I) inside the form away from the app", async () => {
+    await mount();
+    const appKeys = vi.fn();
+    window.addEventListener("keydown", appKeys);
+    const body = document.querySelector<HTMLTextAreaElement>(".ci-textarea")!;
+    body.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true }));
+    body.dispatchEvent(new KeyboardEvent("keydown", { key: "I", metaKey: true, shiftKey: true, bubbles: true }));
+    window.removeEventListener("keydown", appKeys);
+    expect(appKeys).not.toHaveBeenCalled();
   });
 
   it("explains that issues are off and shows no form when no target has them", async () => {

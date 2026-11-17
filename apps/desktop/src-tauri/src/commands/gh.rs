@@ -36,6 +36,8 @@ use std::time::{Duration, Instant};
 /// devlint/GitWand#161 reported the 30s timeout reappearing once the per-PR
 /// stats enrichment below was added.
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
+/// `gh api` calls of `gh_api_on`, writes included: longer than a read, still bounded.
+const GH_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Timeout for the best-effort `git fetch origin` that refreshes
 /// remote-tracking refs before the per-PR numstat diffs below.
 const GH_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -2207,14 +2209,11 @@ pub(crate) fn gh_api_on(
 ) -> Result<serde_json::Value, String> {
     let mut cmd = gh_host_cmd(Some(repo));
     cmd.args(["api", "-X", method, path]).current_dir(cwd);
-    let output = match stdin {
-        Some(body) => {
-            cmd.args(["--input", "-"]);
-            super::ai::output_with_stdin(cmd, body)
-        }
-        None => output_with_timeout(cmd, GH_TIMEOUT),
+    if stdin.is_some() {
+        cmd.args(["--input", "-"]);
     }
-    .map_err(|e| format!("gh api: {}", e))?;
+    let output = crate::git::output_with_timeout_input(cmd, GH_WRITE_TIMEOUT, stdin)
+        .map_err(|e| format!("gh api: {}", e))?;
     if !output.status.success() {
         return Err(format!(
             "gh api {} {}: {}",

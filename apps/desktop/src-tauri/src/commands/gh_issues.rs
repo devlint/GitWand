@@ -83,14 +83,18 @@ pub(crate) fn api_get(cwd: &str, repo: &GhRepo, path: &str) -> Result<serde_json
 const TARGETS_TTL: Duration = Duration::from_secs(5 * 60);
 
 /// The issue targets of `cwd`, cached per repository for five minutes (every
-/// form action re-validates against them). Empty when `origin` is not GitHub.
-pub(crate) fn issue_targets_inner(cwd: &str) -> Result<IssueTargets, String> {
+/// form action re-validates against them); `fresh` reads them again, as the
+/// form does when it opens (issues just turned on, `origin` just changed).
+/// Empty when `origin` is not GitHub.
+pub(crate) fn issue_targets_inner(cwd: &str, fresh: bool) -> Result<IssueTargets, String> {
     type Cache = HashMap<String, (IssueTargets, Instant)>;
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some((t, at)) = cache.lock().ok().and_then(|m| m.get(cwd).cloned()) {
-        if at.elapsed() < TARGETS_TTL {
-            return Ok(t);
+    if !fresh {
+        if let Some((t, at)) = cache.lock().ok().and_then(|m| m.get(cwd).cloned()) {
+            if at.elapsed() < TARGETS_TTL {
+                return Ok(t);
+            }
         }
     }
     let Some(origin) = gh_origin_repo(cwd) else {
@@ -121,7 +125,7 @@ pub(crate) fn resolve_issue_target(
     repo: &str,
     need_issues: bool,
 ) -> Result<GhRepo, String> {
-    let targets = issue_targets_inner(cwd)?;
+    let targets = issue_targets_inner(cwd, false)?;
     check_target(&targets, repo, need_issues)?;
     let origin = gh_origin_repo(cwd).ok_or("No GitHub 'origin' remote in this repository.")?;
     Ok(origin.sibling(repo.to_string()))
@@ -130,7 +134,7 @@ pub(crate) fn resolve_issue_target(
 /// Where an issue can be filed from `cwd` (#301).
 #[tauri::command]
 pub(crate) async fn gh_issue_targets(cwd: String) -> Result<IssueTargets, String> {
-    tauri::async_runtime::spawn_blocking(move || issue_targets_inner(&cwd))
+    tauri::async_runtime::spawn_blocking(move || issue_targets_inner(&cwd, true))
         .await
         .map_err(|e| e.to_string())?
 }

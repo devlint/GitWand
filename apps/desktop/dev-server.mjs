@@ -18,6 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
+import { devIssueTargetsFrom, devCheckIssueTarget, devIssuePayload } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -1264,44 +1265,13 @@ async function githubFetch(path, token, accept = "application/vnd.github+json", 
 
 // ─── Issue creation (#301) — mirrors `commands/gh_issues.rs` ────────────────
 
-/** `GET /repos/{nwo}` JSON → the issue target, or null. */
-function devIssueTarget(v, isOrigin) {
-  if (!v || typeof v.full_name !== "string") return null;
-  return { repo: v.full_name, htmlUrl: v.html_url || "", hasIssues: v.has_issues === true, isOrigin };
-}
-
 /** Same rules as `targets_from`: origin, then its parent when it is a fork. */
 async function devIssueTargets(cwd, token) {
   const nwo = getRepoNwo(cwd);
   if (!nwo) return { targets: [], defaultRepo: null };
   const resp = await githubFetch(`/repos/${nwo}`, token);
   if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
-  const o = await resp.json();
-  const targets = [devIssueTarget(o, true)].filter(Boolean);
-  if (o.fork === true) {
-    const p = devIssueTarget(o.parent, false);
-    if (p) targets.push(p);
-  }
-  return { targets, defaultRepo: targets.find((t) => t.hasIssues)?.repo ?? null };
-}
-
-/** `check_target` with `need_issues`: the error text, or null when allowed. */
-function devCheckIssueTarget(targets, repo) {
-  const t = targets.targets.find((x) => x.repo === repo);
-  if (!t) return `Not an issue target for this repository: ${repo}`;
-  if (!t.hasIssues) return `Issues are disabled on ${repo}`;
-  return null;
-}
-
-/** `issue_payload`: the title trimmed and required, empty optionals left out. */
-function devIssuePayload(input) {
-  const title = typeof input?.title === "string" ? input.title.trim() : "";
-  if (!title) return { error: "Title is required" };
-  const p = { title, body: typeof input.body === "string" ? input.body : "" };
-  if (Array.isArray(input.labels) && input.labels.length) p.labels = input.labels;
-  if (Array.isArray(input.assignees) && input.assignees.length) p.assignees = input.assignees;
-  if (Number.isInteger(input.milestone)) p.milestone = input.milestone;
-  return { payload: p };
+  return devIssueTargetsFrom(await resp.json());
 }
 
 /** Up to `maxPages` pages of 100 of the array at `path` (`query` ends with `&`). */
