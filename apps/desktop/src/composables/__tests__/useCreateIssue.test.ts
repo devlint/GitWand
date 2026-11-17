@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { ref } from "vue";
-import { useCreateIssue, isNewIssueShortcut } from "../useCreateIssue";
+import { useCreateIssue, isNewIssueShortcut, newIssueShortcutLabel } from "../useCreateIssue";
 import type { ForgeProvider } from "../forge/types";
 import type { IssueTargets, CreatedIssue, RepoLabel } from "../../utils/backend";
 
@@ -392,5 +392,42 @@ describe("isNewIssueShortcut", () => {
   it("leaves Ctrl+Shift+I to the WebView inspector elsewhere, using Ctrl+Alt+I", () => {
     expect(isNewIssueShortcut(ev({ ctrlKey: true, shiftKey: true }), false)).toBe(false);
     expect(isNewIssueShortcut(ev({ ctrlKey: true, altKey: true, key: "i" }), false)).toBe(true);
+  });
+});
+
+describe("useCreateIssue — prefill and target switch", () => {
+  it("keeps a late prefill when the user switched target while it loaded", async () => {
+    const prefill = deferred<{ title: string; body: string }>();
+    const { api } = setup(provider({}, { targets: [ORIGIN, PARENT], defaultRepo: "me/app" }));
+    const opening = api.open(prefill.promise);
+    await flush();
+    api.setRepo("org/app");
+    prefill.resolve({ title: "from commit", body: "b" });
+    await opening;
+    expect(api.repo.value).toBe("org/app");
+    expect(api.title.value).toBe("from commit");
+  });
+});
+
+describe("isNewIssueShortcut — off macOS", () => {
+  const ev = (o: Partial<KeyboardEvent> & { altGraph?: boolean; target?: EventTarget | null }) =>
+    ({
+      key: "i", metaKey: false, ctrlKey: true, shiftKey: false, altKey: true, target: null,
+      getModifierState: (k: string) => k === "AltGraph" && !!o.altGraph,
+      ...o,
+    }) as unknown as KeyboardEvent;
+  it("ignores AltGr+I (a character on some layouts)", () => {
+    expect(isNewIssueShortcut(ev({ altGraph: true }), false)).toBe(false);
+  });
+  it("ignores the keystroke inside a text field or the terminal", () => {
+    const input = { tagName: "TEXTAREA", isContentEditable: false, closest: () => null } as unknown as EventTarget;
+    const term = { tagName: "DIV", isContentEditable: false, closest: (sel: string) => (sel.includes("xterm") ? {} : null) } as unknown as EventTarget;
+    expect(isNewIssueShortcut(ev({ target: input }), false)).toBe(false);
+    expect(isNewIssueShortcut(ev({ target: term }), false)).toBe(false);
+    expect(isNewIssueShortcut(ev({}), false)).toBe(true);
+  });
+  it("is labelled for the platform", () => {
+    expect(newIssueShortcutLabel(true)).toBe("⌘⇧I");
+    expect(newIssueShortcutLabel(false)).toBe("Ctrl+Alt+I");
   });
 });

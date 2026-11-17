@@ -61,6 +61,13 @@ describe("commitIssuePrefill", () => {
     expect(commitIssuePrefill(entry({ message: "short" }), null).title).toBe("short");
   });
 
+  it("measures the title in UTF-16 units (the input's maxlength) without splitting a pair", () => {
+    const t = commitIssuePrefill(entry({ message: "😀".repeat(200) }), null).title;
+    expect(t.length).toBeLessThanOrEqual(256);
+    expect(/[\uD800-\uDBFF]$/.test(t.slice(0, -1))).toBe(false);
+    expect(t.endsWith("…")).toBe(true);
+  });
+
   it("names the author", () => {
     expect(commitIssuePrefill(entry(), null).body).toContain("Ada Lovelace");
   });

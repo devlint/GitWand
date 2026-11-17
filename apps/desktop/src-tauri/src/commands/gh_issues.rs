@@ -91,12 +91,12 @@ fn api_call(
     path: &str,
     body: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    // A write is bounded like the `gh` path (GH_WRITE_TIMEOUT): a POST
-    // stalled after sending would outlive the form's wait and invite a retry
-    // that duplicates it.
-    let max_time = (method != "GET").then_some(60);
+    // Bounded like the `gh` path (GH_WRITE_TIMEOUT): a stalled read would
+    // hold the form on "Checking…", a stalled POST would outlive the form's
+    // wait and invite a retry that duplicates it.
+    let max_time = Some(if method == "GET" { 30 } else { 60 });
     let rest = |tok: &str| rest_api_json(method, path, tok, body.as_deref(), max_time);
-    let is_origin = gh_origin_repo(cwd).as_ref() == Some(repo);
+    let is_origin = gh_origin_repo(cwd).is_some_and(|o| same_repo(&o, repo));
     let attempt = if is_origin {
         with_rest(cwd, rest)
     } else {
@@ -106,6 +106,12 @@ fn api_call(
         Some(r) => r,
         None => gh_api_on(cwd, repo, method, path, body),
     }
+}
+
+/// The same repository: same host, `owner/repo` compared without case (the
+/// remote URL and the API's `full_name` may differ in case).
+fn same_repo(a: &GhRepo, b: &GhRepo) -> bool {
+    a.selector().eq_ignore_ascii_case(&b.selector())
 }
 
 /// `GET {path}` on `repo`'s host.
@@ -601,5 +607,16 @@ mod tests {
         o["permissions"] = json!({"push": true});
         assert!(targets_from(&o, None).targets[0].can_triage);
         assert!(!targets_from(&origin(true, false), None).targets[0].can_triage);
+    }
+
+    #[test]
+    fn same_repo_ignores_case_but_not_host_or_name() {
+        let a = GhRepo::for_test("", "devlint/gitwand");
+        assert!(same_repo(&a, &GhRepo::for_test("", "devlint/GitWand")));
+        assert!(!same_repo(
+            &a,
+            &GhRepo::for_test("ghe.example.com/", "devlint/gitwand")
+        ));
+        assert!(!same_repo(&a, &GhRepo::for_test("", "devlint/other")));
     }
 }

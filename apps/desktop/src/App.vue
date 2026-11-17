@@ -193,7 +193,7 @@ const { isOffline: navIsOffline } = useNetworkStatus();
 const { isOnline: probedOnline, probeConnectivity } = useConnectivity();
 const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
 import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment, type GitLogEntry as IssueCommitEntry } from "./utils/backend";
-import { useCreateIssue, CREATE_ISSUE_KEY, isNewIssueShortcut } from "./composables/useCreateIssue";
+import { useCreateIssue, CREATE_ISSUE_KEY, isNewIssueShortcut, newIssueShortcutLabel } from "./composables/useCreateIssue";
 import { githubProvider } from "./composables/forge/useForge";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import type { ForgeName } from "./composables/forge/types";
@@ -2183,7 +2183,7 @@ const paletteActions = computed<PaletteAction[]>(() => {
   // Universal: always available
   out.push({ id: "new-tab", label: t("header.paletteNewTab") });
 
-  if (createIssue.available.value) out.push({ id: "new-issue", label: t("createIssue.paletteLabel"), hint: "⌘⇧I" });
+  if (createIssue.available.value) out.push({ id: "new-issue", label: t("createIssue.paletteLabel"), hint: newIssueShortcutLabel(navigator.platform.toLowerCase().includes("mac")) });
 
   // Theme toggle — label reflects the target mode (what you'll flip TO).
   out.push({

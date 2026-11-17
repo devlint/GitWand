@@ -5532,16 +5532,9 @@ async function handleRequest(req, res) {
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
         const nwo = getRepoNwo(resolve(cwd));
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        // Paginate up to 3 pages of 100 = 300 candidates.
-        const items = [];
-        for (let page = 1; page <= 3; page++) {
-          const resp = await githubFetch(`/repos/${nwo}/assignees?per_page=100&page=${page}`, token);
-          if (!resp.ok) break;
-          const raw = await resp.json();
-          if (!Array.isArray(raw) || raw.length === 0) break;
-          items.push(...raw);
-          if (raw.length < 100) break;
-        }
+        // Up to 3 pages of 100, read like the Rust `api_get_pages` (an error
+        // page fails the call instead of returning partial data).
+        const items = await devGithubPages(`/repos/${nwo}/assignees`, "", token, 3);
         return jsonResponse(req, res, devAssigneesFrom(items));
       } catch (err) {
         console.error("[gh-reviewer-candidates]", err.message);

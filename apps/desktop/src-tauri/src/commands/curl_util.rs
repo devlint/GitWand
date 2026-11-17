@@ -107,6 +107,10 @@ pub(crate) fn quote_config(s: &str) -> String {
     out
 }
 
+/// Written after the body by curl's `-w` and split off by the parsers: one
+/// constant, so the writer and the readers cannot drift apart.
+const MARKER: &str = "\n__GW_HTTP_STATUS__";
+
 /// How a [`curl_request`] reads its answer and how long it may take.
 #[derive(Clone, Copy, Default)]
 struct RequestOpts {
@@ -133,7 +137,6 @@ fn curl_request(
         dump_headers,
         max_time_secs,
     } = opts;
-    const MARKER: &str = "\n__GW_HTTP_STATUS__";
     let mut args: Vec<String> = vec![
         "-s".to_string(),
         "-S".to_string(), // --show-error: keep stderr diagnostics under -s
@@ -214,7 +217,6 @@ pub(crate) fn curl_with_status_bounded(
     accept: &str,
     max_time_secs: Option<u32>,
 ) -> Result<(i32, String), String> {
-    const MARKER: &str = "\n__GW_HTTP_STATUS__";
     let (args, stdin) = curl_request(
         method,
         url,
@@ -262,7 +264,6 @@ pub(crate) fn curl_with_headers(
     extra_headers: &[&str],
     accept: &str,
 ) -> Result<(i32, std::collections::HashMap<String, String>, String), String> {
-    const MARKER: &str = "\n__GW_HTTP_STATUS__";
     let (args, stdin) = curl_request(
         method,
         url,

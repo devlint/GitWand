@@ -24,15 +24,35 @@ async function gitCommitOnOrigin(cwd: string, sha: string): Promise<boolean> {
   return r.exitCode === 0 && r.stdout.trim() !== "";
 }
 
+/** The "New issue" shortcut as shown to the user. */
+export function newIssueShortcutLabel(mac: boolean): string {
+  return mac ? "⌘⇧I" : "Ctrl+Alt+I";
+}
+
+/** A text field, an editable element or the terminal: where keys type. */
+function isTypingTarget(t: EventTarget | null): boolean {
+  const el = t as (HTMLElement & { closest?: (s: string) => Element | null }) | null;
+  if (!el || typeof el !== "object") return false;
+  return (
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.tagName === "SELECT" ||
+    el.isContentEditable === true ||
+    !!el.closest?.(".xterm")
+  );
+}
+
 /**
  * The "New issue" shortcut: ⌘⇧I on macOS; Ctrl+Alt+I elsewhere, where
- * Ctrl+Shift+I belongs to the WebView's inspector.
+ * Ctrl+Shift+I belongs to the WebView's inspector. Off macOS Ctrl+Alt is
+ * also AltGr, which types characters on many layouts: never taken from AltGr
+ * nor where the user is typing.
  */
 export function isNewIssueShortcut(e: KeyboardEvent, mac: boolean): boolean {
   if (e.key !== "I" && e.key !== "i") return false;
-  return mac
-    ? e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey
-    : e.ctrlKey && e.altKey && !e.metaKey;
+  if (mac) return e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey;
+  if (e.getModifierState?.("AltGraph") || isTypingTarget(e.target)) return false;
+  return e.ctrlKey && e.altKey && !e.metaKey;
 }
 
 /** A failed availability check is retried on window focus at most this often. */
@@ -131,6 +151,9 @@ export function useCreateIssue(deps: {
   // Bumped by every open, target switch and close: an answer that comes back
   // under an older value belongs to a form that is no longer on screen.
   let generation = 0;
+  // Bumped only when the form is (re)opened or closed: a target switch does
+  // not discard the prefill still on its way.
+  let openGeneration = 0;
   let availabilitySeq = 0;
 
   const dirty = computed(
@@ -207,6 +230,7 @@ export function useCreateIssue(deps: {
 
   function reset() {
     generation++;
+    openGeneration++;
     repo.value = null;
     title.value = "";
     body.value = "";
@@ -223,6 +247,7 @@ export function useCreateIssue(deps: {
     if (isOpen.value) return;
     reset();
     const gen = generation;
+    const openGen = openGeneration;
     formCwd = deps.cwd.value;
     isOpen.value = true;
     loading.value = true;
@@ -248,7 +273,7 @@ export function useCreateIssue(deps: {
     // The form is on screen; the prefill (a commit's, after its git check)
     // lands when ready, unless the user has started typing meanwhile.
     const filled = await pending;
-    if (gen !== generation || !filled) return;
+    if (openGen !== openGeneration || !filled) return;
     if (title.value !== initial.value.title || body.value !== initial.value.body) return;
     initial.value = { title: filled.title, body: filled.body };
     title.value = filled.title;

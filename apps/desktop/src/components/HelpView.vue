@@ -13,6 +13,7 @@
  */
 import { computed, ref } from "vue";
 import { useI18n } from "../composables/useI18n";
+import { newIssueShortcutLabel } from "../composables/useCreateIssue";
 import ModalCloseButton from "./ModalCloseButton.vue";
 import type { LocaleKey } from "../locales";
 
@@ -47,7 +48,7 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   { action: "help.keyboardShortcuts.openRepo",    keys: ["⌘O"] },
   { action: "help.keyboardShortcuts.settings",    keys: ["⌘,"] },
   { action: "help.keyboardShortcuts.commandPalette", keys: ["⌘K"] },
-  { action: "help.keyboardShortcuts.newIssue", keys: ["⌘⇧I"] },
+  { action: "help.keyboardShortcuts.newIssue", keys: [newIssueShortcutLabel(navigator.platform.toLowerCase().includes("mac"))] },
   { action: "help.keyboardShortcuts.fetch",       keys: ["⌘⇧F"] },
   { action: "help.keyboardShortcuts.push",        keys: ["⌘P"] },
   { action: "help.keyboardShortcuts.newBranch",   keys: ["⌘⇧B"] },

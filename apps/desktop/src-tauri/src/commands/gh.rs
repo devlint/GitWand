@@ -1347,6 +1347,15 @@ impl GhRepo {
         self.enterprise_host().unwrap_or("github.com")
     }
 
+    /// A repository from its parts, for tests outside this module.
+    #[cfg(test)]
+    pub(crate) fn for_test(host_prefix: &str, nwo: &str) -> GhRepo {
+        GhRepo {
+            host_prefix: host_prefix.to_string(),
+            nwo: nwo.to_string(),
+        }
+    }
+
     /// Another repository on the same host (a fork's parent).
     pub(crate) fn sibling(&self, nwo: String) -> GhRepo {
         GhRepo {
@@ -2090,6 +2099,28 @@ fn gh_api_json(cwd: &str, path: &str) -> Result<serde_json::Value, String> {
 }
 
 /// [`gh_api_json`] with an `Accept` media type (e.g. [`github_api::HTML_ACCEPT`]).
+/// A finished `gh api` call: its stderr as the error on failure, else stdout
+/// parsed as JSON — `empty` when there is none (a 204, an empty list).
+fn gh_api_parse(
+    output: std::process::Output,
+    what: &str,
+    empty: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if !output.status.success() {
+        return Err(format!(
+            "{}: {}",
+            what,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Ok(empty);
+    }
+    serde_json::from_str(trimmed).map_err(|e| format!("parse {} response: {}", what, e))
+}
+
 fn gh_api_json_accept(
     cwd: &str,
     path: &str,
@@ -2105,18 +2136,11 @@ fn gh_api_json_accept(
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("gh api: {}", e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh api failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() {
-        return Ok(serde_json::Value::Array(Vec::new()));
-    }
-    serde_json::from_str(trimmed).map_err(|e| format!("parse gh api response: {}", e))
+    gh_api_parse(
+        output,
+        "gh api failed",
+        serde_json::Value::Array(Vec::new()),
+    )
 }
 
 /// `gh api -X {method} {path}` on `repo`'s host, `stdin` sent as the request
@@ -2136,20 +2160,11 @@ pub(crate) fn gh_api_on(
     }
     let output = crate::git::output_with_timeout_input(cmd, GH_WRITE_TIMEOUT, stdin)
         .map_err(|e| format!("gh api: {}", e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh api {} {}: {}",
-            method,
-            path,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() {
-        return Ok(serde_json::Value::Null);
-    }
-    serde_json::from_str(trimmed).map_err(|e| format!("parse gh api response: {}", e))
+    gh_api_parse(
+        output,
+        &format!("gh api {} {}", method, path),
+        serde_json::Value::Null,
+    )
 }
 
 /// Run a mutating `gh api` call (`POST`/`DELETE`) with optional `-f key=value` fields.
@@ -2169,19 +2184,11 @@ fn gh_api_write(
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("gh api write: {}", e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh api {}: {}",
-            method,
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() {
-        return Ok(serde_json::Value::Null);
-    }
-    serde_json::from_str(trimmed).map_err(|e| format!("parse gh api write response: {}", e))
+    gh_api_parse(
+        output,
+        &format!("gh api {}", method),
+        serde_json::Value::Null,
+    )
 }
 
 fn reactions_api_path(nwo: &str, target_type: &str, target_id: i64) -> String {
