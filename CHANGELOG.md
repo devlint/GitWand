@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Screenshots attached on GitHub show in pull requests, private repositories included (#302).** Files uploaded through GitHub's editor (`github.com/user-attachments/assets/…`, older `user-images.githubusercontent.com` URLs) in a pull request's description, comments and reviews were withheld until "Show images" was clicked, and on a private repository stayed broken even then: GitHub only serves them there to a signed-in browser. They now load without that click — GitHub hosts them and already serves the pull request being read, so no third party learns it was opened; images on other hosts are still withheld as before. For a private repository GitWand fetches the short-lived signed URLs GitHub gives out with the rendered bodies and swaps them in, fetching them again when a new attachment appears or the ones in use have expired. Reported by Pannboo.
+
 ## [3.13.2] - 2026-11-16
 
 ### Fixed

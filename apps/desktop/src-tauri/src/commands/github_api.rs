@@ -2448,10 +2448,128 @@ pub(crate) async fn github_token_present() -> Result<bool, String> {
     Ok(settings_github_token().is_some())
 }
 
+// ─── Signed URLs of uploaded attachments (#302) ─────────────────────────────
+
+/// Media type that makes GitHub add a rendered `body_html` to the issue,
+/// comment and review objects it returns.
+pub(crate) const HTML_ACCEPT: &str = "application/vnd.github.html+json";
+
+/// Where `body_html` points the files uploaded through GitHub's editor
+/// (`github.com/user-attachments/assets/<uuid>` in the markdown): short-lived
+/// URLs signed with a `jwt` query parameter, which load without credentials —
+/// the only way to show an attachment of a private repository, whose
+/// markdown URL answers 404 to anyone but a signed-in browser.
+const SIGNED_ATTACHMENT_PREFIX: &str = "https://private-user-images.githubusercontent.com/";
+
+/// The API paths whose `body_html` covers every markdown body of PR `number`
+/// in `nwo`: its description, conversation comments, inline review comments
+/// and review summaries. Same page size as the comment lists GitWand shows.
+pub(crate) fn pr_attachment_html_paths(nwo: &str, number: i64) -> [String; 4] {
+    [
+        format!("repos/{}/issues/{}", nwo, number),
+        format!("repos/{}/issues/{}/comments?per_page=100", nwo, number),
+        format!("repos/{}/pulls/{}/comments?per_page=100", nwo, number),
+        format!("repos/{}/pulls/{}/reviews?per_page=100", nwo, number),
+    ]
+}
+
+/// The `body_html` of `v` — one object, or each element of an array.
+pub(crate) fn body_htmls(v: &serde_json::Value) -> Vec<String> {
+    let one = |x: &serde_json::Value| {
+        x.get("body_html")
+            .and_then(|h| h.as_str())
+            .map(String::from)
+    };
+    match v {
+        serde_json::Value::Array(items) => items.iter().filter_map(one).collect(),
+        other => one(other).into_iter().collect(),
+    }
+}
+
+/// The signed attachment URLs in the `src` attributes of `htmls`, entity-decoded
+/// and deduplicated, in order of appearance.
+pub(crate) fn signed_attachment_urls<'a>(htmls: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for html in htmls {
+        let mut rest = html;
+        while let Some(i) = rest.find("src=\"") {
+            rest = &rest[i + 5..];
+            let Some(end) = rest.find('"') else { break };
+            let raw = &rest[..end];
+            rest = &rest[end..];
+            if !raw.starts_with(SIGNED_ATTACHMENT_PREFIX) {
+                continue;
+            }
+            let url = raw.replace("&amp;", "&");
+            if !out.contains(&url) {
+                out.push(url);
+            }
+        }
+    }
+    out
+}
+
+/// Signed URLs of the attachments in PR `number`'s bodies (REST).
+pub(crate) fn rest_pr_attachment_urls(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<Vec<String>, String> {
+    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+    let htmls = pr_attachment_html_paths(&repo, number)
+        .par_iter()
+        .map(|path| {
+            let url = format!("{}/{}", API_BASE, path);
+            let (status, body) = curl_raw("GET", &url, Some(token), None, HTML_ACCEPT)?;
+            if status >= 400 {
+                return Err(map_api_error(status, &body));
+            }
+            Ok(body_htmls(&parse_json_body(&body)?))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(signed_attachment_urls(
+        htmls.iter().flatten().map(String::as_str),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ─── Signed attachment URLs (#302) ───────────────────────────────────────
+
+    #[test]
+    fn collects_signed_attachment_urls_from_body_html() {
+        let a = "https://private-user-images.githubusercontent.com/1/2-aaaa.png?jwt=x.y.z";
+        let b = "https://private-user-images.githubusercontent.com/1/3-bbbb.gif?jwt=p&amp;q=1";
+        let html1 = format!(
+            r#"<p><a href="{a}"><img alt="x" src="{a}" style="max-width: 100%;"></a></p><img src="https://camo.githubusercontent.com/abc">"#
+        );
+        let html2 = format!(r#"<img src="{a}"><img data-x="1" src="{b}">"#);
+        assert_eq!(
+            signed_attachment_urls([html1.as_str(), html2.as_str()]),
+            vec![
+                a.to_string(),
+                "https://private-user-images.githubusercontent.com/1/3-bbbb.gif?jwt=p&q=1"
+                    .to_string()
+            ]
+        );
+        assert!(signed_attachment_urls(["<img src=\"unterminated"]).is_empty());
+    }
+
+    #[test]
+    fn reads_body_html_from_an_object_or_an_array() {
+        assert_eq!(
+            body_htmls(&json!({ "body_html": "<p>a</p>" })),
+            vec!["<p>a</p>"]
+        );
+        assert_eq!(
+            body_htmls(&json!([{ "body_html": "1" }, { "body": "no html" }, { "body_html": "2" }])),
+            vec!["1", "2"]
+        );
+        assert!(body_htmls(&serde_json::Value::Null).is_empty());
+    }
 
     // ─── OAuth App access restrictions (org-level 403) ───────────────────────
 

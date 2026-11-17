@@ -1331,6 +1331,50 @@ pub(crate) async fn gh_issue_set_state(
         .map_err(|e| e.to_string())?
 }
 
+fn gh_pr_attachment_urls_inner(cwd: String, number: i64) -> Result<Vec<String>, String> {
+    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+        github_api::rest_pr_attachment_urls(&cwd, number, tok)
+    }) {
+        return r;
+    }
+    use rayon::prelude::*;
+    let nwo = gh_base_nwo(&cwd)?;
+    let accept = format!("Accept: {}", github_api::HTML_ACCEPT);
+    let htmls = github_api::pr_attachment_html_paths(&nwo, number)
+        .par_iter()
+        .map(|path| {
+            let output = gh_api_cmd(&cwd)
+                .args(["api", "-H", &accept, path])
+                .current_dir(&cwd)
+                .output()
+                .map_err(|e| format!("gh api: {}", e))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "gh api failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+            let v: serde_json::Value = serde_json::from_slice(&output.stdout)
+                .map_err(|e| format!("parse gh api response: {}", e))?;
+            Ok(github_api::body_htmls(&v))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(github_api::signed_attachment_urls(
+        htmls.iter().flatten().map(String::as_str),
+    ))
+}
+
+/// Signed, short-lived URLs of the files uploaded to PR `number`'s
+/// description, comments and reviews (#302). GitHub only hands them out in
+/// `body_html`; the frontend swaps them in for the `user-attachments` URLs of
+/// the markdown, which a private repository does not serve to the webview.
+#[tauri::command]
+pub(crate) async fn gh_pr_attachment_urls(cwd: String, number: i64) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_pr_attachment_urls_inner(cwd, number))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ─── Private sync helpers ────────────────────────────────────────────────────
 
 // ─── Repository targeting (#298) ─────────────────────────────────────────────

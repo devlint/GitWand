@@ -285,3 +285,46 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
     expect(renderMarkdown("")).toBe("");
   });
 });
+
+describe("GitHub attachments (#302)", () => {
+  const asset = "https://github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016";
+
+  it("loads a file uploaded to GitHub without the remote-image consent", () => {
+    const out = renderMarkdown(`![shot](${asset}) ![t](https://tracker.example/p.png)`);
+    expect(out).toContain(`src="${asset}"`);
+    expect(out).not.toContain(`src="https://tracker.example`);
+    expect(hasBlockedRemoteImages(out)).toBe(true);
+  });
+
+  it("still withholds look-alike hosts and other github.com paths", () => {
+    for (const src of [
+      "https://github.com.evil.example/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016",
+      "https://github.com/someone/repo/raw/main/p.png",
+      "http://github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016",
+      "https://user@github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016",
+    ]) {
+      expect(hasBlockedRemoteImages(renderMarkdown(`![x](${src})`))).toBe(true);
+    }
+  });
+
+  it("swaps in the URL given by resolveImage", () => {
+    const signed = "https://private-user-images.githubusercontent.com/1/2-e56beadb-c31a-4dee-bcd2-973dae719016.png?jwt=a.b.c";
+    const out = renderMarkdown(`<img alt="x" src="${asset}">`, {
+      resolveImage: (src) => (src === asset ? signed : null),
+    });
+    expect(out).toContain(`src="${signed}"`);
+    expect(hasBlockedRemoteImages(out)).toBe(false);
+  });
+
+  it("vets the resolved URL like any other", () => {
+    const out = renderMarkdown(`![x](${asset})`, { resolveImage: () => "https://tracker.example/p.png" });
+    expect(hasBlockedRemoteImages(out)).toBe(true);
+    const js = renderMarkdown(`![x](${asset})`, { resolveImage: () => "javascript:alert(1)" });
+    expect(js).not.toContain("javascript:");
+  });
+
+  it("drops the resolver once the call returns", () => {
+    renderMarkdown(`![x](${asset})`, { resolveImage: () => "https://tracker.example/p.png" });
+    expect(renderMarkdown(`![x](${asset})`)).toContain(`src="${asset}"`);
+  });
+});

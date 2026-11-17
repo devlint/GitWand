@@ -5683,6 +5683,44 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/gh-pr-attachment-urls?cwd=<path>&number=<n>
+    // Signed URLs of the PR's uploaded files, from `body_html` (#302) —
+    // mirrors `gh_pr_attachment_urls` / `signed_attachment_urls` in Rust.
+    if (url.pathname === "/api/gh-pr-attachment-urls" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = await resolvePrNwo(resolve(cwd), number, token);
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const paths = [
+          `/repos/${nwo}/issues/${number}`,
+          `/repos/${nwo}/issues/${number}/comments?per_page=100`,
+          `/repos/${nwo}/pulls/${number}/comments?per_page=100`,
+          `/repos/${nwo}/pulls/${number}/reviews?per_page=100`,
+        ];
+        const htmls = [];
+        for (const resp of await Promise.all(paths.map((p) => githubFetch(p, token, "application/vnd.github.html+json")))) {
+          if (!resp.ok) return jsonResponse(req, res, { error: `GitHub API ${resp.status}` }, 500);
+          const v = await resp.json();
+          for (const item of Array.isArray(v) ? v : [v]) if (typeof item?.body_html === "string") htmls.push(item.body_html);
+        }
+        const urls = [];
+        for (const html of htmls) {
+          for (const m of html.matchAll(/src="([^"]*)"/g)) {
+            if (!m[1].startsWith("https://private-user-images.githubusercontent.com/")) continue;
+            const u = m[1].replace(/&amp;/g, "&");
+            if (!urls.includes(u)) urls.push(u);
+          }
+        }
+        return jsonResponse(req, res, urls);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // ─── Issues (detail / comments / comment / state) ─────────────────────
     // GET /api/gh-issue-detail?cwd=<path>&number=<n>
     if (url.pathname === "/api/gh-issue-detail" && req.method === "GET") {

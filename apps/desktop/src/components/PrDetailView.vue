@@ -15,6 +15,7 @@ import { computed, inject, nextTick, provide, ref, onMounted, onUnmounted, watch
 import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables/usePrPanel";
 import { renderMarkdown, onMarkdownLinkClick, hasBlockedRemoteImages } from "../composables/useSafeHtml";
 import { PR_REMOTE_IMAGES_KEY, commentsWithheldImages } from "../composables/useRemoteImages";
+import { PR_ATTACHMENTS_KEY, usePrAttachments } from "../composables/usePrAttachments";
 import RemoteImagesNotice from "./RemoteImagesNotice.vue";
 import Avatar from "./Avatar.vue";
 import { forgeAvatarUrl } from "../composables/useAvatar";
@@ -122,8 +123,26 @@ provide(PR_REMOTE_IMAGES_KEY, prImagesShown);
 watch([() => p.cwd.value, () => p.prDetail.value?.number], () => {
   prImagesShown.value = false;
 });
+// Files uploaded to GitHub (screenshots…) load through signed URLs, which a
+// private repository needs (#302); the inline threads get the same resolver.
+const attachments = usePrAttachments({
+  cwd: computed(() => p.cwd.value),
+  number: computed(() => p.prDetail.value?.number),
+  enabled: computed(() => p.forge.value.name === "github"),
+  bodies: computed(() => [
+    p.prDetail.value?.body,
+    ...p.prComments.value.map((c) => c.body),
+    ...p.prIssueComments.value.map((c) => c.body),
+    ...p.prReviews.value.map((r) => r.body),
+    ...p.commentsForFile.value.map((c) => c.body),
+  ]),
+});
+provide(PR_ATTACHMENTS_KEY, attachments.resolveImage);
 /** Render options for every markdown body of this PR. */
-const mdOpts = computed(() => ({ allowRemoteImages: prImagesShown.value }));
+const mdOpts = computed(() => ({
+  allowRemoteImages: prImagesShown.value,
+  resolveImage: attachments.resolveImage,
+}));
 
 /** Which editor the description panel shows: the AI draft wins over a manual edit. */
 const bodyEditor = computed<"ai" | "manual" | null>(() =>

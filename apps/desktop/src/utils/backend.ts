@@ -3395,6 +3395,20 @@ export async function ghIssueDetail(cwd: string, number: number): Promise<IssueD
   return raw as IssueDetail;
 }
 
+/**
+ * Signed, short-lived URLs of the files uploaded to PR `number`'s description,
+ * comments and reviews — what a private repository serves its attachments
+ * under (#302). Indexed by `indexSignedAttachments`.
+ */
+export async function ghPrAttachmentUrls(cwd: string, number: number): Promise<string[]> {
+  if (isTauri()) return tauriInvoke<string[]>("gh_pr_attachment_urls", { cwd, number });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-pr-attachment-urls?cwd=${encodeURIComponent(cwd)}&number=${number}`);
+  if (!res.ok) throw new Error(`gh PR attachment URLs failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as string[];
+}
+
 /** List the conversation comments on an issue. */
 export async function ghIssueComments(cwd: string, number: number): Promise<IssueComment[]> {
   if (isTauri()) return tauriInvoke<IssueComment[]>("gh_issue_comments", { cwd, number });
