@@ -2740,7 +2740,7 @@ const en = {
     cancel: "Cancel",
     create: "Create issue",
     creating: "Creating…",
-    submitHint: "⌘Enter to create",
+    submitHint: "{0} to create",
     toolbar: "New issue",
     toolbarTitle: "Create a GitHub issue on this repository",
     paletteLabel: "New GitHub issue",

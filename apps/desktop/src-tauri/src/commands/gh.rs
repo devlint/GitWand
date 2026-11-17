@@ -36,8 +36,6 @@ use std::time::{Duration, Instant};
 /// devlint/GitWand#161 reported the 30s timeout reappearing once the per-PR
 /// stats enrichment below was added.
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
-/// `gh api` calls of `gh_api_on`, writes included: longer than a read, still bounded.
-const GH_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Timeout for the best-effort `git fetch origin` that refreshes
 /// remote-tracking refs before the per-PR numstat diffs below.
 const GH_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -529,7 +527,9 @@ pub(crate) async fn gh_create_pr(
 fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
     // Users with push access — the set GitHub allows as reviewers — read like
     // an issue's assignees: REST with the Settings token, else `gh api`.
-    let origin = gh_origin_repo(&cwd).ok_or("No GitHub 'origin' remote in this repository.")?;
+    let Some(origin) = gh_origin_repo(&cwd) else {
+        return gh_reviewer_candidates_via_view(&cwd);
+    };
     let items = super::gh_issues::api_get_pages(
         &cwd,
         &origin,
@@ -537,6 +537,43 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
         "",
         3,
     )?;
+    Ok(super::gh_issues::assignees_from(&items))
+}
+
+/// Reviewer candidates when `origin` cannot be parsed (an exotic remote, a
+/// `gh repo set-default`): `gh repo view` names the repository, as before.
+fn gh_reviewer_candidates_via_view(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
+    let view = gh_repo_view_cmd(cwd, "nameWithOwner")
+        .output()
+        .map_err(|e| format!("Failed to inspect repo: {}", e))?;
+    if !view.status.success() {
+        return Err(format!(
+            "gh repo view failed: {}",
+            String::from_utf8_lossy(&view.stderr).trim()
+        ));
+    }
+    let nwo = serde_json::from_slice::<serde_json::Value>(&view.stdout)
+        .ok()
+        .and_then(|v| v.get("nameWithOwner")?.as_str().map(String::from))
+        .ok_or("gh repo view returned no repository")?;
+    let output = gh_api_cmd(cwd)
+        .args(["api", "--paginate", &format!("repos/{}/assignees", nwo)])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to list reviewer candidates: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh api assignees failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    // --paginate concatenates one JSON array per page.
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let items: Vec<serde_json::Value> = serde_json::Deserializer::from_str(&raw)
+        .into_iter::<serde_json::Value>()
+        .filter_map(Result::ok)
+        .flat_map(|v| v.as_array().cloned().unwrap_or_default())
+        .collect();
     Ok(super::gh_issues::assignees_from(&items))
 }
 
@@ -2098,7 +2135,6 @@ fn gh_api_json(cwd: &str, path: &str) -> Result<serde_json::Value, String> {
     gh_api_json_accept(cwd, path, None)
 }
 
-/// [`gh_api_json`] with an `Accept` media type (e.g. [`github_api::HTML_ACCEPT`]).
 /// A finished `gh api` call: its stderr as the error on failure, else stdout
 /// parsed as JSON — `empty` when there is none (a 204, an empty list).
 fn gh_api_parse(
@@ -2121,6 +2157,7 @@ fn gh_api_parse(
     serde_json::from_str(trimmed).map_err(|e| format!("parse {} response: {}", what, e))
 }
 
+/// [`gh_api_json`] with an `Accept` media type (e.g. [`github_api::HTML_ACCEPT`]).
 fn gh_api_json_accept(
     cwd: &str,
     path: &str,
@@ -2152,13 +2189,14 @@ pub(crate) fn gh_api_on(
     method: &str,
     path: &str,
     stdin: Option<String>,
+    timeout: Duration,
 ) -> Result<serde_json::Value, String> {
     let mut cmd = gh_host_cmd(Some(repo));
     cmd.args(["api", "-X", method, path]).current_dir(cwd);
     if stdin.is_some() {
         cmd.args(["--input", "-"]);
     }
-    let output = crate::git::output_with_timeout_input(cmd, GH_WRITE_TIMEOUT, stdin)
+    let output = crate::git::output_with_timeout_input(cmd, timeout, stdin)
         .map_err(|e| format!("gh api: {}", e))?;
     gh_api_parse(
         output,

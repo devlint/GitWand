@@ -2700,7 +2700,7 @@ const es: Locale = {
     cancel: "Cancelar",
     create: "Crear issue",
     creating: "Creando…",
-    submitHint: "⌘Intro para crear",
+    submitHint: "{0} para crear",
     toolbar: "Nueva issue",
     toolbarTitle: "Crear una issue de GitHub en este repositorio",
     paletteLabel: "Nueva issue de GitHub",

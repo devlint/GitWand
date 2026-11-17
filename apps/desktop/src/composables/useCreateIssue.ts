@@ -55,12 +55,9 @@ export function isNewIssueShortcut(e: KeyboardEvent, mac: boolean): boolean {
   return e.ctrlKey && e.altKey && !e.metaKey;
 }
 
-/** A failed availability check is retried on window focus at most this often. */
-const FOCUS_RETRY_MS = 60_000;
-
 export interface CreateIssueApi {
   isOpen: Ref<boolean>;
-  /** The current repository has somewhere to file an issue (GitHub `origin`). */
+  /** The current repository's `origin` is on GitHub (a local check, no request). */
   available: Ref<boolean>;
   /** Targets are being read when the form opens. */
   loading: Ref<boolean>;
@@ -83,18 +80,17 @@ export interface CreateIssueApi {
   /** Something was typed or picked since the form opened. */
   dirty: ComputedRef<boolean>;
   canSubmit: ComputedRef<boolean>;
-  /** The current repository's `origin` page, for commit links (GitHub Enterprise included). */
+  /** The open form's `origin` page, for commit links (GitHub Enterprise included). */
   originHtmlUrl: ComputedRef<string | null>;
   refreshAvailability(): Promise<void>;
-  /** On window focus: retry a failed or negative check, at most once a minute. */
-  refreshOnFocus(): Promise<void>;
-  /** Drop the targets of the repository being left, before the next one is read. */
-  forgetTargets(): void;
+  /** The repository is being left: hide the entry points until the next check. */
+  forgetAvailability(): void;
   /**
-   * Open the form. A prefill given as a promise (a commit's, which needs a
-   * git check first) lands when ready: the form shows at once.
+   * Open the form. A prefill can be built once the targets are read (it is
+   * given `origin`'s page, for links); it lands when ready, the form showing
+   * at once.
    */
-  open(prefill?: IssuePrefill | Promise<IssuePrefill>): Promise<void>;
+  open(prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>)): Promise<void>;
   /**
    * "Create issue from commit": the form opens at once, prefilled from
    * `entry`; the commit is linked only once `origin` has it (the link goes to
@@ -118,20 +114,13 @@ export function useCreateIssue(deps: {
   onCreated: (issue: CreatedIssue) => void;
   /** Whether `origin` has the commit (tests replace the git check). */
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
-  /** Clock, for the focus retry interval (tests replace it). */
-  now?: () => number;
 }): CreateIssueApi {
-  const now = deps.now ?? Date.now;
-  let lastFocusCheck = -Infinity;
   const commitOnOrigin = deps.commitOnOrigin ?? gitCommitOnOrigin;
   const isOpen = ref(false);
   const available = ref(false);
   const loading = ref(false);
   const targetsFailed = ref(false);
   const targets = ref<IssueTarget[]>([]);
-  // The current repository's targets, for availability and commit links;
-  // kept apart from the open form's, which may belong to the previous one.
-  const repoTargets = ref<IssueTarget[]>([]);
   const repo = ref<string | null>(null);
   const title = ref("");
   const body = ref("");
@@ -167,14 +156,13 @@ export function useCreateIssue(deps: {
   const canSubmit = computed(
     () => isOpen.value && !!repo.value && title.value.trim() !== "" && !submitting.value,
   );
-  const originHtmlUrl = computed(() => repoTargets.value.find((t) => t.isOrigin)?.htmlUrl || null);
+  const originHtmlUrl = computed(() => targets.value.find((t) => t.isOrigin)?.htmlUrl || null);
 
-  async function readTargets(cwd: string | null, fresh: boolean): Promise<IssueTarget[] | null> {
+  async function readTargets(cwd: string | null): Promise<IssueTarget[] | null> {
     const p = deps.provider.value;
     if (!p?.issueTargets || !cwd) return [];
     try {
-      const t = await p.issueTargets(cwd, fresh);
-      return t.targets;
+      return (await p.issueTargets(cwd)).targets;
     } catch {
       return null;
     }
@@ -182,25 +170,19 @@ export function useCreateIssue(deps: {
 
   async function refreshAvailability(): Promise<void> {
     const seq = ++availabilitySeq;
-    // The backend's cached answer: this runs on every repository switch.
-    const t = await readTargets(deps.cwd.value, false);
-    // A failed read keeps the last answer: one network error must not hide
-    // the action until the repository is switched.
-    if (seq !== availabilitySeq || t === null) return;
-    repoTargets.value = t;
-    available.value = t.length > 0;
+    const p = deps.provider.value;
+    const cwd = deps.cwd.value;
+    let ok = false;
+    try {
+      ok = !!cwd && !!p?.issueAvailable && (await p.issueAvailable(cwd));
+    } catch {
+      ok = false;
+    }
+    if (seq === availabilitySeq) available.value = ok;
   }
 
-  async function refreshOnFocus(): Promise<void> {
-    if (available.value || !deps.cwd.value) return;
-    if (now() - lastFocusCheck < FOCUS_RETRY_MS) return;
-    lastFocusCheck = now();
-    await refreshAvailability();
-  }
-
-  function forgetTargets() {
+  function forgetAvailability() {
     availabilitySeq++;
-    repoTargets.value = [];
     available.value = false;
   }
 
@@ -241,7 +223,9 @@ export function useCreateIssue(deps: {
     clearPickers();
   }
 
-  async function open(prefill?: IssuePrefill | Promise<IssuePrefill>): Promise<void> {
+  async function open(
+    prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>),
+  ): Promise<void> {
     // Already open (⌘⇧I again, the palette): never wipe what is being typed,
     // nor drop the answer of a create in flight.
     if (isOpen.value) return;
@@ -251,28 +235,24 @@ export function useCreateIssue(deps: {
     formCwd = deps.cwd.value;
     isOpen.value = true;
     loading.value = true;
-    // A cached availability read still in flight is older than this one.
-    const seq = ++availabilitySeq;
-    const pending = Promise.resolve(prefill).catch(() => undefined);
-    const t = await readTargets(formCwd, true);
+    const t = await readTargets(formCwd);
     if (gen !== generation) return;
     loading.value = false;
     targetsFailed.value = t === null;
     if (t !== null) {
       targets.value = t;
-      // A fresh answer for the repository still on screen also refreshes its
-      // availability.
-      if (formCwd === deps.cwd.value && seq === availabilitySeq) {
-        repoTargets.value = t;
-        available.value = t.length > 0;
-      }
       const first = targets.value.find((x) => x.hasIssues);
       repo.value = first?.repo ?? null;
       if (repo.value) loadPickers(repo.value);
     }
     // The form is on screen; the prefill (a commit's, after its git check)
     // lands when ready, unless the user has started typing meanwhile.
-    const filled = await pending;
+    let filled: IssuePrefill | undefined;
+    try {
+      filled = typeof prefill === "function" ? await prefill(originHtmlUrl.value) : prefill;
+    } catch {
+      filled = undefined;
+    }
     if (openGen !== openGeneration || !filled) return;
     if (title.value !== initial.value.title || body.value !== initial.value.body) return;
     initial.value = { title: filled.title, body: filled.body };
@@ -280,21 +260,19 @@ export function useCreateIssue(deps: {
     body.value = filled.body;
   }
 
-
   async function openFromCommit(entry: GitLogEntry): Promise<void> {
     const cwd = deps.cwd.value;
-    const origin = originHtmlUrl.value;
     if (!cwd || !available.value) return;
-    const prefill = (async () => {
-      let onOrigin = false;
-      try {
-        onOrigin = await commitOnOrigin(cwd, entry.hashFull);
-      } catch {
-        /* unknown → unlinked, never a 404 link */
-      }
-      return commitIssuePrefill(entry, onOrigin && origin ? commitUrlFor(origin, entry.hashFull) : null);
-    })();
-    await open(prefill);
+    // A form opened but untouched gives way to this commit's.
+    if (isOpen.value) {
+      if (dirty.value || submitting.value) return;
+      close();
+    }
+    // Started now, alongside the targets read; the link waits for both.
+    const onOrigin = commitOnOrigin(cwd, entry.hashFull).catch(() => false);
+    await open(async (origin) =>
+      commitIssuePrefill(entry, (await onOrigin) && origin ? commitUrlFor(origin, entry.hashFull) : null),
+    );
   }
 
   function setRepo(next: string) {
@@ -365,8 +343,7 @@ export function useCreateIssue(deps: {
     canSubmit,
     originHtmlUrl,
     refreshAvailability,
-    refreshOnFocus,
-    forgetTargets,
+    forgetAvailability,
     open,
     openFromCommit,
     close,

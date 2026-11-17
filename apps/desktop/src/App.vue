@@ -515,22 +515,14 @@ const createIssue = useCreateIssue({
 });
 provide(CREATE_ISSUE_KEY, createIssue);
 watch(repoFolderPath, () => {
-  // The previous repository's targets must not decide anything here (a
-  // commit link built from its page, an entry point it allowed).
-  createIssue.forgetTargets();
+  // The previous repository's answer must not show the entry points here.
+  createIssue.forgetAvailability();
   // An open form keeps the repository it was opened for: close it only when
   // nothing would be lost (no typed text, no create in flight).
   if (createIssue.isOpen.value && !createIssue.dirty.value && !createIssue.submitting.value) createIssue.close();
   void createIssue.refreshAvailability();
 }, { immediate: true });
 
-// Offline at start, or GitHub signed in later: look again when the window
-// comes back, as long as the action is not available yet (at most once a minute).
-function onWindowFocusIssues() {
-  void createIssue.refreshOnFocus();
-}
-onMounted(() => window.addEventListener("focus", onWindowFocusIssues));
-onUnmounted(() => window.removeEventListener("focus", onWindowFocusIssues));
 
 function openNewIssue() {
   if (createIssue.available.value) void createIssue.open();

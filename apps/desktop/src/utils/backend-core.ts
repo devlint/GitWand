@@ -91,6 +91,19 @@ export async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>
 }
 
 /**
+ * GET a dev-server route (`/api/…`) and parse its JSON; an error answer (a
+ * failing status, or `{ error }`) throws with the server's message. The one
+ * dev GET helper, shared by every backend-*.ts module.
+ */
+export async function devGet<T>(route: string, params: Record<string, string>, what: string): Promise<T> {
+  const res = await devFetch(`${DEV_SERVER}${route}?${new URLSearchParams(params)}`, { method: "GET" });
+  const data: unknown = await res.json().catch(() => null);
+  const error = data && typeof data === "object" && "error" in data ? (data as { error?: unknown }).error : null;
+  if (!res.ok || error) throw new Error(typeof error === "string" && error ? error : `${what} failed: ${res.status}`);
+  return data as T;
+}
+
+/**
  * Timeout presets for tauriInvoke.
  */
 export const IPC_TIMEOUT = {

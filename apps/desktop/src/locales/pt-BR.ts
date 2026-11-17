@@ -2700,7 +2700,7 @@ const ptBR: Locale = {
     cancel: "Cancelar",
     create: "Criar issue",
     creating: "Criando…",
-    submitHint: "⌘Enter para criar",
+    submitHint: "{0} para criar",
     toolbar: "Nova issue",
     toolbarTitle: "Criar uma issue do GitHub neste repositório",
     paletteLabel: "Nova issue do GitHub",

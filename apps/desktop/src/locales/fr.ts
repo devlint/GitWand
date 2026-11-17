@@ -2709,7 +2709,7 @@ const fr: Locale = {
     cancel: "Annuler",
     create: "Créer l’issue",
     creating: "Création…",
-    submitHint: "⌘Entrée pour créer",
+    submitHint: "{0} pour créer",
     toolbar: "Nouvelle issue",
     toolbarTitle: "Créer une issue GitHub sur ce dépôt",
     paletteLabel: "Nouvelle issue GitHub",

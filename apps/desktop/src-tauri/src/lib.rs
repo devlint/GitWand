@@ -891,6 +891,7 @@ pub fn run() {
             commands::gh::gh_create_pr,
             commands::gh::gh_list_reviewer_candidates,
             commands::gh_issues::gh_issue_targets,
+            commands::gh_issues::gh_issue_available,
             commands::gh_issues::gh_create_issue,
             commands::gh_issues::gh_list_labels,
             commands::gh_issues::gh_list_milestones,

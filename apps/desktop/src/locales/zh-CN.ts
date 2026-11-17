@@ -2710,7 +2710,7 @@ const zhCN: Locale = {
     cancel: "取消",
     create: "创建 Issue",
     creating: "正在创建…",
-    submitHint: "⌘Enter 创建",
+    submitHint: "{0} 创建",
     toolbar: "新建 Issue",
     toolbarTitle: "在此仓库创建 GitHub Issue",
     paletteLabel: "新建 GitHub Issue",

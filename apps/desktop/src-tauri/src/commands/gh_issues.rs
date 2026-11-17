@@ -91,11 +91,11 @@ fn api_call(
     path: &str,
     body: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    // Bounded like the `gh` path (GH_WRITE_TIMEOUT): a stalled read would
-    // hold the form on "Checking…", a stalled POST would outlive the form's
-    // wait and invite a retry that duplicates it.
-    let max_time = Some(if method == "GET" { 30 } else { 60 });
-    let rest = |tok: &str| rest_api_json(method, path, tok, body.as_deref(), max_time);
+    // The same bound on both paths: a stalled read would hold the form on
+    // "Checking…", a stalled POST would outlive the form's wait and invite a
+    // retry that duplicates it.
+    let secs: u32 = if method == "GET" { 30 } else { 60 };
+    let rest = |tok: &str| rest_api_json(method, path, tok, body.as_deref(), Some(secs));
     let is_origin = gh_origin_repo(cwd).is_some_and(|o| same_repo(&o, repo));
     let attempt = if is_origin {
         with_rest(cwd, rest)
@@ -104,7 +104,14 @@ fn api_call(
     };
     match attempt {
         Some(r) => r,
-        None => gh_api_on(cwd, repo, method, path, body),
+        None => gh_api_on(
+            cwd,
+            repo,
+            method,
+            path,
+            body,
+            Duration::from_secs(secs.into()),
+        ),
     }
 }
 
@@ -121,24 +128,25 @@ pub(crate) fn api_get(cwd: &str, repo: &GhRepo, path: &str) -> Result<serde_json
 
 const TARGETS_TTL: Duration = Duration::from_secs(5 * 60);
 
-/// The issue targets of `cwd`, cached per repository for five minutes (every
-/// form action re-validates against them); `fresh` reads them again, as the
-/// form does when it opens (issues just turned on, `origin` just changed).
-/// Empty when `origin` is not GitHub.
+/// The issue targets of `cwd`, cached for five minutes per checkout *and*
+/// `origin` (every form action re-validates against them; a changed `origin`
+/// never reuses the previous one's targets). `fresh` reads them again, as the
+/// form does when it opens. Empty when `origin` is not GitHub.
 pub(crate) fn issue_targets_inner(cwd: &str, fresh: bool) -> Result<IssueTargets, String> {
-    type Cache = HashMap<String, (IssueTargets, Instant)>;
+    type Cache = HashMap<(String, String), (IssueTargets, Instant)>;
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let Some(origin) = gh_origin_repo(cwd) else {
+        return Ok(IssueTargets::default());
+    };
+    let key = (cwd.to_string(), origin.selector());
     if !fresh {
-        if let Some((t, at)) = cache.lock().ok().and_then(|m| m.get(cwd).cloned()) {
+        if let Some((t, at)) = cache.lock().ok().and_then(|m| m.get(&key).cloned()) {
             if at.elapsed() < TARGETS_TTL {
                 return Ok(t);
             }
         }
     }
-    let Some(origin) = gh_origin_repo(cwd) else {
-        return Ok(IssueTargets::default());
-    };
     let o = api_get(cwd, &origin, &format!("repos/{}", origin.nwo))?;
     // The parent embedded in a fork's answer may lack the viewer's
     // `permissions` (and so its triage rights): read it on its own, keeping
@@ -157,7 +165,7 @@ pub(crate) fn issue_targets_inner(cwd: &str, fresh: bool) -> Result<IssueTargets
     };
     let t = targets_from(&o, parent.as_ref());
     if let Ok(mut m) = cache.lock() {
-        m.insert(cwd.to_string(), (t.clone(), Instant::now()));
+        m.insert(key, (t.clone(), Instant::now()));
     }
     Ok(t)
 }
@@ -185,19 +193,23 @@ pub(crate) fn resolve_issue_target(
     Ok(origin.sibling(repo.to_string()))
 }
 
-/// Where an issue can be filed from `cwd` (#301). `fresh` (default) re-reads
-/// GitHub; `false` accepts the five-minute cache.
+/// Where an issue can be filed from `cwd` (#301), read fresh: the form calls
+/// it when it opens.
 #[tauri::command]
-pub(crate) async fn gh_issue_targets(
-    cwd: String,
-    fresh: Option<bool>,
-) -> Result<IssueTargets, String> {
-    // Fresh when the form opens; the availability check (every repository
-    // switch) takes the cached answer.
-    let fresh = fresh.unwrap_or(true);
-    tauri::async_runtime::spawn_blocking(move || issue_targets_inner(&cwd, fresh))
+pub(crate) async fn gh_issue_targets(cwd: String) -> Result<IssueTargets, String> {
+    tauri::async_runtime::spawn_blocking(move || issue_targets_inner(&cwd, true))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Whether `cwd`'s `origin` is a GitHub repository: what shows the "New
+/// issue" entry points. Local (the remote URL), no request: it runs on every
+/// repository switch. Whether issues are turned on is read when the form opens.
+#[tauri::command]
+pub(crate) async fn gh_issue_available(cwd: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_origin_repo(&cwd).is_some())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ─── Create ─────────────────────────────────────────────────────────────────

@@ -196,8 +196,10 @@ export interface ForgeProvider {
   listIssues?(cwd: string, opts?: ListIssuesOptions): Promise<Issue[]>;
 
   // ── Issue creation (#301) — GitHub only for now ─────────────────────────
-  /** Where an issue can be filed: `origin`, or a fork's parent. */
-  issueTargets?(cwd: string, fresh?: boolean): Promise<IssueTargets>;
+  /** Whether `origin` is on this forge — local, no request (shows the entry points). */
+  issueAvailable?(cwd: string): Promise<boolean>;
+  /** Where an issue can be filed: `origin`, or a fork's parent (read fresh). */
+  issueTargets?(cwd: string): Promise<IssueTargets>;
   createIssue?(cwd: string, input: CreateIssueInput): Promise<CreatedIssue>;
   listLabels?(cwd: string, repo: string): Promise<RepoLabel[]>;
   listMilestones?(cwd: string, repo: string): Promise<RepoMilestone[]>;

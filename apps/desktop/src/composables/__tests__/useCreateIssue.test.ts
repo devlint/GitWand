@@ -17,6 +17,7 @@ const PARENT = { repo: "org/app", htmlUrl: "https://github.com/org/app", hasIssu
 function provider(over: Partial<ForgeProvider> = {}, targets: IssueTargets = { targets: [ORIGIN], defaultRepo: "me/app" }) {
   return {
     name: "github",
+    issueAvailable: vi.fn(async () => true),
     issueTargets: vi.fn(async () => targets),
     listLabels: vi.fn(async (_c: string, repo: string) => [{ name: `bug@${repo}`, color: "f00", description: null }]),
     listMilestones: vi.fn(async () => [{ number: 1, title: "v1", dueOn: null }]),
@@ -44,21 +45,6 @@ const COMMIT = {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe("useCreateIssue", () => {
-  it("is available when the repository has at least one issue target", async () => {
-    const { api } = setup(provider());
-    await api.refreshAvailability();
-    expect(api.available.value).toBe(true);
-  });
-
-  it("is not available without targets, nor without the provider method", async () => {
-    const a = setup(provider({}, { targets: [], defaultRepo: null }));
-    await a.api.refreshAvailability();
-    expect(a.api.available.value).toBe(false);
-    const b = setup(provider({ issueTargets: undefined }));
-    await b.api.refreshAvailability();
-    expect(b.api.available.value).toBe(false);
-  });
-
   it("open() selects the default target and loads its pickers", async () => {
     const p = provider();
     const { api } = setup(p);
@@ -193,20 +179,6 @@ describe("useCreateIssue", () => {
     expect(p.issueTargets).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the entry points after a failed availability read", async () => {
-    let fail = false;
-    const p = provider({ issueTargets: vi.fn(async () => { if (fail) throw new Error("offline"); return { targets: [ORIGIN], defaultRepo: "me/app" }; }) });
-    const { api } = setup(p);
-    await api.refreshAvailability();
-    expect(api.available.value).toBe(true);
-    fail = true;
-    await api.refreshAvailability();
-    expect(api.available.value).toBe(true);
-    await api.open();
-    expect(api.targetsFailed.value).toBe(true);
-    expect(api.available.value).toBe(true);
-  });
-
   it("does not switch target while an issue is being created", async () => {
     const created = deferred<CreatedIssue>();
     const p = provider({ createIssue: vi.fn(() => created.promise) }, { targets: [ORIGIN, PARENT], defaultRepo: "me/app" });
@@ -240,49 +212,6 @@ describe("useCreateIssue", () => {
     api.title.value = "t";
     await api.submit();
     expect((p.createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe("/repo");
-  });
-
-  it("opens at once and fills the prefill when it is ready", async () => {
-    const prefill = deferred<{ title: string; body: string }>();
-    const { api } = setup(provider());
-    const opening = api.open(prefill.promise);
-    expect(api.isOpen.value).toBe(true);
-    prefill.resolve({ title: "from commit", body: "b" });
-    await opening;
-    expect(api.title.value).toBe("from commit");
-    expect(api.dirty.value).toBe(false);
-  });
-
-  it("asks for cached targets to decide availability, fresh ones when opening", async () => {
-    const p = provider();
-    const { api } = setup(p);
-    await api.refreshAvailability();
-    expect(p.issueTargets).toHaveBeenLastCalledWith("/repo", false);
-    await api.open();
-    expect(p.issueTargets).toHaveBeenLastCalledWith("/repo", true);
-  });
-
-  it("forgets the previous repository's targets", async () => {
-    const { api } = setup(provider());
-    await api.refreshAvailability();
-    api.forgetTargets();
-    expect(api.available.value).toBe(false);
-    expect(api.originHtmlUrl.value).toBeNull();
-  });
-
-  it("keeps the open form's targets when availability is read for another repository", async () => {
-    const other = { targets: [{ ...ORIGIN, repo: "b/b", htmlUrl: "https://github.com/b/b" }], defaultRepo: "b/b" };
-    const issueTargets = vi.fn(async (c: string) => (c === "/repo" ? { targets: [ORIGIN, PARENT], defaultRepo: "me/app" } : other));
-    const { api, cwd } = setup(provider({ issueTargets }));
-    await api.open();
-    api.title.value = "typed";
-    cwd.value = "/b";
-    api.forgetTargets();
-    await api.refreshAvailability();
-    expect(api.targets.value.map((t) => t.repo)).toEqual(["me/app", "org/app"]);
-    api.setRepo("org/app");
-    expect(api.repo.value).toBe("org/app");
-    expect(api.available.value).toBe(true);
   });
 
   it("counts picked labels, assignees and milestone as unsaved work", async () => {
@@ -321,34 +250,46 @@ describe("useCreateIssue", () => {
   });
 
   it("openFromCommit does nothing when the repository cannot take an issue", async () => {
-    const { api } = setup(provider({}, { targets: [], defaultRepo: null }));
+    const { api } = setup(provider({ issueAvailable: vi.fn(async () => false) }));
     await api.refreshAvailability();
     await api.openFromCommit(COMMIT);
     expect(api.isOpen.value).toBe(false);
   });
 
-  it("a fresh read on open is not overwritten by an older cached availability answer", async () => {
-    const cached = deferred<IssueTargets>();
-    let call = 0;
-    const issueTargets = vi.fn((_c: string, fresh: boolean) => {
-      call++;
-      return fresh ? Promise.resolve({ targets: [ORIGIN], defaultRepo: "me/app" }) : cached.promise;
-    });
-    const { api } = setup(provider({ issueTargets }));
+
+  it("is available when origin is on GitHub (the local check), not otherwise", async () => {
+    const a = setup(provider());
+    await a.api.refreshAvailability();
+    expect(a.api.available.value).toBe(true);
+    const b = setup(provider({ issueAvailable: vi.fn(async () => false) }));
+    await b.api.refreshAvailability();
+    expect(b.api.available.value).toBe(false);
+    const c = setup(provider({ issueAvailable: undefined }));
+    await c.api.refreshAvailability();
+    expect(c.api.available.value).toBe(false);
+  });
+
+  it("reads no target to decide availability", async () => {
+    const p = provider();
+    const { api } = setup(p);
+    await api.refreshAvailability();
+    expect(p.issueTargets).not.toHaveBeenCalled();
+  });
+
+  it("forgetAvailability hides the entry points, and a late answer for the old repository does not bring them back", async () => {
+    const answer = deferred<boolean>();
+    const { api } = setup(provider({ issueAvailable: vi.fn(() => answer.promise) }));
     const refreshing = api.refreshAvailability();
-    await api.open();
-    expect(api.available.value).toBe(true);
-    cached.resolve({ targets: [], defaultRepo: null });
+    api.forgetAvailability();
+    answer.resolve(true);
     await refreshing;
-    expect(call).toBe(2);
-    expect(api.available.value).toBe(true);
-    expect(api.originHtmlUrl.value).toBe("https://github.com/me/app");
+    expect(api.available.value).toBe(false);
   });
 
   it("shows the form once the targets are read, the prefill landing after", async () => {
     const prefill = deferred<{ title: string; body: string }>();
     const { api } = setup(provider());
-    const opening = api.open(prefill.promise);
+    const opening = api.open(() => prefill.promise);
     await flush();
     expect(api.loading.value).toBe(false);
     expect(api.repo.value).toBe("me/app");
@@ -361,7 +302,7 @@ describe("useCreateIssue", () => {
   it("does not overwrite what the user typed with a late prefill", async () => {
     const prefill = deferred<{ title: string; body: string }>();
     const { api } = setup(provider());
-    const opening = api.open(prefill.promise);
+    const opening = api.open(() => prefill.promise);
     await flush();
     api.title.value = "mine";
     prefill.resolve({ title: "from commit", body: "b" });
@@ -369,17 +310,27 @@ describe("useCreateIssue", () => {
     expect(api.title.value).toBe("mine");
   });
 
-  it("retries a failed availability check on focus at most once a minute", async () => {
-    let now = 1_000_000;
-    const issueTargets = vi.fn(async () => { throw new Error("offline"); });
-    const onCreated = vi.fn();
-    const api = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider({ issueTargets })), onCreated, now: () => now });
-    await api.refreshOnFocus();
-    await api.refreshOnFocus();
-    expect(issueTargets).toHaveBeenCalledTimes(1);
-    now += 61_000;
-    await api.refreshOnFocus();
-    expect(issueTargets).toHaveBeenCalledTimes(2);
+  it("keeps a late prefill when the user switched target while it loaded", async () => {
+    const prefill = deferred<{ title: string; body: string }>();
+    const { api } = setup(provider({}, { targets: [ORIGIN, PARENT], defaultRepo: "me/app" }));
+    const opening = api.open(() => prefill.promise);
+    await flush();
+    api.setRepo("org/app");
+    prefill.resolve({ title: "from commit", body: "b" });
+    await opening;
+    expect(api.repo.value).toBe("org/app");
+    expect(api.title.value).toBe("from commit");
+  });
+
+  it("gives an untouched open form way to a commit's, and keeps a touched one", async () => {
+    const { api } = setup(provider(), undefined, async () => true);
+    await api.refreshAvailability();
+    await api.open();
+    await api.openFromCommit(COMMIT);
+    expect(api.title.value).toBe("fix: x");
+    api.title.value = "edited";
+    await api.openFromCommit({ ...COMMIT, message: "other" });
+    expect(api.title.value).toBe("edited");
   });
 });
 
@@ -392,20 +343,6 @@ describe("isNewIssueShortcut", () => {
   it("leaves Ctrl+Shift+I to the WebView inspector elsewhere, using Ctrl+Alt+I", () => {
     expect(isNewIssueShortcut(ev({ ctrlKey: true, shiftKey: true }), false)).toBe(false);
     expect(isNewIssueShortcut(ev({ ctrlKey: true, altKey: true, key: "i" }), false)).toBe(true);
-  });
-});
-
-describe("useCreateIssue — prefill and target switch", () => {
-  it("keeps a late prefill when the user switched target while it loaded", async () => {
-    const prefill = deferred<{ title: string; body: string }>();
-    const { api } = setup(provider({}, { targets: [ORIGIN, PARENT], defaultRepo: "me/app" }));
-    const opening = api.open(prefill.promise);
-    await flush();
-    api.setRepo("org/app");
-    prefill.resolve({ title: "from commit", body: "b" });
-    await opening;
-    expect(api.repo.value).toBe("org/app");
-    expect(api.title.value).toBe("from commit");
   });
 });
 

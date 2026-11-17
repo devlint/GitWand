@@ -1225,12 +1225,6 @@ pub(crate) fn rest_pr_files(cwd: &str, number: i64, token: &str) -> Result<Vec<S
     Ok(files)
 }
 
-/// List candidate reviewers for the repo via the REST `/assignees` endpoint,
-/// using a Settings-managed OAuth token (no `gh` CLI required).
-///
-/// Fetches up to 3 pages of 100 (same ceiling as the CLI path). The assignees
-/// list carries `login` and `avatar_url` but not the display `name` (that needs
-/// a per-user lookup), so `name` is left null — matching the CLI path.
 /// List branch names (heads) for the repo via the REST API (tokenless path).
 /// Paginated at 100/page, deduped, case-insensitively sorted.
 pub(crate) fn rest_branches(cwd: &str, token: &str) -> Result<Vec<String>, String> {

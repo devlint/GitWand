@@ -101,6 +101,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
     cliPathOnly:
       "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured, so the two run different code.",
   },
+  gh_issue_available: { route: "/api/gh-issue-available" },
   gh_issue_targets: {
     route: "/api/gh-issue-targets",
     cliPathOnly:

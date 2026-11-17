@@ -22,7 +22,7 @@
 
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
 import { dispatchTerminalEvent, type TerminalEvent } from "./terminalEvents";
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devPtyStream, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
+import { isTauri, tauriInvoke, devFetch, devGet, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devPtyStream, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
 export { isTauri };
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
@@ -3637,16 +3637,6 @@ export interface CreatedWorktree {
   created_at: number;
 }
 
-/** GET a dev-server route; an error answer (status or `{error}`) throws. */
-async function devGet<T>(route: string, params: Record<string, string>, what: string): Promise<T> {
-  const res = await devFetch(`${DEV_SERVER}${route}?${new URLSearchParams(params)}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || (data && typeof data === "object" && "error" in data && data.error)) {
-    throw new Error(data.error || `${what}: ${res.status}`);
-  }
-  return data as T;
-}
-
 async function devPost<T>(route: string, body: unknown, what: string): Promise<T> {
   const res = await devFetch(`${DEV_SERVER}${route}`, {
     method: "POST",
@@ -4643,9 +4633,15 @@ export interface RepoMilestone {
   dueOn: string | null;
 }
 
-/** `fresh` re-reads GitHub (the form opening); `false` accepts the backend's cache. */
-export async function ghIssueTargets(cwd: string, fresh = true): Promise<IssueTargets> {
-  if (isTauri()) return tauriInvoke<IssueTargets>("gh_issue_targets", { cwd, fresh }, IPC_TIMEOUT.NETWORK);
+/** Whether `origin` is a GitHub repository — local, no request (shows the entry points). */
+export async function ghIssueAvailable(cwd: string): Promise<boolean> {
+  if (isTauri()) return tauriInvoke<boolean>("gh_issue_available", { cwd });
+  return devGet<boolean>("/api/gh-issue-available", { cwd }, "gh issue available");
+}
+
+/** Where an issue can be filed, read fresh (the form opening). */
+export async function ghIssueTargets(cwd: string): Promise<IssueTargets> {
+  if (isTauri()) return tauriInvoke<IssueTargets>("gh_issue_targets", { cwd }, IPC_TIMEOUT.NETWORK);
   return devGet<IssueTargets>("/api/gh-issue-targets", { cwd }, "gh issue targets");
 }
 

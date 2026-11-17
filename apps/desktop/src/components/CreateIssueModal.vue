@@ -19,6 +19,7 @@ type AskConfirm = (o: { title: string; message: string; confirmLabel?: string; d
 const askConfirm = inject<AskConfirm>("askConfirm", async (o) => window.confirm(o.message));
 
 const tab = ref<"write" | "preview">("write");
+const submitKeys = navigator.platform.toLowerCase().includes("mac") ? "⌘Enter" : "Ctrl+Enter";
 const imagesShown = ref(false);
 const titleInput = ref<HTMLInputElement | null>(null);
 
@@ -215,7 +216,7 @@ function onMilestone(e: Event) {
         type="button"
         class="bm-btn bm-btn--primary"
         :disabled="!form.canSubmit.value"
-        :title="t('createIssue.submitHint')"
+        :title="t('createIssue.submitHint', submitKeys)"
         @click="form.submit()"
       >
         {{ form.submitting.value ? t("createIssue.creating") : t("createIssue.create") }}

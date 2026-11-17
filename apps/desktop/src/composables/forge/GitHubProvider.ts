@@ -44,6 +44,7 @@ import {
   ghPrReady,
   ghPrEdit,
   ghListIssues,
+  ghIssueAvailable,
   ghIssueTargets,
   ghCreateIssue,
   ghListLabels,
@@ -120,8 +121,12 @@ export class GitHubProvider implements ForgeProvider {
 
   // ── Issue creation (#301) ──────────────────────────────────────────────────
 
-  issueTargets(cwd: string, fresh = true): Promise<IssueTargets> {
-    return ghIssueTargets(cwd, fresh);
+  issueAvailable(cwd: string): Promise<boolean> {
+    return ghIssueAvailable(cwd);
+  }
+
+  issueTargets(cwd: string): Promise<IssueTargets> {
+    return ghIssueTargets(cwd);
   }
 
   createIssue(cwd: string, input: CreateIssueInput): Promise<CreatedIssue> {

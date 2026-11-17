@@ -5454,6 +5454,14 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/gh-issue-available?cwd=<path> — mirrors `gh_issue_available`:
+    // a local check (origin is a GitHub remote), no request.
+    if (url.pathname === "/api/gh-issue-available" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      return jsonResponse(req, res, getRepoNwo(resolve(cwd)) !== null);
+    }
+
     // GET /api/gh-issue-targets?cwd=<path> — mirrors `gh_issue_targets`.
     if (url.pathname === "/api/gh-issue-targets" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
@@ -9743,6 +9751,7 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    GET  /api/gh-pr-count?cwd=<path>&state=<state>`);
   console.log(`    GET  /api/gh-pr-freshness?cwd=<path>`);
   console.log(`    POST /api/gh-create-pr  { cwd, title, body, base?, draft?, reviewers? }`);
+  console.log(`    GET  /api/gh-issue-available?cwd=<path>`);
   console.log(`    GET  /api/gh-issue-targets?cwd=<path>`);
   console.log(`    POST /api/gh-create-issue  { cwd, input }`);
   console.log(`    GET  /api/gh-list-labels?cwd=<path>&repo=<owner/repo>`);
