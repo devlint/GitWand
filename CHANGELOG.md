@@ -12,3 +12,1818 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Create GitHub issues without leaving GitWand (#301).** A "New issue" window opens over the current view from the toolbar, the ⌘K palette or ⌘⇧I (Ctrl+Alt+I on Windows and Linux, where Ctrl+Shift+I opens the inspector): title, Markdown description with a preview, and optional labels, assignees and milestone read from the repository. Right-click a commit in the Git Tree → *Create issue from commit* prefills the issue with the commit's summary, author and full message (in a code block, so `@mentions` and `#N` in it notify and link nobody); the commit is linked only once it is on a remote, so an issue never carries a link to a commit GitHub does not have. The issue goes to `origin`; on a fork, you choose between the fork and its parent (from GitHub, not from an `upstream` remote), and a repository with issues turned off is shown but cannot be picked. After creation a notice links to the new issue; if the request fails after it was sent (a timeout, a dropped connection, a GitHub 5xx), the form says the issue may already exist and offers to check on GitHub before sending it again. GitHub only for now: the action does not appear when `origin` is on another forge. Requested by Pannboo.
 - **File an issue about specific lines (#301).** In a commit's diff (Git Tree, History), click a line number to select it and Shift+click another in the same hunk to extend the selection; *Create issue from these lines* (or ⌘⇧I / Ctrl+Alt+I while lines are selected) opens the issue form with a GitHub permalink to those lines, the lines themselves in a `diff` block, and the file, line range and commit they come from. The permalink is added only once the commit is on `origin`, and deleted lines link to the commit's parent. In a pull request's diff, Shift+click a second line number while the comment box is open to cover a range: the comment becomes a multi-line GitHub comment (its thread then shows the lines it covers), and *Create issue* next to *Comment* files the same lines, starting with the text already typed. In a pull request, lines from the old version only (deleted lines, with or without context) get the block without a permalink, as the PR's base commit is not known; permalinks open GitHub's plain view (`?plain=1`) so line anchors also work on Markdown and other rendered files.
 - **Report a bad resolution (#301).** The merge editor's proposal panels (the engine's resolution, the AI proposal, the token-level merge) get a *Report* button that opens the issue form with the conflict (ours, theirs and base when there is one), GitWand's result and its reasoning (explanation, conflict type, confidence, decision; the model and validation score for an AI proposal), plus a "What should it have been?" field. A *Send to GitWand* switch retargets the report to GitWand's own repository as a resolver bug report: the file is then described by its kind (`.ts`, `Cargo.lock`…), never its path, name, repository or branches; the form warns that the report will be public, Create stays off until "I reviewed the code, it can be public" is ticked, and a secrets scan blocks the report while a known secret pattern is in it (high entropy alone only warns). Reports to GitWand go to github.com whatever the current repository's forge, so a GitLab, Gitea or remote-less repository can send them with a GitHub sign-in. An accepted engine or token-level proposal stays reportable from an "Accepted in this session" list at the top of the file until another file is opened.
+
+### Fixed
+
+- **Screenshots attached on GitHub show in pull requests, private repositories included (#302).** Files uploaded through GitHub's editor (`github.com/user-attachments/assets/…`, older `user-images.githubusercontent.com` URLs) in a GitHub pull request's description, comments and reviews were withheld until "Show images" was clicked, and on a private repository stayed broken even then: GitHub only serves them there to a signed-in browser. They now load without that click — GitHub hosts them and already serves the pull request being read, so no third party learns it was opened; images on other hosts are still withheld as before. When an attachment fails to load and the repository turns out to be private (GitHub serves its attachments only to a signed-in browser), GitWand fetches the short-lived signed URLs GitHub gives out with the rendered bodies and swaps them in; that repository's other pull requests then get them up front, and an expired URL is fetched again when it is next needed. A public repository's attachments load as they are, with no extra request while they load. Attachments in a pull request on another forge, or in a README, are still withheld like any remote image. Reported by Pannboo.
+- **Large AI prompts are no longer sent empty with an older curl.** curl before 8.x (Ubuntu 22.04 ships 7.81) silently drops a configuration line of 100 KiB or more and then sends the request with no body, without reporting an error. A prompt carrying a large diff hit that limit. A body above 48 KiB now goes to curl through a temporary file that only you can read and that is deleted once the request is done; smaller bodies are sent as before. Writes to GitHub, Gitea, Bitbucket and Azure DevOps go through the same path.
+
+## [3.13.2] - 2026-11-16
+
+### Fixed
+
+- **GitHub CLI: pull requests no longer target an `upstream` remote instead of `origin` (#298).** Without a GitHub token in Settings and without `gh repo set-default`, `gh` picks the repository by remote name, `upstream` before `origin`, so a clone with an unrelated `upstream` remote listed that repository's pull requests and opened new ones against it, which failed. Every `gh` call now names its repository: the parent when `origin` is a fork, else `origin`, as the token path already did (issues included: a fork's issues are its parent's); a new pull request goes to `origin` unless you choose the parent. If GitWand cannot tell whether `origin` is a fork, the pull request list and actions fail with the error instead of possibly showing or acting on a same-numbered pull request in the other repository. Merging still deletes the local branch when the repository it merges into is one of the clone's remotes; otherwise the merge leaves the local branch alone instead of failing after the pull request is merged. `origin` is read as `gh` reads remotes: SSH aliases from `~/.ssh/config` are resolved, any SSH user is accepted (`alice@github.com:…`), and a host counts only when it is github.com or one `gh` is signed in to, so a GitHub Enterprise `origin` keeps its host and goes to `gh` even with a github.com sign-in in Settings, which does not cover it. Reported by Pannboo.
+
+## [3.13.1] - 2026-11-12
+
+### Changed
+
+- **The CI tab of a pull request follows a running CI.** While the tab is shown and a check is still queued or running, GitWand re-fetches the checks every 15 seconds, then once a minute after ten minutes (some queued checks wait on a person: Azure reviewer policies, GitHub environment approvals). When the last check finishes, it reloads the pull request once, so mergeability and the Merge button follow; the pull request's CI dot in the list now follows each reload of the pull request, with the backend's own rule. Polling stops when every check has finished, on another tab, pull request or view, while the window is hidden, and after three failed fetches in a row (a failed fetch keeps the list on screen, and the tab then says it stopped updating); re-opening the tab or the window resumes it, fetching only if the last fetch is older than 15 seconds. When the checks cannot be loaded at all, the tab says so instead of "No CI checks found", and re-opening it tries again. A push to the pull request re-fetches its checks once, on any tab. Checks that wait on someone (a required status that has not reported, an approval such as a GitHub environment, an Azure policy other than an automatically queued build: reviewers, comments, work items, a build queued by hand) block the merge and show ⏳ but are not polled; a GitLab `manual` or `scheduled` pipeline shows ⏳ without blocking (GitLab's own mergeability decides) and is not polled either; GitLab pipelines that have not started (`created`, `preparing`, `waiting_for_resource`) are polled. The merge banner, the check icons, the list dot and the live CI tab now share one definition of a running, failing and blocking check, so the banner no longer says "ready" while a GitLab, Bitbucket or Gitea pipeline is still running, and `TIMED_OUT` or `STARTUP_FAILURE` checks show ❌ instead of ❓.
+
+- **The CI tab knows which commit its checks ran on.** Every backend now says it for each check (GitLab: the pipeline's commit, or for a merged-results or merge-train pipeline, whose commit is a temporary merge, whether the merge request names it as its head pipeline; Azure: the pull request head a build ran for, not its merge commit). After a push, checks that are still the previous commit's (GitLab before the new pipeline is created, an Azure build not re-queued yet) are named in the tab, which keeps following them for up to ten minutes after each push while the new commit's come; coming back to the tab later fetches them once more, and re-opening the pull request does not restart that window. When the checks are newer than the pull request on screen (a push it has not seen), the pull request is reloaded once, even right after it was fetched, and again at the next fetch if that reload failed. The merge banner is unchanged: it reads every check, whichever commit it ran on.
+
+### Fixed
+
+- **CI checks on Bitbucket and Gitea now link to their build.** Their checks reached the CI tab without converting the backend's field names, so the link to each build never showed; every forge now goes through one mapping.
+- **CI checks: a failed fetch is no longer reported as "no checks".** The GitHub (REST and `gh`), GitLab and Bitbucket backends returned an empty list when fetching a pull request's checks failed, and Azure did so for any error; they now report the error, except a 403 or 404 that means the checks are not visible (a fine-grained token without checks access, GitLab CI/CD disabled), which still reads as "no checks"; GitHub's REST path also read only the first 30 check runs (for the CI tab and the list dot), and Bitbucket's CI tab the first 30 statuses; both now read 100. GitHub's REST path now fetches the pull request and its check runs with conditional requests (ETag, cached per account, least recently used entries evicted first), so the CI tab's polling costs nothing against the rate limit while nothing changes (Azure reads 400, 403 and 404 as "no policies", and then still shows the "waiting for reviewer approval" check, which a 403 used to skip; a 429 is a failed fetch). GitLab's CI tab shows only the merge request's latest pipeline, as its code comment already said, instead of every past one: an old failed or stuck pipeline no longer showed as current.
+- **On Linux, the Git Tree no longer reloads in a loop (#287).** The Live Repo watcher took GitWand's own reads of the repository for changes: on Linux the system also reports a file being opened, and reading the branches to draw the graph counted as a branch change. That forced a log reload, which read the branches again, so the list kept shrinking back and refilling, the scrollbar jumped and the loading spinner never went away. Reading a file is no longer a change; writing one still is. The background fetch, every 30 seconds, also stopped reloading the log when it brought nothing: the list no longer shrinks and refills twice a minute.
+- **Publishing a branch no longer fails with "reference already exists".** Two pushes to the same repository now run one after the other: publishing the same new branch twice at once used to send two creates, and the second was rejected. Deleting a remote branch or pushing tags waits its turn too, while reading the repository stays possible during a push. When a branch already exists on the remote without GitWand knowing it (pushed from another machine, tracking branch pruned), the publish now fetches and tries once more, as a normal fast-forward update: a branch that diverged is still refused, never overwritten. Reported and fixed by Guillaume Huard Hughes.
+- **GitHub: a repository whose organization restricts OAuth apps no longer fails with a 403.** When GitHub is signed in under Settings > Accounts and an organization has not approved GitWand ("OAuth App access restrictions"), that repository now uses the GitHub CLI (`gh`) instead, if it is signed in, for the rest of the session; other repositories keep the GitWand sign-in. Without `gh`, the error now says what happened and how to fix it: sign in to `gh`, or ask an organization owner to approve GitWand.
+- **MCP: the rebase and cherry-pick previews now count what GitWand would resolve.** `gitwand_preview_merge` only classified the simulated conflicts in those two modes, so it always reported 0 auto-resolvable and a `high` risk. It now runs the same resolution as the merge preview, with the repo's `.gitwandrc` settings and `min_confidence_score`.
+- **MCP: `gitwand_resolve_hunk_llm` checks YAML and TOML, not only JSON.** It uses the core engine's parsers; the YAML branch used to accept anything.
+- **MCP: an empty resolution removes the conflict block.** Both write tools used to reject an empty string, so an agent could not delete a block with them. `gitwand_apply_resolution`'s description now says it writes without validating.
+
+## [3.13.0] - 2026-11-09
+
+### Added
+
+- `.gitwandrc` accepts a `worktree` section (`dir`, `include`, `setup`, `teardown`, `url`), and `.worktreeinclude` is parsed. GitWand asks before it runs a repository's worktree commands: it shows them as written, remembers the trust per repository, and asks again whether they change. The commands are always read from the main worktree, never from a linked worktree's copy. The worktree service below runs them.
+- GitWand can stop what runs in a linked worktree: it closes its own terminals there, then stops the processes it started that still have their working directory inside. Processes it did not start are listed, never killed unless you ask. A terminal session can also run a given command and report its exit code. Removal uses both.
+- New worktrees and AI tasks are created by one worktree service. They start from the remote default branch, fetched first; offline, GitWand falls back to the local tracking branch, then to `HEAD`, and the creation dialog says which base it used and why. They go in `<repo>.worktrees/<name>` (or `worktree.dir`) on `task/<name>`, without upstream tracking, and get the ignored `include` files copied or linked from the main worktree. Once you trust the repository's commands, `setup` runs in a read-only terminal tab, and the AI-task agent only starts after it succeeds. `url` then puts the environment's address on the worktree, with an Open button. A failed setup leaves the worktree in place with Retry setup, Open the log and Remove. Until merge-back is reworked (v3.13), an AI task started from a newer `origin/main` merges back only once your `main` is updated to it.
+- Every worktree removal (worktree manager, AI-task close, Git Tree, the cleanup after a merge-back) now follows one sequence. GitWand refuses to touch a worktree that is locked, has a `.worktree-keep` file (ignored on a worktree GitWand created, where setup hooks drop it to shield it from another tool's cleanup), or lives in another tool's directory (Claude Code, Conductor, Superset) without being its own; a git lock gets an Unlock button. It then closes the worktree's terminals and stops its processes, and lists those it did not start instead of removing anything (Retry, Stop all). It snapshots the worktree's files, so uncommitted work can be restored, runs the repository's `teardown` in a read-only terminal tab, and removes the worktree only if teardown succeeded; a failed teardown keeps it, with Retry teardown, Open the log and Remove anyway. A task branch already merged is deleted with the worktree. Removing a worktree GitWand did not create asks for one more confirmation.
+- Merge-back brings an AI task's work back as real commits, through the same preview and apply as any other merge. You pick the target (the task's source branch by default) and the mode: **Merge** (a merge commit, the agent's commits kept), **Rebase** (the agent's commits replayed onto the target, which then fast-forwards), or **Squash** (the changes staged on the target, as before). `main` moving on no longer blocks it. GitWand refuses, and says why, when the main checkout is on another branch (offering to switch it when it is clean), in the middle of an operation, or has changes to files the task also changes; it never stashes for you. It then stops the task's processes, commits its uncommitted work as `wip(<name>): uncommitted work at merge-back`, snapshots both checkouts, shows the preview, and applies in the checkout the mode works in. Conflicts the engine cannot resolve stay for you there, never aborted, and the dialog waits with Resume. Removing the worktree is offered afterwards, not done for you; after a squash the removal asks about the branch, since its commits are not merged. The worktree manager gets a Merge back button too.
+- A removed worktree can come back. The Time Machine lists the snapshots of worktrees GitWand removed, and of tasks as they were before a merge-back, under "Removed worktrees", with **Restore as worktree**. The restore creates `<name>-restored` on `restore/<name>` from the snapshot's commit, puts its uncommitted files and index back, copies the `include` files again, and runs `setup` once you trust the repository's commands. The new worktree is a task with the original base. These snapshots stay out of the Time Machine's in-place restore, which would overwrite the current checkout.
+
+### Fixed
+
+- The worktree manager's quick-create no longer starts from an empty base. In `pnpm dev:web`, the worktree add, remove and repair routes no longer build a shell command from the request.
+- A message that repeats a value now shows it everywhere: `{1}` stayed raw from the second occurrence on (wrong-branch warning, agent open failure).
+- Closing a terminal now also stops the shell's background jobs (`sleep 300 &` survived before). On Windows, it stops the terminal's whole process tree instead of the shell alone.
+
+## [3.12.5] - 2026-11-03
+
+### Fixed
+- **The Git Tree follows ref moves that keep the newest commit (#266, #267).** Resetting `main` onto `origin/main`, creating a branch on an existing commit, checking out a previous branch or moving `main` onto another branch's commit left stale labels, lanes and colors until a restart, because the log and graph layout caches were keyed on the top commit alone. The log now compares hashes and ref decorations, a ref change from the watcher forces one reload, and the graph's trunk pin is re-detected whenever refs change.
+- **Two imports of the same module are no longer both kept (#278).** When one side added `import { useAuth } from "./auth"` and the other `import useAuth from "./auth"`, the imports resolver declined, and the hunk went on to the line patterns, which applied it as `insertion_at_boundary` with both lines: a duplicate binding the compiler rejects. When both sides add an import of the same module that declares the same name, the hunk is now classified `complex` and left to you; two forms that bind different names (`import React` and `import { useState }`) are still both kept.
+- **The Dockerfile resolver no longer duplicates a stage or an instruction (#278).** Stages without an `AS` alias were matched by their image, so a `FROM` changed on both sides (`node:20` against `node:22`) kept both lines and created a second stage; a hunk with no `FROM` at all matched nothing, so an `ENV PORT` changed on both sides came out twice. Unaliased stages are now matched by position. When the two sides do not have the same number of them, the hunk goes to the textual engine. Within a stage, an instruction changed on one side only now keeps that change instead of the other side's base value.
+
+### Changed
+- **Dependency updates (#275, #276, #277).** rustls 0.23.46 in the desktop app (its HTTPS traffic), DOMPurify 3.4.17 (the sanitizer behind rendered markdown and PR descriptions), and Vite 6.4.5 for the desktop build.
+
+## [3.12.4] - 2026-10-19
+
+### Added
+- **A security policy (#272).** `SECURITY.md` says how to report a vulnerability privately and which versions get security fixes (the latest release only).
+
+### Fixed
+- **GitWand starts on a Windows without the Visual C++ Redistributable (#273).** From v3.11.2 the Windows build imported `VCRUNTIME140.dll`, so on a clean machine the app quit at launch with `STATUS_DLL_NOT_FOUND`, and winget's validation rejected v3.11.2 to v3.12.3. The C runtime is now linked statically, and the release fails if the exe depends on it again.
+- **The release really re-uploads missing installers (#273).** The step that re-uploads an asset GitHub failed to store looked in a folder the build never writes to, so it never checked anything.
+
+## [3.12.3] - 2026-10-14
+
+### Added
+- **Act on PR comments from the PR detail view (#257).** On GitHub, you can reply to a review thread, edit or delete your own comments, resolve or unresolve a conversation, and copy a comment's link. Deleting the comment that starts a thread keeps its replies, and edits and replies are saved exactly as typed.
+- **A Force software rendering setting on Linux (#257).** Settings → General can turn GPU rendering off for systems where GitWand does not start. It applies at the next launch.
+- **Reset --keep (#263).** The Git Tree reset submenu and the reset dialog offer a fourth mode, **Keep**, beside soft, mixed and hard. It drops the commits like hard but keeps uncommitted edits; if one of them would be overwritten, git refuses, nothing changes, and the message names the files. An unknown reset mode is now an error instead of silently becoming `--mixed`.
+- **Warning for tracked files that match `.gitignore` (#264).** The sidebar lists tracked paths that an ignore rule now covers (`git ls-files -ci --exclude-standard`) and offers to untrack the selected ones or all of them (`git rm --cached`: files stay on disk and the removal is staged, to commit), with a per-repo dismissal. Edits to `.gitignore` or `.git/info/exclude` refresh it.
+- **Opt-in auto fast-forward after fetch (#265).** With the *Auto fast-forward* setting on (off by default), the periodic fetch fast-forwards the current branch when it is purely behind its upstream: no local commits, no tracked edits, no conflict, HEAD not detached, no operation in progress. It never merges or rebases, re-checks every condition under the repo write lock, and when blocked the sync button's tooltip names the reason. The tooltip is computed from the already-loaded status, without spawning git.
+
+### Changed
+- **Markdown is rendered by GitWand itself (#257).** markdown-it is replaced by an in-house renderer (`utils/markdown.ts`), still sanitized by DOMPurify. READMEs, PR descriptions and comments scroll noticeably faster. HTML comments stay hidden even when they span blank lines or sit inside a list item. A package version such as `vue@3.5.42` is no longer turned into an email link.
+- **Linux renders with the GPU by default (#257).** Software rendering (`WEBKIT_DISABLE_COMPOSITING_MODE`, `LIBGL_ALWAYS_SOFTWARE`, `GDK_BACKEND=x11`) used to be forced on every Linux launch to avoid the WebKitGTK EGL abort of #135 and #139. It is now applied only when a previous launch died before its page loaded, or when the setting is on. A launch marker under `~/.local/share/gitwand/` records the failure. A second instance that is still starting is not counted as a failure. Settings shows when the fallback was switched on automatically, and unticking it retries GPU rendering. Only DMA-BUF stays disabled on every launch.
+
+### Fixed
+- **The AI review summary is generated once per PR head (#257).** Concurrent requests for the same PR used to start one generation each; they now share it.
+- **GitWand starts even when its global shortcut is taken (#256).** If another app already owned Cmd/Ctrl+Shift+G, GitWand aborted during startup. It now starts without the shortcut and logs why.
+- **`non_overlapping` no longer writes lines twice when both branches added them (#259).** With `diff3` markers — what `git merge-file --diff3`, the desktop merge preview and the benchmark produce — lines added identically on both sides sat inside the hunk on each side, and the merge kept both copies, auto-applied. Lines identical at the start and end of both sides are now taken out of the merge, as `zdiff3` does, and an insertion that repeats lines of the neighbouring edit from the other branch is left for review.
+- **`gitwand_resolve_hunk_llm` accepts valid answers in files with several conflicts (#260).** The residual-marker check scanned the whole file, so the other, still unresolved hunks made every answer fail. It now checks the model's answer only, and the JSON syntax check is skipped (and reported as skipped) while other conflicts remain.
+- **The Bitbucket PR list returns the requested window for any offset (#261).** The server skips `(page - 1) × pagelen`, but the request inflated the page size and then skipped locally, so an offset that was not a multiple of the limit returned the wrong PRs (offset 25, limit 10 gave items 35–45). The page size is now constant across the requests of one window, and a failing page past the end no longer drops the PRs already fetched.
+- **PR write actions target the right PR on a fork (#262).** Mark ready, merge, auto-merge and request reviewers resolved the PR number in `origin` first, so on a fork with a same-numbered PR they acted on the fork's PR. They now use the base repo's PR, and `gh pr ready` gets `--repo`. After a merge, the head branch is deleted only for a same-repo PR, as `gh pr merge --delete-branch` does; a fork's branch is left alone.
+- **File history compare works in the desktop app (#269).** The Compare tab called a `git_file_diff` command that never existed in the Rust backend, so it failed on every call outside `dev:web`. The command now exists and follows renames: the file history returns the file's name at each commit and the compare diffs the two versions under those names. User diff settings (external diff tool, color, textconv) no longer change the output, file names are taken literally, and a failure shows inside the Compare tab instead of an empty "no differences" or a blocked panel. A test now checks that every command the frontend calls is registered in Rust.
+- **Diffs no longer drop lines that start with `--` or `++` (#270).** Every diff parser treated `---` and `+++` as file headers even inside a hunk, so a removed `-- comment` line (SQL, Lua) or an added `++x` line vanished from the diff and the line numbers after it shifted, in the working-tree diff, commit view, file history, PR panel and absorb. The secrets scan also took an added `++ token` line for a header and attributed the following lines to a file named `token`. Hunks are now bounded by the line counts in their `@@` header and classified by first character only, by one shared parser in Rust and one in `@gitwand/core` (used by the CLI and the desktop frontend). A blank context line printed as an empty line (`diff.suppressBlankEmpty`) is kept too.
+
+## [3.12.2] - 2026-10-11
+
+### Added
+- **Extra context for AI-written PRs and release notes (#252).** PR creation, PR update and release-notes generation gain a "ctx" button on their AI split button. The free-form text typed there is kept per kind and per repository, and is appended to the prompt in its own delimited block.
+- **Create a branch with AI from the branch selector (#252).** The branch selector gets a create-with-AI action, and shows the generated branch name while it is being checked out. Its trigger animates its width when its content changes.
+
+### Changed
+- **The commit AI menu's language chips translate the current message (#252).** Picking a language now translates the message already in the box. The Shorten, Add detail and Regenerate actions are removed from the commit AI menu; the same results can be had with a custom prompt template.
+- **AI split buttons share one frame (#252).** Each segment used to draw its own gradient border, restarting the gradient at every seam and leaving the narrow middle segment looking borderless. One frame now wraps the whole button, and every AI split button uses the same style.
+- **Larger modal and Help titles (#253).** Modal and Help titles are bigger and use the shared font-size tokens.
+
+### Fixed
+- **AI generation follows the chosen language and model again (#252).** Saving settings from one place (the dock, the terminal, the file explorer…) wrote back a stale copy of them, silently dropping the per-repository AI language and template just picked from an AI menu. The shared settings now stay in step with every save. Every AI generator (commit message, PR description, summary and pre-review, release notes, stash message, conflict explanation) now maps the output language through one shared helper instead of its own copy.
+- **No phantom "origin" branch, and every remote's branches count as remote.** `refs/remotes/origin/HEAD` was listed as a branch called "origin", which showed up as a local branch in the PR base picker. Branches from a remote other than `origin` were treated as local, so the sidebar offered to delete them as local branches. Branch names and their remote flag now come from the full refname, with symrefs skipped, in the app and in the `pnpm dev:web` server alike.
+- **The identity menu is no longer clipped (#252).** It was cut off by the scrolling commit rail and drawn under the file list. It now floats above the window and closes when the page scrolls or the window is resized. The conventional-commit scroll arrows in the sidebar follow the actual scroll position.
+- **Modal close buttons line up, and light-theme details stay visible (#254).** Modals and Help share one close button. Settings checkboxes draw their own check mark, which WebKitGTK misplaced at 16px. Dock badge digits are centred and use tabular figures. Split-button and branch selector dividers, and the diff minimap's viewport, were invisible on the light theme; they now follow the theme.
+- **Tests pass on non-English machines (#251).** The desktop test suite pins its locale to `en-US` instead of inheriting the host's, and the CLI's offline DNS probe waits up to 5s instead of 2s.
+
+## [3.12.1] - 2026-10-10
+
+### Added
+- **Each project remembers its own commit identity (#246).** The identity profile used for commits was a single global choice, to be switched by hand from one project to the next. Each repository now keeps its own choice, set from the commit menu or Settings → Git, and falls back to the global default otherwise. It applies to the commit only (`-c user.name/email`), without touching the repository's git config, including commits made by custom automations and under `pnpm dev:web`. A profile's GPG key now goes with its name and email (`-c user.signingkey`): signing a commit with the profile's email and the global key made forges show it as Unverified. Amend, split, merge, revert and cherry-pick still use git's own config.
+- **Update a PR's description with AI, and edit its title and description in place (#234).** The PR detail view gains an "Update with AI" action that drafts a new description from the PR's commits and diff, using the PR template and language picked for that repository. The draft opens in a Preview / Raw editor, and nothing reaches the forge until you apply it. Pencil buttons edit the title and the description by hand. Saving goes through each forge's API: GitHub, GitLab, Bitbucket, Gitea and Azure DevOps. On a fork, the edit targets the base repository, where the PR list reads its PRs. Images, videos and `<picture>` blocks in the old description are masked before the model sees the text and restored afterwards, so the model cannot drop or rewrite them. Fenced and inline code is left untouched. A draft and its error belong to the PR they were generated for, and switching PRs does not discard or misplace them. The manual edit buttons are hidden while a draft is generating, and a background refresh no longer closes an editor you are typing in. The diffstat given to the model is taken from the merge base, so commits that landed on the base branch since the PR opened are no longer described as part of it.
+- **Reasoning effort now reaches the AI CLIs, and every provider lists its models (#237).** The effort set in Settings → AI was never passed on, so it had no effect. It is now sent as `--effort` to Claude Code, as `-c model_reasoning_effort=…` to Codex and as `--reasoning-effort` to Copilot. Each value is checked against a fixed list first, in the app and in the `pnpm dev:web` server. When no effort is set, no flag is sent. The model pickers list Codex models (`codex debug models`, with each model's own effort levels, including `ultra`), Copilot models (`copilot help config`) and Antigravity models instead of a free-text field. Before a key is entered, the Claude API picker shows the current models (Opus 5.5 by default, Fable 5.1, Sonnet 5.5, Haiku 4.5). A saved effort that the selected model no longer accepts is cleared once the model list has loaded. Changing the API endpoint refetches the model list only when the field loses focus and holds a complete URL, so the API key is no longer sent to every partly typed host.
+- **Force push is offered after a local rebase (#239).** A branch that diverged from its upstream only because you rewrote it locally now gets Force Push as the main action instead of Sync. Rebasing a pushed branch onto `main` is the typical case. The check accepts the rewrite only when the remote tip is a commit your branch once pointed to (it is in the reflog), or when every remote-only commit is patch-equivalent to a local one. A merge commit that exists only on the remote always keeps Sync. The check runs again on every status refresh, so a collaborator's push picked up by the background fetch withdraws the offer. The force push itself uses `--force-with-lease=refs/heads/<branch>:<sha>` with the upstream commit that was judged safe, so if the remote moved in between, the push is refused. Force pushes you choose explicitly are unchanged.
+- **Release notes get a header entry, and their draft survives closing the modal (#238).** Each repository keeps its own draft and in-flight generation, so reopening the modal brings both back. A spinner shows at every entry point while notes are generating, and the range selects and the draft are locked until generation finishes.
+- **Merge edges curve into the merged branch (#227).** In the Git Tree, a merge edge now leaves the merge node as an S-curve into the merged branch's lane and runs down that lane to its parent, when the lane is free all the way down. Otherwise it keeps the elbow.
+- **AI work in progress pulses (#230).** Every in-flight AI label or button (merge editor, PR views, commit drafting, timeline and the rest) fades in and out while the model runs, and the loading labels drop their trailing ellipsis. The animation is off under `prefers-reduced-motion`.
+
+### Changed
+- **Settings fills the window, and Help matches it (#246).** Settings is no longer a modal: it covers the whole window like Help, with the same left menu and a content column capped at 1200px whose scrollbar sits at the window edge. Each tab opens with its name as a title, a one-line description in all five languages and a separator, and section titles carry an accent bar (form-field labels keep their plain look). Tabs that started without a section title (Dashboard, AI, Accounts, MCP, Automations) get one; Hooks and Logs rely on the page title alone, with their actions (Reload / New hook, Copy / Clear) right-aligned under it. The AI template kinds (commit message, pull request, release notes) move from a switcher inside the tab to their own group in the left menu, and each page is titled after its kind; its template list is split into Default and Custom, and Add template and the Automations Add button are filled accent buttons. The menu footer shows only "Version: X.Y.Z". Help takes the same menu, header and content width, with its section header rendered once from the section list, and its close button is a rounded square instead of a circle.
+- **Styled tooltips across the Git sidebar, the graph, branches, tabs and the dock (#241).** Native `title` attributes, shown after the system delay and unstyled, are replaced by the app's own tooltip. Long text wraps onto several lines up to 280px instead of being cut with an ellipsis. A tooltip appears at once and fades out over half a second, and one that is left before it has appeared no longer flashes up. Buttons that show only an icon get the tooltip text as their accessible name. Dock tooltips open on the side away from the screen edge.
+- **The terminal panel shows the agents' logos, and its buttons get tooltips (#242).** Claude Code, Codex, OpenCode and Antigravity tabs, and the "+" menu, show each agent's logo instead of a letter. The +, full-screen and hide buttons are square icon buttons with tooltips, lined up with the tab bar, and the search tooltip shows its shortcut (⌘F on macOS, Ctrl+F elsewhere). The "+" menu opens upward when the panel is too short for it. An empty terminal uses the tab bar's background in both themes instead of black.
+- **The header fits narrow windows, whatever the language (#240).** The secondary actions (Stash, Tags, Worktrees, Submodules, Release notes) give up their label one at a time, right to left, and only as far as the row needs to fit, measured on the actual widths rather than at fixed breakpoints: French or Spanish labels and a long branch name collapse earlier than English ones. A collapsed action keeps a square icon button and shows its name in a tooltip; an action with its label shows none, except Release notes, whose hint shows at every width. When even five icons do not fit, the actions move to a row of their own, where they usually get their labels back, and the sync button can drop under the branch instead of overflowing. The merge and undo popovers then open below every row of the header rather than over the actions.
+- **One template store, one picker and one Settings tab for commit, PR and release-note AI (#238).** Commit messages, PR descriptions and release notes share the same template model and the same split-button picker. The commit menu keeps its Regenerate, Shorten, Add detail and Translate actions. PR creation gains a per-repository template choice. Output language is now an explicit setting per kind, defaulting to English on new installs. It can be overridden per repository and is remembered per repository. Existing installs keep what they had, through a one-time migration: a commit language that followed the UI locale becomes that locale, a PR language of "UI" becomes the UI locale, and release notes, which always used the UI locale, start from it. The release-notes-on-tag automation follows that setting too; it used to fall back to French. Custom release-note templates become full prompts, and their per-repository selection is kept. The picker's menu says that the template and language chosen there are remembered for the current project only, and ends with "Manage templates…", which opens the templates tab in Settings. The Settings tab that holds providers, models and effort is renamed "AI (Core & Setup)".
+- **The WIP is a row of the Git Tree, not a dock tab (#224).** The WIP tab that v3.12.0 attached to the Git Tree entry is gone, and so is the "Hide WIP when clean" setting. The WIP is a selectable row at the top of the graph, shown only when the working tree is dirty. Selecting it turns the right rail into the files and commit pane, as before, but no file diff opens until you pick a file, the same as browsing a commit. The WIP row previews the commit summary being drafted, or an AI indicator while one is generated for that repository. AI-written commit messages and PR descriptions now survive navigating away while they are generating; a PR description is dropped if the repository changed meanwhile. In the commit pane, the list/tree toggle and the scope picker move to the same controls row as in the WIP pane.
+- **One highlight per Git Tree row (#232).** Selection, the current commit, search matches and hover light the graph band and the commit columns together, with a shade spanning both. The active search match wins over the selected row. Row bands, shading and branch chips are retuned for the light theme. Edges leave the WIP node at its rim, and the node gets a centre dot.
+- **Long diff lines wrap (#231).** `DiffViewer` and `CommitDiffViewer` soft-wrap long lines and keep their indentation, instead of cutting them with an ellipsis.
+
+### Fixed
+- **Merging back an AI task closes it even when its folder can't be removed, and the agent is really stopped first (#247).** These are the follow-ups to the #233 fix.
+  - **Leftover folder:** when removing the scratch fails after a successful merge-back (a locked worktree, a file held open on Windows), merge-back reports success with a warning that stays on screen until dismissed. The task is closed and the leftover is detached from its branch, which is deleted, so it is a plain worktree to remove by hand. Discarding a task stays all-or-nothing: a failed discard keeps its branch for a retry.
+  - **No stray snapshot:** a dry run checks the merge first, so a refused merge-back no longer leaves a Time Machine snapshot behind, and the refusal shows git's own message.
+  - **Starting point recorded:** an AI task records the commit and branch it started from. Merge-back refuses when the main checkout contains neither: once it has switched to an ancestor branch, for instance, the squash would also bring that branch's commits. Staying on the task's branch is fine, even if its base was rebased or amended since.
+  - **Terminal closed for real:** closing a terminal hangs up its whole process group, and the foreground job's, gives them up to half a second to exit, then kills what is left. Before, only the shell was killed, and an agent's subprocess could keep writing to the scratch after merge-back had read it. Merge-back waits for terminals still starting and refuses to go ahead if stopping them fails. On Windows only the leader is killed; a background job of the shell, or a process that detached itself, survives.
+- **Icon-only dock buttons are square, and the Terminal and Files tiles follow the dock's height (#245).** With labels hidden, dock buttons were wider than tall, in the horizontal and vertical docks alike. Their size now derives from the dock's own height, padding and border, and the tiles grow with the dock instead of keeping a fixed height.
+- **Tooltips describe their button to screen readers again, and the dock's follow the window (#243).** Replacing native `title` attributes with the app's tooltips (#241) had dropped the description a screen reader announced for buttons that have their own text, such as stage/unstage or help. While a tooltip is shown, the button now points to it as its description, unless its text already is the button's name. A vertical dock past the middle of the window now opens its tooltips on the other side after the window is resized, instead of keeping the side it had at startup. In the terminal panel, the Antigravity logo is drawn once as an image rather than re-running its blur filters on every repaint of every tab, "New AI task" uses the AI colour with a still sparkle, and the search button announces its shortcut to assistive technology.
+- **Discarding the Changes section no longer throws away staged work (#241).** A partially staged file has a staged and an unstaged entry under one path, and the section discard matched paths only, so discarding Changes also unstaged and reverted the staged half. The discard now matches the section as well. The confirmation names the section it discards and warns how many staged files will be lost, and, for the Staged section, how many of them also have unstaged edits that go with them. "Discard all" only touches the files its confirmation listed, so a file that appeared while it was open is kept. The section and folder trash tooltips say which state they discard.
+- **Ctrl+F in the terminal no longer reaches the program running in it (#242).** On Linux and Windows, Ctrl+F opened the terminal search and also sent ^F to the shell (page down in vim and less, cursor forward in a shell prompt). It now only opens the search.
+- **Tooltips no longer pile up listeners or vanish under the pointer (#240).** Every re-render of a component carrying a `v-tooltip` added another pair of hover listeners and hid a visible tooltip. In the header, which re-renders continuously during a fetch, hovering an action got slower with each fetch and its tooltip disappeared while still hovered. Listeners are now bound once, and a visible tooltip only changes when its text does.
+- **Today and the Dashboard fit windows narrower than 760px, and contributor cards stay readable (#240).** Both views had a 760px minimum width, so their content scrolled sideways on narrower windows. With more than four contributors, a card could shrink to 150px and cut names down to their first letter. Cards now keep at least 280px and the row scrolls instead, and a merged name ("Name A / Name B") can take two lines.
+- **AI-task merge-back no longer loses data (#233).** Merging an AI task (or a "Resolve in scratch" session) back used to overlay the scratch tree onto the main checkout: once `main` had moved since the task was created, it reverted the files `main` had changed, deleted the files it had added, and overwrote uncommitted edits, with no snapshot first. Merge-back now refuses when the main checkout is conflicted or in the middle of a rebase, merge, cherry-pick, revert or bisect, when the scratch still has unresolved conflicts, and when the main checkout's `HEAD` is not in the task's history (it then says to merge the current branch into the scratch first). Otherwise it commits the scratch, without running hooks or signing (a merge resolved there is concluded first), takes a Time Machine snapshot, and squash-merges the task branch with `git merge --squash --no-overwrite-ignore`. That merge applies as a whole or refuses as a whole, so it never overwrites an uncommitted edit, an untracked or ignored file, or a file/directory swap. Keeping the agent's individual commits comes with Agent Workspaces.
+- **Continue at an unresolved rebase conflict no longer does nothing (#228, #223).** Clicking Continue or Skip in the rebase editor while conflicts were still unresolved made git refuse, and the error was hidden: the modal looked dead until it was closed. A failed `--continue` / `--skip` that is still halted on a conflict now hands off to the conflict banner and the inline merge editor, as a fresh conflict does, and the editor shows rebase errors while a rebase is in progress. The rebase state is read from `.git` rather than from `git status` text, so it works in any git locale, and every unmerged status (`DD` included) counts as a conflict, in the app and in the `pnpm dev:web` server.
+- **Checking out a branch whose upstream was force-pushed updates it cleanly (#229, #223).** When a teammate rebased and force-pushed a branch you have no commits on, the old commits counted as yours, the branch looked diverged, and the generic "Pull changes?" prompt ran a merge pull whatever the pull mode, which conflicted. When every local commit was once upstream's (`git merge-base --fork-point`), the "Update branch" prompt is now offered with its own message, and it lands on the rewritten branch with `pull --rebase`. This needs the remote-tracking reflog; without it, the generic prompt is shown. The generic diverged prompt now follows the pull mode setting.
+- **The Git Tree refreshes right after ref-only operations (#222).** Creating or deleting a tag or a branch, stashing, amending, cherry-picking, reverting, rebasing or splitting a commit changes refs without necessarily moving `HEAD`, so the graph waited for the next poll. These operations now force the reload.
+- **No duplicate remote badge (#226).** After switching projects, a remote branch such as `origin/x` sitting on the same commit as a local `x` could show its badge twice. Branches are loaded before the graph resolves its refs.
+- **The graph column stops twitching (#225).** The lane column grows at once but shrinks only after 1.5 s of stable width, so reloads and pagination no longer make it flicker (`useStickyWidth`).
+- **A stash's untracked files show in its diff, and applying a stash stays in the Git Tree (#236).** `stash push --include-untracked` stores untracked files in the stash's third parent, which the diff never read. They now appear alongside the tracked changes. Applying or popping a stash no longer switches the right rail to Changes or leaves a stale file diff open: the WIP row is selected in the Git Tree.
+- **Light-mode commit graph keeps its colours (#235).** Row bands faded to a dark gradient that muddied lane colours, and yellow and green nodes turned olive when darkened for contrast. Bands now overlay the lane colour (a rainbow on the trunk) and fade in past 40% of the row, and nodes use brighter fills. Dark-mode band tints are slightly stronger.
+
+### Security
+- **AI agents no longer see your tokens, run with no tools, and never inside the repository (#244).** GitWand imports your login-shell environment at startup and passed all of it, plus the `GH_TOKEN`/`GITLAB_TOKEN` it preloads for `gh` and `glab`, to every process it started, AI CLIs included. Those agents read diffs and PR bodies written by other people, so a prompt injection could have them print and send that environment, and a cloned repository could ship a config the agent would run. Claude Code, Codex, opencode, Copilot and Antigravity now start from an empty environment that gets back only home, locale, proxy and CA-certificate variables, the API key of that CLI's own provider, and the configuration its own setup needs: Bedrock or Vertex credentials when Claude Code is set up for them (in the environment, `~/.claude/settings.json` or Claude Code's managed settings), the `env_key` of a custom Codex provider, the variables an opencode config names. Forge tokens are never passed. Every run starts in a fresh private directory (`<user cache>/gitwand/ai-runs`, mode 0700) that is removed afterwards, so no CLI loads hooks, plugins or MCP servers from the repository, and nothing one run writes reaches the next. Claude Code runs with no tools at all, only your user settings, no MCP servers and no saved session; Codex with `--sandbox read-only`; opencode with bash, edit and webfetch denied and project config ignored. Claude Code, Codex and opencode read the prompt from stdin, so repository content no longer shows in the process list. AI completions get a 30-minute ceiling instead of no limit. Since the agents no longer start in the repository, its `CLAUDE.md` or `AGENTS.md` does not reach them; the prompt carries what they need.
+- **The AI API key moves to the system keychain (#244).** The Anthropic / OpenAI-compatible key was stored in plain text in the settings kept by the WebView on disk. It now lives in the OS keychain, and the webview only ever sees a masked hint: Anthropic, OpenAI-compatible and Ollama requests go through the Rust backend, which attaches the key and passes it, with the request body, to curl on stdin. The key is bound to the endpoint it was entered for, and the backend refuses to attach it to any other origin: changing the endpoint asks for the key again. An existing key is moved on first launch, bound to its saved endpoint (an endpoint saved without `http://` or `https://` is repaired first), and removed from the old settings once the keychain has it; if that move fails, Settings says the key is still stored in plain text and offers to remove it. The keychain commands only accept GitWand's own `gitwand:` entries, and the AI key cannot be read back by the frontend at all. With AI calls out of the webview, its Content Security Policy allows connections to a short list of fixed hosts instead of any host.
+- **New privacy settings: remote images, Gravatar and launch statistics (#244).** Images in PR descriptions, comments and READMEs were loaded straight from whatever host the author chose (github.com routes them through a proxy, GitWand did not), so an image in someone's PR could learn your IP and when you opened it. Remote images are now replaced by a placeholder, with a "Show images" button above the PR description, its comments and the PR-creation preview that shows them for that PR only. On a README the button reads "Always show for this project" and is remembered per repository. Settings → General → "Load remote images in markdown" turns them on everywhere. Gravatar lookups, which send a hash of every commit author's email to gravatar.com, are off unless enabled. The anonymous launch event can be turned off in Settings, and `DO_NOT_TRACK=1` or `GITWAND_NO_TELEMETRY=1` turn it off for the machine. The Copilot CLI no longer receives `GH_TOKEN`: sign in with `copilot /login` or set `COPILOT_GITHUB_TOKEN`.
+- **File reads and writes stay inside repositories (#244).** The raw file commands accepted any folder as their root, so `/` gave access to every file on the machine. The root must now be inside a git working tree. Importing a commit template, which lives outside the repository (`~/.gitmessage`), goes through a dedicated command that takes the path from git config.
+
+## [3.12.0] - 2026-10-06
+
+### Added
+- **Cherry-pick a commit as work in progress.** The commit context menu, in the Git Tree and in the commit list, gains "Cherry-pick as WIP": the commit's changes land in the index and working tree without being committed (`git cherry-pick --no-commit`), so they can be edited, split or partly unstaged before you commit them. When the pick conflicts, the conflicted files open for resolution as ordinary WIP: with `--no-commit` git leaves no cherry-pick in progress, so there is nothing to continue or abort.
+
+### Changed
+- **The WIP lives in the Git Tree.** The dock's Changes entry becomes a WIP tab attached to the Git Tree entry. Clicking it, or the WIP row at the top of the graph, selects your uncommitted changes: the right rail turns into the files and commit pane, and the selected file's diff covers the graph until you close it with the X, which returns to the graph with the WIP still selected. Moving between the WIP and the graph no longer clears the commit summary and description, including an AI-written draft. A saved dock order that still lists Changes is cleaned up on upgrade, and "Hide Changes when clean" now hides the WIP tab.
+- **The integrated terminal has its own renderer, and typing is fast again.** Terminals used xterm.js, whose WebGL renderer runs on the CPU wherever the webview falls back to software GL, which is common on Linux, so every keystroke repainted the whole canvas there. GitWand now draws the terminal itself (`utils/vt`): a small VT emulator keeps the screen, and each row is a plain DOM line that is rebuilt only when its content changes, at most once per frame, so an echoed keystroke touches one row. The emulator covers what the AI CLIs and a shell use: colours (16, 256 and truecolor), scroll regions, the alternate screen, bracketed paste, mouse and focus reporting, synchronized output, and the startup queries Claude Code, Codex, Gemini, Copilot and Antigravity wait for. Selection, copy (Ctrl+Shift+C, ⌘C), paste, search, Ctrl/⌘+click on links and scrollback (wheel, Shift+PageUp/PageDown) work as before. In an AI CLI tab, Shift+Enter inserts a newline. Nerd Font icons (prompt themes, `eza`/`lsd`, status lines) now display without installing anything: GitWand ships Symbols Nerd Font Mono (MIT, 1.2 MB), which the terminal fetches only once an icon is drawn. The terminal now sits on the same surface as its tab and follows the light / dark theme, and it reports those colours to programs that ask for them. xterm.js and its four add-ons (`@xterm/xterm`, `addon-fit`, `addon-search`, `addon-web-links`, `addon-webgl`) are no longer dependencies.
+- **The monorepo scope is remembered locally instead of in the repository.** Choosing a scope used to write it into the repository's `.gitwand-workspace.json`, and to create that file when it did not exist, so "Scope here" left an untracked file in any repo it was used in. The scope is now kept in the app's storage, per repository, and nothing is written to the repository. A scope already saved in a `.gitwand-workspace.json` is picked up once, the first time the repository opens, and the file is left as it is.
+
+### Fixed
+- **A conflicted file no longer shows its raw diff before the merge editor opens.** In Changes, selecting a conflicted file loads the repository's conflicts first, and for about 300 ms the view showed the plain diff instead: the conflict markers as added lines, with a clickable "Stage this hunk". It now shows "Loading…" until the merge editor is ready. A load that finishes after you have moved to another file no longer opens the merge editor on the wrong one.
+- **The Git Tree updates as soon as a reset or a checkout moves HEAD (#213).** After `reset --hard` to an older commit, the graph kept the old branch and HEAD labels for up to half a minute, until the next poll: the reload skipped the log whenever its top commit had not changed, and with `origin/<branch>` still on the newest commit it never had. Reset and checkout now force the reload. A forced reload also stopped refetching the whole prefetched history (up to 5,000 commits): it fetches what you are looking at plus one page, and the background prefetch refills the rest. Changing the branch or author filter, or the monorepo scope, fetches the first page of the new view and drops pages still in flight for the old one.
+- **Staged files can be discarded.** The Discard action was hidden on staged files. It now unstages them first, then restores the working tree. Two cases also failed in "Discard section" before this: a staged rename (only the new path was unstaged, then git refused to check it out, leaving the old path deleted and the new one untracked), and a file added then edited (it went to both the checkout and the clean batches, and git rejected the whole checkout, so every other file in the batch kept its changes). Discarding the staged row of a partially staged file drops both halves; the discard snapshot and ⌘Z cover it.
+- **A WIP on the trunk head stays on the trunk's lane.** On main or master with uncommitted changes, the WIP node was pushed onto a side lane next to the trunk instead of sitting at the top of lane 0.
+
+### Security
+- **rustls 0.23.45 in the desktop app.** Earlier 0.23 releases accepted TLS 1.3 handshake messages across encryption-level boundaries. rustls carries the app's HTTPS traffic (update checks, launch telemetry).
+- **Patched transitive dependencies of `@gitwand/mcp`.** The MCP SDK pulls in express and hono for its HTTP transport: `proxy-addr` 2.0.8 (critical, IPv4-mapped IPv6 trust bypass), `hono` 4.13.13, `ip-address` 10.7.3 and `fast-uri` 4.2.1. GitWand's MCP server runs over stdio, so those HTTP paths do not run, but they are installed with the package. Dev and build tooling got the same treatment (`undici`, `brace-expansion`, `source-map-js`); `braces` has no patched release yet and only reaches the VS Code extension's packaging tools.
+- **DOMPurify 3.4.16.** The sanitizer behind rendered PR descriptions and markdown picks up upstream hardening against DOM clobbering through XML content.
+
+## [3.11.2] - 2026-10-05
+
+### Added
+- **The File Explorer panel becomes a Finder-like file browser.** The panel behind the dock's Files tile keeps its tabs, editing and blame, and gains what a file browser needs. It also opens from the command palette ("Toggle File Explorer") and, on macOS, the View menu. Badges are landmarks, not the point. Every changed file has one, and so does every folder above it, including folders that were never opened.
+  - **Lazy, one folder at a time.** A new `list_repo_dir` command lists a single directory when it is first expanded, capped at 5,000 entries, after which the tree says only the first 5,000 are shown. Ignored entries are classified in process with libgit2: a path is ignored when an ignore rule matches it and the index does not track it, so a force-added file is not shown as ignored. Measured on a `microsoft/vscode` checkout, a 6,000-file directory lists in 66 ms, where `git check-ignore` takes 1.6 s. Ignored files are hidden by default, and "Show ignored" shows them greyed out.
+  - **Keyboard-first.** Arrow keys expand, collapse, descend and climb. Enter opens a file in the preview tab or toggles a folder, and a double click still pins a tab. Home and End jump to the ends, typing a name jumps to it, and ⇧F10 opens the context menu. The tree is virtualized and exposes `role="tree"` with a single tab stop.
+  - **Diff or file, per tab.** A tab on a changed file opens on its inline diff, with a Working tree | Index switch when the file is both staged and modified. A Diff | File toggle in the toolbar switches to the editor and back. The diff always shows the file on disk, so Diff waits while the tab has unsaved changes ("Save to see the diff"), and leaving the diff re-reads a clean tab from disk. An unchanged file opens in the editor, as before. A conflicted file offers "Open in merge editor", and a file deleted on disk says so.
+  - **Context menu.** On a file: Open in editor, Copy path and Reveal in Finder / Explorer / the file manager. On a folder: Scope here, Copy path and Reveal.
+  - **Live, and scope-aware.** The tree refreshes from the Live Repo watcher and re-lists only the folders that changed. "Scope here" narrows the whole app to a folder, the tree re-roots on it with a "Whole repo" button to go back, and if that folder is deleted, the panel falls back to the whole repo with a notice. Expanded folders, the selection and "Show ignored" are remembered per repository.
+
+### Changed
+- **The File Explorer panel lists folders lazily and refreshes live.** It used to load the whole repository once, capped at 20,000 entries, and never refreshed. Each folder is now listed when it is opened, folders show a count of changes below them, and the Live Repo watcher keeps the tree current.
+
+### Fixed
+- **Virtualized lists stopped growing after their first render.** The shared row virtualizer kept the item list and total height it computed for the first row count, so the inline PR diff did not show rows added later (a loaded diff, review threads, a comment box or a critique panel opening) until a scroll or measure happened to refresh it. It now follows the row count.
+- **The Linux AppImage would not start for a user other than the one who mounted it.** The Tauri bundler stored the launcher, `AppRun.wrapped`, as `0770` (tauri-apps/tauri#16155). A normal start never noticed, but `firejail --appimage`, which mounts the image as root, got `Permission denied`, and so did the AppImage catalog's test (AppImage/appimage.github.io#7392). `@tauri-apps/cli` is now on 2.12, which ships the launcher as `0755`, and the CI bundle build fails if any file in the AppImage is executable or readable by its owner only.
+- **Three diff panels never appeared in the packaged app.** On the desktop path, `getGitDiff` rebuilt the diff from its path and hunks only, and dropped every other field the Rust command sends. So the "diff truncated at 5 MB" banner, the untracked-directory panel and the nested-repository panel (issue #183) never rendered, while they did under `pnpm dev:web`. The wrapper now passes those fields through.
+- **Untracked files over 5 MB are now truncated like other diffs.** `git_diff` capped the plain `git diff` output at 5 MB but not the `--no-index` fallback that renders an untracked file, so a huge new file streamed its whole content to the UI. Both outputs now go through the same 5 MB cut and report `truncatedFromBytes`, and the `pnpm dev:web` server applies the same cap.
+
+### Security
+- **`git_diff` and `write_file` now refuse paths outside the repository, including through symlinks.** `git_diff` never checked the path it was given, and its untracked-file fallback (`git diff --no-index`) reads whatever file that path names, so a `../` or absolute path, or a symlink leading out of the repo, could render a file outside it. `write_file` followed a dangling symlink and created its target, even outside the repository. Both now run the path through `safe_repo_path`, in the app and in the `pnpm dev:web` server. That check now resolves paths on the filesystem rather than lexically, and refuses a path below a dangling, looping or unreadable symlink. `write_file` also refuses to write through a symlink that does not resolve. A deleted file whose whole folder is gone still diffs, and `./file` or an absolute path inside the repository no longer makes the diff panic inside libgit2.
+
+## [3.11.1] - 2026-09-25
+
+### Added
+- **History-aware LLM prompts.** When a conflict goes to a model, through the `llm_proposed` fallback or through "Resolve with AI", the prompt now says *why* each side changed the conflicting lines. For each side, it carries the commits since the merge base that touched those lines: their messages always, and their diffs limited to the conflicting range while a token budget allows. Before this, the model only ever saw the hunk.
+  - **Local, and lazy.** The algorithm lives in `@gitwand/core`, which stays browser-safe: the host injects a `GitRunner` (`gitExec` on the desktop, `execFile` in the CLI). Git is queried only for the hunks actually sent to a model, with a 2-second budget per hunk. History can make a prompt poorer, but it never makes a resolution fail.
+  - **Budgeted.** The default budget is 1 500 tokens, adjustable from 200 to 8 000. When the budget is exceeded, the diffs are dropped first, then the message bodies, then the oldest commits. The newest commit's subject on each side is always kept.
+  - **Explicit when useless.** The prompt says why history is missing instead of silently leaving it out: no merge base, a side that removed the lines, a timeout, and so on. Cherry-picks and reverts use only the applied commit on the theirs side. A side that only reformatted the lines shows its reformat commit instead of claiming that no commit touched them.
+  - **An opt-out a repository can enforce.** History is enabled by default, and can be turned off in Settings → AI or with `llmFallback.history` in `.gitwandrc`. `enabled: false` in `.gitwandrc` wins over the app setting on both desktop paths, so a repository can forbid sending its history to an AI provider. The LLM trace panel shows what was sent ("History: 2 commits (≈150 tokens)", or "not sent").
+- The CLI passes the operation's SHAs (`HEAD` and `MERGE_HEAD` / `REBASE_HEAD` / `CHERRY_PICK_HEAD` / `REVERT_HEAD`) and runs its history queries from the repository root. Variables that look like secrets (`*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`) are stripped from the environment before git is spawned.
+
+### Fixed
+- **The merge editor never received the repository path.** `App.vue` did not bind `MergeEditor`'s optional `cwd` prop, so everything that reads it turned itself off without an error: custom automations and resolution-memory apply, as well as the new history section of "Resolve with AI". A source-level test now pins that call site, because an optional prop type-checks when it is forgotten.
+- Saving the LLM-fallback section of Settings rewrote `llmFallback` in `.gitwandrc` from the fields it edits, and dropped the rest: `model`, `maxTokens`, `temperature` and, now, a repository's `history` opt-out. Unknown keys are kept.
+
+## [3.11.0] - 2026-09-21
+
+### Added
+
+- **Apply from the Conflict Predictor, stopping only on what needs a human.** The predictor told you what *would* happen and then abandoned you: merge blind, or detour through a scratch worktree. "Merge and auto-resolve" now runs the real operation and re-runs the engine against what git actually produced, applies every resolution that passes the gates, stages them, and stops with the operation still in progress on the residual. It never auto-aborts (an abort discards hand resolution the snapshot cannot give back), never auto-continues past a residual, and never trusts `stageFiles`, whose errors land in a ref instead of throwing: success is verified by re-reading git's conflicted set. A snapshot is taken before the operation, not after. The button says "Estimated N", and the report says so again when the estimate and the outcome disagree, which they can by construction: the preview is a simulation over three blobs, with no index, no `MERGE_HEAD`, no rename detection and no `.gitattributes` merge drivers.
+- **A numeric confidence bar, combined in AND with the label gate.** `minConfidenceScore` (0-100) lands in `@gitwand/core`, settable from the desktop (Settings, Resolution), `.gitwandrc`, the CLI (`--min-confidence-score`) and the MCP tool schemas. It is ANDed with `minConfidence`, never substituted for it, and that is the design rather than an implementation detail: `complex` scores 60, so a numeric gate *replacing* the label gate would silently apply complex hunks under any bar below 60. Being purely subtractive, no setting of the bar can apply more than the engine applies with the bar off.
+- **Per-hunk opt-out of an auto-resolution.** The merge editor's summary modal lists every offered resolution with its confidence score and a checkbox, including the ones currently held back, and the confirm button disables when nothing is left to apply. Selection is keyed on the repo-relative path, survives a file switch, is renumbered deterministically after an apply, and is dropped entirely if the content changes underneath.
+- **The Conflict Predictor shows the engine's confidence.** Per-hunk score, label and reason were computed on every preview and thrown away. Each hunk now carries a coloured bar, and a five-stop segmented control (Off / 60 / 75 / 90 / 95) re-filters the counts without re-running the engine. A hunk held back by the bar and a hunk the engine refused are rendered differently on purpose: lowering the bar can release the first and will never release the second.
+- **The merge editor's custom edit is a real code editor.** The bare textarea is replaced by CodeMirror 6: syntax highlighting, line numbers, real undo. `validateEditing` and `resolveHunkCustom`, including its stale-content bail, are untouched.
+- **Editable diff: fix a hunk where you are reading it.** A pencil on an inline-mode hunk opens a CodeMirror box in place. Deliberately bounded: unstaged, non-conflicted working-tree files, inline mode only, one hunk at a time. Write-back is a plain file write through a pure splice layer that reconstructs from the original bytes, so a trailing newline and CRLF endings survive, and refuses rather than guessing if the file moved since the diff was computed.
+- **"Split this commit" is reachable again after a rebase conflict handoff** (#128). v3.6.0 made a mid-rebase conflict non-blocking by closing `RebaseEditor`, which took the split action with it for the rest of the rebase. It now lives on the progress banner, gated on the rebase being at an *edit* stop rather than a conflict stop: at a conflict stop the commit does not exist yet and HEAD is its parent, so the button would have split the previous commit.
+- **`git_rebase_onto`**, with its dev-server route and parity coverage. A ref starting with `-` is refused before git runs.
+- **Three real dev-server routes for the previews.** `preview_merge` POSTed to a path that did not exist and swallowed the failure into `[]`; `preview_rebase` and `preview_cherry_pick` were Tauri-only stubs returning `[]`. Under `pnpm dev:web`, the environment used for manual QA, the Conflict Predictor therefore reported every merge, rebase and cherry-pick as conflict-free. The three wrappers now throw with the server's own message, because an empty preview reads as "this merge is clean", the most misleading answer available.
+
+- **Gitea and Forgejo support** (#193). Sign in with a personal access token in Settings > Accounts, and get the PR tab and Today on any self-hosted Gitea or Forgejo server: list, detail, diff, CI status, comments, read-only reviews, create, merge, checkout, and draft-to-ready. Remote detection resolves the server from the account you configured rather than from a fixed hostname pattern, so an instance living on a neutral domain is still recognised as Gitea. This first pass does not cover forge-side auto-merge or submitting and dismissing reviews. Verified against a live Gitea 1.27.3, which corrected two guesses the documentation had led us to: the merge endpoint takes `Do`, not `merge_method`, and the PR diff lives at `/pulls/{index}.diff` with no `/patch` fallback to fall back to. The same session caught a comment list that repeated a single comment 300 times, because Gitea's comments endpoint ignores pagination and the loop only knew how to stop on an empty page.
+
+- **GitWand is published to the Arch User Repository as `gitwand-bin`.** A release now generates a `PKGBUILD` from the `.deb` it just built and pushes it to the AUR, so Arch users can install with any AUR helper instead of unpacking a Debian package by hand. Original work by [@t1gu1](https://github.com/t1gu1) in #100. The publish step is skipped with a warning when the AUR credentials are absent rather than failing the release, the third-party action is pinned to a commit rather than a moving tag because it receives the AUR SSH private key, and `makepkg` builds the package before it is published: verified end to end in an Arch container, where the generated `PKGBUILD` builds, installs, and puts `gitwand-desktop` and the licence where they belong.
+
+- **CI now checks that the packaged `.deb` actually starts.** Nothing did: `rust-check` compiles, `bundle-smoke` proves the bundler still produces a package, and neither ever ran the result. A new job installs the built `.deb` on **ubuntu-24.04** (Linux Mint 22's base, deliberately not the 22.04 it is built on) and launches it headless, failing unless the process is still alive after 20 seconds, since a GUI app has no success exit code. It captures the output a real GUI launch throws away: the `.desktop` entry ships `Terminal=false`, which is why #139 arrived with no diagnostics at all and sat unresolvable for a month.
+
+- **Forge-side auto-merge.** A PR whose checks have not finished yet can now be armed to merge itself the moment they pass, instead of forcing someone to come back and click merge by hand. GitHub, GitLab and Azure DevOps can each queue one (`gh pr merge --auto`, GitLab's merge-when-pipeline-succeeds, Azure's auto-complete); Bitbucket has no such capability on its API and says so plainly rather than pretending to offer it, while keeping the immediate merge it already does. The action lives in three places: the PR detail panel, a badge on the PR list row of a PR whose merge is already scheduled, and the Today inbox. It is only ever offered on a PR that is **not** already mergeable: when a PR is already clean, the plain merge sitting right next to it is what a user wants, and rather than guess at what `gh pr merge --auto` does against an already-clean PR (merge immediately, refuse, or queue), the design simply never puts it in front of one.
+- Today does **not** offer auto-merge for GitLab, on purpose. A GitLab merge-requests list payload carries `merge_when_pipeline_succeeds` but never the pipeline status itself, only the single-MR detail endpoint returns that, so whether arming is even possible cannot be known without opening the MR. The PR detail panel, which does load the single MR, still offers it there. A GitLab user who never sees the action in Today is seeing this limitation, not a bug.
+- Azure DevOps auto-merge is desktop-only, like every other Azure capability: its sign-in is an Entra device flow held in the OS keychain, which a Node dev-server process cannot reach. It cannot be exercised under `pnpm dev:web` and has no parity coverage as a result.
+
+- **Resolve all conflicts with AI** (#196). A fourth entry in the "Accept all:" bar asks the model for every unresolved hunk in the file, at most three at a time, with progress and a cancel. Suggestions are staged for review rather than applied: the confidence stance the engine is built on does not change because the request came in a batch. A busy hunk's whole action row disables while its suggestion is arriving, so it cannot be accepted mid-request.
+
+### Fixed
+
+- **Two commands 404'd under `pnpm dev:web`.** `backend.ts` fetched `/api/git-commit-template-path` and `/api/git-config-identity`; `dev-server.mjs` declared neither, so the commit-template lookup silently returned null and the identity lookup threw, in web mode only. Both routes now exist and mirror the Rust commands, including their judgement calls: an unset `commit.template` is not an error, an unset `user.name` or `user.email` is. Found by the command-registry audit and pinned at parity, so the fix is the Rust behaviour rather than an approximation of it.
+
+- **A failed submodule update reported success under `pnpm dev:web`.** `/api/git-submodule-update-one` ran `git submodule update` and discarded the exit code, answering `{}` whatever happened, while the Rust command propagated the error. Found by the parity work below, which is the only thing that compares the two.
+
+- **The conflict banner reads the repository instead of a frontend flag.** `isCherryPicking` is set when *this app* starts a cherry-pick, so it did not survive opening a repository that was already mid-cherry-pick: the banner offered "Abort merge", and once the last conflict was resolved the app ran `git merge --continue` on a repo with no `MERGE_HEAD`. Both decisions now come from `git_repo_state`, which reads `MERGE_HEAD`/`CHERRY_PICK_HEAD` on disk, with the old flag kept only as the fallback for when that read fails. A conflicted `revert` still maps to the merge action, which is what the app actually has a wrapper for.
+
+- **Abort merge and abort cherry-pick now report what git did.** A refused abort produced a "Merge aborted" toast and left the conflict on disk: `git_merge_abort` returns Ok with `success: false` when git refuses ("Entry not uptodate"), and nothing read the field. In web mode the cherry-pick abort was worse still — the dev-server answers 200 with `{ success: false }` and the body was discarded. Both now surface git's own sentence, a failed cherry-pick abort stays in cherry-pick mode instead of hiding the banner for a sequencer still on disk, an abort that would discard resolution work asks first, and a successful one clears the resolution state and leaves the changes view instead of leaving an undo stack pointing at a merge that no longer exists (#197).
+
+- **GitLab merge requests could not be merged at all.** `gl_merge_mr_inner` passed `--delete-source-branch` to `glab mr merge`, a flag that does not exist: `glab` answers `ERROR Unknown flag: --delete-source-branch.` and stops before doing anything, so every GitLab MR merge from GitWand has failed since the line was written. The correct flag is `--remove-source-branch`. The argument construction is now extracted into a pure `gl_merge_args(iid, method)` so a test can see it, pinned by five regression tests, the same shape `gl_state_flag` got for #138.
+
+- **Rejecting a proposed resolution was cosmetic.** The click added the hunk index to a local ref that nothing but the `v-if` hiding the panel ever read. Neither the summary nor the "Resolve auto" path consulted it, so the panel disappeared, the user believed the resolution was declined, and it was written anyway with nothing reporting that it had. The neighbouring LLM rejection *was* wired to the apply, which is how the two diverged; both now write to one store.
+- **The confidence bar never reached the apply.** The preview filtered its displayed counts through a ref of its own while the store's `minScore`, which is what the apply predicate actually consults, stayed 0 forever: nothing in the app ever wrote it. A user could set 90%, watch the panel report "1 held back by the bar", press the button and have the sub-90 hunk written anyway. The same held for the merge editor's "Resolve auto" and the `MERGE_HEAD` automation. There is now literally one ref, asserted by object identity rather than by equal values, and Settings seeds it on load and on repo change so the bar applies whether or not the predictor is ever opened.
+- **A merge git refused looked like a clean success.** The apply orchestrator called `useGitRepo`'s `mergeBranch` and `cherryPick`, which catch everything into `error.value` and also swallow a `{ success: false }` result. A merge refused for a dirty tree, unrelated histories or a bad ref therefore arrived looking like success: no conflicts, the loop breaks immediately, and the report announced `finalized: true` and "0 applied, 0 left to resolve" for an operation that never ran. The runners and the finalize step now call the backend directly and assert on the result. A conflict is still not a failure: git did the work and stopped where it should.
+- **Two concurrent previews read each other's files.** The scratch files `git merge-file` reads were named after the file path alone in the shared temp dir, so two previews running at once wrote and read the very same three files: a preview came back holding a three-way merge assembled from two unrelated repositories. Each call now owns a scratch directory removed on `Drop`, with names from a counter, which also fixes `a/b.ts` and `a.b.ts` collapsing onto the same prefix.
+- **Absolute temp paths leaked into the conflict markers users read and copy.** `git merge-file` was called without `-L`, so it labelled each side with the scratch file it was handed. It now passes `-L ours -L base -L theirs`, matching the reconstruct-conflict route.
+- **The Conflict Predictor was unreadable in light mode.** Every surface in the panel referenced `--color-surface-1` / `--color-surface-2` / `--color-subtext`, none of which is defined by either theme, so each fell through to its hard-coded Catppuccin fallback and painted a dark panel, while `--color-text` *is* defined and resolves to near-black: `#1e1e2e` behind `#15151f` text. A repo-wide sweep for undefined `--color-*` names now comes back empty, including a PR check badge whose hover turned orange text onto an orange fill.
+- **A tab switch in the File Explorer could write one file's text into another.** The v3.11 refactor replaced a listener that captured its tab id inside each `EditorState` with a single handler reading `activeTab` at fire time. `mountTab` awaits the tab load and the grammar import while the *previous* tab's view is still mounted and editable, so a keystroke in that window fired with `activeTab` already pointing at the new tab. Capture is per state again, as it was before the refactor.
+- **A delete-only hunk could never be edited.** With `newCount === 0` the post-image is the empty string, and `"".split("\n")` is `[""]` rather than `[]`, so the staleness check compared one empty line against an empty slice and reported a perfectly fresh hunk as stale.
+- **`gitwand_preview_merge` declared no `min_confidence_score`.** Its handler branched on the argument, but unlike the other two tools its `inputSchema` never declared the property, so a schema-validating client stripped or rejected it and only `.gitwandrc` could reach the bar.
+- **The split modal showed the pre-rebase diff while the split acted on HEAD.** `RebaseEditor.handleSplitAtHead` passed the pending entry's original hash, which drives the modal's diff, while `gitSplitCommit` operates on HEAD. Whenever the replay rewrote the commit (a moved base, or a conflict just resolved) those are two different commits. A clean replay makes them identical, which is why it went unnoticed.
+- **A latent flake in the parity harness.** The dev-server keeps Node's default 5 s `keepAliveTimeout` and undici pools keep-alive sockets, so any suite whose gap between two requests exceeds that is handed a socket the server already closed and fails with `ECONNRESET` rather than with anything about the route under test. The harness now sends `Connection: close`.
+
+- **The dev-server accepted files the packaged app refuses.** `read_file` is `std::fs::read_to_string` in Rust, which rejects anything that is not valid UTF-8, while the dev-server's `readFileSync(path, "utf-8")` silently substituted `U+FFFD` and returned success. The two "worked" differently, which is worse than one of them failing: a non-UTF-8 file among a repository's conflicts made every conflict unresolvable in the packaged app while the same repository loaded fine under `pnpm dev:web`, so the bug could not be reproduced in the environment used for manual QA. The dev-server now decodes strictly and returns the same error string, and a new `tests/parity/read-file.test.mjs` asserts the two backends **refuse** the same input for the same reason, not merely that they accept the same input.
+
+- **AI conflict resolution no longer collides with itself** (#196). Requesting a suggestion for a second hunk while the first was still running overwrote a single shared index, so the first answer was applied to the wrong hunk. State is now keyed per hunk, a hunk that is working greys out and refuses further clicks, and the twelve AI commands run on the blocking pool instead of pinning tokio workers that every other IPC call shares. Confirming one hunk no longer throws away the suggestions staged for the others: because the component knows which index it just consumed, the queue renumbers its settled answers instead of dropping them, so resolving the first of ten hunks costs nine model calls, not nineteen. Work still in flight at that moment is discarded, deliberately, since a call already handed to the provider captured its hunk index and its answer would land on the wrong hunk after the renumbering.
+
+### Changed
+
+- **Twenty-seven write commands are now proven to refuse identically in both backends.** `pnpm dev:web` runs `dev-server.mjs`, not Rust, and the failure paths were where the two had already diverged unnoticed (`read_file` rejected non-UTF-8 in Rust and substituted `U+FFFD` in Node). Twenty-seven parity tests now assert that both sides refuse **and leave the same repository behind** — agreeing on "no" while leaving different working trees is not parity, because the state is what the user acts on next. They cover the ten commands that touch the working tree or HEAD (`merge`, `cherry-pick`, `revert`, `reset`, `discard`, `checkout`, `switch-branch`, the three stash operations) and the seventeen that touch the index, refs or submodules (`commit`, `amend`, `stage`, `unstage`, the patch variants, branch create and delete, interactive rebase, `pull`, the submodule family). They found one divergence, fixed above. Three commands are **not** covered, and saying which matters more than the count: `git_fetch` takes a `tauri::ipc::Channel`, so no process without a Tauri runtime can call it; `workspace_fetch_all` and `workspace_pull_all` return a status vector rather than a `Result`, so they have no refusal to compare. `snapshot_create` answers `Ok(None)` instead of failing, so it has no reachable refusal either.
+
+  Reaching them at all needed one mechanism: 5 of the 35 write commands had a probe arm, and the other 30 would each have needed a `*_parity` wrapper plus an arm. A single generic `command-parity` arm dispatching on the command name replaces thirty wrapper-plus-arm pairs with thirty short match arms. The parity suite goes from 81 tests to 91 without getting slower.
+
+- **Every Tauri command the frontend calls now declares its dev-server route, or why it has none.** `pnpm dev:web` runs `dev-server.mjs`, not the Rust backend, so a command whose route is missing makes manual QA test something other than what ships — that is how a broken `glab` flag survived in `gl_merge_mr`, and how `read_file` disagreed with Rust on non-UTF-8 input while agreeing on everything else. `commandRegistry.ts` declares the correspondence for all 139 invoked commands and `commandRegistry.test.ts` fails when it stops matching reality: a command with no entry, an entry naming a route the dev-server does not serve, an entry for a command nothing invokes any more, or a `tauriInvoke` call whose command name is not a string literal — a dynamic name is invisible to the registry, which would make the audit wrong rather than merely incomplete.
+
+  The audit it is named after found **11 gaps**, recorded in the file rather than dressed up as deliberate choices. Two are live defects: `git_commit_template_path` and `git_config_identity` fetch `/api/git-commit-template-path` and `/api/git-config-identity`, which `dev-server.mjs` never declares, so both 404 under `pnpm dev:web`. The other nine have no dev-server route and no reason they could not have one: `git_autocomplete`, `git_conflict_check`, `set_git_config`, `scratch_worktree_discard`, `scratch_worktree_merge_back`, and the four `mcp_*` config commands.
+
+  One measurement worth recording, because it nearly went unnoticed: a first pass counted 122 invoked commands, not 139. The regex `tauriInvoke<?[^>]*>?\(` stops at the first `>` and so missed every call with a nested generic — `git_status`, `git_diff`, `git_log` and `git_blame` among them. A guard that under-counts passes while auditing nothing, so the parser walks from the identifier to its parenthesis instead, and a floor assertion pins the count.
+
+- **Merge, cherry-pick, revert and rebase share one command, one error convention and one banner.** They had four separate abort/continue pairs with three different error conventions between them, which is what produced #197 and three more defects of the same shape. `git_operation_action(cwd, operation, action)` replaces five Tauri commands and distinguishes the three outcomes an operation action actually has: it completed, it halted on a further conflict, or git refused. Conflating the last two is why a `--continue` that simply advanced to the next conflicting commit used to surface an error toast. A revert is now a parameter value rather than a missing feature: the app could start one (`git_revert_commit`) but had no way to continue or abandon it, so a conflicted revert offered "Abort merge". `isCherryPicking` is deleted — the repository records the operation, and `git_repo_state` reads it. The dev-server route that ran a shell string (forbidden by AGENTS.md) is rewritten with an argument array, and both sides pin `LC_ALL=C` so a check that matches git's own words does not depend on how git was built.
+
+- **Nothing continues by itself any more.** Resolving the last conflict used to run `merge --continue` / `cherry-pick --continue` immediately, while a rebase deliberately did not (#128). One policy now, for every operation: the banner's Continue button is the only way forward, and git writes a commit when you say so. The merge-completed modal still appears, but only once the repository confirms the merge is over — a `--continue` that halted on a further conflict shows nothing.
+
+- **The CodeMirror wiring is a shared three-layer extraction instead of living entirely inside `FileExplorerPanel.vue`.** `codemirrorLibs.ts` (memoized dynamic imports, language detection, memoized per extension rather than per path), `useCodeMirror.ts` (one `EditorView` and its compartments) and `CodeEditor.vue` (the `v-model` SFC). Every `@codemirror/*` import in the new files is `import type`, so nothing becomes statically reachable from an eager path. The File Explorer was migrated onto it behind a test written against the *original* implementation first, and gained the behaviour change that came with it: the editor follows the app theme instead of being `oneDark` in both, and the blame gutter stops hard-coding oneDark's palette.
+- **The preview runs the same engine call the apply does.** `useMergePreview` called `resolve` with no options while the real path calls `resolveAsync`, so it ran without the tree-sitter structural pass and ignored the repository's `.gitwandrc` entirely. It was a lower bound on what applying would achieve, and the largest source of the gap between what the predictor promised and what an apply delivered. `llmFallback` stays deliberately unset, and is asserted absent: a preview must not cost money or seconds.
+- **The desktop bundle budget is re-baselined against the leak it exists to catch.** The main-chunk comment still claimed August's 829 KB with ~70 KB of headroom; the real number was 893 KB, leaving 7 KB. Raised to 950 KB, calibrated rather than rounded: reintroducing the historical regression (a used static import of `resolve` from `@gitwand/core` in `useMergePreview.ts`) takes main to 1085 KB, so 950 still catches it with ~135 KB to spare.
+
+- **`Bundle smoke build` now runs on pull requests that can break it.** It is the only job that executes `tauri build`, and it was gated to push-to-main, so a PR could be entirely green and still break `main` on merge, which is exactly what happened for six days after #180. It now also runs on same-repo PRs touching `apps/desktop/src-tauri`, the lockfile, `apps/desktop/package.json` or `ci.yml`. Fork PRs stay excluded because the job signs with a secret they cannot read.
+- **The release now verifies that the auto-update manifest is actually live.** GitHub Pages deduplicates deployments by commit sha, so the release job's deploy was a silent no-op whenever the tag pointed at a commit already deployed from `main`: every step green, "Reported success!" in the log, and the old manifest still being served. v3.10.1 shipped that way and advertised 3.10.0 to the updater. The job now fetches the published URL and fails, with the cause and the remedy, unless it serves the version just built.
+
+## [3.10.1] - 2026-09-09
+
+### Fixed
+
+- **One unreadable file made every conflict in the repo unresolvable.** Selecting a conflicted file opened the read-only diff instead of the merge editor, with no way to reach resolution at all: the sidebar listed N conflicts and the banner asked the user to resolve them, while nothing could be opened. `loadRealFiles` read every unmerged path inside a single `Promise.all`, and `read_file` is `std::fs::read_to_string`, which rejects any file that is not valid UTF-8. A minified build artifact or a Latin-1 source therefore rejected the whole batch, `openPath` caught it and called `loadDemoData()`, and the merge editor ended up holding fabricated demo paths, so the lookup for the real file returned null and `App.vue` fell through to `DiffViewer`. Each file now loads in isolation, and a failure degrades only itself. The demo set is also no longer used as an error handler for a real repository: replacing a user's conflicts with invented files hid the failure instead of reporting it.
+- **A conflicted file GitWand cannot decode now has a panel of its own.** It stays in the list, because git still counts it and the rebase will not continue until it is settled, and it offers the two side-picks plus opening it externally. Both picks go through `git checkout --ours/--theirs`, which operates on the raw bytes and never needs to decode the file.
+
+## [3.10.0] - 2026-09-09
+
+### Added
+
+- **Live Repo: the working tree refreshes itself.** GitWand watched nothing and asked every 2 seconds instead; an edit made outside the app showed up whenever the next poll happened to land. A `notify`-based filesystem watcher now covers `.git/` and the working tree, coalescing raw OS events into typed `RepoChangeEvent`s (`status`, `index`, `refs`, `head`…) streamed over a scoped `tauri::ipc::Channel`, with an EventSource equivalent under `pnpm dev:web` so both backends behave the same. One OS watcher per repository is shared by however many subscribers ask for it, which is also the hook the v4.0 incremental indexer will use. Debounce latency and batch size are bounded so a `git checkout` touching thousands of files cannot stall the stream. Controlled by `Live repo updates` (Settings → Git), on by default; turning it off restores exact pre-v3.10 poll-only behaviour immediately.
+- **The Today inbox acts instead of just listing.** The remaining Phase 3 mutations from v3.0.0 landed: `merge` and the dependency-bump action really merge (gated by `mergeReadiness`, so a PR that is not actually mergeable is refused rather than silently failing), `nudge` posts a reminder comment you can edit before it goes out, and `resolve` jumps straight into the conflict resolver rather than dumping you on the PR review page. Nudge is GitHub-only for now. Forge-side auto-merge (`gh pr merge --auto` and its per-provider equivalents) is deliberately *not* here: the action performs an honest immediate merge instead of a button labelled "Auto-merge" that could only ever report "waiting: <check>".
+
+- **A panel for an untracked nested Git repository** (#183). A folder carrying its own `.git` is the one directory entry `git status` still reports as a single row, because git refuses to look inside it. Selecting it now explains why its contents are not tracked from here and offers the two things the app can act on: open it as its own repo tab, or add it to `.gitignore`. Its files are deliberately not listed, because `git ls-files --others` answers with the directory itself, so a file row would just reopen the same panel.
+
+### Changed
+
+- **The 2s status poll is now a fallback, not the mechanism.** While the watcher is healthy the poll drops to a 15s wall-clock safety net; it returns to its old cadence only if the watcher fails or was never available (network mounts, a platform `notify` failure, the setting turned off). Mid-session connection loss on the `dev:web` path is detected rather than silently leaving a dead stream. Post-command manual refreshes scattered across the app are replaced by watcher events, so invalidation has a single code path. The app-dock PR-count badge refreshes live off `refs` events, throttled to at most one forge call per minute.
+- **`git_diff` runs through libgit2.** The first step of the shell-out → libgit2 migration, on the hottest read path in the app: no git subprocess per diff. Any error falls back to the CLI, which stays the reference implementation, and the new parity suite compares the two. **`git_blame` deliberately did not migrate**: `libgit2_blame` is implemented and tested but stays unused, because CI caught a real, git-version-dependent attribution divergence on a moved block between libgit2's bundled Myers xdiff and the CLI's histogram blame (it passed against git 2.50.1 and failed against 2.55.0). Blame attribution is user-visible, so it stays CLI-only until that divergence is resolved; the code and its tests remain as a guard against re-enabling it without re-verifying.
+- **Clone and fetch progress moved to scoped IPC channels.** `git_clone` and `git_fetch` streamed progress over a single global `clone-progress` broadcast, which every listener received regardless of which operation it belonged to. Each invoke now gets its own `tauri::ipc::Channel`, and fetch gained a progress stream it never had.
+- **Conflict resolution runs off the main thread.** `@gitwand/core`'s `resolve`, `resolveAsync` and `parseConflictMarkers` execute in a Web Worker via Comlink, so a large conflicted file no longer freezes the UI while it is analysed. `packages/core` itself is unchanged, and stays browser-safe.
+
+- **`git_diff` is now covered by the parity suite.** It was absent from `parity_probe.rs`, which is why four drifts between the Rust backend and the dev-server accumulated unnoticed in a single command; three of the four above were found by the new `tests/parity/git-diff.test.mjs` rather than reported. Every git-read command the frontend consumes should have this coverage.
+
+### Fixed
+
+- **A brand-new folder showed no folder and no files in WIP Changes until it was staged** (#181). Both status implementations ran git's default `--untracked-files=normal`, which collapses a never-staged directory into a single `newfolder/` entry; the sidebar tree renders such a trailing-slash path as one opaque leaf row, with no chevron, no file count and nothing inside. Staging turned it into per-file entries, which is why the folder only appeared afterwards. The libgit2 fast path now sets `recurse_untracked_dirs`, and `git_status_cli` plus the dev-server route pass `--untracked-files=all`, so an untracked directory is listed file by file from the start, like every other change. The explicit flag also aligns the CLI path with the libgit2 one, which reported untracked files regardless of a repo-local `status.showUntrackedFiles`. Untracked *nested git repos* are still reported as a single `nestedrepo/` entry (git never expands those); the flat-list layout used to label that row with an empty string and now shows the directory name, sharing its label helpers with the tree layout.
+- **`git_diff` on a directory path did nothing in the packaged app** (#183). The branch that turns an untracked directory into a file list existed only in the Node dev-server, and `GitDiff` carried no `isDirectory` / `newFiles` fields on the Rust side, although `backend.ts` had declared them for releases. Clicking such an entry therefore worked under `pnpm dev:web` and showed an empty panel in the shipped app. The Rust `git_diff` gained the branch, guarded by `safe_repo_path`, which also short-circuits the `--no-index` fallback that was spawning two git processes for nothing on a directory path.
+- **"Add to .gitignore" threw in the packaged app.** `backend.ts` has invoked a `git_add_to_gitignore` Tauri command since the context-menu action shipped, and no such command was ever registered: only the dev-server route existed. It is now implemented in Rust with the dev-server's semantics (create if absent, never duplicate an entry, always leave a trailing newline) plus a refusal for a multi-line entry, which would otherwise write rules the user never asked for. The same guard was mirrored into the dev-server route.
+- **A phantom context line at the end of every diff under `dev:web`.** The dev-server's diff parser classified context lines with `!line.startsWith("\\")`, which lets through the empty string `split("\n")` leaves after the trailing newline. This is verbatim the gotcha `AGENTS.md` documents; the Rust parser (`strip_prefix(' ')`) never had it.
+- **An unmodified tracked file rendered as an all-green whole-file addition under `dev:web`.** The dev-server ran its `--no-index` fallback for any path whose `git diff` came back empty, including a tracked file with nothing to show. It now checks `ls-files --error-unmatch` first, the guard the Rust implementation has always had.
+- The folder panel hardcoded `Nouveau dossier` and `fichier(s)` in French, in violation of the i18n rule. Six `diff.*` keys now cover it and the nested-repo panel, translated in all 5 locales.
+- **The `Bundle smoke build` CI job had been failing on every `main` push since #180.** `pnpm update -r` bumped the npm half of two Tauri plugins without the Rust half, and `tauri build` refuses to run on a major/minor mismatch between the two: `tauri-plugin-notification` 2.3.3 vs `@tauri-apps/plugin-notification` 2.4.0, `tauri-plugin-updater` 2.10.1 vs `@tauri-apps/plugin-updater` 2.11.0. The Rust crates are now locked to 2.4.0 and 2.11.0. `Cargo.toml` already declared `"2"`, so only `Cargo.lock` moved. The job is gated on `Detect bundle-relevant changes` and reports `skipping` on pull requests, which is why six days of red `main` builds went unnoticed behind green PR checks.
+
+### Security
+
+- **Git option injection in `git clone` closed.** `git_clone` (desktop backend) and the dev-server's clone routes passed the user-supplied URL straight into an argv slot where a leading `-` is parsed as an option, so a pasted `--upload-pack=<cmd>` URL executed that command for the local and ssh transports (verified locally). Both now pass `--` before the positionals and reject a `-`-prefixed URL outright.
+- **Dev-server: side-effecting `GET` routes now refuse cross-origin requests.** `pnpm dev:web`'s CORS handling only echoed an allow-listed `Origin`, it never rejected a request, so any page a developer visited while the dev server ran could trigger clone, fetch, PTY-spawn or watcher routes with `<img src="http://localhost:PORT/api/…">` (response blocked, request executed). Those routes now require an allow-listed `Origin`, or the absence of any browser fetch metadata (curl, the parity harness). Dev-only; the shipped app is unaffected.
+
+- Cleared 39 open Dependabot alerts (all `high`/`medium`, one `low`) via `pnpm update -r` across the monorepo, all resolved within existing semver ranges — no direct dependency needed a major-version bump. Most of the chain came from `@modelcontextprotocol/sdk` (`packages/mcp`, a published runtime dependency): `hono`, `@hono/node-server`, `express`, `express-rate-limit`, `body-parser`, `qs`, `ip-address`, `ajv`/`ajv-formats`, `undici`, `fast-uri`. The rest came from `@vscode/vsce` (dev-only VSIX packaging, `packages/vscode`): `cheerio`, `@textlint/linter-formatter` → `js-yaml`, `azure-devops-node-api` → `typed-rest-client`. A Linux-only `glib` alert (RUSTSEC-2024-0429, transitive via `tauri`'s GTK3 stack) stays open: the patched `glib` 0.22 shipped, and `gtk` 0.19 with it on 2026-09-08, but nothing between us and it has moved. `tao` still requires `gtk ^0.18` as of 0.37.0, which pins `glib` to 0.18.x, so no `cargo update` can reach the fix; the blocker is that one requirement, not the gtk-rs side. Upstream, `tauri-apps/tauri#12564` (ask gtk-rs to upgrade) was closed as not planned in favour of a gtk4-rs migration (`tauri-apps/tao#1051`), and gtk3-rs found a new maintainer independently, who landed the 0.22 bump. Tracked at `tauri-apps/tao#1281`; actionable once `tao` bumps `gtk`.
+
+## [3.9.1] - 2026-09-02
+
+### Added
+
+- **No-fast-forward merge option** (#177). The "Merge into current…" popover gets an "Always create a merge commit" checkbox — forces `git merge --no-ff` so merging a fast-forwardable branch still records an explicit merge commit, matching teams whose workflow requires one. Off by default; the existing fast-forward behavior is unchanged.
+- **CLI update notice.** A global `npm install -g @gitwand/cli` never auto-updates, unlike `npx @gitwand/cli` or the desktop app's own updater. `gitwand` now checks the npm registry at most once every 24h (cached locally) and prints a one-line notice when a newer version is published. Only runs in an interactive terminal, never in CI or piped output, and any failure (offline, registry down, unwritable home dir) is silent.
+
+### Changed
+
+- `website/guide/getting-started.md`'s CLI section led with a global install only, inconsistent with every other install doc (root README, `packages/cli/README.md`, `website/reference/cli-commands.md`), which lead with `npx @gitwand/cli` since it always resolves the latest version. Aligned.
+
+## [3.9.0] - 2026-08-31
+
+- **`/agent`, a WebMCP page.** gitwand.app/agent exposes two read-only git tools to any agent browsing it, over the W3C WebMCP standard: `parse_git_error` explains a failing git command and gives the commands that fix it, `resolve_conflict` runs the deterministic engine over a conflicted file and reports per hunk what was resolved and what still needs a human. Both execute in the visitor's tab, so nothing is uploaded and there is no backend. `@gitwand/core` is imported on demand rather than at module scope, which keeps it out of the shared theme chunk every page downloads.
+- The page states its own registration status live, including when the browser has no WebMCP at all, and writes both tool contracts out in HTML and JSON-LD for the majority of visitors and crawlers that will never run the script.
+- **A try-it panel on `/agent`.** Both tools can be run by hand from the page, against editable sample inputs, so the majority of visitors whose browser has no WebMCP can still see what an agent gets back. It calls the same `execute` an agent calls rather than a mock, and deliberately does not feed the agent call counter.
+- **The Merge Room on `/agent`.** The page is now a shared workspace rather than a tool listing. Tool handlers no longer just return text to the agent: they file a case into live page state that the person sitting there watches fill up. The engine settles every hunk that carries no decision; every hunk where the two branches genuinely disagree queues for a human, who picks a side and gets the assembled file back, ready to paste. No tool on the page can make that call, which is the boundary the whole thing is built around. A live journal records who did what, agent and human alike.
+- **`list_cases`**, a third WebMCP tool, lets an agent read the room back: what is filed, what the engine settled, what is still waiting on a person, what they have already decided. It is what turns a stateless calculator into a workspace an agent can pick back up.
+- **The engine now knows what merge it is in.** A new optional `mergeContext` (operation + which side is the target branch) flows from the CLI, the MCP server and the desktop into `@gitwand/core`. Its first use: a version scalar set differently on both sides — `'13.x-dev'` vs `'12.54.1'` — resolves to the **target branch's value**, which is what teams actually ship. Measured by replaying laravel/framework's real merges: agreement with the human resolution on fully-resolved files jumps from 36.6 % to **81.9 %**. Without context, that case is now *proposed* instead of applied — the old fallback was a coin flip measured wrong three times out of four. Orderable dependency bumps deliberately keep "newest wins": flipping those to the target regressed three other corpora, and the benchmark caught it before it shipped.
+- **`format_semantic` classification.** A hunk the textual classifier calls `complex` but a format-aware resolver (JSON, Markdown, YAML, lockfiles…) can merge semantically is now reclassified, scored and traced like every other pattern — no more files reported as containing `complex` hunks that were silently applied without a confidence score.
+- **Format invariants in post-merge validation.** A resolution that would produce a changelog with two `Unreleased` sections, a duplicated version heading, or a JSON object with duplicate keys is retracted — syntax validation alone passed all three.
+- **Key-wise merging for manifest fragments.** Conflicts in `package.json` / `composer.json` are almost always fragments — a few `"key": value,` lines — which the line-level engine merged at exactly the wrong granularity. Those fragments are now merged **by key** (three-way, deletions and one-sided changes handled), with one bounded arbitration: two constraints on the same operator (`^7.23.0` vs `^7.23.3`) resolve to the newer, which is what teams ship. Anything else — operator changes, `workspace:*` migrations — is a human decision and is declined. On the benchmark this is the first change that raises coverage *and* agreement at once, on all four measured repositories.
+- **`resolveGeneratedFiles` option** (`.gitwandrc`, and `--resolve-generated` on the CLI).
+- **`gitwand conventions`** measures a repository's own merge-resolution habits by replaying its merge history (`git merge-tree`, read-only, capped at 200 merges) and scoring candidate rules against what the team actually committed. Verdicts are only emitted above evidence floors (5+ samples, 80%+ agreement), live in `.git/gitwand/conventions.json` (per clone, never committed), and always lose to an explicit `.gitwandrc`. Three consumptions today: a measured "merge" verdict re-enables auto-resolution for generated files where the caller expressed no preference, a "regenerate" verdict confirms the decline, and a "tool-rebuilt" changelog verdict declines markdown unions on changelog files. Every influenced resolution carries the measurement in its reason (sample count, agreement percentage). Split-half validation against the benchmark corpus came back flat everywhere: every derived verdict confirmed the engine's own defaults, which were calibrated on that same corpus. That is circularity, not absence of value: the desktop surface is deferred until the corpus includes repositories with genuinely divergent conventions to prove the layer moves anything.
+- **`--regenerate`** (CLI) and `regenerate: true` (`.gitwandrc`): for a declined generated file, runs the ecosystem's own tool (`npm install --package-lock-only`, etc.) in a disposable, sandboxed `git worktree` seeded from the resolved sources of truth, never the real working tree. Guarded by an explicit environment allowlist (no secrets or tokens reach the spawned installer), a toolchain probe, an offline probe, and a hard timeout. `@gitwand/mcp` reports the same regeneration plan read-only: no MCP tool executes anything. Measured against real historical merges rather than assumed correct: 5 of 13 comparable `prettier/prettier` (yarn-berry) attempts matched what the team committed (38.5%, well short of the 80% bar). Verdict: the accuracy target was not met, so the tier stays CLI opt-in only, not a desktop feature, until there is evidence to justify one.
+
+### Changed
+
+- **The engine speaks English.** Every explanation, resolution reason, decision-trace step, confidence booster and penalty `@gitwand/core` produces was written in French. None of the consumers translate them, so the desktop merge editor, the CLI summary and the `@gitwand/mcp` `explanation` / `resolutionReason` fields have been handing French text to every user and every agent, whatever their locale. 194 strings translated across 38 files. Comments and test names stay French: this is only about what leaves the engine.
+- A regression guard (`__tests__/english-output.test.ts`) runs the engine over the whole corpus and asserts that no string it hands back is French, checking real output rather than scanning source so it cannot be fooled by how a string is assembled. It caught four strings a source scan had missed, including one with no accented characters in it.
+- **Generated files decline by default.** Lockfiles, minified bundles and `dist/` outputs are regenerated by tools, not merged — measured on 1,662 real merges, auto-merging them diverged from what teams shipped in almost every case. GitWand now explains what to regenerate instead of writing a plausible-but-wrong merge; only the patterns that fabricate nothing (same change, one-sided change, deletion, whitespace) still apply. The previous behaviour is one `.gitwandrc` key away.
+- **A reproducible benchmark now backs every accuracy claim** — `benchmark/` pins 8 public repositories to exact commits, replays ~1,700 merges through the engine and compares the output byte-for-byte with what the teams actually committed. The engine changes above were driven, and one of them corrected, by its numbers.
+- **The benchmark corpus is now a measured choice, not a guess.** Candidates were probed with `git rev-list --merges` plus a `merge-tree` conflict-rate sample over their 60 most recent merges before being added: kubernetes, rails and godot were rejected outright (merge-queue workflows produce zero conflicted merges to replay), cargo and django had nothing to replay either. `symfony` (back-merge culture), `git/git` (integration branches, maintainer-resolved conflicts, about as good as human ground truth gets) and `bootstrap` came in instead. `vuejs/core` was dropped despite being the strongest showcase result (92-95%), precisely because keeping it would have been flattering rather than informative. New baseline on the re-pinned corpus: 59.2% of end-to-end-resolved files byte-identical to the human merge, across 1,927 replayed merges (634 conflicted, 5,675 hunks).
+- **A CI gate now protects every future accuracy claim.** `.github/workflows/benchmark-gate.yml` runs on any pull request touching the engine and fails the build if agreement on the pinned corpus drops more than 1.5 points overall, drops more than 5 points on any single repository, or if end-to-end coverage collapses by more than 25% without the PR's own commit explaining why. Coverage is allowed to fall on purpose, since a deliberate decline is progress rather than regression: agreement is the metric the gate actually protects.
+
+### Fixed
+
+- **`parse_git_error` did not recognise a rebase that stopped on a conflict.** The catalogue only knew the phrases git prints when you try to *start* a rebase while one is already unfinished (`rebase-merge directory`), not the ones it prints when a rebase *halts*, which is the far more common paste. Reported by an agent audit of the live page. It now keys on the rebase-specific commands, and a halted cherry-pick gets its own entry rather than being mislabelled a rebase: both print `could not apply`, so matching on that phrase would have handed out `git rebase --continue` to someone mid-cherry-pick.
+- **`pnpm test` was non-deterministic (#172).** Suites that use real git repositories are subprocess-bound, not CPU-bound, and were timing out under the load of the whole monorepo testing at once. Every git-backed suite now shares a 60s timeout, chosen to catch a hang rather than to enforce a performance budget. Running workspaces one at a time turned out to be **faster** as well as deterministic (49s against 119s), because five packages each fanning out to one worker per core oversubscribes the machine several times over, so `pnpm test` now passes `--workspace-concurrency=1`. Eleven consecutive full runs green, against roughly one failure in three before.
+- **Site-wide WebMCP tools went dark on browsers without `navigator.modelContext`.** The registration script bailed out entirely unless the deprecated `navigator` location existed, so the three documentation tools would disappear the day Chrome removes the alias it deprecated in 150. It now prefers `document.modelContext`, where the spec has put the entry point since 27 May 2026, and falls back to `navigator` only when that is all the browser offers. It registers once either way: on the versions exposing both names they alias the same object, so registering on both would have duplicated every tool.
+- **WebMCP tools could never be unregistered.** `signal` was passed as a property of the tool dictionary, which declares no such member, so it was silently dropped. It now goes in the options argument where `ModelContextRegisterToolOptions` expects it.
+- **Signed commits failed from the GUI with a gpg-agent/ssh-agent socket error (#171)**, even though the identical `git commit` succeeded from Terminal. On macOS, a Finder/Dock-launched GitWand backfills its minimal `launchd` environment by reading `$SHELL -l -c env` once at startup, but `-l` (login) alone does not make zsh source `~/.zshrc` — only an interactive shell does, and setup guides for gpg/ssh agents (`export GPG_TTY=$(tty)`, agent-socket exports for tools like 1Password/YubiKey) conventionally live there. The probe now runs `$SHELL -i -l -c env`, so those exports are captured like any other shell-rc variable.
+
+## [3.8.0] - 2026-08-24
+
+### Added
+
+- **Time Machine — repo snapshots & global undo.** Every destructive operation (discard, reset, checkout, branch switch, bulk resolution apply) now captures a restorable snapshot first: the working tree including untracked files, the index, and conflict stages 1/2/3. Snapshots are written with git plumbing under `refs/gitwand/snapshots/`, so they cost nothing until git's own `gc` reclaims them and they are never pushed by the default refspec. Restoring uses `read-tree` rather than `checkout`, so it cannot refuse on a dirty tree, which is the state an undo has to recover from.
+- **Undo where the action happened.** A discard used to give no feedback at all. It now surfaces a single-slot toast with an "Undo" button and a `⌘Z` hint, which is what makes the safety net discoverable rather than a panel you have to remember exists.
+- **Global `⌘Z` / `⇧⌘Z`.** Outside the merge editor these rewind and replay repo operations. The keyboard path reports through the same toast the buttons use, so it says either "Restored" or "Nothing to undo" instead of failing silently.
+- **One timeline over two sources.** The existing rewind popover (`⌘⇧U`, and Actions > Rewind) now lists GitWand snapshots merged with git's reflog rather than the reflog alone, deduplicating the operations that produce both. A footer link opens a full-history modal with source filters. Restoring is itself undoable, since a `pre-restore` snapshot is taken first, and the confirmation says so.
+- **Retention settings** — enable/disable snapshots, an age cap (default 14 days) and a count cap (default 200), pruned on repo open rather than on a timer. Plus opt-in one-line AI snapshot labels, following the Quick Stash label pattern.
+- `snapshot_create` / `snapshot_list` / `snapshot_restore` / `snapshot_prune` Tauri commands, each with a real `dev-server.mjs` route and parity coverage.
+
+### Fixed
+
+- Snapshot refs are excluded from every `--all` history traversal GitWand runs, so the Git Tree, the hidden-commit count, the contributor shortlog and per-author line churn are unaffected. (A `git log --all` typed at the terminal still shows them, exactly as it shows `refs/stash`.)
+- Ref moves made by a restore carry an explicit reflog message. Without one git writes an empty reflog entry, which showed as a blank row in the timeline and as an unexplained line in the user's own `git reflog`.
+- Restoring a snapshot taken *before* a merge started now clears `MERGE_HEAD` and `MERGE_MSG` as well. Previously the merge state survived the rewind, so `git status` reported "you are still merging" over a tree that no longer contained the merge, and the next commit became a merge commit that silently re-merged the branch the user had just undone.
+- A failed index restore no longer leaves the index wiped. The restored index is now built in a scratch `GIT_INDEX_FILE` and moved into place only once `update-index` has succeeded; previously the live index was emptied first, so any failure in the second step left every tracked file reading as deleted-from-index with no rollback.
+- `⌘Z` and `⇧⌘Z` report a failed restore instead of doing nothing. The keyboard path opens neither the popover nor the modal, which are the only places the error was rendered, so a failure was silent and surfaced only as an unhandled rejection.
+- The undo toast rewinds the snapshot its own operation created, rather than whatever point happens to be newest when the button is clicked, and steps aside once the repo has moved on. An offer reading "1 file discarded" could previously undo a commit made inside its 8-second window; restoring blind would equally have dragged that commit along, since a snapshot restore rewinds HEAD too.
+- `prune_snapshots_inner` refuses a 0-day or 0-count retention outright, in both the Rust engine and the dev-server port. The frontend already clamped at the input and guarded again before the call; this is the last layer before the refs go, and it also covers a hand-edited settings file.
+- Opt-in AI snapshot labels now persist in a linked worktree. They were written to a sidecar under `.git/`, which is a file rather than a directory in any linked worktree, so every read and write failed with `ENOTDIR` and was silently swallowed; they live in `localStorage` keyed by repo path now, like the other ancillary per-repo state.
+- The snapshot retention fields refuse a value that would delete every snapshot. Clearing the input yields `Number("") === 0`, which was persisted verbatim and made the next prune wipe the whole undo history; the value is now clamped at the input and the destructive case is rejected again before the backend is called.
+
+## [3.7.3] - 2026-08-25
+
+### Fixed
+
+- **Self-hosted GitLab remotes fell through to the GitHub provider in the PR panel** (#168). `detect_provider()` only recognized a GitLab remote by matching the literal substring `"gitlab"` in the URL, so a self-hosted instance on a hostname that doesn't contain it (e.g. an internal alias like `forge`) was classified `"unknown"`, and the frontend's `githubProvider` fallback kicked in — even though `glab` was correctly authenticated for that host. `git_remote_info` now falls back to probing `glab auth status --hostname <host>` (then `gh auth status --hostname <host>`) from the repo directory whenever the URL-based detection is inconclusive, so any self-hosted forge the user has already authenticated via CLI is recognized regardless of hostname. `dev-server.mjs` (the `pnpm dev:web` mock backend) intentionally does not mirror this CLI probe, matching its existing "no glab in dev:web" mock-only design; an unrecognized host there still resolves to `"unknown"`.
+
+## [3.7.2] - 2026-08-24
+
+### Fixed
+
+- **The conflict predictor reported 0% auto-resolvable on every conflict.** `gitwand preview --onto=<ref>` (and the MCP `gitwand_status` / `gitwand_preview_merge` tools) called `resolve()` with `{ explainOnly: true }` and then read `stats.autoResolved`. That flag short-circuits `resolveHunk()` before the format-aware dispatch and the confidence gate, returning `lines: null` for every hunk, so `autoResolved` was structurally always `0`. Every file showed `0/N auto-resolvable` and every operation came back `Risk: HIGH`, whatever the engine could actually do. On a real 4-file rebase the predictor now reports `6/7` where it previously reported `0/7`. These three call sites predict over in-memory content and never write, so `explainOnly` bought nothing. The desktop merge preview goes through `useMergePreview` and was never affected.
+
+## [3.7.1] - 2026-08-21
+
+### Added
+
+- **Cursor Origin remote detection** (#165) — [Cursor Origin](https://cursor.com/docs/origin) remotes (`origin.cursor.com`) are now recognized instead of falling through to `unknown`, which previously routed PR-panel calls at the GitHub provider and surfaced a confusing GitHub-auth error on a repo that has nothing to do with GitHub. This is detection only (Phase 1, a real `OriginProvider`, is deferred until Origin's app-auth model and API stabilize out of beta): the PR panel now shows an honest "Open on the web" state, both "New PR" buttons are hidden via a provider-driven `forgeSupportsPRs()` check instead of only after a failed call, and Today no longer offers to "connect" an account type that can't exist for this forge. `detect_provider()` was extracted out of `git_remote_info` into `git/parse.rs` (unit-testable, mirrored in `dev-server.mjs`), with new parity coverage for `git-remote-info`, which previously had none despite the detection chain being duplicated verbatim between the Rust backend and the Node dev-server.
+
+### Fixed
+
+- **Azure DevOps "View on forge" commit URLs pointed at GitHub** (#165) — `forgeCommitUrl()` built a `github.com` URL for Azure DevOps repos because the generic owner/repo parser split `https://dev.azure.com/myorg/myproj/_git/myrepo` incorrectly and hit the GitHub fallback. It now resolves org/project through the same `parseAzureRemote()` logic already used server-side (`parse_azure_remote()` in `commands/azure.rs`), covering all five documented remote shapes (`dev.azure.com`, `user@` userinfo, legacy `visualstudio.com`, the `DefaultCollection` segment, and SSH `v3/`); an unparseable Azure remote now returns `null` instead of silently producing a broken GitHub-shaped link.
+
+### Security
+
+- Bumped `dompurify` (used by `useSafeHtml.ts` to sanitize user-generated HTML) from 3.4.11 to 3.4.13 — fixes for a hook-removal issue during `IN_PLACE` sanitization, a clone-guard bypass via hooks, and DOM clobbering via `ownerDocument` during `IN_PLACE`.
+
+## [3.7.0] - 2026-08-19
+
+### Added
+
+- **Commit Review** — micro AI reviews in the Changes panel (roadmap v3.7.0, #164). "Review staged changes" runs an AI pass over the staged diff producing inline findings with severity badges (risk/suggestion/nit), navigable with `n`/`p` and dismissible with `x`. "Fix with agent" pipes findings into a terminal AI agent session (Claude Code / opencode / Codex) in the current repo. Tracks review→fix→review iterations and staged-diff coverage, content-hash based so a fix that only shifts line numbers doesn't destroy coverage, bound to HEAD so an amend or an out-of-app commit correctly starts a fresh cycle. At commit time, an explicit non-blocking Review / Vouch / Skip decision is recorded as a `GitWand-Review: ran|vouched|skipped (iter:N, coverage:X%)` commit trailer. A per-repo `.gitwandrc` `commitReview` block can force the feature on or off independently of the app Setting, in either direction. Settings > Hooks can install a composable pre-commit script combining the shipped (v3.5.0) secrets-scanning section with a new warn-only Commit Review reminder section, correctly migrating an already-installed v1 secrets-only hook.
+- **Modal focus trap** — `BaseModal` now traps Tab/Shift-Tab within the open modal, focuses it (or its first focusable element) on open, and restores focus to the trigger on close, closing a foundational accessibility gap inherited by every modal in the app.
+
+### Fixed
+
+- **A routine background status poll was silently wiping Commit Review findings** — `repoStats` (derived from git status) produced a new object reference on every poll regardless of content, and a watcher wrapping it in a throwaway array compared it by reference, firing on every poll tick instead of on genuine staged-set changes. Fixed with a content-memoized `repoStats` and a proper multi-source watch; also restored (and hardened against the same class of bug) the secrets scanner's accidental "catch a secret added by editing an already-staged file" trigger that this fix would otherwise have silently removed.
+- The commit-time decision gate now re-prompts when a live, undismissed Risk-severity finding is on screen, instead of silently proceeding once any review had run that cycle.
+- `clearReviewState()` now aborts an in-flight background review before clearing state, so a stale run can no longer resurrect cleared state right after a commit.
+- The pre-commit decision modal now distinguishes "not reviewed yet" from "reviewed, found nothing" instead of showing the same "0 finding(s)" copy for both.
+- Fixed a phantom trailing context line in the diff parser (a diff string ending in `\n` produced a spurious empty context line with incorrect line numbers in the last hunk of the last file).
+- `dev-server.mjs`'s `/api/read-gitwandrc` route now sends CORS headers on its success paths, fixing `.gitwandrc` testability via `pnpm dev:web`.
+- The Hooks panel now visibly distinguishes a foreign/hand-written pre-commit hook from "nothing installed" instead of showing the same state for both.
+- The folder picker's "Select this folder" button now uses the currently typed path instead of silently ignoring it unless Enter was pressed first.
+- **`gh_list_prs` 30s timeout reappeared** (#161 follow-up) — the per-PR `+`/`-` stats enrichment added after v2.8.5 ran a `git fetch origin` and one sequential `git diff --numstat` per PR with no timeout on any of it, unlike `glab`'s commands (`GLAB_TIMEOUT`, #149). A slow remote or a large PR list could blow past the frontend's 30s IPC timeout with nothing server-side to bound or kill the subprocesses. The `gh pr list` call is now bounded by the same 20s `output_with_timeout` pattern as GitLab's commands, the `git fetch origin` is throttled to once per 30s per repo (mirroring `azure.rs`'s existing fetch throttle) and itself bounded to 5s, and the per-PR numstat diffs now run in parallel (`rayon`) instead of in series.
+- **GitLab MR list still showed `+0 -0`** — the v3.6.5 fix computed real additions/deletions from the diffs endpoint but only wired it into the single-MR detail view (`gl_get_mr`), leaving the list view's per-row fetch out on purpose to avoid reintroducing the #149 timeout risk. `gl_list_mrs_inner` now fetches diff stats per MR under the same shared wall-clock budget (`ROLLUP_BUDGET`) already used for the pipeline-rollup fan-out, so the list gets real stats without doubling the worst-case latency.
+- **Diff-view "add a comment" tooltip was hardcoded in French** regardless of app locale — `PrInlineDiff.vue`'s line-number hover title used the literal string `'Ajouter un commentaire'` instead of going through i18n. Added `pr.inline.commentTooltip` to all 5 locale files and switched the 4 call sites to `t(...)`.
+
+## [3.6.6] - 2026-08-19
+
+Pure tooling/perf chore — no product-facing surface. Full rationale in `docs/superpowers/specs/2026-08-18-dev-loop-ci-build-times-plan.md`.
+
+### Changed
+
+- **CI build time** — `ci.yml`'s `desktop` job (3 fully-signed release bundles per push, never consumed by anything downstream) replaced by `rust-check` (fmt/clippy -D warnings/check/test, now also on `pull_request`) plus a path-filtered `bundle-smoke` job that only builds a real bundle on push-to-main when bundle-relevant files changed. Rust cache added to `ci.yml`/`release.yml`/`perf.yml`. ~230 billed CI minutes saved per push to `main`; the 217 Rust unit tests and 8 parity tests now actually run in CI for the first time.
+- **Dev-loop speed** — `[profile.ci]` (thin LTO) for the smoke build and bench probe; `[profile.dev]` (lighter debug info, `opt-level=1` on dependencies only) cut a post-edit `cargo build` from ~21s to ~6.5s. Measured `cargo llvm-lines`/`--timings` to confirm the previously-planned `gitwand-git` crate split isn't worth doing (the 663 dependencies dominate build time regardless of profile).
+- **Vitest** — `apps/desktop` now defaults to `environment: "node"` instead of a global `jsdom`, with per-file opt-in via `// @vitest-environment jsdom` on the ~18 files that actually touch the DOM. `environment` setup time dropped from ~96s to ~17s across the suite; test count unchanged (706 tests).
+- **Runtime perf** — the secrets scanner's `.gitwandrc` ignore-list regex are now precompiled once per scan instead of once per candidate value (~24x faster in Rust, ~2.5x in TypeScript). `@gitwand/core`'s conflict-resolution engine is now lazy-loaded instead of statically bundled into the boot chunk, shrinking the desktop app's main JS chunk by ~185 KB raw.
+- **Dependencies** — deduplicated `reqwest` (the `tauri-plugin-aptabase` fork now matches `tauri-plugin-updater`'s `rustls` choice instead of pulling `native-tls`/`openssl-sys` separately), removing `libssl-dev` from CI. Anonymous launch telemetry is now gated behind an explicit `telemetry` Cargo feature, with a build-time guard against a release accidentally shipping without it.
+
+## [3.6.5] - 2026-08-18
+
+### Fixed
+
+- **Nine GitLab MR overview bugs, all from one repeated root cause** (#161) — several GitLab response handlers (`glListMrs`, `glMrPipelines`, `glCreateMr`, `glReviewerCandidates`) returned the raw Tauri payload untouched instead of mapping it to the camelCase shape the UI expects, the way `glGetMr` and every GitHub equivalent already did. That silently dropped `createdAt`/`updatedAt` (rendering "NaNj" instead of an age), the CI tab's pipeline link, and reviewer avatars. Fixed alongside it, each independently root-caused:
+  - `merge_status` is deprecated since GitLab 15.6 and commonly sits at `unchecked` until something triggers a recheck; the old mapping treated every not-yet-computed MR as a real conflict. Now prefers `detailed_merge_status` and only flags an actual `conflict`.
+  - `glab mr diff` needs `--raw` or its output isn't the git-compatible unified diff format the frontend parser expects, so the diff view always read as empty ("no diff available").
+  - The dock's MR count capped at 100 by fetching one page and counting it. Now reads the real total off the REST list endpoint's `X-Total` header.
+  - `gl_list_mrs_inner` requested a growing `--per-page` (limit + offset) on every page without clamping it to GitLab's 100-per-page ceiling. The automatic background prefetch that drains the rest of the open-MR list right after the first page paints requested `--per-page 110` on its very first batch, which GitLab rejects outright — silently disabling the *visible* "load more" scroll trigger as a side effect, so a repo with more than 10 open MRs looked permanently stuck at 10.
+  - GitLab's MR resource has no `diff_stats` field (a GitHub-shaped assumption that never matched a real GitLab payload), so additions/deletions always read `+0 -0` on the detail view. Now computed from the diffs endpoint's per-file unified-diff text (left as a known gap on the list view, where doing this per MR risked reintroducing the #149 slowness).
+  - Three duplicated `timeAgo` implementations (later found: a fourth, in the comment timeline) hardcoded a French-only "j" unit regardless of locale and rendered "NaNj" on any unparseable date instead of degrading gracefully. Consolidated into one `formatRelativeAge()` using the already-translated `date.*` i18n keys.
+- **Resolved GitLab comment threads showed no "Resolved" indicator** — comments were listed via GitLab's flat `/notes` endpoint, which has no concept of a resolved discussion thread at all. Switched to the Discussions API (flattened back to the same shape) so each note's resolved state is available, and added a small "Resolved" badge to the comment timeline (#161).
+
+## [3.6.4] - 2026-08-17
+
+### Fixed
+
+- **GitLab MR list can still time out when `glab` is authenticated via `--use-keyring`** — the v3.6.2 fix (#149) made a hang surface as a clean 20s timeout instead of freezing the app, but on keyring auth the underlying `glab` subprocess itself was still slow: retrieving the PAT from the macOS keychain hangs when `glab` is spawned from a signed Tauri app, the same per-binary ACL mismatch already fixed for `gh`. `shell_env.rs` now also preloads a `GITLAB_TOKEN` from a login shell at startup (parsed from `glab auth status --show-token`) so `glab` subprocesses bypass the keychain lookup entirely, mirroring the existing `GH_TOKEN` preload (#149).
+- **Dock PR badge briefly queries GitHub on a non-GitHub repo's first open** — opening a repo whose remote had never been resolved yet in this session (no cached remote, e.g. right after install, or a repo opened for the first time) fired the dock badge's `getPRCount` refresh immediately, before the async remote lookup completed. `forge` falls back to the GitHub provider by default while the remote is unresolved, so a GitLab (or other non-GitHub) repo would briefly hit a doomed `gh`-backed call and could surface a spurious error, before quietly correcting itself once the remote resolved. `refreshDockPrCount` now waits for the remote lookup on that cold path, same as the PR panel's own `init()`/`ensurePrsLoaded()` already did (#149).
+
+## [3.6.3] - 2026-08-13
+
+### Fixed
+
+- Linux: added a further startup fallback, `GDK_BACKEND=x11` (never overriding a value already set in the environment), for systems where `Could not create default EGL display: EGL_BAD_PARAMETER` still occurs after the v3.6.2 fallbacks. Confirmed via a report with `ldd` output that this is a genuine native-Wayland EGL negotiation failure on the host system, not an AppImage-bundled-library mismatch. Forcing GTK onto XWayland sidesteps that negotiation, at the cost of native Wayland's fractional scaling and lower input latency (#135).
+- **Amend and Split commit are reachable again from the commit graph.** Both actions shipped in April with a full backend/dialog implementation, but the v2.15.0 "Git Tree" rewrite replaced the old flat commit-log view with the graph view and never carried the corresponding context-menu items over, leaving the two actions fully wired end to end with no button left to trigger them. Restored "Amend commit..." and "Split commit..." to the graph's right-click menu (#156).
+
+## [3.6.2] - 2026-08-11
+
+### Added
+
+- **Auto-stash on pull (#150)** — pulling with uncommitted changes no longer dead-ends on `cannot pull with rebase: You have unstaged changes`. A new Settings → Git → "Pull with uncommitted changes" option (Ask — default · Auto stash & restore · Refuse) parks the working tree via `git pull --autostash` and lets git restore it, including across a conflicted rebase/merge (`rebase --continue`, `merge --continue`, and both `--abort` paths). When re-applying the parked changes conflicts, GitWand now says so explicitly instead of reporting a successful sync over a conflicted tree.
+
+### Fixed
+
+- **GitLab MR list no longer times out / freezes the app** — every `glab`-backed command ran its blocking subprocess directly on the async runtime, parking a worker thread for the call's duration; the frontend's 30s IPC timeout only gave up on the JS promise, leaving the `glab` process running and the worker parked on every retry. All `gl_*` commands now offload to `spawn_blocking`, and the `glab` subprocess itself carries a 20s timeout that kills and reaps the child instead of orphaning it, so the app stays responsive and a hang now surfaces as a clear "took too long to respond" message instead of a silent freeze (#149).
+- **Stash Manager: dates are no longer "Invalid Date"** — the backend asked git for its lenient date format (`%ai`, e.g. `2026-08-11 09:16:44 +0200`), which the macOS/Linux webview refuses to parse, so every stash rendered "Invalid Date". Stash dates now use git's strict ISO 8601 output (`%aI`), the Node dev-server route was aligned onto the same placeholder (it was using the committer timestamp), the parity suite now compares the field instead of blanking it, and the UI falls back to the raw string rather than "Invalid Date" if a date is ever unparseable. The same lenient format in the Tags panel (which rendered "NaN years ago") was fixed alongside it (#151).
+- Linux: broadened the startup render fallback with `LIBGL_ALWAYS_SOFTWARE=1` (never overriding a value already set in the environment) alongside the existing `WEBKIT_DISABLE_COMPOSITING_MODE`/`WEBKIT_DISABLE_DMABUF_RENDERER`. The two WebKitGTK vars only steer compositing; they don't affect EGL *display acquisition*, which is where `Could not create default EGL display: EGL_BAD_PARAMETER` originates on some native-Wayland/Gnome setups (#135).
+- Telemetry no longer panics on exit (`there is no reactor running, must be called from the context of a Tokio 1.x runtime`). The vendored `tauri-plugin-aptabase` fork still flushed its queue through `futures::executor::block_on`, which provides no Tokio reactor, so quitting within 60s of launch — before the background flush had drained the queued `launch` event — panicked on any platform. This was the second half of the crash reported on Linux, where EGL failures make the app exit almost immediately (#135).
+
+## [3.6.1] - 2026-08-10
+
+### Fixed
+
+- **Settings → Git → Default Branch is now actually used** — repos whose mainline is neither `main` nor `master` (nor tracked as `origin/main`/`origin/master`) no longer hit a recurring `git branch failed: fatal: failed to find 'main'` notification. The configured default branch is now threaded through to `git_branches`, `git_branch_merged`, and `git_branch_top_authors` and tried before the existing fallback chain; if nothing resolves, the current branch is used instead of a hardcoded `"main"` literal (#136).
+- Commit Tree: checking out or deleting a local branch with a `/` in its name (e.g. `test/some_experiment`) no longer truncates it to the text after the first slash once you've switched away from it — the ref-classification logic no longer assumes any slash-containing decoration is a remote branch (#137).
+- **GitLab PR overview** — the PR panel no longer shows the GitHub-specific "GitHub CLI not installed" message for GitLab repos; the CLI-missing error and its install hint are now forge-specific (GitHub/`gh` vs GitLab/`glab`). Also fixed `glab mr list` failing with "Unknown flag: --state" — GitLab's CLI uses per-state boolean flags (`--opened`/`--closed`/`--merged`/`--all`), not `gh`'s generic `--state <value>` (#138).
+- **Rebase auto-resolve UX** — "Auto-resolve" on a paused rebase conflict now correctly re-polls the rebase banner state (the Continue button and conflict hint were staying stuck even though the conflict had actually been resolved and staged); the per-hunk AI-resolve button now uses the app-wide animated `AiSparkle` icon instead of a barely-visible opacity pulse, for both clearer feedback and visual consistency with the rest of the app; and the per-hunk AI explanation prompt now repeats its language directive at the end of the prompt as a best-effort mitigation for occasional wrong-language responses from some providers (#133).
+- Linux: force WebKitGTK software-rendering fallback (`WEBKIT_DISABLE_COMPOSITING_MODE`, `WEBKIT_DISABLE_DMABUF_RENDERER`) before the webview is created, so the app degrades gracefully instead of aborting on systems without a working EGL/GPU context (`Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...`) (#135, #139).
+- Settings → Git → Committer Identities now update immediately after adding, editing, or deleting an identity, instead of requiring the settings popover to be closed and reopened (#140).
+
+## [3.6.0] - 2026-07-20
+
+### Added
+
+- **Post-checkout "Update branch" prompt** — checking out a local branch that is behind its upstream with no divergent local commits now offers a one-click fast-forward (`git pull --ff-only`, with automatic stash/restore when the working tree is dirty) or "Continue on local branch", which mutes the prompt for that branch. The mute clears automatically after any successful pull of the branch, and can be reset globally in Settings → Git. Diverged branches (ahead and behind) keep the existing generic pull prompt (#126).
+
+### Fixed
+
+- Interactive rebase now hands a conflict off to the non-blocking rebase banner + inline conflict editor instead of trapping it behind a modal (#128).
+- Fixed a UI freeze when highlighting conflicts on very long / minified lines (word-level diff now guards against pathological line lengths) (#128).
+- **Commit graph animation & loading layout shifts** — the SVG `viewBox` no longer stretches graph content during width transitions, the graph keeps its maximum width while loading to avoid jumping the left column, and the loading spinner is positioned absolutely so it no longer pushes content or flickers on fast page loads (#127).
+
+## [3.5.0] - 2026-07-10
+
+### Added
+
+- **PR Review 2.0** — a chantier of composable, keyboard-first review upgrades:
+  - **GitHub-standard review keymap** — `J`/`K` next/previous hunk, `⇧J`/`⇧K` next/previous file, `V` toggle viewed, `⇧V` hide viewed files, `T` filter files, `C` comment on the current hunk, `N`/`P` next/previous AI finding, `⌘Enter`/`Ctrl+Enter` submit review. Documented in Help → Keyboard Shortcuts.
+  - **Viewed-file state** — mark files as reviewed; hidden-viewed-files view to focus on what's left. Invalidated at the whole-PR level when the head SHA changes (a re-push resets viewed state honestly, rather than silently keeping stale marks).
+  - **Pending review surfaced** — draft review comments persist across closing/reopening the PR detail (survives navigating away) and are visible as a running count before submission.
+  - **Dismiss review / request reviewers** — GitHub gains both actions from the Info tab; forges that don't support one (e.g. GitLab has no direct review-dismissal equivalent) hide the action instead of throwing.
+  - **Local, opt-in AI pre-review pipeline** — a multi-hop pass (diff → import/dependency extraction → file history → LLM findings) surfaces confidence-scored, line-anchored findings with a cap and per-finding dismissal memory. Zero calls when the setting is off; a PR switch aborts any in-flight run. Configurable under Settings → Git → Review AI.
+  - **PR summary block** — a generated one-paragraph summary of the PR's intent and risk, shown above the diff, regeneratable on demand.
+  - **Unified `LineAnnotation` model** — CI check-run annotations, AI findings, and static heuristic flags now render through one merged gutter-overlay stream instead of three separate code paths.
+  - **GitLab real review completion** — inline batch review comments anchor correctly via a dedicated diff-refs lookup, `listReviews` reflects approvals and changes-requested verdicts, and file review history reports real per-path comment counts.
+- **Pre-commit secrets scanner** — a zero-network, local scanner over the staged diff's added lines, detecting AWS/GCP/Azure/GitHub/GitLab/Slack/Stripe/OpenAI/Anthropic tokens, RSA/OpenSSH/EC/PGP private-key headers, JWTs, and high-entropy literals (Shannon entropy, tunable threshold). Non-blocking in-app: an orange badge in the commit area opens a findings modal (redacted excerpts only, per-finding dismiss, per-pattern ignore), and committing with active findings shows a confirm the user can always bypass. Extensible per-repo via `.gitwandrc` `secrets.patterns[]` / `secrets.ignore[]`. Dual-implemented (Rust `regex` crate for the desktop app, a pure TypeScript mirror in `@gitwand/core` for `pnpm dev:web` and the CLI) and locked in sync by a parity test. Also ships `gitwand scan [--json] [--strict]` in the CLI and an opt-in, blocking pre-commit hook installer (Settings → Hooks) that shells out to it — always bypassable with `git commit --no-verify`.
+- **PR badges: background prefetch & cache (git-log style)** — branch badges (`#<number>` on branches with an open PR) now drain further pages in the background after first paint instead of only ever seeing the first page of 10 open PRs, and an in-memory per-repo cache restores the drained list instantly on a repeat visit (branch popover reopened, tab switch back) instead of re-fetching from a cold state — the same pattern as the git-log cache/prefetch fix (#113). Non-GitHub forges get the breadth fix; the instant-restore fast path stays GitHub-only for now.
+- **PR dock badge shows a real open-PR count** — the "prs" `AppDock` badge now wires the existing forge-abstracted `getPRCount()` and refreshes on repo open/switch and on the PR list's manual refresh, instead of reading `0` until the branch popover or graph mode happened to populate the badge-path list.
+
+### Changed
+
+- **PR detail open now costs 3 forge calls on the hot path (was 6)** — revalidation on reopening an already-cached PR detail was slimmed to only the calls that can actually have changed.
+- **PR diff parsing is lazy, per-file** — a PR with many changed files no longer parses every file's hunks up front; only the file currently open is parsed, cached by path.
+- **Diff line rendering is virtualized** — large diffs (thousands of lines) keep a bounded DOM instead of rendering every line, fixing scroll/interaction lag on big files.
+- **File Explorer: Save button moved next to the lock toggle** — grouped with the other primary edit action instead of sitting after Undo/Blame.
+
+### Fixed
+
+- **Azure comment edit/delete no longer risks a runtime crash** — `updateComment`/`deleteComment` are unsupported on Azure DevOps for now; the UI hides the edit/delete affordance instead of calling into a forge method that throws.
+- **Repo tabs: reordering now works with mouse, touch, and pen** — tab drag-to-reorder was mouse-event-only; it now uses pointer events, plus keyboard support (arrow keys) for accessible reordering.
+
+## [3.4.0] - 2026-07-08
+
+### Added
+
+- **`token_level_merge` conflict pattern** — decomposes a conflicted hunk line by line, then token by token, and proposes a merge when both sides changed disjoint tokens on the same line (e.g. two branches editing different utility classes on one HTML/JSX line). Never auto-applied regardless of confidence: it surfaces a proposal in a new `TokenMergePanel` that the user confirms explicitly, applied through the same `resolveHunkCustom` path as a manual edit. Priority 65 — evaluated before every opt-in deterministic recoverer.
+- **2-way conflict base recovery** — most repos use git's default `merge.conflictstyle` (no `|||||||` base section), which left every diff3-only pattern (`one_side_change`, `non_overlapping`, `token_level_merge`, …) inert. The desktop now reconstructs the base from the git index (`reconstructConflict`) and re-resolves, upgrading real-world 2-way conflicts to diff3. Guarded against overwriting manual edits made outside the conflict markers, with a discreet banner when recovery fired. Concurrency-capped at 4 subprocesses.
+- **`ResolutionPreviewPanel` + "Resolve auto" confirmation** — pre-computed hunk resolutions are shown for review before applying; the global "Resolve auto" button now opens a per-hunk summary modal instead of applying blind, and applies the engine's real merged lines (not a raw ours+theirs concatenation).
+- **"Recoverable-before-model" metric** — `summarizeTiers()` derives a funnel over the existing per-type counts (trivial / advanced-deterministic / model / unresolved) and reports how much of the residual is still recoverable deterministically before the LLM is invoked. Surfaced in the CLI resolve summary, the MergeEditor header, the MCP `tierSummary` field, and as a cumulative local aggregate in Settings → Git (localStorage only, no network). Backed by a corpus regression guard and a committed golden-funnel snapshot that fails CI on any silent drift.
+
+### Changed
+
+- **`value_only_change` extended to diff3 with ordered-value resolution** — the pattern now runs with a base (both-sides value bumps), and when the differing tokens are comparable semver or ISO timestamps the higher/later value wins deterministically instead of blindly taking the policy side. Value tokens are tokenized quote-aware so multi-word quoted values (e.g. `'2026-07-06 11:42:00'`) aren't split on their inner whitespace.
+- **Deterministic recoverers run before the LLM** — enabling `llmFallback` now forces `refactoringAware` on, so a rename-on-both-sides hunk is never sent to the model when a deterministic answer exists.
+
+### Fixed
+
+- **Data-loss: imports resolver deleted unparsable import-like blocks** — a block accepted as "imports" but containing an unparsable line (e.g. `import a` with no `from`) could return an empty merged block reported as success, silently deleting the hunk. It now falls back to the textual engine.
+- **Data-loss: `insertion_at_boundary` dropped insertions duplicating a base line** — insertions were filtered with a `Set`, so an inserted line equal to any base line was lost. Now uses multiset counting.
+- **`whitespace_only` false positive inside string literals** — whitespace inside a quoted string is data, not formatting; the pattern no longer auto-resolves when only a string literal differs.
+- **Rename detection matched inside strings and comments** — `detectRefactorings` masked neither string literals nor `//`·`/* */` comments, so a value or comment-wording change could pass as a "bijective rename". Both are now masked in a single scan.
+- **git log pagination, caching, and prefetching** — per-file lazy loading and cache correctness fixes in the desktop commit graph (#113).
+
+## [3.3.0] - 2026-07-06
+
+### Added
+
+- **Blame gutter in the File Explorer editor** — an opt-in "Blame" toolbar button in the CodeMirror editor adds an author/date gutter, deduped per consecutive same-commit run with a hover tooltip for full details. Reuses the existing `git_blame` command (no new Tauri command). Blame clears automatically on edit, the toggle is disabled while the file is dirty, and the cache is evicted when the tab closes.
+
+### Changed
+
+- **Anonymous launch telemetry moved from Umami to Aptabase** — Umami Cloud silently dropped every launch ping (it filters non-browser User-Agents, replying HTTP 200 with a `{"beep":"boop"}` decoy and recording nothing). GitWand now sends the same anonymous, release-only "launch" event through Aptabase (App-Key authenticated, no UA/bot filtering). The GDPR-safe random `install_id` is unchanged; app version and locale are captured automatically by the Aptabase plugin. Dropped the direct `ureq` and `sys-locale` Rust dependencies.
+
+### Fixed
+
+- **PR base-branch picker only showed `main` on Azure DevOps** — the "into" branch dropdown was built solely from local git refs, which on an Azure clone often hold just `origin/main`, so server-side branches never appeared. The forge is now queried for its branches (`ForgeProvider.listBranches`) and those heads are merged into the picker, falling back to local refs when unavailable. Implemented across all forges for parity: Azure (`az_branches`, refs API), GitHub (`gh_branches`, REST/`gh` CLI), GitLab (`gl_branches`, `glab` CLI), and Bitbucket (`bb_branches`, refs API).
+
+## [3.2.0] - 2026-07-02
+
+### Added
+
+- **Integrated terminal — WebGL rendering, agent tabs, New AI task** — the terminal panel now renders via WebGL for smoother output, gains inline search (`Ctrl+F`, prev/next) and clickable links, and its tabs carry a type (`shell` / `claude` / `codex`) with a distinct icon and an unread-output dot. "Launch Claude Code" / "Launch Codex" now open a real PTY shell tab instead of a non-functional stub, and a new "New AI task" button creates a scratch git worktree and opens a Claude Code terminal tab in one click. Hardening: `safe_repo_path()` on all terminal filesystem operations, a shell-executable whitelist, PTY orphan/zombie prevention on tab close, bounded keystroke input, and a UTF-8 boundary carry-buffer fix for multibyte characters straddling PTY read chunks.
+- **File Explorer / Editor panel** — a new dockable panel (drag/resize/fullscreen, mirroring the Terminal panel) lists the full repo file tree (gitignore-aware, via `git ls-files`) and opens files in a lazy-loaded CodeMirror 6 editor with per-tab undo history, syntax highlighting, and a lock/undo/save toolbar. Reachable from a new Files tile in the AppDock, with per-repo layout settings and folder file-counts pre-computed in a single tree walk.
+- **Per-project worktree submenu** — each project tab now has a caret (▼) between its name and close button that opens a submenu listing `main` plus every worktree of the project. Selecting one switches that project's checkout in place (no extra tab); the active checkout is checkmarked.
+- **AI tasks manage their worktree** — `gitwand-scratch-*` worktrees appear in the submenu with a sparkle icon and a delete action that prompts to either merge the work back into the project or delete the isolated worktree (with branch cleanup), instead of leaving it orphaned on disk.
+- **GitTree filter mode + branch/date-bucket navigation** — the Git Tree toolbar gains a filter mode that recalculates the DAG to show only matching commits, quick-toggle buttons for branch/author filters, and date-bucket separators in the commit timeline. The branch search box now offers a branch-name autocomplete dropdown (teleported to `<body>` to escape `overflow:hidden` clipping) and can resolve `#<PR number>` directly to the branch that PR is on — cache-first against the already-loaded PR list, with a debounced fallback fetch and a `#1234` badge on branches with a known PR.
+- **Submodule updates** — the Submodules panel now shows update-available indicators and lets you pull remote submodule changes (rebase) or discard them (`git submodule update --force`), backed by new Rust `ops.rs` commands.
+- **Per-author line churn stats** — the contributor dashboard now aggregates insertions/deletions per author (via `git log --numstat`) alongside the existing commit counts. Also brings GitHub API request caching via ETags and consolidated PR detail queries to cut API usage.
+- **Antigravity CLI provider** — the Antigravity CLI (`agy`) is now a selectable local AI provider in Settings, with backend detection and execution support.
+- **Rebase onto any ref, with branch reset** — the rebase editor now accepts remote branches, tags, and raw SHAs (not just local branches) as the base, with free-form ref input; when there are no commits to replay, it offers a branch reset routed through the app's standard confirmation flow instead of an inline prompt.
+
+### Changed
+
+- **Sidebar: unified Changes section** — the working-tree "Unstaged" and "Untracked" sections are merged into a single "Changes" section for a simpler, more conventional view.
+- **PR create: base branch is now a `<select>`** — replaces the free-form text input + datalist, restricting the target to valid base branches (main/master first, then `release/*`, then the rest by recency).
+- **AI presets: duplicate default entry removed** — the built-in `__builtin_default` preset (which duplicated the Default menu entry already routed via `activate(null)`) is gone; the active-preset checkmark now refreshes immediately after save instead of staying stale until reload.
+- **Closing a project asks for confirmation** — a confirmation prompt guards the tab close button (now next to the worktree caret) against misclicks. Closing a project only closes the tab; its worktrees stay on disk.
+- **Tauri bumped to 2.11** — `@tauri-apps/api`, CLI and plugins aligned with the Rust-side bump; the fragile inline find/chmod postinstall step was replaced with a cross-platform `scripts/fix-spawn-helper.mjs`.
+- **Website: "Today" card refresh** — the What's New card moved to first position with its badge bumped to v3.0 and a rewritten triaged-inbox description across all 5 locales; the social-share `og-image` was refreshed to match.
+
+### Fixed
+
+- **Git Tree: deleting a worktree branch** — right-clicking a branch that's checked out in a worktree now offers "Delete worktree" (and "Merge & delete worktree" for AI-task scratch worktrees) instead of a plain "Delete branch" that git rejects. Removing/merging a worktree also reloads the branch list so the deleted branch no longer lingers in the view.
+- **Fork PR checkout** — checking out a PR now resolves its real source repository and fetches `pull/N/head` from upstream when the PR originates from a fork; the branch, status, and log resync immediately after checkout instead of showing stale state.
+- **Real Tauri error messages surfaced** — `invoke()` rejects with a plain string, not an `Error` object, so `err.message` was always `undefined` across ~20 catch blocks in `useGitRepo.ts`, showing e.g. "git log: undefined" instead of the actual git error.
+- **"Changes" missing from selectable startup views** — Settings > Dock's startup-view picker now includes Changes alongside the other panes.
+- **PR create: close button legibility** — improved contrast on the close button in the PR creation view.
+
+## [3.1.0] - 2026-06-25
+
+### Added
+
+- **Customizable dock and startup view** — the AppDock position and visible tabs are now configurable in Settings; the startup view (which pane opens first on launch) is also user-selectable.
+- **PR create: unpublished branch warning** — GitWand warns when you try to open a pull request from a branch that hasn't been pushed to the remote yet, and offers to publish it in one click.
+- **Customizable release notes** — release note templates can be customized per-repo; the default template is smarter, deriving content from merged commit messages.
+- **Anonymous launch ping (GDPR-compliant telemetry)** — a single fire-and-forget ping on launch counts active installations; no personal data, no user identifiers, no tracking.
+- **Website: screenshot slideshow & lightbox** — the landing page features a scrollable screenshot gallery with a click-to-zoom lightbox.
+- **pnpm 11.9.0** — bumped via the `packageManager` field.
+
+### Fixed
+
+- **NUL bytes in AI CLI prompts** — diff content containing NUL bytes was silently corrupting prompts passed to AI CLI processes on spawn; they are now stripped before the process is launched.
+- **Website hero reflow on tab switch** — the hero section no longer jumps in height when switching between the Desktop and CLI tabs.
+- **VS Code: esbuild CVE** — esbuild bumped to `^0.28.1` (CVE GHSA-67mh-4wv8-2f99).
+- **CI: tag pattern narrowed** — the release workflow tag trigger now matches `v[0-9]*.*.*` only, excluding `vscode-v*` tags that were incorrectly triggering the desktop release pipeline.
+
+## [3.0.0] - 2026-06-23
+
+### Added
+
+- **Today — triaged action inbox** (was: Launchpad, v2.9.0+) — urgency tiers (À traiter / En attente / Plus tard), state-aware primary action per row (Merge · Review · Resolve · Reply · See failure), local working-state band, reworked card UI (left accent · state pills · CI/review chips · diff stat · avatars · action hierarchy), pill-chip tab bar, centered max-width layout. The rename Launchpad → Today drops the GitKraken-associated term in favour of a daily-driver framing.
+- **VS Code extension on the Marketplace** — `gitwand-vscode` is now published at `marketplace.visualstudio.com/items?itemName=Gitwand.gitwand-vscode`. The extension is bundled with esbuild (inlines `@gitwand/core`, no runtime `node_modules`), published via a new `.github/workflows/publish-vscode.yml` workflow on `vscode-v*` tags or `workflow_dispatch`. The website hero card links directly to the Marketplace.
+- **Dashboard enhancements** — contributor modal with per-contributor stats, activity-bar tooltips with exact commit counts, fortnight (14-day) commit stats replacing the previous 7-day window, trimmed dashboard cards; clicking a commit in the dashboard graph navigates directly to the Git Tree.
+- **Branch management improvements** — top-contributor avatars on branch rows, inline row actions, pinned-branch section; uncommitted working-tree changes are now automatically moved to the target branch when switching or creating a branch; force-delete now prompts for confirmation when the branch is not fully merged.
+- **Full-screen image viewer** — images embedded in markdown files open in a full-screen overlay viewer.
+- **Website** — GUI/CLI hero toggle (Desktop tab focused by default), all platform cards are now clickable links (correct release/npm/Marketplace destinations), Linux download URL casing fixed, launch-directory badge strip below the CTA.
+
+### Fixed
+
+- **PR panel stuck after a transient "current user" failure** — `ghCurrentUser()` cached its result promise unconditionally; a rate-limit blip or GitHub 5xx poisoned the identity for the whole session. Only successful results are now cached; failures are evicted so the next caller retries. The error carries the server's response body instead of a bare status code.
+- **CLI: validation issues surfaced in terminal output** — `gitwand resolve` silently wrote merged files even when `result.validation` reported residual conflict markers or post-merge syntax errors. Writes with residual markers are now blocked (red warning, file NOT written); syntax or parse-tree errors emit a yellow warning. The `--ci`/`--json` report already included this data; the human-readable output now matches.
+- **DOMPurify** bumped 3.4.9 → 3.4.11 (security).
+
+### VS Code extension — v1.3.0 (independently versioned)
+
+- **`Resolve All` now covers the entire workspace** — previously iterated only open text documents; now uses `vscode.workspace.findFiles` + `vscode.workspace.fs.readFile` to scan all files, pre-filtered with a conflict-marker regex, capped at 2 MB.
+- **File resolution no longer breaks the confidence penalty** — `cmdResolveFile` was re-resolving each hunk individually, resetting the per-file frequency context; it now calls `resolve()` once on the full content and applies `result.mergedContent` directly.
+- **CodeLens and diagnostics respect `minConfidence`** — the "resolvable" label previously ignored the configured threshold; it now compares `classification.confidence.label` against `minConfidence` via a `CONFIDENCE_RANK` map.
+- **Validation failures surfaced as warnings** — `cmdResolveFile` shows a warning notification when `result.validation.isValid` is false; `cmdResolveAll` skips files with residual markers and reports the count in the completion notification.
+
+## [2.24.0] - 2026-06-19
+
+### Added
+
+- **Full-screen views + floating navigation dock** — the permanent left sidebar (3 tabs) and right Git Tree strip are gone. Navigation now lives in a floating bottom-center `AppDock` (Dashboard · Changes · PRs · Git Tree), so each view renders full-bleed. Dashboard, Changes (files │ diff │ collapsible commit rail), History (commit list │ diff) and PRs (list │ detail) compose their own panes; the Git Tree becomes a first-class full-screen `graph` view (selecting a commit drills into History). `RepoSidebar` gained a `pane` prop so a single component renders any one slice; the commit composer rail is collapsible and its state persisted. New `sidebar.toggleCommitPanel` i18n key in all 5 locales.
+- **Launchpad — in-app issue review, action inbox & internal navigation** — issues now open in an in-app detail view (`IssueDetailView` + `useIssuePanel`) instead of bouncing to the browser. A new action inbox surfaces per-repo action cards (`useLaunchpadInbox` / `useRepoActionCards`), Launchpad scope selection is extracted into `useLaunchpadScope`, and internal navigation lets you move between Launchpad surfaces (and the branch selector) without leaving the app. New i18n keys in all 5 locales; composable unit tests added.
+- **File-tree view for the history (commit) sidebar** — the list/tree toggle now also applies when browsing a previously committed (already pushed) commit: the commit's changed-files list can render as a nested, collapsible folder tree, with the status badge per file and click-to-scroll preserved. The layout choice is shared with the Changes view — switching to tree in one switches both — and folder collapse state is persisted per folder path. The pure tree-builder (`useFileTree`) was generalised over any `{ path: string }` entry so it serves both the working-tree `RepoFileEntry` list and the commit `GitDiff` list. The lone "H" header icon is indented to align with the chevron-prefixed change sections.
+
+### Changed
+
+- **Lazy-load `EditCommitOverlay` and `SplitCommitModal`** — both were always-mounted despite being gated by user actions; `v-if` guards plus `defineAsyncComponent` keep their chunks out of the main bundle until they're actually needed.
+
+### Fixed
+
+- **AppImage external links — silent no-open** — inside the released Linux AppImage, `AppRun` prepends `$APPDIR` entries to `PATH`, `XDG_DATA_DIRS` and `XDG_CONFIG_DIRS`, so a spawned `xdg-open` could resolve a bundled helper or miss the system browser/mime association and exit `0` without opening anything. URL openers now strip the `$APPDIR`-injected search-path entries before spawning (never emptying a variable), and capture each opener's stderr + exit code into the command log so a future silent failure stays diagnosable. Follow-up to the v2.22 AppImage link fix (GitHub issue #52).
+
+## [2.23.0] - 2026-06-18
+
+### Added
+
+- **File-tree view for the changes sidebar** — the Changes view gains a list/tree layout toggle (in the controls row, to the right of the monorepo scope picker; full-width with text labels when no scope picker is present). The tree layout nests each git section's files under their folders, with collapsible folders (per-section collapse state, persisted in `localStorage`); selecting a file auto-expands its ancestor folders. The chosen layout is persisted. Pure tree-building logic lives in a new `useFileTree` composable with unit tests; `viewLayout` / `viewAsList` / `viewAsTree` i18n keys added in all 5 locales.
+- **Per-file and per-folder discard** — every file row now carries a discard button alongside stage/unstage, and tree folder rows carry folder-level stage/unstage + discard (operating on all files under the folder). Section-header, folder and file actions share a new segmented "action group" control (fused square buttons split by a hairline divider), and the stage/unstage/discard buttons are now always visible rather than hover-only.
+
+### Changed
+
+- **Branch selector polish** — the branch popover is wider and its lists grow to fit their contents; each branch row's actions are fused into a single segmented control, and the branch name is now a full-height hover/tooltip target so the whole row reacts to the pointer. The create-branch form reset is factored into a shared helper.
+- **Collapsible branch sections** — the `LOCAL` and `REMOTE` headers in the branch popover are now toggle buttons with a disclosure chevron and a branch count, collapsing/expanding their lists (same affordance as the Submodules section).
+- **Shared `BranchNameField`** — create-branch modals across `App.vue`, `CommitGraph.vue`, `RepoSidebar.vue`, and the branch selector now use one extracted `BranchNameField` component for consistent validation and UX, with new `branch.*` i18n keys in all 5 locales.
+- **AI button color** — the loading state of the commit AI button in `RepoSidebar.vue` now uses the AI accent color.
+- **Branch lists ordered by recency** — the header branch selector, merge picker and rebase base picker now share a single `branchSort` (current branch first, then `main`/`master`, then most-recently-committed, then name), so the branch you're most likely to target sits at the top everywhere.
+
+### Fixed
+
+- **External links in the Linux AppImage** — clicking external links (the GitHub/Azure sign-in buttons, PR/issue links in the Launchpad, "open repo on the web", the changelog link) did nothing in the released AppImage even though they worked under `pnpm tauri dev`. Two causes: (1) the `open_url` helper fired a lone fire-and-forget `xdg-open` whose spawned helper inherited the AppImage's polluted `LD_LIBRARY_PATH` and died silently — `open_url` now spawns via `hidden_cmd` (de-polluted env), tries `xdg-open` / `gio` / `kde-open5` / `$BROWSER` in turn, and checks exit status so a real failure surfaces (exit-status handling documented as Linux-only); (2) several links were bare `http(s)` anchors that the Tauri webview ignores (`target="_blank"`/`window.open` are no-ops) — a single catch-all now routes every external anchor click through `openExternalUrl`, so no link can silently do nothing again.
+- **Interactive rebase in the packaged desktop app** — applying an interactive rebase (reorder / squash / edit / drop from the rebase editor) silently did nothing in the built Tauri app: the frontend POSTed to an `/api/git-interactive-rebase` endpoint that only exists in `dev:web` mode, so outside development the request never reached git. A dedicated `git_interactive_rebase` Tauri command now runs `git rebase -i` with the edited todo list injected via a temp file + `GIT_SEQUENCE_EDITOR` (the env control plain `gitExec` can't provide) and reports conflicts back as a structured flag. Rust command, `backend.ts` wrapper and dev-server route kept in parity.
+
+## [2.22.0] - 2026-06-18
+
+### Added
+
+- **File-level bulk conflict resolution** — in the merge editor header, "Accept all: Current · Incoming · Both" resolves *every* hunk of a file in one click (including complex/low-confidence hunks the safe "Resolve auto" leaves behind), with a non-blocking "⚠ may break a generated file" hint on Both for build-generated files. After a bulk action, a memorize offer surfaces as a persistent app-level toast (survives the auto-advance to the next conflicted file) so the rule can be saved; the saved-rule banner becomes one-click actionable ("Apply rule to N hunks") with an applicability count, gracefully skipping hunks the rule can't apply. Built on a single pure `resolveAllConflictBlocks` engine (one marker pass, callback-driven) with `resolveFileBulk` / `applyMemoryToFile` composable methods; reuses the existing undo and save/stage/advance flow. No `packages/core` change. New `merge.bulk*` / `mergeEditor.memory*` i18n keys in all 5 locales; pure-engine unit tests.
+- **Tree-conflict resolution (modify/delete, both-deleted, add/delete)** — conflicts with no `<<<<<<<` markers (a file modified on one side and deleted on the other, deleted on both, etc.) previously showed as "0 conflit" with no way to act. A new Rust `get_tree_conflicts` reads unmerged index stages from `git status --porcelain=v2`, and `resolve_tree_conflict` applies a choice via `git checkout --ours/--theirs` + `add` or `git rm -f` (args as arrays, path guarded by `safe_repo_path()`). The file list now shows a distinct "deleted" badge instead of a resolved state, and the editor renders a dedicated panel explaining the case ("Modified on current side, deleted on incoming side", …) with availability-driven actions (Keep current / Keep incoming / Accept deletion) and a read-only preview of the surviving content; resolving advances the merge through a shared `advanceToNextConflictOrFinalize` helper. New `merge.tree*` i18n keys in all 5 locales; real-temp-repo Rust tests.
+- **Markerless content-conflict reconstruction** — a content conflict (`UU`, all three index stages) can have *no* `<<<<<<<` markers in the working tree (after a one-sided `git checkout`/`restore`, a `-X ours/theirs` merge, `rerere`, …), which GitWand showed as "0 conflit" — even though git still recorded the conflict (the gap PhpStorm doesn't have, since it reads the stage blobs). GitWand is now stage-authoritative for this case: a new Rust `reconstruct_conflict` reads the stage-1/2/3 blobs and runs `git merge-file -p --diff3` to rebuild the 3-way conflict text. When the working tree is just one side it is reconstructed silently and flows through the normal hunk-resolution UI (with a discreet "reconstructed from the index" banner); when the working tree matches no side (a possible unstaged manual resolution) the editor offers a choice — "Reconstruct conflict" or "Keep my version (stage as-is)" — so no manual work is ever clobbered. New `merge.reconstructedBanner` / `merge.markerless*` / `merge.reconstructConflict` / `merge.keepWorkingTree` i18n keys in all 5 locales; real-temp-repo Rust tests.
+
+### Fixed
+
+- **False "Publish branch" on an already-published branch** — a branch present on the remote but without configured upstream tracking (pushed without `-u`, `gh pr checkout`, fork checkout…) was wrongly offered as "not published yet", because `needsPublish` keyed solely on the `@{u}` config. `git_status` now exposes a `remote_branch_exists` flag (libgit2 fast-path + CLI fallback + dev-server parity) that detects a matching remote-tracking ref and computes ahead/behind against it; `needsPublish` now means "no upstream AND no remote branch", while a new `needsUpstream` drives the `--set-upstream` on first push. The branch shows its real ahead/behind state instead of a misleading publish banner. Real-temp-repo Rust tests.
+- **False "Offline" blocking push/pull/PR actions** — on macOS the WKWebView emits spurious `offline` events / unreliable `navigator.onLine`, which hard-flipped the app to offline and gated every network action until the next ~30 s probe (and only while focused). The browser `offline` event no longer flips state — it triggers a real probe; offline detection gains hysteresis (2 consecutive failed probes before lighting the pill, immediate recovery on one success); and `requireOnline` is now async, asking an authoritative `confirmOnline()` that runs a FRESH probe at action time (trusting only a <5 s-old success). A stale/spurious offline reading can no longer block an action that would succeed, while a genuine outage still blocks before git hangs on a dead socket. Updated connectivity unit tests.
+- **"Unpushed tags" modal listing tags already on the remote** — with several remotes (e.g. `fork` + `origin`), `git_remote_info` returned the alphabetically-first remote (`fork`, which has no tags), so the unpushed-tag check compared local tags against the wrong repo and flagged every already-pushed tag. `git_remote_info` now prefers `origin` when present, falling back to the first remote otherwise (Rust + dev-server parity) — fixing the tag modal and every other consumer (PR lookups, connectivity probe…). Real-temp-repo Rust tests.
+
+## [2.21.0] - 2026-06-17
+
+### Added
+
+- **Monorepo Scope** — pick a single sub-workspace and scope the commit graph, commit search, and repo stats to its file tree. A scope picker in the repo sidebar lists auto-detected packages across six workspace formats (`pnpm-workspace.yaml`, `package.json` `workspaces` for npm/yarn, `Cargo.toml [workspace]`, `nx.json`, `turbo.json`, `go.work`) — all parsed natively in Rust with no new dependencies, base paths validated through `safe_repo_path()`, and a documented precedence (pnpm > Cargo > go.work > nx > turbo > npm/yarn) when manifests coexist; malformed manifests degrade to empty rather than erroring. The active scope is persisted per repo as an additive optional `scope` field in `.gitwand-workspace.json`, restored on open and validated against a new `path_exists` command (falls back to the whole repo with a one-time notice if the path was deleted). When a scope is active, `git_log` filters history to the sub-tree via a pathspec and the graph header shows the active-scope chip plus an "N commits hidden" badge — the hidden count is `unscopedTotal − scopedTotal` (both from a new lightweight `git_rev_count` command) so it stays stable across pagination; clicking either clears the scope. A "Custom folder…" entry in the picker scopes to any directory ad-hoc. Backed by a `useWorkspaceScope` composable, `backend.ts` wrappers for every new/changed command, dev-server routes for `dev:web` parity, `scope.*` i18n keys in all 5 locales, and real-temp-repo Rust tests (one per detection format + precedence) plus composable unit tests.
+
+## [2.20.1] - 2026-06-17
+
+### Fixed
+
+- **GitHub & Azure OAuth in the Linux AppImage** — sign-in failed in the released AppImage with `Failed to parse device-code response: EOF while parsing a value at line 1 column 0` (worked under `pnpm tauri dev`). The forge HTTP transport shells out to the system `curl`, which inherited the AppImage `AppRun`'s `LD_LIBRARY_PATH` pollution and loaded ABI-incompatible bundled libs, dying before the TLS request completed (empty body → JSON parse error). `hidden_cmd` now de-pollutes the child environment inside an AppImage (restore each `<VAR>_ORIG` saved by AppRun, else drop the override; no-op outside an AppImage), and the curl transport now adds `--show-error` and reports a non-zero curl exit as an explicit transport error instead of a misleading parse error. Reproduced and verified end-to-end on Linux via `scripts/repro-issue-48-appimage-curl.sh`. (#48)
+
+## [2.20.0] - 2026-06-17
+
+### Added
+
+- **Scratch worktree for isolated resolution** — backend commands `scratch_worktree_create` / `merge_back` / `discard` create a temporary `gitwand-scratch-<timestamp>` worktree as a sibling of the repo, let you resolve conflicts away from the active checkout, bring the changes back into the main checkout in one click (merge-back refuses if the main checkout has conflicting uncommitted changes), and auto-clean up (`worktree remove --force` + `prune`, no dangling registration). Wired into the merge-preview / Conflict Predictor panel: "Resolve in scratch worktree" opens the new worktree as a repo tab so you resolve in it, then merge-back / discard switch back to the origin checkout and close the scratch tab. The lifecycle is anchored to the origin repo (merge-back/discard always target the captured origin cwd, never the active tab). Backed by `useScratchWorktree` composable, `backend.ts` wrappers, `scratch.*` i18n keys in all 5 locales, and real-temp-repo Rust tests + composable unit tests.
+- **Conflict Predictor extended to rebase & cherry-pick** — new side-effect-free `preview_rebase` / `preview_cherry_pick` Tauri commands (same `FileMergePreview` shape as `preview_merge`, which is left untouched): rebase replays each commit in `merge-base(HEAD, onto)..HEAD` as a per-commit 3-way against `onto` (deduplicated by highest conflict signal per file — faithful to a real rebase, not a squashed approximation), cherry-pick 3-ways `commit` onto HEAD (ancestor = `commit^`); both fail fast on unknown refs / missing merge-base / root commits and never touch the working tree. `MergePreviewPanel` gains an operation selector (merge | rebase | cherry-pick), a colour-coded `riskLevel` badge (low / medium / high), and an expandable hunk-by-hunk preview of the predicted conflicts surfaced from the existing per-file `resolve()` output. Rust tests cover known rebase/cherry-pick conflicts on real temp repos and assert the working tree is untouched.
+- **MCP `gitwand_preview_merge` extended** — new `operation` parameter (`merge` | `rebase` | `cherry-pick`) with `onto` and `commit` args; uses `git merge-file` on blob snapshots in a temp dir — side-effect-free 3-way simulation mirroring the desktop Rust predictor.
+- **CLI `gitwand preview`** — new command; `--onto <ref>` (rebase), `--commit <sha>` (cherry-pick), `--branch <name>` (merge); exits 0 = clean, 1 = conflicts predicted, 2 = error; `--json` for CI pipelines.
+
+## [2.19.0] - 2026-06-16
+
+v2.19 takes the PR workflow off the `gh` CLI and opens it to more forges: sign in to GitHub with the OAuth device flow (tokens in the OS keychain, REST path with no CLI required), add Azure DevOps as a first-class forge, and open cross-fork pull requests against an upstream parent. Ships with a round of performance work on the backend (async Tauri commands, disk-persisted stale-while-revalidate PR cache, libgit2 `git_status` fast-path).
+
+### Added
+
+- **Cross-fork pull requests** — when the repo's `origin` is a fork, the PR create view shows a target-repository selector (upstream parent vs your fork), defaulting to upstream. Works on both the REST (token) path — head is qualified as `fork-owner:branch` — and the `gh` path (`--repo`). New `gh_fork_info` command detects the relationship.
+- **Fork PRs in the list** — on the REST (token) path, the PR list for a fork now also includes the PRs you opened on the upstream repo (head repo == your fork), merged and sorted with origin's own PRs. PR detail/diff/checks/merge transparently resolve to the upstream repo for those entries.
+- **Sign in with GitHub (no `gh` CLI required)** — Settings → Accounts now offers a "Sign in with GitHub" button using the OAuth device flow. The resulting token is stored in the OS keychain; once present, the GitHub PR workflow (list, count, detail, diff, checks, files, create, merge, checkout, mark-ready) routes through the GitHub REST API instead of shelling out to `gh`. The `gh` CLI still works as before when no Settings token is configured — the ambient `GH_TOKEN`/`GITHUB_TOKEN` env path is unchanged.
+- **Azure DevOps support (new forge)** — Settings → Accounts now offers "Sign in with Azure" using the Entra ID OAuth device flow (same UX as GitHub), with automatic access-token refresh via the stored refresh token. The tokens are stored in the OS keychain (`gitwand:azure/oauth` + `oauth-refresh`). Azure DevOps remotes (`dev.azure.com`, `*.visualstudio.com`) are auto-detected and routed to a new `AzureProvider` backed by the Azure DevOps REST API (api-version 7.1): PR list/count/detail/diff/files/create/merge/checkout, draft→ready, comments (threads), CI checks (branch-policy evaluations) and reviewer-vote reviews — so the merge-readiness chip reflects real build + approval state. Diff, file lists and change stats are produced from local git (Azure has no unified-patch endpoint). Comment edit/delete, line-anchored comment creation, reviewer pickers and submitting reviews are not wired yet and degrade gracefully.
+
+### Technical
+
+- **Backend performance** — PR-workflow Tauri commands converted to `async` with blocking git/network work offloaded to background threads (no more UI freeze on context switch); disk-persisted stale-while-revalidate cache for PR lists and details (the UI paints from cache, then revalidates in the background); `git_status` gains an in-process libgit2 fast-path that avoids spawning a CLI process.
+- **CI: npm publishing switched to OIDC trusted publishing** — the three `@gitwand/*` packages now have a Trusted Publisher configured on npmjs.com (GitHub Actions, repo `devlint/GitWand`, workflow `publish.yml`); pnpm exchanges the workflow's OIDC id-token for a short-lived publish token. The long-lived `NPM_TOKEN` secret is gone — its silent expiry had caused npm publishes to fail unnoticed from v2.15 to v2.17 (npm users jumped straight from 2.14.0 to 2.18.0). Provenance attestations are still emitted (automatic with OIDC).
+
+### Notes
+
+- Ships with GitWand's registered GitHub OAuth App `client_id` (`Ov23li1JPkwPsqdFrJ76`, public — device flow enabled) baked into `github_api.rs`. Override at runtime or build time via `GITWAND_GH_CLIENT_ID` if needed.
+- Ships with GitWand's registered Entra ID public client (`e26aa15d-856c-4a64-98ed-d44d4c7b3a18`, device flow enabled) baked into `azure.rs` for Azure DevOps sign-in. Override with a different Entra app via `GITWAND_AZURE_CLIENT_ID` (runtime or build time) if needed.
+
+## [2.18.0] - 2026-06-12
+
+v2.18 brings the CI back to the code: check-run annotations now overlay the PR diff — the exact line that failed the linter or typecheck, right where you review — across all three forges. GitHub Copilot CLI also joins the AI-provider lineup.
+
+### Added
+
+- **Inline CI check annotations** — check-run annotations are fetched per PR and anchored to the diff:
+  - **Gutter icons** (❌ failure, ⚠ warning, ℹ notice) on affected lines in the PR inline diff, with a subtle colored edge on annotated rows. Hovering shows a tooltip with the annotation title, message, and the check that produced it. Multi-line annotations flag their whole range (capped at 20 lines); when several annotations hit the same line, the worst level wins the icon.
+  - **"N annotations" badge in the CI tab** — check-runs that produced annotations show a clickable badge that jumps straight to the diff.
+  - **Per-file ⚠ count in the diff file sidebar** — spot which files the CI flagged before opening them.
+  - **All three forges**: GitHub (check-runs annotations API), GitLab (`artifacts:reports:codequality` — Code Climate severities mapped to failure/warning/notice), Bitbucket (Reports API annotations). Everything is non-fatal: a repo with no checks, an expired report, or a forge with nothing to offer simply shows no annotations.
+  - **Lazy by design** — annotations are fetched once per PR, the first time the Diff or CI tab is opened; never during PR-list browsing.
+- **GitHub Copilot CLI as an AI provider** — `copilot-cli` joins `claude-code-cli`, `codex-cli`, and `opencode-cli` in the `AIProvider` union. It piggybacks on the user's locally-installed `copilot` binary and their GitHub Copilot subscription — no API key required. Detection mirrors the existing CLI providers (binary discovery across PATH + common install locations) and it appears in Settings → AI with the same status/re-detect pattern. Prompts run one-shot via `copilot -p` (model selectable via the per-provider model picker, free-text since Copilot has no enumeration command). Tool permissions are deliberately restricted (`--deny-tool=shell`, `--deny-tool=write`, `--no-ask-user`, and `COPILOT_ALLOW_ALL` stripped from the child env) so Copilot only produces text and cannot edit files, run shell commands, or block on interactive prompts.
+### Changed
+
+- **Sidebar quick actions trimmed** — the Changes and History quick actions were removed from the repo sidebar (#39); both remain reachable from their primary surfaces (commit area, Git Tree).
+
+### Technical
+
+- New forge-agnostic type `CIAnnotation { check_name, path, start_line, end_line, level, title, message }` (`types.rs`, mirrored as camelCase in `backend-pr.ts` with a shared `mapAnnotation` normalizer — unknown levels degrade to `notice`).
+- Three new Rust commands following the per-forge pattern: `gh_check_annotations` (head SHA → `commits/{sha}/check-runs` → `check-runs/{id}/annotations`, capped at 20 annotated runs), `gl_mr_annotations` (MR pipelines → jobs with a `codequality` artifact → `gl-code-quality-report.json`), `bb_pr_annotations` (commit Reports → per-report annotations). Registered in `lib.rs`; GitHub path mirrored in `dev-server.mjs` (`/api/gh-check-annotations`); TS wrappers in `backend-pr.ts` / `backend-gitlab.ts` / `backend-bitbucket.ts`.
+- `ForgeProvider.getCheckAnnotations()` added to the forge contract and implemented by the three providers. `usePrPanel` gains `prAnnotations` (lazy, one flight per PR), `annotationCountByCheck`, and `annotationsByFile`.
+- Gutter rendering in `PrInlineDiff` is anchored on `newLineNo` (annotations target the head commit); CSS-only hover tooltip, no new dependency.
+- i18n: `pr.annotations.{badge,badgeTooltip}` across all five locales; unit tests in `v2.18-ci-annotations.test.ts`.
+- New Rust commands `detect_copilot_cli` and `copilot_cli_prompt` (`copilot --no-color --deny-tool=shell --deny-tool=write --no-ask-user [--model …] -p <prompt>`), plus a `CopilotCliInfo` type; registered in `lib.rs`. Mirrored across all three layers: `commands/ai.rs`, `dev-server.mjs`, and the `backend-ai.ts` wrapper.
+- `useAIProvider` adds `copilot-cli` to `CLI_AGENT_PROVIDERS`, dispatches it in `suggest()` / `rawPrompt()`, and forwards the per-provider model. `SettingsPanel` gains the provider option, detection state, and status block.
+- i18n: `aiProviderCopilotCli`, `aiProviderCopilotCliNotFound`, `aiCopilotCliDetectedHint`, `aiCopilotCliInfoBox` across all five locales (en, fr, es, pt-BR, zh-CN).
+- Unit tests extended in `useAIProvider-opencode.test.ts` for the Copilot dispatch and model fallback.
+
+## [2.17.0] - 2026-06-04
+
+v2.17 rounds out the agent-CLI lineup with **opencode** as a first-class AI provider, and gives every CLI agent its own model picker — a second select under the provider dropdown, scoped per provider so switching back restores the previous choice.
+
+### Added
+
+- **opencode as a first-class AI provider** — `opencode-cli` joins `claude-code-cli` and `codex-cli` in the `AIProvider` union. Detection mirrors the existing CLI providers (binary discovery across PATH + common install locations, login-shell env so the agent finds its auth), and it appears in Settings → AI with the same status/re-detect pattern. Prompts run one-shot via `opencode run`.
+- **Per-provider model selection** — for the three CLI agents (Claude Code, Codex, opencode) a second select appears under the provider picker. opencode enumerates its catalog dynamically (`opencode models`, `provider/model` form, with a Refresh button); Claude Code advertises its stable aliases (`sonnet`/`opus`/`haiku`); Codex falls back to free-text entry. The chosen model is forwarded to each CLI via `--model`.
+- **`aiModelByProvider` setting** — the model is persisted per provider (keyed by provider id), so switching providers restores each one's previous choice. An empty value means "let the CLI use its own configured default".
+
+### Technical
+
+- New Rust commands `detect_opencode_cli`, `opencode_cli_prompt` (`opencode run [--model …]`), and `opencode_list_models` (`opencode models`), plus a `model` argument threaded into `claude_cli_prompt` and `codex_cli_prompt`. `OpencodeCliInfo` type added; commands registered in `lib.rs`. Mirrored across all three layers: `commands/ai.rs`, `dev-server.mjs`, and the `backend-ai.ts` wrapper.
+- `useAIProvider` gains `modelForProvider` / `listModelsForProvider` helpers and dispatches `opencode-cli` in `suggest()` / `rawPrompt()`. `aiModelByProvider` added to both the `useSettings` `AppSettings` and the `SettingsPanel` `Settings` interface.
+- Unit tests for the model-selection helpers and CLI dispatch (`useAIProvider-opencode.test.ts`).
+- i18n: `aiProviderOpencodeCli`, opencode hints, and the `aiModelCli*` model-picker keys across all five locales (en, fr, es, pt-BR, zh-CN).
+
+## [2.16.0] - 2026-05-29
+
+v2.16 adds native OS notifications for pull-request activity — review requests, new comments, CI pass/fail flips, and merge/close — surfaced while GitWand is in the background, with zero extra network requests beyond the existing Launchpad poll.
+
+### Added
+
+- **Background Launchpad poller** (`useLaunchpadPoller`) — a dedicated ~60 s poll loop, independent of `useRepoPoller` (which pauses when the window is hidden). It keeps refreshing PR state in the background so notifications fire without GitWand in the foreground. Gated on workspace presence, notification settings, and connectivity.
+- **Snapshot diff layer** (`useLaunchpadNotifications`) — a module-level singleton that compares successive PR snapshots and emits typed events: `new-pr`, `ci-flip`, `review-requested`, `review-decided`, `new-comment`, `closed` (merged/closed). Zero additional network requests — it consumes the data the poller already fetched. The first pass only seeds the snapshot, so reopening the app never fires a burst of stale notifications.
+- **Native OS notifications** via `tauri-plugin-notification` (macOS Notification Center, Linux libnotify, Windows toast). Emitted only when the window is in the background (`document.hidden`); in the foreground the Launchpad updates visually instead. Every event is also pushed to `useLogs` (traceable in the Logs tab).
+- **Notification settings** (Settings → Notifications) — granularity selector: All activity · Reviews & comments · CI failures only · None; plus a "by people" toggle that suppresses events authored by bots (GitHub Actions, Dependabot, Renovate).
+
+### Changed
+
+- **`workspace_prs_all` re-enriched** — the Launchpad PR list again carries `statusCheckRollup`, `reviewDecision`, `reviewRequests` and a new `comment_count`, which the notification diff needs. The light sidebar list (`gh_list_prs`) stays unenriched for boot performance; only the background Launchpad path pays the heavier `gh pr list --json` cost.
+
+### Technical
+
+- New `PullRequest.comment_count` field threaded across the three layers (`types.rs`/`gh.rs`/`gitlab.rs`/`bitbucket.rs`, `dev-server.mjs`, `backend.ts` + `backend-pr.ts`).
+- `tauri-plugin-notification` added to Cargo + initialised in `lib.rs`; `notification:*` permissions declared in `capabilities/default.json`. The TS wrapper (`useOsNotification`) calls the plugin's IPC commands directly so the type-check and `dev:web` builds don't depend on the native JS package.
+- Unit tests for the diff layer (every transition → correct event, terminal-only CI flips, bot detection, no boot burst).
+- i18n: `settings.notification*` and `notify.*` keys across all five locales.
+
+## [2.15.1] - 2026-05-29
+
+v2.15.1 closes the "Git Tree polish & quick actions" lot — the daily-friction follow-ups to PR #23 (Force push, Quick Stash, Submodules in the Git Tree).
+
+### Added
+
+- **Force push from the branch context menu** — right-click the current branch in the Git Tree to force push when it has an upstream and local commits ahead (rewritten history after a reset/rebase). Routes through the same `--force-with-lease` path as the header sync button.
+- **Force-push guard** — a confirmation modal now gates force push when the target is a protected trunk (`main`/`master`) and/or the remote has diverged (commits you don't have locally would be lost). Clean ahead-only pushes skip the modal.
+- **Quick Stash (`⌘⇧,`)** — instant stash from anywhere with no modal; the label is AI-generated from the working-tree diff (reuses `useStashMessage`). No-ops with a toast when the working tree is clean.
+- **Pending-stash badge in the commit area** — the WIP node in the Git Tree shows a subtle count badge when stashes are pending.
+- **Submodules section in the branch picker** — lists each declared submodule; expand one to see its local branches (lazy-loaded).
+- **Submodule pointer badges in the Git Tree** — a commit that moves a submodule pointer shows a `path@<sha>` badge; clicking it navigates the Git Tree into that submodule (opened as its own repo tab).
+
+### Technical
+
+- New Rust commands `git_submodule_branches` (lists a submodule's local branches) and `git_commit_submodule_changes` (maps each commit to the submodule gitlinks it touches, scoped to declared submodule paths so the scan stays cheap). Both mirrored across the three layers: `ops.rs`, `dev-server.mjs`, and the `backend.ts` wrapper.
+- New types `SubmoduleBranch` and `CommitSubmoduleChange`; both registered in the Tauri invoke handler and re-exported as `*_parity` wrappers for the parity probe.
+- Parity tests added for both new commands with a dedicated `fixtureSubmodule` (parent repo embedding `libs/inner`).
+- i18n: new `forcePushConfirm.*`, `stash.pendingBadge`, and `submodule.{viewTree,noBranches,backToParent,viewingSubmodule}` keys across all five locales (en, fr, es, pt-BR, zh-CN).
+
+## [2.15.0] - 2026-05-22
+
+v2.15 makes the Git Tree the primary history view and removes the flat commit log panel entirely. All branch, stash, tag, and commit operations are now accessible directly from the graph. PR #23 — 59 commits, author t1gu1.
+
+### Added
+
+- **Git Tree as primary view** — the Git Tree replaces the commit log as the main history panel. The DAG renders the full multi-branch topology as an SVG with trunk-pinning, per-lane cooldown counters, and automatic WIP node injection (uncommitted changes appear as a live node at the HEAD of the active branch).
+- **Unified context menus on commits** — right-click any node to checkout, reset (soft/mixed/hard), revert, create branch, create tag, or cherry-pick without leaving the graph.
+- **Unified context menus on branches** — right-click any ref label to checkout, merge, rebase, rename, delete, push, or pull the branch; stash management accessible from the same menu.
+- **In-graph stash management** — stash nodes visible directly in the DAG; apply, pop, drop, or inspect from the context menu.
+- **In-graph tag management** — tag nodes rendered inline; create, push, delete from the context menu.
+- **Search bar in the Git Tree** — live fuzzy search across commits (message, SHA prefix, author); matching nodes highlighted; `Escape` clears.
+- **DAG trunk-pinning** — the default branch (main/master) always occupies the leftmost lane, regardless of merge order.
+- **Lane cooldown system** — vacated lanes are reused after a configurable number of commits to prevent unbounded lane sprawl on long-running feature branches.
+
+### Changed
+
+- **Log/History panel removed** — the flat commit list that previously showed `git log` output has been replaced by the Git Tree. File-level history is opened via a dedicated "File history" button in the diff header.
+- **Branch list relocated** — the branch picker is a dropdown triggered from the header branch chip; the standalone Branches sidebar panel is removed.
+
+### Technical
+
+- `GitTreeView.vue` promoted from secondary panel to primary view; `HistoryView.vue` removed; `CommitLog.vue` kept as a lightweight embedded component for file history.
+- Rust command `git_log_graph` extended with `--all` by default and a `branches[]` filter for scoped views; new command `git_wip_status` returns the WIP pseudo-commit shape.
+- `useGitTree.ts` — new composable owning DAG layout (trunk-pinning + lane assignment + cooldown bookkeeping); extracted from the former `useBranchGraph.ts`.
+
+## [2.14.0] - 2026-05-19
+
+v2.14 closes the remaining `ForgeNotImplementedError` gaps on GitLab and Bitbucket and makes all three intelligence methods (conflict preview, hotspots, file history) forge-agnostic.
+
+### Added
+
+- **GitLab diff-line discussions** — `createComment` now routes to the GitLab Discussions API (`POST /projects/:id/merge_requests/:iid/discussions`) when `path` + `line` are supplied, anchoring the comment to the exact diff line instead of posting a general MR note. New Rust command `gl_mr_create_discussion`; new TS wrapper `glMrCreateDiscussion` in `backend-gitlab.ts`.
+- **Bitbucket CI checks** — `getCIChecks` wired to the Bitbucket Pipelines commit statuses endpoint (`/commit/{sha}/statuses`). The PR's `source.commit.hash` is extracted to form the URL, then each status is mapped to the common `CICheck` shape. New Rust command `bb_pr_ci_checks`; new TS wrapper `bbPrCiChecks`.
+- **Bitbucket draft → ready** — `convertDraftToReady` strips the `"Draft: "` title prefix (case-insensitive) via a `PUT` PR update. New Rust command `bb_convert_draft_to_ready`; new TS wrapper `bbConvertDraftToReady`.
+- **`updateComment` / `deleteComment` on GitLab and Bitbucket** — both methods now fully wired: GitLab via `gl_mr_update_note` / `gl_mr_delete_note`, Bitbucket via `bb_update_comment` / `bb_delete_comment`. `prNumber` added as optional 4th parameter to the `ForgeProvider` interface (required at runtime for non-GitHub providers; ignored on GitHub where comment IDs are globally unique).
+- **`setAccount(account: Account | null): void`** — new method on `ForgeProvider` interface implemented by all three providers; stores an `Account` context in-memory to enable multi-workspace credential resolution (Bitbucket) and multi-profile switching (GitLab, GitHub) without re-authenticating.
+
+### Changed
+
+- **`getConflictPreview` / `getHotspots` — forge-agnostic** — both methods now delegate to the same local-git implementation (`ghPrConflictPreview` / `ghPrHotspots`) in `GitLabProvider` and `BitbucketProvider`. These methods run `git merge-tree` and `git log --merges` locally — no forge API required. The `forge.name === "github"` guard that was previously needed in consumers is no longer necessary.
+- **`PullRequestPanel.vue` — forge bypass fixed** — the panel now uses `forge.value.getConflictPreview`, `forge.value.getHotspots`, and `forge.value.getFileHistory` through the resolved `ForgeProvider` instead of calling `gh*` functions directly.
+
+### Technical
+
+- `ForgeNotImplementedError` import removed from `GitLabProvider` and `BitbucketProvider` — all stubs replaced; no remaining `throw new ForgeNotImplementedError(…)` in either provider.
+- `PrFileHistory` zeroed stubs corrected: `{ reviewCommentCount: 0, reviewers: [], lastComment: null }` — matches the actual interface shape.
+- `CreatePrCommentParams.diff_hunk` reference removed from `GitLabProvider.createComment` — `diff_hunk` is not part of the interface; condition simplified to `params.path && params.line != null`.
+- 128 tests green; TypeScript strict mode — 0 errors.
+
+## [2.13.0] - 2026-05-18
+
+v2.13 extends the AI commit workflow with named system-prompt presets and adds inline code suggestions directly in PR diffs.
+
+### Added
+
+- **AI Prompt Presets** — named system-prompt presets for commit message generation; four built-in presets (Default, Concise, Detailed, Emoji/Gitmoji) plus unlimited user-defined presets with a custom `systemPrompt` field; `${lang}` placeholder is substituted with the resolved commit-message language at generation time.
+- **Preset CRUD in Settings → AI** — add, edit, and delete custom presets from a dedicated Presets section in the AI settings tab; built-in presets are read-only (displayed with a "built-in" badge).
+- **Per-repo preset picker** — preset submenu in the commit-zone AI dropdown; active preset is persisted per repo in `AppSettings.activePresetIdByRepo`; selecting "Default" resets to the built-in conventional-commits prompt.
+- **Inline Code Suggestions in PR diffs** — pencil "Suggest" button on every non-delete diff line in `PrInlineDiff`; clicking opens an inline editor pre-filled with the current line content; submitting serializes the change as a GitHub suggestion block (` ```suggestion ``` `) and stages it via the existing `add-to-review` mechanism.
+
+### Technical
+
+- New composable `useAiPromptPresets` — module-level CRUD (`addPreset`, `updatePreset`, `removePreset`, `setActivePreset`) + reactive composable wrapper; built-ins are immutable (id prefix `__builtin_`); stored in `AppSettings.aiPromptPresets`.
+- `CommitMessageOptions.systemPromptOverride` — new optional field on `useCommitMessage.generate()` to inject a custom system prompt (replaces the default conventional-commits prompt); `${lang}` substitution applied.
+- `useCommitMessage.transform()` unchanged — shorten/detail/changeLang transform actions remain independent of presets.
+- 10 new unit tests for `useAiPromptPresets` (all CRUD paths + builtin immutability + repo override).
+
+## [2.12.0] - 2026-05-18
+
+v2.12 solves three daily workflow friction points: branches that pile up, multiple git identities, and repetitive commit messages.
+
+### Added
+
+- **Archived Branches** — archive any branch from its context menu; archived branches move to a collapsible "Archived" section in the dashboard sidebar and are never deleted from git.
+- **Pinned Branches** — user-chosen branch pins replace the former auto-computed top-5 heuristic; pin/unpin via context menu, ordered list persisted per repo.
+- **Branch badges** — "Merged" badge on branches already integrated into the default branch (`git branch --merged`); "Inactive" badge on branches silent for N days (configurable in Settings → Git).
+- **Multiple Committer Identities** — named profiles (label, git name, email, optional GPG key) in Settings → Git → Identities; global default + per-repo override; discrete selector in the commit panel.
+- **Commit Templates** — named templates (subject + body) in Settings → Git → Templates; apply via picker button or `/` autocomplete in the subject field; import from `.gitmessage` via `git config commit.template`.
+
+### Changed
+
+- `git_commit` Rust command accepts optional `identity_name` / `identity_email` params (non-breaking); injects `-c user.name=… -c user.email=…` when an identity is active.
+- Dashboard sidebar branch section now driven by `usePinnedBranches`; falls back to top-5 by activity when no pins are set.
+
+### Technical
+
+- New Rust commands: `git_branch_merged`, `git_config_identity`, `git_commit_template_path`.
+- New composables: `useArchivedBranches`, `usePinnedBranches`, `useIdentity`, `useCommitTemplates` — all state persisted in `AppSettings` via localStorage.
+- i18n: ~28 new keys across `branch.*`, `commit.identityDefault`, `settings.git.*` in all 5 locales.
+- 23 new unit tests (118 total, all green).
+
+## [2.11.0] - 2026-05-18
+
+v2.11 focuses on performance at scale and developer transparency — pagination for large repos, real-time feedback during clones, and full visibility into every git command GitWand runs under the hood.
+
+### Added
+
+- **Transparent command log** — new `⌘⇧L` / `Ctrl+Shift+L` shortcut opens a slide-in panel listing the last 200 git commands executed by GitWand (write operations only: commit, push, pull, fetch, merge, rebase, stash, cherry-pick, branch ops, clone). Each entry shows the command label, working directory (last 2 segments), wall-clock timestamp, execution time in ms, and exit code (green 0 / red non-zero). Implemented as an in-process ring buffer (`VecDeque<CmdLogEntry>`, cap 200, `OnceLock<Mutex<…>>`) in Rust — zero overhead when the panel is closed. New Tauri command `get_command_log`; new composable `useCommandLog` (module-level singleton so panel state survives remounts); new component `CommandLogPanel.vue` (560 px slide-in from right, `slide-right` transition).
+
+- **Real-time clone progress bar** — the Clone modal now shows a live progress bar while `git clone` is running. Git's `--progress` flag writes carriage-return-delimited stage lines to stderr; the Rust `git_clone` command spawns the process, reads raw stderr bytes in 512-byte chunks, splits on `\r`/`\n`, and emits `clone-progress` Tauri events with `{ stage, percent, message }`. The Vue listener maps stages to weighted progress ranges: Counting objects 0–15 %, Compressing 15–25 %, Receiving objects 25–90 %, Resolving deltas 90–100 %. The event listener is cleaned up on unmount.
+
+- **CommitLog pagination with infinite scroll** — the commit log now loads 100 entries at a time instead of a fixed 50. When scrolling within 200 px of the bottom of the log, the next page is fetched via `--skip=N` (Rust side) and appended to the existing list. A sentinel row below the virtualizer shows a spinner while the next page is loading, and disappears once the last page is reached (heuristic: fewer than 100 entries returned). Props `has-more` and `loading-more` thread from `useGitRepo` → `RepoSidebar` → `CommitLog`; emit `load-more` bubbles back up. Debounced with a `_loadMorePending` flag to prevent duplicate fetches during fast scrolling.
+
+- **Fork Point visualization in CommitGraph** — divergence point between the current branch and its upstream is now marked with a distinct node style in the commit graph. The merge-base is detected server-side and surfaced via the existing `git_graph` data; the Vue renderer applies a `fork-point` CSS class to the corresponding node.
+
+### Changed
+
+- **`backend.ts` domain split** — the monolithic `src/utils/backend.ts` (900+ lines) is split into per-domain modules under `src/utils/commands/`: `branch.ts`, `commit.ts`, `diff.ts`, `forge.ts`, `graph.ts`, `index.ts`, `log.ts`, `repo.ts`, `stash.ts`, `tag.ts`, `workspace.ts`. `backend.ts` is now a thin re-export barrel; all existing imports continue to work without changes. This is a refactor only — no behaviour change.
+
+- **`git_log` default page size** — increased from 50 to 100 entries per page (Rust `git_log` command).
+
+### Technical
+
+- New Rust commands: `get_command_log`.
+- New composables: `useCommandLog`.
+- New components: `CommandLogPanel.vue`.
+- Rust `git_log` gains `offset: Option<i32>` parameter (`--skip=N`); parity shim in `lib.rs` passes `None`.
+- TypeScript: zero errors. Tests: 95/95 passing.
+
+## [2.10.0] - 2026-05-13
+
+v2.10 opens GitWand to the broader forge ecosystem and brings the MCP ecosystem inside the app.
+
+### Added
+
+- **GitLab MR integration** — list, review, and merge GitLab Merge Requests without leaving the app. Uses the `glab` CLI, auto-detected on `$PATH`. Full feature parity with the GitHub PR panel: diff, CI status, inline comments, "Mark as ready" for drafts.
+
+- **Bitbucket PR integration** — list and manage Bitbucket Cloud Pull Requests via the REST v2 API. No CLI dependency — authenticates via credentials stored in the OS keychain (`tauri-plugin-keyring`).
+
+- **Multi-account forge support** — new **Settings > Comptes** tab to connect multiple GitHub, GitLab, and Bitbucket accounts (personal + work). GitWand resolves the right account for each repo from the remote URL; credentials persist in the system keychain and never touch localStorage.
+
+- **Draft PR → Ready** — "Mark as ready" button in the PR detail view. GitHub: `gh pr ready`. GitLab: `glab mr update --ready`. One click, no terminal.
+
+- **MCP catalog in Settings** — a new **MCP** tab in the Settings panel to browse, search, and install MCP servers without leaving GitWand.
+  - Source: npm registry fallback (250+ packages with `keywords:mcp-server`), official MCP Registry when available.
+  - **One-click install** into any detected config file: Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`), Claude Code global (`~/.claude.json`), Cursor (`~/.cursor/mcp.json`), Windsurf (`~/.windsurf/mcp.json`).
+  - **Installed badge** — reads `server_keys` from every config file to show exactly which servers are already configured where.
+  - **Smart input** — paste a `registry.modelcontextprotocol.io` URL for deep-link, type `@scope/package` to install directly from npm, or plain-text search across names and descriptions.
+  - **`@gitwand/mcp` pinned at the top** with automatic `--cwd` injection and a "Reconfigure" shortcut.
+  - **Manual fallback** — when running in browser/dev mode (no config files accessible), shows a copy-paste path with JSON copy button and the 4 standard config file locations.
+  - New Rust commands: `mcp_detect_configs`, `mcp_read_config`, `mcp_install_server`, `mcp_uninstall_server`.
+
+- **Settings panel redesign** — the Settings modal is now wider (`xl`, 960 px fixed at 72 vh) and replaces the horizontal scrolling tab bar with a left-side navigation sidebar. Groups: **Application** (Général, Éditeur), **Dépôt** (Git, Hooks, Comptes), **IA & Agents** (IA, MCP, Automations), **Système** (Logs). Footer shows the app version. No more layout shift on tab switch.
+
+- **Check for updates from Settings** — "Vérifier les mises à jour" in the Système group. Spinner while checking; green "À jour" confirmation for 4 s if up to date; opens the update modal directly if a new version is found (single network call, no double-check).
+
+### Changed
+
+- **`ForgeProvider` abstraction** — new `forge/` layer routes all PR/MR operations through a typed interface (`GitHubProvider`, `GitLabProvider`, `BitbucketProvider`). Auto-detected from remote URL; multi-account overrides applied transparently. No API change for consumers of `usePrPanel`.
+
+### Technical
+
+- New Rust commands (18): `gl_mr_list/detail/merge/ready`, `bb_pr_list/detail/merge`, `gh_pr_ready`, `keyring_set/get/delete`, `mcp_detect_configs/read_config/install_server/uninstall_server`.
+- New composables: `useForge`, `useAccounts`, `useCredentials`, `useMcpRegistry`.
+- New components: `SettingsAccountsTab.vue`, `SettingsMcpTab.vue`.
+- TypeScript: zero errors. Tests: 95/95 passing.
+
+## [2.9.0] - 2026-05-12
+
+Launchpad — cross-repo dashboard inspired by GitKraken's Launchpad but local-first (no cloud, no account). Closes the v2.9.0 ROADMAP entry. Audit established the chantier was ~95% implemented across previous unmerged work; this release wraps the closure (keyboard shortcut, tab persistence, lazy Team tab, UI tests) and ships. Detail per task was in `PLAN-v2.9-launchpad.md` (since removed — chantier fully closed).
+
+### Added
+
+- **Launchpad — cross-repo dashboard for workspaces** (depends on v2.7.0 Workspaces). Single full-screen view with four tabs aggregating across every repo in the active workspace:
+  - **WIP tab** — repos with uncommitted changes or branches behind upstream. Staged / unstaged / untracked counts, ahead/behind, no-upstream warning, last commit timestamp. Powered by `workspace_wip_all` (libgit2, P3.3a — from v2.8.2 perf hardening).
+  - **PRs tab** — open pull requests across all workspace repos via `gh pr list` (now with the v2.8.5 lightweight payload). Renders Draft / Approved / ChangesRequested / Review-Required badges, CI rollup status, labels, per-repo error states. Secondary row shows assignees and review-requested users as chips (up to 3 each + `+N` overflow).
+  - **Issues tab** — open GitHub Issues via `gh issue list` with three filters (Assigned to me / Mentioned / Created by me). Milestone badge, labels, per-repo errors.
+  - **Team tab** — colleagues' open PRs grouped by author with overlap detection: intersection between my WIP files (staged + unstaged) OR my un-merged commits and the files touched by each colleague's PR. Avatars use deterministic colour from a 6-colour palette. Auto-expand members with overlap. Identity resolved via `gh api user --jq .login` (module-level cache). PR file lists fetched lazily with `concurrentMap(limit=5)` to stay within GitHub rate limits.
+- **Pin / snooze for PRs and Issues** — module-singleton `useLaunchpadPins` composable persists to `localStorage` under key `gitwand-launchpad-pins`. Pin sorts the item to the top of its list; snooze removes it from view for 1, 3, 7, or 14 days. Per-item `⋮` menu in the row exposes both actions. A "N item(s) snoozed" banner above the list lets you peek at the snoozed items and unsnooze any of them. Snooze takes priority over pin so a snoozed-and-pinned item stays hidden until its preset elapses. Lazy-prune of expired snoozes on every write. 8 unit tests cover the singleton, sort order, expiry, and persistence round-trip.
+- **Keyboard shortcut `⌘L` / `Ctrl+L`** — opens the Launchpad from anywhere via the new **View > Open Launchpad** menu entry. Gating: if no workspace is defined, the shortcut toasts a warning ("Create a workspace first to use the Launchpad") and opens the Workspace panel instead.
+- **Tab persistence** — `launchpadActiveTab` (`"wip" | "prs" | "issues" | "team"`) is now part of `AppSettings` and survives between Launchpad opens. If the persisted tab is "team" the lazy fetch fires on mount instead of waiting for a click. Default remains `"wip"`.
+- **Refresh all button** — alongside the existing "refresh current tab" button, a new "Refresh all" button fans out `refreshWip` / `refreshPrs` / `refreshIssues` / `refreshTeam` via `Promise.all`. SVG double-arrow icon with spin animation during the run. Combined loading state disables both refresh buttons.
+- **Settings toggle "Disable Launchpad Team tab"** — `launchpadTeamTabEnabled` (default `true`) hides the Team tab entirely when off, for users on small teams or perf-sensitive setups who don't want the per-PR `gh pr view --json files` cost.
+
+### Changed
+
+- **Launchpad re-framed as a full-screen modal.** Previously the Launchpad was an opaque panel that filled the viewport edge-to-edge, hiding the app entirely. Now it renders as a centered card with a 2 rem inset on every side over a dimmed-and-blurred backdrop (`var(--color-overlay)` + `backdrop-filter: blur(4px)`, same pattern as `BaseModal`). The card itself uses `--color-bg-secondary` (the canonical white surface, `#ffffff` light / `#1a1a26` dark — no more "is it grey?" ambiguity), `--radius-2xl` rounded corners, `--shadow-xl` elevation, and a subtle `scale(0.985) → scale(1)` slide-in animation. The blurred view of the app behind keeps spatial context (you remember which repo you came from, where the menu is, etc.) and matches user expectations of a modal overlay.
+
+- **Launchpad design pass — full alignment with the app's design system.** The original `LaunchpadView.vue` styles were written with hardcoded fallback hex colours (`#3182ce`, `#718096`, `#e53e3e`, etc.) and references to **non-existent tokens** (`--color-surface-raised`, `--color-surface`) which silently fell through to the hardcoded white/grey backgrounds in dark mode — the whole tab read "work in progress". Refactor (style block only, template/script intact so the 95 tests stay green):
+  - All hardcoded hex fallbacks removed. Every colour now resolves through the canonical tokens defined in `assets/main.css`: `--color-bg{,-secondary,-tertiary}`, `--color-text{,-muted,-subtle}`, `--color-border{,-strong}`, `--color-accent{,-hover,-soft,-text}`, `--color-{success,warning,danger,info}{,-soft}`, `--color-focus-ring`.
+  - All spacing converted from ad-hoc `12px` / `0.5rem 1rem` literals to `var(--space-N)` (4 px base). All `border-radius` to `var(--radius-{xs,sm,md,lg,pill})`. All font sizes to `var(--font-size-{xs,sm,base,md,lg,xl})` and weights to `--font-weight-{regular,medium,semibold,bold}`.
+  - **PR / Issue / WIP rows** : surface `--color-bg-secondary` with `1px` border that brightens to `--color-border-strong` on hover; padding and density match `PullRequestPanel.vue` / `StashManager.vue`. Repo / milestone chips use `--color-bg-tertiary` pill shape.
+  - **Status badges** mapped semantically: Approved + CI Success → `--color-success-soft`/`--color-success`, Changes Requested + CI Failure → `--color-danger-soft`/`--color-danger`, Review Required + CI Pending → `--color-warning-soft`/`--color-warning`, Draft → `--color-bg-tertiary`/`--color-text-muted`. All pill-shaped with `--font-weight-semibold`.
+  - **Tab strip** : active indicator is a 2 px underline (replaces the previous solid accent block), inactive tabs muted, hover lifts to `--color-text`, tab badges use `--color-accent-soft` idle / full accent when active. Focus-visible outline on every interactive element.
+  - **`⋮` menu dropdowns** now use `--shadow-popover` (the canonical popover shadow), `--color-bg-secondary` panel, slide-down animation via `--transition-base`. Snooze submenu items are aligned to the same x-position as parent menu items.
+  - **Team panel** : member cards use `--color-bg-secondary` + border + `--radius-md`. Overlap members use `--color-warning-soft` background + `--color-warning` border + warning-text badge (replaces the previous Catppuccin hardcoded `#f38ba8` / `#2a1e2e` that didn't read in light mode). Avatars enlarged 20 px → 24 px with subtle border. Per-PR rows in expanded member cards use `--color-bg` with proper borders (replaces `rgba(0, 0, 0, 0.2)` which inverted in light mode).
+  - **Snoozed bandeau** : tertiary background with hover that grades through to primary surface; reveal/hide toggle aligned right via `margin-left: auto`.
+  - **PR people chips** (assignees / reviewers from v2.9 Wave B) : assignees use `--color-accent-soft` + `--color-accent`, reviewers use `--color-warning-soft` + `--color-warning` (replaces the v2.9 first-pass `#fef3c7` + `#92400e` hardcoded values). Separated from the row body by a dashed border-top.
+  - **All 12 emojis** (📌 pin × 6, 💤 snooze × 6, ⚠ warning × 2) replaced with 14 px SVG inline icons consistent with the rest of the app. Each menu item now uses `display: flex; align-items: center; gap: var(--space-2)` to align the icon and the label cleanly. New CSS slots `__pin-badge`, `__menu-icon`, `__bandeau-icon`, `__warning-icon`.
+  - Hover, focus-visible, and transition states added to every interactive element. Dark mode parity verified: now that everything resolves through tokens, both themes are first-class.
+  - Style block grew from 674 → 962 lines, but the added volume is hover/focus/transition declarations + comments, not duplication. No new dependencies. No template changes — 95/95 tests still green.
+
+- **Team tab is now lazy-loaded** — `refreshTeam(repos)` no longer fires in `LaunchpadView.vue#onMounted`. Eager refreshes stay on `wip` / `prs` / `issues` (fast, parallel, bounded). Team only fetches on the first click of the tab (or via Refresh-all). A placeholder ("Team activity not loaded yet") with a "Load team activity" button shows on the empty Team panel. Same pattern as the lazy PR loading shipped in v2.8.5; on a 50-PR-colleague workspace this saves ~10 s off the Launchpad first open.
+- **Homogeneous loading state across all four tabs** — central 24 px SVG spinner on first load (empty tab), top-right 16 px spinner on subsequent refreshes (data already shown). Uses `var(--color-accent)`. Same animation across tabs; previously only Team had a plain "Loading…" string.
+
+### Tests
+
+- **`apps/desktop/src/components/__tests__/LaunchpadView.test.ts`** — 11 new UI smoke tests using Vue 3's native `createApp` + `nextTick` (no `@vue/test-utils` dependency added). Coverage: initial render (4 tabs), Team tab hidden when toggle off, default tab from settings, tab switch fires correct refresh, `⋮` menu opens with Pin + Snooze, Pin action wired to `useLaunchpadPins.pin`, Snooze submenu with 4 presets, close emit on `✕`, Refresh all fans out to all four refresh mocks, Team click triggers lazy refresh, persisted activeTab honoured at mount, `onMounted` eager refreshes wip/prs/issues.
+- 36 existing Launchpad composable tests preserved (pins / prs / issues / wip / team).
+- **Total desktop tests: 95/95 passing** (84 from v2.8.5 + 11 new UI smoke), `vue-tsc --noEmit` clean.
+
+### Notes
+
+- Naming inconsistency `pr_files` (Rust) vs `ghPrFiles` (TS wrapper): documented in `commands/ops.rs` above the command. Renaming the Tauri command would be a breaking change for external callers (parity probes), not worth it.
+- Homepage redesign still pending decision (see `project_homepage_redesign.md` memory). A Launchpad feature card on `HomeLanding.vue` will be added in the next homepage pass, not piecemeal here.
+
+---
+
+## [2.8.5] - 2026-05-12
+
+Critical lag fixes that surfaced post-2.8.4 release. The v2.8.2 perf hardening had attacked the symptoms (slow renders, polling churn) but missed the dominant root causes hiding beneath. Two compounding bugs were responsible for the bulk of the perceived lag and the wave of mysterious `[TAURI] Couldn't find callback id` warnings in the console. Diagnosed from Safari Web Inspector logs.
+
+### Fixed
+
+- **CSP blocked Tauri 2 IPC — every command was falling back to `postMessage`.**
+  - `connect-src` in `tauri.conf.json` was `'self' http://localhost:3001` only. Tauri 2 IPC uses `ipc://localhost/<cmd>` (macOS/Linux) or `http://ipc.localhost/<cmd>` (Windows), neither of which were allowed. Every IPC call (`git_status`, `git_repo_state`, `git_exec`, `git_remote_info`, `set_git_config`, `plugin:menu|*`, …) was rejected by the CSP, triggering Tauri's `postMessage` fallback path — significantly slower and prone to callback-id races.
+  - Fix: `connect-src` now includes `ipc: http://ipc.localhost http: https:` to cover Tauri IPC on all platforms plus user-configurable AI providers (Anthropic / OpenAI-compat / Ollama / custom endpoints, e.g. `http://localhost:11434/api/tags` for the Ollama detection probe). `img-src` opened to `https: http:` for README badges (shields.io, github user-content) that were also rejected.
+  - Security posture preserved: `script-src 'self' 'wasm-unsafe-eval'` is unchanged — no remote code execution surface added. Only data fetches and IPC channels were unblocked.
+
+- **macOS GUI apps lacked the user's shell env — subprocess auth lookups hung indefinitely.**
+  - Apps launched from Finder/Dock/Spotlight inherit `PATH=/usr/bin:/bin:/usr/sbin:/sbin` plus `HOME`/`USER`/`TMPDIR` from launchd, but nothing from `~/.zshrc`, `~/.zprofile`, `~/.bashrc` — so no `SSH_AUTH_SOCK`, `XDG_CONFIG_HOME`, `LANG`, custom `PATH` prefixes (asdf/mise/nvm), nix-darwin exports, etc. `gh`'s credential chain then fell back to the macOS keychain helper from a launchd-spawned process, where the authorization prompt fires silently or retries indefinitely.
+  - Fix in new `apps/desktop/src-tauri/src/shell_env.rs`: at `run()` startup, spawn `$SHELL -l -c env` once (bounded by a 3-second timeout — a misbehaving rc file can't freeze app launch), parse the output, and `std::env::set_var` everything not already set. `PATH` is skipped (`hidden_cmd` owns it for Homebrew-prefix enrichment predictability); `PWD`/`OLDPWD`/`SHLVL`/`_`/`SHELL` skipped (shell-local noise). All subsequent subprocess (`gh`, `claude`, `codex`, `git`, etc.) inherit the enriched env. No-op on Linux/Windows. Same approach used by VS Code, Sublime, IntelliJ.
+
+- **Offline detection false-positive on networks that block SSH port 22.**
+  - The connectivity probe was using the URL-derived port (22 for SSH remotes, 9418 for `git://`, etc.) to test if the host was reachable. Corporate networks like Dendreo's routinely block outbound port 22 while allowing HTTPS through proxies/tunnels — so SSH remotes would falsely report "Offline" even though `git fetch` worked fine.
+  - Fix in `commands/network.rs#check_remote_reachable`: always probe HTTPS/443 first (universally open wherever internet exists), and only fall back to the URL-derived port if 443 itself fails. Catches enterprise SSH-only hosts as a last resort. Connectivity is now a "can I reach this host?" question, not "can I git over this exact protocol?".
+
+- **`gh` subprocess hung on signed Tauri.app even with the right env — keychain ACL trust mismatch.**
+  - Even with the full shell env, `gh pr list` from the signed GitWand.app subprocess hung because the macOS keychain ACL treats the signed Developer ID app as a different application than iTerm/Terminal, and the `security` helper called by `gh` to retrieve the OAuth token waited for a foreground UI prompt that never fires in the webview context.
+  - Fix: `init_login_shell_env()` also runs `$SHELL -l -c "gh auth token"` once from the login shell (where the keychain ACL is authorized) and `std::env::set_var("GH_TOKEN", …)`. `git/cmd.rs#hidden_cmd` now explicitly propagates `GH_TOKEN` and `GITHUB_TOKEN` to every subprocess (belt-and-suspenders against any future `env_clear()` or tokio-runtime peculiarity). gh subprocess from Tauri now skip the keychain helper entirely.
+
+### Changed
+
+- **Boot perf — `gh pr list` payload + lazy PR loading.**
+  - `gh_list_prs` heavy fields (`statusCheckRollup`, `mergeStateStatus`, `reviewRequests`, `reviewDecision`, `additions`, `deletions`) dropped from the initial list. Each cost a per-PR roundtrip to the GitHub API internally — for a repo with 100+ open PRs (Dendreo-class), the full query returned `HTTP 502 Bad Gateway` from GitHub's GraphQL endpoint after >30s, tripping the IPC timeout. The list query now returns 12 cheap fields; heavy data is lazy-loaded when the user opens a PR's detail view.
+  - `--limit` reduced 50 → **10** with new cursor-friendly pagination. `gh_list_prs(cwd, state, limit, offset)` accepts page parameters; `PrListSidebar.vue` uses `IntersectionObserver` on a sentinel `<div>` to trigger the next 10-PR page when the user scrolls near the bottom. Deduplication by PR `number` handles list shifts between fetches.
+  - New lightweight `gh_pr_count(cwd, state)` Rust command (3-layer: `commands/gh.rs` + dev-server `/api/gh-pr-count` + TS `ghPrCount`). Single GraphQL `totalCount` call (~150 ms, no per-PR roundtrip) replaces the heavy `gh pr list` call previously fired at every boot just to populate the Dashboard "Open PRs" stat card.
+  - `DashboardView.vue` boot Promise.all dropped from 8 to 7 entries: the old `ghListPrs(cwd, "open")` slot is now `ghPrCount(cwd)` (assignment, not `.length`). The merged-PRs count is deferred to v2.9 (Phase 2 — needs a `ghMergedSinceCount(cwd, since)` command to stay cheap).
+  - `PullRequestPanel.vue` no longer auto-loads PRs on `onMounted` — `loadPrs()` only runs when `props.show` flips to true (PR tab opened). cwd changes while the panel is hidden reset the list without spawning `gh`.
+  - `workspace_prs_all` (`commands/workspace.rs`) reduced `--limit 100 → 10` with the same lighter JSON field set, since multi-repo workspaces multiply the per-PR roundtrip cost.
+
+### Phase 2 deferred (v2.9)
+
+- Cursor-based `gh api graphql` `pullRequests(first:N, after:CURSOR)` to replace the naive `offset+limit` re-walk (current implementation re-fetches all previously-loaded pages each scroll).
+- `gh_pr_status_rollup(cwd, numbers[])` batched call to repopulate CI/merge badges on the list without requiring a click.
+- `ghMergedSinceCount(cwd, since)` for the Dashboard "N merged this week" hint (currently stuck at 0).
+- Re-enrich the "Reviews" PR filter (currently shows empty list — depends on lazy enrichment landing).
+
+### Notes
+
+- The previous v2.8.4 tag bundled only the Quick Fixes work (see entry below). The CSP / shell_env / boot-perf fixes here were on top but the tag did not move — so v2.8.5 is the first release where they ship to users.
+- Verified: `pnpm test` → 84/84 desktop, `pnpm exec vue-tsc --noEmit` → clean. Rust changes (`shell_env.rs`, `commands/gh.rs`, `commands/workspace.rs`, `git/cmd.rs`, `commands/network.rs`) require `cargo check` host-side.
+
+---
+
+## [2.8.4] - 2026-05-12
+
+Quick fixes batch — 2 bugs, 6 UX polish, 1 feature (Mode hors-ligne). Closes the "Quick Fixes" section of the ROADMAP. Detail per chantier was in `PLAN-quick-fixes.md` (since removed — chantier fully closed).
+
+### Fixed
+
+- **Global search palette — stale branches on repo switch** : `useGitRepo.ts` adds a `watch(folderPath, …)` that invalidates `branches` and `log` whenever the active repo changes. The inline reset inside `openRepo`/`closeRepo` is kept as defense-in-depth.
+- **PR sidebar empty when PRs exist** : root cause was an atomic `Vec<GhPrRaw>` deserialization that failed when any PR had `author: null` (deleted user, GitHub App bots) or `assignees[].login: null` — the whole list was dropped, surfacing as a generic error. Refactored `parse_gh_pr_json` to two-pass tolerant: parse to `Vec<Value>` first, then try each PR individually; structurally-broken entries are skipped and logged to stderr Rust. `GhPrAuthor.login`, `GhPrAssignee.login`, `GhPrRaw.author` now `Option<>` with `#[serde(default)]`. 3 new Rust tests (`parse_pr_with_null_author_does_not_drop_list`, `parse_pr_with_null_assignee_login_keeps_others`, `parse_pr_list_skips_unparseable_entry`).
+
+### Changed
+
+- **Repo `+` dropdown — recent and pinned repos** : `RepoTabStrip.vue` extended with two sections (pinned + recents) under the existing Open / Clone / Fork actions, separated by `<hr>`. Cap 8 entries combined (pinned first), `max-width: 320px`, `max-height: 360px`, vertical scroll. Empty state is handled cleanly (no orphan `<hr>`). +1 i18n key × 5 locales (`tabStripPinnedSection`); the existing `tabStripRecentSection` is reused.
+- **Push confirmation when unpushed tags exist** : new 3-layer command `git_unpushed_tags(cwd, remote)` (Rust `commands/ops.rs` + dev-server `GET /api/git-unpushed-tags` + TS `gitUnpushedTags`) — deterministic diff between `git tag -l` and `git ls-remote --tags --refs <remote>`. `App.vue#handlePush` intercepts the push, opens an inline `BaseModal` with 3 actions (Push with tags / Push without tags / Cancel) when the list is non-empty, otherwise pushes directly. Best-effort: a probe failure falls back to a standard push (no UX blocking). 5 i18n keys × 5 locales (`push.tagsConfirm.*`).
+- **Tags modal — buttons aligned with design system** : `TagsPanel.vue` "Nouveau tag" and "Pousser tout vers origin" buttons now use a new `.tp-btn-sm` class (`height: 32px`, `padding: var(--space-2) var(--space-4)`, `font-size: var(--font-size-sm)`) matching `StashManager`'s `.sm-btn-sm`. Specificity (0,1,0) preserved per the BaseModal rule.
+- **Rewind button — Light mode contrast** : `AppHeader.vue#.undo-entry-btn` already used `background: var(--color-bg-secondary)` which resolves cleanly to `#ffffff` (light) / `#15151f` (dark). Inline CSS comment expanded to document the theme intent and prevent future regression to `transparent`.
+- **Red error banner replaced by in-app Logs panel** : new `useLogs.ts` composable (module-level singleton, `LogEntry { id, timestamp, level: "error"|"warn"|"info", message, context? }`, FIFO cap 500 with `splice` eviction, `unreadCount` ref, `pushLog`/`clearLogs`/`markAllRead`, in-memory only — no `localStorage`). New Logs tab in `SettingsPanel.vue` with structured rendering (`[YYYY-MM-DD HH:mm:ss] LEVEL message` + optional context block), `Clear` button, `markAllRead` on tab mount. Status-bar indicator in `AppHeader.vue` with pill counter (caps visually at `99+`), tooltip "{count} unread logs". Lightweight `error-toast` (3s auto-dismiss, "View logs" jump button) is preserved for immediate critical errors (clone/push fail) — these errors also `pushLog("error", …)` so they accumulate. 15 new i18n entries (`logsLevelError`, `logsLevelWarn`, `logsLevelInfo` × 5 locales) plus reworded `logsEmpty` strings.
+
+### Added
+
+- **Sidebar PR — "Assigned to me" filter** (verified — already shipped in a prior iteration). 3-position toggle All / Assigned / Reviews in `PrListSidebar.vue`, Rust command `gh_current_user` (wraps `gh api user --jq .login`) cached at module level, `usePrPanel.ts#displayedPrs` computed filters by `assignees` (assigned mode) or `reviewRequested` (reviews mode). Identity banner with retry button when current user can't be resolved. Dedicated empty states for both modes. 15 locale keys × 5 locales already in place.
+
+- **Offline mode** :
+  - New Rust command `check_remote_reachable(url, timeout_ms)` in `commands/network.rs` — `reqwest::Client::head()` for HTTPS, `TcpStream::connect_timeout` fallback for SSH (`git@host:owner/repo` SCP-form), `ssh://`, `git://`, and IPv6 bracketed URLs. Strips `user:pass@` credentials. 11 Rust unit tests on the URL parser.
+  - New `useConnectivity.ts` composable (module-level singleton — `isOnline`, `lastCheckedAt`, `checking`). `probeConnectivity(cwd)` reads `gitRemoteInfo` then calls `checkRemoteReachable(2000ms)`. Logs `info`/`warn` transitions via `useLogs`. Listens to `window.online` (optimistic flip + poller confirmation) and `window.offline` (immediate flip).
+  - Polling integrated into `useRepoPoller`'s existing 2-second heartbeat via new optional `onConnectivityTick` callback gated to every 15 ticks (~30s). No new independent timer (respects the polling-discipline invariant from v2.8.2).
+  - New `networkGuard.ts` helper exporting `requireOnline(operationLabel): boolean` — synchronous, logs `warn` + shows toast and returns `false` when offline. Wrapped on 9 Tauri network call sites: `fetchRemote`, `push`, `pull` (`useGitRepo.ts`), `gitClone` (`CloneModal.vue`), `ghFork` (`ForkModal.vue`), `ghListPrs` / `ghCreatePr` / `ghCheckoutPr` / `ghMergePr` (`usePrPanel.ts`). Guard runs *before* IPC, so no spinner is ever started on a network operation while offline.
+  - "Offline" badge in `AppHeader.vue` driven by `isOffline = navIsOffline || !probedOnline` computed; `SyncSplitButton` accepts `:disabled="isOffline"` for push/pull/sync.
+  - 8 new i18n keys × 5 locales (`connectivity.{offline.badge,offline.tooltip,offline.disabledOp,offline.opSkipped,online.reconnected,offline.detected,probe.error,probe.label}`).
+  - 8 vitest tests in `connectivity.test.ts` covering probe flip, log transitions both ways, no-repo path, no-remote path, guard true/false, guard log. **84/84 desktop tests green.**
+
+### Test results
+
+- `cd apps/desktop && pnpm test` → 84/84
+- `cd apps/desktop && pnpm exec vue-tsc --noEmit` → clean
+- New Rust unit tests (11 in `network.rs` + 3 in PR parser): cargo run required host-side (sandbox cargo unavailable)
+
+## [2.8.3] - 2026-05-12
+
+### Added
+
+- **LLM fallback tie-in (closes v2.5.0 across consumers)** — `@gitwand/core@2.5.0` shipped the `llm_proposed` pattern + `resolveAsync` + `LlmEndpoint` injection earlier; this batch wires it through every consumer.
+  - **Desktop** : new "AI fallback" section in `SettingsPanel.vue` (toggle, provider picker `claude` / `claude-code-cli` / `codex-cli` / `openai-compat` / `ollama` / `mcp`, `minPostMergeScore` 50-100 slider, `contextLines` 10-200, `minMode` `off`/`balanced`/`strict`). Persists to `.gitwandrc.llmFallback` via new 3-layer `write_gitwandrc` (Rust `commands/files.rs` + dev-server `POST /api/write-gitwandrc` + TS `backend.ts#writeGitwandrc`). `useGitWand.ts` reads the config on file open and injects an `LlmEndpoint` into `resolveAsync` when enabled; `useAIProvider.toLlmEndpoint()` bridges to the existing AI provider stack. New `LlmTracePanel.vue` component renders the `LlmTrace` (model, validation score with red/amber/green bucket, latency, prompt hash click-to-copy, raw response truncated to 2 KB) above the conflict hunk in `MergeEditor.vue` whenever `decision.type === "llm_proposed"`; per-hunk Accept / Reject buttons downgrade to manual resolution on reject. ~80 new i18n entries (16 keys × 5 locales).
+  - **CLI** : new `--llm-fallback`, `--llm-provider {claude,openai,ollama}`, `--llm-model` flags on `gitwand resolve`. Switches from `resolve()` to `resolveAsync()` and builds a Node-side `LlmEndpoint` via native `fetch` (Node 20+, zero new dep — no `node-fetch`, no SDK). Claude reads `ANTHROPIC_API_KEY`, OpenAI reads `OPENAI_API_KEY`, Ollama hits `${OLLAMA_URL || http://localhost:11434}/api/chat`. Stderr warning at startup ("LLM fallback enabled — your code will be sent to …"). `--json` output now includes per-resolution `llmTrace`. 13 vitest unit tests covering each provider's request body, headers, response parsing, and error paths. Backwards-compatible: without the flag, `resolve()` is called exactly as before.
+  - **MCP** : new `gitwand_resolve_hunk` tool exposed by `@gitwand/mcp`. Inversion of the CLI flow — instead of GitWand calling a remote LLM, the connected agent (Claude Code, Cursor, Windsurf, etc.) *is* the LLM and resolves the hunk inside its own tool-call loop. Pure prompt builder, zero `fetch`, zero API key. README and CLAUDE.md updated for the 6-tool surface.
+  - **Validation** : `packages/core/src/__tests__/bench/congra-mini.test.ts` — 15 hand-crafted fixtures across TS, Python, Go, Rust, JSON, Markdown (4 easy, 7 medium, 4 hard difficulty distribution), each forcing a `complex` classification. Mock endpoint deterministic. Result: **15/15 (100 %) resolved by `llm_proposed`** with validation score 100 across the board (target ≥ 80 % met). `apps/desktop/src/__tests__/llm-fallback-integration.test.ts` — 4 composable-level scenarios (happy path, validation-failure rejection, disabled fallback, missing provider) mocking `readGitwandrc`, `getConflictedFiles`, `toLlmEndpoint`, `useFolderHistory`, `useI18n`.
+  - **Docs** : new `website/guide/llm-fallback.md` (why opt-in, how to enable across the three surfaces, supported providers, validation policy, audit trail, revocation, FAQ on confidentiality and cost — ~0.015 $/hunk on Sonnet, browser-safe contract). New `website/blog/v2-5-llm-fallback.md` (~2 100 words: state of the art ConGra + Project Harmony, architecture of `llm_proposed` priority 998, CLI walkthrough, rejection by design, MCP roadmap).
+  - **Test results** : `pnpm test` → 901/901 core, 76/76 desktop. `tsc --noEmit` clean on `apps/desktop`, `packages/cli`, `packages/mcp`. VitePress build clean.
+
+## [2.8.2] - 2026-05-11
+
+Performance hardening release. After a fluidity regression observed between v2.6 → v2.8, ~30 chantiers were delivered across 6 optimization levels (frontend, polling/IPC, backend Rust, bundle, measurements, code structure). Behaviour is unchanged for end users — this is consolidation, no new commands or API surface. The working plan (`PERFORMANCE_PLAN.md`) has since been folded into `ROADMAP.md` — its remaining items (FS watchers, libgit2 phase 1, Web Worker diff/parse, Channels for progress streaming) are scoped under v3.9.0.
+
+### Changed
+
+- **Frontend — cold start**
+  - 20 panels and modals are now lazy-loaded via `defineAsyncComponent` (Settings, Stash, Merge editor, Rebase editor, Split commit, Branch rename/delete, PR Review, PR Create, Tags, Hooks, Worktrees, Submodules, Agent Sessions, Launchpad, Workspaces…). Each becomes its own Vite chunk, removed from the initial JS parsed at app launch.
+  - 17 highlight.js languages moved to dynamic-import chunks (Rust, Go, Python, Java, SQL, PHP, C/C++, etc.). Only the 9 most-used languages remain in the main bundle. Saves ~150-250 KB gzipped off the cold start.
+  - README badges in the Dashboard now use `loading="lazy"`, `decoding="async"`, `referrerpolicy="no-referrer"` so external image fetches no longer block first paint.
+
+- **Frontend — DiffViewer hot path**
+  - Two-layer cache for syntax highlighting: `_hlCache` in `highlight.ts` (content + language → hljs output) plus `_dvHlCache` in `DiffViewer.vue` (content + language → safeHtml-ready HTML). No more re-tokenisation per render tick.
+  - `wordDiff` now computed once per diff in a single pass producing both `sbsByHunk` (side-by-side mode) and `inlineMap` (inline mode). Previous code ran `wordDiff()` twice on the same hunks.
+  - `CommitGraph.vue` adds deep-equality on props and viewport culling.
+  - `SearchPalette.vue` query input now debounced at 150 ms.
+
+- **Polling and IPC**
+  - All polling consolidated into a single `useRepoPoller` timer in `App.vue` with callbacks `onStatusChange`, `onConflictDetected`, `onFetchTick`, `onNightlyTick`. Replaces the 3 independent timers that contributed to the v2.6 → v2.8 regression.
+  - Polling now pauses on `visibilitychange` when the GitWand window goes to the background, and resumes immediately on refocus.
+  - The 3-second rebase-detection poll only runs while a rebase is actually in progress (was running unconditionally — root cause of the regression).
+  - `tauriInvoke()` now has a default 30-second timeout, plus `IPC_TIMEOUT.NETWORK` (5 min for push/pull/fetch/clone) and `IPC_TIMEOUT.NONE` (AI prompts) presets. No more indefinitely-blocking IPC promises.
+
+- **Backend Rust**
+  - `Cargo profile.release` tuned: `lto = "fat"`, `codegen-units = 1`, `strip = true`, `panic = "abort"`. Smaller binary, faster execution.
+  - `git_status` migrated to a libgit2 fast-path (`git2::Repository::open` + in-process branch ahead/behind + statuses). Falls back to the CLI parser on libgit2 errors. Probe measurement: CLI 41 ms → libgit2 32 ms; in-app gain extrapolated to 2-3× without the fork-exec overhead of the probe.
+  - `workspace_*_all` commands (`status_all`, `fetch_all`, `pull_all`, `wip_all`, `prs_all`, `issues_all`) parallelised with `rayon::par_iter` — N repos run as N tasks in parallel (bounded by core count).
+  - `workspace_*_all` also moved to libgit2 helpers for branch ahead/behind, modified count, WIP status, last commit timestamp.
+  - `resolve_git_dir` memoizes `git rev-parse --git-dir` per `cwd`. No more fork on every poll.
+  - `git_diff` defensively caps output at 5 MB per file, slicing at the last `\n` to never cut a hunk header. New `truncated_from_bytes` field on the response so the UI can surface a notice.
+
+- **Backend Rust — architecture (§3.4 split)**
+  - `apps/desktop/src-tauri/src/lib.rs` shrunk from ~3 254 to ~670 lines. The rest is now split by domain:
+    - `commands/ai.rs` (384 LOC) — Claude + Codex CLI detection / prompt / login.
+    - `commands/files.rs` (272 LOC) — `read_file`, `write_file`, `read_file_at_revision`, `folder_diff`, `list_dir`.
+    - `commands/gh.rs` (360 LOC) — 8 `gh_*` commands (issues, PRs, view, comment).
+    - `commands/ops.rs` (2193 LOC) — write side (stage, unstage, commit, push, pull, merge, rebase, discard).
+    - `commands/read.rs` (1187 LOC) — `git_status`, `git_diff`, `git_log`, `git_repo_state`, `git_show`, `git_blame`, `git_file_log{,_pickaxe,_range}`, `preview_merge`.
+    - `commands/workspace.rs` (268 LOC) — `workspace_read/write` + 6 `*_all` aggregates.
+    - `git/cmd.rs`, `git/libgit2.rs`, `git/parse.rs` — shared helpers.
+    - `types.rs` — every shared struct (consolidated from app).
+  - Parity wrappers (`pub fn *_parity`) remain in `lib.rs` and delegate to `commands::read::*`. Zero IPC surface change — Tauri command names are identical.
+
+- **Dependencies**
+  - `git2` 0.19 → 0.20.4 (fixes GHSA security advisory). `libgit2-sys` 0.17 → 0.18.4+1.9.3.
+
+### Added
+
+- **Bench suite** (`apps/desktop/perf/bench.mjs`) — measures CLI vs libgit2 on a deterministic fixture; "vs CLI" column shows the delta. Probe entry `git-status-fast` added to `parity_probe` for isolated libgit2 measurement.
+- **Bundle size budget in CI** (`apps/desktop/scripts/bundle-budget.mjs`) — breaks the build if initial JS exceeds the budget. Prevents silent regressions post-merge.
+- **Performance invariants** documented in `AGENTS.md` (`polling discipline`, `tauri-bundler [[example]]` rule, settings duplicate-interface rule, watch-immediate TDZ pattern).
+
+### Fixed
+
+- **Windows — terminal flashes after the §3.4 split** — `CommandExt::creation_flags()` was silently a no-op on Windows because the trait import got lost during the module split. Re-imported in `git/cmd.rs` so `CREATE_NO_WINDOW` is honoured again. (Regression from v2.8.1's fix, surfaced by GitHub issue #6.)
+- **Settings panel no longer pings AI CLIs at boot** — `detect_claude_cli` / `detect_codex_cli` previously ran an unsolicited prompt to verify authentication on every Settings open. Both now return a `detected` status without firing a prompt; auth is only verified when the user explicitly uses the provider. Privacy + cost win. (GitHub issue #6.)
+- **CommitLog TDZ crash** — `watch(() => rows.value.length, ..., { immediate: true })` was declared before its transitive sources (`displayedEntries`, `isSearchActive`), causing a `ReferenceError: Cannot access 'displayedEntries' before initialization` on first render. Watcher moved below the source declarations.
+- **CommitLog section labels height** — the virtualizer's `estimateSize: () => 72` used the commit-row height for `"non pushé" / "pushé"` section dividers, leaving them at 72 px. Now index-aware (`SECTION_ROW_H = 24` vs `COMMIT_ROW_H = 72`).
+- **GitHub badge slow load on Dashboard** — first paint of the homepage README was blocked ~15 s waiting on a TLS handshake to `img.shields.io` on some networks. Badges now lazy-load and decode asynchronously so the rest of the README renders immediately.
+
+### CI
+
+- **Linux build dependencies** — `.github/workflows/{ci,release}.yml` now install the full Tauri 2 Linux prereq set explicitly: `libwebkit2gtk-4.1-dev` + `libglib2.0-dev` + `libsoup-3.0-dev` + `libayatana-appindicator3-dev` + `librsvg2-dev` + `libxdo-dev` + `libssl-dev` + `build-essential` + `file` + `patchelf`. Fixes recurring `glib-sys` build failures on the GitHub Actions Ubuntu 22.04 image, which no longer pulls `libglib2.0-dev` transitively via `libwebkit2gtk-4.1-dev`. `libappindicator3-dev` replaced by its supported successor `libayatana-appindicator3-dev`.
+
+## [2.8.1] - 2026-05-04
+
+Patch release addressing regressions reported after v2.8.0.
+
+### Fixed
+
+- **Windows — CMD console flash** — Every Git/gh/claude/codex child process was spawning a visible black CMD window on Windows. Added `CREATE_NO_WINDOW` flag (`0x08000000`) to all child processes via a new `hidden_cmd()` helper. The only intentional exception is the `claude login` interactive flow which requires a visible terminal.
+- **Auto-updater infinite spinner** — On macOS, `relaunch()` could throw while Gatekeeper verifies the new binary signature, leaving the update modal stuck on "Installation…" forever. A 3-second post-download delay is now applied before relaunch, and any remaining failure is caught and surfaced as a readable error with a manual-reopen instruction instead of hanging indefinitely.
+- **PRs not loading when app opened from Finder/Dock (macOS)** — The Tauri process inherits a minimal `PATH` when not launched from a terminal, so Homebrew-installed `gh` (`/opt/homebrew/bin/gh`, `/usr/local/bin/gh`) was not discoverable. `hidden_cmd()` now enriches `PATH` with the four common Homebrew/MacPorts prefixes on macOS before every spawn.
+- **CI release — intermittent asset upload 500 error** — GitHub Releases API occasionally returns a 500 on one of the last assets when parallel matrix jobs upload simultaneously. A post-build verification step now detects and re-uploads any missing asset with up to 3 retries.
+
+## [2.8.0] - 2026-05-01
+
+Desktop product track v2.8: Agent Sessions View and Scheduled AI tasks — GitWand now sees the AI agents working on your repos, and can run lightweight automation tasks on your behalf without any external daemon.
+
+### Added
+
+- **Agent Sessions View** (`AgentSessionsPanel.vue` + 3-layer backend)
+  - New **Agents** button in the repo sidebar (robot icon) — opens a modal listing all agent sessions detected across the current repo's worktrees.
+  - Each card shows: tool badge (Claude Code / Cursor / Windsurf / other), active/configured status, branch, ↑ ahead / ↓ behind / ~ modified pills, and shortened path.
+  - **Active detection** cross-platform: `lsof -a -d cwd -c <tool>` on macOS/Linux + `/proc/<pid>/cwd` Linux fallback; graceful no-op when unavailable.
+  - **Launch session**: one-click to start Claude Code (`claude .`) on any worktree, or open a worktree in a GitWand tab.
+  - Active sessions sort first; animated green pulse badge on active cards.
+  - Rust commands (`agent_session_list`, `agent_session_launch`) + dev-server endpoints + typed `backend.ts` wrappers (`AgentSession`, `agentSessionList`, `agentSessionLaunch`).
+
+- **Scheduled AI tasks** (`useScheduler.ts` composable)
+  - New `useScheduler()` composable — pure TypeScript, no external daemon; uses `setInterval` + `visibilitychange` + `beforeunload` events. Completely silent when all tasks are disabled.
+  - Four opt-in predefined tasks:
+    - **Auto-resolve on conflict** — polls every 5 s for a rising-edge MERGE_HEAD; triggers `resolveConflicts()` automatically and logs the result.
+    - **Nightly pull + rebase** — checks the schedule every 60 s; runs `pullAndRebase()` at the configured hour:minute, once per day (guarded by `localStorage` last-run timestamp).
+    - **Release notes on tag** — called by `App.vue` after a push that includes `v*` tags; generates CHANGELOG entry via `useReleaseNotes`. Requires AI enabled.
+    - **AI commit batch** — on `visibilitychange` (app blur) or `beforeunload`, if staged files are present, focuses the commit panel to suggest an AI message. Requires AI enabled.
+  - All tasks respect offline mode — silently skip when `isOffline = true`.
+  - Log entries flow to the existing **Logs** tab in Settings via the `onLog` callback.
+  - `triggerReleaseNotesIfEnabled()` returned for external callers (used by `App.vue` post-push).
+
+- **Automations Settings tab** (`AutomationsPanel.vue`)
+  - New **Automations** tab in Settings (between AI and Hooks) with a card per task: title, description, trigger badge (event or `HH:MM`), last-run timestamp from `localStorage`, and a toggle switch.
+  - Nightly pull card expands hour/minute number inputs when enabled.
+  - AI-dependent tasks (Release notes, AI commit batch) show a warning label and disabled toggle when AI is off in Settings.
+  - `useSettings()` composable now exposes `saveSettings()` so any component can persist settings without duplicating the write logic.
+
+### Fixed
+
+- `useSettings` composable was missing `saveSettings` export — `AutomationsPanel` and any future component can now call `saveSettings(settings.value)` directly without duplicating localStorage write logic.
+- `SettingsPanel.vue` local `Settings` interface now mirrors `AppSettings` in `useSettings.ts` for the new `automations` field (per duplicate-interface rule).
+
+### Website
+
+- **Homepage redesign** (`website/.vitepress/theme/HomeLanding.vue`) — complete structural overhaul replacing the flat 20-card feature grid:
+  - **Hero terminal animation** — live `gitwand resolve` simulation (9-step, type-in sequence) replaces the static screenshot; ↻ Replay button for repeat demos.
+  - **Conflict demo elevated** — before/after block moved immediately after the stats bar so visitors see the payoff before any feature list.
+  - **10 Patterns grid** — dedicated section with one card per resolution pattern; each card shows the pattern name, confidence tier (colour-coded: certain / high / medium / low), a one-line description, and auto-resolve status (⚡ or ○).
+  - **Tabbed features** — 20 cards reorganised into four navigable tabs: Core Git · AI · Integrations · New in v2.8; active tab underlined in purple.
+  - **Benchmarks section** — six metric cards with number-first typography: throughput at 1 / 5 / 50 conflicts, binary size (~8 MB vs ~150 MB Electron), test count (322), and hallucination count (0 — fully deterministic).
+  - All sections fully responsive; `vitepress build` clean (4.5 s).
+
+## [2.7.0] - 2026-05-01
+
+Desktop product track v2.7: Workspaces multi-repo, Hooks manager, and Worktree first-class — three independent pillars that together make GitWand the command center for multi-repo engineering workflows.
+
+### Added
+
+- **Hooks manager** (`HooksPanel.vue` + 3-layer backend)
+  - New **Hooks** tab in Settings (accessible from any open repo).
+  - Lists all hooks found in `.git/hooks/`, showing enable/disable toggle, script preview, and executable warning.
+  - Toggle: renames `pre-commit` ↔ `pre-commit.disabled` — no hook runner change, fully compatible with standard Git tooling.
+  - Create a new hook via dropdown (18 standard hook names) + textarea editor.
+  - Delete with confirmation modal.
+  - Rust command (`git_hook_list/toggle/create/delete`) + dev-server endpoints + typed `backend.ts` wrappers.
+
+- **Workspaces multi-repo** (`WorkspacePanel.vue` + 3-layer backend)
+  - New **Workspace** button in the repo sidebar (briefcase icon).
+  - Create / open a `.gitwand-workspace.json` grouping multiple repos; workspace directory persisted across sessions.
+  - Per-repo status badges: branch (monospace), ↑ ahead (purple), ↓ behind (amber), modified (pink), Clean (green), ⚠ error.
+  - **Fetch all** / **Pull all** / **Refresh** / **Open all in tabs** bulk operations.
+  - Rust commands (`workspace_read/write/status_all/fetch_all/pull_all`) + dev-server + typed wrappers.
+
+- **Worktree first-class** (`WorktreeManager.vue` upgrades)
+  - **Quick-create ⌘⇧N** — keyboard shortcut opens the Worktree manager with the quick-create form pre-focused. Type a task name (e.g. `fix/login-bug`), GitWand auto-derives the worktree path (sibling of main worktree) and branch name (`task/<name>`), creates both in one action, and opens the worktree in a new tab.
+  - **Cross-worktree status** — each worktree row now shows live status pills: ↑ ahead, ↓ behind, ~ modified, ✓ clean (fetched via `git_worktree_status_all` on load).
+  - **Cleanup assisté** — new "Clean up" panel lists non-main, non-locked worktrees with `ahead = 0` (nothing to push). Select one or many, confirm, done.
+
+### Fixed
+
+- Stray closing brace in `en.ts` locale (duplicated `workspace` section close) causing `vue-tsc` parse failure.
+- `SettingsPanel` received `currentRepo?.path` (non-existent ref) — corrected to `repoFolderPath ?? undefined`.
+- `HooksPanel` dynamic locale key `hooks.${key}` typed as `LocaleKey` cast to pass strict `t()` signature.
+
+## [2.6.0] - 2026-05-01
+
+`@gitwand/core@2.6.0` closes the v2.6 entry of the CORE-V2-ROADMAP (since folded into `ROADMAP.md`): a refactoring-aware merge pipeline that detects concurrent rename / move-method refactorings and resolves the resulting conflicts via an invert → merge → replay strategy (inspired by Ellis et al. TSE 2023). Opt-in via `refactoringAware.enabled: true`. Otherwise fully backward-compatible — the new code path is completely silent by default.
+
+### Added
+
+- **`@gitwand/core@2.6.0` — Refactoring-aware merge (CORE-V2-ROADMAP v2.6)**
+  - **`RefactoringKind` / `Refactoring` types** — new exported types describing a detected refactoring: `kind` (`"rename-local" | "rename-top-level" | "move-method"`), `oldName`, `newName`, `scope` (enclosing function for local renames), `sourceClass` / `targetClass` (for method moves).
+  - **`refactoringAware` option in `GitWandOptions`** — opt-in flag (`enabled?: boolean`) and quota (`maxRefactoringsPerSide?: number`, default 10). Added to `GitWandrcConfig` for `.gitwandrc` support.
+  - **`packages/core/src/refactoring/detect.ts`** — pure-TypeScript refactoring detector. Tokenises base and branch, finds removed/added identifiers, applies simultaneous bijective substitution (with permutation search for same-count ambiguous groups), and confirms via full token-sequence equality. Also parses class method sets for move-method detection via a brace-depth line parser.
+  - **`packages/core/src/refactoring/invert.ts`** — applies refactorings in reverse: `rename-top-level` → global identifier replacement; `rename-local` → scoped replacement (signature + body) using `findScopeRange`; `move-method` → no-op (structural only). Multiple refactorings applied in reverse order to handle rename chains.
+  - **`packages/core/src/refactoring/replay.ts`** — `mergeRefactorings()` deduplicates detected refactorings from both branches (ours wins on conflict); `replayRefactorings()` applies the merged refactoring set forward on the merged text.
+  - **`packages/core/src/refactoring/orchestration.ts`** — `tryRefMerge(input, max)`: Phase 1 detect (ours + theirs), Phase 2 invert both branches to base nomenclature, Phase 3 classic 3-way merge on the inverted versions (`mergeInverted` cascades: same_change → one_side_change → LCS non-overlapping), Phase 4 replay the merged refactoring set. Full try/catch — always safe to call. Exposes `RefMergeResult { lines, reason, oursRefs, theirsRefs }`.
+  - **Pattern plugin `refactoring_aware_merge` (priority 970)** — registered in the classifier after all text patterns (10–60) but before `llm_proposed` (998) and `complex` (999). Disabled by default; activated by `resolve()` when `options.refactoringAware.enabled`. Module-level flag/cache pattern (same as `llm-proposed`): `detect()` runs the full RefMerge pipeline and caches the result; `assembleResolution()` reads the cache to avoid recomputation.
+  - **21 new tests** — `src/__tests__/refactoring/refactoring-pipeline.test.ts` (F-R01–F-R21) covering `detectRefactorings` (rename-local, rename-top-level, multi-rename, move-method, identical, non-bijective), `invertRefactorings` + `replayRefactorings`, `mergeRefactorings` ours-wins, `tryRefMerge` positive and negative cases, and `resolve()` integration with `refactoringAware.enabled`. **898/898 tests passing.**
+
+### Fixed
+
+- **`packages/vscode` build** — `TYPE_LABELS` and `TYPE_ICONS` in `extension.ts` were missing `llm_proposed` and `refactoring_aware_merge` keys, causing `Record<ConflictType, string>` exhaustiveness errors. Both keys added to both maps.
+- **Multi-rename detection** — `detectRenames()` now handles simultaneous same-count renames (e.g. two function parameters renamed in one commit) via permutation search over ambiguous groups, rather than silently skipping them.
+- **`rename-local` inversion scope** — `findScopeRange()` now returns the range from the `function` keyword (not just the body `{`) so that parameter names in the function signature are also inverted, not just the body.
+
+## [2.5.1] - 2026-05-01
+
+Desktop patch — PR filter pipeline fixed end-to-end, offline mode, error log tab, and several UX polish items that had accumulated post-v2.5.0.
+
+### Added
+
+- **PR filter — Assignées / Reviews** — new `filterMode` ref (`'all' | 'assigned' | 'reviews'`) replaces the old `filterMine` boolean. Three equal-width buttons in the PR sidebar let you switch between all PRs, those assigned to you, and those requesting your review. `displayedPrs` filters client-side on `pr.assignees` / `pr.reviewRequested` (case-insensitive comparison).
+- **PR filter — identity banner** — when a user filter is active but `currentUser` hasn't resolved yet, the sidebar shows a slim loading indicator; on failure it shows an error message with a **Retry** button. `currentUserLoading` and `currentUserError` are now exposed on the `PrPanelState` return object.
+- **Offline mode** — new `useNetworkStatus()` composable wires `window online/offline` events to an `isOffline` ref. `SyncSplitButton` disables all remote actions (push, pull, fetch, merge remote) and shows a tooltip when offline. `AppHeader` renders an "Offline" pill and passes `isOffline` down the tree.
+- **Error log tab in Settings** — blocking red error banner replaced by a non-blocking slim toast with a "View logs" link. A discrete red dot on the settings button signals unread errors. Settings gains a **Logs** tab with a timestamped, reversed-chronological list (max 200 entries) and a Clear button. `errorLog` is persisted to `localStorage`.
+
+### Fixed
+
+- **`ghCurrentUser()` dev-server URL** — fetch was calling `/api/gh-current-user` (hitting Vite on port 5173, which served `index.html`) instead of `${DEV_SERVER}/api/gh-current-user`. All other endpoints correctly used the `DEV_SERVER` prefix; this one was missed. Result: `currentUser` was always `null` in dev mode, so the Assignées/Reviews filters silently showed all PRs.
+- **`ghCurrentUser()` error swallowing** — `.catch(() => {})` replaced by `loadCurrentUser()` which logs to the console and sets `currentUserError`. `displayedPrs` now returns `[]` (not all PRs) when a user filter is active but identity isn't resolved, making failures visible rather than hiding them behind an unfiltered list.
+- **PR list limit** — `gh pr list` was capped at 50 results, silently dropping older PRs on busy repos. Raised to `--limit 300` in Rust. Dev-server paginates 3 × 100 via `per_page=100&page=N`, stopping early when the last page has fewer than 100 results.
+- **PR list reload on repo switch** — `watch(cwd)` in `usePrPanel` now calls `init()` after resetting state, so switching repos while the PR tab is open correctly reloads the PR list and re-resolves the current user for the new repo.
+- **User filter buttons equal width** — `grid-template-columns` fixed from `auto 1fr 1fr` to `repeat(3, 1fr)`.
+- **Locale keys alignment** — `filterMineTitle` / `emptyMine` (removed) and `identityLoading` / `identityError` / `identityRetry` (added) synced across all 5 locales (en, fr, es, pt-BR, zh-CN).
+
+## [2.5.0] - 2026-04-30
+
+`@gitwand/core@2.5.0` closes the v2.5 entry of the CORE-V2-ROADMAP (since folded into `ROADMAP.md`): a LLM fallback that resolves `complex` conflicts through a generative model when the deterministic engine cannot. Plus desktop search reliability, PR list stability, and accumulated UX polish.
+
+### Added
+
+- **`@gitwand/core@2.5.0` — LLM fallback for `complex` conflicts (CORE-V2-ROADMAP v2.5)**
+  - **`llm_proposed` ConflictType** — new entry added to the `ConflictType` union; appears in traces when a generative model produced the resolution.
+  - **`LlmEndpoint` / `LlmFallbackConfig` / `LlmTrace` types** — typed interfaces for injecting a model endpoint, configuring the fallback pipeline (model, maxTokens, temperature, contextLines, minPostMergeScore, minMode), and tracing LLM calls for audit (calledAt, model, latencyMs, promptHash, rawResponseTruncated, validationScore, accepted).
+  - **Pattern plugin `llm_proposed` (priority 998)** — registered in the classifier immediately before the `complex` fallback (priority 999). Skipped by the synchronous `resolve()` — only active in `resolveAsync()`.
+  - **`tryLlmFallbackResolve()` resolver** — `resolvers/llm-fallback.ts`. Constructs a context-aware prompt (configurable `contextLines`), calls `endpoint.call(prompt)`, validates the response with `validateMergedContent()` (score ≥ `minPostMergeScore` threshold), and falls back to `complex` if the score is below threshold. Accepts if the validation passes.
+  - **`resolveAsync()` wiring** — the async resolver calls `tryLlmFallbackResolve()` on every hunk classified as `complex` when `llmFallback.enabled: true`. The synchronous `resolve()` logs a warning if `llmFallback.enabled` but continues without LLM.
+  - **MCP tool `resolve_hunk`** — `@gitwand/mcp` gains a `resolve_hunk` tool that exposes the full `resolveAsync()` pipeline (structural merge → pattern classifier → LLM fallback) to any MCP client (Claude Code, Claude Desktop, Cursor, Windsurf). Three parameters: `ours`, `theirs`, `base` (optional). Returns `type`, `confidence`, `resolution`, `explanation`, and `llmTrace` when applicable.
+  - **+10 corpus fixtures (F36–F45)** and a dedicated `v2.5-llm-fallback.test.ts` test suite. **841/841 tests passing** (core package).
+- **Desktop — repos récents et favoris** — `useRecentRepos` composable stores the last 10 opened repositories and up to 5 pinned favorites. The empty-state view and the repo-switcher dropdown now surface this list with direct open buttons.
+- **Desktop — push confirmation pour les tags non poussés** — `SyncSplitButton` détecte si des tags locaux n'ont pas encore de remote counterpart et affiche une modale de confirmation avant le push (« pousser également les N tags en attente ? »).
+
+### Fixed
+
+- **Recherche globale stale au changement de repo** — `useGlobalSearch` ne réinitialisait pas ses résultats quand `cwd` changeait. Un `watch(cwd, reset)` efface maintenant l'index et les résultats stale à chaque changement de dépôt.
+- **Liste PR vide + état d'erreur explicite** — `usePrPanel` affichait une liste vide sans feedback quand le chargement échouait. L'état d'erreur est maintenant exposé comme `prError: ref<string | null>` et rendu dans le panneau avec un bouton Retry.
+- **Boutons modale Tags plus grands** — les boutons dans la modale Tags utilisent maintenant `size="md"` (padding horizontal 20 px) au lieu du `size="sm"` par défaut, alignant la taille avec les autres modales de l'app.
+- **Bouton Rembobiner — fond correct en Light mode** — la couleur de fond du bouton Rembobiner utilisait `var(--color-danger-bg)` qui retournait transparent en Light mode. Remplacé par `var(--color-danger)` avec `opacity: 0.12` pour un fond visible dans les deux thèmes.
+- **Design modales Worktree et Submodule harmonisé** — `WorktreeModal` et `SubmodulePanel` migrent vers `BaseModal` (backdrop uniforme, focus-trap, Esc-to-close, footer layout partagé) en remplacement des overlays ad-hoc.
+
+## [2.4.1] - 2026-04-29
+
+Implementation pass on the v2.4 entry of the CORE-V2-ROADMAP (since folded into `ROADMAP.md`) — the resolver gains a parse-tree validation layer, a third validation tier (`off` / `balanced` / `strict`), and a `postMergeRisk` dimension on `ConfidenceScore` that retroactively demotes resolutions whose output doesn't parse. Plus an in-app Help Panel, agent-discovery surfaces on the marketing site, and a fix for the merge-success modal that was offering to delete `master` / `main` / `develop`.
+
+### Added
+
+- **`@gitwand/core@2.4.1` — Semantic post-merge validation (CORE-V2-ROADMAP v2.4)**
+  - **Validation tiers** — `ValidationLevel` is now `off | balanced | strict`. `standard` is renamed to `balanced`; the new `off` skips the parse-tree pass entirely for raw-throughput resolves.
+  - **Parse-tree validation** — new `validate-parse-tree.ts` runs each candidate resolution through tree-sitter for the file's language and refuses resolutions that introduce parse errors. `ValidationResult` exposes `parseTreeErrors` + `parseTreeErrorRanges` so callers can report which bytes broke.
+  - **External validators (`strict` tier)** — new `validate-strict.ts` and `adapters/strict-node.ts` plumb `tsc --noEmit` and `eslint` as opt-in external validators when `validation.level: "strict"` is set in `.gitwandrc`. The previous loose `strictErrors` field is replaced by a typed `ExternalValidationResult { tool, errors, passed }`, so consumers can render per-tool diagnostics instead of concatenating strings.
+  - **`postMergeRisk` score dimension** — `makeScore()` accepts a new `postMergeRisk` parameter (weight −0.20). Resolutions whose output fails parse-tree or external validation are retroactively demoted in the confidence score. Closes the v2.4 roadmap target of −50 % parse-tree-broken false positives.
+  - **`resolveAsync()` shape** — handles `validationLevel='off'` and populates `externalValidation` on every return path so async consumers always get a complete `ValidationResult` regardless of which tier ran.
+  - **+5 corpus fixtures (F31–F35)** per the +5/release principle, plus two new test suites: `v2-core-scenarios.test.ts` (829 lines, end-to-end coverage from v2.1 to v2.4) and `validation-parse-tree.test.ts` (274 lines). **841/841 tests passing.**
+- **In-app Help Panel** — header button, menu bar entry, and `Esc` key open a `HelpView` overlay covering Getting Started, Conflicts, Shortcuts, Workflow, AI features, and an FAQ. Translated across all 5 locales.
+- **Agent discovery surfaces on the website** — `gitwand.app` now publishes the surfaces AI tooling looks for: an MCP server card (`server-card.json`, wired into `bump-version.sh` so the version stays aligned automatically), Agent Skills entries, an RFC 8288 `api-catalog` link in the homepage `<head>`, WebMCP browser-tool declarations, and explicit AI usage signals in `robots.txt`. Agents scanning the site can discover and install `@gitwand/mcp` without a human in the loop.
+- **Repository-level AI agent docs** — top-level `AGENTS.md` and `CLAUDE.md`, plus per-package `CLAUDE.md` for `apps/desktop`, `apps/desktop/src`, `apps/desktop/src-tauri`, `packages/core`, `packages/cli`, `packages/mcp`, `packages/vscode`. New `.claude/skills/` for `add-pattern`, `add-resolver`, `add-tauri-command`, `i18n-sync`, and `release` flows.
+- **AI settings in the desktop store** — `commitMessageLang`, `aiEnabled`, `aiProvider`, `aiApiKey`, `aiApiEndpoint`, `aiModel`, `aiOllamaUrl`, `aiOllamaModel` added to `AppSettings` with defaults.
+
+### Changed
+
+- **Resolver split** — `resolver/index.ts` reorganised so validation lives in dedicated modules (`validate-parse-tree.ts`, `validate-strict.ts`, `validation.ts`) instead of inline. The entry-point shrinks; new modules are independently testable.
+
+### Fixed
+
+- **Branch-deletion offer guards protected branches** — `MergeSuccessModal` used to propose deleting whatever branch had just been merged, including `master` / `main` / `develop`. The post-merge cleanup now only fires for feature/PR branches; mainline names stay put.
+- **`process.env` instead of `import.meta.env` for `GITWAND_DIFF`** — the Histogram-diff opt-out flag was reading `import.meta.env.GITWAND_DIFF`, which isn't typed on `ImportMeta` without Vite types. `tsc --build` was failing in CI. Replaced with a `typeof process !== 'undefined'`-guarded `process.env` lookup so the flag works under Node.js without breaking browser/Tauri builds.
+- **`@gitwand/cli` and `@gitwand/mcp` resync to 2.4.1** — both packages were stuck at 2.3.0 because `bump-version.sh` skips packages whose version drifts from `@gitwand/core`. The resync brings them to 2.4.1 alongside core; the publish workflow's `[ version == tag ]` precondition now passes. `server.json`, `server.ts`, and `server-card.json` aligned in the same commit.
+
+## [2.3.0] - 2026-04-27
+
+The v2 core engine sequence. Three back-to-back `@gitwand/core` releases — v2.1 (Histogram diff), v2.2 (format profile registry), and v2.3 (tree-sitter structural merge dispatcher) — bundled under the umbrella `v2.3.0` tag. Plus cherry-pick-from-log with full conflict resolution in the desktop, and a hardened auto-update manifest publish in CI.
+
+### Added
+
+- **`@gitwand/core@2.1.0` — Histogram diff & block-move detection** (CORE-V2-ROADMAP v2.1)
+  - **Diff backend switched to Histogram** (rare-anchor splitting with forward/backward extension, JGit-style), replacing the pure DP / Hirschberg backend. Public signatures of `lcs(a, b)`, `computeDiff(base, branch)`, and `mergeNonOverlapping(base, ours, theirs)` are unchanged. Direct gain on `non_overlapping` and `insertion_at_boundary` patterns — corpus fixtures F22/F23/F24 that previously hit `complex` are now auto-resolved end-to-end.
+  - **Rollback flag** — `GITWAND_DIFF=lcs` selects the legacy backend at call time. On runtimes without `process.env` (pure browser), Histogram is always used.
+  - **New exports** — `histogramDiff(a, b, opts?)`, `lcsLegacy(a, b)`, `detectBlockMove(base, ours, theirs, opts?)` (Rabin-Karp rolling-hash detector for blocks present in `ours`/`theirs` but absent or relocated in `base`; primitive only — consumed by the v2.6 refactoring-aware merge), plus `MovedBlock`, `BlockMoveOptions`, `HistogramOptions` types.
+  - **`ConfidenceScore.dimensions`** gains an optional `algorithmStability` (default 0 → numerically identical to v1.4 for all existing patterns); reserved for v2.6.
+  - `src/diff.ts` split into `src/diff/{lcs,histogram,block-move,shared,index}.ts`. New tests: `__tests__/diff/{histogram,parity,block-move}.test.ts`, `__tests__/patterns/make-score.test.ts` (~30 new tests). Corpus +F21–F25. New benches in `bench.bench.ts`.
+- **`@gitwand/core@2.2.0` — Format profile registry + JSON Patch arrays** (CORE-V2-ROADMAP v2.2)
+  - **Format profile registry** annotates JSON Pointer paths with merge strategies (`set` / `ordered-list` / `merge-keys` / `opaque`). The JSON and YAML resolvers consult the registry before falling back to textual conflict markers — closes the long-standing gap on JSON arrays at `/dependencies`, `/scripts`, `/keywords`, etc., and on YAML sequences in `helm/values.yaml` / Kubernetes manifests (containers, volumes, env vars, ports merged by `name` / `port` / `host`).
+  - **Five built-in profiles** — `package.json`, `tsconfig.json` (incl. `tsconfig.<variant>.json`), `composer.json`, `helm/values.yaml`, and `kubernetes` (manifests under `k8s/`, `kubernetes/`, `manifests/` or with conventional basenames).
+  - **RFC 6902 (JSON Patch) — minimal in-house** — `diffJson(base, target)` produces an op sequence (`add` / `remove` / `replace`); `applyJsonPatch(doc, ops)` applies it immutably; `mergeJsonPatches(ours, theirs)` returns the concat when paths are disjoint or `null` plus a list of conflicting paths. JSON Pointer escapes (`~0`, `~1`) handled. `move` and `copy` deliberately not supported (express via `add` + `remove`). Round-trip property `applyJsonPatch(base, diffJson(base, x)) ≡ x` verified on 100 random inputs.
+  - **New exports** — `profileForFile`, `registerFormatProfile` (returns an unregister function for clean teardown), `strategyForPath`, `diffJson`, `applyJsonPatch`, `mergeJsonPatches`, `parseJsonPointer`, `buildJsonPointer`, `jsonStructEqual`, plus `FormatProfile`, `PathStrategy`, `JsonPatchOp` types.
+  - **Rollback** — `GitWandOptions.disableFormatProfiles?: boolean` (default `false`) reverts JSON/YAML resolvers to v2.1 behaviour; useful for A/B comparison or when a third-party profile causes silent deletions.
+  - YAML resolver gets a parse-merge-serialize fast path that runs only when a profile applies (comments are lost on this path; line-based pipeline remains the default for unprofiled YAML). New module `src/format-profiles/{index,types,json-patch,merge-strategies,profiles/*}.ts`. Tests: `__tests__/format-profiles/{json-patch,registry,integration}.test.ts` (~47 new tests). Corpus +F26–F30.
+- **`@gitwand/core@2.3.0` — Tree-sitter structural merge dispatcher** (CORE-V2-ROADMAP v2.3)
+  - **AST-based first-pass resolver** for TypeScript, TSX, JavaScript, JSX, Python, Go, and Rust files. Aligned with Mergiraf/Weave: parse `base` / `ours` / `theirs` with `web-tree-sitter`, pair top-level entities (functions, classes, methods, top-level statements) by canonical signature, merge entity-by-entity. Falls back to the existing hunk-based engine when structural merge yields `null`.
+  - **Lazy WASM grammars** — `web-tree-sitter` declared as an **optional** peer dependency (`>=0.20.0`); `tree-sitter-wasms` carries the grammar bytes; loader supports both v0.20 and v0.26 API shapes. Three environment adapters in `structural/parsers/adapters/{node,browser,tauri}.ts` keep `packages/core` browser-compatible (Node imports stay dynamic and guarded per the package's adapter pattern).
+  - **`resolveAsync()`** — new async entry point that runs the structural pass and falls back to the synchronous `resolve()` when needed. Synchronous `resolve()` keeps its v2.2 contract.
+  - **New exports** — `resolveAsync`, `tryStructuralMergeResolve`, `wrapStructuralResult`, `isStructuralLanguage`. New module `src/structural/{entities,matching,merge,reconstruct,index}.ts` (~1,700 lines) plus `parsers/{loader,grammars/*,adapters/*}`. Tests: `__tests__/structural/{structural-index,matching,merge,reconstruct,languages}.test.ts` + a 15-test `grandeur-nature` integration suite (5 scenarios, WASM-optional guards).
+- **Cherry-pick from the log with full conflict resolution** — the right-click *Cherry-pick* entry in the commit log now keeps `isCherryPicking=true` when the operation produces conflicts, switches the desktop into the changes view, selects the first conflicted file, and stops auto-fetch/poll while the operation is in flight. New paths through `useGitRepo`: `cherryPickAbort()` and `cherryPickContinue()` (multi-pass, stays in cherry-pick mode until everything is resolved). The conflict banner button reads *Annuler le cherry-pick* / *Annuler le merge* depending on which operation is running. New i18n key `header.abortCherryPick` across all 5 locales.
+
+### Changed
+
+- **CSS resolver bypasses the structural merge dispatcher** — explicit regression tests assert that the CSS resolver's reason string skips the structural merge path (the structural dispatcher is for AST-parseable source code, not stylesheets).
+- **Auto-update manifest publish hardened in CI** — the release workflow's auto-update manifest publish step gains a fallback endpoint and tighter retry semantics so a transient hiccup on the primary endpoint doesn't fail the whole release.
+- **macOS Gatekeeper workaround removed from docs** — the app is now properly Developer-ID-signed and notarized (since v1.9.0); the README/website no longer mention the manual `xattr -d com.apple.quarantine` step.
+
+### Fixed
+
+- **Diff line counters use signed integers** — fixes a panic in the Rust diff parser when removed-line counts could go negative.
+- **`web-tree-sitter` pinned to `~0.20.7`** — ABI-compatible with `tree-sitter-wasms@0.1.13`. The 0.26 API shape is supported by the loader for forward compatibility, but the runtime peer pin avoids loading-path mismatches in CI on older Node versions.
+- **Desktop branch list loaded before PR create** — the PR create form's base-branch detection used to fail because the branch list was still empty when the form opened. The form now waits for the list and uses the raw branch name (not the display string) so candidate-base resolution works.
+- **Untracked file diffs render in the UI** — desktop now parses the fallback diff output for untracked files, so newly created files appear in the diff panel instead of showing "no changes".
+- **Vite alias points at `packages/core` source** — removes the requirement to rebuild the core dist before running the desktop dev server; one less footgun on a fresh clone.
+
+## [2.0.1] - 2026-04-26
+
+### Changed
+
+- **Update modal redesigned, marketing-first** — the in-app update prompt no longer renders the auto-generated release manifest body (download table + raw "see the changelog" link rendered as basic markdown). The modal now shows a sparkle hero, the new version, a localized tagline ("Discover the new features, refinements, and fixes in this release."), and a "Read the full changelog" link that anchors to the version's heading on `gitwand.app/changelog`. Two new i18n keys (`update.tagline`, `update.viewChangelog`) across the 5 locales. The `update.body` field is still kept on `UpdateInfo` for a future iteration where we might publish hand-written marketing copy in the manifest.
+
+## [2.0.0] - 2026-04-26
+
+Major release. v2.0 introduces three desktop-first surfaces — a native macOS menu bar, in-app Clone & Fork, and an opt-in beta update channel — plus an OpenAI Codex CLI provider, a shortlog-driven Contributors widget, and a tightened follow-up pass on the menu bar that lights up Find in Log, Merge…, Open in Terminal, Toggle Sidebar, and Undo Last Operation.
+
+### Added — v2.0 surfaces
+
+- **Native macOS menu bar** — full File / Edit / Repository / View / Window / Help via `@tauri-apps/api/menu`. Built entirely from the frontend so labels come from `useI18n()` and rebuild on locale + repo open/close. Predefined OS items (Cut/Copy/Paste/Hide/Quit/Minimize/Fullscreen) keep first-responder routing intact — Cmd+Z stays webview-default for text undo. macOS-only via `navigator.platform` gate.
+- **Clone & Fork from the UI** — three entry points for `git clone <url> <dest>` and `gh repo fork <url> --clone --remote-name=upstream`: secondary buttons under the empty state, a `+` dropdown on the tab strip (teleported to body to escape the strip's overflow clip), and File menu items. Backends are 3-layer (Rust + dev-server + TS wrapper) per the project convention; modals are `BaseModal`-based with auto-derived destination paths.
+- **Auto-update channels (stable / beta)** — `Settings.updateChannel` ref and a new `fetchBetaUpdate(currentVersion)` that compares semver locally against `latest-beta.json`. Stable keeps the Tauri plugin's auto-install path; beta switches to a manual flow (open the GitHub release page) because `tauri-plugin-updater` doesn't support runtime endpoint override. CHANGELOG note: the GitHub Actions workflow still needs to publish `latest-beta.json` on `v*-beta.*` tags — tracked as a follow-up.
+- **OpenAI Codex CLI provider** — `codex-cli` added to `useAIProvider` mirroring the Claude Code CLI flow. Backend has `resolve_codex_binary` + `detect_codex_cli` + `codex_cli_prompt` (uses `codex exec "<prompt>"` — no `--quiet`, that flag doesn't exist on `exec`). Settings UI matches the Claude block: detect on mount, status states (not_found / not_logged_in / connected) with install hint.
+- **5 deferred menu items, now wired** — `Find in Log` (Cmd+F focuses the existing `CommitLog.searchQuery` input via a `LOG_FOCUS_SEARCH_KEY` provide/inject bridge after switching `viewMode` to "history"), `Merge…` (opens `AppHeader.openMergePopover()` via `MERGE_POPOVER_REQUEST_KEY`), `Open in Terminal` (Cmd+Shift+T mounts `GitTerminal` in a stash-overlay shell), `Toggle Sidebar` (Cmd+Shift+S, new `showSidebar` ref defaulted true), `Undo Last Operation` (Cmd+Shift+U opens the existing rewind popover via `UNDO_POPOVER_REQUEST_KEY`). Toggle Light/Dark Mode loses Cmd+Shift+T (now claimed by Open in Terminal per spec) — stays in the menu without an accelerator; the header chip remains the primary entry.
+
+### Changed — v2.0 surfaces
+
+- **Dashboard contributors** — backend `git_shortlog` (3 layers) replaces the windowed-log aggregation. `contributorCount` becomes a computed derived from `allContributors.length`, `topContributors` no longer slices to 4. Layout converts to a horizontal scroll rail: cards take `(100% - 2×gap)/3` with `min-width: 180px` and `scroll-snap-align: start`, so a fourth contributor peeks in to cue the scroll.
+- **`AIProvider` type unified** — `SettingsPanel.vue` redeclared the union inline and silently drifted from `useAIProvider.ts`. Replaced with a re-export so the canonical declaration has a single home.
+- **`@gitwand/core`, `@gitwand/cli`, `@gitwand/mcp`, `@gitwand/desktop`, `gitwand-website`** all bumped to `2.0.0` via `scripts/bump-version.sh`. `@gitwand/mcp/server.json` (root + packages[0] version) and `packages/mcp/src/server.ts` aligned.
+
+### Added
+
+- **Commit context menu** — right-click any commit in the Log to get a full action menu. Twelve entries in four groups:
+  - *Navigation* — **Checkout commit** (modal with detached-HEAD warning); **Reset to commit** (soft / mixed / hard selector, danger styling and explicit warning on `--hard`, `repoRefresh()` called after to keep the staged/unstaged panel in sync).
+  - *Branching* — **Create branch here** (`git checkout -b <name> <sha>`); **Tag this commit** (lightweight or annotated depending on whether a message is supplied); **Cherry-pick onto current branch**.
+  - *History* — **Revert commit** (non-destructive, merge commits handled via `-m 1`); **Amend** (HEAD only); **Split** (HEAD only, no merge commits — routes to the existing split-commit modal).
+  - *Clipboard & forge* — **Copy short SHA**, **Copy full SHA**, **Copy commit message** (summary + body); **View on GitHub / GitLab / Bitbucket** (URL derived from `gitRemoteInfo`).
+- **Four new backend primitives** (Rust + Node dev-server + TypeScript wrapper, three layers each): `git_checkout_commit`, `git_reset_to_commit`, `git_revert_commit`, `git_create_tag`. `git_create_branch` extended with an optional `start_point` parameter (backward-compatible).
+- **`useCommitActions` composable** (`composables/useCommitActions.ts`, 244 lines) — encapsulates modal state, all handlers, and confirm callbacks extracted from `App.vue`. App.vue shrinks by 172 lines.
+- **37 i18n keys** for the commit context menu translated across all 5 locales (`en`, `fr`, `es`, `pt-BR`, `zh-CN`), zero TypeScript errors.
+
+### Changed
+
+- Commit context-menu modals use `BaseModal` (consistent background, border-radius, slide-in animation, close button, footer layout) instead of hand-rolled overlays.
+- `RepoSidebar` now forwards the 7 new commit context-menu events (`checkoutCommit`, `resetToCommit`, `revertCommit`, `createBranchFromCommit`, `tagCommit`, `cherryPickCommit`, `viewOnForge`) from its internal `CommitLog` up to `App.vue`.
+
+- **Tags panel** — the ◇ button in the sidebar tab strip opens a `BaseModal`-based panel listing all local tags sorted by semver/date. Per-tag actions appear on hover: push to remote (single tag) and delete local (with optional remote deletion, confirmed via a sub-modal). A "Push all tags" button at the top sends `--tags` to the configured remote. Four new backend primitives (Rust + Node dev-server + TypeScript wrapper): `git_list_tags`, `git_delete_tag`, `git_push_tags`, `git_delete_remote_tag`.
+- **Ref badges in CommitLog list view** — branch, tag, and remote ref badges now appear below the commit meta line in the Log sidebar list (not just in the DAG graph). Branch/HEAD badges are accent-purple; tag badges are amber; remote refs are muted grey.
+- **AI tag suggestion** (`useTagSuggestion.ts`) — a ✦ Suggest button appears in the "Tag this commit" modal when an AI provider is configured. One click fetches the latest tag, collects commits since it via `git log <lastTag>..HEAD --oneline`, and asks the model to propose the next semver bump (major/minor/patch based on conventional-commit types) plus a one-line annotated tag message. Both fields are filled simultaneously.
+- **Commit trailers** — the commit panel in the sidebar now shows two checkboxes below the description: `Signed-off-by` (auto-filled from `git config user.name/email`, loaded eagerly on mount) and `Reviewed-by` (checkbox + free-text input). When checked, the trailers are appended as a conventional trailer block (`\n\n<trailers>`) to the commit message in `useGitRepo.commit()`. The AI commit-message prompts are updated to say trailers are "controlled by the user" rather than categorically banned. Three new i18n keys (`trailerSobTooltip`, `trailerRbTooltip`, `trailerRbPlaceholder`) across all 5 locales.
+- **Conventional Commits type picker** — a row of monospace chips (`feat` · `fix` · `docs` · `chore` · `refactor` · `test` · `style` · `perf` · `ci`) appears above the summary input in the commit panel. Clicking a chip injects the prefix (`feat: `, `fix: `, …) at the start of the summary, replacing any existing type prefix. Clicking the active chip again removes it. The `activePrefix` computed detects the prefix in real time so the correct chip is always highlighted, including when the AI generates a conventional commit message.
+- **Post-merge branch cleanup** — after a successful merge, `MergeSuccessModal` shows a "Delete «branch»" button alongside the existing Push button. An optional "Also delete from remote" checkbox runs `git push <remote> --delete <branch>` after the local deletion. The merged branch name is captured when `mergeBranch()` is called and passed as a prop to the modal.
+- **File history pickaxe & line-range search** — the File History Viewer (Blame / Log / Compare tabs, opened from the clock icon in the diff header) gains two new search modes in the Log tab. A **pickaxe search bar** with S/G mode toggle lets you find every commit where a specific string (literal `-S`) or regex pattern (`-G`) was added or removed in the file. A **clock button** on each blame block runs `git log -L <start>,<end>:<file>` to show only the commits that touched that contiguous group of lines — the view switches to the Log tab automatically and displays a "Lines X–Y" banner. `git_file_log`, `git_file_log_pickaxe`, and `git_file_log_range` are now proper Rust Tauri commands (previously only in the dev-server). Four new i18n keys across all 5 locales.
+- **Blame diff algorithm setting** — a new "Blame diff algorithm" selector (histogram / patience / minimal / myers) in Settings → Git tab controls `git blame --diff-algorithm=<algo>`. `git_blame` is now properly implemented as a Rust Tauri command (it was only in the dev-server before). `FileHistoryViewer` reads the setting on each blame load. Default is `histogram` which gives the best blame results for most codebases. Three new i18n keys across all 5 locales.
+- **Fork / triangular workflow badge** — `GitStatus` now tracks `push_remote` and `ahead_push` when `@{push}` differs from `@{upstream}`. `SyncSplitButton` shows a subtle "↑N fork" badge in the push button when in a fork setup, making it clear how many commits are ahead of the fork vs. the upstream.
+- **MCP Registry CI automation** (`publish.yml`) — a new `publish-mcp-registry` job runs after `smoke-test` on every tag push. It installs `mcp-publisher` from the official pre-built binary (no Homebrew dependency), polls npm for up to 12 minutes until `@gitwand/mcp@<version>` propagates, then runs `mcp-publisher publish` from `packages/mcp/`. Authenticated via `secrets.MCP_PUBLISHER_TOKEN` (GitHub PAT, `read:user` scope). Fixes the registry being frozen at v1.6.1 since no manual publish was run after that release. `packages/mcp/PUBLISH-TO-REGISTRY.md` updated to document the automated flow and the one required secret.
+
+### Fixed
+
+- `isCtxEntryHead` in `CommitLog` now guards against search mode: when a search is active, `idx === 0` no longer implies HEAD, so **Amend** and **Split** are correctly disabled for non-HEAD results.
+- Checkout and Reset `--hard` now call `repoRefresh()` after completion so the staged/unstaged file panel reflects the new working-tree state immediately.
+
+## [1.8.0] - 2026-04-23
+
+Design-system foundations — the app header and every overlay now ride on a shared chrome. A new `BaseModal` swallows the backdrop / focus-trap / Esc handling that had drifted across 10 modals, and a companion `AiSparkle` icon retires the ad-hoc SVG copies that had accumulated around AI actions. The refactor let us revisit the surfaces that carry them — PR views, merge editor, sidebar dashboard — with a consistent hand.
+
+### Added
+
+- **AppHeader revamp** — the 1654-line `AppHeader.vue` monolith is split into composable building blocks under `components/header/`: `SyncSplitButton` (primary sync CTA with publish/push/pull variants + split-button menu for less-common sync actions), `BranchSelector` (rich branch popover with search and quick-switch), `BranchMenu` (secondary branch actions), `SearchTrigger` + `SearchPalette` (centered search input opening a full-screen command palette), `RepoTabStrip` (replaces `RepoTabBar` with multi-tab ergonomics), `HeaderLogo`. Each is typed, i18n'd across all 5 locales, and re-wired into `App.vue`.
+- **Cmd/Ctrl+K command palette** — the new `SearchPalette` is reachable from anywhere and surfaces branches, commits, and quick actions. Centered search field in the header doubles as the palette trigger.
+- **Branch rename / delete modals** — `BranchRenameModal.vue` and `BranchDeleteModal.vue` replace the inline `rename()` / `confirm()` flows in `BranchMenu`. Delete modal includes a type-the-name guard for unmerged branches. Backed by a new `git_rename_branch` primitive (Rust/Tauri + Node dev-server + TypeScript wrapper), exposed via `useGitRepo.renameBranch`.
+- **`useSyncAction` composable** — central state machine for publish / push / pull / fetch / mergeRemote variants, with a unit test suite covering the transitions. Consumed by `SyncSplitButton` and `App.vue`.
+- **`BaseModal.vue`** — shared overlay wrapper (backdrop, focus trap, Esc-to-close, sized footers with typed primary/danger/ghost button variants, `bm-btn` class scale pinned to (0,1,0) specificity to keep modifiers composable). 367 lines of chrome reused by 10+ modals.
+- **`AiSparkle.vue`** — 77-line reusable sparkle icon for AI-powered actions. Replaces the scattered inline SVGs in the PR review modal, split commit modal, and PR intelligence panel.
+- **Merge editor line numbers + minimap** — per-line numbering on code and conflict panels, and a right-side canvas minimap that highlights auto-resolvable vs manual conflicts for one-click navigation across large merges.
+- **PR detail markdown description switch** — the Description block in `PrDetailView` now renders full markdown (tables, code blocks, links, blockquotes, images) via the existing `renderMarkdown` composable, with a segmented pill switch ("Formatted" / "Raw") matching the Dashboard's readme widget. New i18n keys `dashboard.formatted` / `dashboard.raw` across the 5 locales.
+- **PrIntelligencePanel redesign** — emoji section icons replaced with 28px accent-soft tile + inline SVG; scope grid upgraded to `.pi-stat` cards with radial hover gradient and lift; file rows / hotspot rows / AI flag rows unified with a `border-left: 3px solid` severity strip; conflict summary became a success/danger banner; "Analyser" button is now a primary CTA with play-triangle SVG and hover lift. Loading states use a 10px `.pi-dot-spinner`. `@media (prefers-reduced-motion)` disables all transforms + spin animations.
+- **PR create view polish** — `PrCreateView` restyled with an icon hero, segmented template pills, accent AI button, and highlighted draft card for a consistent PR flow with `PrDetailView`.
+
+### Changed
+
+- **10 modals migrated to `BaseModal`** — `EditCommitOverlay`, `MergeSuccessModal`, `PrReviewModal`, `RebaseEditor`, `SettingsPanel`, `SplitCommitModal`, `StashManager`, `BranchRenameModal`, `BranchDeleteModal`, `SearchPalette`. Net impact: duplicated backdrop/focus logic removed, accessibility fixes apply everywhere at once.
+- **Sidebar dashboard refresh** — `RepoSidebar.vue` gets more padding and gaps for breathing room, icon badges, and hover lifts on branch / activity / quick-action items.
+- **Folder history pill chips** — `FolderPicker.vue` switches from a vertical list to wrapping pill-shaped chips, hiding the path and shrinking pin/remove controls for a denser layout.
+- `@gitwand/core`, `@gitwand/cli`, `@gitwand/mcp`, `@gitwand/desktop`, and `gitwand-website` bumped to `1.8.0`. `@gitwand/mcp` server-reported handshake version and `packages/mcp/server.json` (MCP Registry manifest) aligned to `1.8.0`.
+
+### Docs
+
+- ROADMAP: new **Tags management** section (UI-driven tag creation, push, log badges) and **Log commit context menu** plan (checkout / reset / revert / create branch / tag / cherry-pick / amend / copy SHA / open on forge / compare with).
+
+## [1.7.0] - 2026-04-21
+
+### Added
+
+- **Split commit by hunks** — a new "Split this commit…" entry in the commit log's context menu opens a dedicated modal that lets you break a single commit in two by picking individual lines across files. Each file shows as a collapsible summary row (chevron, short name, path, +/- stats, hunk count, selected-lines badge); click to expand the full diff and pick lines to keep in the first commit. The rest of the changes flow into the second commit automatically. Selections persist across collapse/expand. Large commits (> 3 files) get a "Expand all / Collapse all" toolbar. A new `git_split_commit` backend primitive ships in both the Rust/Tauri (`lib.rs`) and Node (`dev-server.mjs`) paths with full parity, plus a TypeScript wrapper (`gitSplitCommit`) and a `useSplitCommit` composable.
+- **Split integrated into interactive rebase** — pick a commit in the rebase editor and switch its action to `split` (alongside `pick`, `edit`, `squash`, `fixup`, `drop`). The rebase halts at that commit via a synthetic `edit` step, the split modal opens with the commit preloaded, and after you confirm the split the rebase resumes. The progress banner now stays up on `edit` / synthetic-`split` halts (they exit 0 with no conflict, which used to wrongly close the editor).
+- **Merge-commit guard (defense in depth)** — splitting a merge commit would silently drop the second parent and flatten history. The guard blocks the operation at every entry point: Rust backend (`git_split_commit`), Node dev-server, TypeScript composable, the `App.vue` dispatcher, and the context-menu entry in `CommitLog.vue` (disabled with tooltip). Error message translated across all 5 locales.
+- **Correct patch headers for added / deleted / renamed files** — `GitDiff` now carries `status` (`added | modified | deleted | renamed`) and `oldPath` from `git_show`. `patchBuilder` emits the matching extended header (`new file mode` + `--- /dev/null`, `deleted file mode` + `+++ /dev/null`, or `rename from/to`) so `git apply --cached` stops failing with "does not exist in index" when the split touches a file creation or deletion.
+- **i18n** — 6 new strings for the split flow (`errorMergeCommit`, `filesCount`, `expandAll`, `collapseAll`, `hunksCount`, `linesSelectedSuffix`) translated across all 5 locales: `en`, `fr`, `es`, `pt-BR`, `zh-CN`.
+
+### Changed
+
+- Rebase-result types (`startRebase`, `rebaseContinue`, `rebaseSkip`) now carry an explicit `inProgress` flag. `conflict` is reserved for merge conflicts; `inProgress` is the authoritative "rebase still running" signal so UI callers stop conflating the two.
+- `@gitwand/core`, `@gitwand/cli`, `@gitwand/mcp`, `@gitwand/desktop`, and `gitwand-website` bumped to `1.7.0`. `@gitwand/mcp` server-reported handshake version and `packages/mcp/server.json` (MCP Registry manifest) aligned to `1.7.0`.
+
+### Fixed
+
+- `git_show` parser: the final context-line detection site (line 1811) still used `!starts_with('\\')` instead of `starts_with(' ')`, which misclassified empty strings as context lines. Matches the fix previously applied in the primary diff parser.
+
+## [1.6.3] - 2026-04-20
+
+### Added
+
+- **Worktree manager** — create, list, and remove Git worktrees from a dedicated overlay panel (header button "Worktrees"). Each worktree shows its branch, HEAD SHA, path, and status badges (main / locked / bare). "Open in tab" opens any worktree as a first-class repo tab — enabling parallel work on two branches without stashing or switching. "Prune" cleans up stale administrative files. The "New worktree" form lets you check out an existing branch or create a new one directly at the worktree.
+- **Quick worktree from branch list** — every non-current branch in the branch popover now has a worktree shortcut button (⧉ icon). Clicking it opens the worktree manager with the branch pre-selected and the creation form pre-filled, so the "open this branch in a new tab without touching my working tree" flow is two clicks total.
+- **Submodule panel** — new "Submodules" header button opens an overlay listing all submodules declared in `.gitmodules`, with live status badges (clean / modified / not initialized). "Init & Update all" runs `git submodule update --init --recursive`. "Open in tab" opens any initialized submodule as a standalone repo tab. "Add submodule" form (URL + local path). An inline warning banner counts uninitialized submodules and doubles as a one-click init trigger.
+- **Auto-update infrastructure fixes** — `createUpdaterArtifacts: true` in `tauri.conf.json` (was missing, preventing `.sig` file generation); `updater:default`, `process:default`, `process:allow-restart` permissions added to `capabilities/default.json`; updater endpoint simplified to static `latest.json`; `release.yml` now downloads the `tauri-action`-generated manifest (with real cryptographic signatures) instead of hand-crafting one with empty signature fields.
+- **i18n** — all new strings translated across all 5 locales: `en`, `fr`, `es`, `pt-BR`, `zh-CN`.
+
+### Changed
+
+- `tauri.conf.json` updater endpoint: `{{target}}/{{arch}}/{{current_version}}` → `latest.json` (static GitHub Pages, no dynamic server needed).
+
+## [1.6.2] - 2026-04-20
+
+### Added
+
+- **Image diff viewer** — binary image files (PNG, JPG, WebP, GIF, SVG) now render in the commit diff with four comparison modes:
+  - **Side-by-side** — before/after framed with dimension + size metadata
+  - **Overlay** — stacked images with opacity control
+  - **Blink** — alternates the two images to reveal pixel-level deltas
+  - **Slider** — draggable reveal between before/after
+  Includes a 20 MB per-side guardrail (oversize images are skipped with an explicit notice), safe rendering for SVG (text content, not raster), and an "animated" metadata badge for GIF. New `read_file_at_revision(path, rev)` backend command — available in both the Rust/Tauri and Node dev-server paths — fetches file bytes at any git revision so the viewer can compare `HEAD^` against `HEAD`, across branches, across stashes, etc.
+- **Folder tree view in commit diff** — the file list in `CommitDiffViewer` gets a flat ↔ tree toggle. Tree mode shows an expandable folder tree with per-folder aggregates (files changed, additions, deletions) and lets you click any folder to filter the list down to its descendants — a breadcrumb + clear (×) button surfaces the active filter. The sidebar column is now **resizable by dragging its left edge**, with double-click to reset; width is clamped 180–600 px and persisted in `localStorage` (`gitwand.cdv.filelistWidth`). Full keyboard navigation (arrow keys, Enter, Esc) on the tree. New `folder_diff` backend command (3 layers: Rust/Tauri + Node/dev-server + TypeScript wrapper) builds the aggregated tree. i18n across all 5 locales (en, fr, es, pt-BR, zh-CN).
+
+### Changed
+
+- `@gitwand/core`, `@gitwand/cli`, `@gitwand/mcp`, `@gitwand/desktop`, and `gitwand-website` bumped to `1.6.2`. `@gitwand/mcp` server-reported protocol version and `packages/mcp/server.json` (MCP Registry manifest) aligned to `1.6.2` so registry consumers see a consistent version.
+
+### Docs
+
+- `packages/mcp/README.md` — document the two supported install paths for `mcp-publisher` (Homebrew and prebuilt binary) so new contributors aren't blocked on the registry-publish step.
+
+### Internals
+
+- `.gitignore` ignores Vite's `*.timestamp-*.mjs` temp files and the `.release-notes-*.md` scratch notes so they stop surfacing in `git status`.
+
+## [1.6.1] - 2026-04-20
+
+### Fixed
+
+- **`@gitwand/mcp` missing `mcpName` field** — the MCP Registry rejects submissions whose referenced npm package lacks the `mcpName` field (ownership-verification mechanism preventing squatting). `@gitwand/mcp@1.6.0` was published without it, so the initial registry submission failed with HTTP 400. Fix: add `"mcpName": "io.github.devlint/gitwand"` to `packages/mcp/package.json` and re-publish as `1.6.1`.
+- **`@gitwand/mcp` server-reported version** — `src/server.ts` hardcoded the protocol handshake version to `1.6.0`, now bumped to `1.6.1` in sync with package.json.
+
+### Changed
+
+- `packages/mcp/server.json` (MCP Registry manifest) bumped to `1.6.1` accordingly. `@gitwand/core` and `@gitwand/cli` remain at `1.6.0` — no code change needed there.
+
+### Docs
+
+- Root README and `packages/mcp/README.md` show an **MCP Registry** badge pointing to `registry.modelcontextprotocol.io`.
+- Website (`HomeLanding.vue`, 5 locales) — MCP badge updated to surface the registry listing, FAQ answer for MCP install now leads with the `claude mcp add gitwand -- npx -y @gitwand/mcp` one-liner, and the CLI platform card fixes the stale `npm i -g gitwand` (was never a valid package name) to `npm i -g @gitwand/cli`.
+- Root README roadmap — the `published to npm + MCP Registry` line is checked off with a ship date.
+
+## [1.5.1] - 2026-04-19
+
+### Fixed
+
+- **CI release — tauri-bundler failing on every platform** — the `parity_probe` test binary was declared as `[[bin]]` with `required-features = ["parity-probe"]`. tauri-bundler auto-discovers **every** `[[bin]]` entry in `Cargo.toml` and tries to embed it as a sidecar in the final bundle, regardless of whether the feature was enabled — so release builds failed with `Failed to copy binary from .../target/release/parity_probe: does not exist`. Fix: move the probe from `[[bin]]` to `[[example]]` (examples are ignored by tauri-bundler and aren't built by default). Source moves from `src-tauri/src/bin/parity_probe.rs` to `src-tauri/examples/parity_probe.rs`; build command becomes `cargo build --example parity-probe`; output path becomes `target/debug/examples/parity-probe`. Parity harness default path updated accordingly.
+- **macOS permission dialog prompting 50× on home folder** — opening the home directory triggered a `.join(".git").exists()` probe on every entry, which hit macOS TCC for `Documents`, `Desktop`, `Downloads`, `Pictures`, `Movies`, `Music`, and `Library`. Unsigned/ad-hoc dev builds don't persist TCC decisions, so the dialog reappeared for every child access. Fix: `MACOS_TCC_PROTECTED` guard in both the Rust (`list_dir`) and Node (`dev-server.mjs`) backends skips the `.git` probe for these well-known system folders when listing the home directory — they're never git repos anyway.
+- **Unused variable warning** — `shortcut` → `_shortcut` in the global-shortcut closure at `src-tauri/src/lib.rs` (silences the clippy warning in release builds).
+
+### Changed
+
+- `@gitwand/core`, `@gitwand/desktop`, and `gitwand-website` bumped to `1.5.1`.
+
+### Internals
+
+- **i18n sweep — composable errors** — the remaining hardcoded French error strings in the AI-powered composables (`useCommitMessage`, `useBranchName`, `useReleaseNotes`, `useStashMessage`, `usePrDescription`, `useSquashSuggestion`, `usePrHunkCritique`, `useBlameContext`, `useMergeRisk`, `useCommitSearch`, `useHunkExplanation`, `useAIProvider`) now route through the `errors.*` namespace populated in all 5 locales. A standalone `t` helper is exported from `useI18n` so non-component modules can translate without instantiating the composable.
+
+## [1.5.0] - 2026-04-19
+
+### Security
+
+- **XSS hardening across 10 views** — all `v-html` usage now routes through a shared `useSafeHtml` / `useMarkdown` composable that sanitizes output with DOMPurify (markdown-it for the markdown path). README rendering, PR bodies, commit-message previews, and every other bit of user- or Git-authored markup is filtered through a conservative DOMPurify profile with a URI allow-list, `target="_blank" rel="noopener noreferrer"` hardening, and `javascript:` protocol blocking.
+- **Dev-server CORS + filesystem path enforcement** — the Node dev-server now refuses requests from unexpected origins and validates every repo/file path against a safe root, preventing path traversal on the desktop app's local HTTP bridge.
+
+### Added
+
+- **English-first UI** (P3.1) — the desktop app now defaults to English, with French as a secondary locale kept in sync. The locale registry's source of truth moves from `fr.ts` to `en.ts`, and the public website landing page mirrors the same default. French is automatically picked up when the browser / OS prefers it, and the Settings panel still lets users force either language.
+- **`.gitwandrc` — `generatedFiles` option** (P2.4) — users can now declare extra glob patterns (e.g. `"dist/**"`, `"**/*.generated.ts"`) that GitWand treats as generated when applying the `generated_file` resolver. Patterns are additive on top of the built-in list.
+- **Post-merge validation — YAML + TOML** (P2.5) — the `validateMergedContent` contract is extended with format-specific parsers. Invalid YAML / TOML after a merge is surfaced as a `syntaxError` with a `YAML: …` / `TOML: …` prefix, matching the existing JSON behaviour.
+- **3 new parity-tested Tauri↔Node commands** (P2.3) — the Rust/Tauri and Node/dev-server backends now share a parity probe harness to catch drift; 3 commands are validated end-to-end on every build.
+
+### Changed
+
+- `@gitwand/core` and `@gitwand/desktop` bumped to `1.5.0`.
+- `@gitwand/cli` and `@gitwand/mcp` bumped to `1.3.0` (parallel CLI loop, module split).
+- `gitwand-website` bumped to `1.5.0` and aligned with the app release tag.
+
+### Performance
+
+- **LCS memory — O(n·m) → O(min(n, m))** (P2.1) — the diff engine's LCS now runs a hybrid `Int32Array` DP under 4M cells and switches to Hirschberg's divide-and-conquer above. Measured on 3000×3000 inputs: ~36 MB → ~1 MB, a ~35× reduction. Tie-break behaviour is preserved so existing diffs are byte-identical.
+- **Parallel conflict loading in the desktop app** (P1.2) — conflicted files are read in parallel instead of one-by-one, with bounded concurrency. Same concurrency model applied to `saveAllFiles`.
+- **Parallel CLI file loop** (P1.3) — `gitwand resolve` walks the conflict set concurrently (bounded) rather than serially. Throughput scales with file count on big merges.
+
+### Internals
+
+- **Shared markdown pipeline** (P1.4) — every view that used to call markdown-it / DOMPurify directly now goes through a single `useMarkdown` composable.
+- **Resolver refactor** (P1.1) — the monolithic `resolver.ts` was split into 6 focused sub-modules (`validation`, `policy`, `generated-detection`, …), keeping the public API identical.
+- **CLI refactor** (P2.2) — `cli/index.ts` split into sub-modules, one per command concern.
+- Removed deprecated `@types/dompurify` — DOMPurify 3.x ships its own types.
+
+## [1.4.0] - 2026-04-17
+
+### Added
+
+#### AI Everywhere (Phase 1.3.x)
+
+- **AI branch-name suggestion** (1.3.1) — generate `feat/…` / `fix/…` branch names from a description or the staged diff.
+- **AI PR title & description** (1.3.1) — `PrCreateView` analyses the `currentBranch..base` diff and produces a structured title + body (summary, test plan, breaking changes).
+- **Hunk-level AI critique in PR Review** (1.3.1) — the Intelligence panel now surfaces per-hunk feedback (risks, regressions, concrete suggestions) instead of static heuristics.
+- **Natural-language conflict explanation** (1.3.2) — the DecisionTrace is translated into plain English inside the merge editor ("this hunk changes the `login()` signature on both sides — manual resolution required").
+- **Pre-merge AI risk summary** (1.3.2) — `MergePreview` complements the `merge-tree` simulation with an AI summary of risk ("3 files touch auth, high regression probability if untested").
+- **AI stash message** (1.3.3) — the stash flow (including the switch-branch modal) proposes a message from the unstaged diff.
+- **AI semantic squash grouping** (1.3.3) — interactive rebase groups candidate commits by intent and proposes a combined message.
+- **AI-ranked Absorb target** (1.3.3) — when lines span multiple commits, the best candidate is picked from a semantic ranking rather than the first `git blame` hit.
+- **Natural-language commit search** (1.3.4) — query the log with plain-English questions ("when did we introduce log pagination?").
+- **AI blame context** (1.3.4) — "why did this line change?" button on each blame block, with context from neighbouring commits.
+- **AI release notes generator** (1.3.4) — structured markdown (Added / Changed / Fixed) from `git log <tag>..<tag>`, ready to paste into a GitHub release.
+- **Rotating feature tips on the empty state** (1.3.5) — a pool of ~20 localised tips cycles every 30 s on the dashboard before repo selection.
+
+#### Conflict engine — v1.4
+
+- **Pattern registry** — classification pipeline rewritten around a prioritised pattern registry; each pattern declares its `priority`, `requires` (`diff3` / `diff2` / `both`), `detect`, `confidence`, and `explanation`.
+- **New resolver: `reorder_only`** — detects pure permutations (same lines on both sides, different order). Auto-resolved.
+- **New resolver: `insertion_at_boundary`** — detects pure insertions on both sides with an intact base. Auto-resolved.
+- **Refined confidence scoring** — boosters, penalties, and dimensions tuned for the two new patterns and for stricter guarding on `complex`.
+
+#### Desktop
+
+- **Auto-update check** — background check against the GitHub Releases feed on app launch, with a toast + changelog link when a new version is available.
+- **App version display** — current version now visible in the footer / About section.
+
+#### Branding
+
+- Shared hex-cube favicon across desktop app and website.
+
+### Changed
+
+- `@gitwand/core`, `@gitwand/cli`, `@gitwand/mcp`, `gitwand-vscode`, `gitwand-website`, `@gitwand/desktop` versions aligned to `1.4.0`.
+- `ConflictType` union extended with `reorder_only` and `insertion_at_boundary`.
+- Replaced hardcoded CSS values with design tokens across desktop views.
+
+## [1.2.0] - 2026-04-16
+
+### Added
+
+- **Interactive rebase** (Phase 1.2.1) — drag-and-drop reorder in the log, per-commit actions (squash, edit message, drop, fixup), multi-select squash with combined message, rebase onto branch from the UI, in-flight conflict handling (continue/abort/skip).
+- **Absorb** (Phase 1.2.2, inspired by GitButler) — right-click a modified file to absorb it into an existing commit, automatic candidate detection via `git blame`, partial absorb through hunk selection (`useAbsorb.ts`).
+- **AI commit messages** (Phase 1.2.3) — dropdown in the commit area analyses the staged diff and produces summary + description. Provider-agnostic: Claude Code CLI, Claude API, OpenAI-compatible, Ollama. Regenerate, shorten, expand, switch language.
+- **Universal Undo** (Phase 1.2.4) — operation stack covering commit, merge, rebase, cherry-pick, stash, discard. One-click undo via `git reset` / `git reflog`. History panel lets you jump back to any prior state.
+- `gh-merge-pr` endpoint in the desktop dev-server plus a TypeScript wrapper.
+- Website homepage: new LLM/MCP section and FAQ.
+
+### Changed
+
+- `@gitwand/core`, `@gitwand/cli`, `@gitwand/mcp`, `gitwand-vscode`, `gitwand-website` versions aligned to `1.2.0`.
+- Desktop app (`@gitwand/desktop`) and Tauri bundle bumped to `1.2.0`.
+
+## [1.1.0] - 2026-04
+
+### Added
+
+- **MCP server** (`@gitwand/mcp`) — 5 tools (`gitwand_status`, `gitwand_resolve_conflicts`, `gitwand_preview_merge`, `gitwand_explain_hunk`, `gitwand_apply_resolution`) and 3 resources, stdio transport, compatible with Claude Code, Claude Desktop, Cursor, Windsurf.
+- **Claude Code slash commands** — `/resolve` and `/preview` workflows.
+- **Enriched CLI JSON output** — confidence scores, decision traces, `pendingHunks` with ours/theirs/base, post-merge validation.
+- **Partial resolution** in the desktop app — apply resolvable hunks even when others remain manual.
+- **Merge success modal** with Close and Push actions, light/dark themed via design tokens.
+- **Dashboard README improvements** — GitHub-style header parsing, GFM tables, checkboxes, anchor navigation, relative image handling.
+- **Website MCP Server page** and FR/EN homepage toggle.
+- **New 3D hexagonal cube logo**; Tauri app icons regenerated (ico, icns, multi-size PNG).
+
+## [1.0.0] - 2026
+
+### Added
+
+- Core conflict resolution engine: 8 patterns (same_change, one_side_change, delete_no_change, whitespace_only, non_overlapping, value_only_change, generated_file, complex), LCS 3-way, diff2 + diff3.
+- Composite confidence scoring (`ConfidenceScore` 0–100), configurable merge policies via `.gitwandrc`, decision trace, explain-only mode.
+- Format-aware resolvers: JSON/JSONC, Markdown, YAML, Vue SFC, CSS/SCSS, TS/JS imports, npm/yarn/pnpm lockfiles.
+- CLI (`gitwand resolve`, `gitwand status`) with `--ci` / `--json` structured output.
+- VS Code extension: diagnostics, CodeLens, status bar, `resolveFile` / `resolveAll` commands.
+- Desktop app (Tauri 2 + Vue 3): complete Git workflow — staging, commit, push/pull, branches, merge editor, advanced diff, history, DAG graph, file history, blame, time-travel diff, merge preview, cherry-pick, stash, amend, repo switcher, multi-tabs, terminal, PR workflow via `gh` CLI, inline code review, intelligence panel, AI suggestions (Claude / OpenAI / Ollama), i18n FR/EN, theme dark/light/system.
+- 332 tests, 20 fixtures corpus, benchmarks (249k ops/s on single conflict).
+- CI/CD multi-OS (macOS universal, Linux, Windows), Tauri updater, VitePress documentation site.
+
+## [0.0.1] - 2026-04-03
+
+### Added
+
+- **Core engine** (`@gitwand/core`) with 5 automatic conflict resolution patterns:
+  - `same_change` — both branches made the exact same edit (certain)
+  - `one_side_change` — only one branch modified a block (certain)
+  - `delete_no_change` — one branch deleted, the other didn't touch (certain)
+  - `whitespace_only` — same code, different formatting (high)
+  - `non_overlapping` — additions at different locations, LCS-based 3-way diff (high)
+- **CLI** (`@gitwand/cli`) with commands:
+  - `gitwand resolve` — auto-resolve trivial conflicts
+  - `gitwand status` — show conflict status
+  - `--ci` / `--json` mode with structured JSON output and exit codes
+  - `--dry-run`, `--verbose`, `--no-whitespace` options
+- **VS Code extension** (`gitwand-vscode`) with:
+  - DiagnosticsProvider — inline warnings on each conflict
+  - CodeLensProvider — clickable annotations above each conflict marker
+  - StatusBarItem — conflict count with auto-resolvable ratio
+  - Commands: `resolveFile`, `resolveAll`
+- **Desktop app placeholder** (Tauri + Vue 3, Phase 4)
+- CI pipeline via GitHub Actions (Node 18, 20, 22)
+- 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
+
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.13.2...HEAD
+[3.13.2]: https://github.com/devlint/GitWand/compare/v3.13.1...v3.13.2
+[3.13.1]: https://github.com/devlint/GitWand/compare/v3.13.0...v3.13.1
+[3.13.0]: https://github.com/devlint/GitWand/compare/v3.12.5...v3.13.0
+[3.12.5]: https://github.com/devlint/GitWand/compare/v3.12.4...v3.12.5
+[3.12.4]: https://github.com/devlint/GitWand/compare/v3.12.3...v3.12.4
+[3.12.3]: https://github.com/devlint/GitWand/compare/v3.12.2...v3.12.3
+[3.12.2]: https://github.com/devlint/GitWand/compare/v3.12.1...v3.12.2
+[3.12.1]: https://github.com/devlint/GitWand/compare/v3.12.0...v3.12.1
+[3.12.0]: https://github.com/devlint/GitWand/compare/v3.11.2...v3.12.0
+[3.11.2]: https://github.com/devlint/GitWand/compare/v3.11.1...v3.11.2
+[3.11.1]: https://github.com/devlint/GitWand/compare/v3.11.0...v3.11.1
+[3.11.0]: https://github.com/devlint/GitWand/compare/v3.10.1...v3.11.0
+[3.10.1]: https://github.com/devlint/GitWand/compare/v3.10.0...v3.10.1
+[3.10.0]: https://github.com/devlint/GitWand/compare/v3.9.1...v3.10.0
+[3.9.1]: https://github.com/devlint/GitWand/compare/v3.9.0...v3.9.1
+[3.9.0]: https://github.com/devlint/GitWand/compare/v3.8.0...v3.9.0
+[3.8.0]: https://github.com/devlint/GitWand/compare/v3.7.3...v3.8.0
+[3.7.3]: https://github.com/devlint/GitWand/compare/v3.7.2...v3.7.3
+[3.7.2]: https://github.com/devlint/GitWand/compare/v3.7.1...v3.7.2
+[3.7.1]: https://github.com/devlint/GitWand/compare/v3.7.0...v3.7.1
+[3.7.0]: https://github.com/devlint/GitWand/compare/v3.6.6...v3.7.0
+[3.6.6]: https://github.com/devlint/GitWand/compare/v3.6.5...v3.6.6
+[3.6.5]: https://github.com/devlint/GitWand/compare/v3.6.4...v3.6.5
+[3.6.4]: https://github.com/devlint/GitWand/compare/v3.6.3...v3.6.4
+[3.6.3]: https://github.com/devlint/GitWand/compare/v3.6.2...v3.6.3
+[3.6.2]: https://github.com/devlint/GitWand/compare/v3.6.1...v3.6.2
+[3.6.1]: https://github.com/devlint/GitWand/compare/v3.6.0...v3.6.1
+[3.6.0]: https://github.com/devlint/GitWand/compare/v3.5.0...v3.6.0
+[3.5.0]: https://github.com/devlint/GitWand/compare/v3.4.0...v3.5.0
+[3.4.0]: https://github.com/devlint/GitWand/compare/v3.3.0...v3.4.0
+[3.3.0]: https://github.com/devlint/GitWand/compare/v3.2.0...v3.3.0
+[3.2.0]: https://github.com/devlint/GitWand/compare/v3.1.0...v3.2.0
+[3.1.0]: https://github.com/devlint/GitWand/compare/v3.0.0...v3.1.0
+[3.0.0]: https://github.com/devlint/GitWand/compare/v2.24.0...v3.0.0
+[2.24.0]: https://github.com/devlint/GitWand/compare/v2.23.0...v2.24.0
+[2.23.0]: https://github.com/devlint/GitWand/compare/v2.22.0...v2.23.0
+[2.18.0]: https://github.com/devlint/GitWand/compare/v2.17.0...v2.18.0
+[2.17.0]: https://github.com/devlint/GitWand/compare/v2.16.0...v2.17.0
+[2.16.0]: https://github.com/devlint/GitWand/compare/v2.15.1...v2.16.0
+[2.15.1]: https://github.com/devlint/GitWand/compare/v2.15.0...v2.15.1
+[2.15.0]: https://github.com/devlint/GitWand/compare/v2.14.0...v2.15.0
+[2.14.0]: https://github.com/devlint/GitWand/compare/v2.13.0...v2.14.0
+[2.13.0]: https://github.com/devlint/GitWand/compare/v2.12.0...v2.13.0
+[2.12.0]: https://github.com/devlint/GitWand/compare/v2.11.0...v2.12.0
+[2.11.0]: https://github.com/devlint/GitWand/compare/v2.10.0...v2.11.0
+[2.10.0]: https://github.com/devlint/GitWand/compare/v2.9.0...v2.10.0
+[2.9.0]: https://github.com/devlint/GitWand/compare/v2.8.2...v2.9.0
+[2.22.0]: https://github.com/devlint/GitWand/compare/v2.21.0...v2.22.0
+[2.21.0]: https://github.com/devlint/GitWand/compare/v2.20.1...v2.21.0
+[2.20.1]: https://github.com/devlint/GitWand/compare/v2.20.0...v2.20.1
+[2.8.2]: https://github.com/devlint/GitWand/compare/v2.8.0...v2.8.2
+[2.8.0]: https://github.com/devlint/GitWand/compare/v2.7.0...v2.8.0
+[2.7.0]: https://github.com/devlint/GitWand/compare/v2.6.0...v2.7.0
+[2.6.0]: https://github.com/devlint/GitWand/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/devlint/GitWand/compare/v2.4.1...v2.5.0
+[2.4.1]: https://github.com/devlint/GitWand/compare/v2.3.0...v2.4.1
+[2.3.0]: https://github.com/devlint/GitWand/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/devlint/GitWand/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/devlint/GitWand/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/devlint/GitWand/compare/v1.9.0...v2.0.0
+[1.9.0]: https://github.com/devlint/GitWand/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/devlint/GitWand/compare/v1.7.0...v1.8.0
+[1.7.0]: https://github.com/devlint/GitWand/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/devlint/GitWand/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/devlint/GitWand/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/devlint/GitWand/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/devlint/GitWand/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/devlint/GitWand/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/devlint/GitWand/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/devlint/GitWand/releases/tag/v1.0.0
