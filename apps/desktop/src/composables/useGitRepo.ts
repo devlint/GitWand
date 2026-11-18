@@ -332,6 +332,13 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   /** The commit `commitDiffs` belong to: while a newly selected commit
    *  loads, the previous one's are still shown (#301 files lines by it). */
   const commitDiffsHash = ref<string | null>(null);
+  /** The one way to set the commit diffs: the diffs and the commit they
+   *  belong to move together, and only for the commit still selected. */
+  function setCommitDiffs(hash: string | null, diffs: GitDiff[]) {
+    if (hash !== null && selectedCommitHash.value !== hash) return;
+    commitDiffs.value = diffs;
+    commitDiffsHash.value = hash;
+  }
 
   /**
    * Search-palette invalidation on active-repo change.
@@ -608,8 +615,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
     // Reset previous repo state
     selectedCommitHash.value = null;
-    commitDiffs.value = [];
-    commitDiffsHash.value = null;
+    setCommitDiffs(null, []);
     log.value = [];
     branches.value = []; // ← reset so the palette doesn't show stale branches from the previous repo
     selectedFilePath.value = null;
@@ -644,8 +650,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     diff.value = null;
     log.value = [];
     selectedCommitHash.value = null;
-    commitDiffs.value = [];
-    commitDiffsHash.value = null;
+    setCommitDiffs(null, []);
     branches.value = [];
     worktrees.value = [];
     error.value = null;
@@ -948,11 +953,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
         const hash = selectedCommitHash.value;
-        const diffs = await getGitShow(folderPath.value, hash);
-        if (selectedCommitHash.value === hash) {
-          commitDiffs.value = diffs;
-          commitDiffsHash.value = hash;
-        }
+        setCommitDiffs(hash, await getGitShow(folderPath.value, hash));
       }
     } catch (err: any) {
       error.value = `git log: ${err?.message ?? err}`;
@@ -1065,12 +1066,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           // No untracked part in this stash.
         }
       }
-      if (selectedCommitHash.value !== hash) return;
-      commitDiffs.value = diffs;
-      commitDiffsHash.value = hash;
+      setCommitDiffs(hash, diffs);
     } catch (err: any) {
-      commitDiffs.value = [];
-      commitDiffsHash.value = hash;
+      // A commit the user has since left must not wipe the one shown now.
+      if (selectedCommitHash.value !== hash) return;
+      setCommitDiffs(hash, []);
       error.value = `git show: ${err?.message ?? err}`;
     }
   }

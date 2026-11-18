@@ -768,4 +768,17 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     await nextTick();
     expect(container.querySelector(".pid-compose")).toBeNull();
   });
+
+  it("once the range is filed, the comment box keeps its keys again", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 5), true);
+    await nextTick();
+    c.querySelector<HTMLButtonElement>(".pid-issue-btn")!.click();
+    await nextTick();
+    expect(c.querySelector(".pid-compose textarea")?.hasAttribute("data-issue-shortcut")).toBe(false);
+  });
 });

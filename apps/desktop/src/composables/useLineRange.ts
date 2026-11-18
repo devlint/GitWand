@@ -85,7 +85,8 @@ export function useLineRange(opts?: {
       setTimeout(() => {
         if (!e.defaultPrevented) clear();
       }, 0);
-    };    onMounted(() => {
+    };
+    onMounted(() => {
       document.addEventListener("mousedown", onMousedown);
       document.addEventListener("keydown", onKeydown);
     });

@@ -466,6 +466,13 @@ describe("useCreateIssue — from a diff selection", () => {
     expect(api.body.value.startsWith(`https://github.com/org/app/blob/${"h".repeat(40)}/src/a.ts?plain=1#L4\n`)).toBe(true);
   });
 
+  it("reads the PR's repository from a URL with a trailing path or query", async () => {
+    const { api } = setup(provider());
+    await api.refreshAvailability();
+    await api.openFromSelection(prSel(ADDED, "https://github.com/org/app/pull/12/files?w=1"));
+    expect(api.body.value.startsWith(`https://github.com/org/app/blob/${"h".repeat(40)}/src/a.ts?plain=1#L4\n`)).toBe(true);
+  });
+
   it("gives a PR no permalink for deleted lines or an unexpected URL", async () => {
     const a = setup(provider());
     await a.api.refreshAvailability();

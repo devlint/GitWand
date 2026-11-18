@@ -276,7 +276,6 @@ const composeRange = computed<{ lo: number; hi: number } | null>(() => {
   return { lo: r.lo, hi: r.hi };
 });
 
-
 /** Open the box on a row; `keepText` carries the draft over (a Shift+click
  *  that could not extend must not cost what was typed). */
 function openCompose(hunkIdx: number, lineIdx: number, dl: DiffLine, keepText = false) {
@@ -313,7 +312,6 @@ function placeComposeAtRangeEnd(hunkIdx: number) {
   if (!r || !last) return;
   composeLine.value = { hunkIdx, lineIdx: r.hi, line: lineNoOf(last), side: sideOf(last) };
 }
-
 
 /**
  * A reloaded diff for the same file: the box (and its range) follow their
@@ -814,7 +812,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
             <div class="pid-compose">
               <textarea
                 :ref="setComposeTextarea"
-                :data-issue-shortcut="composeRange ? '' : undefined"
+                :data-issue-shortcut="composeRange && !handedOver ? '' : undefined"
                 v-model="composeText"
                 class="pid-textarea"
                 :placeholder="t('pr.inline.composePlaceholder')"
@@ -1056,7 +1054,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                 <div class="pid-compose">
                   <textarea
                     :ref="setComposeTextarea"
-                    :data-issue-shortcut="composeRange ? '' : undefined"
+                    :data-issue-shortcut="composeRange && !handedOver ? '' : undefined"
                     v-model="composeText"
                     class="pid-textarea"
                     :placeholder="t('pr.inline.composePlaceholder')"

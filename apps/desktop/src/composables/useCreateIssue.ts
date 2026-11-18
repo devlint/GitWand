@@ -178,9 +178,16 @@ export function useSelectionPublisher(
 ): void {
   if (!api) return;
   const id = Symbol("selection");
+  // Published again only when the selection or its pick changed, not on
+  // every recompute of whatever the source reads.
+  let last: { sel: DiffSelection | null; key: unknown } = { sel: null, key: undefined };
   watch(
     () => [api.available.value ? source() : null, pick?.()] as const,
-    ([sel, key]) => api.publishSelection(id, sel, key),
+    ([sel, key]) => {
+      if (sel === last.sel && key === last.key) return;
+      last = { sel, key };
+      api.publishSelection(id, sel, key);
+    },
   );
   onUnmounted(() => api.publishSelection(id, null));
 }
@@ -392,7 +399,7 @@ export function useCreateIssue(deps: {
     if (src.kind === "pr") {
       // The PR's own repository (it may be a fork's parent); its base SHA is
       // unknown, so the old version of its lines gets no permalink.
-      const repo = /^(https?:\/\/.+)\/pull\/\d+\/?$/.exec(src.url)?.[1] ?? null;
+      const repo = /^(https?:\/\/.+?)\/pull\/\d+(?:[/?#].*)?$/.exec(src.url)?.[1] ?? null;
       opened = open(selectionIssuePrefill(sel, { repoHtmlUrl: repo, newSha: src.headSha, oldSha: null, commitUrl: null }));
     } else {
       // The old version is the first parent, on origin too once the commit is.

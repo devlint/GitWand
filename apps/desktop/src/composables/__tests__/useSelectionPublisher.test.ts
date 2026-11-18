@@ -3,7 +3,7 @@
  * useSelectionPublisher — several diff views can each hold a selection; the
  * shortcut files the most recent one still shown (#301).
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createApp, defineComponent, h, nextTick, ref, shallowRef, type Ref } from "vue";
 import { useSelectionPublisher, createSelectionRegistry } from "../useCreateIssue";
 import type { DiffSelection } from "../../utils/issuePrefill";
@@ -70,5 +70,24 @@ describe("useSelectionPublisher", () => {
     a.value = sel("a2");
     await nextTick();
     expect(api.activeSelection.value?.path).toBe("a2");
+  });
+
+  it("publishes nothing again when neither the selection nor its pick changed", async () => {
+    const activeSelection = shallowRef<DiffSelection | null>(null);
+    const registry = createSelectionRegistry(activeSelection);
+    const publishSelection = vi.fn(registry);
+    const api = { available: ref(true), activeSelection, publishSelection };
+    const same = sel("a");
+    const a = ref<DiffSelection | null>(same);
+    const noise = ref(0);
+    createApp(view(api, a, () => { void noise.value; return "pick"; })).mount(document.createElement("div"));
+    a.value = null;
+    await nextTick();
+    a.value = same;
+    await nextTick();
+    const calls = publishSelection.mock.calls.length;
+    noise.value++;
+    await nextTick();
+    expect(publishSelection.mock.calls.length).toBe(calls);
   });
 });
