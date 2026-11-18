@@ -88,6 +88,8 @@ export interface LineSpan {
 
 /** The most selected lines written into an issue's block. */
 export const SELECTION_MAX_LINES = 200;
+/** The most characters of selected lines, well under GitHub's 65 536-character body. */
+const SELECTION_MAX_CHARS = 60_000;
 
 /**
  * The lines a selection covers in one version of the file: the old version
@@ -121,18 +123,27 @@ export function selectionIssuePrefill(
   sel: DiffSelection,
   links: { permalink: string | null; commitUrl: string | null },
 ): IssuePrefill {
-  const shown = sel.lines.slice(0, SELECTION_MAX_LINES);
-  const rows = shown.map((l) => (l.type === "add" ? "+" : l.type === "delete" ? "-" : " ") + l.content);
+  const all = sel.lines.map((l) => (l.type === "add" ? "+" : l.type === "delete" ? "-" : " ") + l.content);
+  const rows: string[] = [];
+  let chars = 0;
+  for (const row of all.slice(0, SELECTION_MAX_LINES)) {
+    if (chars + row.length + 1 > SELECTION_MAX_CHARS) break;
+    rows.push(row);
+    chars += row.length + 1;
+  }
+  // One line longer than the whole budget: show its start rather than nothing.
+  if (rows.length === 0 && all.length > 0) rows.push(all[0].slice(0, SELECTION_MAX_CHARS));
   const parts: string[] = [];
   if (sel.intro?.trim()) parts.push(sel.intro.trim());
   if (links.permalink) parts.push(links.permalink);
   let block = codeBlock(rows.join("\n"), "diff");
-  if (sel.lines.length > shown.length) {
-    block += `\n(first ${shown.length} of ${sel.lines.length} lines)`;
+  if (sel.lines.length > rows.length) {
+    block += `\n(first ${rows.length} of ${sel.lines.length} lines)`;
   }
   parts.push(block);
   const span = permalinkSpan(sel.lines);
-  const where = span ? (span.from === span.to ? ` line ${span.from}` : ` lines ${span.from}–${span.to}`) : "";
+  const old = span?.side === "old" ? " old" : "";
+  const where = span ? (span.from === span.to ? `${old} line ${span.from}` : `${old} lines ${span.from}–${span.to}`) : "";
   const src = sel.source;
   const origin =
     src.kind === "commit"

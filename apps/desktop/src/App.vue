@@ -526,8 +526,7 @@ watch(repoFolderPath, () => {
 
 
 function openNewIssue() {
-  // From the lines selected in a diff when there are some (#301).
-  if (createIssue.available.value) void createIssue.openFromShortcut();
+  if (createIssue.available.value) void createIssue.open();
 }
 
 const issuePanel = useIssuePanel(prCwd);
@@ -4180,9 +4179,11 @@ function onKeyDown(e: KeyboardEvent) {
     // Not over another dialog (Settings, a confirm…).
     !document.querySelector('[aria-modal="true"]')
   ) {
-    // ⌘⇧I (Ctrl+Alt+I off macOS) — new GitHub issue (#301)
+    // ⌘⇧I (Ctrl+Alt+I off macOS) — new GitHub issue (#301), about the lines
+    // selected in a diff when there are some (the toolbar and the palette
+    // open a blank one: their click would clear a commit-diff selection).
     e.preventDefault();
-    openNewIssue();
+    void createIssue.openFromShortcut();
     return;
   }
   if (mod && e.key === "t") {

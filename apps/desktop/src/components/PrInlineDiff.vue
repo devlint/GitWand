@@ -6,7 +6,8 @@
  *  - Syntax highlighting
  *  - Comment threads anchored to specific lines (injected between rows)
  *  - "+" button on line-number hover to create new comments
- *  - Multi-line selection (drag line numbers) to create range comments
+ *  - Shift+click a second line number to cover a range (GitHub multi-line
+ *    comments, and "Create issue" from those lines, #301)
  *  - Code suggestion apply support
  */
 import { ref, computed, watch, inject, onUnmounted, toRaw } from "vue";
@@ -263,8 +264,6 @@ function isSuggestAnchoredAt(dl: DiffLine): boolean {
 
 // Multi-line selection
 const selectionStart = ref<{ line: number; side: "LEFT" | "RIGHT" } | null>(null);
-const selectionEnd = ref<{ line: number; side: "LEFT" | "RIGHT" } | null>(null);
-const isDragging = ref(false);
 
 /** The row a Shift+click range is measured from (the row first clicked). */
 const rangeAnchorIdx = ref<number | null>(null);
@@ -282,7 +281,6 @@ function openCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
   composeLine.value = { hunkIdx, lineIdx, line: lineNoOf(dl), side: sideOf(dl) };
   composeText.value = "";
   selectionStart.value = null;
-  selectionEnd.value = null;
   rangeAnchorIdx.value = lineIdx;
   composeRange.value = null;
 }
@@ -306,12 +304,20 @@ function extendCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
   const first = hunk.lines[lo];
   const last = hunk.lines[hi];
   composeLine.value = { hunkIdx, lineIdx: hi, line: lineNoOf(last), side: sideOf(last) };
-  selectionStart.value = lo === hi ? null : { line: lineNoOf(first), side: sideOf(first) };
+  // A range ending on a deleted line is read on the old side: a context first
+  // row then starts there too (its old number), as GitHub expects.
+  const startSide = sideOf(last) === "LEFT" && first.type === "context" ? "LEFT" : sideOf(first);
+  const startLine = startSide === "LEFT" ? (first.oldLineNo ?? 0) : lineNoOf(first);
+  selectionStart.value = lo === hi ? null : { line: startLine, side: startSide };
   composeRange.value = lo === hi ? null : { lo, hi };
 }
 
+/** Multi-line comments are sent as such only to GitHub; elsewhere a range
+ *  would be shown but posted on its last line. */
+const canRange = computed(() => props.forgeName === "github");
+
 function onLineNoClick(e: MouseEvent, hunkIdx: number, lineIdx: number, dl: DiffLine) {
-  if (e.shiftKey) extendCompose(hunkIdx, lineIdx, dl);
+  if (e.shiftKey && canRange.value) extendCompose(hunkIdx, lineIdx, dl);
   else openCompose(hunkIdx, lineIdx, dl);
 }
 
@@ -324,7 +330,6 @@ function closeCompose() {
   composeLine.value = null;
   composeText.value = "";
   selectionStart.value = null;
-  selectionEnd.value = null;
   rangeAnchorIdx.value = null;
   composeRange.value = null;
 }
@@ -345,7 +350,6 @@ const composeSelection = computed<DiffSelection | null>(() => {
   return {
     path: props.filePath,
     lines,
-    intro: composeText.value,
     source: { kind: "pr", number: props.prNumber, url: props.prUrl, headSha: props.headSha || null },
   };
 });
@@ -359,7 +363,9 @@ function publish(sel: DiffSelection | null) {
   else if (published && toRaw(createIssue.activeSelection.value) === published) createIssue.activeSelection.value = null;
   published = next;
 }
-watch(composeSelection, publish);
+// Only a Shift+click range is a selection for ⌘⇧I: a box opened to comment
+// on one line is not.
+watch(() => (composeRange.value ? composeSelection.value : null), publish);
 onUnmounted(() => publish(null));
 // Another file: the box (and its line numbers) belonged to the previous one.
 watch(() => props.filePath, closeCompose);
@@ -367,7 +373,7 @@ watch(() => props.filePath, closeCompose);
 function fileIssueFromCompose() {
   const sel = composeSelection.value;
   if (!sel || !createIssue) return;
-  void createIssue.openFromSelection(sel);
+  void createIssue.openFromSelection({ ...sel, intro: composeText.value });
   closeCompose();
 }
 
@@ -376,7 +382,8 @@ function buildComposeParams(): CommentParams | null {
   const body = composeText.value.trim();
   const { line, side } = composeLine.value;
   const base: CommentParams = { path: props.filePath, line, side, body };
-  if (selectionStart.value && selectionStart.value.line !== line) {
+  // A range, even when its two ends share a number (-x / +y on line 10).
+  if (composeRange.value && selectionStart.value) {
     return {
       ...base,
       // Always the range's first row (see extendCompose).
@@ -672,7 +679,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
             @click="row.dl.type !== 'add' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
-            :title="row.dl.type !== 'add' ? t('pr.inline.commentTooltip') : undefined"
+            :title="row.dl.type !== 'add' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
           >
             <span class="pid-lno-num">{{ row.dl.oldLineNo ?? '' }}</span>
             <span class="pid-lno-icon">+</span>
@@ -682,7 +689,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
             @click="row.dl.type !== 'delete' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
-            :title="row.dl.type !== 'delete' ? t('pr.inline.commentTooltip') : undefined"
+            :title="row.dl.type !== 'delete' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
           >
             <span class="pid-lno-num">{{ row.dl.newLineNo ?? '' }}</span>
             <span class="pid-lno-icon">+</span>
@@ -924,7 +931,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
                 @click="row.dl.type !== 'add' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
-                :title="row.dl.type !== 'add' ? t('pr.inline.commentTooltip') : undefined"
+                :title="row.dl.type !== 'add' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
               >
                 <span class="pid-lno-num">{{ row.dl.oldLineNo ?? '' }}</span>
                 <span class="pid-lno-icon">+</span>
@@ -933,7 +940,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
                 @click="row.dl.type !== 'delete' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
-                :title="row.dl.type !== 'delete' ? t('pr.inline.commentTooltip') : undefined"
+                :title="row.dl.type !== 'delete' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
               >
                 <span class="pid-lno-num">{{ row.dl.newLineNo ?? '' }}</span>
                 <span class="pid-lno-icon">+</span>

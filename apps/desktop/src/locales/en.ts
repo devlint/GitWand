@@ -1167,6 +1167,7 @@ const en = {
       reviewBtn: "+ Review",
       reviewBtnCount: "+ Review ({0})",
       commentTooltip: "Add a comment",
+      commentRangeTooltip: "Add a comment (Shift+click another line for a range)",
       suggestTooltip: "Suggest a change",
       suggestTitle: "Code suggestion",
       suggestHint: "Edit the code — it will be submitted as a GitHub suggestion block.",

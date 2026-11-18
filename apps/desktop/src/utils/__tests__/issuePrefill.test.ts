@@ -173,4 +173,17 @@ describe("selectionIssuePrefill", () => {
     expect(body.split("\n").filter((l) => l === "+x")).toHaveLength(SELECTION_MAX_LINES);
     expect(body).toContain("\n(first 200 of 250 lines)\n");
   });
+
+  it("says when the lines are from the old version", () => {
+    const sel: DiffSelection = { path: "x.ts", lines: [del(4, "a"), del(5, "b")], source: { kind: "pr", number: 1, url: "u", headSha: null } };
+    expect(selectionIssuePrefill(sel, { permalink: null, commitUrl: null }).body).toContain("`x.ts` old lines 4–5, ");
+  });
+
+  it("keeps the body under GitHub's limit when lines are very long", () => {
+    const pr = { kind: "pr" as const, number: 1, url: "u", headSha: null };
+    const long = Array.from({ length: 100 }, (_, i) => add(i + 1, "y".repeat(5000)));
+    const body = selectionIssuePrefill({ path: "x", lines: long, source: pr }, { permalink: null, commitUrl: null }).body;
+    expect(body.length).toBeLessThan(65536);
+    expect(body).toMatch(/\n\(first \d+ of 100 lines\)\n/);
+  });
 });

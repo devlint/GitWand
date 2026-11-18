@@ -145,7 +145,7 @@ function mountRange(props: Record<string, unknown> = {}, available = true) {
   document.body.appendChild(container);
   const app = createApp(PrInlineDiff as any, {
     diff: rangeDiff(), filePath: "src/r.ts", comments: [], prNumber: 12,
-    prUrl: "https://github.com/o/r/pull/12", headSha: "h".repeat(40), ...props,
+    prUrl: "https://github.com/o/r/pull/12", headSha: "h".repeat(40), forgeName: "github", ...props,
   });
   app.provide(CREATE_ISSUE_KEY, fake as any);
   const vm = app.mount(container);
@@ -269,12 +269,13 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(b.mounted.container.querySelector(".pid-issue-btn")).toBeNull();
   });
 
-  it("closing the box or changing file clears the published selection", async () => {
+  it("closing the box clears the published selection", async () => {
     const r = mountRange();
     mounted = r.mounted;
     const c = r.mounted.container;
     await nextTick();
     clickNo(newNo(c, 3));
+    clickNo(newNo(c, 4), true);
     await nextTick();
     expect(r.fake.activeSelection.value).not.toBeNull();
     c.querySelector<HTMLButtonElement>(".pid-cancel-btn")!.click();
@@ -291,7 +292,7 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     const app = createApp({
       render: () => h(PrInlineDiff as any, {
         diff: rangeDiff(), filePath: filePath.value, comments: [], prNumber: 12,
-        prUrl: "https://github.com/o/r/pull/12", headSha: "h".repeat(40),
+        prUrl: "https://github.com/o/r/pull/12", headSha: "h".repeat(40), forgeName: "github",
       }),
     });
     app.provide(CREATE_ISSUE_KEY, fake as any);
@@ -299,6 +300,7 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     mounted = { app, container, vm: null };
     await nextTick();
     clickNo(newNo(container, 3));
+    clickNo(newNo(container, 5), true);
     await nextTick();
     expect(activeSelection.value).not.toBeNull();
     filePath.value = "src/other.ts";
@@ -306,5 +308,86 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     await nextTick();
     expect(container.querySelector(".pid-compose")).toBeNull();
     expect(activeSelection.value).toBeNull();
+  });
+
+  /** One modified line: `-old` (old 2) then `+new` (new 2), with context around. */
+  function modifiedDiff(): GitDiff {
+    return {
+      path: "src/m.ts",
+      hunks: [{
+        header: "@@ -1,3 +1,3 @@", oldStart: 1, oldCount: 3, newStart: 1, newCount: 3,
+        lines: [
+          line("context", "a", 1, 1),
+          line("delete", "old", 2, undefined),
+          line("add", "new", undefined, 2),
+          line("context", "z", 3, 3),
+        ],
+      }],
+    };
+  }
+  function cells(container: HTMLElement, rowIdx: number): HTMLElement[] {
+    return [...container.querySelectorAll<HTMLElement>(".pid-row")[rowIdx].querySelectorAll<HTMLElement>(".pid-lno")];
+  }
+
+  it("a deleted-then-added line with the same number is still a range comment", async () => {
+    const created = vi.fn();
+    const r = mountRange({ diff: modifiedDiff(), filePath: "src/m.ts", onCreateComment: created });
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(cells(c, 1)[0]); // -old, old number 2
+    await nextTick();
+    clickNo(cells(c, 2)[1], true); // +new, new number 2
+    await nextTick();
+    await typeInCompose(c, "x");
+    c.querySelector<HTMLButtonElement>(".pid-submit-btn")!.click();
+    expect(created).toHaveBeenCalledWith(expect.objectContaining({ line: 2, side: "RIGHT", start_line: 2, start_side: "LEFT" }));
+  });
+
+  it("a range ending on a deleted line starts on the old side", async () => {
+    const created = vi.fn();
+    const r = mountRange({ diff: modifiedDiff(), filePath: "src/m.ts", onCreateComment: created });
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(cells(c, 0)[1]); // context a (1/1)
+    await nextTick();
+    clickNo(cells(c, 1)[0], true); // -old (old 2)
+    await nextTick();
+    await typeInCompose(c, "x");
+    c.querySelector<HTMLButtonElement>(".pid-submit-btn")!.click();
+    expect(created).toHaveBeenCalledWith(expect.objectContaining({ line: 2, side: "LEFT", start_line: 1, start_side: "LEFT" }));
+  });
+
+  it("other forges get no range (their comments are single-line)", async () => {
+    const created = vi.fn();
+    const r = mountRange({ forgeName: "gitea", onCreateComment: created });
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    await nextTick();
+    clickNo(newNo(c, 6), true);
+    await nextTick();
+    expect(c.querySelectorAll(".pid-row--selected")).toHaveLength(0);
+    await typeInCompose(c, "x");
+    c.querySelector<HTMLButtonElement>(".pid-submit-btn")!.click();
+    expect(created.mock.calls[0][0].start_line).toBeUndefined();
+  });
+
+  it("a lone comment box is not a selection; typing does not republish one", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    await nextTick();
+    expect(r.fake.activeSelection.value).toBeNull();
+    clickNo(newNo(c, 5), true);
+    await nextTick();
+    const sel = r.fake.activeSelection.value;
+    expect(sel).not.toBeNull();
+    await typeInCompose(c, "typing");
+    expect(r.fake.activeSelection.value).toBe(sel);
   });
 });

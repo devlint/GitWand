@@ -291,6 +291,9 @@ function fileIssue() {
   if (sel && createIssue) void createIssue.openFromSelection(sel);
 }
 
+/** The line numbers' tooltip, computed once rather than per cell. */
+const pickTitle = computed(() => (canSelectLines.value ? t("createIssue.selectionHint") : undefined));
+
 function onDocKeydown(e: KeyboardEvent) {
   if (e.key === "Escape" && lineSel.value && !document.querySelector('[aria-modal="true"]')) clearLineSel();
 }
@@ -298,6 +301,8 @@ function onDocMousedown(e: MouseEvent) {
   if (!lineSel.value) return;
   const target = e.target as Element | null;
   if (target?.closest?.(".cdv-line-no, .cdv-issue-btn")) return;
+  // The diff's own scroll area: a press on its scrollbar is scrolling.
+  if (target && target === contentEl.value) return;
   clearLineSel();
 }
 onMounted(() => {
@@ -535,7 +540,7 @@ function onContentScroll(e: Event) {
               <div class="cdv-hunk-header mono">
                 <span>{{ hunk.header }}</span>
                 <button
-                  v-if="canSelectLines && isHunkSelected(fileIdx - 1, hunkIdx)"
+                  v-if="selection && isHunkSelected(fileIdx - 1, hunkIdx)"
                   type="button"
                   class="cdv-issue-btn"
                   @click="fileIssue"
@@ -554,13 +559,13 @@ function onContentScroll(e: Event) {
                     <td
                       class="cdv-line-no mono"
                       :class="{ 'cdv-line-no--pick': canSelectLines }"
-                      :title="canSelectLines ? t('createIssue.selectionHint') : undefined"
+                      :title="pickTitle"
                       @click="onLineNoClick($event, fileIdx - 1, hunkIdx, lineIdx, 'row')"
                     >{{ line.oldLineNo ?? '' }}</td>
                     <td
                       class="cdv-line-no mono"
                       :class="{ 'cdv-line-no--pick': canSelectLines }"
-                      :title="canSelectLines ? t('createIssue.selectionHint') : undefined"
+                      :title="pickTitle"
                       @click="onLineNoClick($event, fileIdx - 1, hunkIdx, lineIdx, 'row')"
                     >{{ line.newLineNo ?? '' }}</td>
                     <td class="cdv-line-marker mono">
@@ -584,7 +589,7 @@ function onContentScroll(e: Event) {
                     <td
                       class="cdv-line-no mono"
                       :class="[pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty', { 'cdv-line-no--pick': canSelectLines && pair.left, 'cdv-cell--selected': isSelected(fileIdx - 1, hunkIdx, pairIdx, 'old') }]"
-                      :title="canSelectLines && pair.left ? t('createIssue.selectionHint') : undefined"
+                      :title="pair.left ? pickTitle : undefined"
                       @click="pair.left && onLineNoClick($event, fileIdx - 1, hunkIdx, pairIdx, 'old')"
                     >
                       {{ pair.left?.oldLineNo ?? '' }}
@@ -599,7 +604,7 @@ function onContentScroll(e: Event) {
                     <td
                       class="cdv-line-no mono"
                       :class="[pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty', { 'cdv-line-no--pick': canSelectLines && pair.right, 'cdv-cell--selected': isSelected(fileIdx - 1, hunkIdx, pairIdx, 'new') }]"
-                      :title="canSelectLines && pair.right ? t('createIssue.selectionHint') : undefined"
+                      :title="pair.right ? pickTitle : undefined"
                       @click="pair.right && onLineNoClick($event, fileIdx - 1, hunkIdx, pairIdx, 'new')"
                     >
                       {{ pair.right?.newLineNo ?? '' }}

@@ -1150,6 +1150,7 @@ const es: Locale = {
       addToReviewPending: "Añadir a la review ({0} pendientes)",
       reviewBtn: "+ Review",
       commentTooltip: "Añadir un comentario",
+      commentRangeTooltip: "Añadir un comentario (Mayús+clic en otra línea para un rango)",
       suggestTooltip: "Sugerir un cambio",
       suggestTitle: "Sugerencia de código",
       suggestHint: "Edite el código — se enviará como bloque de sugerencia de GitHub.",

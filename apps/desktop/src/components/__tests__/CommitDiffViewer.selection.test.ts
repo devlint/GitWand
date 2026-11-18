@@ -66,7 +66,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function mount(opts: { available?: boolean; withProvider?: boolean; diffMode?: "inline" | "side-by-side" } = {}) {
+function mount(opts: { available?: boolean; withProvider?: boolean; diffMode?: "inline" | "side-by-side"; commitInfo?: GitLogEntry | null } = {}) {
   const activeSelection = ref<DiffSelection | null>(null) as Ref<DiffSelection | null>;
   const openFromSelection = vi.fn(async (_sel: DiffSelection) => {});
   const fake = { available: ref(opts.available ?? true), activeSelection, openFromSelection };
@@ -79,7 +79,7 @@ function mount(opts: { available?: boolean; withProvider?: boolean; diffMode?: "
         h(CommitDiffViewer as any, {
           diffs: DIFFS,
           commitHash: commitHash.value,
-          commitInfo: ENTRY,
+          commitInfo: opts.commitInfo === undefined ? ENTRY : opts.commitInfo,
           diffMode: opts.diffMode ?? "inline",
         });
     },
@@ -203,5 +203,23 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     click(numberCell(0, 1));
     await nextTick();
     expect(document.querySelector(".cdv-line--selected")).toBeNull();
+  });
+
+  it("pressing the diff's own scroll area (its scrollbar) keeps the selection", async () => {
+    const { fake } = mount();
+    await nextTick();
+    click(numberCell(0, 1));
+    await nextTick();
+    document.querySelector(".cdv-content")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await nextTick();
+    expect(fake.activeSelection.value).not.toBeNull();
+  });
+
+  it("no button when the commit's details are not loaded", async () => {
+    mount({ commitInfo: null });
+    await nextTick();
+    click(numberCell(0, 1));
+    await nextTick();
+    expect(document.querySelector(".cdv-issue-btn")).toBeNull();
   });
 });
