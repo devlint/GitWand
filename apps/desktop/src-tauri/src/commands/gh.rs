@@ -1394,6 +1394,15 @@ impl GhRepo {
         }
     }
 
+    /// A repository on github.com, whatever the working directory's remote
+    /// (GitWand's own repository, for resolver reports, #301).
+    pub(crate) fn github_com(nwo: &str) -> GhRepo {
+        GhRepo {
+            host_prefix: String::new(),
+            nwo: nwo.to_string(),
+        }
+    }
+
     /// Another repository on the same host (a fork's parent).
     pub(crate) fn sibling(&self, nwo: String) -> GhRepo {
         GhRepo {
@@ -1557,9 +1566,9 @@ fn ssh_resolved_host(host: &str) -> Option<String> {
     })
 }
 
-/// Whether `gh` is signed in to `host` (an Enterprise host; github.com is
-/// always a GitHub host). Cached for the session.
-fn gh_signed_in_to(host: &str) -> bool {
+/// Whether `gh` is signed in to `host` (an Enterprise host, or github.com for
+/// GitWand's resolver reports). Cached for the session.
+pub(crate) fn gh_signed_in_to(host: &str) -> bool {
     if !is_plain_host(host) {
         return false;
     }

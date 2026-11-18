@@ -4653,6 +4653,20 @@ export async function ghCreateIssue(cwd: string, input: CreateIssueInput): Promi
   return devPost<CreatedIssue>("/api/gh-create-issue", { cwd, input }, "gh create issue");
 }
 
+/** A resolver report on GitWand's own repository (#301): github.com, whatever the current repository. */
+export async function ghCreateGitwandIssue(input: { title: string; body: string }): Promise<CreatedIssue> {
+  // NETWORK, as for `ghCreateIssue`: a frontend timeout while the POST still
+  // lands would invite a duplicate.
+  if (isTauri()) return tauriInvoke<CreatedIssue>("gh_create_gitwand_issue", { input }, IPC_TIMEOUT.NETWORK);
+  return devPost<CreatedIssue>("/api/gh-create-gitwand-issue", { input }, "gh create gitwand issue");
+}
+
+/** Whether a report can be written to GitWand's repository (a token, or `gh` on github.com). */
+export async function ghGitwandWritable(): Promise<boolean> {
+  if (isTauri()) return tauriInvoke<boolean>("gh_gitwand_writable", {});
+  return devGet<boolean>("/api/gh-gitwand-writable", {}, "gh gitwand writable");
+}
+
 export async function ghListLabels(cwd: string, repo: string): Promise<RepoLabel[]> {
   if (isTauri()) return tauriInvoke<RepoLabel[]>("gh_list_labels", { cwd, repo }, IPC_TIMEOUT.NETWORK);
   return devGet<RepoLabel[]>("/api/gh-list-labels", { cwd, repo }, "gh list labels");

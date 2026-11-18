@@ -5,7 +5,7 @@
 //! command that takes a `repo` checks it against those targets, recomputed
 //! here, so the frontend cannot aim a write anywhere else.
 
-use super::gh::{gh_api_on, gh_origin_repo, GhRepo};
+use super::gh::{gh_api_on, gh_origin_repo, gh_signed_in_to, GhRepo};
 use super::github_api::{
     rest_api_json, rest_api_json_cached, settings_github_token, with_rest_other_repo_using,
     with_rest_using,
@@ -385,6 +385,78 @@ pub(crate) async fn gh_create_issue(
         .map_err(|e| e.to_string())?
 }
 
+// ─── GitWand's own repository: resolver reports ────────────────────────────
+
+/// Where a "bad resolution" report goes when the user sends it to GitWand
+/// (#301): always github.com, whatever the current repository's forge or host.
+pub(crate) const GITWAND_REPO: &str = "devlint/GitWand";
+
+fn gitwand_repo() -> GhRepo {
+    GhRepo::github_com(GITWAND_REPO)
+}
+
+/// A resolver report: a title and a body, nothing else (no triage rights on
+/// GitWand's repository, so no labels, assignees or milestone).
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitwandIssueInput {
+    pub(crate) title: String,
+    pub(crate) body: String,
+}
+
+fn gitwand_payload(input: &GitwandIssueInput) -> Result<serde_json::Value, String> {
+    let title = input.title.trim();
+    if title.is_empty() {
+        return Err("Title is required".to_string());
+    }
+    Ok(serde_json::json!({ "title": title, "body": input.body }))
+}
+
+fn create_gitwand_issue_inner(input: &GitwandIssueInput) -> Result<CreatedIssue, String> {
+    let payload = gitwand_payload(input)?.to_string();
+    let path = format!("repos/{}/issues", GITWAND_REPO);
+    // Its own github.com path: the helpers behind `api_call` choose the token
+    // and the host from the working directory's `origin`, which may be a
+    // GitHub Enterprise host, another forge, or nothing at all.
+    let attempt = match issue_token() {
+        Some(tok) => rest_api_json("POST", &path, &tok, Some(&payload), Some(60)),
+        None => gh_api_on(
+            &std::env::temp_dir().to_string_lossy(),
+            &gitwand_repo(),
+            "POST",
+            &path,
+            Some(payload),
+            Duration::from_secs(60),
+        ),
+    };
+    match attempt {
+        Ok(created) => created_from(&created),
+        Err(e) if post_may_have_landed(&e) => Err(format!("{}{}", MAY_HAVE_BEEN_CREATED, e)),
+        Err(e) => Err(e),
+    }
+}
+
+/// File a resolver report on GitWand's repository (#301).
+#[tauri::command]
+pub(crate) async fn gh_create_gitwand_issue(
+    input: GitwandIssueInput,
+) -> Result<CreatedIssue, String> {
+    tauri::async_runtime::spawn_blocking(move || create_gitwand_issue_inner(&input))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Whether a report can be written to GitWand's repository: a GitHub token in
+/// Settings, else `gh` signed in to github.com. No API request.
+#[tauri::command]
+pub(crate) async fn gh_gitwand_writable() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        issue_token().is_some() || gh_signed_in_to("github.com")
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 // ─── Pickers: labels, milestones, assignees ────────────────────────────────
 
 /// Pages of 100 from `fetch(page)`, up to `max_pages`, stopping at the first
@@ -578,6 +650,30 @@ pub(crate) async fn gh_list_assignees(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn gitwand_repo_is_on_github_com() {
+        let r = gitwand_repo();
+        assert_eq!(r.selector(), "devlint/GitWand");
+        assert_eq!(r.enterprise_host(), None);
+    }
+
+    #[test]
+    fn gitwand_payload_is_title_and_body_only() {
+        let input = GitwandIssueInput {
+            title: " Resolver: bad resolution ".into(),
+            body: "b".into(),
+        };
+        assert_eq!(
+            gitwand_payload(&input).unwrap(),
+            json!({"title": "Resolver: bad resolution", "body": "b"})
+        );
+        let blank = GitwandIssueInput {
+            title: "  ".into(),
+            body: "b".into(),
+        };
+        assert!(gitwand_payload(&blank).is_err());
+    }
 
     fn origin(has_issues: bool, fork: bool) -> serde_json::Value {
         json!({"full_name":"me/app","html_url":"https://github.com/me/app","has_issues":has_issues,"fork":fork})

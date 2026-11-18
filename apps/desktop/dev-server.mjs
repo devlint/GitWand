@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -5525,6 +5525,38 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/gh-gitwand-writable — mirrors `gh_gitwand_writable`: the
+    // dev-server writes with the `gh` token, so a token is enough.
+    if (url.pathname === "/api/gh-gitwand-writable" && req.method === "GET") {
+      return jsonResponse(req, res, !!getGithubToken());
+    }
+
+    // POST /api/gh-create-gitwand-issue { input } — mirrors
+    // `gh_create_gitwand_issue` (#301), on GITWAND_DEV_REPORT_REPO when set.
+    if (url.pathname === "/api/gh-create-gitwand-issue" && req.method === "POST") {
+      const { input } = await readBody(req);
+      const built = devGitwandReport(input, process.env);
+      if (built.error) return jsonResponse(req, res, { error: built.error }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        let resp;
+        try {
+          resp = await githubFetch(`/repos/${built.repo}/issues`, token, undefined, {
+            method: "POST",
+            body: JSON.stringify(built.payload),
+          });
+        } catch (err) {
+          return jsonResponse(req, res, { error: MAY_HAVE_BEEN_CREATED + err.message }, 502);
+        }
+        const created = await resp.json().catch(() => ({}));
+        if (!resp.ok) return jsonResponse(req, res, { error: devCreateFailure(resp.status, created) }, resp.status);
+        return jsonResponse(req, res, { number: created.number, url: created.html_url || "" });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
     // GET /api/gh-list-{labels,milestones,assignees}?cwd=<path>&repo=<owner/repo>
     // — mirror `gh_list_labels` / `gh_list_milestones` / `gh_list_assignees`.
     // (The condition below names each route literally: commandRegistry.test
@@ -9779,6 +9811,8 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    GET  /api/gh-issue-available?cwd=<path>`);
   console.log(`    GET  /api/gh-issue-targets?cwd=<path>`);
   console.log(`    POST /api/gh-create-issue  { cwd, input }`);
+  console.log(`    GET  /api/gh-gitwand-writable`);
+  console.log(`    POST /api/gh-create-gitwand-issue  { input }`);
   console.log(`    GET  /api/gh-list-labels?cwd=<path>&repo=<owner/repo>`);
   console.log(`    GET  /api/gh-list-milestones?cwd=<path>&repo=<owner/repo>`);
   console.log(`    GET  /api/gh-list-assignees?cwd=<path>&repo=<owner/repo>`);

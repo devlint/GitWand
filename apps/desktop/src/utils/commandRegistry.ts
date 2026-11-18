@@ -112,6 +112,16 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
     cliPathOnly:
       "The dev-server always calls the REST API with the `gh` token; the Rust command sends the same JSON through `gh api --input -` when no Settings token is configured.",
   },
+  gh_create_gitwand_issue: {
+    route: "/api/gh-create-gitwand-issue",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token, and posts to `GITWAND_DEV_REPORT_REPO` when set (QA on a test fork); the Rust command uses the Settings token, else `gh api` on github.com, always on devlint/GitWand.",
+  },
+  gh_gitwand_writable: {
+    route: "/api/gh-gitwand-writable",
+    cliPathOnly:
+      "The dev-server answers from the `gh` token's presence; the Rust command checks the Settings token, else `gh auth status --hostname github.com`.",
+  },
   gh_list_labels: {
     route: "/api/gh-list-labels",
     cliPathOnly:
