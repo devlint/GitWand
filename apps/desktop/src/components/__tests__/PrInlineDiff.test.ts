@@ -594,4 +594,46 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     await nextTick();
     expect(r.mounted.container.querySelector(".pid-compose textarea")?.hasAttribute("data-issue-shortcut")).toBe(true);
   });
+
+  it("typing keeps the published range the same (it does not jump ahead of others)", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 5), true);
+    await nextTick();
+    const sel = r.fake.activeSelection.value;
+    await typeInCompose(c, "more text");
+    expect(r.fake.activeSelection.value).toBe(sel);
+    expect(sel?.intro).toBe("more text");
+  });
+
+  it("a range filed as an issue is not offered again after the diff reloads", async () => {
+    const diff = vueRef(rangeDiff());
+    const r = mountReactive(diff);
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 5), true);
+    await nextTick();
+    r.fake.activeSelection.value?.onOpened?.();
+    await nextTick();
+    expect(r.fake.activeSelection.value).toBeNull();
+    diff.value = rangeDiff();
+    await nextTick();
+    await nextTick();
+    expect(c.querySelectorAll(".pid-row--selected")).toHaveLength(3);
+    expect(r.fake.activeSelection.value).toBeNull();
+  });
+
+  it("Shift+press is left to the browser where no range can be made", async () => {
+    const r = mountRange({ forgeName: "gitlab" });
+    mounted = r.mounted;
+    await nextTick();
+    const ev = new MouseEvent("mousedown", { bubbles: true, cancelable: true, shiftKey: true });
+    newNo(r.mounted.container, 3).dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+  });
 });

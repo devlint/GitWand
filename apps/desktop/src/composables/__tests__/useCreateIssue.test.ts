@@ -502,6 +502,36 @@ describe("useCreateIssue — from a diff selection", () => {
 });
 
 describe("useCreateIssue — selection hand-off", () => {
+  it("keeps the selection when its prefill could not land (typed meanwhile)", async () => {
+    const onOrigin = deferred<boolean>();
+    const { api } = setup(provider(), undefined, () => onOrigin.promise);
+    await api.refreshAvailability();
+    const onOpened = vi.fn();
+    const pending = api.openFromSelection({ ...commitSel(ADDED), onOpened });
+    await flush();
+    api.title.value = "typed first";
+    onOrigin.resolve(true);
+    await pending;
+    expect(api.body.value).toBe("");
+    expect(onOpened).not.toHaveBeenCalled();
+  });
+
+  it("keeps the selection when its form was closed and another opened meanwhile", async () => {
+    const targets = deferred<IssueTargets>();
+    const p = provider({ issueTargets: vi.fn(() => targets.promise) as any });
+    const { api } = setup(p);
+    await api.refreshAvailability();
+    const onOpened = vi.fn();
+    const pending = api.openFromSelection({ ...prSel(ADDED), onOpened });
+    await flush();
+    api.close();
+    void api.open();
+    targets.resolve({ targets: [ORIGIN], defaultRepo: "me/app" });
+    await pending;
+    await flush();
+    expect(onOpened).not.toHaveBeenCalled();
+  });
+
   it("lets the selection go only once the form could read its targets", async () => {
     const failing = setup(provider({ issueTargets: vi.fn(async () => { throw new Error("auth"); }) }));
     await failing.api.refreshAvailability();

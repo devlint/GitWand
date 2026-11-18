@@ -359,4 +359,12 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     await nextTick();
     expect(wordDiffCalls.n).toBe(before);
   });
+
+  it("Shift+press is left to the browser when lines cannot be selected", async () => {
+    mount({ available: false });
+    await nextTick();
+    const ev = new MouseEvent("mousedown", { bubbles: true, cancelable: true, shiftKey: true });
+    numberCell(0, 1).dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+  });
 });

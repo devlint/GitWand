@@ -268,9 +268,6 @@ const lineRange = useLineRange();
 /** The range has been filed as an issue: kept for the comment, no longer
  *  offered to ⌘⇧I. Any new pick offers it again. */
 const handedOver = ref(false);
-watch(() => lineRange.range.value, () => {
-  handedOver.value = false;
-});
 
 /** The rows a Shift+click range covers in the compose box's hunk. */
 const composeRange = computed<{ lo: number; hi: number } | null>(() => {
@@ -284,6 +281,7 @@ function openCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
   composeLine.value = { hunkIdx, lineIdx, line: lineNoOf(dl), side: sideOf(dl) };
   composeText.value = "";
   lineRange.pick(String(hunkIdx), lineIdx, false);
+  handedOver.value = false;
 }
 
 /**
@@ -300,6 +298,7 @@ function extendCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
     return;
   }
   lineRange.pick(String(hunkIdx), lineIdx, true);
+  handedOver.value = false;
   placeComposeAtRangeEnd(hunkIdx);
   // The box is drawn again under its new last row: keep typing where it was.
   void nextTick(() => composeTextarea?.focus());
@@ -376,6 +375,7 @@ function closeCompose() {
   composeLine.value = null;
   composeText.value = "";
   lineRange.clear();
+  handedOver.value = false;
 }
 
 // ─── Create an issue from the compose box's lines (#301) ─
@@ -397,7 +397,10 @@ const composeSelection = computed<DiffSelection | null>(() => {
     path: props.filePath,
     ...(props.diff?.oldPath ? { oldPath: props.diff.oldPath } : {}),
     lines,
-    intro: composeText.value,
+    // Read when filed: typing must not rebuild (and so re-rank) the selection.
+    get intro() {
+      return composeText.value;
+    },
     source: { kind: "pr", number: props.prNumber, url: props.prUrl, headSha: props.headSha || null },
     // Filed (button or ⌘⇧I): no longer offered to ⌘⇧I; the box, its range
     // and the draft stay for the comment (cancelling the issue costs nothing).
@@ -415,8 +418,8 @@ watch(() => props.filePath, closeCompose);
 
 function fileIssueFromCompose() {
   const sel = composeSelection.value;
-  // The box closes only once the form has opened (`onOpened`): refused (a
-  // form being typed in), the text stays.
+  // The box, its range and the draft stay either way (`onOpened` only stops
+  // offering the range to ⌘⇧I once filed).
   if (sel && createIssue) void createIssue.openFromSelection(sel);
 }
 
@@ -715,7 +718,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
           <div
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
-            @mousedown="preventShiftSelect"
+            @mousedown="canRange && preventShiftSelect($event)"
             @click="row.dl.type !== 'add' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
             :title="row.dl.type !== 'add' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
           >
@@ -726,7 +729,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
           <div
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
-            @mousedown="preventShiftSelect"
+            @mousedown="canRange && preventShiftSelect($event)"
             @click="row.dl.type !== 'delete' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
             :title="row.dl.type !== 'delete' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
           >
@@ -971,7 +974,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               <div
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
-                @mousedown="preventShiftSelect"
+                @mousedown="canRange && preventShiftSelect($event)"
                 @click="row.dl.type !== 'add' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
                 :title="row.dl.type !== 'add' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
               >
@@ -981,7 +984,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               <div
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
-                @mousedown="preventShiftSelect"
+                @mousedown="canRange && preventShiftSelect($event)"
                 @click="row.dl.type !== 'delete' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
                 :title="row.dl.type !== 'delete' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
               >

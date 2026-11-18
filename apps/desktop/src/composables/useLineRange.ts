@@ -38,9 +38,8 @@ export function preventShiftSelect(e: MouseEvent): void {
 export function useLineRange(opts?: {
   /**
    * Clear on a press outside `keep` (nor on `scrollEl` itself: a press on
-   * its scrollbar is scrolling). Escape clears through `onKeydown`, bound on
-   * the diff: only when the user is in the diff, and the key goes on to menus
-   * and overlays listening further up.
+   * its scrollbar is scrolling, nor inside a dialog). Escape clears through
+   * `onKeydown`, bound on the diff, so only when the user is in the diff.
    */
   dismiss?: { keep: string; scrollEl?: () => HTMLElement | null };
 }): LineRangeApi {
@@ -66,10 +65,13 @@ export function useLineRange(opts?: {
     state.value = null;
   }
 
+  /** Escape: the topmost thing first. A menu or dialog open over the diff
+   *  gets it (the range stays); otherwise it clears the range, and only that. */
   function onKeydown(e: KeyboardEvent) {
     if (e.key !== "Escape" || !state.value || e.defaultPrevented) return;
-    if (document.querySelector('[aria-modal="true"]')) return;
+    if (document.querySelector('[aria-modal="true"], [role="menu"], [role="dialog"]')) return;
     clear();
+    e.stopPropagation();
   }
 
   const dismiss = opts?.dismiss;
@@ -77,7 +79,8 @@ export function useLineRange(opts?: {
     const onMousedown = (e: MouseEvent) => {
       if (!state.value) return;
       const target = e.target as Element | null;
-      if (target?.closest?.(dismiss.keep)) return;
+      // Its own controls, and a dialog (the issue form opened from it).
+      if (target?.closest?.(dismiss.keep) || target?.closest?.('[aria-modal="true"]')) return;
       if (target && target === dismiss.scrollEl?.()) return;
       clear();
     };

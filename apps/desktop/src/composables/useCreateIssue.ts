@@ -49,9 +49,9 @@ export function newIssueShortcutLabel(mac: boolean): string {
   return mac ? "⌘⇧I" : "Ctrl+Alt+I";
 }
 
-/** A text field, an editable element or the terminal: where keys type. */
-/** A field typed in (the shortcut is left to it), unless it asks for the
- *  shortcut with `data-issue-shortcut` (the PR comment box: a range). */
+/** A text field, an editable element or the terminal: where keys type, so
+ *  the shortcut is left to it — unless it asks for the shortcut with
+ *  `data-issue-shortcut` (the PR comment box, which may hold a range). */
 function isTypingTarget(t: EventTarget | null): boolean {
   const el = t as (HTMLElement & { closest?: (s: string) => Element | null }) | null;
   if (!el || typeof el !== "object") return false;
@@ -122,7 +122,7 @@ export interface CreateIssueApi {
    * given `origin`'s page, for links); it lands when ready, the form showing
    * at once.
    */
-  open(prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>)): Promise<void>;
+  open(prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>)): Promise<boolean>;
   /**
    * "Create issue from commit": the form opens at once, prefilled from
    * `entry`; the commit is linked only once `origin` has it (the link goes to
@@ -311,10 +311,10 @@ export function useCreateIssue(deps: {
 
   async function open(
     prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>),
-  ): Promise<void> {
+  ): Promise<boolean> {
     // Already open (⌘⇧I again, the palette): never wipe what is being typed,
     // nor drop the answer of a create in flight.
-    if (isOpen.value) return;
+    if (isOpen.value) return false;
     reset();
     const gen = generation;
     const openGen = openGeneration;
@@ -322,7 +322,7 @@ export function useCreateIssue(deps: {
     isOpen.value = true;
     loading.value = true;
     const t = await readTargets(formCwd);
-    if (gen !== generation) return;
+    if (gen !== generation) return false;
     loading.value = false;
     targetsFailed.value = t === null;
     if (t !== null) {
@@ -339,11 +339,13 @@ export function useCreateIssue(deps: {
     } catch {
       filled = undefined;
     }
-    if (openGen !== openGeneration || !filled) return;
-    if (title.value !== initial.value.title || body.value !== initial.value.body) return;
+    if (openGen !== openGeneration) return false;
+    if (!filled) return !prefill;
+    if (title.value !== initial.value.title || body.value !== initial.value.body) return false;
     initial.value = { title: filled.title, body: filled.body };
     title.value = filled.title;
     body.value = filled.body;
+    return true;
   }
 
   /**
@@ -351,7 +353,7 @@ export function useCreateIssue(deps: {
    * (the links go to origin's page; a commit only elsewhere would answer
    * 404). The check starts now, alongside the targets read.
    */
-  function openLinkedTo(cwd: string, sha: string, build: (origin: string | null) => IssuePrefill): Promise<void> {
+  function openLinkedTo(cwd: string, sha: string, build: (origin: string | null) => IssuePrefill): Promise<boolean> {
     const onOrigin = commitOnOrigin(cwd, sha).catch(() => false);
     return open(async (origin) => build((await onOrigin) ? origin : null));
   }
@@ -381,7 +383,7 @@ export function useCreateIssue(deps: {
     const cwd = deps.cwd.value;
     if (!cwd || !available.value || !makeRoom()) return false;
     const src = sel.source;
-    let opened: Promise<void>;
+    let opened: Promise<boolean>;
     if (src.kind === "pr") {
       // The PR's own repository (it may be a fork's parent); its base SHA is
       // unknown, so the old version of its lines gets no permalink.
@@ -398,10 +400,10 @@ export function useCreateIssue(deps: {
         }),
       );
     }
-    await opened;
-    // Handed over only once the form could read its targets: a form that
-    // failed (signed out…) must not have cost the selection.
-    if (isOpen.value && !targetsFailed.value) sel.onOpened?.();
+    // Handed over only once its lines are in this very form and the form
+    // could read its targets: a prefill dropped (typed first, form closed
+    // and another opened) or a failed read (signed out…) must not cost it.
+    if ((await opened) && !targetsFailed.value) sel.onOpened?.();
     return true;
   }
 

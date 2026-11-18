@@ -46,8 +46,9 @@ function sameRow(a: DiffLine, b: DiffLine): boolean {
 export function findBlock(diff: GitDiff, rows: DiffLine[]): { hunkIdx: number; start: number } | null {
   if (rows.length === 0) return null;
   const first = rows[0];
-  let best: { hunkIdx: number; start: number; dist: number } | null = null;
-  diff.hunks.forEach((h, hunkIdx) => {
+  let best: { hunkIdx: number; start: number } | null = null;
+  let bestDist = Infinity;
+  for (const [hunkIdx, h] of diff.hunks.entries()) {
     for (let start = 0; start + rows.length <= h.lines.length; start++) {
       if (!rows.every((r, i) => sameRow(h.lines[start + i], r))) continue;
       const at = h.lines[start];
@@ -55,8 +56,11 @@ export function findBlock(diff: GitDiff, rows: DiffLine[]): { hunkIdx: number; s
         first.oldLineNo !== undefined && at.oldLineNo !== undefined
           ? Math.abs(at.oldLineNo - first.oldLineNo) * 2
           : Math.abs((at.newLineNo ?? 0) - (first.newLineNo ?? 0)) * 2 + 1;
-      if (!best || dist < best.dist) best = { hunkIdx, start, dist };
+      if (dist < bestDist) {
+        best = { hunkIdx, start };
+        bestDist = dist;
+      }
     }
-  });
-  return best ? { hunkIdx: (best as { hunkIdx: number }).hunkIdx, start: (best as { start: number }).start } : null;
+  }
+  return best;
 }

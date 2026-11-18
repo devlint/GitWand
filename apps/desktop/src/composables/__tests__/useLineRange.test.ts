@@ -50,24 +50,37 @@ describe("useLineRange", () => {
     expect(r.range.value).toEqual({ group: "h2", anchor: 1, focus: 1, lo: 1, hi: 1 });
   });
 
-  it("Escape on the diff clears it and lets the key go on; not under a dialog or once handled", () => {
+  it("Escape on the diff clears it, and that is all it does", () => {
     const r = withRange({ dismiss: { keep: ".keep" } });
     r.pick("h", 1, false);
     const handled = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
     handled.preventDefault();
     r.onKeydown(handled);
-    const dialog = document.createElement("div");
-    dialog.setAttribute("aria-modal", "true");
-    document.body.appendChild(dialog);
-    r.onKeydown(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(r.range.value).not.toBeNull();
-    dialog.remove();
     const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
     const stop = vi.spyOn(esc, "stopPropagation");
     r.onKeydown(esc);
     expect(r.range.value).toBeNull();
-    // Menus and overlays listening further up still get it.
-    expect(stop).not.toHaveBeenCalled();
+    // One key, one thing: panels listening further up stay open.
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it("a menu or dialog on top gets Escape first; the range stays", () => {
+    for (const role of ["menu", "dialog"]) {
+      const r = withRange();
+      r.pick("h", 1, false);
+      const top = document.createElement("div");
+      top.setAttribute("role", role);
+      document.body.appendChild(top);
+      const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+      const stop = vi.spyOn(esc, "stopPropagation");
+      r.onKeydown(esc);
+      expect(r.range.value).not.toBeNull();
+      expect(stop).not.toHaveBeenCalled();
+      top.remove();
+      app?.unmount();
+      app = null;
+    }
   });
 
   it("an Escape elsewhere in the document leaves it alone", () => {
@@ -86,6 +99,13 @@ describe("useLineRange", () => {
     r.pick("h", 1, false);
     keep.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     scroller.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    // Inside a dialog (the issue form opened from these lines).
+    const dialog = document.createElement("div");
+    dialog.setAttribute("aria-modal", "true");
+    const btn = document.createElement("button");
+    dialog.appendChild(btn);
+    document.body.appendChild(dialog);
+    btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     expect(r.range.value).not.toBeNull();
     document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     expect(r.range.value).toBeNull();

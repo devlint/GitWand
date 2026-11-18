@@ -581,14 +581,14 @@ function onContentScroll(e: Event) {
                       class="cdv-line-no mono"
                       :class="{ 'cdv-line-no--pick': canSelectLines }"
                       :title="pickTitle"
-                      @mousedown="preventShiftSelect"
+                      @mousedown="canSelectLines && preventShiftSelect($event)"
                       @click="onLineNoClick($event, fileIdx - 1, hunkIdx, lineIdx, 'row')"
                     >{{ line.oldLineNo ?? '' }}</td>
                     <td
                       class="cdv-line-no mono"
                       :class="{ 'cdv-line-no--pick': canSelectLines }"
                       :title="pickTitle"
-                      @mousedown="preventShiftSelect"
+                      @mousedown="canSelectLines && preventShiftSelect($event)"
                       @click="onLineNoClick($event, fileIdx - 1, hunkIdx, lineIdx, 'row')"
                     >{{ line.newLineNo ?? '' }}</td>
                     <td class="cdv-line-marker mono">
@@ -613,7 +613,7 @@ function onContentScroll(e: Event) {
                       class="cdv-line-no mono"
                       :class="[pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty', { 'cdv-line-no--pick': canSelectLines && pair.left, 'cdv-cell--selected': isSelected(fileIdx - 1, hunkIdx, pairIdx, 'old') }]"
                       :title="pair.left ? pickTitle : undefined"
-                      @mousedown="preventShiftSelect"
+                      @mousedown="canSelectLines && preventShiftSelect($event)"
                       @click="pair.left && onLineNoClick($event, fileIdx - 1, hunkIdx, pairIdx, 'old')"
                     >
                       {{ pair.left?.oldLineNo ?? '' }}
@@ -629,7 +629,7 @@ function onContentScroll(e: Event) {
                       class="cdv-line-no mono"
                       :class="[pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty', { 'cdv-line-no--pick': canSelectLines && pair.right, 'cdv-cell--selected': isSelected(fileIdx - 1, hunkIdx, pairIdx, 'new') }]"
                       :title="pair.right ? pickTitle : undefined"
-                      @mousedown="preventShiftSelect"
+                      @mousedown="canSelectLines && preventShiftSelect($event)"
                       @click="pair.right && onLineNoClick($event, fileIdx - 1, hunkIdx, pairIdx, 'new')"
                     >
                       {{ pair.right?.newLineNo ?? '' }}
