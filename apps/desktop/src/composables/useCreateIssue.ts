@@ -7,7 +7,11 @@
 
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
-import { gitExec } from "../utils/backend";
+import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, readGitwandrc } from "../utils/backend";
+import { parseGitwandrc, type SecretPattern } from "@gitwand/core";
+import { IS_MAC } from "../utils/platform";
+import { gitwandReportPrefill, repoReportPrefill, type ResolutionReport } from "../utils/resolutionReport";
+import { scanReportBody, type ReportScan } from "../utils/reportGuard";
 import { isEditableTarget } from "../utils/editableTarget";
 import type {
   CreatedIssue,
@@ -137,6 +141,68 @@ export interface CreateIssueApi {
   close(): void;
   setRepo(repo: string): void;
   submit(): Promise<void>;
+
+  // ─── Report mode ("Report bad resolution", #301 part 3) ───────────────
+  /** The resolution being reported, `null` for any other issue. */
+  report: Ref<ResolutionReport | null>;
+  /** "What should it have been?": its own field, kept across switches. */
+  answer: Ref<string>;
+  /** The report goes to GitWand's repository instead of the current one. */
+  toGitwand: Ref<boolean>;
+  /** The current repository cannot take the issue: GitWand only. */
+  gitwandLocked: Ref<boolean>;
+  /** A report can be written to GitWand (`null` while checking). */
+  gitwandWritable: Ref<boolean | null>;
+  /** "I reviewed the code, it can be public" (GitWand only). */
+  confirmedPublic: Ref<boolean>;
+  /** The secrets scan of what would be sent. */
+  findings: Ref<ReportScan>;
+  /** The description differs from the one generated for the current target. */
+  bodyEdited: ComputedRef<boolean>;
+  /** What is sent: the answer on top of the description. */
+  finalBody: ComputedRef<string>;
+  openFromResolution(r: ResolutionReport): Promise<void>;
+  /** Retarget the report; regenerates title and description (the caller
+   *  confirms first when `bodyEdited`). */
+  setGitwand(on: boolean): void;
+}
+
+/** GitWand's own repository, where resolver reports go (mirrors Rust `GITWAND_REPO`). */
+export const GITWAND_REPO = "devlint/GitWand";
+
+/** The answer to "What should it have been?" on top of a report's body. */
+export function withAnswer(answer: string, body: string): string {
+  const a = answer.trim();
+  return a ? `### What it should have been\n\n${a}\n\n${body}` : body;
+}
+
+/** What report mode needs from outside (tests replace it). */
+export interface ReportDeps {
+  createGitwandIssue?: (input: { title: string; body: string }) => Promise<CreatedIssue>;
+  gitwandWritable?: () => Promise<boolean>;
+  env?: () => { version: string; platform: string };
+  /** The repository's extra secret patterns and entropy threshold. */
+  secretsOptions?: (cwd: string | null) => Promise<{ extraPatterns: SecretPattern[]; entropyThreshold: number }>;
+  scanDebounceMs?: number;
+}
+
+function defaultEnv(): { version: string; platform: string } {
+  const version = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const platform = IS_MAC ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "unknown";
+  return { version, platform };
+}
+
+/** `.gitwandrc`'s extra secret patterns and entropy threshold (4.0 when unset). */
+async function defaultSecretsOptions(cwd: string | null) {
+  let rc: ReturnType<typeof parseGitwandrc> = null;
+  try {
+    rc = cwd ? parseGitwandrc(await readGitwandrc(cwd)) : null;
+  } catch {
+    rc = null;
+  }
+  const extraPatterns: SecretPattern[] = (rc?.secrets?.patterns ?? []).map((p) => ({ ...p }));
+  return { extraPatterns, entropyThreshold: rc?.secrets?.entropyThreshold ?? 4.0 };
 }
 
 export const CREATE_ISSUE_KEY: InjectionKey<CreateIssueApi> = Symbol("createIssue");
@@ -202,7 +268,14 @@ export function useCreateIssue(deps: {
   onCreated: (issue: CreatedIssue) => void;
   /** Whether `origin` has the commit (tests replace the git check). */
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
+  report?: ReportDeps;
 }): CreateIssueApi {
+  const rdeps = deps.report ?? {};
+  const createGitwandIssue = rdeps.createGitwandIssue ?? ghCreateGitwandIssue;
+  const checkGitwandWritable = rdeps.gitwandWritable ?? ghGitwandWritable;
+  const reportEnv = rdeps.env ?? defaultEnv;
+  const secretsOptions = rdeps.secretsOptions ?? defaultSecretsOptions;
+  const scanDebounceMs = rdeps.scanDebounceMs ?? 300;
   const commitOnOrigin = deps.commitOnOrigin ?? gitCommitOnOrigin;
   const isOpen = ref(false);
   const available = ref(false);
@@ -223,6 +296,18 @@ export function useCreateIssue(deps: {
   const error = ref<string | null>(null);
   const outcomeUnknown = ref(false);
   const initial = ref<IssuePrefill>({ title: "", body: "" });
+  const report = shallowRef<ResolutionReport | null>(null);
+  const answer = ref("");
+  const toGitwand = ref(false);
+  const gitwandLocked = ref(false);
+  const gitwandWritable = ref<boolean | null>(null);
+  const confirmedPublic = ref(false);
+  const findings = ref<ReportScan>({ blocking: [], warnings: [] });
+  // A change not scanned yet: a secret typed a moment ago must not slip out.
+  const scanPending = ref(false);
+  let secretsOpts: { extraPatterns: SecretPattern[]; entropyThreshold: number } = { extraPatterns: [], entropyThreshold: 4 };
+  // The repository the report would go to without the switch.
+  let repoTarget: string | null = null;
   // The repository the open form files on: an app tab switch while it is open
   // must not send the issue (or its picker reads) somewhere else.
   let formCwd: string | null = null;
@@ -235,8 +320,11 @@ export function useCreateIssue(deps: {
   let openGeneration = 0;
   let availabilitySeq = 0;
 
+  const finalBody = computed(() => (report.value ? withAnswer(answer.value, body.value) : body.value));
+  const bodyEdited = computed(() => body.value !== initial.value.body);
   const dirty = computed(
     () =>
+      answer.value.trim() !== "" ||
       title.value !== initial.value.title ||
       body.value !== initial.value.body ||
       labels.value.length > 0 ||
@@ -245,7 +333,16 @@ export function useCreateIssue(deps: {
   );
   const canSubmit = computed(
     () =>
-      isOpen.value && !!repo.value && title.value.trim() !== "" && !submitting.value && !outcomeUnknown.value,
+      isOpen.value &&
+      !!repo.value &&
+      title.value.trim() !== "" &&
+      !submitting.value &&
+      !outcomeUnknown.value &&
+      (!toGitwand.value ||
+        (confirmedPublic.value &&
+          gitwandWritable.value === true &&
+          !scanPending.value &&
+          findings.value.blocking.length === 0)),
   );
   const originHtmlUrl = computed(() => targets.value.find((t) => t.isOrigin)?.htmlUrl || null);
 
@@ -318,6 +415,15 @@ export function useCreateIssue(deps: {
     targets.value = [];
     initial.value = { title: "", body: "" };
     clearPickers();
+    report.value = null;
+    answer.value = "";
+    toGitwand.value = false;
+    gitwandLocked.value = false;
+    gitwandWritable.value = null;
+    confirmedPublic.value = false;
+    findings.value = { blocking: [], warnings: [] };
+    scanPending.value = false;
+    repoTarget = null;
   }
 
   async function open(
@@ -420,6 +526,82 @@ export function useCreateIssue(deps: {
     return landed;
   }
 
+  function scanNow() {
+    if (scanTimer) clearTimeout(scanTimer);
+    scanTimer = null;
+    scanPending.value = false;
+    if (!report.value) return;
+    findings.value = scanReportBody(finalBody.value, {
+      ...secretsOpts,
+      blockAt: toGitwand.value ? "medium" : "never",
+    });
+  }
+
+  let scanTimer: ReturnType<typeof setTimeout> | null = null;
+  watch(finalBody, () => {
+    if (!report.value) return;
+    scanPending.value = true;
+    if (scanTimer) clearTimeout(scanTimer);
+    scanTimer = setTimeout(scanNow, scanDebounceMs);
+  });
+  onUnmounted(() => {
+    if (scanTimer) clearTimeout(scanTimer);
+  });
+
+  /** Title and description for the current target (the answer stays apart). */
+  function regenerate() {
+    const r = report.value;
+    if (!r) return;
+    const p = toGitwand.value ? gitwandReportPrefill(r, "", reportEnv()) : repoReportPrefill(r, "");
+    initial.value = p;
+    title.value = p.title;
+    body.value = p.body;
+  }
+
+  function setGitwand(on: boolean) {
+    if (!report.value || submitting.value || outcomeUnknown.value) return;
+    if (!on && gitwandLocked.value) return;
+    generation++;
+    toGitwand.value = on;
+    // Re-confirm every time the report heads for the public repository.
+    confirmedPublic.value = false;
+    clearPickers();
+    repo.value = on ? GITWAND_REPO : repoTarget;
+    if (!on && repo.value) loadPickers(repo.value);
+    regenerate();
+    scanNow();
+  }
+
+  async function openFromResolution(r: ResolutionReport): Promise<void> {
+    if (isOpen.value) return;
+    await open();
+    if (!isOpen.value) return;
+    const openGen = openGeneration;
+    report.value = r;
+    repoTarget = repo.value;
+    gitwandLocked.value = !repoTarget;
+    toGitwand.value = gitwandLocked.value;
+    if (toGitwand.value) {
+      clearPickers();
+      repo.value = GITWAND_REPO;
+    }
+    regenerate();
+    scanNow();
+    const cwd = formCwd;
+    checkGitwandWritable().then(
+      (ok) => { if (openGen === openGeneration) gitwandWritable.value = ok; },
+      () => { if (openGen === openGeneration) gitwandWritable.value = false; },
+    );
+    secretsOptions(cwd).then(
+      (o) => {
+        if (openGen !== openGeneration) return;
+        secretsOpts = o;
+        scanNow();
+      },
+      () => {},
+    );
+  }
+
   async function openFromShortcut(): Promise<void> {
     const sel = activeSelection.value;
     if (sel) await openFromSelection(sel);
@@ -455,20 +637,24 @@ export function useCreateIssue(deps: {
   async function submit(): Promise<void> {
     const p = deps.provider.value;
     const cwd = formCwd;
-    if (!canSubmit.value || !p?.createIssue || !cwd || !repo.value) return;
+    // A GitWand report needs neither the repository's forge nor its folder.
+    if (!canSubmit.value || !repo.value) return;
+    if (!toGitwand.value && (!p?.createIssue || !cwd)) return;
     // Set before the first await: a second call in the same tick sees it.
     submitting.value = true;
     error.value = null;
     const gen = generation;
     try {
-      const created = await p.createIssue(cwd, {
-        repo: repo.value,
-        title: title.value,
-        body: body.value,
-        labels: [...labels.value],
-        assignees: [...assignees.value],
-        milestone: milestone.value,
-      });
+      const created = toGitwand.value
+        ? await createGitwandIssue({ title: title.value, body: finalBody.value })
+        : await p!.createIssue!(cwd!, {
+            repo: repo.value,
+            title: title.value,
+            body: finalBody.value,
+            labels: [...labels.value],
+            assignees: [...assignees.value],
+            milestone: milestone.value,
+          });
       if (gen !== generation) return;
       deps.onCreated(created);
       close();
@@ -518,5 +704,16 @@ export function useCreateIssue(deps: {
     close,
     setRepo,
     submit,
+    report,
+    answer,
+    toGitwand,
+    gitwandLocked,
+    gitwandWritable,
+    confirmedPublic,
+    findings,
+    bodyEdited,
+    finalBody,
+    openFromResolution,
+    setGitwand,
   };
 }
