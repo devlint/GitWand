@@ -2719,7 +2719,7 @@ const es: Locale = {
       answerPlaceholder: "El resultado esperado, o lo que GitWand hizo mal",
       toGitwand: "Enviar a GitWand (informe del motor)",
       toGitwandHint: "Informar del error del motor a los desarrolladores de GitWand en lugar de a este repositorio",
-      publicWarning: "Este informe será público en github.com/devlint/GitWand. Contiene el código de abajo: revísalo y quita todo lo privado.",
+      publicWarning: "Este informe será público en github.com/{0}. Contiene el código de abajo: revísalo y quita todo lo privado.",
       confirmPublic: "He revisado el código, puede ser público",
       secretBlocking: "Posible secreto en la línea {0} ({1}): quítalo para enviar",
       secretWarning: "Posible secreto en la línea {0} ({1}): compruébalo antes de enviar",

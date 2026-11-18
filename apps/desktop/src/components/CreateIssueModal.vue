@@ -88,10 +88,17 @@ const switchDisabled = computed(
     form.outcomeUnknown.value,
 );
 
-// A lockfile can raise hundreds of entropy warnings: show a few, count the rest.
+// A lockfile can raise hundreds of entropy warnings: show a few, count the
+// rest. A known pattern is always shown, never folded into that count.
 const WARNINGS_SHOWN = 5;
-const shownWarnings = computed(() => form.findings.value.warnings.slice(0, WARNINGS_SHOWN));
-const hiddenWarnings = computed(() => Math.max(0, form.findings.value.warnings.length - WARNINGS_SHOWN));
+const isEntropy = (f: { patternId: string }) => f.patternId === "high_entropy";
+const shownWarnings = computed(() => {
+  const w = form.findings.value.warnings;
+  return [...w.filter((f) => !isEntropy(f)), ...w.filter(isEntropy).slice(0, WARNINGS_SHOWN)];
+});
+const hiddenWarnings = computed(() =>
+  Math.max(0, form.findings.value.warnings.filter(isEntropy).length - WARNINGS_SHOWN),
+);
 
 /** A finding, named by the field it is in (and the line, in the description). */
 function findingText(f: { file: string; line: number; patternId: string }, blocking: boolean): string {
@@ -174,7 +181,7 @@ function onMilestone(e: Event) {
             {{ t("createIssue.report.gitwandUnavailable") }}
           </p>
           <div v-if="form.toGitwand.value" class="ci-public" role="note">
-            <p>{{ t("createIssue.report.publicWarning") }}</p>
+            <p>{{ t("createIssue.report.publicWarning", GITWAND_REPO) }}</p>
             <label class="ci-confirm">
               <input
                 v-model="form.confirmedPublic.value"

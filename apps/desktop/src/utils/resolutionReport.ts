@@ -98,9 +98,13 @@ function renderBlock(b: Block, withLabel = true): string {
   const notes: string[] = [];
   if (b.kept < b.lines.length) notes.push(`_(cut to its first ${b.kept} of ${b.lines.length} lines)_`);
   if (shown.length < full.length) notes.push(`_(cut to its first ${shown.length} characters)_`);
+  // A base that is known but empty (both sides inserted) is not a missing one.
+  if (b.lines.length === 0) notes.push("_(empty)_");
   const note = notes.length ? `\n\n${notes.join(" ")}` : "";
   return `${withLabel ? `**${b.label}**\n\n` : ""}${codeBlock(shown)}${note}`;
 }
+
+const NO_ANSWER = "No result: the AI fallback gave no answer (no endpoint configured, an error, or a refusal).";
 
 /** An engine sentence can quote code: never let one line outgrow the budget. */
 const REASON_LINE_MAX = 1_000;
@@ -128,6 +132,12 @@ function scrubberFor(path: string): Scrub {
     // whole rest of the line when it has none). Saying too little is safe.
     let out = text.replace(/user pattern: [^\n]*\)/g, "user pattern)").replace(/user pattern: [^\n)]*$/gm, "user pattern");
     for (const s of secrets) out = out.split(s).join("<file>");
+    // An endpoint's error can name a private host: URLs, host:port, and
+    // names under a private suffix.
+    out = out
+      .replace(/\bhttps?:\/\/\S+/gi, "<url>")
+      .replace(/\b[\w-]+(?:\.[\w-]+)+:\d+\b/g, "<host>")
+      .replace(/\b[\w-]+(?:\.[\w-]+)*\.(?:internal|corp|local|lan|intranet|home)\b/gi, "<host>");
     return out;
   };
 }
@@ -157,29 +167,34 @@ function reasoning(r: ResolutionReport, scrub: Scrub): string[] {
  * the whole fits `REPORT_BODY_MAX`. The answer goes on top separately
  * (`withAnswer`).
  */
-function assemble(r: ResolutionReport, head: string[], scrub: Scrub = (t) => t): string {
+function assemble(r: ResolutionReport, head: string[], scrub: Scrub = (t) => t, inert = false): string {
   const h = r.hunk;
   const blocks: Block[] = [
     { label: "ours", lines: h.oursLines, kept: h.oursLines.length, maxChars: Infinity },
     { label: "theirs", lines: h.theirsLines, kept: h.theirsLines.length, maxChars: Infinity },
   ];
   // A 2-way conflict has no base: say nothing rather than show an empty one.
-  if (h.trace.hasBase && h.baseLines.length > 0) blocks.push({ label: "base", lines: h.baseLines, kept: h.baseLines.length, maxChars: Infinity });
-  // An AI proposal that failed validation has no result: report its answer.
-  const raw = h.trace.llmTrace?.rawResponseTruncated ?? "";
+  if (h.trace.hasBase) blocks.push({ label: "base", lines: h.baseLines, kept: h.baseLines.length, maxChars: Infinity });
+  // An AI proposal with no result: report its answer (scrubbed: the model
+  // was given the file's path and may repeat it), or say there was none.
+  const raw = scrub(h.trace.llmTrace?.rawResponseTruncated ?? "");
+  const noAnswer = r.resolvedLines === null && !raw.trim();
   const resultLines = r.resolvedLines ?? raw.split("\n");
   const result: Block = { label: "GitWand's result", lines: resultLines, kept: resultLines.length, maxChars: Infinity };
   const resultIntro =
-    r.resolvedLines === null
+    r.resolvedLines === null && !noAnswer
       ? `No result: the AI proposal failed validation (score ${h.trace.llmTrace?.validationScore ?? "?"}). Its answer (first 500 characters):\n\n`
       : "";
+  // In a public report the engine's prose is inert too: it can quote code
+  // (`@user`, `#N`) or an endpoint's error.
+  const why = () => (inert ? codeBlock(reasoning(r, scrub).join("\n")) : reasoning(r, scrub).join("\n"));
 
   const render = () => {
     const parts: string[] = [];
     parts.push(head.join("\n"));
     parts.push(`### The conflict\n\n${blocks.map((b) => renderBlock(b)).join("\n\n")}`);
-    parts.push(`### GitWand's result\n\n${resultIntro}${renderBlock(result, false)}`);
-    parts.push(`### Why\n\n${reasoning(r, scrub).join("\n")}`);
+    parts.push(`### GitWand's result\n\n${noAnswer ? NO_ANSWER : `${resultIntro}${renderBlock(result, false)}`}`);
+    parts.push(`### Why\n\n${why()}`);
     return parts.join("\n\n") + "\n";
   };
 
@@ -217,6 +232,6 @@ export function gitwandReportPrefill(
   if (r.hunk.formatResolver) head.push(`Format resolver: ${codeSpan(r.hunk.formatResolver)}.`);
   return {
     title: issueTitle(`Resolver: bad ${codeSpan(r.hunk.type)} resolution (${codeSpan(kind)})`),
-    body: assemble(r, head, scrubberFor(r.path)),
+    body: assemble(r, head, scrubberFor(r.path), true),
   };
 }

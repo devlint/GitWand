@@ -2759,7 +2759,7 @@ const en = {
       answerPlaceholder: "The result you expected, or what GitWand got wrong",
       toGitwand: "Send to GitWand (resolver report)",
       toGitwandHint: "Report the resolver's mistake to GitWand's developers instead of this repository",
-      publicWarning: "This report will be public on github.com/devlint/GitWand. It contains the code shown below; review it and remove anything private.",
+      publicWarning: "This report will be public on github.com/{0}. It contains the code shown below; review it and remove anything private.",
       confirmPublic: "I reviewed the code, it can be public",
       secretBlocking: "Possible secret on line {0} ({1}): remove it to send",
       secretWarning: "Possible secret on line {0} ({1}): check before sending",

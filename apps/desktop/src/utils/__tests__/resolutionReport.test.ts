@@ -67,6 +67,13 @@ describe("repoReportPrefill", () => {
     expect(p.body).toContain("confidence 90 (high)");
   });
 
+  it("shows a known but empty base as empty, unlike a missing one", () => {
+    const r = report({ hunk: hunk({ baseLines: [] }) });
+    const body = repoReportPrefill(r).body;
+    expect(body).toContain("**base**");
+    expect(body).toContain("_(empty)_");
+  });
+
   it("prints no base block for a conflict without one", () => {
     const r = report({ hunk: hunk({ baseLines: [], trace: { steps: [], selected: "non_overlapping", summary: "s", hasBase: false } }) });
     expect(repoReportPrefill(r).body).not.toMatch(/\*\*base\*\*/);
@@ -152,6 +159,43 @@ describe("gitwandReportPrefill", () => {
     const body = gitwandReportPrefill(report({ kind: "ai", hunk: h, resolvedLines: null }), env).body;
     expect(body).toContain("No result: the AI proposal failed validation");
     expect(body).toContain("const a = 9;");
+  });
+
+  it("scrubs the AI's raw answer too", () => {
+    const h = hunk({
+      type: "llm_proposed",
+      trace: {
+        steps: [], selected: "llm_proposed", summary: "s", hasBase: true,
+        llmTrace: { calledAt: "", model: "m", latencyMs: 1, promptHash: "h", rawResponseTruncated: "I cannot merge clients/acme/billing.ts because", validationScore: 10, accepted: false },
+      } as ConflictHunk["trace"],
+    });
+    const body = gitwandReportPrefill(report({ kind: "ai", path: "clients/acme/billing.ts", hunk: h, resolvedLines: null }), env).body;
+    expect(body).not.toContain("acme");
+    expect(body).not.toContain("billing.ts");
+  });
+
+  it("keeps the engine's reasoning inert in a public report, and drops private hosts", () => {
+    const h = hunk({
+      explanation: "Kept @acme/team#12's change",
+      trace: { steps: [], selected: "non_overlapping", summary: "LLM endpoint error: connect ECONNREFUSED llm.internal.acme.corp:11434", hasBase: true },
+    });
+    const body = gitwandReportPrefill(report({ hunk: h }), env).body;
+    const why = body.slice(body.indexOf("### Why"));
+    expect(why).toMatch(/```text\n[\s\S]*@acme\/team#12[\s\S]*```/);
+    expect(body).not.toContain("llm.internal.acme.corp");
+  });
+
+  it("says an AI fallback gave no answer when it has none, rather than a failed validation", () => {
+    const h = hunk({
+      type: "llm_proposed",
+      trace: {
+        steps: [], selected: "llm_proposed", summary: "s", hasBase: true,
+        llmTrace: { calledAt: "", model: "m", latencyMs: 0, promptHash: "", rawResponseTruncated: "", validationScore: 0, accepted: false },
+      } as ConflictHunk["trace"],
+    });
+    const body = repoReportPrefill(report({ kind: "ai", hunk: h, resolvedLines: null })).body;
+    expect(body).toContain("No result: the AI fallback gave no answer");
+    expect(body).not.toContain("failed validation");
   });
 
   it("carries a token-level merge's pass counts", () => {

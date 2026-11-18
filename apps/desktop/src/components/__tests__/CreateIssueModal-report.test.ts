@@ -144,6 +144,20 @@ describe("CreateIssueModal — report mode", () => {
     expect(box.textContent).toContain("createIssue.report.secretWarningMore:7");
   });
 
+  it("never folds a known pattern into the high-entropy count", async () => {
+    const { form } = await mount();
+    const hash = (i: number) => `"integrity": "sha512-Zm9vYmFyYmF6cXV4cXV1eA9xT3kL0pQ8rW2vY5zN1mH6jC4bD7eF0gA3iK9oU1sR8tE2wQ5yP4lM6nV3xB0cZ7${i}",`;
+    form.body.value = [...Array.from({ length: 12 }, (_, i) => hash(i)), "key AKIAIOSFODNN7EXAMPLE"].join("\n");
+    await flush();
+    expect($('[data-testid="ci-secrets"]')!.textContent).toContain("createIssue.report.secretWarning:13,aws_access_key_id");
+  });
+
+  it("names the public repository in the warning from the constant", async () => {
+    await mount();
+    await flip();
+    expect(document.body.textContent).toContain("createIssue.report.publicWarning:devlint/GitWand");
+  });
+
   it("disables the switch with its reason when GitWand cannot be written to", async () => {
     await mount({ writable: false });
     expect(sw().disabled).toBe(true);

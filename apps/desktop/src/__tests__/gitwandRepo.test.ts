@@ -16,4 +16,13 @@ describe("GITWAND_REPO", () => {
     expect(m?.[1]).toBe(GITWAND_REPO);
     expect(DEV_REPO).toBe(GITWAND_REPO);
   });
+
+  it("is never written by hand in the public warning (it takes it as a parameter)", () => {
+    for (const loc of ["en", "fr", "es", "pt-BR", "zh-CN"]) {
+      const text = readFileSync(join(__dirname, `../locales/${loc}.ts`), "utf8");
+      const warning = /publicWarning: "([^"]*)"/.exec(text)?.[1] ?? "";
+      expect(warning.includes(GITWAND_REPO), loc).toBe(false);
+      expect(warning.includes("{0}"), loc).toBe(true);
+    }
+  });
 });

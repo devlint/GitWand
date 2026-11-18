@@ -2719,7 +2719,7 @@ const ptBR: Locale = {
       answerPlaceholder: "O resultado esperado, ou o que o GitWand errou",
       toGitwand: "Enviar ao GitWand (relatório do motor)",
       toGitwandHint: "Relatar o erro do motor aos desenvolvedores do GitWand em vez deste repositório",
-      publicWarning: "Este relatório será público em github.com/devlint/GitWand. Ele contém o código abaixo: revise-o e remova tudo o que for privado.",
+      publicWarning: "Este relatório será público em github.com/{0}. Ele contém o código abaixo: revise-o e remova tudo o que for privado.",
       confirmPublic: "Revisei o código, ele pode ser público",
       secretBlocking: "Possível segredo na linha {0} ({1}): remova-o para enviar",
       secretWarning: "Possível segredo na linha {0} ({1}): verifique antes de enviar",

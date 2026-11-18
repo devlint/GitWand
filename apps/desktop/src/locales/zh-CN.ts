@@ -2729,7 +2729,7 @@ const zhCN: Locale = {
       answerPlaceholder: "期望的结果，或 GitWand 哪里出错了",
       toGitwand: "发送给 GitWand（解析器报告）",
       toGitwandHint: "将解析器的错误报告给 GitWand 开发者，而不是此仓库",
-      publicWarning: "此报告将公开发布在 github.com/devlint/GitWand。它包含下方的代码：请检查并删除所有私密内容。",
+      publicWarning: "此报告将公开发布在 github.com/{0}。它包含下方的代码：请检查并删除所有私密内容。",
       confirmPublic: "我已检查代码，可以公开",
       secretBlocking: "第 {0} 行可能有密钥（{1}）：删除后才能发送",
       secretWarning: "第 {0} 行可能有密钥（{1}）：发送前请检查",

@@ -545,7 +545,6 @@ export function useCreateIssue(deps: {
     scanTimer = null;
     scanPending.value = false;
     if (!report.value) return;
-    lastScanKey = scanKey();
     const opts = { ...secretsOpts, blockAt: toGitwand.value ? ("medium" as const) : ("never" as const) };
     // Each part on its own, so a finding names the field the user can edit
     // and a line number that is that field's own.
@@ -570,16 +569,10 @@ export function useCreateIssue(deps: {
     findings.value = next;
   }
 
-  /** What a scan depends on: the same key means the same findings. */
-  function scanKey(): string {
-    return [toGitwand.value, secretsVersion, title.value, answer.value, body.value].join("\u0000");
-  }
 
   let scanTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastScanKey = "";
   watch([finalBody, title], () => {
-    // Already scanned (a switch or an open scans at once).
-    if (!report.value || scanKey() === lastScanKey) return;
+    if (!report.value) return;
     scanPending.value = true;
     if (scanTimer) clearTimeout(scanTimer);
     scanTimer = setTimeout(scanNow, scanDebounceMs);

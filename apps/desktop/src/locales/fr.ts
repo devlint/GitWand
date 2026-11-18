@@ -2728,7 +2728,7 @@ const fr: Locale = {
       answerPlaceholder: "Le résultat attendu, ou ce que GitWand a mal fait",
       toGitwand: "Envoyer à GitWand (rapport sur le moteur)",
       toGitwandHint: "Signaler l'erreur du moteur aux développeurs de GitWand plutôt qu'à ce dépôt",
-      publicWarning: "Ce rapport sera public sur github.com/devlint/GitWand. Il contient le code ci-dessous : relisez-le et retirez tout ce qui est privé.",
+      publicWarning: "Ce rapport sera public sur github.com/{0}. Il contient le code ci-dessous : relisez-le et retirez tout ce qui est privé.",
       confirmPublic: "J'ai relu le code, il peut être public",
       secretBlocking: "Secret possible ligne {0} ({1}) : retirez-le pour envoyer",
       secretWarning: "Secret possible ligne {0} ({1}) : vérifiez avant d'envoyer",
