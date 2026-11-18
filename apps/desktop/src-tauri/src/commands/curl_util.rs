@@ -118,6 +118,85 @@ pub(crate) fn quote_config(s: &str) -> String {
     out
 }
 
+/// Bodies up to this many bytes go inline in the stdin config; larger ones
+/// through a file. Escaping at most doubles a byte, so an inline line stays
+/// below the 100 KiB curl 7.x accepts.
+const INLINE_MAX: usize = 48 * 1024;
+
+/// A request body for curl's stdin config, never on argv (visible to other
+/// processes, capped on Windows).
+///
+/// Up to [`INLINE_MAX`] it goes inline (`data-raw`). Beyond, through a file
+/// (`data-binary = "@path"`): curl before 8.x silently drops a config line of
+/// 100 KiB or more and sends the request with no body (exit 0). The file is
+/// private to the user (0600 on Unix) and removed on drop, so keep the value
+/// alive until curl has exited. Inline is the default because a file path
+/// curl cannot open (a non-ASCII temp dir on an old Windows curl) would fail
+/// every write, not just the rare large one.
+pub(crate) struct RequestBody {
+    line: String,
+    path: Option<std::path::PathBuf>,
+}
+
+impl RequestBody {
+    pub(crate) fn new(body: &str) -> Result<Self, String> {
+        if body.len() <= INLINE_MAX {
+            return Ok(RequestBody {
+                // `data-raw`: a leading `@` is never read as a file name.
+                line: format!("data-raw = {}\n", quote_config(body)),
+                path: None,
+            });
+        }
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "gitwand-body-{}-{}-{}",
+            std::process::id(),
+            nanos,
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+        let fail = |e: std::io::Error| format!("failed to write the request body: {}", e);
+        // Owned (and so removed on drop) only once this call created it.
+        let mut f = opts.open(&path).map_err(fail)?;
+        let file = RequestBody {
+            line: format!(
+                "data-binary = {}\n",
+                quote_config(&format!("@{}", path.display()))
+            ),
+            path: Some(path),
+        };
+        f.write_all(body.as_bytes()).map_err(fail)?;
+        Ok(file)
+    }
+
+    /// The file the body was written to, if it was too large to go inline.
+    #[cfg(test)]
+    pub(crate) fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
+
+    /// The config line that makes curl send the body as it is.
+    pub(crate) fn config_line(&self) -> String {
+        self.line.clone()
+    }
+}
+
+impl Drop for RequestBody {
+    fn drop(&mut self) {
+        if let Some(p) = &self.path {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 /// Written after the body by curl's `-w` and split off by the parsers: one
 /// constant, so the writer and the readers cannot drift apart.
 const MARKER: &str = "\n__GW_HTTP_STATUS__";
@@ -142,7 +221,7 @@ fn curl_request(
     method: &str,
     url: &str,
     auth_config: Option<&str>,
-    body_json: Option<&str>,
+    body: Option<&RequestBody>,
     extra_headers: &[&str],
     accept: &str,
     opts: RequestOpts,
@@ -182,11 +261,10 @@ fn curl_request(
         args.push(h.to_string());
     }
     let mut config = auth_config.unwrap_or_default().to_string();
-    if let Some(b) = body_json {
+    if let Some(b) = body {
         args.push("-H".to_string());
         args.push("Content-Type: application/json".to_string());
-        // `data-raw`: sent as is, no `@file` reading.
-        config.push_str(&format!("data-raw = {}\n", quote_config(b)));
+        config.push_str(&b.config_line());
     }
     let stdin = (!config.is_empty()).then_some(config);
     if stdin.is_some() {
@@ -235,11 +313,12 @@ pub(crate) fn curl_with_status_bounded(
     accept: &str,
     opts: RequestOpts,
 ) -> Result<(i32, String), String> {
+    let body = body_json.map(RequestBody::new).transpose()?;
     let (args, stdin) = curl_request(
         method,
         url,
         auth_config,
-        body_json,
+        body.as_ref(),
         extra_headers,
         accept,
         RequestOpts {
@@ -282,11 +361,12 @@ pub(crate) fn curl_with_headers(
     extra_headers: &[&str],
     accept: &str,
 ) -> Result<(i32, std::collections::HashMap<String, String>, String), String> {
+    let body = body_json.map(RequestBody::new).transpose()?;
     let (args, stdin) = curl_request(
         method,
         url,
         auth_config,
-        body_json,
+        body.as_ref(),
         extra_headers,
         accept,
         RequestOpts {
@@ -381,13 +461,73 @@ mod tests {
     }
 
     #[test]
-    fn request_body_goes_to_stdin_config_not_argv() {
-        let body = "{\"body\":\"secret \\\" text\\n--flag\"}";
+    fn a_small_body_stays_inline_with_no_file() {
+        let body = RequestBody::new("{\"a\":\"@x\"}").unwrap();
+        assert!(body.path().is_none());
+        // `data-raw`: a leading `@` is never read as a file name.
+        assert_eq!(
+            body.config_line(),
+            "data-raw = \"{\\\"a\\\":\\\"@x\\\"}\"\n"
+        );
+    }
+
+    #[test]
+    fn a_large_body_goes_through_a_private_file_removed_on_drop() {
+        let body = format!("{{\"b\":\"{}\"}}", "é — 日本 \\\" $HOME\\n".repeat(5000));
+        let file = RequestBody::new(&body).unwrap();
+        let path = file.path().unwrap().to_path_buf();
+        assert_eq!(std::fs::read(&path).unwrap(), body.as_bytes());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        assert_eq!(
+            file.config_line(),
+            format!(
+                "data-binary = {}\n",
+                quote_config(&format!("@{}", path.display()))
+            )
+        );
+        drop(file);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn the_inline_limit_keeps_config_lines_under_curls_100_kib() {
+        // The largest inline body still makes a line well below 100 KiB, even
+        // when every character needs escaping.
+        let worst = "\"".repeat(INLINE_MAX);
+        let line = RequestBody::new(&worst).unwrap().config_line();
+        assert!(line.len() < 100 * 1024, "{}", line.len());
+        // One byte more and it goes to a file.
+        assert!(RequestBody::new(&"x".repeat(INLINE_MAX + 1))
+            .unwrap()
+            .path()
+            .is_some());
+    }
+
+    #[test]
+    fn two_body_files_never_share_a_path() {
+        let big = "x".repeat(INLINE_MAX + 1);
+        let a = RequestBody::new(&big).unwrap();
+        let b = RequestBody::new(&big).unwrap();
+        assert_ne!(a.path(), b.path());
+    }
+
+    /// curl before 8.x silently drops a config line of 100 KiB or more (the
+    /// request then goes out with no body and curl exits 0): the body is read
+    /// from a file, so no config line grows with it.
+    #[test]
+    fn request_body_goes_through_a_body_file_not_argv_or_a_config_line() {
+        let body = format!("{{\"body\":\"{}\"}}", "secret ".repeat(30_000));
+        let file = RequestBody::new(&body).unwrap();
         let (args, cfg) = curl_request(
             "POST",
             "https://api.github.com/x",
             Some("header = \"Authorization: Bearer t\"\n"),
-            Some(body),
+            Some(&file),
             &[],
             "application/json",
             RequestOpts::default(),
@@ -396,22 +536,25 @@ mod tests {
         assert!(args.windows(2).any(|w| w[0] == "--config" && w[1] == "-"));
         let cfg = cfg.unwrap();
         assert!(cfg.starts_with("header = \"Authorization: Bearer t\"\n"));
-        assert!(cfg.contains("data-raw = "));
+        assert!(!cfg.contains("secret"));
+        assert!(cfg.ends_with(&file.config_line()));
+        assert!(cfg.lines().all(|l| l.len() < 1024), "{cfg}");
     }
 
     #[test]
     fn body_without_auth_still_uses_stdin_config() {
+        let file = RequestBody::new("{}").unwrap();
         let (args, cfg) = curl_request(
             "POST",
             "u",
             None,
-            Some("{}"),
+            Some(&file),
             &[],
             "a",
             RequestOpts::default(),
         );
         assert!(args.windows(2).any(|w| w[0] == "--config" && w[1] == "-"));
-        assert_eq!(cfg.as_deref(), Some("data-raw = \"{}\"\n"));
+        assert_eq!(cfg, Some(file.config_line()));
     }
 
     #[test]
@@ -448,11 +591,12 @@ mod tests {
         assert!(!without.iter().any(|a| a == "-D"));
     }
 
-    /// Real curl against a local server: the body read back from the config
-    /// file is byte-for-byte what was sent (quotes, backslashes, newlines,
-    /// `$`, `--flag` lines, non-ASCII, 60 KB).
+    /// Real curl against a local server: the body curl sends is byte-for-byte
+    /// what was given (quotes, backslashes, newlines, `$`, `--flag` lines,
+    /// non-ASCII), at a size whose inline config line (> 100 KiB) curl 7.x
+    /// would have dropped without a word.
     #[test]
-    fn curl_sends_the_config_body_verbatim() {
+    fn curl_sends_the_body_verbatim() {
         use std::io::{Read, Write as _};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -463,21 +607,20 @@ mod tests {
             loop {
                 let n = sock.read(&mut chunk).unwrap();
                 buf.extend_from_slice(&chunk[..n]);
-                let text = String::from_utf8_lossy(&buf).to_string();
-                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                // Bytes, not text: a read may end inside a UTF-8 sequence.
+                if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
                     let len: usize = head
                         .lines()
-                        .find_map(|l| {
-                            l.to_ascii_lowercase()
-                                .strip_prefix("content-length:")
-                                .map(|v| v.trim().parse().unwrap())
-                        })
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .map(|v| v.trim().parse().unwrap())
                         .unwrap_or(0);
+                    let body = &buf[end + 4..];
                     if body.len() >= len {
                         let _ = sock.write_all(
                             b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
                         );
-                        return body[..len].to_string();
+                        return String::from_utf8(body[..len].to_vec()).unwrap();
                     }
                 }
                 if n == 0 {
@@ -487,9 +630,10 @@ mod tests {
         });
         let payload = serde_json::json!({
             "title": "t",
-            "body": "a \"q\" \\ $HOME\n--flag\r\n\té — 日本\n".repeat(2000),
+            "body": "a \"q\" \\ $HOME\n--flag\r\n\té — 日本\n".repeat(4000),
         })
         .to_string();
+        assert!(quote_config(&payload).len() > 100 * 1024);
         let (status, _) = curl_with_status(
             "POST",
             &format!("http://127.0.0.1:{}/x", port),
@@ -509,11 +653,12 @@ mod tests {
             args.windows(2).any(|w| w[0] == flag && w[1] == v)
         };
         let (get, _) = curl_request("GET", "u", None, None, &[], "a", RequestOpts::default());
+        let file = RequestBody::new("{}").unwrap();
         let (post, _) = curl_request(
             "POST",
             "u",
             None,
-            Some("{}"),
+            Some(&file),
             &[],
             "a",
             RequestOpts::default(),
@@ -522,7 +667,7 @@ mod tests {
             "POST",
             "u",
             None,
-            Some("{}"),
+            Some(&file),
             &[],
             "a",
             RequestOpts {

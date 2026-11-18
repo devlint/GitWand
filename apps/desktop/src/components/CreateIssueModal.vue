@@ -302,6 +302,11 @@ function onMilestone(e: Event) {
   border-radius: var(--radius-md);
   overflow-wrap: anywhere;
 }
+.ci-preview :deep(ul),
+.ci-preview :deep(ol) {
+  margin: 6px 0;
+  padding-left: 22px;
+}
 .ci-group {
   display: flex;
   flex-direction: column;
