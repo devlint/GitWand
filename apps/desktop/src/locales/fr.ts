@@ -2684,6 +2684,8 @@ const fr: Locale = {
   },
 
   createIssue: {
+    fromSelection: "Créer une issue depuis ces lignes",
+    selectionHint: "Cliquez sur un numéro de ligne pour la sélectionner pour une issue ; Maj+clic pour étendre",
     title: "Nouvelle issue",
     loading: "Recherche du dépôt cible…",
     targetsFailed: "Impossible de lire ce dépôt sur GitHub. Vérifiez votre connexion ou votre compte GitHub, puis réessayez.",

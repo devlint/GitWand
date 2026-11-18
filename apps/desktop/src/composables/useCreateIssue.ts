@@ -5,7 +5,7 @@
  * ⌘K, ⌘⇧I) calls `open(prefill?)`, a commit's menu `openFromCommit(entry)`.
  */
 
-import { computed, ref, type ComputedRef, type InjectionKey, type Ref } from "vue";
+import { computed, ref, shallowRef, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec } from "../utils/backend";
 import type {
@@ -325,7 +325,8 @@ export function useCreateIssue(deps: {
     );
   }
 
-  const activeSelection = ref<DiffSelection | null>(null);
+  // Shallow: replaced whole, never mutated, and compared by identity.
+  const activeSelection = shallowRef<DiffSelection | null>(null);
 
   async function openFromSelection(sel: DiffSelection): Promise<void> {
     const cwd = deps.cwd.value;

@@ -2675,6 +2675,8 @@ const ptBR: Locale = {
   },
 
   createIssue: {
+    fromSelection: "Criar issue a partir destas linhas",
+    selectionHint: "Clique no número de uma linha para selecioná-la para uma issue; Shift+clique para estender",
     title: "Nova issue",
     loading: "Verificando para onde esta issue pode ir…",
     targetsFailed: "Não foi possível ler este repositório no GitHub. Verifique sua conexão ou seu login no GitHub e tente novamente.",

@@ -2685,6 +2685,8 @@ const zhCN: Locale = {
   },
 
   createIssue: {
+    fromSelection: "从这些行创建 Issue",
+    selectionHint: "点击行号以选中该行用于 Issue；Shift+点击以扩展选区",
     title: "新建 Issue",
     loading: "正在确认 Issue 可提交到的仓库…",
     targetsFailed: "无法在 GitHub 上读取此仓库。请检查网络连接或 GitHub 登录状态后重试。",

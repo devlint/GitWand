@@ -2675,6 +2675,8 @@ const es: Locale = {
   },
 
   createIssue: {
+    fromSelection: "Crear issue desde estas líneas",
+    selectionHint: "Haz clic en un número de línea para seleccionarla para un issue; Mayús+clic para ampliar",
     title: "Nueva issue",
     loading: "Comprobando dónde puede ir esta issue…",
     targetsFailed: "No se pudo leer este repositorio en GitHub. Comprueba tu conexión o tu sesión de GitHub e inténtalo de nuevo.",

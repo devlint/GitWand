@@ -2715,6 +2715,8 @@ const en = {
   },
 
   createIssue: {
+    fromSelection: "Create issue from these lines",
+    selectionHint: "Click a line number to select it for an issue; Shift+click to extend",
     title: "New issue",
     loading: "Checking where this issue can go…",
     targetsFailed: "Could not read this repository on GitHub. Check your connection or your GitHub sign-in, then try again.",
