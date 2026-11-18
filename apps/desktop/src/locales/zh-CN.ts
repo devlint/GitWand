@@ -2763,6 +2763,8 @@ const zhCN: Locale = {
       settings: "设置",
       commandPalette: "命令面板",
       newIssue: "新建 Issue",
+      extendLineSelection: "在 diff 中扩展行选区（Issue、PR 评论）",
+      click: "点击",
       fetch: "Fetch",
       push: "Push",
       newBranch: "新建分支",

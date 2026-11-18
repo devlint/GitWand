@@ -2753,6 +2753,8 @@ const ptBR: Locale = {
       settings: "Configurações",
       commandPalette: "Paleta de comandos",
       newIssue: "Nova issue",
+      extendLineSelection: "Estender uma seleção de linhas em um diff (issue, comentário de PR)",
+      click: "clique",
       fetch: "Fetch",
       push: "Push",
       newBranch: "Nova branch",

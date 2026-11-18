@@ -2794,6 +2794,8 @@ const en = {
       settings: "Settings",
       commandPalette: "Command palette",
       newIssue: "New issue",
+      extendLineSelection: "Extend a line selection in a diff (issue, PR comment)",
+      click: "click",
       fetch: "Fetch",
       push: "Push",
       newBranch: "New branch",

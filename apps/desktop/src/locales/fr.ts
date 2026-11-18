@@ -2763,6 +2763,8 @@ const fr: Locale = {
       settings: "Paramètres",
       commandPalette: "Palette de commandes",
       newIssue: "Nouvelle issue",
+      extendLineSelection: "Étendre une sélection de lignes dans un diff (issue, commentaire de PR)",
+      click: "clic",
       fetch: "Fetch",
       push: "Push",
       newBranch: "Nouvelle branche",
