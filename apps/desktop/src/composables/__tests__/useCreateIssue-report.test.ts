@@ -91,6 +91,19 @@ describe("useCreateIssue — report mode", () => {
     expect(api.body.value).not.toContain("src/x.ts");
   });
 
+  it("a failed targets read still opens the report, locked on GitWand, with the reason", async () => {
+    const p = provider();
+    (p.issueTargets as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("gh: not signed in to ghe.acme"));
+    const { api } = setup(p);
+    await api.openFromResolution(REPORT);
+    await settle();
+    expect(api.targetsFailed.value).toBe(false);
+    expect(api.targetsError.value).toContain("not signed in");
+    expect(api.gitwandLocked.value).toBe(true);
+    expect(api.toGitwand.value).toBe(true);
+    expect(api.repo.value).toBe("devlint/GitWand");
+  });
+
   it("switching keeps the answer, drops the path and the pickers, and back again", async () => {
     const { api } = setup();
     await api.openFromResolution(REPORT);
@@ -131,6 +144,18 @@ describe("useCreateIssue — report mode", () => {
     await settle();
     expect(api.findings.value.blocking).toHaveLength(0);
     expect(api.canSubmit.value).toBe(true);
+  });
+
+  it("a secret in the title blocks too (line 0 = the title)", async () => {
+    const { api } = setup();
+    await api.openFromResolution(REPORT);
+    await settle();
+    api.setGitwand(true);
+    api.confirmedPublic.value = true;
+    api.title.value = `Leak ${TOKEN}`;
+    await settle();
+    expect(api.findings.value.blocking.map((f) => f.line)).toEqual([0]);
+    expect(api.canSubmit.value).toBe(false);
   });
 
   it("on the repository, a secret only warns", async () => {
@@ -191,6 +216,73 @@ describe("useCreateIssue — report mode", () => {
     expect(api.bodyEdited.value).toBe(false);
     api.body.value += "\nmore";
     expect(api.bodyEdited.value).toBe(true);
+  });
+
+  it("replaces an untouched open form, like the other entry points", async () => {
+    const { api } = setup();
+    await api.open();
+    await api.openFromResolution(REPORT);
+    await settle();
+    expect(api.report.value).toEqual(REPORT);
+  });
+
+  it("leaves an edited open form alone", async () => {
+    const { api } = setup();
+    await api.open();
+    api.title.value = "mine";
+    await api.openFromResolution(REPORT);
+    expect(api.report.value).toBeNull();
+    expect(api.title.value).toBe("mine");
+  });
+
+  it("a report closed while its targets load does not attach to the next form", async () => {
+    let release!: (t: IssueTargets) => void;
+    const p = provider();
+    (p.issueTargets as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise<IssueTargets>((r) => { release = r; }),
+    );
+    const { api } = setup(p);
+    const pending = api.openFromResolution(REPORT);
+    await flush();
+    api.close();
+    const plain = api.open();
+    release({ targets: [ORIGIN], defaultRepo: "me/app" });
+    await pending;
+    await plain;
+    await settle();
+    expect(api.isOpen.value).toBe(true);
+    expect(api.report.value).toBeNull();
+    expect(api.toGitwand.value).toBe(false);
+  });
+
+  it("forgets the previous repository's secret patterns", async () => {
+    const acme = { id: "acme", regex: "ACME-[0-9]{6}", severity: "high" as const, description: "d" };
+    const opts = vi
+      .fn()
+      .mockResolvedValueOnce({ extraPatterns: [acme], entropyThreshold: 4 })
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const api = useCreateIssue({
+      cwd: ref("/repo"),
+      provider: ref(provider()),
+      onCreated: vi.fn(),
+      report: {
+        createGitwandIssue: vi.fn(),
+        gitwandWritable: async () => true,
+        env: () => ENV,
+        secretsOptions: opts,
+        scanDebounceMs: 0,
+      },
+    });
+    await api.openFromResolution(REPORT);
+    await settle();
+    api.answer.value = "ACME-123456";
+    await settle();
+    expect(api.findings.value.warnings.map((f) => f.patternId)).toEqual(["acme"]);
+    api.close();
+    await api.openFromResolution(REPORT);
+    api.answer.value = "ACME-123456";
+    await settle();
+    expect(api.findings.value.warnings).toEqual([]);
   });
 
   it("a plain open after a report shows no report state", async () => {

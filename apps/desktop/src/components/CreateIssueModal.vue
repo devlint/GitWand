@@ -87,7 +87,12 @@ const switchDisabled = computed(
     form.outcomeUnknown.value,
 );
 
-/** The switch: regenerates the description, after asking when it was edited. */
+// A lockfile can raise hundreds of entropy warnings: show a few, count the rest.
+const WARNINGS_SHOWN = 5;
+const shownWarnings = computed(() => form.findings.value.warnings.slice(0, WARNINGS_SHOWN));
+const hiddenWarnings = computed(() => Math.max(0, form.findings.value.warnings.length - WARNINGS_SHOWN));
+
+/** The switch: regenerates title and description, after asking when either was edited. */
 async function onSwitch(e: Event) {
   const box = e.target as HTMLInputElement;
   const wanted = box.checked;
@@ -151,6 +156,9 @@ function onMilestone(e: Event) {
             {{ t("createIssue.report.toGitwand") }}
           </label>
           <p v-if="form.gitwandLocked.value" class="ci-status">{{ t("createIssue.report.repoUnavailable") }}</p>
+          <p v-if="form.gitwandLocked.value && form.targetsError.value" class="ci-status ci-detail">
+            {{ form.targetsError.value }}
+          </p>
           <p v-if="form.gitwandWritable.value === false" class="ci-status ci-status--error">
             {{ t("createIssue.report.gitwandUnavailable") }}
           </p>
@@ -172,6 +180,7 @@ function onMilestone(e: Event) {
             v-model="form.answer.value"
             data-testid="ci-answer"
             class="ci-textarea ci-answer"
+            maxlength="10000"
             rows="2"
             :placeholder="t('createIssue.report.answerPlaceholder')"
             :disabled="form.submitting.value"
@@ -299,12 +308,21 @@ function onMilestone(e: Event) {
           data-testid="ci-secrets"
           role="alert"
         >
-          <p v-for="f in form.findings.value.blocking" :key="`b${f.line}${f.patternId}`">
-            {{ t("createIssue.report.secretBlocking", f.line, f.patternId) }}
+          <p v-for="(f, i) in form.findings.value.blocking" :key="`b${i}`">
+            {{
+              f.line === 0
+                ? t("createIssue.report.secretBlockingTitle", f.patternId)
+                : t("createIssue.report.secretBlocking", f.line, f.patternId)
+            }}
           </p>
-          <p v-for="f in form.findings.value.warnings" :key="`w${f.line}${f.patternId}`">
-            {{ t("createIssue.report.secretWarning", f.line, f.patternId) }}
+          <p v-for="(f, i) in shownWarnings" :key="`w${i}`" class="ci-secret-warning">
+            {{
+              f.line === 0
+                ? t("createIssue.report.secretWarningTitle", f.patternId)
+                : t("createIssue.report.secretWarning", f.line, f.patternId)
+            }}
           </p>
+          <p v-if="hiddenWarnings > 0">{{ t("createIssue.report.secretWarningMore", hiddenWarnings) }}</p>
         </div>
 
         <div v-if="form.outcomeUnknown.value" class="ci-unknown" role="alert">

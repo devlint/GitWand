@@ -41,4 +41,15 @@ describe("scanReportBody", () => {
     });
     expect(r.blocking.map((f) => f.patternId)).toEqual(["acme"]);
   });
+
+  it("still blocks a secret that comes after hundreds of entropy warnings (the scan's finding cap)", () => {
+    const hashes = Array.from({ length: 520 }, (_, i) => `"integrity": "sha512-${"Zm9vYmFyYmF6cXV4cXV1eA9xT3kL0pQ8rW2vY5zN1mH6jC4bD7eF0gA3iK9oU1sR8tE2wQ5yP4lM6nV3xB0cZ7" + i}",`);
+    const r = scanReportBody([...hashes, `token = "${token}"`].join("\n"), opts);
+    expect(r.blocking.map((f) => f.patternId)).toEqual(["github_pat_classic"]);
+  });
+
+  it("scans a title given with the body", () => {
+    expect(scanReportBody(`Leak ${token}`, opts).blocking).toHaveLength(1);
+  });
 });
+

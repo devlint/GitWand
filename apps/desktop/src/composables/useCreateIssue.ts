@@ -12,6 +12,7 @@ import { parseGitwandrc, type SecretPattern } from "@gitwand/core";
 import { IS_MAC } from "../utils/platform";
 import { gitwandReportPrefill, repoReportPrefill, type ResolutionReport } from "../utils/resolutionReport";
 import { scanReportBody, type ReportScan } from "../utils/reportGuard";
+import type { SecretFinding } from "@gitwand/core";
 import { isEditableTarget } from "../utils/editableTarget";
 import type {
   CreatedIssue,
@@ -157,7 +158,7 @@ export interface CreateIssueApi {
   confirmedPublic: Ref<boolean>;
   /** The secrets scan of what would be sent. */
   findings: Ref<ReportScan>;
-  /** The description differs from the one generated for the current target. */
+  /** Title or description differ from those generated for the current target. */
   bodyEdited: ComputedRef<boolean>;
   /** What is sent: the answer on top of the description. */
   finalBody: ComputedRef<string>;
@@ -321,7 +322,8 @@ export function useCreateIssue(deps: {
   let availabilitySeq = 0;
 
   const finalBody = computed(() => (report.value ? withAnswer(answer.value, body.value) : body.value));
-  const bodyEdited = computed(() => body.value !== initial.value.body);
+  // Title or description no longer what was generated for the current target.
+  const bodyEdited = computed(() => body.value !== initial.value.body || title.value !== initial.value.title);
   const dirty = computed(
     () =>
       answer.value.trim() !== "" ||
@@ -424,6 +426,9 @@ export function useCreateIssue(deps: {
     findings.value = { blocking: [], warnings: [] };
     scanPending.value = false;
     repoTarget = null;
+    // The previous repository's extra patterns must not stand in for this
+    // one's while its `.gitwandrc` is read.
+    secretsOpts = { extraPatterns: [], entropyThreshold: 4 };
   }
 
   async function open(
@@ -531,14 +536,19 @@ export function useCreateIssue(deps: {
     scanTimer = null;
     scanPending.value = false;
     if (!report.value) return;
-    findings.value = scanReportBody(finalBody.value, {
-      ...secretsOpts,
-      blockAt: toGitwand.value ? "medium" : "never",
-    });
+    const opts = { ...secretsOpts, blockAt: toGitwand.value ? ("medium" as const) : ("never" as const) };
+    // The title is sent too; its findings carry line 0.
+    const inTitle = scanReportBody(title.value, opts);
+    const inBody = scanReportBody(finalBody.value, opts);
+    const atTitle = (f: SecretFinding) => ({ ...f, line: 0 });
+    findings.value = {
+      blocking: [...inTitle.blocking.map(atTitle), ...inBody.blocking],
+      warnings: [...inTitle.warnings.map(atTitle), ...inBody.warnings],
+    };
   }
 
   let scanTimer: ReturnType<typeof setTimeout> | null = null;
-  watch(finalBody, () => {
+  watch([finalBody, title], () => {
     if (!report.value) return;
     scanPending.value = true;
     if (scanTimer) clearTimeout(scanTimer);
@@ -573,11 +583,16 @@ export function useCreateIssue(deps: {
   }
 
   async function openFromResolution(r: ResolutionReport): Promise<void> {
-    if (isOpen.value) return;
-    await open();
-    if (!isOpen.value) return;
+    if (!makeRoom()) return;
+    // False when the form was closed (or reopened) while its targets loaded:
+    // the report must not attach to whatever form is on screen now.
+    if (!(await open())) return;
     const openGen = openGeneration;
     report.value = r;
+    // The repository's targets could not be read: a report can still go to
+    // GitWand (github.com only), so the form opens locked there, the read's
+    // error kept as the reason.
+    targetsFailed.value = false;
     repoTarget = repo.value;
     gitwandLocked.value = !repoTarget;
     toGitwand.value = gitwandLocked.value;

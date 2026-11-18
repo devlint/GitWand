@@ -49,7 +49,8 @@ const KNOWN_NAMES = new Set([
  * "no extension" — never the file's own name.
  */
 export function fileKind(path: string): string {
-  const name = path.split("/").pop() ?? "";
+  // Either separator: a Windows path must not let its folders into the kind.
+  const name = path.split(/[\\/]/).pop() ?? "";
   if (KNOWN_NAMES.has(name)) return name;
   if (name === ".env" || name.startsWith(".env.")) return ".env";
   const dot = name.lastIndexOf(".");
@@ -73,11 +74,28 @@ function confidenceLine(h: ConflictHunk): string {
   return `${codeSpan(h.type)}, confidence ${h.confidence.score} (${h.confidence.label})`;
 }
 
+type Scrub = (text: string) => string;
+
+/**
+ * Engine prose can carry what a public report must not: a `.gitwandrc`
+ * glob ("user pattern: clients/acme/**") and, defensively, the file's own
+ * path or name. Both are replaced.
+ */
+function scrubberFor(path: string): Scrub {
+  const name = path.split(/[\\/]/).pop() ?? "";
+  const secrets = [path, name].filter((x) => x.length > 2).sort((a, b) => b.length - a.length);
+  return (text) => {
+    let out = text.replace(/user pattern: [^)\n]*/g, "user pattern");
+    for (const s of secrets) out = out.split(s).join("<file>");
+    return out;
+  };
+}
+
 /** The engine's reasoning: explanation, trace summary, and the proposal's own trace. */
-function reasoning(r: ResolutionReport): string[] {
+function reasoning(r: ResolutionReport, scrub: Scrub): string[] {
   const h = r.hunk;
-  const out = [`- Conflict type: ${confidenceLine(h)}`, `- Explanation: ${h.explanation}`];
-  if (h.trace.summary) out.push(`- Decision: ${h.trace.summary}`);
+  const out = [`- Conflict type: ${confidenceLine(h)}`, `- Explanation: ${scrub(h.explanation)}`];
+  if (h.trace.summary) out.push(`- Decision: ${scrub(h.trace.summary)}`);
   const llm = h.trace.llmTrace;
   if (r.kind === "ai" && llm) {
     out.push(`- AI proposal: model ${codeSpan(llm.model)}, validation ${llm.validationScore}`);
@@ -96,7 +114,7 @@ function reasoning(r: ResolutionReport): string[] {
  * versions and the result, then the reasoning — the longest block cut by half
  * until the whole fits `REPORT_BODY_MAX`.
  */
-function assemble(r: ResolutionReport, answer: string, head: string[]): string {
+function assemble(r: ResolutionReport, answer: string, head: string[], scrub: Scrub = (t) => t): string {
   const h = r.hunk;
   const blocks: Block[] = [
     { label: "ours", lines: h.oursLines, kept: h.oursLines.length },
@@ -112,7 +130,7 @@ function assemble(r: ResolutionReport, answer: string, head: string[]): string {
     parts.push(head.join("\n"));
     parts.push(`### The conflict\n\n${blocks.map((b) => renderBlock(b)).join("\n\n")}`);
     parts.push(`### GitWand's result\n\n${renderBlock(result, false)}`);
-    parts.push(`### Why\n\n${reasoning(r).join("\n")}`);
+    parts.push(`### Why\n\n${reasoning(r, scrub).join("\n")}`);
     return parts.join("\n\n") + "\n";
   };
 
@@ -154,6 +172,6 @@ export function gitwandReportPrefill(
   if (r.hunk.formatResolver) head.push(`Format resolver: ${codeSpan(r.hunk.formatResolver)}.`);
   return {
     title: issueTitle(`Resolver: bad ${codeSpan(r.hunk.type)} resolution (${codeSpan(kind)})`),
-    body: assemble(r, answer, head),
+    body: assemble(r, answer, head, scrubberFor(r.path)),
   };
 }

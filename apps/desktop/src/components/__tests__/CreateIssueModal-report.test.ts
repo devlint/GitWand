@@ -46,10 +46,13 @@ const flush = async () => {
   await nextTick();
 };
 
-async function mount(opts: { targets?: IssueTargets; writable?: boolean; confirm?: boolean } = {}) {
+async function mount(opts: { targets?: IssueTargets; writable?: boolean; confirm?: boolean; targetsError?: string } = {}) {
   const provider = {
     name: "github",
-    issueTargets: vi.fn(async () => opts.targets ?? { targets: [ORIGIN], defaultRepo: "me/app" }),
+    issueTargets: vi.fn(async () => {
+      if (opts.targetsError) throw new Error(opts.targetsError);
+      return opts.targets ?? { targets: [ORIGIN], defaultRepo: "me/app" };
+    }),
     listLabels: vi.fn(async () => [{ name: "bug", color: "f00", description: null }]),
     listMilestones: vi.fn(async () => []),
     listAssignees: vi.fn(async () => []),
@@ -121,6 +124,24 @@ describe("CreateIssueModal — report mode", () => {
     expect(createButton()?.disabled).toBe(true);
   });
 
+  it("names a secret in the title as such", async () => {
+    const { form } = await mount();
+    await flip();
+    form.title.value = `Leak ${TOKEN}`;
+    await flush();
+    expect($('[data-testid="ci-secrets"]')?.textContent).toContain("createIssue.report.secretBlockingTitle:github_pat_classic");
+  });
+
+  it("shows at most five warnings and counts the rest", async () => {
+    const { form } = await mount();
+    const hash = (i: number) => `"integrity": "sha512-Zm9vYmFyYmF6cXV4cXV1eA9xT3kL0pQ8rW2vY5zN1mH6jC4bD7eF0gA3iK9oU1sR8tE2wQ5yP4lM6nV3xB0cZ7${i}",`;
+    form.answer.value = Array.from({ length: 12 }, (_, i) => hash(i)).join("\n");
+    await flush();
+    const box = $('[data-testid="ci-secrets"]')!;
+    expect(box.querySelectorAll("p.ci-secret-warning")).toHaveLength(5);
+    expect(box.textContent).toContain("createIssue.report.secretWarningMore:7");
+  });
+
   it("disables the switch with its reason when GitWand cannot be written to", async () => {
     await mount({ writable: false });
     expect(sw().disabled).toBe(true);
@@ -134,6 +155,13 @@ describe("CreateIssueModal — report mode", () => {
     expect(document.body.textContent).toContain("createIssue.report.repoUnavailable");
   });
 
+  it("still offers GitWand when the targets cannot be read, saying why", async () => {
+    await mount({ targetsError: "gh: not signed in to ghe.acme" });
+    expect(sw().checked).toBe(true);
+    expect(document.body.textContent).toContain("gh: not signed in to ghe.acme");
+    expect(document.body.textContent).not.toContain("createIssue.targetsFailed");
+  });
+
   it("asks before replacing an edited description, and keeps it on cancel", async () => {
     const { form, askConfirm } = await mount({ confirm: false });
     form.body.value += "\nmine";
@@ -143,6 +171,20 @@ describe("CreateIssueModal — report mode", () => {
     expect(form.toGitwand.value).toBe(false);
     expect(form.body.value).toContain("mine");
     expect(sw().checked).toBe(false);
+  });
+
+  it("asks before replacing an edited title too", async () => {
+    const { form, askConfirm } = await mount({ confirm: false });
+    form.title.value = "My own title";
+    await flush();
+    await flip();
+    expect(askConfirm).toHaveBeenCalled();
+    expect(form.title.value).toBe("My own title");
+  });
+
+  it("caps the answer field", async () => {
+    await mount();
+    expect($<HTMLTextAreaElement>('[data-testid="ci-answer"]')!.maxLength).toBe(10000);
   });
 
   it("previews the answer on top of the description", async () => {

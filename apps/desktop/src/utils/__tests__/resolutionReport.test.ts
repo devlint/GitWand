@@ -47,6 +47,8 @@ describe("fileKind", () => {
     expect(fileKind("pnpm-lock.yaml")).toBe("pnpm-lock.yaml");
     expect(fileKind("LICENSE")).toBe("no extension");
     expect(fileKind("acme-secret-billing")).toBe("no extension");
+    expect(fileKind("clients\\acme.bank\\Makefile-x")).toBe("no extension");
+    expect(fileKind("src\\acme\\x.ts")).toBe(".ts");
   });
 });
 
@@ -84,6 +86,18 @@ describe("gitwandReportPrefill", () => {
     expect(p.body).not.toContain("secret-project");
     expect(p.body).not.toContain("billing");
     expect(p.body).not.toContain("x.ts");
+  });
+
+  it("scrubs a .gitwandrc glob and the file's own path or name out of engine text", () => {
+    const h = hunk({
+      type: "generated_file",
+      explanation: "Generated file (user pattern: clients/acme-bank/**) — taken from theirs.",
+      trace: { steps: [], selected: "generated_file", summary: "Generated (user pattern: clients/acme-bank/**) in clients/acme-bank/api.ts", hasBase: true },
+    });
+    const p = gitwandReportPrefill(report({ path: "clients/acme-bank/api.ts", hunk: h }), "", env);
+    expect(p.body).not.toContain("acme-bank");
+    expect(p.body).not.toContain("api.ts");
+    expect(p.body).toContain("user pattern");
   });
 
   it("names the format resolver when one handled the hunk", () => {

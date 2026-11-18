@@ -21,13 +21,19 @@ export function scanReportBody(
   body: string,
   opts: { extraPatterns: SecretPattern[]; entropyThreshold: number; blockAt: "medium" | "never" },
 ): ReportScan {
-  const addedLines = body.split("\n").map((text, i) => ({ line: i + 1, text }));
-  const findings = scanSecrets([{ path: "issue-body.md", addedLines }], {
-    enabled: true,
-    extraPatterns: opts.extraPatterns,
-    ignore: [],
-    entropyThreshold: opts.entropyThreshold,
-  });
+  const files = [{ path: "issue-body.md", addedLines: body.split("\n").map((text, i) => ({ line: i + 1, text })) }];
+  const config = { enabled: true, extraPatterns: opts.extraPatterns, ignore: [] };
+  // Two passes: the scanner keeps its first 500 findings in line order, so a
+  // lockfile's hundreds of entropy hits would push a real secret past the
+  // cut. The pattern pass (no entropy) carries everything that can block.
+  const patterns = scanSecrets(files, { ...config, entropyThreshold: 0 });
+  const entropy =
+    opts.entropyThreshold > 0
+      ? scanSecrets(files, { ...config, entropyThreshold: opts.entropyThreshold }).filter((f) => f.patternId === "high_entropy")
+      : [];
   const blocks = (f: SecretFinding) => opts.blockAt === "medium" && f.severity !== "low";
-  return { blocking: findings.filter(blocks), warnings: findings.filter((f) => !blocks(f)) };
+  return {
+    blocking: patterns.filter(blocks),
+    warnings: [...patterns.filter((f) => !blocks(f)), ...entropy].sort((a, b) => a.line - b.line),
+  };
 }
