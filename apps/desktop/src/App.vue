@@ -514,6 +514,15 @@ const createIssue = useCreateIssue({
       8000,
       issue.url ? { label: t("createIssue.open"), url: issue.url } : undefined,
     ),
+  report: {
+    // A resolver report is scanned like a commit: the repository's
+    // .gitwandrc patterns, and its or the app's entropy threshold.
+    secretsOptions: async (cwd) => {
+      if (!cwd) return { extraPatterns: [], entropyThreshold: settings.value.secretsEntropyThreshold };
+      const cfg = await secretsScanner.resolveConfig(cwd, settings.value);
+      return { extraPatterns: cfg.extraPatterns, entropyThreshold: cfg.entropyThreshold };
+    },
+  },
 });
 provide(CREATE_ISSUE_KEY, createIssue);
 watch(repoFolderPath, () => {

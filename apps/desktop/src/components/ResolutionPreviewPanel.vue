@@ -57,7 +57,7 @@ const { t } = useI18n();
       <button
         v-if="props.canReport"
         type="button"
-        class="resolution-preview-panel__btn resolution-preview-panel__btn--reject"
+        class="resolution-preview-panel__btn resolution-preview-panel__btn--report"
         data-action="report"
         :title="t('createIssue.report.buttonTitle')"
         @click="emit('report', props.hunkId)"
@@ -129,7 +129,8 @@ const { t } = useI18n();
   color: var(--color-accent-text);
   border-color: var(--color-accent);
 }
-.resolution-preview-panel__btn--reject {
+.resolution-preview-panel__btn--reject,
+.resolution-preview-panel__btn--report {
   background: transparent;
 }
 .resolution-preview-panel__accepted-badge {

@@ -7,8 +7,8 @@
 
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
-import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, readGitwandrc } from "../utils/backend";
-import { parseGitwandrc, type SecretPattern } from "@gitwand/core";
+import { gitExec, ghCreateGitwandIssue, ghGitwandWritable } from "../utils/backend";
+import type { SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
 import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
 import { scanReportBody, type ReportScan } from "../utils/reportGuard";
@@ -160,6 +160,8 @@ export interface CreateIssueApi {
   findings: Ref<ReportScan>;
   /** Title or description differ from those generated for the current target. */
   bodyEdited: ComputedRef<boolean>;
+  /** The text is over GitHub's body limit: Create is held. */
+  tooLong: ComputedRef<boolean>;
   /** What is sent: the answer on top of the description. */
   finalBody: ComputedRef<string>;
   openFromResolution(r: ResolutionReport): Promise<void>;
@@ -173,6 +175,9 @@ export interface CreateIssueApi {
 
 /** GitWand's own repository, where resolver reports go (mirrors Rust `GITWAND_REPO`). */
 export const GITWAND_REPO = "devlint/GitWand";
+
+/** GitHub's limit on an issue body. */
+export const ISSUE_BODY_MAX = 65_536;
 
 
 /** What report mode needs from outside (tests replace it). */
@@ -190,16 +195,9 @@ function defaultEnv(): { version: string; platform: string } {
   return { version, platform: platformName() };
 }
 
-/** `.gitwandrc`'s extra secret patterns and entropy threshold (4.0 when unset). */
-async function defaultSecretsOptions(cwd: string | null) {
-  let rc: ReturnType<typeof parseGitwandrc> = null;
-  try {
-    rc = cwd ? parseGitwandrc(await readGitwandrc(cwd)) : null;
-  } catch {
-    rc = null;
-  }
-  const extraPatterns: SecretPattern[] = (rc?.secrets?.patterns ?? []).map((p) => ({ ...p }));
-  return { extraPatterns, entropyThreshold: rc?.secrets?.entropyThreshold ?? 4.0 };
+/** Without the app's scanner config (tests): the built-in patterns at 4.0. */
+async function defaultSecretsOptions(_cwd: string | null) {
+  return { extraPatterns: [] as SecretPattern[], entropyThreshold: 4.0 };
 }
 
 export const CREATE_ISSUE_KEY: InjectionKey<CreateIssueApi> = Symbol("createIssue");
@@ -327,6 +325,9 @@ export function useCreateIssue(deps: {
 
   const finalBody = computed(() => (report.value ? withAnswer(answer.value, body.value, toGitwand.value) : body.value));
   // Title or description no longer what was generated for the current target.
+  // GitHub refuses a body over 65,536 characters (422) — after the user has
+  // already confirmed a public report: hold Create instead.
+  const tooLong = computed(() => finalBody.value.length > ISSUE_BODY_MAX);
   const bodyEdited = computed(() => body.value !== initial.value.body || title.value !== initial.value.title);
   const dirty = computed(
     () =>
@@ -344,6 +345,7 @@ export function useCreateIssue(deps: {
       title.value.trim() !== "" &&
       !submitting.value &&
       !outcomeUnknown.value &&
+      !tooLong.value &&
       (!toGitwand.value ||
         (confirmedPublic.value &&
           gitwandWritable.value === true &&
@@ -759,6 +761,7 @@ export function useCreateIssue(deps: {
     confirmedPublic,
     findings,
     bodyEdited,
+    tooLong,
     finalBody,
     openFromResolution,
     openId,

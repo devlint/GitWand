@@ -253,6 +253,17 @@ describe("useCreateIssue — report mode", () => {
     expect(api.canSubmit.value).toBe(false);
   });
 
+  it("holds Create while the text is over GitHub's 65,536-character limit", async () => {
+    const { api } = setup();
+    await api.openFromResolution(REPORT);
+    await settle();
+    api.answer.value = "`".repeat(9_000);
+    api.body.value = "x".repeat(60_000);
+    await settle();
+    expect(api.tooLong.value).toBe(true);
+    expect(api.canSubmit.value).toBe(false);
+  });
+
   it("a GitWand report cannot be sent without a github.com sign-in", async () => {
     const { api } = setup(provider(), false);
     await api.openFromResolution(REPORT);

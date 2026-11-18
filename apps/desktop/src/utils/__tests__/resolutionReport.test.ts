@@ -48,6 +48,10 @@ describe("fileKind", () => {
     expect(fileKind("yarn.lock")).toBe("yarn.lock");
     expect(fileKind("pnpm-lock.yaml")).toBe("pnpm-lock.yaml");
     expect(fileKind("LICENSE")).toBe("no extension");
+    // An extension of the project's own invention says who it is.
+    expect(fileKind("config.acmecorp")).toBe("other extension");
+    expect(fileKind("a/b.vue")).toBe(".vue");
+    expect(fileKind("a/b.yml")).toBe(".yml");
     expect(fileKind("acme-secret-billing")).toBe("no extension");
     expect(fileKind("clients\\acme.bank\\Makefile-x")).toBe("no extension");
     expect(fileKind("src\\acme\\x.ts")).toBe(".ts");
@@ -108,12 +112,12 @@ describe("gitwandReportPrefill", () => {
     const h = hunk({
       type: "generated_file",
       explanation: "Generated file (user pattern: clients/(acme)/gen/**) — taken from theirs.",
-      trace: { steps: [], selected: "generated_file", summary: "Moved from acme-bank/internal", hasBase: true },
+      trace: { steps: [], selected: "generated_file", summary: "Moved from acme-bank/billing-svc", hasBase: true },
     });
-    const p = gitwandReportPrefill(report({ path: "acme-bank/internal/api.ts", hunk: h }), env);
+    const p = gitwandReportPrefill(report({ path: "acme-bank/billing-svc/api.ts", hunk: h }), env);
     expect(p.body).not.toContain("acme");
     expect(p.body).not.toContain("gen/**");
-    expect(p.body).not.toContain("internal");
+    expect(p.body).not.toContain("billing-svc");
   });
 
   it("names the format resolver when one handled the hunk", () => {
@@ -196,6 +200,32 @@ describe("gitwandReportPrefill", () => {
     const body = repoReportPrefill(report({ kind: "ai", hunk: h, resolvedLines: null })).body;
     expect(body).toContain("No result: the AI fallback gave no answer");
     expect(body).not.toContain("failed validation");
+  });
+
+  it("names a public model family, never a private deployment", () => {
+    const withModel = (model: string) =>
+      hunk({
+        type: "llm_proposed",
+        trace: {
+          steps: [], selected: "llm_proposed", summary: "s", hasBase: true,
+          llmTrace: { calledAt: "", model, latencyMs: 1, promptHash: "h", rawResponseTruncated: "", validationScore: 80, accepted: true },
+        } as ConflictHunk["trace"],
+      });
+    expect(gitwandReportPrefill(report({ kind: "ai", hunk: withModel("claude-sonnet-4-6") }), env).body).toContain("claude-sonnet-4-6");
+    const priv = gitwandReportPrefill(report({ kind: "ai", hunk: withModel("acme-payments-gpt4") }), env).body;
+    expect(priv).not.toContain("acme");
+    expect(priv).toContain("a custom model");
+  });
+
+  it("scrubs folder names whatever their case, short ones too, but not generic words", () => {
+    const h = hunk({
+      explanation: 'Resolved by the "json" resolver for acme and IBM',
+      trace: { steps: [], selected: "non_overlapping", summary: "s", hasBase: true },
+    });
+    const body = gitwandReportPrefill(report({ path: "clients/ibm/Acme/json/x.ts", hunk: h }), env).body;
+    expect(body).not.toMatch(/acme/i);
+    expect(body).not.toMatch(/\bibm\b/i);
+    expect(body).toContain('"json" resolver');
   });
 
   it("carries a token-level merge's pass counts", () => {

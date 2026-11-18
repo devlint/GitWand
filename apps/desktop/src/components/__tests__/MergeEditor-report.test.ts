@@ -257,6 +257,27 @@ describe("MergeEditor — report a resolution", () => {
     expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(0);
   });
 
+  it("an undo that brings the hunk back empties the list", async () => {
+    const file = twoResolvableHunks();
+    const state = mountWithFile(file);
+    await nextTick();
+    container.querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--accept")!.click();
+    state.file = afterWrite(file);
+    await nextTick();
+    expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(1);
+    state.file = twoResolvableHunks();
+    await nextTick();
+    expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(0);
+  });
+
+  it("the Report button is not styled or found as Reject", async () => {
+    mountWithFile(twoResolvableHunks());
+    await nextTick();
+    const btn = reportButtons("resolution-preview-panel")[0];
+    expect(btn.classList.contains("resolution-preview-panel__btn--reject")).toBe(false);
+    expect(btn.classList.contains("resolution-preview-panel__btn--report")).toBe(true);
+  });
+
   it("offers no Report without the issue form", async () => {
     mountWithFile(twoResolvableHunks(), false);
     await nextTick();

@@ -696,6 +696,9 @@ watch(
       && nextHunks.length === prevHunks.length - 1;
     // An accepted proposal is listed only when its own write is what landed.
     accepted.landed(renumber ? consumed : null);
+    // More conflicts than before in the same file (an undo, a reload): the
+    // accepted resolutions may be undone, so they are no longer listed.
+    if (nextPath === prevPath && nextHunks.length > prevHunks.length) accepted.clear();
     if (renumber) {
       aiQueue.remapAfterApply([consumed]);
       aiBatchIndices.value = new Set(

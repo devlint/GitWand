@@ -63,6 +63,17 @@ const KNOWN_NAMES = new Set([
   "poetry.lock",
 ]);
 
+/** Extensions common enough to say nothing about whose file it is. */
+const KNOWN_EXTENSIONS = new Set(
+  (
+    ".ts .tsx .js .jsx .mjs .cjs .vue .svelte .json .jsonc .json5 .yaml .yml .toml .ini .cfg .conf .xml " +
+    ".html .htm .css .scss .sass .less .md .mdx .rst .txt .csv .sql .graphql .gql .proto " +
+    ".py .rb .php .java .kt .kts .scala .groovy .gradle .go .rs .c .h .cc .cpp .hpp .cs .fs .swift .m .mm " +
+    ".dart .lua .pl .r .ex .exs .erl .hs .clj .elm .zig .nim .sh .bash .zsh .fish .ps1 .bat .cmd " +
+    ".tf .hcl .nix .lock .env .properties .plist .csproj .sln .xcodeproj .pbxproj .tex .bib .svg"
+  ).split(" "),
+);
+
 /**
  * The file's kind for a public report: a known name (`Cargo.lock`,
  * `Dockerfile`), else its extension, `.env` for any `.env.*`, else
@@ -74,7 +85,10 @@ export function fileKind(path: string): string {
   if (KNOWN_NAMES.has(name)) return name;
   if (name === ".env" || name.startsWith(".env.")) return ".env";
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot) : "no extension";
+  if (dot <= 0) return "no extension";
+  const ext = name.slice(dot).toLowerCase();
+  // A made-up extension can name the project: only common ones are printed.
+  return KNOWN_EXTENSIONS.has(ext) ? ext : "other extension";
 }
 
 interface Block {
@@ -113,7 +127,16 @@ function confidenceLine(h: ConflictHunk): string {
   return `${codeSpan(h.type)}, confidence ${h.confidence.score} (${h.confidence.label})`;
 }
 
-type Scrub = (text: string) => string;
+type Scrub = ((text: string) => string) & { isPublic?: boolean };
+
+/** Public model families; a self-hosted deployment's name can name its owner. */
+const PUBLIC_MODEL = /^(claude|gpt|o\d|chatgpt|gemini|gemma|llama|codellama|mistral|mixtral|codestral|qwen|deepseek|phi|command|grok)[\w.:-]*$/i;
+
+/** The model as a public report may show it (the repository report shows it as is). */
+function modelName(model: string, scrub: Scrub): string {
+  if (!scrub.isPublic) return `model ${codeSpan(model)}`;
+  return PUBLIC_MODEL.test(model) ? `model ${codeSpan(model)}` : "a custom model";
+}
 
 /**
  * Engine prose can carry what a public report must not: a `.gitwandrc`
@@ -122,16 +145,18 @@ type Scrub = (text: string) => string;
  */
 function scrubberFor(path: string): Scrub {
   const parts = path.split(/[\\/]/).filter(Boolean);
-  // The whole path, the file name, and every folder name long enough to say
-  // something (a 3-letter `src` or `lib` says nothing about the project).
   const name = parts[parts.length - 1] ?? "";
-  const folders = parts.slice(0, -1).filter((x) => x.length > 3);
-  const secrets = [...new Set([path, name, ...folders])].filter((x) => x.length > 2).sort((a, b) => b.length - a.length);
-  return (text) => {
+  // Every folder name, short ones too (`ibm`), except words that say nothing
+  // about the project and that the engine's own prose uses (`json`, `src`).
+  const folders = parts.slice(0, -1).filter((x) => x.length > 1 && !GENERIC_FOLDERS.has(x.toLowerCase()));
+  const secrets = [...new Set([path, name, ...folders])].filter((x) => x.length > 1).sort((a, b) => b.length - a.length);
+  const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = secrets.length ? new RegExp(`(?<![\\w-])(?:${secrets.map(escape).join("|")})(?![\\w-])`, "gi") : null;
+  const scrub: Scrub = (text) => {
     // A glob may hold parentheses: drop up to the line's last one (and the
     // whole rest of the line when it has none). Saying too little is safe.
     let out = text.replace(/user pattern: [^\n]*\)/g, "user pattern)").replace(/user pattern: [^\n)]*$/gm, "user pattern");
-    for (const s of secrets) out = out.split(s).join("<file>");
+    if (pattern) out = out.replace(pattern, "<file>");
     // An endpoint's error can name a private host: URLs, host:port, and
     // names under a private suffix.
     out = out
@@ -140,7 +165,19 @@ function scrubberFor(path: string): Scrub {
       .replace(/\b[\w-]+(?:\.[\w-]+)*\.(?:internal|corp|local|lan|intranet|home)\b/gi, "<host>");
     return out;
   };
+  scrub.isPublic = true;
+  return scrub;
 }
+
+/** Folder names too common to identify a project. */
+const GENERIC_FOLDERS = new Set(
+  (
+    "src lib app apps api bin build dist out test tests spec specs docs doc packages package pkg cmd internal " +
+    "components component utils util helpers common shared core config configs scripts public static assets " +
+    "resources res main java kotlin js ts json yaml yml vendor modules node_modules web server client frontend " +
+    "backend tools tool examples example fixtures data types models views controllers services resolver resolvers"
+  ).split(" "),
+);
 
 /** The engine's reasoning: explanation, trace summary, and the proposal's own trace. */
 function reasoning(r: ResolutionReport, scrub: Scrub): string[] {
@@ -150,7 +187,7 @@ function reasoning(r: ResolutionReport, scrub: Scrub): string[] {
   if (h.trace.summary) out.push(`- Decision: ${clip(scrub(h.trace.summary))}`);
   const llm = h.trace.llmTrace;
   if (r.kind === "ai" && llm) {
-    out.push(`- AI proposal: model ${codeSpan(llm.model)}, validation ${llm.validationScore}`);
+    out.push(`- AI proposal: ${modelName(llm.model, scrub)}, validation ${llm.validationScore}`);
     if (llm.history) out.push(`- history: ${llm.history.commitCount} commits (${llm.history.status})`);
   }
   const tok = h.trace.tokenMergeTrace;

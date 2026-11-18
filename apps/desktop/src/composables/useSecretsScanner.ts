@@ -59,6 +59,9 @@ export interface UseSecretsScannerResult {
   dismiss: (key: string) => void;
   /** Stable per-finding identity used by `dismiss`. */
   findingKey: (finding: SecretFinding) => string;
+  /** The effective scan config for `cwd`: `.gitwandrc` over the app settings
+   *  (also what a resolver report is scanned with, #301). */
+  resolveConfig: (cwd: string, settings: SecretsScannerAppSettings) => Promise<SecretsScanConfig>;
 }
 
 function findingKey(f: SecretFinding): string {
@@ -213,5 +216,6 @@ export function useSecretsScanner(opts: UseSecretsScannerOptions = {}): UseSecre
     filesForPattern,
     dismiss,
     findingKey,
+    resolveConfig,
   };
 }

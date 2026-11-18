@@ -8,7 +8,7 @@ import { IS_MAC } from "../utils/platform";
 import { computed, inject, nextTick, ref, watch } from "vue";
 import BaseModal from "./BaseModal.vue";
 import RemoteImagesNotice from "./RemoteImagesNotice.vue";
-import { CREATE_ISSUE_KEY, GITWAND_REPO } from "../composables/useCreateIssue";
+import { CREATE_ISSUE_KEY, GITWAND_REPO, ISSUE_BODY_MAX } from "../composables/useCreateIssue";
 import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables/useSafeHtml";
 import { useI18n } from "../composables/useI18n";
 import { ISSUE_TITLE_MAX } from "../utils/issuePrefill";
@@ -177,7 +177,11 @@ function onMilestone(e: Event) {
           <p v-if="form.gitwandLocked.value && form.targetsError.value" class="ci-status ci-detail">
             {{ form.targetsError.value }}
           </p>
-          <p v-if="form.gitwandWritable.value === false" class="ci-status ci-status--error">
+          <p
+            v-if="form.gitwandWritable.value === false"
+            class="ci-status"
+            :class="{ 'ci-status--error': form.toGitwand.value }"
+          >
             {{ t("createIssue.report.gitwandUnavailable") }}
           </p>
           <div v-if="form.toGitwand.value" class="ci-public" role="note">
@@ -330,6 +334,10 @@ function onMilestone(e: Event) {
           <p v-for="(f, i) in shownWarnings" :key="`w${i}`" class="ci-secret-warning">{{ findingText(f, false) }}</p>
           <p v-if="hiddenWarnings > 0">{{ t("createIssue.report.secretWarningMore", hiddenWarnings) }}</p>
         </div>
+
+        <p v-if="form.tooLong.value" class="ci-status ci-status--error" role="alert">
+          {{ t("createIssue.report.tooLong", form.finalBody.value.length, ISSUE_BODY_MAX) }}
+        </p>
 
         <div v-if="form.outcomeUnknown.value" class="ci-unknown" role="alert">
           <p class="ci-status ci-status--error">{{ t("createIssue.maybeCreated") }}</p>

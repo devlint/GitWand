@@ -52,7 +52,7 @@ const { t } = useI18n();
       <button
         v-if="props.canReport"
         type="button"
-        class="token-merge-panel__btn token-merge-panel__btn--reject"
+        class="token-merge-panel__btn token-merge-panel__btn--report"
         data-action="report"
         :title="t('createIssue.report.buttonTitle')"
         @click="emit('report', props.hunkId)"
@@ -114,7 +114,8 @@ const { t } = useI18n();
   color: var(--color-accent-text);
   border-color: var(--color-accent);
 }
-.token-merge-panel__btn--reject {
+.token-merge-panel__btn--reject,
+.token-merge-panel__btn--report {
   background: transparent;
 }
 .token-merge-panel__accepted-badge {

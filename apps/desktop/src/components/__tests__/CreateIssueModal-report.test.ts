@@ -164,6 +164,20 @@ describe("CreateIssueModal — report mode", () => {
     expect(document.body.textContent).toContain("createIssue.report.gitwandUnavailable");
   });
 
+  it("the sign-in hint is not an error while the report goes to the repository", async () => {
+    await mount({ writable: false });
+    const hint = [...document.querySelectorAll("p")].find((p) => p.textContent?.includes("createIssue.report.gitwandUnavailable"))!;
+    expect(hint.classList.contains("ci-status--error")).toBe(false);
+  });
+
+  it("says when the text is too long for GitHub", async () => {
+    const { form } = await mount();
+    form.body.value = "x".repeat(70_000);
+    await flush();
+    expect(document.body.textContent).toContain("createIssue.report.tooLong");
+    expect(createButton()?.disabled).toBe(true);
+  });
+
   it("is checked and locked when the repository cannot take the issue", async () => {
     await mount({ targets: { targets: [], defaultRepo: null } });
     expect(sw().checked).toBe(true);

@@ -145,6 +145,12 @@ function reclassifyFormatConflict(hunk: ConflictHunk, resolverUsed: string, reas
   };
 }
 
+/** #301 — A hunk whose format-aware resolution was not applied names no resolver. */
+function withoutFormatResolver(hunk: ConflictHunk): ConflictHunk {
+  const { formatResolver: _unused, ...rest } = hunk;
+  return rest;
+}
+
 /**
  * accuracy lot 1 — Un hunk non-complex résolu par un résolveur format-aware garde son
  * type (la classification textuelle reste vraie) mais sa confiance intègre la
@@ -261,7 +267,8 @@ function resolveHunk(
       // prefer-safety) l'excluent donc aussi, comme pour le résolveur imports.
       if (effective.type === "format_semantic" && !fmtCfg.allowNonOverlapping) {
         return {
-          hunk: effective,
+          // Not applied: no resolver produced this hunk's resolution.
+          hunk: withoutFormatResolver(effective),
           lines: null,
           reason: `Semantic merge (${dispatch.resolverUsed}) disabled by the "${fmtPolicy}" policy — it combines content from both sides.`,
         };
@@ -279,7 +286,7 @@ function resolveHunk(
             ? `below the minConfidenceScore of ${fmtGate.required}`
             : `insufficient (minimum required: ${fmtGate.required}, policy: ${fmtPolicy})`;
         return {
-          hunk: effective,
+          hunk: withoutFormatResolver(effective),
           lines: null,
           reason: `Confidence ${effective.confidence.label} (score: ${effective.confidence.score}) is ${because} to apply the format-aware resolution.`,
         };
