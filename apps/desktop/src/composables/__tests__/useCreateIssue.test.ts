@@ -501,6 +501,27 @@ describe("useCreateIssue — from a diff selection", () => {
   });
 });
 
+describe("useCreateIssue — selection hand-off", () => {
+  it("reports whether it opened, and tells the selection's view only then", async () => {
+    const { api } = setup(provider());
+    await api.refreshAvailability();
+    const onOpened = vi.fn();
+    expect(await api.openFromSelection({ ...prSel(ADDED), onOpened })).toBe(true);
+    expect(onOpened).toHaveBeenCalledTimes(1);
+    api.title.value = "typing";
+    const later = vi.fn();
+    expect(await api.openFromSelection({ ...prSel(ADDED), onOpened: later })).toBe(false);
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  it("links a renamed file's deleted lines under its old path", async () => {
+    const { api } = setup(provider(), undefined, async () => true);
+    await api.refreshAvailability();
+    await api.openFromSelection({ ...commitSel(DELETED), path: "src/new.ts", oldPath: "src/old.ts" });
+    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/old.ts#L7\n`)).toBe(true);
+  });
+});
+
 describe("commitOnOriginWith — real git repository", () => {
   const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
   const exec = async (cwd: string, args: string[]) => {

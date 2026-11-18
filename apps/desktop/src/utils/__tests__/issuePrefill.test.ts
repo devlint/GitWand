@@ -186,4 +186,21 @@ describe("selectionIssuePrefill", () => {
     expect(body.length).toBeLessThan(65536);
     expect(body).toMatch(/\n\(first \d+ of 100 lines\)\n/);
   });
+
+  it("names a renamed file's old path for deleted lines", () => {
+    const sel: DiffSelection = { path: "b/new.ts", oldPath: "a/old.ts", lines: [del(4, "a")], source: { kind: "pr", number: 1, url: "u", headSha: null } };
+    expect(selectionIssuePrefill(sel, { permalink: null, commitUrl: null }).body).toContain("`a/old.ts` old line 4, ");
+    const added: DiffSelection = { ...sel, lines: [add(4, "a")] };
+    expect(selectionIssuePrefill(added, { permalink: null, commitUrl: null }).body).toContain("`b/new.ts` line 4, ");
+  });
+
+  it("stays under GitHub's limit with a long intro too", () => {
+    const pr = { kind: "pr" as const, number: 1, url: "u", headSha: null };
+    const long = Array.from({ length: 100 }, (_, i) => add(i + 1, "y".repeat(5000)));
+    const body = selectionIssuePrefill(
+      { path: "x", lines: long, source: pr, intro: "w".repeat(80_000) },
+      { permalink: "https://github.com/o/r/blob/s/x#L1-L100", commitUrl: null },
+    ).body;
+    expect(body.length).toBeLessThan(65536);
+  });
 });

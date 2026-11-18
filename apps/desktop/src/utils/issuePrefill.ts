@@ -70,6 +70,8 @@ export function commitIssuePrefill(entry: GitLogEntry, commitUrl: string | null)
 /** Lines selected in a commit or PR diff, to file an issue about (#301). */
 export interface DiffSelection {
   path: string;
+  /** A renamed file's path before the change (where its deleted lines are). */
+  oldPath?: string;
   /** Selected rows, in diff order, all from one hunk. */
   lines: DiffLine[];
   source:
@@ -77,6 +79,9 @@ export interface DiffSelection {
     | { kind: "pr"; number: number; url: string; headSha: string | null };
   /** Text typed before (the PR compose box): starts the body. */
   intro?: string;
+  /** Told once the issue form has opened with this selection (the view
+   *  that owns it then lets it go: the PR compose box closes). */
+  onOpened?: () => void;
 }
 
 /** Which version of the file, and which of its lines, a permalink points at. */
@@ -88,8 +93,10 @@ export interface LineSpan {
 
 /** The most selected lines written into an issue's block. */
 export const SELECTION_MAX_LINES = 200;
-/** The most characters of selected lines, well under GitHub's 65 536-character body. */
+/** The most characters of the whole body, well under GitHub's 65 536. */
 const SELECTION_MAX_CHARS = 60_000;
+/** The most characters kept of the text typed before (the PR compose box). */
+const SELECTION_MAX_INTRO = 20_000;
 
 /**
  * The lines a selection covers in one version of the file: the old version
@@ -123,25 +130,9 @@ export function selectionIssuePrefill(
   sel: DiffSelection,
   links: { permalink: string | null; commitUrl: string | null },
 ): IssuePrefill {
-  const all = sel.lines.map((l) => (l.type === "add" ? "+" : l.type === "delete" ? "-" : " ") + l.content);
-  const rows: string[] = [];
-  let chars = 0;
-  for (const row of all.slice(0, SELECTION_MAX_LINES)) {
-    if (chars + row.length + 1 > SELECTION_MAX_CHARS) break;
-    rows.push(row);
-    chars += row.length + 1;
-  }
-  // One line longer than the whole budget: show its start rather than nothing.
-  if (rows.length === 0 && all.length > 0) rows.push(all[0].slice(0, SELECTION_MAX_CHARS));
-  const parts: string[] = [];
-  if (sel.intro?.trim()) parts.push(sel.intro.trim());
-  if (links.permalink) parts.push(links.permalink);
-  let block = codeBlock(rows.join("\n"), "diff");
-  if (sel.lines.length > rows.length) {
-    block += `\n(first ${rows.length} of ${sel.lines.length} lines)`;
-  }
-  parts.push(block);
   const span = permalinkSpan(sel.lines);
+  // Deleted lines of a renamed file live under its old path.
+  const path = span?.side === "old" && sel.oldPath ? sel.oldPath : sel.path;
   const old = span?.side === "old" ? " old" : "";
   const where = span ? (span.from === span.to ? `${old} line ${span.from}` : `${old} lines ${span.from}–${span.to}`) : "";
   const src = sel.source;
@@ -151,6 +142,29 @@ export function selectionIssuePrefill(
         ? `commit [\`${src.hash}\`](${links.commitUrl})`
         : `commit \`${src.hashFull}\``
       : `pull request [#${src.number}](${src.url})`;
-  parts.push(`${codeSpan(sel.path)}${where}, ${origin}`);
+  const footer = `${codeSpan(path)}${where}, ${origin}`;
+  let intro = sel.intro?.trim() ?? "";
+  if (intro.length > SELECTION_MAX_INTRO) intro = intro.slice(0, SELECTION_MAX_INTRO) + "…";
+
+  // Whatever the rest takes comes off the lines' share of the budget.
+  const budget = Math.max(1000, SELECTION_MAX_CHARS - intro.length - (links.permalink?.length ?? 0) - footer.length);
+  const all = sel.lines.map((l) => (l.type === "add" ? "+" : l.type === "delete" ? "-" : " ") + l.content);
+  const rows: string[] = [];
+  let chars = 0;
+  for (const row of all.slice(0, SELECTION_MAX_LINES)) {
+    if (chars + row.length + 1 > budget) break;
+    rows.push(row);
+    chars += row.length + 1;
+  }
+  // One line longer than the whole budget: show its start rather than nothing.
+  if (rows.length === 0 && all.length > 0) rows.push(all[0].slice(0, budget));
+  let block = codeBlock(rows.join("\n"), "diff");
+  if (sel.lines.length > rows.length) {
+    block += `\n(first ${rows.length} of ${sel.lines.length} lines)`;
+  }
+  const parts: string[] = [];
+  if (intro) parts.push(intro);
+  if (links.permalink) parts.push(links.permalink);
+  parts.push(block, footer);
   return { title: "", body: parts.join("\n\n") + "\n" };
 }

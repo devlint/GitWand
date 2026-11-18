@@ -10,8 +10,8 @@
  *    comments, and "Create issue" from those lines, #301)
  *  - Code suggestion apply support
  */
-import { ref, computed, watch, inject, onUnmounted, toRaw } from "vue";
-import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
+import { ref, computed, watch, inject } from "vue";
+import { CREATE_ISSUE_KEY, useSelectionPublisher } from "../composables/useCreateIssue";
 import type { DiffSelection } from "../utils/issuePrefill";
 import type { GitDiff, DiffLine, PrReviewComment } from "../utils/backend";
 import { annotationsByLine as groupAnnotationsByLine, worstSeverity, type LineAnnotation } from "../composables/prAnnotations";
@@ -262,9 +262,6 @@ function isSuggestAnchoredAt(dl: DiffLine): boolean {
   return suggestLine.value.line === dl.newLineNo && dl.type !== "delete";
 }
 
-// Multi-line selection
-const selectionStart = ref<{ line: number; side: "LEFT" | "RIGHT" } | null>(null);
-
 /** The row a Shift+click range is measured from (the row first clicked). */
 const rangeAnchorIdx = ref<number | null>(null);
 /** The rows a Shift+click range covers in the compose box's hunk. */
@@ -280,7 +277,6 @@ function lineNoOf(dl: DiffLine): number {
 function openCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
   composeLine.value = { hunkIdx, lineIdx, line: lineNoOf(dl), side: sideOf(dl) };
   composeText.value = "";
-  selectionStart.value = null;
   rangeAnchorIdx.value = lineIdx;
   composeRange.value = null;
 }
@@ -301,16 +297,30 @@ function extendCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
   const anchor = rangeAnchorIdx.value ?? cur.lineIdx;
   const lo = Math.min(anchor, lineIdx);
   const hi = Math.max(anchor, lineIdx);
-  const first = hunk.lines[lo];
   const last = hunk.lines[hi];
   composeLine.value = { hunkIdx, lineIdx: hi, line: lineNoOf(last), side: sideOf(last) };
-  // A range ending on a deleted line is read on the old side: a context first
-  // row then starts there too (its old number), as GitHub expects.
-  const startSide = sideOf(last) === "LEFT" && first.type === "context" ? "LEFT" : sideOf(first);
-  const startLine = startSide === "LEFT" ? (first.oldLineNo ?? 0) : lineNoOf(first);
-  selectionStart.value = lo === hi ? null : { line: startLine, side: startSide };
   composeRange.value = lo === hi ? null : { lo, hi };
 }
+
+/**
+ * Where GitHub's multi-line comment starts (`start_line` / `start_side`):
+ * the range's first row, read on the side its last row is on when that is
+ * the old one — GitHub refuses a range from the new side to the old. A range
+ * ending on a deleted line therefore starts on its first row that exists in
+ * the old version (an added row does not).
+ */
+const rangeStart = computed<{ line: number; side: "LEFT" | "RIGHT" } | null>(() => {
+  const r = composeRange.value;
+  const c = composeLine.value;
+  const hunk = r && c ? props.diff?.hunks[c.hunkIdx] : undefined;
+  if (!r || !hunk) return null;
+  const rows = hunk.lines.slice(r.lo, r.hi + 1);
+  if (sideOf(rows[rows.length - 1]) === "LEFT") {
+    const first = rows.find((l) => l.type !== "add");
+    return first?.oldLineNo ? { line: first.oldLineNo, side: "LEFT" } : null;
+  }
+  return { line: lineNoOf(rows[0]), side: sideOf(rows[0]) };
+});
 
 /** Multi-line comments are sent as such only to GitHub; elsewhere a range
  *  would be shown but posted on its last line. */
@@ -329,7 +339,6 @@ function isInComposeRange(hunkIdx: number, lineIdx: number): boolean {
 function closeCompose() {
   composeLine.value = null;
   composeText.value = "";
-  selectionStart.value = null;
   rangeAnchorIdx.value = null;
   composeRange.value = null;
 }
@@ -343,38 +352,34 @@ const canCreateIssue = computed(
 const composeSelection = computed<DiffSelection | null>(() => {
   const c = composeLine.value;
   const hunk = c ? props.diff?.hunks[c.hunkIdx] : undefined;
-  if (!c || !hunk || !props.filePath || !props.prUrl || props.prNumber === undefined) return null;
+  if (!canCreateIssue.value || !c || !hunk || !props.filePath || !props.prUrl || props.prNumber === undefined) {
+    return null;
+  }
   const r = composeRange.value;
   const lines = r ? hunk.lines.slice(r.lo, r.hi + 1) : hunk.lines.slice(c.lineIdx, c.lineIdx + 1);
   if (lines.length === 0) return null;
   return {
     path: props.filePath,
+    ...(props.diff?.oldPath ? { oldPath: props.diff.oldPath } : {}),
     lines,
+    intro: composeText.value,
     source: { kind: "pr", number: props.prNumber, url: props.prUrl, headSha: props.headSha || null },
+    // Filed (button or ⌘⇧I): the box has handed its lines and text over.
+    onOpened: closeCompose,
   };
 });
 
-// Published for ⌘⇧I; given back only if it is still this view's.
-let published: DiffSelection | null = null;
-function publish(sel: DiffSelection | null) {
-  if (!createIssue) return;
-  const next = canCreateIssue.value ? sel : null;
-  if (next) createIssue.activeSelection.value = next;
-  else if (published && toRaw(createIssue.activeSelection.value) === published) createIssue.activeSelection.value = null;
-  published = next;
-}
 // Only a Shift+click range is a selection for ⌘⇧I: a box opened to comment
 // on one line is not.
-watch(() => (composeRange.value ? composeSelection.value : null), publish);
-onUnmounted(() => publish(null));
+useSelectionPublisher(createIssue, () => (composeRange.value ? composeSelection.value : null));
 // Another file: the box (and its line numbers) belonged to the previous one.
 watch(() => props.filePath, closeCompose);
 
 function fileIssueFromCompose() {
   const sel = composeSelection.value;
-  if (!sel || !createIssue) return;
-  void createIssue.openFromSelection({ ...sel, intro: composeText.value });
-  closeCompose();
+  // The box closes only once the form has opened (`onOpened`): refused (a
+  // form being typed in), the text stays.
+  if (sel && createIssue) void createIssue.openFromSelection(sel);
 }
 
 function buildComposeParams(): CommentParams | null {
@@ -383,14 +388,8 @@ function buildComposeParams(): CommentParams | null {
   const { line, side } = composeLine.value;
   const base: CommentParams = { path: props.filePath, line, side, body };
   // A range, even when its two ends share a number (-x / +y on line 10).
-  if (composeRange.value && selectionStart.value) {
-    return {
-      ...base,
-      // Always the range's first row (see extendCompose).
-      start_line: selectionStart.value.line,
-      start_side: selectionStart.value.side,
-    };
-  }
+  const start = rangeStart.value;
+  if (start) return { ...base, start_line: start.line, start_side: start.side };
   return base;
 }
 

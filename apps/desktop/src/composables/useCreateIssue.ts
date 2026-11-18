@@ -5,7 +5,7 @@
  * ⌘K, ⌘⇧I) calls `open(prefill?)`, a commit's menu `openFromCommit(entry)`.
  */
 
-import { computed, ref, shallowRef, type ComputedRef, type InjectionKey, type Ref } from "vue";
+import { computed, onUnmounted, ref, shallowRef, toRaw, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec } from "../utils/backend";
 import type {
@@ -135,7 +135,7 @@ export interface CreateIssueApi {
    * "Create issue from these lines": the form opens prefilled with a
    * permalink (when GitHub has the lines), the lines and their origin.
    */
-  openFromSelection(sel: DiffSelection): Promise<void>;
+  openFromSelection(sel: DiffSelection): Promise<boolean>;
   /** ⌘⇧I / palette: from the active selection when there is one. */
   openFromShortcut(): Promise<void>;
   close(): void;
@@ -144,6 +144,24 @@ export interface CreateIssueApi {
 }
 
 export const CREATE_ISSUE_KEY: InjectionKey<CreateIssueApi> = Symbol("createIssue");
+
+/**
+ * Publish a diff view's selection as `api.activeSelection` (what ⌘⇧I files)
+ * while issues can be created, and give it back — only if it is still this
+ * view's — when it goes away, availability drops or the view unmounts. Call
+ * from a component's setup.
+ */
+export function useSelectionPublisher(api: CreateIssueApi | null, source: () => DiffSelection | null): void {
+  if (!api) return;
+  let published: DiffSelection | null = null;
+  function give(next: DiffSelection | null) {
+    if (next) api!.activeSelection.value = next;
+    else if (published && toRaw(api!.activeSelection.value) === published) api!.activeSelection.value = null;
+    published = next;
+  }
+  watch(() => (api.available.value ? source() : null), give);
+  onUnmounted(() => give(null));
+}
 
 function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -328,35 +346,44 @@ export function useCreateIssue(deps: {
   // Shallow: replaced whole, never mutated, and compared by identity.
   const activeSelection = shallowRef<DiffSelection | null>(null);
 
-  async function openFromSelection(sel: DiffSelection): Promise<void> {
+  /** Resolves `true` when the form opened with `sel` (then `sel.onOpened`
+   *  has run), `false` when it could not (no GitHub, a form being typed in). */
+  async function openFromSelection(sel: DiffSelection): Promise<boolean> {
     const cwd = deps.cwd.value;
-    if (!cwd || !available.value) return;
+    if (!cwd || !available.value) return false;
     if (isOpen.value) {
-      if (dirty.value || submitting.value) return;
+      if (dirty.value || submitting.value) return false;
       close();
     }
     const span = permalinkSpan(sel.lines);
+    // Deleted lines of a renamed file live under its old path.
+    const path = span?.side === "old" && sel.oldPath ? sel.oldPath : sel.path;
     const src = sel.source;
+    let opened: Promise<void>;
     if (src.kind === "pr") {
       // The PR's own repository (it may be a fork's parent); its base SHA is
       // unknown, so deleted lines get no permalink.
       const m = /^(https?:\/\/.+)\/pull\/\d+\/?$/.exec(src.url);
       const permalink =
-        m && span && span.side === "new" && src.headSha ? blobPermalink(m[1], src.headSha, sel.path, span) : null;
-      await open(selectionIssuePrefill(sel, { permalink, commitUrl: null }));
-      return;
-    }
-    // Started now, alongside the targets read; the links wait for both.
-    const onOrigin = commitOnOrigin(cwd, src.hashFull).catch(() => false);
-    await open(async (origin) => {
-      if (!(await onOrigin) || !origin) return selectionIssuePrefill(sel, { permalink: null, commitUrl: null });
-      // Deleted lines live in the first parent, on origin too once the commit is.
-      const sha = span?.side === "old" ? src.parent : src.hashFull;
-      return selectionIssuePrefill(sel, {
-        permalink: span && sha ? blobPermalink(origin, sha, sel.path, span) : null,
-        commitUrl: commitUrlFor(origin, src.hashFull),
+        m && span && span.side === "new" && src.headSha ? blobPermalink(m[1], src.headSha, path, span) : null;
+      opened = open(selectionIssuePrefill(sel, { permalink, commitUrl: null }));
+    } else {
+      // Started now, alongside the targets read; the links wait for both.
+      const onOrigin = commitOnOrigin(cwd, src.hashFull).catch(() => false);
+      opened = open(async (origin) => {
+        if (!(await onOrigin) || !origin) return selectionIssuePrefill(sel, { permalink: null, commitUrl: null });
+        // Deleted lines live in the first parent, on origin too once the commit is.
+        const sha = span?.side === "old" ? src.parent : src.hashFull;
+        return selectionIssuePrefill(sel, {
+          permalink: span && sha ? blobPermalink(origin, sha, path, span) : null,
+          commitUrl: commitUrlFor(origin, src.hashFull),
+        });
       });
-    });
+    }
+    // The form is on screen from here (`open` shows it before reading).
+    sel.onOpened?.();
+    await opened;
+    return true;
   }
 
   async function openFromShortcut(): Promise<void> {

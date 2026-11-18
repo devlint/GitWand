@@ -12,6 +12,18 @@ import { CREATE_ISSUE_KEY } from "../../composables/useCreateIssue";
 import type { GitDiff, GitLogEntry } from "../../utils/backend";
 import type { DiffSelection } from "../../utils/issuePrefill";
 
+const wordDiffCalls = vi.hoisted(() => ({ n: 0 }));
+vi.mock("../../utils/wordDiff", async (orig) => {
+  const real = (await orig()) as typeof import("../../utils/wordDiff");
+  return {
+    ...real,
+    wordDiff: (a: string, b: string) => {
+      wordDiffCalls.n++;
+      return real.wordDiff(a, b);
+    },
+  };
+});
+
 vi.mock("../../composables/useI18n", () => ({
   useI18n: () => ({ t: (key: string) => key, locale: ref("en") }),
 }));
@@ -215,11 +227,38 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     expect(fake.activeSelection.value).not.toBeNull();
   });
 
-  it("no button when the commit's details are not loaded", async () => {
+  it("selects nothing when the commit's details are not loaded", async () => {
     mount({ commitInfo: null });
     await nextTick();
     click(numberCell(0, 1));
     await nextTick();
     expect(document.querySelector(".cdv-issue-btn")).toBeNull();
+    expect(document.querySelector(".cdv-line--selected")).toBeNull();
+  });
+
+  it("selecting does not redo the word diffs", async () => {
+    mount({ diffMode: "side-by-side" });
+    await nextTick();
+    const before = wordDiffCalls.n;
+    const rows = document.querySelectorAll<HTMLElement>(".cdv-hunk")[0].querySelectorAll<HTMLElement>("tr.cdv-line");
+    click(rows[0].querySelectorAll<HTMLElement>(".cdv-line-no")[0]);
+    await nextTick();
+    click(rows[1].querySelectorAll<HTMLElement>(".cdv-line-no")[0], true);
+    await nextTick();
+    expect(wordDiffCalls.n).toBe(before);
+  });
+
+  it("publishes once issue creation becomes available", async () => {
+    const { fake } = mount({ available: false });
+    await nextTick();
+    // Not selectable while unavailable; the published value follows availability.
+    fake.available.value = true;
+    await nextTick();
+    click(numberCell(0, 1));
+    await nextTick();
+    expect(fake.activeSelection.value).not.toBeNull();
+    fake.available.value = false;
+    await nextTick();
+    expect(fake.activeSelection.value).toBeNull();
   });
 });

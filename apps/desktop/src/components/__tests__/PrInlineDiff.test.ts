@@ -139,8 +139,13 @@ function rangeDiff(): GitDiff {
 
 function mountRange(props: Record<string, unknown> = {}, available = true) {
   const activeSelection = vueRef<DiffSelection | null>(null);
-  const openFromSelection = vi.fn(async (_sel: DiffSelection) => {});
-  const fake = { available: vueRef(available), activeSelection, openFromSelection };
+  // Opens unless told otherwise; tells the view, like the real one.
+  let opens = true;
+  const openFromSelection = vi.fn(async (sel: DiffSelection) => {
+    if (opens) sel.onOpened?.();
+    return opens;
+  });
+  const fake = { available: vueRef(available), activeSelection, openFromSelection, refuse: () => { opens = false; } };
   const container = document.createElement("div");
   document.body.appendChild(container);
   const app = createApp(PrInlineDiff as any, {
@@ -375,7 +380,7 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(created.mock.calls[0][0].start_line).toBeUndefined();
   });
 
-  it("a lone comment box is not a selection; typing does not republish one", async () => {
+  it("a lone comment box is not a selection; a range is, with the text typed", async () => {
     const r = mountRange();
     mounted = r.mounted;
     const c = r.mounted.container;
@@ -385,9 +390,79 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(r.fake.activeSelection.value).toBeNull();
     clickNo(newNo(c, 5), true);
     await nextTick();
-    const sel = r.fake.activeSelection.value;
-    expect(sel).not.toBeNull();
+    expect(r.fake.activeSelection.value).not.toBeNull();
     await typeInCompose(c, "typing");
-    expect(r.fake.activeSelection.value).toBe(sel);
+    expect(r.fake.activeSelection.value?.intro).toBe("typing");
+    // ⌘⇧I files it: the box closes like with the button.
+    r.fake.activeSelection.value?.onOpened?.();
+    await nextTick();
+    expect(c.querySelector(".pid-compose")).toBeNull();
+  });
+
+  it("keeps the box and its text when the issue form does not open", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    r.fake.refuse();
+    await nextTick();
+    clickNo(newNo(c, 3));
+    await nextTick();
+    await typeInCompose(c, "keep me");
+    c.querySelector<HTMLButtonElement>(".pid-issue-btn")!.click();
+    await nextTick();
+    await nextTick();
+    expect(c.querySelector<HTMLTextAreaElement>(".pid-compose textarea")?.value).toBe("keep me");
+  });
+
+  it("an add-to-delete range starts on the first old-side row", async () => {
+    const created = vi.fn();
+    const diff: GitDiff = {
+      path: "src/m.ts",
+      hunks: [{
+        header: "@@ -1,3 +1,3 @@", oldStart: 1, oldCount: 3, newStart: 1, newCount: 3,
+        lines: [
+          line("delete", "a", 1, undefined),
+          line("add", "b", undefined, 1),
+          line("context", "ctx", 2, 2),
+          line("delete", "c", 3, undefined),
+        ],
+      }],
+    };
+    const r = mountRange({ diff, filePath: "src/m.ts", onCreateComment: created });
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(cells(c, 1)[1]); // +b
+    await nextTick();
+    clickNo(cells(c, 3)[0], true); // -c
+    await nextTick();
+    await typeInCompose(c, "x");
+    c.querySelector<HTMLButtonElement>(".pid-submit-btn")!.click();
+    expect(created).toHaveBeenCalledWith(expect.objectContaining({ line: 3, side: "LEFT", start_line: 2, start_side: "LEFT" }));
+  });
+
+  it("publishes a range once issue creation becomes available", async () => {
+    const r = mountRange({}, false);
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 5), true);
+    await nextTick();
+    expect(r.fake.activeSelection.value).toBeNull();
+    r.fake.available.value = true;
+    await nextTick();
+    expect(r.fake.activeSelection.value?.lines.map((l) => l.content)).toEqual(["c3", "c4", "c5"]);
+  });
+
+  it("carries a renamed file's old path", async () => {
+    const r = mountRange({ diff: { ...rangeDiff(), oldPath: "src/old.ts" } });
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 4), true);
+    await nextTick();
+    expect(r.fake.activeSelection.value?.oldPath).toBe("src/old.ts");
   });
 });

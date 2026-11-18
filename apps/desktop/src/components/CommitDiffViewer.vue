@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, inject, toRaw } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, inject } from "vue";
 import type { GitDiff, GitLogEntry, DiffLine, FolderDiffNode } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { avatarStyle } from "../composables/useAvatar";
@@ -8,7 +8,7 @@ import type { DiffMode } from "../utils/diffMode";
 import { detectLanguage, highlightLine } from "../utils/highlight";
 import { safeHtml } from "../composables/useSafeHtml";
 import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
-import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
+import { CREATE_ISSUE_KEY, useSelectionPublisher } from "../composables/useCreateIssue";
 import type { DiffSelection } from "../utils/issuePrefill";
 
 const { t } = useI18n();
@@ -38,6 +38,36 @@ interface SbsPair {
 function hl(content: string, filePath: string): string {
   const lang = detectLanguage(filePath);
   return highlightLine(content, lang);
+}
+
+/**
+ * Side-by-side pairs of a hunk, with their final (sanitised) HTML, computed
+ * once per hunk: a re-render (a line selected, a file expanded) must not
+ * redo the word diffs, the highlighting and the sanitising of every line.
+ */
+const pairCache = new WeakMap<DiffLine[], SbsPair[]>();
+function pairsOf(lines: DiffLine[], path: string): SbsPair[] {
+  let pairs = pairCache.get(lines);
+  if (!pairs) {
+    pairs = pairLines(lines).map((p) => ({
+      ...p,
+      leftHtml: safeHtml(p.leftHtml ?? (p.left ? hl(p.left.content, path) : "")),
+      rightHtml: safeHtml(p.rightHtml ?? (p.right ? hl(p.right.content, path) : "")),
+    }));
+    pairCache.set(lines, pairs);
+  }
+  return pairs;
+}
+
+/** A line's highlighted, sanitised HTML, computed once per line. */
+const lineHtmlCache = new WeakMap<DiffLine, string>();
+function lineHtml(line: DiffLine, path: string): string {
+  let html = lineHtmlCache.get(line);
+  if (html === undefined) {
+    html = safeHtml(hl(line.content, path));
+    lineHtmlCache.set(line, html);
+  }
+  return html;
 }
 
 function pairLines(lines: DiffLine[]): SbsPair[] {
@@ -216,7 +246,9 @@ function truncatedHunks(idx: number) {
 // Click a line number to select it, Shift+click another in the same hunk to
 // extend; the selection is what "Create issue" (and ⌘⇧I) files.
 const createIssue = inject(CREATE_ISSUE_KEY, null);
-const canSelectLines = computed(() => !!createIssue?.available.value);
+// Without the commit's details (not in the loaded log) there is nothing to
+// file the lines against.
+const canSelectLines = computed(() => !!createIssue?.available.value && !!props.commitInfo);
 
 /** `row`: inline rows; `old` / `new`: one column of the side-by-side pairs. */
 type SelSide = "row" | "old" | "new";
@@ -260,7 +292,7 @@ const selection = computed<DiffSelection | null>(() => {
   const lines =
     s.side === "row"
       ? hunk.lines.slice(lo, hi + 1)
-      : pairLines(hunk.lines)
+      : pairsOf(hunk.lines, diff.path)
           .slice(lo, hi + 1)
           .map((p) => (s.side === "old" ? p.left : p.right))
           .filter((l): l is DiffLine => l !== null);
@@ -272,15 +304,8 @@ const selection = computed<DiffSelection | null>(() => {
   };
 });
 
-// Published for ⌘⇧I; given back only if it is still this view's.
-let published: DiffSelection | null = null;
-function publish(sel: DiffSelection | null) {
-  if (!createIssue) return;
-  if (sel) createIssue.activeSelection.value = sel;
-  else if (published && toRaw(createIssue.activeSelection.value) === published) createIssue.activeSelection.value = null;
-  published = sel;
-}
-watch(selection, publish);
+// Published for ⌘⇧I while issues can be created (#301).
+useSelectionPublisher(createIssue, () => selection.value);
 
 function clearLineSel() {
   lineSel.value = null;
@@ -312,7 +337,6 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener("keydown", onDocKeydown);
   document.removeEventListener("mousedown", onDocMousedown);
-  publish(null);
 });
 watch(() => [props.commitHash, props.diffs, props.diffMode], clearLineSel);
 
@@ -572,7 +596,7 @@ function onContentScroll(e: Event) {
                       {{ line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' ' }}
                     </td>
                     <td class="cdv-line-content mono">
-                      <span v-html="safeHtml(hl(line.content, diffs[fileIdx - 1].path)) || '\u00a0'"></span>
+                      <span v-html="lineHtml(line, diffs[fileIdx - 1].path) || '\u00a0'"></span>
                     </td>
                   </tr>
                 </tbody>
@@ -582,7 +606,7 @@ function onContentScroll(e: Event) {
               <table v-else class="cdv-table cdv-table--sbs">
                 <tbody>
                   <tr
-                    v-for="(pair, pairIdx) in pairLines(hunk.lines)"
+                    v-for="(pair, pairIdx) in pairsOf(hunk.lines, diffs[fileIdx - 1].path)"
                     :key="pairIdx"
                     class="cdv-line"
                   >
@@ -598,7 +622,7 @@ function onContentScroll(e: Event) {
                       {{ pair.left?.type === 'delete' ? '-' : pair.left?.type === 'context' ? ' ' : '' }}
                     </td>
                     <td class="cdv-line-content mono cdv-sbs-content" :class="pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty'">
-                      <span v-html="safeHtml(pair.leftHtml ?? (pair.left ? hl(pair.left.content, diffs[fileIdx - 1].path) : '')) || '\u00a0'"></span>
+                      <span v-html="pair.leftHtml || '\u00a0'"></span>
                     </td>
                     <td class="cdv-sbs-gutter"></td>
                     <td
@@ -613,7 +637,7 @@ function onContentScroll(e: Event) {
                       {{ pair.right?.type === 'add' ? '+' : pair.right?.type === 'context' ? ' ' : '' }}
                     </td>
                     <td class="cdv-line-content mono cdv-sbs-content" :class="pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty'">
-                      <span v-html="safeHtml(pair.rightHtml ?? (pair.right ? hl(pair.right.content, diffs[fileIdx - 1].path) : '')) || '\u00a0'"></span>
+                      <span v-html="pair.rightHtml || '\u00a0'"></span>
                     </td>
                   </tr>
                 </tbody>
