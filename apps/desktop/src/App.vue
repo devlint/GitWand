@@ -526,7 +526,8 @@ watch(repoFolderPath, () => {
 
 
 function openNewIssue() {
-  if (createIssue.available.value) void createIssue.open();
+  // From the lines selected in a diff when there are some (#301).
+  if (createIssue.available.value) void createIssue.openFromShortcut();
 }
 
 const issuePanel = useIssuePanel(prCwd);

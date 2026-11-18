@@ -17,7 +17,15 @@ import type {
   RepoMilestone,
   ReviewerCandidate,
 } from "../utils/backend";
-import { commitIssuePrefill, commitUrlFor, type IssuePrefill } from "../utils/issuePrefill";
+import {
+  blobPermalink,
+  commitIssuePrefill,
+  commitUrlFor,
+  permalinkSpan,
+  selectionIssuePrefill,
+  type DiffSelection,
+  type IssuePrefill,
+} from "../utils/issuePrefill";
 
 type GitRun = (cwd: string, args: string[]) => Promise<{ stdout: string; exitCode: number }>;
 
@@ -121,6 +129,15 @@ export interface CreateIssueApi {
    * origin's page, so a commit only elsewhere would answer 404).
    */
   openFromCommit(entry: GitLogEntry): Promise<void>;
+  /** The selection a diff view currently shows, if any (⌘⇧I uses it). */
+  activeSelection: Ref<DiffSelection | null>;
+  /**
+   * "Create issue from these lines": the form opens prefilled with a
+   * permalink (when GitHub has the lines), the lines and their origin.
+   */
+  openFromSelection(sel: DiffSelection): Promise<void>;
+  /** ⌘⇧I / palette: from the active selection when there is one. */
+  openFromShortcut(): Promise<void>;
   close(): void;
   setRepo(repo: string): void;
   submit(): Promise<void>;
@@ -308,6 +325,45 @@ export function useCreateIssue(deps: {
     );
   }
 
+  const activeSelection = ref<DiffSelection | null>(null);
+
+  async function openFromSelection(sel: DiffSelection): Promise<void> {
+    const cwd = deps.cwd.value;
+    if (!cwd || !available.value) return;
+    if (isOpen.value) {
+      if (dirty.value || submitting.value) return;
+      close();
+    }
+    const span = permalinkSpan(sel.lines);
+    const src = sel.source;
+    if (src.kind === "pr") {
+      // The PR's own repository (it may be a fork's parent); its base SHA is
+      // unknown, so deleted lines get no permalink.
+      const m = /^(https?:\/\/.+)\/pull\/\d+\/?$/.exec(src.url);
+      const permalink =
+        m && span && span.side === "new" && src.headSha ? blobPermalink(m[1], src.headSha, sel.path, span) : null;
+      await open(selectionIssuePrefill(sel, { permalink, commitUrl: null }));
+      return;
+    }
+    // Started now, alongside the targets read; the links wait for both.
+    const onOrigin = commitOnOrigin(cwd, src.hashFull).catch(() => false);
+    await open(async (origin) => {
+      if (!(await onOrigin) || !origin) return selectionIssuePrefill(sel, { permalink: null, commitUrl: null });
+      // Deleted lines live in the first parent, on origin too once the commit is.
+      const sha = span?.side === "old" ? src.parent : src.hashFull;
+      return selectionIssuePrefill(sel, {
+        permalink: span && sha ? blobPermalink(origin, sha, sel.path, span) : null,
+        commitUrl: commitUrlFor(origin, src.hashFull),
+      });
+    });
+  }
+
+  async function openFromShortcut(): Promise<void> {
+    const sel = activeSelection.value;
+    if (sel) await openFromSelection(sel);
+    else if (available.value) await open();
+  }
+
   function setRepo(next: string) {
     // The issue being created goes where it was sent; switching now would
     // drop its answer (and the notice that it was created).
@@ -393,6 +449,9 @@ export function useCreateIssue(deps: {
     forgetAvailability,
     open,
     openFromCommit,
+    activeSelection,
+    openFromSelection,
+    openFromShortcut,
     close,
     setRepo,
     submit,

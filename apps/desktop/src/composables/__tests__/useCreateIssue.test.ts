@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ForgeProvider } from "../forge/types";
 import type { IssueTargets, CreatedIssue, RepoLabel } from "../../utils/backend";
+import type { DiffSelection } from "../../utils/issuePrefill";
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -409,6 +410,94 @@ describe("useCreateIssue", () => {
     await api.open();
     expect(api.targetsFailed.value).toBe(true);
     expect(api.targetsError.value).toContain("gh auth login");
+  });
+});
+
+const SHA = "abc1234".padEnd(40, "f");
+const PARENT_SHA = "0123456".padEnd(40, "0");
+const commitSel = (lines: DiffSelection["lines"], parent: string | null = PARENT_SHA): DiffSelection => ({
+  path: "src/a.ts",
+  lines,
+  source: { kind: "commit", hash: "abc1234", hashFull: SHA, parent },
+});
+const prSel = (lines: DiffSelection["lines"], url = "https://github.com/org/app/pull/12"): DiffSelection => ({
+  path: "src/a.ts",
+  lines,
+  source: { kind: "pr", number: 12, url, headSha: "h".repeat(40) },
+});
+const ADDED = [{ type: "add" as const, content: "x", newLineNo: 4 }];
+const DELETED = [{ type: "delete" as const, content: "y", oldLineNo: 7 }];
+
+describe("useCreateIssue — from a diff selection", () => {
+  it("links a pushed commit's lines on origin, with the commit", async () => {
+    const { api } = setup(provider(), undefined, async () => true);
+    await api.refreshAvailability();
+    await api.openFromSelection(commitSel(ADDED));
+    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${SHA}/src/a.ts#L4\n`)).toBe(true);
+    expect(api.body.value).toContain(`commit [\`abc1234\`](https://github.com/me/app/commit/${SHA})`);
+    expect(api.title.value).toBe("");
+  });
+
+  it("points deleted lines at the first parent, and at nothing for a root commit", async () => {
+    const a = setup(provider(), undefined, async () => true);
+    await a.api.refreshAvailability();
+    await a.api.openFromSelection(commitSel(DELETED));
+    expect(a.api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/a.ts#L7\n`)).toBe(true);
+    const b = setup(provider(), undefined, async () => true);
+    await b.api.refreshAvailability();
+    await b.api.openFromSelection(commitSel(DELETED, null));
+    expect(b.api.body.value).not.toContain("/blob/");
+  });
+
+  it("leaves an unpushed commit's lines unlinked", async () => {
+    const { api } = setup(provider(), undefined, async () => false);
+    await api.refreshAvailability();
+    await api.openFromSelection(commitSel(ADDED));
+    expect(api.isOpen.value).toBe(true);
+    expect(api.body.value).not.toContain("/blob/");
+    expect(api.body.value).not.toContain("/commit/");
+    expect(api.body.value).toContain("```diff\n+x\n```");
+  });
+
+  it("links a PR's lines on the PR's own repository, at its head", async () => {
+    const { api } = setup(provider());
+    await api.refreshAvailability();
+    await api.openFromSelection(prSel(ADDED));
+    expect(api.body.value.startsWith(`https://github.com/org/app/blob/${"h".repeat(40)}/src/a.ts#L4\n`)).toBe(true);
+  });
+
+  it("gives a PR no permalink for deleted lines or an unexpected URL", async () => {
+    const a = setup(provider());
+    await a.api.refreshAvailability();
+    await a.api.openFromSelection(prSel(DELETED));
+    expect(a.api.body.value).not.toContain("/blob/");
+    const b = setup(provider());
+    await b.api.refreshAvailability();
+    await b.api.openFromSelection(prSel(ADDED, "https://example.com/x"));
+    expect(b.api.body.value).not.toContain("/blob/");
+  });
+
+  it("leaves a form being typed in alone", async () => {
+    const { api } = setup(provider(), undefined, async () => true);
+    await api.refreshAvailability();
+    await api.open();
+    api.title.value = "mine";
+    await api.openFromSelection(commitSel(ADDED));
+    expect(api.title.value).toBe("mine");
+    expect(api.body.value).toBe("");
+  });
+
+  it("the shortcut uses the active selection, or opens an empty form", async () => {
+    const a = setup(provider(), undefined, async () => true);
+    await a.api.refreshAvailability();
+    a.api.activeSelection.value = commitSel(ADDED);
+    await a.api.openFromShortcut();
+    expect(a.api.body.value).toContain("```diff\n+x\n```");
+    const b = setup(provider());
+    await b.api.refreshAvailability();
+    await b.api.openFromShortcut();
+    expect(b.api.isOpen.value).toBe(true);
+    expect(b.api.body.value).toBe("");
   });
 });
 
