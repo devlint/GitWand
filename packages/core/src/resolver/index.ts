@@ -146,7 +146,6 @@ function reclassifyFormatConflict(hunk: ConflictHunk, resolverUsed: string, reas
   };
 }
 
-
 /**
  * accuracy lot 1 — Un hunk non-complex résolu par un résolveur format-aware garde son
  * type (la classification textuelle reste vraie) mais sa confiance intègre la
@@ -653,5 +652,3 @@ export async function resolveAsync(
     },
   };
 }
-
-export { retractForInvariant, forgetRetractedFormatResolvers, retractForParseTree } from "./retract.js";

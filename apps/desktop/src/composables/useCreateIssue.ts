@@ -187,7 +187,7 @@ export interface ReportDeps {
   gitwandWritable?: () => Promise<boolean>;
   env?: () => { version: string; platform: string };
   /** The repository's extra secret patterns and entropy threshold. */
-  secretsOptions?: (cwd: string | null) => Promise<{ extraPatterns: SecretPattern[]; entropyThreshold: number }>;
+  secretsOptions?: (cwd: string | null) => Promise<{ extraPatterns: SecretPattern[]; entropyThreshold: number; ignore?: string[] }>;
   scanDebounceMs?: number;
 }
 
@@ -198,7 +198,7 @@ function defaultEnv(): { version: string; platform: string } {
 
 /** The scan's options until the repository's arrive (and without the app's
  *  scanner config, in tests): the built-in patterns, entropy at 4.0. */
-const DEFAULT_SECRETS_OPTIONS: Readonly<{ extraPatterns: SecretPattern[]; entropyThreshold: number }> = {
+const DEFAULT_SECRETS_OPTIONS: Readonly<{ extraPatterns: SecretPattern[]; entropyThreshold: number; ignore?: string[] }> = {
   extraPatterns: [],
   entropyThreshold: 4.0,
 };
@@ -309,7 +309,7 @@ export function useCreateIssue(deps: {
   const findings = ref<ReportScan>({ blocking: [], warnings: [] });
   // A change not scanned yet: a secret typed a moment ago must not slip out.
   const scanPending = ref(false);
-  let secretsOpts: { extraPatterns: SecretPattern[]; entropyThreshold: number } = DEFAULT_SECRETS_OPTIONS;
+  let secretsOpts: { extraPatterns: SecretPattern[]; entropyThreshold: number; ignore?: string[] } = DEFAULT_SECRETS_OPTIONS;
   // Bumped when the patterns change (they arrive, or the form is reset): part
   // of every scan's cache key.
   let secretsVersion = 0;

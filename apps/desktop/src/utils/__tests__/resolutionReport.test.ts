@@ -12,6 +12,8 @@ import {
   REPORT_BODY_MAX,
   ANSWER_MAX,
   withAnswer,
+  reportFor,
+  acceptedLabel,
   type ResolutionReport,
 } from "../resolutionReport";
 
@@ -306,6 +308,33 @@ describe("budget — one enormous line", () => {
     const fences = p.body.split("\n").filter((l) => /^```/.test(l));
     expect(fences.length % 2).toBe(0);
     expect(p.body).toContain("characters)_");
+  });
+});
+
+describe("reportFor", () => {
+  const res = (lines: string[] | null) => ({ hunk: hunk(), resolvedLines: lines, autoResolved: !!lines, resolutionReason: "" });
+
+  it("takes the engine's (or the AI's) resolved lines", () => {
+    expect(reportFor("engine", "a.ts", hunk(), res(["R"]))).toMatchObject({ kind: "engine", path: "a.ts", resolvedLines: ["R"] });
+  });
+
+  it("takes a token-level merge's own merged lines", () => {
+    const h = hunk({ trace: { steps: [], selected: "token_level_merge", summary: "", hasBase: true, tokenMergeTrace: { mergedLines: ["M"], pass1Count: 1, pass2Count: 0, lineDetails: [] } } as ConflictHunk["trace"] });
+    expect(reportFor("token", "a.ts", h, res(null))?.resolvedLines).toEqual(["M"]);
+  });
+
+  it("reports an AI proposal without a result only when it has a trace", () => {
+    const withTrace = hunk({ trace: { steps: [], selected: "llm_proposed", summary: "", hasBase: true, llmTrace: {} } as unknown as ConflictHunk["trace"] });
+    expect(reportFor("ai", "a.ts", withTrace, res(null))?.resolvedLines).toBeNull();
+    expect(reportFor("ai", "a.ts", hunk(), res(null))).toBeNull();
+    expect(reportFor("engine", "a.ts", hunk(), res(null))).toBeNull();
+  });
+});
+
+describe("acceptedLabel", () => {
+  it("names a copy by its type and the first line written, cut at 40 characters", () => {
+    expect(acceptedLabel(report({ resolvedLines: ["", "  const a = 23;"] }))).toEqual(["non_overlapping", "const a = 23;"]);
+    expect(acceptedLabel(report({ resolvedLines: ["x".repeat(50)] }))[1]).toBe("x".repeat(40) + "…");
   });
 });
 

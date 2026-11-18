@@ -522,7 +522,7 @@ const createIssue = useCreateIssue({
     secretsOptions: async (cwd) => {
       if (!cwd) return { extraPatterns: [], entropyThreshold: settings.value.secretsEntropyThreshold };
       const cfg = await secretsScanner.resolveConfig(cwd, settings.value);
-      return { extraPatterns: cfg.extraPatterns, entropyThreshold: cfg.entropyThreshold };
+      return { extraPatterns: cfg.extraPatterns, entropyThreshold: cfg.entropyThreshold, ignore: cfg.ignore };
     },
   },
 });

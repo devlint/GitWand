@@ -24,14 +24,22 @@ function piecesOf(text: string): string[] {
     // The last character before the limit that cannot be part of a token
     // (the scanner's token class), so no token is cut in two.
     let cut = PIECE_CHARS;
-    while (cut > 0 && /[A-Za-z0-9+/=_-]/.test(rest[cut - 1])) cut--;
-    const at = cut > 0 ? cut : PIECE_CHARS;
+    while (cut > 0 && TOKEN_CHAR.test(rest[cut - 1])) cut--;
+    // A single token longer than a piece: cut after it instead, whole.
+    if (cut === 0) {
+      cut = PIECE_CHARS;
+      while (cut < rest.length && TOKEN_CHAR.test(rest[cut])) cut++;
+    }
+    const at = cut;
     out.push(rest.slice(0, at));
     rest = rest.slice(at);
   }
   out.push(rest);
   return out;
 }
+
+/** A character the scanner's entropy tokens are made of (ENTROPY_TOKEN_RE). */
+const TOKEN_CHAR = /[A-Za-z0-9+/=_-]/;
 
 /** Piece length for one enormous line: at most ~100 tokens of 20+ characters. */
 const PIECE_CHARS = 2_000;
@@ -45,13 +53,22 @@ export interface ReportScan {
 
 export function scanReportBody(
   body: string,
-  opts: { extraPatterns: SecretPattern[]; entropyThreshold: number; blockAt: "medium" | "never" },
+  opts: {
+    extraPatterns: SecretPattern[];
+    entropyThreshold: number;
+    blockAt: "medium" | "never";
+    /** `.gitwandrc` `secrets.ignore`: only its `/regex/` value entries apply. */
+    ignore?: string[];
+  },
 ): ReportScan {
   // The scanner keeps its first SCAN_CAP findings: a lockfile's hundreds of
   // entropy hits would hide a real secret, or the true count, past the cut.
   // Scanned in slices small enough never to reach it (one finding per token).
   const lines = body.split("\n");
-  const config = { enabled: true, extraPatterns: opts.extraPatterns, ignore: [], entropyThreshold: opts.entropyThreshold };
+  // A value the repository allow-lists (a fake test key) is not a secret; a
+  // path glob is not about this text and could match the report's own name.
+  const ignore = (opts.ignore ?? []).filter((x) => x.length > 2 && x.startsWith("/") && x.endsWith("/"));
+  const config = { enabled: true, extraPatterns: opts.extraPatterns, ignore, entropyThreshold: opts.entropyThreshold };
   const all: SecretFinding[] = [];
   for (let start = 0; start < lines.length; start += SLICE_LINES) {
     const addedLines = lines.slice(start, start + SLICE_LINES).map((text, i) => ({ line: start + i + 1, text }));

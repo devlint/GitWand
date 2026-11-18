@@ -11,7 +11,7 @@
  *
  * The text is English, as it is read on GitHub.
  */
-import type { ConflictHunk } from "@gitwand/core";
+import type { ConflictHunk, HunkResolution } from "@gitwand/core";
 import { codeBlock, codeSpan, cutUtf16, issueTitle, type IssuePrefill } from "./issuePrefill";
 
 /** Which proposal panel the report comes from. */
@@ -300,3 +300,30 @@ export function gitwandReportPrefill(
     body: assemble(r, head, scrubberFor(r.path), true),
   };
 }
+
+/**
+ * The report a proposal panel files for its hunk: the engine's or the AI's
+ * resolved lines, a token-level merge's own merged lines. An AI proposal
+ * that failed validation has no lines and is reported with its answer
+ * (`resolvedLines: null`); anything else without lines has nothing to report.
+ */
+export function reportFor(
+  kind: ProposalKind,
+  path: string,
+  hunk: ConflictHunk,
+  resolution: HunkResolution | undefined,
+): ResolutionReport | null {
+  const resolvedLines = kind === "token" ? hunk.trace.tokenMergeTrace?.mergedLines : resolution?.resolvedLines;
+  if (resolvedLines) return { kind, path, hunk, resolvedLines };
+  return kind === "ai" && hunk.trace.llmTrace ? { kind, path, hunk, resolvedLines: null } : null;
+}
+
+/**
+ * An accepted copy's label: its conflict type and the first line written
+ * (a line number would be stale as soon as another hunk is resolved).
+ */
+export function acceptedLabel(r: ResolutionReport): [string, string] {
+  const first = ((r.resolvedLines ?? []).find((l) => l.trim()) ?? "").trim();
+  return [r.hunk.type, first.length > 40 ? `${cutUtf16(first, 40)}…` : first];
+}
+

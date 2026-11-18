@@ -26,8 +26,7 @@ import TokenMergePanel from "./TokenMergePanel.vue";
 import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
 import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
 import { useAcceptedReports } from "../composables/useAcceptedReports";
-import { cutUtf16 } from "../utils/issuePrefill";
-import type { ProposalKind, ResolutionReport } from "../utils/resolutionReport";
+import { acceptedLabel, reportFor as buildReport, type ProposalKind, type ResolutionReport } from "../utils/resolutionReport";
 // Async on purpose, and NOT a contradiction of the static-import justification
 // above: that one covers thin BaseModal wrappers with no heavy dependencies.
 // CodeEditor is the entry point to CodeMirror (~400 KB), and it sits behind a
@@ -135,6 +134,16 @@ let consumedHunkIndex: number | null = null;
 function consume(idx: number, acceptedReport: ResolutionReport | null = null) {
   consumedHunkIndex = idx;
   accepted.resolving(idx, acceptedReport);
+}
+
+/**
+ * A whole-file write (Resolve auto, a file-level choice, a memory rule): no
+ * single hunk is consumed, and an earlier single-hunk write that never came
+ * back (refused) must not be credited to this one's reparse.
+ */
+function consumeWholeFile() {
+  consumedHunkIndex = null;
+  accepted.landed(null);
 }
 
 /**
@@ -403,6 +412,7 @@ const memoryApplicableCount = computed(() => {
 /** Apply the saved rule to every hunk in the file (one click). */
 function applyMemoryToWholeFile() {
   if (!fileMemory.value) return;
+  consumeWholeFile();
   emit("applyFileMemory", props.file.path, fileMemory.value);
   markUsed(fileMemory.value.id);
 }
@@ -414,6 +424,7 @@ const isGeneratedFileLocal = computed(() =>
 );
 
 function bulkResolve(choice: "ours" | "theirs" | "both") {
+  consumeWholeFile();
   emit("resolveFileBulk", props.file.path, choice);
 }
 
@@ -595,12 +606,7 @@ const canReport = computed(() => !!createIssue && createIssue.reportAvailable.va
 /** What a report needs about hunk `idx`, as the panel shows it. */
 function reportFor(kind: ProposalKind, idx: number): ResolutionReport | null {
   const hunk = hunks.value[idx];
-  if (!hunk) return null;
-  const resolvedLines =
-    kind === "token" ? hunk.trace.tokenMergeTrace?.mergedLines : resolutions.value[idx]?.resolvedLines;
-  // An AI proposal that failed validation has no lines; its answer is reported.
-  if (!resolvedLines) return kind === "ai" && hunk.trace.llmTrace ? { kind, path: props.file.path, hunk, resolvedLines: null } : null;
-  return { kind, path: props.file.path, hunk, resolvedLines };
+  return hunk ? buildReport(kind, props.file.path, hunk, resolutions.value[idx]) : null;
 }
 
 function sendReport(r: ResolutionReport | null) {
@@ -616,13 +622,6 @@ function onReport(kind: ProposalKind, hunkId: string | number) {
 const accepted = useAcceptedReports();
 const acceptedReports = accepted.list;
 
-/** An accepted copy's label: the first line of what was written (its line
- *  number would be stale as soon as another hunk is resolved). */
-function acceptedSnippet(r: ResolutionReport): string {
-  const first = (r.resolvedLines ?? []).find((l) => l.trim()) ?? "";
-  const s = first.trim();
-  return s.length > 40 ? `${cutUtf16(s, 40)}…` : s;
-}
 
 // Another file, or the same path in another repository.
 watch([() => props.file.path, () => props.cwd], () => accepted.clear());
@@ -773,6 +772,7 @@ function toggleSummaryRow(hunkIndex: number) {
 
 function confirmResolveAuto() {
   showResolveAutoSummary.value = false;
+  consumeWholeFile();
   emit("resolve", props.file.path);
 }
 
@@ -1104,7 +1104,7 @@ useResizeObserver(contentEl, drawMinimap);
     <div v-if="canReport && acceptedReports.length" class="me-accepted" role="region" :aria-label="t('createIssue.report.acceptedTitle')">
       <span class="me-accepted-title">{{ t("createIssue.report.acceptedTitle") }}</span>
       <span v-for="(r, i) in acceptedReports" :key="i" class="me-accepted-item">
-        {{ t("createIssue.report.acceptedItem", r.hunk.type, acceptedSnippet(r)) }}
+        {{ t("createIssue.report.acceptedItem", ...acceptedLabel(r)) }}
         <button type="button" class="me-accepted-btn" :title="t('createIssue.report.buttonTitle')" @click="sendReport(r)">
           {{ t("createIssue.report.button") }}
         </button>

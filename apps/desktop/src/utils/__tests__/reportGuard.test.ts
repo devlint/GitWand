@@ -77,5 +77,19 @@ describe("scanReportBody", () => {
     const line = Array.from({ length: 1200 }, (_, i) => tok(i)).join(",");
     expect(scanReportBody(line, opts).warnings).toHaveLength(1200);
   });
+
+  it("honours the repository's ignored values, never its path globs", () => {
+    const body = "fixture key AKIAIOSFODNN7EXAMPLE";
+    expect(scanReportBody(body, { ...opts, ignore: ["/AKIAIOSFODNN7EXAMPLE/"] }).blocking).toHaveLength(0);
+    // A path glob would match the report's own name and silence everything.
+    expect(scanReportBody(body, { ...opts, ignore: ["**/*.md", "**"] }).blocking).toHaveLength(1);
+  });
+
+  it("never splits a token longer than a piece", () => {
+    const blob = "Zm9vYmFyYmF6cXV4cXV1eA9xT3kL0pQ8rW2vY5zN1mH6jC4bD7eF0gA3".repeat(60);
+    const tok = (i: number) => `Q${i}xT3kL0pQ8rW2vY5zN1mH6jC4bD7eF0gA3`;
+    const line = [...Array.from({ length: 600 }, (_, i) => tok(i)), blob].join(",");
+    expect(scanReportBody(line, opts).warnings).toHaveLength(601);
+  });
 });
 

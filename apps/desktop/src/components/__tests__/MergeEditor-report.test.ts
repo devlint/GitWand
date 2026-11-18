@@ -225,6 +225,20 @@ describe("MergeEditor — report a resolution", () => {
     expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(0);
   });
 
+  it("a whole-file write after a refused accept credits nothing", async () => {
+    const file = twoResolvableHunks();
+    const state = mountWithFile(file);
+    await nextTick();
+    // Accept: the write is refused (no reparse comes back).
+    container.querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--accept")!.click();
+    await nextTick();
+    // A file-level choice, whose reparse happens to show one conflict fewer.
+    container.querySelector<HTMLButtonElement>(".me-bulk-btn")!.click();
+    state.file = afterWrite(file);
+    await nextTick();
+    expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(0);
+  });
+
   it("another repository's file at the same path empties the list", async () => {
     const file = twoResolvableHunks();
     const state = mountWithFile(file);
