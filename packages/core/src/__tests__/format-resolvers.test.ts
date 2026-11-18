@@ -293,6 +293,54 @@ describe("Phase 7.3 — JSON resolver", () => {
       expect(merged.version).toBe("1.0.0");
     });
 
+    it("records the format resolver on the resolved hunk (#301)", () => {
+      const conflict = `<<<<<<< ours
+{
+  "name": "my-app",
+  "lodash": "^4.17.0"
+}
+||||||| base
+{
+  "name": "my-app"
+}
+=======
+{
+  "name": "my-app",
+  "axios": "^1.0.0"
+}
+>>>>>>> theirs`;
+      const result = resolve(conflict, "package.json");
+      expect(result.resolutions[0].hunk.formatResolver).toBe("json");
+    });
+
+    it("records the format resolver when the hunk was already high-confidence (#301)", () => {
+      const conflict = `<<<<<<< ours
+{
+  "name": "my-app",
+  "version": "2.0.0"
+}
+||||||| base
+{
+  "name": "my-app",
+  "version": "1.0.0"
+}
+=======
+{
+  "name": "my-app",
+  "version": "1.0.0"
+}
+>>>>>>> theirs`;
+      const result = resolve(conflict, "package.json");
+      expect(result.resolutions[0].hunk.confidence.label).not.toBe("low");
+      expect(result.resolutions[0].hunk.formatResolver).toBe("json");
+    });
+
+    it("leaves formatResolver unset for a pattern-resolved hunk (#301)", () => {
+      const r = resolve("<<<<<<< ours\na\n||||||| base\na\n=======\nb\n>>>>>>> theirs", "x.txt");
+      expect(r.resolutions[0].autoResolved).toBe(true);
+      expect(r.resolutions[0].hunk.formatResolver).toBeUndefined();
+    });
+
     it("la raison de résolution mentionne le résolveur json", () => {
       const jsonConflict = `{
 <<<<<<< ours

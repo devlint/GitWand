@@ -99,6 +99,7 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
   return {
     ...hunk,
     type: "format_semantic",
+    formatResolver: resolverUsed,
     confidence,
     explanation: `Hunk resolved semantically by the "${resolverUsed}" resolver (merged by the format's structure, not by lines).`,
     trace: {
@@ -151,7 +152,7 @@ function reclassifyFormatConflict(hunk: ConflictHunk, resolverUsed: string, reas
  * et elle doit être visible dans la trace au lieu d'un bypass silencieux.
  */
 function boostFormatValidated(hunk: ConflictHunk, resolverUsed: string): ConflictHunk {
-  if (CONFIDENCE_ORDER[hunk.confidence.label] >= CONFIDENCE_ORDER.high) return hunk;
+  if (CONFIDENCE_ORDER[hunk.confidence.label] >= CONFIDENCE_ORDER.high) return { ...hunk, formatResolver: resolverUsed };
   const confidence: ConfidenceScore = {
     score: Math.max(hunk.confidence.score, 75),
     label: "high",
@@ -162,7 +163,7 @@ function boostFormatValidated(hunk: ConflictHunk, resolverUsed: string): Conflic
     ],
     penalties: hunk.confidence.penalties,
   };
-  return { ...hunk, confidence };
+  return { ...hunk, confidence, formatResolver: resolverUsed };
 }
 
 /**
