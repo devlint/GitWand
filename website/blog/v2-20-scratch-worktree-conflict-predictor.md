@@ -62,10 +62,10 @@ The predictor isn't desktop-only. The resolution engine lives in `@gitwand/core`
 **`@gitwand/cli`** ships a new `gitwand preview` command:
 
 ```bash
-gitwand preview --onto main          # will rebasing onto main conflict?
-gitwand preview --commit a1b2c3d      # will cherry-picking this commit conflict?
-gitwand preview --branch feature/x    # will merging this branch conflict?
-gitwand preview --onto main --json    # machine-readable, for CI
+gitwand preview --onto=main          # will rebasing onto main conflict?
+gitwand preview --commit=a1b2c3d      # will cherry-picking this commit conflict?
+gitwand preview --branch=feature/x    # will merging this branch conflict?
+gitwand preview --onto=main --json    # machine-readable, for CI
 ```
 
 It exits `0` when the operation is predicted clean, `1` when conflicts are predicted, and `2` on error — so it drops straight into a CI gate. Under the hood it runs `git merge-file` on temporary blob snapshots — no checkout, no index mutation.
