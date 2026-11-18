@@ -221,10 +221,16 @@ function isFileTruncated(idx: number): boolean {
   return fileTotalLines(idx) > MAX_LINES_PER_FILE;
 }
 
+/** Truncated hunks per file, kept so their line arrays (the render caches'
+ *  keys) stay the same objects from one render to the next. */
+const truncatedCache = new WeakMap<GitDiff, GitDiff["hunks"]>();
+
 /** Get hunks with truncation applied */
 function truncatedHunks(idx: number) {
   const diff = props.diffs[idx];
   if (!isFileTruncated(idx)) return diff.hunks;
+  const cached = truncatedCache.get(diff);
+  if (cached) return cached;
 
   const result: typeof diff.hunks = [];
   let remaining = MAX_LINES_PER_FILE;
@@ -239,6 +245,7 @@ function truncatedHunks(idx: number) {
       remaining = 0;
     }
   }
+  truncatedCache.set(diff, result);
   return result;
 }
 
@@ -299,8 +306,11 @@ const selection = computed<DiffSelection | null>(() => {
   if (lines.length === 0) return null;
   return {
     path: diff.path,
+    ...(diff.oldPath ? { oldPath: diff.oldPath } : {}),
     lines,
     source: { kind: "commit", hash: info.hash, hashFull: info.hashFull, parent: info.parents[0] ?? null },
+    // Filed: the next ⌘⇧I is about something else, not these lines again.
+    onOpened: clearLineSel,
   };
 });
 
@@ -320,7 +330,12 @@ function fileIssue() {
 const pickTitle = computed(() => (canSelectLines.value ? t("createIssue.selectionHint") : undefined));
 
 function onDocKeydown(e: KeyboardEvent) {
-  if (e.key === "Escape" && lineSel.value && !document.querySelector('[aria-modal="true"]')) clearLineSel();
+  if (e.key !== "Escape" || !lineSel.value || e.defaultPrevented) return;
+  // Escape meant for a field, or for a dialog over the diff.
+  const target = e.target as HTMLElement | null;
+  if (target?.closest?.("input, textarea, select, [contenteditable]")) return;
+  if (document.querySelector('[aria-modal="true"]')) return;
+  clearLineSel();
 }
 function onDocMousedown(e: MouseEvent) {
   if (!lineSel.value) return;

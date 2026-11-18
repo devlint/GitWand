@@ -9,7 +9,7 @@ import { describe, it, expect, afterEach, beforeAll, vi } from "vitest";
 import { createApp, h, nextTick, ref, type App, type Ref } from "vue";
 import CommitDiffViewer from "../CommitDiffViewer.vue";
 import { CREATE_ISSUE_KEY } from "../../composables/useCreateIssue";
-import type { GitDiff, GitLogEntry } from "../../utils/backend";
+import type { DiffLine, GitDiff, GitLogEntry } from "../../utils/backend";
 import type { DiffSelection } from "../../utils/issuePrefill";
 
 const wordDiffCalls = vi.hoisted(() => ({ n: 0 }));
@@ -260,5 +260,66 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     fake.available.value = false;
     await nextTick();
     expect(fake.activeSelection.value).toBeNull();
+  });
+
+  it("carries a renamed file's old path", async () => {
+    const renamed = [{ ...DIFFS[0], oldPath: "src/old.ts" }] as GitDiff[];
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    const activeSelection = ref<DiffSelection | null>(null);
+    app = createApp({ setup: () => () => h(CommitDiffViewer as any, { diffs: renamed, commitHash: SHA, commitInfo: ENTRY, diffMode: "inline" }) });
+    app.provide(CREATE_ISSUE_KEY, { available: ref(true), activeSelection, openFromSelection: vi.fn() } as any);
+    app.mount(container);
+    await nextTick();
+    click(numberCell(0, 1));
+    await nextTick();
+    expect(activeSelection.value?.oldPath).toBe("src/old.ts");
+  });
+
+  it("lets the selection go once its issue form has opened", async () => {
+    const { fake } = mount();
+    await nextTick();
+    click(numberCell(0, 1));
+    await nextTick();
+    fake.activeSelection.value?.onOpened?.();
+    await nextTick();
+    expect(fake.activeSelection.value).toBeNull();
+    expect(document.querySelector(".cdv-line--selected")).toBeNull();
+  });
+
+  it("Escape meant for something else keeps the selection", async () => {
+    const { fake } = mount();
+    await nextTick();
+    click(numberCell(0, 1));
+    await nextTick();
+    const handled = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    handled.preventDefault();
+    document.dispatchEvent(handled);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await nextTick();
+    expect(fake.activeSelection.value).not.toBeNull();
+  });
+
+  it("a truncated file's last hunk keeps its word diffs between clicks", async () => {
+    const lines: DiffLine[] = [];
+    for (let i = 1; i <= 300; i++) {
+      lines.push({ type: "delete", content: `o${i}`, oldLineNo: i });
+      lines.push({ type: "add", content: `n${i}`, newLineNo: i });
+    }
+    const big = [{ path: "big.ts", hunks: [{ header: "@@ -1,300 +1,300 @@", oldStart: 1, oldCount: 300, newStart: 1, newCount: 300, lines }] }] as unknown as GitDiff[];
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    app = createApp({ setup: () => () => h(CommitDiffViewer as any, { diffs: big, commitHash: SHA, commitInfo: ENTRY, diffMode: "side-by-side" }) });
+    app.provide(CREATE_ISSUE_KEY, { available: ref(true), activeSelection: ref(null), openFromSelection: vi.fn() } as any);
+    app.mount(container);
+    await nextTick();
+    const before = wordDiffCalls.n;
+    click(document.querySelectorAll<HTMLElement>("tr.cdv-line")[0].querySelectorAll<HTMLElement>(".cdv-line-no")[0]);
+    await nextTick();
+    click(document.querySelectorAll<HTMLElement>("tr.cdv-line")[2].querySelectorAll<HTMLElement>(".cdv-line-no")[0], true);
+    await nextTick();
+    expect(wordDiffCalls.n).toBe(before);
   });
 });

@@ -465,4 +465,34 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     await nextTick();
     expect(r.fake.activeSelection.value?.oldPath).toBe("src/old.ts");
   });
+
+  it("Shift+click gives the focus back to the text being typed", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    await nextTick();
+    clickNo(newNo(c, 6), true);
+    await nextTick();
+    await nextTick();
+    expect(document.activeElement).toBe(c.querySelector(".pid-compose textarea"));
+  });
+
+  it("the box is drawn under its own row only, not under a same-numbered row elsewhere", async () => {
+    const twin: GitDiff = {
+      path: "src/t.ts",
+      hunks: [
+        { header: "@@ -1,1 +1,1 @@", oldStart: 1, oldCount: 1, newStart: 1, newCount: 1, lines: [line("context", "a", 1, 1)] },
+        { header: "@@ -1,1 +1,1 @@", oldStart: 1, oldCount: 1, newStart: 1, newCount: 1, lines: [line("context", "b", 1, 1)] },
+      ],
+    };
+    const r = mountRange({ diff: twin, filePath: "src/t.ts" });
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(c.querySelectorAll<HTMLElement>(".pid-row")[1].querySelectorAll<HTMLElement>(".pid-lno")[1]);
+    await nextTick();
+    expect(c.querySelectorAll(".pid-compose-row")).toHaveLength(1);
+  });
 });

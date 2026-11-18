@@ -145,22 +145,35 @@ export interface CreateIssueApi {
 
 export const CREATE_ISSUE_KEY: InjectionKey<CreateIssueApi> = Symbol("createIssue");
 
+/** Every view's live selection, per issue-form instance (most recent wins). */
+const selectionRegistries = new WeakMap<object, { seq: number; live: Map<symbol, { sel: DiffSelection; at: number }> }>();
+
 /**
  * Publish a diff view's selection as `api.activeSelection` (what ⌘⇧I files)
- * while issues can be created, and give it back — only if it is still this
- * view's — when it goes away, availability drops or the view unmounts. Call
- * from a component's setup.
+ * while issues can be created. Several views may hold one: the most recently
+ * changed wins, and when it goes away (cleared, availability dropped, view
+ * unmounted) the next most recent one still shown takes over. Call from a
+ * component's setup.
  */
 export function useSelectionPublisher(api: CreateIssueApi | null, source: () => DiffSelection | null): void {
   if (!api) return;
-  let published: DiffSelection | null = null;
-  function give(next: DiffSelection | null) {
-    if (next) api!.activeSelection.value = next;
-    else if (published && toRaw(api!.activeSelection.value) === published) api!.activeSelection.value = null;
-    published = next;
+  const key = toRaw(api) as object;
+  let reg = selectionRegistries.get(key);
+  if (!reg) {
+    reg = { seq: 0, live: new Map() };
+    selectionRegistries.set(key, reg);
   }
-  watch(() => (api.available.value ? source() : null), give);
-  onUnmounted(() => give(null));
+  const registry = reg;
+  const id = Symbol("selection");
+  function set(next: DiffSelection | null) {
+    if (next) registry.live.set(id, { sel: next, at: ++registry.seq });
+    else registry.live.delete(id);
+    let best: { sel: DiffSelection; at: number } | null = null;
+    for (const entry of registry.live.values()) if (!best || entry.at > best.at) best = entry;
+    api!.activeSelection.value = best?.sel ?? null;
+  }
+  watch(() => (api.available.value ? source() : null), set);
+  onUnmounted(() => set(null));
 }
 
 function message(e: unknown): string {

@@ -10,7 +10,7 @@
  *    comments, and "Create issue" from those lines, #301)
  *  - Code suggestion apply support
  */
-import { ref, computed, watch, inject } from "vue";
+import { ref, computed, watch, inject, nextTick } from "vue";
 import { CREATE_ISSUE_KEY, useSelectionPublisher } from "../composables/useCreateIssue";
 import type { DiffSelection } from "../utils/issuePrefill";
 import type { GitDiff, DiffLine, PrReviewComment } from "../utils/backend";
@@ -235,8 +235,7 @@ function openSuggest(hunkIdx: number, lineIdx: number, dl: DiffLine) {
   suggestLine.value = { hunkIdx, lineIdx, line, side: "RIGHT" };
   // Pre-fill with the existing line content (strip leading marker spaces).
   suggestText.value = dl.content.replace(/^\+?/, "");
-  composeLine.value = null; // close regular compose if open
-  composeText.value = "";
+  closeCompose(); // close regular compose (and its range) if open
 }
 
 function closeSuggest() {
@@ -300,6 +299,14 @@ function extendCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
   const last = hunk.lines[hi];
   composeLine.value = { hunkIdx, lineIdx: hi, line: lineNoOf(last), side: sideOf(last) };
   composeRange.value = lo === hi ? null : { lo, hi };
+  // The box is drawn again under its new last row: keep typing where it was.
+  void nextTick(() => composeTextarea?.focus());
+}
+
+/** The open compose box's textarea (one at a time). */
+let composeTextarea: HTMLTextAreaElement | null = null;
+function setComposeTextarea(el: unknown) {
+  composeTextarea = (el as HTMLTextAreaElement | null) ?? null;
 }
 
 /**
@@ -407,11 +414,11 @@ function submitToReview() {
   closeCompose();
 }
 
-function isComposeAnchoredAt(dl: DiffLine): boolean {
-  if (!composeLine.value) return false;
-  const side: "LEFT" | "RIGHT" = dl.type === "delete" ? "LEFT" : "RIGHT";
-  const lineNo = side === "RIGHT" ? dl.newLineNo : dl.oldLineNo;
-  return composeLine.value.line === lineNo && composeLine.value.side === side;
+/** The compose box sits under its own row (hunk and row), not under every
+ *  row that happens to share its line number. */
+function isComposeAnchoredAt(hunkIdx: number, lineIdx: number): boolean {
+  const c = composeLine.value;
+  return !!c && c.hunkIdx === hunkIdx && c.lineIdx === lineIdx;
 }
 
 // ─── Thread reply/edit/delete handlers ──────────────────
@@ -464,7 +471,7 @@ const rows = computed<DiffRow[]>(() => {
       for (const thread of threadsForLine(dl)) {
         out.push({ kind: "thread", hunkIdx, lineIdx, dl, thread });
       }
-      if (isComposeAnchoredAt(dl)) out.push({ kind: "compose", hunkIdx, lineIdx, dl });
+      if (isComposeAnchoredAt(hunkIdx, lineIdx)) out.push({ kind: "compose", hunkIdx, lineIdx, dl });
       if (isSuggestAnchoredAt(dl)) out.push({ kind: "suggest", hunkIdx, lineIdx, dl });
     });
   });
@@ -748,6 +755,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
           <div class="pid-thread-body">
             <div class="pid-compose">
               <textarea
+                :ref="setComposeTextarea"
                 v-model="composeText"
                 class="pid-textarea"
                 :placeholder="t('pr.inline.composePlaceholder')"
@@ -986,7 +994,8 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               <div class="pid-thread-body">
                 <div class="pid-compose">
                   <textarea
-                    v-model="composeText"
+                    :ref="setComposeTextarea"
+                v-model="composeText"
                     class="pid-textarea"
                     :placeholder="t('pr.inline.composePlaceholder')"
                     rows="3"
