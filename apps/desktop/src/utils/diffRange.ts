@@ -52,8 +52,9 @@ export function findBlock(diff: GitDiff, rows: DiffLine[]): { hunkIdx: number; s
     for (let start = 0; start + rows.length <= h.lines.length; start++) {
       if (!rows.every((r, i) => sameRow(h.lines[start + i], r))) continue;
       const at = h.lines[start];
+      // Line numbers may be absent or null (the backends send null).
       const dist =
-        first.oldLineNo !== undefined && at.oldLineNo !== undefined
+        typeof first.oldLineNo === "number" && typeof at.oldLineNo === "number"
           ? Math.abs(at.oldLineNo - first.oldLineNo) * 2
           : Math.abs((at.newLineNo ?? 0) - (first.newLineNo ?? 0)) * 2 + 1;
       if (dist < bestDist) {

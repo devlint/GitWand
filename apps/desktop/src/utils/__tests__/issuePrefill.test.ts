@@ -122,11 +122,16 @@ describe("permalinkSpan", () => {
 });
 
 describe("blobPermalink", () => {
+  it("asks for the plain file, so rendered files (Markdown…) keep the line anchor", () => {
+    expect(blobPermalink("https://github.com/o/r", "abc", "README.md", { side: "new", from: 2, to: 4 }))
+      .toBe("https://github.com/o/r/blob/abc/README.md?plain=1#L2-L4");
+  });
+
   it("builds a blob permalink, one line or a range, path segments encoded", () => {
     expect(blobPermalink("https://github.com/o/r/", "abc", "src/a b#c/é.ts", { side: "new", from: 3, to: 3 }))
-      .toBe("https://github.com/o/r/blob/abc/src/a%20b%23c/%C3%A9.ts#L3");
+      .toBe("https://github.com/o/r/blob/abc/src/a%20b%23c/%C3%A9.ts?plain=1#L3");
     expect(blobPermalink("https://github.com/o/r", "abc", "x.ts", { side: "new", from: 3, to: 7 }))
-      .toBe("https://github.com/o/r/blob/abc/x.ts#L3-L7");
+      .toBe("https://github.com/o/r/blob/abc/x.ts?plain=1#L3-L7");
   });
 });
 
@@ -147,7 +152,7 @@ describe("selectionIssuePrefill", () => {
     ).toEqual({
       title: "",
       body:
-        "https://g/o/r/blob/abc/src/x.ts#L10-L11\n\n```diff\n a\n-b\n+c\n```\n\n`src/x.ts` lines 10–11, commit [`abc1234`](https://g/o/r/commit/abc1234ffff)\n",
+        "https://g/o/r/blob/abc/src/x.ts?plain=1#L10-L11\n\n```diff\n a\n-b\n+c\n```\n\n`src/x.ts` lines 10–11, commit [`abc1234`](https://g/o/r/commit/abc1234ffff)\n",
     });
   });
 
@@ -220,7 +225,7 @@ describe("selectionIssuePrefill", () => {
       source: { kind: "commit", hash: "c", hashFull: "cfull", parent: "pfull" },
     };
     const body = selectionIssuePrefill(sel, { repoHtmlUrl: "https://g/o/r", newSha: "cfull", oldSha: "pfull", commitUrl: "u" }).body;
-    expect(body.startsWith("https://g/o/r/blob/pfull/a/old.ts#L4\n")).toBe(true);
+    expect(body.startsWith("https://g/o/r/blob/pfull/a/old.ts?plain=1#L4\n")).toBe(true);
     const noOld = selectionIssuePrefill(sel, { repoHtmlUrl: "https://g/o/r", newSha: "cfull", oldSha: null, commitUrl: "u" }).body;
     expect(noOld).not.toContain("/blob/");
   });

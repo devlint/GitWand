@@ -433,7 +433,7 @@ describe("useCreateIssue — from a diff selection", () => {
     const { api } = setup(provider(), undefined, async () => true);
     await api.refreshAvailability();
     await api.openFromSelection(commitSel(ADDED));
-    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${SHA}/src/a.ts#L4\n`)).toBe(true);
+    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${SHA}/src/a.ts?plain=1#L4\n`)).toBe(true);
     expect(api.body.value).toContain(`commit [\`abc1234\`](https://github.com/me/app/commit/${SHA})`);
     expect(api.title.value).toBe("");
   });
@@ -442,7 +442,7 @@ describe("useCreateIssue — from a diff selection", () => {
     const a = setup(provider(), undefined, async () => true);
     await a.api.refreshAvailability();
     await a.api.openFromSelection(commitSel(DELETED));
-    expect(a.api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/a.ts#L7\n`)).toBe(true);
+    expect(a.api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/a.ts?plain=1#L7\n`)).toBe(true);
     const b = setup(provider(), undefined, async () => true);
     await b.api.refreshAvailability();
     await b.api.openFromSelection(commitSel(DELETED, null));
@@ -463,7 +463,7 @@ describe("useCreateIssue — from a diff selection", () => {
     const { api } = setup(provider());
     await api.refreshAvailability();
     await api.openFromSelection(prSel(ADDED));
-    expect(api.body.value.startsWith(`https://github.com/org/app/blob/${"h".repeat(40)}/src/a.ts#L4\n`)).toBe(true);
+    expect(api.body.value.startsWith(`https://github.com/org/app/blob/${"h".repeat(40)}/src/a.ts?plain=1#L4\n`)).toBe(true);
   });
 
   it("gives a PR no permalink for deleted lines or an unexpected URL", async () => {
@@ -557,7 +557,7 @@ describe("useCreateIssue — selection hand-off", () => {
     const { api } = setup(provider(), undefined, async () => true);
     await api.refreshAvailability();
     await api.openFromSelection(commitSel([...DELETED, { type: "context", content: "z", oldLineNo: 8, newLineNo: 5 }]));
-    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/a.ts#L7-L8\n`)).toBe(true);
+    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/a.ts?plain=1#L7-L8\n`)).toBe(true);
   });
 
   it("publishes a view's selection through the API (most recent wins)", () => {
@@ -575,7 +575,7 @@ describe("useCreateIssue — selection hand-off", () => {
     const { api } = setup(provider(), undefined, async () => true);
     await api.refreshAvailability();
     await api.openFromSelection({ ...commitSel(DELETED), path: "src/new.ts", oldPath: "src/old.ts" });
-    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/old.ts#L7\n`)).toBe(true);
+    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/old.ts?plain=1#L7\n`)).toBe(true);
   });
 });
 

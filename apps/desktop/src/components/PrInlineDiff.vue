@@ -334,7 +334,12 @@ watch(
     // must not pull the range over other code.
     const at = findBlock(next, rows);
     if (!at) {
-      closeCompose();
+      // The range changed: the box (and its draft) stays on its own last
+      // line if that one is still there, as a one-line comment.
+      const last = prev.hunks[c.hunkIdx]?.lines[c.lineIdx];
+      const kept = last ? findBlock(next, [last]) : null;
+      if (kept) openCompose(kept.hunkIdx, kept.start, next.hunks[kept.hunkIdx].lines[kept.start], true);
+      else closeCompose();
       return;
     }
     const shift = at.start - lo;
@@ -423,7 +428,13 @@ useSelectionPublisher(
 );
 // Another file, or another PR (its file may share the path): the box and its
 // line numbers belonged to the previous one.
-watch(() => [props.filePath, props.prNumber], closeCompose);
+watch(
+  () => [props.filePath, props.prNumber] as const,
+  ([path, pr], [prevPath, prevPr]) => {
+    // A number missing for a moment (a list refresh) is not another PR.
+    if (path !== prevPath || (pr !== undefined && prevPr !== undefined && pr !== prevPr)) closeCompose();
+  },
+);
 
 function fileIssueFromCompose() {
   const sel = composeSelection.value;
@@ -801,7 +812,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
             <div class="pid-compose">
               <textarea
                 :ref="setComposeTextarea"
-                data-issue-shortcut
+                :data-issue-shortcut="composeRange ? '' : undefined"
                 v-model="composeText"
                 class="pid-textarea"
                 :placeholder="t('pr.inline.composePlaceholder')"
@@ -1043,7 +1054,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                 <div class="pid-compose">
                   <textarea
                     :ref="setComposeTextarea"
-                    data-issue-shortcut
+                    :data-issue-shortcut="composeRange ? '' : undefined"
                     v-model="composeText"
                     class="pid-textarea"
                     :placeholder="t('pr.inline.composePlaceholder')"

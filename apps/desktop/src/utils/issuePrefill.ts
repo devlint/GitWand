@@ -121,7 +121,9 @@ export function permalinkSpan(lines: DiffLine[], side?: "old" | "new"): LineSpan
 export function blobPermalink(repoHtmlUrl: string, sha: string, path: string, span: LineSpan): string {
   const file = path.split("/").map(encodeURIComponent).join("/");
   const lines = span.from === span.to ? `L${span.from}` : `L${span.from}-L${span.to}`;
-  return `${repoHtmlUrl.replace(/\/+$/, "")}/blob/${sha}/${file}#${lines}`;
+  // `?plain=1`: GitHub renders Markdown, notebooks, SVG… and drops the line
+  // anchor there; the plain view keeps it (and changes nothing for code).
+  return `${repoHtmlUrl.replace(/\/+$/, "")}/blob/${sha}/${file}?plain=1#${lines}`;
 }
 
 /** Where the selected lines can be linked on GitHub; nulls where they cannot. */

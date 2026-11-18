@@ -49,6 +49,17 @@ describe("findBlock", () => {
     expect(findBlock(next, rows)).toEqual({ hunkIdx: 1, start: 0 });
   });
 
+  it("finds the nearest copy with the backend's null line numbers too", () => {
+    const nul = (type: DiffLine["type"], c: string, o: number | null, n: number | null) =>
+      ({ type, content: c, oldLineNo: o, newLineNo: n }) as unknown as DiffLine;
+    const rows = [nul("add", "}", null, 30), nul("add", "", null, 31)];
+    const next = diffOf(
+      [nul("add", "}", null, 2), nul("add", "", null, 3)],
+      [nul("add", "}", null, 31), nul("add", "", null, 32)],
+    );
+    expect(findBlock(next, rows)).toEqual({ hunkIdx: 1, start: 0 });
+  });
+
   it("is null when the rows are gone", () => {
     expect(findBlock(diffOf([ctx(1, 1, "a")]), [ctx(3, 3, "zz")])).toBeNull();
   });

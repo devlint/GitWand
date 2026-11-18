@@ -203,6 +203,8 @@ function toggleFile(idx: number) {
   const s = new Set(expandedFiles.value);
   if (s.has(idx)) {
     s.delete(idx);
+    // Hidden lines are not a selection ⌘⇧I should file.
+    if (lineRange.range.value && parseRowGroup(lineRange.range.value.group).fileIdx === idx) lineRange.clear();
   } else {
     s.add(idx);
   }
@@ -230,9 +232,9 @@ const truncatedCache = new WeakMap<GitDiff, GitDiff["hunks"]>();
 /** Get hunks with truncation applied */
 function truncatedHunks(idx: number) {
   const diff = props.diffs[idx];
-  if (!isFileTruncated(idx)) return diff.hunks;
   const cached = truncatedCache.get(diff);
   if (cached) return cached;
+  if (!isFileTruncated(idx)) return diff.hunks;
 
   const result: typeof diff.hunks = [];
   let remaining = MAX_LINES_PER_FILE;
@@ -257,7 +259,16 @@ function truncatedHunks(idx: number) {
 const createIssue = inject(CREATE_ISSUE_KEY, null);
 // Without the commit's details (not in the loaded log) there is nothing to
 // file the lines against.
-const canSelectLines = computed(() => !!createIssue?.available.value && !!props.commitInfo);
+// Nor while another commit's diff is still on screen (the selected commit's
+// is loading): its lines would be filed under the wrong commit.
+const diffsStale = ref(false);
+watch(() => props.commitHash, () => {
+  diffsStale.value = true;
+});
+watch(() => props.diffs, () => {
+  diffsStale.value = false;
+});
+const canSelectLines = computed(() => !!createIssue?.available.value && !!props.commitInfo && !diffsStale.value);
 
 /** `row`: inline rows; `old` / `new`: one column of the side-by-side pairs. */
 type SelSide = RowSide;

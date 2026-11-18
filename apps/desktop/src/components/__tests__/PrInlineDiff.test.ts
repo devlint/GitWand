@@ -545,6 +545,51 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(r.fake.activeSelection.value?.lines.map((l) => l.content)).toEqual(["c3", "c4", "c5"]);
   });
 
+  it("a reloaded diff that changed the range keeps the box and draft on its last line", async () => {
+    const diff = vueRef(rangeDiff());
+    const r = mountReactive(diff);
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 5), true);
+    await nextTick();
+    await typeInCompose(c, "long draft");
+    const changed = rangeDiff();
+    changed.hunks[0] = { ...changed.hunks[0], lines: changed.hunks[0].lines.map((l) => (l.content === "c4" ? { ...l, content: "c4 edited" } : l)) };
+    diff.value = changed;
+    await nextTick();
+    await nextTick();
+    expect(c.querySelector<HTMLTextAreaElement>(".pid-compose textarea")?.value).toBe("long draft");
+    expect(c.querySelectorAll(".pid-row--selected")).toHaveLength(0);
+  });
+
+  it("a PR number missing for a moment keeps the box", async () => {
+    const prNumber = vueRef<number | undefined>(12);
+    const activeSelection = vueRef<DiffSelection | null>(null);
+    const fake = { available: vueRef(true), activeSelection, openFromSelection: vi.fn(), publishSelection: createSelectionRegistry(activeSelection) };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const app = createApp({
+      render: () => h(PrInlineDiff as any, {
+        diff: rangeDiff(), filePath: "src/r.ts", comments: [], prNumber: prNumber.value,
+        prUrl: "https://github.com/o/r/pull/12", headSha: "h".repeat(40), forgeName: "github",
+      }),
+    });
+    app.provide(CREATE_ISSUE_KEY, fake as any);
+    app.mount(container);
+    mounted = { app, container, vm: null };
+    await nextTick();
+    clickNo(newNo(container, 3));
+    await nextTick();
+    prNumber.value = undefined;
+    await nextTick();
+    prNumber.value = 12;
+    await nextTick();
+    await nextTick();
+    expect(container.querySelector(".pid-compose")).not.toBeNull();
+  });
+
   it("a reloaded diff without those lines closes the box", async () => {
     const diff = vueRef(rangeDiff());
     const r = mountReactive(diff);
@@ -586,13 +631,17 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(created).toHaveBeenCalledWith(expect.objectContaining({ line: 6, start_line: 3 }));
   });
 
-  it("the comment box lets the new-issue shortcut through", async () => {
+  it("the comment box lets the new-issue shortcut through only while it holds a range", async () => {
     const r = mountRange();
     mounted = r.mounted;
+    const c = r.mounted.container;
     await nextTick();
-    clickNo(newNo(r.mounted.container, 3));
+    clickNo(newNo(c, 3));
     await nextTick();
-    expect(r.mounted.container.querySelector(".pid-compose textarea")?.hasAttribute("data-issue-shortcut")).toBe(true);
+    expect(c.querySelector(".pid-compose textarea")?.hasAttribute("data-issue-shortcut")).toBe(false);
+    clickNo(newNo(c, 5), true);
+    await nextTick();
+    expect(c.querySelector(".pid-compose textarea")?.hasAttribute("data-issue-shortcut")).toBe(true);
   });
 
   it("typing keeps the published range the same (it does not jump ahead of others)", async () => {
