@@ -1150,6 +1150,7 @@ const zhCN: Locale = {
     },
     inline: {
       composePlaceholder: "添加评论…（Ctrl+Enter 发送）",
+      createIssue: "创建 Issue",
       commentBtn: "评论",
       cancel: "取消",
       addToReview: "加入 review",

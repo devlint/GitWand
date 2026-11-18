@@ -1159,6 +1159,7 @@ const en = {
     },
     inline: {
       composePlaceholder: "Add a comment\u2026 (Ctrl+Enter to send)",
+      createIssue: "Create issue",
       commentBtn: "Comment",
       cancel: "Cancel",
       addToReview: "Add to review",

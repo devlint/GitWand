@@ -1589,6 +1589,8 @@ function submitRequestReviewers() {
                 :review-draft-count="p.draftReviewComments.value.length"
                 :cwd="p.cwd.value"
                 :pr-number="p.selectedPr.value?.number"
+                :pr-url="p.prDetail.value?.url"
+                :head-sha="p.prDetail.value?.headSha"
                 :forge-name="p.forge.value.name"
                 :annotations="p.selectedDiffFile.value ? (p.mergedAnnotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
                 :can-edit-comments="p.forgeSupportsCommentEdit.value"

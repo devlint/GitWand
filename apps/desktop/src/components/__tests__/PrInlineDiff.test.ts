@@ -119,3 +119,192 @@ describe("PrInlineDiff — flat row model", () => {
     expect(exposed.currentRowIdx).toBe(2);
   });
 });
+
+// ─── Shift+click ranges: multi-line comments and issues (#301) ───────────────
+import { ref as vueRef, h } from "vue";
+import { vi } from "vitest";
+import { CREATE_ISSUE_KEY } from "../../composables/useCreateIssue";
+import type { DiffSelection } from "../../utils/issuePrefill";
+
+function rangeDiff(): GitDiff {
+  const ctx = (n: number) => line("context", `c${n}`, n, n);
+  return {
+    path: "src/r.ts",
+    hunks: [
+      { header: "@@ -1,8 +1,8 @@", oldStart: 1, oldCount: 8, newStart: 1, newCount: 8, lines: [1, 2, 3, 4, 5, 6, 7, 8].map(ctx) },
+      { header: "@@ -40,1 +40,1 @@", oldStart: 40, oldCount: 1, newStart: 40, newCount: 1, lines: [ctx(40)] },
+    ],
+  };
+}
+
+function mountRange(props: Record<string, unknown> = {}, available = true) {
+  const activeSelection = vueRef<DiffSelection | null>(null);
+  const openFromSelection = vi.fn(async (_sel: DiffSelection) => {});
+  const fake = { available: vueRef(available), activeSelection, openFromSelection };
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const app = createApp(PrInlineDiff as any, {
+    diff: rangeDiff(), filePath: "src/r.ts", comments: [], prNumber: 12,
+    prUrl: "https://github.com/o/r/pull/12", headSha: "h".repeat(40), ...props,
+  });
+  app.provide(CREATE_ISSUE_KEY, fake as any);
+  const vm = app.mount(container);
+  return { mounted: { app, container, vm } as MountResult, fake };
+}
+
+/** The new-side line-number cell of the line row numbered `n`. */
+function newNo(container: HTMLElement, n: number): HTMLElement {
+  for (const row of container.querySelectorAll<HTMLElement>(".pid-row")) {
+    const cells = row.querySelectorAll<HTMLElement>(".pid-lno");
+    if (cells[1]?.querySelector(".pid-lno-num")?.textContent?.trim() === String(n)) return cells[1];
+  }
+  throw new Error(`no line ${n}`);
+}
+
+function clickNo(el: HTMLElement, shift = false) {
+  el.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: shift }));
+}
+
+describe("PrInlineDiff — Shift+click ranges", () => {
+  let mounted: MountResult | null = null;
+  afterEach(() => {
+    if (mounted) unmount(mounted);
+    mounted = null;
+  });
+
+  async function typeInCompose(c: HTMLElement, text: string) {
+    const ta = c.querySelector<HTMLTextAreaElement>(".pid-compose textarea")!;
+    ta.value = text;
+    ta.dispatchEvent(new Event("input"));
+    await nextTick();
+  }
+
+  it("extends the compose box to a range, keeps the text, comments on the range", async () => {
+    const created = vi.fn();
+    const r = mountRange({ onCreateComment: created });
+    mounted = r.mounted;
+    const c2 = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c2, 3));
+    await nextTick();
+    await typeInCompose(c2, "x");
+    clickNo(newNo(c2, 6), true);
+    await nextTick();
+    const ta = c2.querySelector<HTMLTextAreaElement>(".pid-compose textarea")!;
+    expect(ta.value).toBe("x");
+    // The compose box sits under line 6.
+    const composeRow = c2.querySelector<HTMLElement>(".pid-compose-row")!;
+    const before = composeRow.previousElementSibling as HTMLElement;
+    expect(before.querySelectorAll(".pid-lno-num")[1].textContent?.trim()).toBe("6");
+    expect(c2.querySelectorAll(".pid-row--selected")).toHaveLength(4);
+    c2.querySelector<HTMLButtonElement>(".pid-submit-btn")!.click();
+    expect(created).toHaveBeenCalledWith(expect.objectContaining({ line: 6, side: "RIGHT", start_line: 3, start_side: "RIGHT", body: "x" }));
+  });
+
+  it("Shift+click above the compose line keeps the box on the later row", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 6));
+    await nextTick();
+    clickNo(newNo(c, 3), true);
+    await nextTick();
+    const before = c.querySelector<HTMLElement>(".pid-compose-row")!.previousElementSibling as HTMLElement;
+    expect(before.querySelectorAll(".pid-lno-num")[1].textContent?.trim()).toBe("6");
+    expect(r.fake.activeSelection.value?.lines.map((l) => l.content)).toEqual(["c3", "c4", "c5", "c6"]);
+  });
+
+  it("Shift+click in another hunk opens a plain compose box there", async () => {
+    const created = vi.fn();
+    const r = mountRange({ onCreateComment: created });
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    await nextTick();
+    clickNo(newNo(c, 40), true);
+    await nextTick();
+    expect(c.querySelectorAll(".pid-row--selected")).toHaveLength(0);
+    await typeInCompose(c, "y");
+    c.querySelector<HTMLButtonElement>(".pid-submit-btn")!.click();
+    const params = created.mock.calls[0][0];
+    expect(params.line).toBe(40);
+    expect(params.start_line).toBeUndefined();
+  });
+
+  it("Create issue files the range with the typed text and closes the box", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    await nextTick();
+    await typeInCompose(c, "x");
+    clickNo(newNo(c, 6), true);
+    await nextTick();
+    c.querySelector<HTMLButtonElement>(".pid-issue-btn")!.click();
+    await nextTick();
+    const sel = r.fake.openFromSelection.mock.calls[0][0];
+    expect(sel.lines.map((l) => l.content)).toEqual(["c3", "c4", "c5", "c6"]);
+    expect(sel.intro).toBe("x");
+    expect(sel.source).toEqual({ kind: "pr", number: 12, url: "https://github.com/o/r/pull/12", headSha: "h".repeat(40) });
+    expect(c.querySelector(".pid-compose")).toBeNull();
+    expect(r.fake.activeSelection.value).toBeNull();
+  });
+
+  it("no Create issue without a PR URL or a GitHub repository", async () => {
+    const a = mountRange({ prUrl: undefined });
+    mounted = a.mounted;
+    await nextTick();
+    clickNo(newNo(a.mounted.container, 3));
+    await nextTick();
+    expect(a.mounted.container.querySelector(".pid-issue-btn")).toBeNull();
+    unmount(a.mounted);
+    const b = mountRange({}, false);
+    mounted = b.mounted;
+    await nextTick();
+    clickNo(newNo(b.mounted.container, 3));
+    await nextTick();
+    expect(b.mounted.container.querySelector(".pid-issue-btn")).toBeNull();
+  });
+
+  it("closing the box or changing file clears the published selection", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    await nextTick();
+    expect(r.fake.activeSelection.value).not.toBeNull();
+    c.querySelector<HTMLButtonElement>(".pid-cancel-btn")!.click();
+    await nextTick();
+    expect(r.fake.activeSelection.value).toBeNull();
+  });
+
+  it("changing file closes the box and clears the selection", async () => {
+    const activeSelection = vueRef<DiffSelection | null>(null);
+    const fake = { available: vueRef(true), activeSelection, openFromSelection: vi.fn() };
+    const filePath = vueRef("src/r.ts");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const app = createApp({
+      render: () => h(PrInlineDiff as any, {
+        diff: rangeDiff(), filePath: filePath.value, comments: [], prNumber: 12,
+        prUrl: "https://github.com/o/r/pull/12", headSha: "h".repeat(40),
+      }),
+    });
+    app.provide(CREATE_ISSUE_KEY, fake as any);
+    app.mount(container);
+    mounted = { app, container, vm: null };
+    await nextTick();
+    clickNo(newNo(container, 3));
+    await nextTick();
+    expect(activeSelection.value).not.toBeNull();
+    filePath.value = "src/other.ts";
+    await nextTick();
+    await nextTick();
+    expect(container.querySelector(".pid-compose")).toBeNull();
+    expect(activeSelection.value).toBeNull();
+  });
+});

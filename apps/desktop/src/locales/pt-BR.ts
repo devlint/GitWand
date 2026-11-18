@@ -1144,6 +1144,7 @@ const ptBR: Locale = {
     },
     inline: {
       composePlaceholder: "Adicionar um comentário… (Ctrl+Enter para enviar)",
+      createIssue: "Criar issue",
       commentBtn: "Comentar",
       cancel: "Cancelar",
       addToReview: "Adicionar à review",

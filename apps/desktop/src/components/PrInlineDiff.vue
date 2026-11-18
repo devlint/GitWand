@@ -9,7 +9,9 @@
  *  - Multi-line selection (drag line numbers) to create range comments
  *  - Code suggestion apply support
  */
-import { ref, computed } from "vue";
+import { ref, computed, watch, inject, onUnmounted, toRaw } from "vue";
+import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
+import type { DiffSelection } from "../utils/issuePrefill";
 import type { GitDiff, DiffLine, PrReviewComment } from "../utils/backend";
 import { annotationsByLine as groupAnnotationsByLine, worstSeverity, type LineAnnotation } from "../composables/prAnnotations";
 import PrCommentThread from "./PrCommentThread.vue";
@@ -39,6 +41,10 @@ const props = defineProps<{
   canEditComments?: boolean;
   /** Whether the active forge supports deleting a comment (F2). Defaults to true. */
   canDeleteComments?: boolean;
+  /** The PR's page, for "Create issue" (#301); absent, the action is not offered. */
+  prUrl?: string;
+  /** The PR's head commit, for a permalink to the selected lines. */
+  headSha?: string;
 }>();
 
 interface CommentParams {
@@ -260,13 +266,58 @@ const selectionStart = ref<{ line: number; side: "LEFT" | "RIGHT" } | null>(null
 const selectionEnd = ref<{ line: number; side: "LEFT" | "RIGHT" } | null>(null);
 const isDragging = ref(false);
 
+/** The row a Shift+click range is measured from (the row first clicked). */
+const rangeAnchorIdx = ref<number | null>(null);
+/** The rows a Shift+click range covers in the compose box's hunk. */
+const composeRange = ref<{ lo: number; hi: number } | null>(null);
+
+function sideOf(dl: DiffLine): "LEFT" | "RIGHT" {
+  return dl.type === "delete" ? "LEFT" : "RIGHT";
+}
+function lineNoOf(dl: DiffLine): number {
+  return (sideOf(dl) === "RIGHT" ? dl.newLineNo : dl.oldLineNo) ?? 0;
+}
+
 function openCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
-  const side: "LEFT" | "RIGHT" = dl.type === "delete" ? "LEFT" : "RIGHT";
-  const line = side === "RIGHT" ? (dl.newLineNo ?? 0) : (dl.oldLineNo ?? 0);
-  composeLine.value = { hunkIdx, lineIdx, line, side };
+  composeLine.value = { hunkIdx, lineIdx, line: lineNoOf(dl), side: sideOf(dl) };
   composeText.value = "";
   selectionStart.value = null;
   selectionEnd.value = null;
+  rangeAnchorIdx.value = lineIdx;
+  composeRange.value = null;
+}
+
+/**
+ * Shift+click on a line number while the compose box is open in the same
+ * hunk: the box covers the range from the row first clicked to this one and
+ * sits under its last row (where GitHub anchors a multi-line comment); the
+ * text typed so far is kept. Elsewhere it is a plain click.
+ */
+function extendCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
+  const cur = composeLine.value;
+  const hunk = props.diff?.hunks[hunkIdx];
+  if (!cur || cur.hunkIdx !== hunkIdx || !hunk) {
+    openCompose(hunkIdx, lineIdx, dl);
+    return;
+  }
+  const anchor = rangeAnchorIdx.value ?? cur.lineIdx;
+  const lo = Math.min(anchor, lineIdx);
+  const hi = Math.max(anchor, lineIdx);
+  const first = hunk.lines[lo];
+  const last = hunk.lines[hi];
+  composeLine.value = { hunkIdx, lineIdx: hi, line: lineNoOf(last), side: sideOf(last) };
+  selectionStart.value = lo === hi ? null : { line: lineNoOf(first), side: sideOf(first) };
+  composeRange.value = lo === hi ? null : { lo, hi };
+}
+
+function onLineNoClick(e: MouseEvent, hunkIdx: number, lineIdx: number, dl: DiffLine) {
+  if (e.shiftKey) extendCompose(hunkIdx, lineIdx, dl);
+  else openCompose(hunkIdx, lineIdx, dl);
+}
+
+function isInComposeRange(hunkIdx: number, lineIdx: number): boolean {
+  const r = composeRange.value;
+  return !!r && composeLine.value?.hunkIdx === hunkIdx && lineIdx >= r.lo && lineIdx <= r.hi;
 }
 
 function closeCompose() {
@@ -274,6 +325,50 @@ function closeCompose() {
   composeText.value = "";
   selectionStart.value = null;
   selectionEnd.value = null;
+  rangeAnchorIdx.value = null;
+  composeRange.value = null;
+}
+
+// ─── Create an issue from the compose box's lines (#301) ─
+const createIssue = inject(CREATE_ISSUE_KEY, null);
+const canCreateIssue = computed(
+  () => !!createIssue?.available.value && !!props.prUrl && props.prNumber !== undefined,
+);
+
+const composeSelection = computed<DiffSelection | null>(() => {
+  const c = composeLine.value;
+  const hunk = c ? props.diff?.hunks[c.hunkIdx] : undefined;
+  if (!c || !hunk || !props.filePath || !props.prUrl || props.prNumber === undefined) return null;
+  const r = composeRange.value;
+  const lines = r ? hunk.lines.slice(r.lo, r.hi + 1) : hunk.lines.slice(c.lineIdx, c.lineIdx + 1);
+  if (lines.length === 0) return null;
+  return {
+    path: props.filePath,
+    lines,
+    intro: composeText.value,
+    source: { kind: "pr", number: props.prNumber, url: props.prUrl, headSha: props.headSha || null },
+  };
+});
+
+// Published for ⌘⇧I; given back only if it is still this view's.
+let published: DiffSelection | null = null;
+function publish(sel: DiffSelection | null) {
+  if (!createIssue) return;
+  const next = canCreateIssue.value ? sel : null;
+  if (next) createIssue.activeSelection.value = next;
+  else if (published && toRaw(createIssue.activeSelection.value) === published) createIssue.activeSelection.value = null;
+  published = next;
+}
+watch(composeSelection, publish);
+onUnmounted(() => publish(null));
+// Another file: the box (and its line numbers) belonged to the previous one.
+watch(() => props.filePath, closeCompose);
+
+function fileIssueFromCompose() {
+  const sel = composeSelection.value;
+  if (!sel || !createIssue) return;
+  void createIssue.openFromSelection(sel);
+  closeCompose();
 }
 
 function buildComposeParams(): CommentParams | null {
@@ -284,7 +379,8 @@ function buildComposeParams(): CommentParams | null {
   if (selectionStart.value && selectionStart.value.line !== line) {
     return {
       ...base,
-      start_line: Math.min(selectionStart.value.line, line),
+      // Always the range's first row (see extendCompose).
+      start_line: selectionStart.value.line,
       start_side: selectionStart.value.side,
     };
   }
@@ -543,6 +639,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
             'pid-row--del': row.dl.type === 'delete',
             'pid-row--ctx': row.dl.type === 'context',
             'pid-row--annotated': annotationsForLine(row.dl).length > 0,
+            'pid-row--selected': isInComposeRange(row.hunkIdx, row.lineIdx),
             'pid-rowbox--start': isHunkStart(idx),
             'pid-rowbox--end': isHunkEnd(idx),
           }"
@@ -574,7 +671,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
           <div
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
-            @click="row.dl.type !== 'add' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
+            @click="row.dl.type !== 'add' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
             :title="row.dl.type !== 'add' ? t('pr.inline.commentTooltip') : undefined"
           >
             <span class="pid-lno-num">{{ row.dl.oldLineNo ?? '' }}</span>
@@ -584,7 +681,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
           <div
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
-            @click="row.dl.type !== 'delete' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
+            @click="row.dl.type !== 'delete' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
             :title="row.dl.type !== 'delete' ? t('pr.inline.commentTooltip') : undefined"
           >
             <span class="pid-lno-num">{{ row.dl.newLineNo ?? '' }}</span>
@@ -656,6 +753,13 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               />
               <div class="pid-compose-actions">
                 <button class="pid-cancel-btn" @click="closeCompose">{{ t('pr.inline.cancel') }}</button>
+                <button
+                  v-if="canCreateIssue"
+                  type="button"
+                  class="pid-issue-btn"
+                  :title="t('createIssue.fromSelection')"
+                  @click="fileIssueFromCompose"
+                >{{ t('pr.inline.createIssue') }}</button>
                 <button
                   class="pid-review-btn"
                   :disabled="!composeText.trim()"
@@ -790,6 +894,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                 'pid-row--del': row.dl.type === 'delete',
                 'pid-row--ctx': row.dl.type === 'context',
                 'pid-row--annotated': annotationsForLine(row.dl).length > 0,
+                'pid-row--selected': isInComposeRange(row.hunkIdx, row.lineIdx),
                 'pid-rowbox--start': isHunkStart(vr.index),
                 'pid-rowbox--end': isHunkEnd(vr.index),
               }"
@@ -818,7 +923,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               <div
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
-                @click="row.dl.type !== 'add' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
+                @click="row.dl.type !== 'add' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
                 :title="row.dl.type !== 'add' ? t('pr.inline.commentTooltip') : undefined"
               >
                 <span class="pid-lno-num">{{ row.dl.oldLineNo ?? '' }}</span>
@@ -827,7 +932,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               <div
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
-                @click="row.dl.type !== 'delete' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
+                @click="row.dl.type !== 'delete' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
                 :title="row.dl.type !== 'delete' ? t('pr.inline.commentTooltip') : undefined"
               >
                 <span class="pid-lno-num">{{ row.dl.newLineNo ?? '' }}</span>
@@ -886,6 +991,13 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                   />
                   <div class="pid-compose-actions">
                     <button class="pid-cancel-btn" @click="closeCompose">{{ t('pr.inline.cancel') }}</button>
+                    <button
+                      v-if="canCreateIssue"
+                      type="button"
+                      class="pid-issue-btn"
+                      :title="t('createIssue.fromSelection')"
+                      @click="fileIssueFromCompose"
+                    >{{ t('pr.inline.createIssue') }}</button>
                     <button
                       class="pid-review-btn"
                       :disabled="!composeText.trim()"
@@ -1403,4 +1515,20 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
   outline: none;
   border-color: transparent;
 }
+
+/* Shift+click range (#301) */
+.pid-row--selected {
+  box-shadow: inset 3px 0 0 var(--color-accent), inset 0 0 0 9999px var(--color-accent-soft);
+}
+.pid-issue-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.pid-issue-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 </style>

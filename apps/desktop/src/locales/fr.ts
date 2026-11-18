@@ -1152,6 +1152,7 @@ const fr: Locale = {
     },
     inline: {
       composePlaceholder: "Ajouter un commentaire\u2026 (Ctrl+Enter pour envoyer)",
+      createIssue: "Créer une issue",
       commentBtn: "Commenter",
       cancel: "Annuler",
       addToReview: "Ajouter à la review",
