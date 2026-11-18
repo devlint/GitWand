@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ForgeProvider } from "../forge/types";
 import type { IssueTargets, CreatedIssue, RepoLabel } from "../../utils/backend";
+import type { DiffSelection } from "../../utils/issuePrefill";
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -412,6 +413,179 @@ describe("useCreateIssue", () => {
   });
 });
 
+const SHA = "abc1234".padEnd(40, "f");
+const PARENT_SHA = "0123456".padEnd(40, "0");
+const commitSel = (lines: DiffSelection["lines"], parent: string | null = PARENT_SHA): DiffSelection => ({
+  path: "src/a.ts",
+  lines,
+  source: { kind: "commit", hash: "abc1234", hashFull: SHA, parent },
+});
+const prSel = (lines: DiffSelection["lines"], url = "https://github.com/org/app/pull/12"): DiffSelection => ({
+  path: "src/a.ts",
+  lines,
+  source: { kind: "pr", number: 12, url, headSha: "h".repeat(40) },
+});
+const ADDED = [{ type: "add" as const, content: "x", newLineNo: 4 }];
+const DELETED = [{ type: "delete" as const, content: "y", oldLineNo: 7 }];
+
+describe("useCreateIssue — from a diff selection", () => {
+  it("links a pushed commit's lines on origin, with the commit", async () => {
+    const { api } = setup(provider(), undefined, async () => true);
+    await api.refreshAvailability();
+    await api.openFromSelection(commitSel(ADDED));
+    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${SHA}/src/a.ts?plain=1#L4\n`)).toBe(true);
+    expect(api.body.value).toContain(`commit [\`abc1234\`](https://github.com/me/app/commit/${SHA})`);
+    expect(api.title.value).toBe("");
+  });
+
+  it("points deleted lines at the first parent, and at nothing for a root commit", async () => {
+    const a = setup(provider(), undefined, async () => true);
+    await a.api.refreshAvailability();
+    await a.api.openFromSelection(commitSel(DELETED));
+    expect(a.api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/a.ts?plain=1#L7\n`)).toBe(true);
+    const b = setup(provider(), undefined, async () => true);
+    await b.api.refreshAvailability();
+    await b.api.openFromSelection(commitSel(DELETED, null));
+    expect(b.api.body.value).not.toContain("/blob/");
+  });
+
+  it("leaves an unpushed commit's lines unlinked", async () => {
+    const { api } = setup(provider(), undefined, async () => false);
+    await api.refreshAvailability();
+    await api.openFromSelection(commitSel(ADDED));
+    expect(api.isOpen.value).toBe(true);
+    expect(api.body.value).not.toContain("/blob/");
+    expect(api.body.value).not.toContain("/commit/");
+    expect(api.body.value).toContain("```diff\n+x\n```");
+  });
+
+  it("links a PR's lines on the PR's own repository, at its head", async () => {
+    const { api } = setup(provider());
+    await api.refreshAvailability();
+    await api.openFromSelection(prSel(ADDED));
+    expect(api.body.value.startsWith(`https://github.com/org/app/blob/${"h".repeat(40)}/src/a.ts?plain=1#L4\n`)).toBe(true);
+  });
+
+  it("reads the PR's repository from a URL with a trailing path or query", async () => {
+    const { api } = setup(provider());
+    await api.refreshAvailability();
+    await api.openFromSelection(prSel(ADDED, "https://github.com/org/app/pull/12/files?w=1"));
+    expect(api.body.value.startsWith(`https://github.com/org/app/blob/${"h".repeat(40)}/src/a.ts?plain=1#L4\n`)).toBe(true);
+  });
+
+  it("gives a PR no permalink for deleted lines or an unexpected URL", async () => {
+    const a = setup(provider());
+    await a.api.refreshAvailability();
+    await a.api.openFromSelection(prSel(DELETED));
+    expect(a.api.body.value).not.toContain("/blob/");
+    const b = setup(provider());
+    await b.api.refreshAvailability();
+    await b.api.openFromSelection(prSel(ADDED, "https://example.com/x"));
+    expect(b.api.body.value).not.toContain("/blob/");
+  });
+
+  it("leaves a form being typed in alone", async () => {
+    const { api } = setup(provider(), undefined, async () => true);
+    await api.refreshAvailability();
+    await api.open();
+    api.title.value = "mine";
+    await api.openFromSelection(commitSel(ADDED));
+    expect(api.title.value).toBe("mine");
+    expect(api.body.value).toBe("");
+  });
+
+  it("the shortcut uses the active selection, or opens an empty form", async () => {
+    const a = setup(provider(), undefined, async () => true);
+    await a.api.refreshAvailability();
+    a.api.activeSelection.value = commitSel(ADDED);
+    await a.api.openFromShortcut();
+    expect(a.api.body.value).toContain("```diff\n+x\n```");
+    const b = setup(provider());
+    await b.api.refreshAvailability();
+    await b.api.openFromShortcut();
+    expect(b.api.isOpen.value).toBe(true);
+    expect(b.api.body.value).toBe("");
+  });
+});
+
+describe("useCreateIssue — selection hand-off", () => {
+  it("keeps the selection when its prefill could not land (typed meanwhile)", async () => {
+    const onOrigin = deferred<boolean>();
+    const { api } = setup(provider(), undefined, () => onOrigin.promise);
+    await api.refreshAvailability();
+    const onOpened = vi.fn();
+    const pending = api.openFromSelection({ ...commitSel(ADDED), onOpened });
+    await flush();
+    api.title.value = "typed first";
+    onOrigin.resolve(true);
+    expect(await pending).toBe(false);
+    expect(api.body.value).toBe("");
+    expect(onOpened).not.toHaveBeenCalled();
+  });
+
+  it("keeps the selection when its form was closed and another opened meanwhile", async () => {
+    const targets = deferred<IssueTargets>();
+    const p = provider({ issueTargets: vi.fn(() => targets.promise) as any });
+    const { api } = setup(p);
+    await api.refreshAvailability();
+    const onOpened = vi.fn();
+    const pending = api.openFromSelection({ ...prSel(ADDED), onOpened });
+    await flush();
+    api.close();
+    void api.open();
+    targets.resolve({ targets: [ORIGIN], defaultRepo: "me/app" });
+    await pending;
+    await flush();
+    expect(onOpened).not.toHaveBeenCalled();
+  });
+
+  it("lets the selection go only once the form could read its targets", async () => {
+    const failing = setup(provider({ issueTargets: vi.fn(async () => { throw new Error("auth"); }) }));
+    await failing.api.refreshAvailability();
+    const kept = vi.fn();
+    await failing.api.openFromSelection({ ...prSel(ADDED), onOpened: kept });
+    expect(failing.api.targetsFailed.value).toBe(true);
+    expect(kept).not.toHaveBeenCalled();
+  });
+
+  it("reports whether it opened, and tells the selection's view only then", async () => {
+    const { api } = setup(provider());
+    await api.refreshAvailability();
+    const onOpened = vi.fn();
+    expect(await api.openFromSelection({ ...prSel(ADDED), onOpened })).toBe(true);
+    expect(onOpened).toHaveBeenCalledTimes(1);
+    api.title.value = "typing";
+    const later = vi.fn();
+    expect(await api.openFromSelection({ ...prSel(ADDED), onOpened: later })).toBe(false);
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  it("links deleted lines with their context at the first parent", async () => {
+    const { api } = setup(provider(), undefined, async () => true);
+    await api.refreshAvailability();
+    await api.openFromSelection(commitSel([...DELETED, { type: "context", content: "z", oldLineNo: 8, newLineNo: 5 }]));
+    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/a.ts?plain=1#L7-L8\n`)).toBe(true);
+  });
+
+  it("publishes a view's selection through the API (most recent wins)", () => {
+    const { api } = setup(provider());
+    const a = Symbol("a");
+    const b = Symbol("b");
+    api.publishSelection(a, commitSel(ADDED));
+    api.publishSelection(b, prSel(ADDED));
+    expect(api.activeSelection.value?.source.kind).toBe("pr");
+    api.publishSelection(b, null);
+    expect(api.activeSelection.value?.source.kind).toBe("commit");
+  });
+
+  it("links a renamed file's deleted lines under its old path", async () => {
+    const { api } = setup(provider(), undefined, async () => true);
+    await api.refreshAvailability();
+    await api.openFromSelection({ ...commitSel(DELETED), path: "src/new.ts", oldPath: "src/old.ts" });
+    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/old.ts?plain=1#L7\n`)).toBe(true);
+  });
+});
+
 describe("commitOnOriginWith — real git repository", () => {
   const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
   const exec = async (cwd: string, args: string[]) => {
@@ -439,6 +613,46 @@ describe("commitOnOriginWith — real git repository", () => {
     expect(await onOrigin(dir, pushed)).toBe(true);
     // Only on another remote: origin's page would answer 404.
     expect(await onOrigin(dir, local)).toBe(false);
+  });
+});
+
+describe("openFromSelection — real git repository", () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+  const exec = async (cwd: string, args: string[]) => {
+    try {
+      return { stdout: execFileSync("git", args, { cwd, encoding: "utf-8" }), stderr: "", exitCode: 0 };
+    } catch (e) {
+      const err = e as { stdout?: string; status?: number };
+      return { stdout: err.stdout ?? "", stderr: "", exitCode: err.status ?? 1 };
+    }
+  };
+  let dir = "";
+  afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+  it("links the lines of a commit origin has, and not those of a local one", async () => {
+    dir = mkdtempSync(join(tmpdir(), "gw-sel-"));
+    git(dir, "init", "-q");
+    git(dir, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base");
+    const base = git(dir, "rev-parse", "HEAD");
+    git(dir, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "pushed");
+    const pushed = git(dir, "rev-parse", "HEAD");
+    git(dir, "update-ref", "refs/remotes/origin/main", pushed);
+    git(dir, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "local");
+    const local = git(dir, "rev-parse", "HEAD");
+    const sel = (sha: string, parent: string): DiffSelection => ({
+      path: "src/a.ts",
+      lines: [{ type: "delete", content: "y", oldLineNo: 7 }],
+      source: { kind: "commit", hash: sha.slice(0, 7), hashFull: sha, parent },
+    });
+    const a = setup(provider(), ref<string | null>(dir), commitOnOriginWith(exec));
+    await a.api.refreshAvailability();
+    await a.api.openFromSelection(sel(pushed, base));
+    // Deleted lines: the parent's version, on origin's page.
+    expect(a.api.body.value.startsWith(`https://github.com/me/app/blob/${base}/src/a.ts?plain=1#L7\n`)).toBe(true);
+    const b = setup(provider(), ref<string | null>(dir), commitOnOriginWith(exec));
+    await b.api.refreshAvailability();
+    await b.api.openFromSelection(sel(local, pushed));
+    expect(b.api.body.value).not.toContain("/blob/");
   });
 });
 
@@ -474,5 +688,11 @@ describe("isNewIssueShortcut — off macOS", () => {
   it("is labelled for the platform", () => {
     expect(newIssueShortcutLabel(true)).toBe("⌘⇧I");
     expect(newIssueShortcutLabel(false)).toBe("Ctrl+Alt+I");
+  });
+
+  it("works from a field that asks for it (the PR comment box holding a range)", () => {
+    const target = { tagName: "TEXTAREA", closest: (q: string) => (q.includes("data-issue-shortcut") ? {} : null) };
+    const e = { key: "i", ctrlKey: true, altKey: true, metaKey: false, shiftKey: false, target, getModifierState: () => false } as unknown as KeyboardEvent;
+    expect(isNewIssueShortcut(e, false)).toBe(true);
   });
 });

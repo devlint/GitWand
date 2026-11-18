@@ -5,9 +5,10 @@
  * ⌘K, ⌘⇧I) calls `open(prefill?)`, a commit's menu `openFromCommit(entry)`.
  */
 
-import { computed, ref, type ComputedRef, type InjectionKey, type Ref } from "vue";
+import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec } from "../utils/backend";
+import { isEditableTarget } from "../utils/editableTarget";
 import type {
   CreatedIssue,
   GitLogEntry,
@@ -17,7 +18,13 @@ import type {
   RepoMilestone,
   ReviewerCandidate,
 } from "../utils/backend";
-import { commitIssuePrefill, commitUrlFor, type IssuePrefill } from "../utils/issuePrefill";
+import {
+  commitIssuePrefill,
+  commitUrlFor,
+  selectionIssuePrefill,
+  type DiffSelection,
+  type IssuePrefill,
+} from "../utils/issuePrefill";
 
 type GitRun = (cwd: string, args: string[]) => Promise<{ stdout: string; exitCode: number }>;
 
@@ -43,17 +50,11 @@ export function newIssueShortcutLabel(mac: boolean): string {
   return mac ? "⌘⇧I" : "Ctrl+Alt+I";
 }
 
-/** A text field, an editable element or the terminal: where keys type. */
-function isTypingTarget(t: EventTarget | null): boolean {
-  const el = t as (HTMLElement & { closest?: (s: string) => Element | null }) | null;
-  if (!el || typeof el !== "object") return false;
-  return (
-    el.tagName === "INPUT" ||
-    el.tagName === "TEXTAREA" ||
-    el.tagName === "SELECT" ||
-    el.isContentEditable === true ||
-    !!el.closest?.(".xterm")
-  );
+/** A field typed in keeps the shortcut's keys, unless it asks for them with
+ *  `data-issue-shortcut` (the PR comment box while it holds a range). */
+function leavesShortcutToField(t: EventTarget | null): boolean {
+  const el = t as { closest?: (s: string) => Element | null } | null;
+  return isEditableTarget(t) && !el?.closest?.("[data-issue-shortcut]");
 }
 
 /**
@@ -65,7 +66,7 @@ function isTypingTarget(t: EventTarget | null): boolean {
 export function isNewIssueShortcut(e: KeyboardEvent, mac: boolean): boolean {
   if (e.key !== "I" && e.key !== "i") return false;
   if (mac) return e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey;
-  if (e.getModifierState?.("AltGraph") || isTypingTarget(e.target)) return false;
+  if (e.getModifierState?.("AltGraph") || leavesShortcutToField(e.target)) return false;
   return e.ctrlKey && e.altKey && !e.metaKey;
 }
 
@@ -114,19 +115,82 @@ export interface CreateIssueApi {
    * given `origin`'s page, for links); it lands when ready, the form showing
    * at once.
    */
-  open(prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>)): Promise<void>;
+  open(prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>)): Promise<boolean>;
   /**
    * "Create issue from commit": the form opens at once, prefilled from
    * `entry`; the commit is linked only once `origin` has it (the link goes to
    * origin's page, so a commit only elsewhere would answer 404).
    */
   openFromCommit(entry: GitLogEntry): Promise<void>;
+  /** The selection a diff view currently shows, if any (⌘⇧I uses it). */
+  activeSelection: Ref<DiffSelection | null>;
+  /** A view publishes (or, with `null`, withdraws) its selection; the most
+   *  recent one still live becomes `activeSelection`. */
+  publishSelection(id: symbol, sel: DiffSelection | null, key?: unknown): void;
+  /**
+   * "Create issue from these lines": the form opens prefilled with a
+   * permalink (when GitHub has the lines), the lines and their origin.
+   */
+  openFromSelection(sel: DiffSelection): Promise<boolean>;
+  /** ⌘⇧I / palette: from the active selection when there is one. */
+  openFromShortcut(): Promise<void>;
   close(): void;
   setRepo(repo: string): void;
   submit(): Promise<void>;
 }
 
 export const CREATE_ISSUE_KEY: InjectionKey<CreateIssueApi> = Symbol("createIssue");
+
+/**
+ * The selections diff views publish, of which `target` shows the most
+ * recently changed one still live: when it goes away (cleared, view gone) the
+ * next most recent takes over. Returns the publish function (`null` removes
+ * the caller's).
+ */
+export function createSelectionRegistry(target: Ref<DiffSelection | null>) {
+  let seq = 0;
+  const live = new Map<symbol, { sel: DiffSelection; at: number; key: unknown }>();
+  /** `key` names the pick behind `sel`: a selection rebuilt for the same
+   *  pick (a refresh) keeps its rank; without a key every update ranks. */
+  return (id: symbol, sel: DiffSelection | null, key?: unknown): void => {
+    const prev = live.get(id);
+    if (sel) {
+      const same = key !== undefined && prev !== undefined && prev.key === key;
+      live.set(id, { sel, at: same ? prev.at : ++seq, key });
+    } else live.delete(id);
+    let best: { sel: DiffSelection; at: number } | null = null;
+    for (const entry of live.values()) if (!best || entry.at > best.at) best = entry;
+    target.value = best?.sel ?? null;
+  };
+}
+
+/**
+ * Publish a diff view's selection (what ⌘⇧I files) while issues can be
+ * created; withdrawn when it goes away, availability drops or the view
+ * unmounts. Call from a component's setup.
+ */
+export function useSelectionPublisher(
+  api: CreateIssueApi | null,
+  source: () => DiffSelection | null,
+  /** The pick behind the selection (its range): rebuilt for the same pick,
+   *  the selection keeps its rank among the views'. */
+  pick?: () => unknown,
+): void {
+  if (!api) return;
+  const id = Symbol("selection");
+  // Published again only when the selection or its pick changed, not on
+  // every recompute of whatever the source reads.
+  let last: { sel: DiffSelection | null; key: unknown } = { sel: null, key: undefined };
+  watch(
+    () => [api.available.value ? source() : null, pick?.()] as const,
+    ([sel, key]) => {
+      if (sel === last.sel && key === last.key) return;
+      last = { sel, key };
+      api.publishSelection(id, sel, key);
+    },
+  );
+  onUnmounted(() => api.publishSelection(id, null));
+}
 
 function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -258,10 +322,10 @@ export function useCreateIssue(deps: {
 
   async function open(
     prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>),
-  ): Promise<void> {
+  ): Promise<boolean> {
     // Already open (⌘⇧I again, the palette): never wipe what is being typed,
     // nor drop the answer of a create in flight.
-    if (isOpen.value) return;
+    if (isOpen.value) return false;
     reset();
     const gen = generation;
     const openGen = openGeneration;
@@ -269,7 +333,7 @@ export function useCreateIssue(deps: {
     isOpen.value = true;
     loading.value = true;
     const t = await readTargets(formCwd);
-    if (gen !== generation) return;
+    if (gen !== generation) return false;
     loading.value = false;
     targetsFailed.value = t === null;
     if (t !== null) {
@@ -286,26 +350,80 @@ export function useCreateIssue(deps: {
     } catch {
       filled = undefined;
     }
-    if (openGen !== openGeneration || !filled) return;
-    if (title.value !== initial.value.title || body.value !== initial.value.body) return;
+    if (openGen !== openGeneration) return false;
+    if (!filled) return !prefill;
+    if (title.value !== initial.value.title || body.value !== initial.value.body) return false;
     initial.value = { title: filled.title, body: filled.body };
     title.value = filled.title;
     body.value = filled.body;
+    return true;
+  }
+
+  /**
+   * Open the form with a prefill that links `sha` only once `origin` has it
+   * (the links go to origin's page; a commit only elsewhere would answer
+   * 404). The check starts now, alongside the targets read.
+   */
+  function openLinkedTo(cwd: string, sha: string, build: (origin: string | null) => IssuePrefill): Promise<boolean> {
+    const onOrigin = commitOnOrigin(cwd, sha).catch(() => false);
+    return open(async (origin) => build((await onOrigin) ? origin : null));
+  }
+
+  /** A form opened but untouched gives way; one being typed in stays. */
+  function makeRoom(): boolean {
+    if (!isOpen.value) return true;
+    if (dirty.value || submitting.value) return false;
+    close();
+    return true;
   }
 
   async function openFromCommit(entry: GitLogEntry): Promise<void> {
     const cwd = deps.cwd.value;
-    if (!cwd || !available.value) return;
-    // A form opened but untouched gives way to this commit's.
-    if (isOpen.value) {
-      if (dirty.value || submitting.value) return;
-      close();
-    }
-    // Started now, alongside the targets read; the link waits for both.
-    const onOrigin = commitOnOrigin(cwd, entry.hashFull).catch(() => false);
-    await open(async (origin) =>
-      commitIssuePrefill(entry, (await onOrigin) && origin ? commitUrlFor(origin, entry.hashFull) : null),
+    if (!cwd || !available.value || !makeRoom()) return;
+    await openLinkedTo(cwd, entry.hashFull, (origin) =>
+      commitIssuePrefill(entry, origin ? commitUrlFor(origin, entry.hashFull) : null),
     );
+  }
+
+  const activeSelection = shallowRef<DiffSelection | null>(null);
+  const publishSelection = createSelectionRegistry(activeSelection);
+
+  /** Resolves `true` when the form holds `sel`'s lines (then `sel.onOpened`
+   *  has run, unless its targets could not be read), `false` otherwise: no
+   *  GitHub, a form being typed in, typed first, another form meanwhile. */
+  async function openFromSelection(sel: DiffSelection): Promise<boolean> {
+    const cwd = deps.cwd.value;
+    if (!cwd || !available.value || !makeRoom()) return false;
+    const src = sel.source;
+    let opened: Promise<boolean>;
+    if (src.kind === "pr") {
+      // The PR's own repository (it may be a fork's parent); its base SHA is
+      // unknown, so the old version of its lines gets no permalink.
+      const repo = /^(https?:\/\/.+?)\/pull\/\d+(?:[/?#].*)?$/.exec(src.url)?.[1] ?? null;
+      opened = open(selectionIssuePrefill(sel, { repoHtmlUrl: repo, newSha: src.headSha, oldSha: null, commitUrl: null }));
+    } else {
+      // The old version is the first parent, on origin too once the commit is.
+      opened = openLinkedTo(cwd, src.hashFull, (origin) =>
+        selectionIssuePrefill(sel, {
+          repoHtmlUrl: origin,
+          newSha: origin ? src.hashFull : null,
+          oldSha: origin ? src.parent : null,
+          commitUrl: origin ? commitUrlFor(origin, src.hashFull) : null,
+        }),
+      );
+    }
+    // Handed over only once its lines are in this very form and the form
+    // could read its targets: a prefill dropped (typed first, form closed
+    // and another opened) or a failed read (signed out…) must not cost it.
+    const landed = await opened;
+    if (landed && !targetsFailed.value) sel.onOpened?.();
+    return landed;
+  }
+
+  async function openFromShortcut(): Promise<void> {
+    const sel = activeSelection.value;
+    if (sel) await openFromSelection(sel);
+    else if (available.value) await open();
   }
 
   function setRepo(next: string) {
@@ -393,6 +511,10 @@ export function useCreateIssue(deps: {
     forgetAvailability,
     open,
     openFromCommit,
+    activeSelection,
+    publishSelection,
+    openFromSelection,
+    openFromShortcut,
     close,
     setRepo,
     submit,

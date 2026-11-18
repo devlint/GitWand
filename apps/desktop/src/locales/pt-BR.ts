@@ -1068,6 +1068,7 @@ const ptBR: Locale = {
       unresolveThread: "Reabrir conversa",
       copyLink: "Copiar link",
       linkCopied: "Link copiado",
+      lineRange: "Linhas {0}\u2013{1}",
       deleteConfirm: "Excluir este comentário?",
     },
     reactions: {
@@ -1144,12 +1145,14 @@ const ptBR: Locale = {
     },
     inline: {
       composePlaceholder: "Adicionar um comentário… (Ctrl+Enter para enviar)",
+      createIssue: "Criar issue",
       commentBtn: "Comentar",
       cancel: "Cancelar",
       addToReview: "Adicionar à review",
       addToReviewPending: "Adicionar à review ({0} pendente(s))",
       reviewBtn: "+ Review",
       commentTooltip: "Adicionar um comentário",
+      commentRangeTooltip: "Adicionar um comentário (Shift+clique em outra linha para um intervalo)",
       suggestTooltip: "Sugerir uma alteração",
       suggestTitle: "Sugestão de código",
       suggestHint: "Edite o código — será enviado como bloco de sugestão do GitHub.",
@@ -2675,6 +2678,8 @@ const ptBR: Locale = {
   },
 
   createIssue: {
+    fromSelection: "Criar issue a partir destas linhas",
+    selectionHint: "Clique no número de uma linha para selecioná-la para uma issue; Shift+clique para estender",
     title: "Nova issue",
     loading: "Verificando para onde esta issue pode ir…",
     targetsFailed: "Não foi possível ler este repositório no GitHub. Verifique sua conexão ou seu login no GitHub e tente novamente.",
@@ -2750,6 +2755,8 @@ const ptBR: Locale = {
       settings: "Configurações",
       commandPalette: "Paleta de comandos",
       newIssue: "Nova issue",
+      extendLineSelection: "Estender uma seleção de linhas em um diff (issue, comentário de PR)",
+      click: "clique",
       fetch: "Fetch",
       push: "Push",
       newBranch: "Nova branch",

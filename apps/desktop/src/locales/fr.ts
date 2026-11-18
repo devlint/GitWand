@@ -1076,6 +1076,7 @@ const fr: Locale = {
       unresolveThread: "Rouvrir la conversation",
       copyLink: "Copier le lien",
       linkCopied: "Lien copié",
+      lineRange: "Lignes {0}\u2013{1}",
       deleteConfirm: "Supprimer ce commentaire ?",
     },
     reactions: {
@@ -1152,12 +1153,14 @@ const fr: Locale = {
     },
     inline: {
       composePlaceholder: "Ajouter un commentaire\u2026 (Ctrl+Enter pour envoyer)",
+      createIssue: "Créer une issue",
       commentBtn: "Commenter",
       cancel: "Annuler",
       addToReview: "Ajouter à la review",
       addToReviewPending: "Ajouter à la review ({0} en attente)",
       reviewBtn: "+ Review",
       commentTooltip: "Ajouter un commentaire",
+      commentRangeTooltip: "Ajouter un commentaire (Maj+clic sur une autre ligne pour une plage)",
       suggestTooltip: "Proposer une modification",
       suggestTitle: "Suggestion de code",
       suggestHint: "Éditez le code — il sera soumis comme bloc de suggestion GitHub.",
@@ -2684,6 +2687,8 @@ const fr: Locale = {
   },
 
   createIssue: {
+    fromSelection: "Créer une issue depuis ces lignes",
+    selectionHint: "Cliquez sur un numéro de ligne pour la sélectionner pour une issue ; Maj+clic pour étendre",
     title: "Nouvelle issue",
     loading: "Recherche du dépôt cible…",
     targetsFailed: "Impossible de lire ce dépôt sur GitHub. Vérifiez votre connexion ou votre compte GitHub, puis réessayez.",
@@ -2760,6 +2765,8 @@ const fr: Locale = {
       settings: "Paramètres",
       commandPalette: "Palette de commandes",
       newIssue: "Nouvelle issue",
+      extendLineSelection: "Étendre une sélection de lignes dans un diff (issue, commentaire de PR)",
+      click: "clic",
       fetch: "Fetch",
       push: "Push",
       newBranch: "Nouvelle branche",

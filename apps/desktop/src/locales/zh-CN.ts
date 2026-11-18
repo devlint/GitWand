@@ -1074,6 +1074,7 @@ const zhCN: Locale = {
       unresolveThread: "重新打开对话",
       copyLink: "复制链接",
       linkCopied: "链接已复制",
+      lineRange: "第 {0}\u2013{1} 行",
       deleteConfirm: "删除此评论？",
     },
     reactions: {
@@ -1150,12 +1151,14 @@ const zhCN: Locale = {
     },
     inline: {
       composePlaceholder: "添加评论…（Ctrl+Enter 发送）",
+      createIssue: "创建 Issue",
       commentBtn: "评论",
       cancel: "取消",
       addToReview: "加入 review",
       addToReviewPending: "加入 review（{0} 待定）",
       reviewBtn: "+ Review",
       commentTooltip: "添加评论",
+      commentRangeTooltip: "添加评论（Shift+点击另一行以选择范围）",
       suggestTooltip: "建议修改",
       suggestTitle: "代码建议",
       suggestHint: "编辑代码 — 将作为 GitHub 建议块提交。",
@@ -2685,6 +2688,8 @@ const zhCN: Locale = {
   },
 
   createIssue: {
+    fromSelection: "从这些行创建 Issue",
+    selectionHint: "点击行号以选中该行用于 Issue；Shift+点击以扩展选区",
     title: "新建 Issue",
     loading: "正在确认 Issue 可提交到的仓库…",
     targetsFailed: "无法在 GitHub 上读取此仓库。请检查网络连接或 GitHub 登录状态后重试。",
@@ -2760,6 +2765,8 @@ const zhCN: Locale = {
       settings: "设置",
       commandPalette: "命令面板",
       newIssue: "新建 Issue",
+      extendLineSelection: "在 diff 中扩展行选区（Issue、PR 评论）",
+      click: "点击",
       fetch: "Fetch",
       push: "Push",
       newBranch: "新建分支",

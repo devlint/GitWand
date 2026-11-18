@@ -1083,6 +1083,7 @@ const en = {
       unresolveThread: "Unresolve conversation",
       copyLink: "Copy link",
       linkCopied: "Link copied",
+      lineRange: "Lines {0}\u2013{1}",
       deleteConfirm: "Delete this comment?",
     },
     reactions: {
@@ -1159,6 +1160,7 @@ const en = {
     },
     inline: {
       composePlaceholder: "Add a comment\u2026 (Ctrl+Enter to send)",
+      createIssue: "Create issue",
       commentBtn: "Comment",
       cancel: "Cancel",
       addToReview: "Add to review",
@@ -1166,6 +1168,7 @@ const en = {
       reviewBtn: "+ Review",
       reviewBtnCount: "+ Review ({0})",
       commentTooltip: "Add a comment",
+      commentRangeTooltip: "Add a comment (Shift+click another line for a range)",
       suggestTooltip: "Suggest a change",
       suggestTitle: "Code suggestion",
       suggestHint: "Edit the code — it will be submitted as a GitHub suggestion block.",
@@ -2715,6 +2718,8 @@ const en = {
   },
 
   createIssue: {
+    fromSelection: "Create issue from these lines",
+    selectionHint: "Click a line number to select it for an issue; Shift+click to extend",
     title: "New issue",
     loading: "Checking where this issue can go…",
     targetsFailed: "Could not read this repository on GitHub. Check your connection or your GitHub sign-in, then try again.",
@@ -2791,6 +2796,8 @@ const en = {
       settings: "Settings",
       commandPalette: "Command palette",
       newIssue: "New issue",
+      extendLineSelection: "Extend a line selection in a diff (issue, PR comment)",
+      click: "click",
       fetch: "Fetch",
       push: "Push",
       newBranch: "New branch",

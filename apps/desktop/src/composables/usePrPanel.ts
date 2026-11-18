@@ -846,6 +846,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     issueCommentsLoading.value = false;
     fileCountLoaded.value = false;
     prDiffFiles.value = [];
+    diffHeadSha.value = "";
     diffIndex.value = [];
     parsedDiffPaths.clear();
     prComments.value = [];
@@ -1303,11 +1304,27 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     } catch { /* silent */ }
   }
 
+  /** The head commit the shown diff was loaded at ("" when unknown). */
+  const diffHeadSha = ref("");
+  /**
+   * The head to link the diff's lines at: the detail's, only while it is the
+   * one the diff was loaded at. After a push the detail moves on before the
+   * diff is reloaded, and its line numbers would point at other code.
+   */
+  const permalinkHeadSha = computed(() => {
+    const head = prDetail.value?.headSha;
+    return head && head === diffHeadSha.value ? head : null;
+  });
+
   async function loadDiff() {
     if (!selectedPr.value || prDiffFiles.value.length) return;
     detailLoading.value = true;
+    // The head the diff is read at (as far as the detail knows): line numbers
+    // in it are that commit's (#301 permalinks).
+    const head = prDetail.value?.headSha ?? "";
     try {
       const raw = await forge.value.getPRDiff(cwd.value, selectedPr.value.number);
+      diffHeadSha.value = head;
       // A1: index only (cheap) — shells render the file sidebar instantly.
       // Hunks are parsed lazily, per file, by `ensureFileParsed`.
       diffIndex.value = indexDiffFiles(raw);
@@ -2018,7 +2035,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     showCreateForm, newPrTitle, newPrBody, newPrBase, newPrDraft, newPrReviewers, isCreating,
     forkInfo, newPrBaseRepo,
     mergingPr, mergeMethod,
-    selectedPr, prDetail, prChecks, checksWithConflict, checksError, checksOtherCommit, setDetailVisible, prDiffFiles, prComments, prIssueComments, prReviews,
+    selectedPr, prDetail, prChecks, checksWithConflict, checksError, checksOtherCommit, setDetailVisible, prDiffFiles, permalinkHeadSha, prComments, prIssueComments, prReviews,
     detailLoading, detailRefreshing, detailError, detailTab, selectedDiffFile, diffMode,
     // Viewed-file state (B2)
     viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,
