@@ -145,6 +145,33 @@ function reclassifyFormatConflict(hunk: ConflictHunk, resolverUsed: string, reas
   };
 }
 
+/**
+ * accuracy lot 1 — Les résolutions automatiques d'un fichier dont le contenu
+ * fusionné viole un invariant de format sont rétractées. #301 — un hunk
+ * rétracté ne nomme plus de résolveur de format : ce n'est pas lui qui l'a résolu.
+ */
+export function retractForInvariant(
+  hunks: ConflictHunk[],
+  resolutions: HunkResolution[],
+  why: string,
+): { hunks: ConflictHunk[]; resolutions: HunkResolution[] } {
+  const retractedIdx = new Set(resolutions.flatMap((r, i) => (r.autoResolved ? [i] : [])));
+  return {
+    hunks: hunks.map((h, i) => (retractedIdx.has(i) ? withoutFormatResolver(h) : h)),
+    resolutions: resolutions.map((r) =>
+      r.autoResolved
+        ? {
+            ...r,
+            hunk: withoutFormatResolver(r.hunk),
+            autoResolved: false,
+            resolvedLines: null,
+            resolutionReason: `Retracted: the merged content violates a format invariant. ${why}`,
+          }
+        : r,
+    ),
+  };
+}
+
 /** #301 — A hunk whose format-aware resolution was not applied names no resolver. */
 function withoutFormatResolver(hunk: ConflictHunk): ConflictHunk {
   const { formatResolver: _unused, ...rest } = hunk;
@@ -487,22 +514,12 @@ export function resolve(
   // Une résolution qui casse un invariant n'est pas appliquée, quel que soit
   // le pattern qui l'a produite.
   if (mergedContent !== null && validation.invariantErrors && validation.invariantErrors.length > 0) {
-    const why = validation.invariantErrors.join(" ");
-    const retractedResolutions = resolutions.map((r) =>
-      r.autoResolved
-        ? {
-            ...r,
-            autoResolved: false,
-            resolvedLines: null,
-            resolutionReason: `Retracted: the merged content violates a format invariant. ${why}`,
-          }
-        : r,
-    );
+    const retracted = retractForInvariant(hunks, resolutions, validation.invariantErrors.join(" "));
     return {
       filePath,
       mergedContent: null,
-      hunks,
-      resolutions: retractedResolutions,
+      hunks: retracted.hunks,
+      resolutions: retracted.resolutions,
       stats: { ...stats, autoResolved: 0, remaining: stats.totalConflicts },
       validation: { ...validation, isValid: false },
     };

@@ -120,6 +120,12 @@ describe("gitwandReportPrefill", () => {
     expect(p.body).not.toContain("billing-svc");
   });
 
+  it("scrubs the file's stem too", () => {
+    const h = hunk({ explanation: "Kept the acme-billing import", trace: { steps: [], selected: "non_overlapping", summary: "s", hasBase: true } });
+    const body = gitwandReportPrefill(report({ path: "src/acme-billing.config.ts", hunk: h }), env).body;
+    expect(body).not.toContain("acme-billing");
+  });
+
   it("names the format resolver when one handled the hunk", () => {
     const p = gitwandReportPrefill(report({ path: "package.json", hunk: hunk({ formatResolver: "json" }) }), env);
     expect(p.body).toContain("resolver: `json`");

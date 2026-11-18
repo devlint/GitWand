@@ -168,7 +168,10 @@ function scrubberFor(path: string): Scrub {
   // Every folder name, short ones too (`ibm`), except words that say nothing
   // about the project and that the engine's own prose uses (`json`, `src`).
   const folders = parts.slice(0, -1).filter((x) => x.length > 1 && !GENERIC_FOLDERS.has(x.toLowerCase()));
-  const secrets = [...new Set([path, name, ...folders])].filter((x) => x.length > 1).sort((a, b) => b.length - a.length);
+  // The name without its extensions (`acme-billing` of `acme-billing.config.ts`).
+  const stem = name.split(".")[0] ?? "";
+  const stems = stem.length > 2 && !GENERIC_FOLDERS.has(stem.toLowerCase()) ? [stem] : [];
+  const secrets = [...new Set([path, name, ...folders, ...stems])].filter((x) => x.length > 1).sort((a, b) => b.length - a.length);
   const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = secrets.length ? new RegExp(`(?<![\\w-])(?:${secrets.map(escape).join("|")})(?![\\w-])`, "gi") : null;
   const scrub: Scrub = (text) => {
@@ -194,7 +197,8 @@ const GENERIC_FOLDERS = new Set(
     "src lib app apps api bin build dist out test tests spec specs docs doc packages package pkg cmd internal " +
     "components component utils util helpers common shared core config configs scripts public static assets " +
     "resources res main java kotlin js ts json yaml yml vendor modules node_modules web server client frontend " +
-    "backend tools tool examples example fixtures data types models views controllers services resolver resolvers"
+    "backend tools tool examples example fixtures data types models views controllers services resolver resolvers " +
+    "index mod readme changelog license cargo makefile dockerfile setup settings gitignore tsconfig vite webpack"
   ).split(" "),
 );
 

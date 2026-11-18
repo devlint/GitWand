@@ -452,6 +452,22 @@ fn create_gitwand_issue_inner(input: &GitwandIssueInput) -> Result<CreatedIssue,
     }
 }
 
+/// `gh_signed_in_now("github.com")`, reused for 30 s.
+fn gh_github_com_signed_in() -> bool {
+    static CACHE: OnceLock<Mutex<Option<(bool, Instant)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    if let Some((ok, at)) = cache.lock().ok().and_then(|g| *g) {
+        if at.elapsed() < Duration::from_secs(30) {
+            return ok;
+        }
+    }
+    let ok = gh_signed_in_now("github.com");
+    if let Ok(mut g) = cache.lock() {
+        *g = Some((ok, Instant::now()));
+    }
+    ok
+}
+
 /// File a resolver report on GitWand's repository (#301).
 #[tauri::command]
 pub(crate) async fn gh_create_gitwand_issue(
@@ -466,13 +482,12 @@ pub(crate) async fn gh_create_gitwand_issue(
 /// Settings, else `gh` signed in to github.com. No API request.
 #[tauri::command]
 pub(crate) async fn gh_gitwand_writable() -> Result<bool, String> {
-    // Asked fresh each time the form opens: a `gh auth login` since the last
-    // report must unlock the switch without restarting the app.
-    tauri::async_runtime::spawn_blocking(|| {
-        issue_token().is_some() || gh_signed_in_now("github.com")
-    })
-    .await
-    .map_err(|e| e.to_string())
+    // `gh auth status` is a process and a github.com round trip: reused for
+    // 30 s (switching repository tabs), never for the session, so a
+    // `gh auth login` since unlocks the switch without restarting the app.
+    tauri::async_runtime::spawn_blocking(|| issue_token().is_some() || gh_github_com_signed_in())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ─── Pickers: labels, milestones, assignees ────────────────────────────────

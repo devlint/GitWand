@@ -65,5 +65,11 @@ describe("scanReportBody", () => {
     const r = scanReportBody([line, `token = "${token}"`].join("\n"), opts);
     expect(r.blocking.map((f) => f.line)).toEqual([2]);
   });
+
+  it("counts every entropy token of one enormous line", () => {
+    const tok = (i: number) => `Q${i}xT3kL0pQ8rW2vY5zN1mH6jC4bD7eF0gA3`;
+    const line = Array.from({ length: 1200 }, (_, i) => tok(i)).join(" ");
+    expect(scanReportBody(line, opts).warnings).toHaveLength(1200);
+  });
 });
 

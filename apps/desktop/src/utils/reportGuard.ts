@@ -16,6 +16,23 @@ const SCAN_CAP = 500;
  *  stays far under SCAN_CAP. */
 const SLICE_LINES = 50;
 
+/** `text` in pieces of about PIECE_CHARS, cut at whitespace (never inside a token). */
+function piecesOf(text: string): string[] {
+  const out: string[] = [];
+  let rest = text;
+  while (rest.length > PIECE_CHARS) {
+    const cut = rest.lastIndexOf(" ", PIECE_CHARS);
+    const at = cut > 0 ? cut : PIECE_CHARS;
+    out.push(rest.slice(0, at));
+    rest = rest.slice(at);
+  }
+  out.push(rest);
+  return out;
+}
+
+/** Piece length for one enormous line: at most ~100 tokens of 20+ characters. */
+const PIECE_CHARS = 2_000;
+
 export interface ReportScan {
   /** Findings that keep the report from being sent. */
   blocking: SecretFinding[];
@@ -44,9 +61,14 @@ export function scanReportBody(
     // its patterns found without entropy so none is cut.
     for (const l of addedLines) {
       all.push(...scanSecrets([{ path: "issue-body.md", addedLines: [l] }], { ...config, entropyThreshold: 0 }));
-      all.push(
-        ...scanSecrets([{ path: "issue-body.md", addedLines: [l] }], config).filter((f) => f.patternId === "high_entropy"),
-      );
+      // Its entropy tokens in pieces cut at spaces, each far under the cap.
+      for (const piece of piecesOf(l.text)) {
+        all.push(
+          ...scanSecrets([{ path: "issue-body.md", addedLines: [{ line: l.line, text: piece }] }], config).filter(
+            (f) => f.patternId === "high_entropy",
+          ),
+        );
+      }
     }
   }
   const patterns = all.filter((f) => f.patternId !== "high_entropy");
