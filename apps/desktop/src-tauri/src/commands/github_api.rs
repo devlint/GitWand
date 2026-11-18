@@ -36,7 +36,9 @@
 //! harden via `curl --config -` stdin piping in a follow-up). The token is
 //! never logged or included in error messages.
 
-use super::curl_util::{bearer_config, curl_with_headers, curl_with_status};
+use super::curl_util::{
+    bearer_config, curl_with_headers, curl_with_status, curl_with_status_bounded, RequestOpts,
+};
 use crate::git::{git_cmd, hidden_cmd};
 use crate::types::*;
 use rayon::prelude::*;
@@ -190,18 +192,25 @@ pub(crate) fn rest_token_for(cwd: &str) -> Option<String> {
 }
 
 /// Testable core of [`with_rest`]: `token` is the Settings token and
-/// `gh_signed_in` says whether the `gh` CLI can take over.
+/// `gh_signed_in` says whether the `gh` CLI can take over. A refusal is
+/// remembered under `key`: `cwd` itself for its `origin`, another key for a
+/// call about another repository (a fork's parent), whose organization says
+/// nothing about the checkout's own.
 fn rest_attempt<T>(
     cwd: &str,
+    key: &str,
     token: Option<String>,
     gh_signed_in: impl FnOnce() -> bool,
     call: impl FnOnce(&str) -> Result<T, String>,
 ) -> Option<Result<T, String>> {
+    if key != cwd && is_marked_restricted(key) {
+        return None;
+    }
     let tok = token_for_repo(cwd, token)?;
     match call(&tok) {
         Err(e) if is_oauth_restricted(&e) => {
             if gh_signed_in() {
-                mark_restricted(cwd);
+                mark_restricted(key);
                 None
             } else {
                 Some(Err(oauth_restricted_message(&e)))
@@ -234,6 +243,26 @@ pub(crate) fn with_rest_using<T>(
 ) -> Option<Result<T, String>> {
     rest_attempt(
         cwd,
+        cwd,
+        token.map(String::from),
+        || super::gh::gh_auth_token().is_some(),
+        call,
+    )
+}
+
+/// [`with_rest_using`] for a call about `nwo`, another repository than `cwd`'s
+/// `origin` (a fork's parent): an OAuth App refusal from its organization is
+/// remembered for `nwo` (later calls about it go straight to `gh`) without
+/// marking `cwd` restricted.
+pub(crate) fn with_rest_other_repo_using<T>(
+    cwd: &str,
+    nwo: &str,
+    token: Option<&str>,
+    call: impl FnOnce(&str) -> Result<T, String>,
+) -> Option<Result<T, String>> {
+    rest_attempt(
+        cwd,
+        &format!("repo:{}", nwo),
         token.map(String::from),
         || super::gh::gh_auth_token().is_some(),
         call,
@@ -339,12 +368,43 @@ fn curl_raw(
 
 /// Map an HTTP ≥ 400 response to a user-facing error, preferring GitHub's
 /// `message` field over the bare status code.
-fn map_api_error(status: i32, body: &str) -> String {
-    let msg = serde_json::from_str::<serde_json::Value>(body.trim())
-        .ok()
+pub(crate) fn map_api_error(status: i32, body: &str) -> String {
+    let v = serde_json::from_str::<serde_json::Value>(body.trim()).ok();
+    let msg = v
+        .as_ref()
         .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from))
         .unwrap_or_else(|| format!("HTTP {}", status));
-    format!("GitHub API error ({}): {}", status, msg)
+    // A 422 says which field it refused in `errors[]` ("Validation Failed"
+    // alone does not tell an invalid assignee from an unknown milestone).
+    let details: Vec<String> = v
+        .as_ref()
+        .and_then(|v| v.get("errors"))
+        .and_then(|e| e.as_array())
+        .map(|errs| {
+            errs.iter()
+                .filter_map(|e| {
+                    let s = |k: &str| e.get(k).and_then(|x| x.as_str()).filter(|x| !x.is_empty());
+                    s("message")
+                        .map(String::from)
+                        .or_else(|| match (s("field"), s("code")) {
+                            (Some(f), Some(c)) => Some(format!("{}: {}", f, c)),
+                            (None, Some(c)) => Some(c.to_string()),
+                            _ => None,
+                        })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if details.is_empty() {
+        format!("GitHub API error ({}): {}", status, msg)
+    } else {
+        format!(
+            "GitHub API error ({}): {} ({})",
+            status,
+            msg,
+            details.join("; ")
+        )
+    }
 }
 
 /// Parse a (possibly empty) JSON response body. An empty body maps to `Null` so
@@ -439,6 +499,44 @@ fn etag_key(url: &str, token: &str) -> String {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     token.hash(&mut h);
     format!("{:016x} {}", h.finish(), url)
+}
+
+/// `method {API_BASE}/{path}` with `token`, for callers outside this module
+/// (`path` without a leading slash, e.g. `repos/o/r/labels`).
+pub(crate) fn rest_api_json(
+    method: &str,
+    path: &str,
+    token: &str,
+    body_json: Option<&str>,
+    max_time_secs: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}/{}", API_BASE, path);
+    let (status, body) = curl_with_status_bounded(
+        method,
+        &url,
+        Some(&bearer_config(token)),
+        body_json,
+        &["User-Agent: GitWand", "X-GitHub-Api-Version: 2022-11-28"],
+        "application/vnd.github+json",
+        RequestOpts {
+            max_time_secs,
+            // A renamed or transferred repository answers a read with a 301
+            // to its new name, which the `gh` path follows too. A write is
+            // never re-sent to another address.
+            follow_redirects: method == "GET",
+            ..RequestOpts::default()
+        },
+    )?;
+    if status >= 400 {
+        return Err(map_api_error(status, &body));
+    }
+    parse_json_body(&body)
+}
+
+/// [`api_json_cached`] for callers outside this module (`path` without a
+/// leading slash).
+pub(crate) fn rest_api_json_cached(path: &str, token: &str) -> Result<serde_json::Value, String> {
+    api_json_cached(&format!("{}/{}", API_BASE, path), token)
 }
 
 /// GET a GitHub JSON endpoint with ETag-based conditional requests.
@@ -1139,54 +1237,6 @@ pub(crate) fn rest_pr_files(cwd: &str, number: i64, token: &str) -> Result<Vec<S
         })
         .unwrap_or_default();
     Ok(files)
-}
-
-/// List candidate reviewers for the repo via the REST `/assignees` endpoint,
-/// using a Settings-managed OAuth token (no `gh` CLI required).
-///
-/// Fetches up to 3 pages of 100 (same ceiling as the CLI path). The assignees
-/// list carries `login` and `avatar_url` but not the display `name` (that needs
-/// a per-user lookup), so `name` is left null — matching the CLI path.
-pub(crate) fn rest_reviewer_candidates(
-    cwd: &str,
-    token: &str,
-) -> Result<Vec<ReviewerCandidate>, String> {
-    let (owner, repo) = owner_repo(cwd)?;
-    let mut all: Vec<ReviewerCandidate> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for page in 1..=3 {
-        let url = format!(
-            "{}/repos/{}/{}/assignees?per_page=100&page={}",
-            API_BASE, owner, repo, page
-        );
-        let v = api_json("GET", &url, token, None)?;
-        let arr = match v.as_array() {
-            Some(a) if !a.is_empty() => a,
-            _ => break,
-        };
-        let count = arr.len();
-        for u in arr {
-            let login = js(u, "login");
-            if login.is_empty() || !seen.insert(login.clone()) {
-                continue;
-            }
-            let name = u.get("name").and_then(|n| n.as_str()).map(String::from);
-            let avatar_url = u
-                .get("avatar_url")
-                .and_then(|a| a.as_str())
-                .map(String::from);
-            all.push(ReviewerCandidate {
-                login,
-                name,
-                avatar_url,
-            });
-        }
-        if count < 100 {
-            break;
-        }
-    }
-    all.sort_by_key(|a| a.login.to_lowercase());
-    Ok(all)
 }
 
 /// List branch names (heads) for the repo via the REST API (tokenless path).
@@ -2637,6 +2687,23 @@ pub(crate) fn rest_pr_attachment_urls(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn api_error_keeps_validation_details() {
+        let body = r#"{"message":"Validation Failed","errors":[{"resource":"Issue","field":"assignees","code":"invalid"},{"message":"milestone not found"}]}"#;
+        assert_eq!(
+            map_api_error(422, body),
+            "GitHub API error (422): Validation Failed (assignees: invalid; milestone not found)"
+        );
+    }
+
+    #[test]
+    fn api_error_without_details_is_unchanged() {
+        assert_eq!(
+            map_api_error(404, r#"{"message":"Not Found"}"#),
+            "GitHub API error (404): Not Found"
+        );
+    }
+
     use super::*;
     use serde_json::json;
 
@@ -2734,9 +2801,60 @@ mod tests {
     }
 
     #[test]
+    fn a_parent_refusal_is_remembered_for_that_repository_only() {
+        let cwd = "/tmp/gitwand-test-parent-memo";
+        let key = "repo:org/parent-memo";
+        let calls = std::cell::Cell::new(0);
+        let first: Option<Result<(), String>> = rest_attempt(
+            cwd,
+            key,
+            Some("tok".into()),
+            || true,
+            |_| {
+                calls.set(calls.get() + 1);
+                Err(RESTRICTED.to_string())
+            },
+        );
+        assert!(first.is_none());
+        let second: Option<Result<(), String>> = rest_attempt(
+            cwd,
+            key,
+            Some("tok".into()),
+            || true,
+            |_| {
+                calls.set(calls.get() + 1);
+                Ok(())
+            },
+        );
+        assert!(
+            second.is_none(),
+            "the refused repository goes straight to gh"
+        );
+        assert_eq!(calls.get(), 1);
+        assert!(!is_marked_restricted(cwd), "the checkout keeps its token");
+    }
+
+    #[test]
+    fn a_restricted_call_on_another_repo_does_not_mark_this_checkout() {
+        // A fork's parent in an org that restricts OAuth apps: fall back to
+        // `gh` for that call, but keep the GitWand token for the fork itself.
+        let cwd = "/tmp/gitwand-test-restricted-parent";
+        let out: Option<Result<(), String>> = rest_attempt(
+            cwd,
+            "repo:org/parent-a",
+            Some("tok".into()),
+            || true,
+            |_| Err(RESTRICTED.to_string()),
+        );
+        assert!(out.is_none());
+        assert!(!is_marked_restricted(cwd));
+    }
+
+    #[test]
     fn a_restricted_call_falls_back_to_gh_and_marks_the_repo() {
         let cwd = "/tmp/gitwand-test-restricted-a";
         let out: Option<Result<(), String>> = rest_attempt(
+            cwd,
             cwd,
             Some("tok".into()),
             || true,
@@ -2757,6 +2875,7 @@ mod tests {
         let cwd = "/tmp/gitwand-test-restricted-b";
         let out: Option<Result<(), String>> = rest_attempt(
             cwd,
+            cwd,
             Some("tok".into()),
             || false,
             |_| Err(RESTRICTED.to_string()),
@@ -2775,9 +2894,10 @@ mod tests {
     fn other_results_pass_through_untouched() {
         let cwd = "/tmp/gitwand-test-restricted-c";
         let ok: Option<Result<i32, String>> =
-            rest_attempt(cwd, Some("tok".into()), || true, |_| Ok(7));
+            rest_attempt(cwd, cwd, Some("tok".into()), || true, |_| Ok(7));
         assert_eq!(ok, Some(Ok(7)));
         let err: Option<Result<i32, String>> = rest_attempt(
+            cwd,
             cwd,
             Some("tok".into()),
             || true,
@@ -2788,7 +2908,7 @@ mod tests {
             Some(Err("GitHub API error (404): Not Found".to_string()))
         );
         assert!(!is_marked_restricted(cwd));
-        let none: Option<Result<i32, String>> = rest_attempt(cwd, None, || true, |_| Ok(1));
+        let none: Option<Result<i32, String>> = rest_attempt(cwd, cwd, None, || true, |_| Ok(1));
         assert_eq!(none, None, "no GitWand token: the gh path runs");
     }
 

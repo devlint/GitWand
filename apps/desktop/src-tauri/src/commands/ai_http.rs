@@ -21,7 +21,7 @@
 //! - Because the webview no longer talks to arbitrary AI hosts itself, the CSP
 //!   `connect-src` can be limited to a short list of fixed hosts.
 
-use crate::commands::curl_util::{curl_transport_check, run_curl};
+use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl, RequestBody};
 
 /// Keychain service holding the AI provider API key. Backend-only: see
 /// `credentials::BACKEND_ONLY_SERVICES`.
@@ -193,27 +193,6 @@ pub(crate) async fn ai_api_key_hint() -> Result<Option<AiKeyInfo>, String> {
         .map_err(|e| e.to_string())?
 }
 
-/// Quote a value for a curl config file. Inside double quotes curl recognises
-/// `\\`, `\"`, `\n`, `\r`, `\t`; escaping exactly those means no value — a
-/// prompt full of quotes and newlines included — can close the string and
-/// inject a directive of its own.
-fn quote_config(v: &str) -> String {
-    let mut out = String::with_capacity(v.len() + 2);
-    out.push('"');
-    for c in v.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            _ => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
 /// Auth headers for `auth` ("anthropic" | "bearer" | "none"), with the key.
 fn auth_headers(auth: &str, key: Option<&str>) -> Result<Vec<String>, String> {
     match auth {
@@ -238,7 +217,7 @@ fn auth_headers(auth: &str, key: Option<&str>) -> Result<Vec<String>, String> {
 fn build_request_config(
     method: &str,
     url: &tauri::Url,
-    body: Option<&str>,
+    body: Option<&RequestBody>,
     headers: &[String],
 ) -> Result<String, String> {
     if !matches!(method, "GET" | "POST") {
@@ -250,9 +229,7 @@ fn build_request_config(
     }
     if let Some(b) = body {
         cfg.push_str("header = \"Content-Type: application/json\"\n");
-        // `data-raw`, not `data`/`data-binary`: a leading `@` is never read as
-        // a file name.
-        cfg.push_str(&format!("data-raw = {}\n", quote_config(b)));
+        cfg.push_str(&b.config_line());
     }
     Ok(cfg)
 }
@@ -291,7 +268,9 @@ fn ai_http_request_inner(
     if let Some(s) = stored.as_ref() {
         check_key_binding(s.origin.as_deref(), &target)?;
     }
-    let cfg = build_request_config(method, &target, body, &headers)?;
+    // Kept alive until curl has exited: it reads the body from this file.
+    let body_file = body.map(RequestBody::new).transpose()?;
+    let cfg = build_request_config(method, &target, body_file.as_ref(), &headers)?;
     let timeout = timeout_secs
         .unwrap_or(COMPLETION_TIMEOUT_SECS)
         .clamp(1, COMPLETION_TIMEOUT_SECS);
@@ -348,16 +327,19 @@ mod tests {
 
     #[test]
     fn config_carries_url_headers_and_body() {
+        let body = RequestBody::new("{\"a\":\"b\\nc\"}").unwrap();
         let cfg = build_request_config(
             "POST",
             &url("https://api.anthropic.com/v1/messages"),
-            Some("{\"a\":\"b\\nc\"}"),
+            Some(&body),
             &["x-api-key: k".to_string()],
         )
         .unwrap();
         assert!(cfg.contains("url = \"https://api.anthropic.com/v1/messages\"\n"));
         assert!(cfg.contains("header = \"x-api-key: k\"\n"));
-        assert!(cfg.contains("data-raw = \"{\\\"a\\\":\\\"b\\\\nc\\\"}\"\n"));
+        // `RequestBody` decides inline vs file: curl 7.x drops a config line
+        // of 100 KiB or more, and a prompt carrying a diff easily gets there.
+        assert!(cfg.ends_with(&body.config_line()));
     }
 
     #[test]

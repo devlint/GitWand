@@ -2,7 +2,7 @@
 // Extracted from backend.ts as part of the v2.11 backend split to keep module size manageable.
 // Consumers should import directly from this file instead of backend.ts for these symbols.
 
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER } from "./backend-core";
+import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT } from "./backend-core";
 
 // Module-level identity cache — one `gh api user` call per app session.
 // Store the Promise so concurrent callers reuse the same in-flight request.
@@ -468,7 +468,7 @@ export async function ghListReviewerCandidates(cwd: string): Promise<ReviewerCan
   if (isTauri()) {
     const raw = await tauriInvoke<
       Array<{ login: string; name?: string | null; avatar_url?: string | null }>
-    >("gh_list_reviewer_candidates", { cwd });
+    >("gh_list_reviewer_candidates", { cwd }, IPC_TIMEOUT.NETWORK); // up to 3 pages over the network
     return raw.map((u) => ({
       login: u.login,
       name: u.name ?? null,

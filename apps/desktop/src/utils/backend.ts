@@ -22,7 +22,7 @@
 
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
 import { dispatchTerminalEvent, type TerminalEvent } from "./terminalEvents";
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devPtyStream, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
+import { isTauri, tauriInvoke, devFetch, devGet, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devPtyStream, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
 export { isTauri };
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
@@ -4583,3 +4583,91 @@ export * from './backend-bitbucket';
 export * from './backend-gitea';
 export * from './backend-ai';
 
+
+// ─── Issue creation (#301) ──────────────────────────────────────────────────
+
+import type { ReviewerCandidate } from "./backend-pr";
+
+/** A repository an issue can be filed on: `origin`, or a fork's parent. */
+export interface IssueTarget {
+  /** `owner/repo`. */
+  repo: string;
+  htmlUrl: string;
+  hasIssues: boolean;
+  isOrigin: boolean;
+  /** The user may set labels, assignees and a milestone (GitHub drops them otherwise). */
+  canTriage: boolean;
+}
+
+/** Result of `ghIssueTargets`: empty `targets` when `origin` is not GitHub. */
+export interface IssueTargets {
+  targets: IssueTarget[];
+  /** The first target with issues turned on, `null` when none has. */
+  defaultRepo: string | null;
+}
+
+export interface CreateIssueInput {
+  repo: string;
+  title: string;
+  body: string;
+  labels: string[];
+  assignees: string[];
+  /** Milestone number, not title. */
+  milestone: number | null;
+}
+
+export interface CreatedIssue {
+  number: number;
+  url: string;
+}
+
+export interface RepoLabel {
+  name: string;
+  color: string;
+  description: string | null;
+}
+
+export interface RepoMilestone {
+  number: number;
+  title: string;
+  dueOn: string | null;
+}
+
+/** Whether `origin` is a GitHub repository — local, no request (shows the entry points). */
+export async function ghIssueAvailable(cwd: string): Promise<boolean> {
+  if (isTauri()) return tauriInvoke<boolean>("gh_issue_available", { cwd });
+  return devGet<boolean>("/api/gh-issue-available", { cwd }, "gh issue available");
+}
+
+/** Where an issue can be filed, read fresh (the form opening). */
+export async function ghIssueTargets(cwd: string): Promise<IssueTargets> {
+  if (isTauri()) return tauriInvoke<IssueTargets>("gh_issue_targets", { cwd }, IPC_TIMEOUT.NETWORK);
+  return devGet<IssueTargets>("/api/gh-issue-targets", { cwd }, "gh issue targets");
+}
+
+export async function ghCreateIssue(cwd: string, input: CreateIssueInput): Promise<CreatedIssue> {
+  // NETWORK, not the 30 s default: the backend may take longer (the `gh`
+  // path allows 60 s), and a frontend timeout while the POST still lands
+  // would invite a second, duplicate issue.
+  if (isTauri()) return tauriInvoke<CreatedIssue>("gh_create_issue", { cwd, input }, IPC_TIMEOUT.NETWORK);
+  return devPost<CreatedIssue>("/api/gh-create-issue", { cwd, input }, "gh create issue");
+}
+
+export async function ghListLabels(cwd: string, repo: string): Promise<RepoLabel[]> {
+  if (isTauri()) return tauriInvoke<RepoLabel[]>("gh_list_labels", { cwd, repo }, IPC_TIMEOUT.NETWORK);
+  return devGet<RepoLabel[]>("/api/gh-list-labels", { cwd, repo }, "gh list labels");
+}
+
+export async function ghListMilestones(cwd: string, repo: string): Promise<RepoMilestone[]> {
+  if (isTauri()) return tauriInvoke<RepoMilestone[]>("gh_list_milestones", { cwd, repo }, IPC_TIMEOUT.NETWORK);
+  return devGet<RepoMilestone[]>("/api/gh-list-milestones", { cwd, repo }, "gh list milestones");
+}
+
+/** Same shape as `ghListReviewerCandidates` (`avatar_url` → `avatarUrl`). */
+export async function ghListAssignees(cwd: string, repo: string): Promise<ReviewerCandidate[]> {
+  type Raw = { login: string; name?: string | null; avatar_url?: string | null };
+  const raw = isTauri()
+    ? await tauriInvoke<Raw[]>("gh_list_assignees", { cwd, repo }, IPC_TIMEOUT.NETWORK)
+    : await devGet<Raw[]>("/api/gh-list-assignees", { cwd, repo }, "gh list assignees");
+  return raw.map((u) => ({ login: u.login, name: u.name ?? null, avatarUrl: u.avatar_url ?? null }));
+}

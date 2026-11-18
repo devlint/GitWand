@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { IS_MAC } from "../utils/platform";
 /**
  * HelpView — full-screen in-app help panel.
  *
@@ -13,6 +14,7 @@
  */
 import { computed, ref } from "vue";
 import { useI18n } from "../composables/useI18n";
+import { newIssueShortcutLabel } from "../composables/useCreateIssue";
 import ModalCloseButton from "./ModalCloseButton.vue";
 import type { LocaleKey } from "../locales";
 
@@ -47,6 +49,7 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   { action: "help.keyboardShortcuts.openRepo",    keys: ["⌘O"] },
   { action: "help.keyboardShortcuts.settings",    keys: ["⌘,"] },
   { action: "help.keyboardShortcuts.commandPalette", keys: ["⌘K"] },
+  { action: "help.keyboardShortcuts.newIssue", keys: [newIssueShortcutLabel(IS_MAC)] },
   { action: "help.keyboardShortcuts.fetch",       keys: ["⌘⇧F"] },
   { action: "help.keyboardShortcuts.push",        keys: ["⌘P"] },
   { action: "help.keyboardShortcuts.newBranch",   keys: ["⌘⇧B"] },

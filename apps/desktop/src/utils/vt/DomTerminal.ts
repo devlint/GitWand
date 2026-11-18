@@ -11,6 +11,7 @@
  * The public surface mirrors the slice of xterm.js `TerminalPanel` used, so the
  * panel stays renderer-agnostic.
  */
+import { IS_MAC } from "../platform";
 import {
   VtEmulator, Line, DEFAULT_COLOR, TRUECOLOR,
   BOLD, DIM, ITALIC, UNDERLINE, INVERSE, HIDDEN, STRIKE,
@@ -70,7 +71,7 @@ function colorCss(c: number): string {
 }
 
 /** Shared with TerminalPanel so its shortcut hints match the key handling here. */
-export const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+export { IS_MAC };
 const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
 const WORD_RE = /[\p{L}\p{N}_\-./~:@%+#?=&]/u;
 

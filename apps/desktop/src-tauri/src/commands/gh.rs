@@ -525,95 +525,57 @@ pub(crate) async fn gh_create_pr(
 }
 
 fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
-    // Settings-managed OAuth token present → tokenless REST path (no `gh` needed).
-    if let Some(r) =
-        github_api::with_rest(&cwd, |tok| github_api::rest_reviewer_candidates(&cwd, tok))
-    {
-        return r;
+    // Users with push access — the set GitHub allows as reviewers. With the
+    // Settings token: `origin`'s, over REST. Without: `gh repo view` names the
+    // repository, which follows `gh repo set-default` (a fork set to its
+    // parent lists the parent's maintainers), as before.
+    if let Some(origin) = gh_origin_repo(&cwd) {
+        let token = github_api::settings_github_token();
+        let path = format!("repos/{}/assignees", origin.nwo);
+        if let Some(r) = github_api::with_rest_using(&cwd, token.as_deref(), |tok| {
+            super::gh_issues::rest_pages(&path, tok, 3)
+        }) {
+            return r.map(|items| super::gh_issues::assignees_from(&items));
+        }
     }
-    // Discover owner/repo from the current repo.
-    let view = gh_repo_view_cmd(&cwd, "owner,name")
+    gh_reviewer_candidates_via_view(&cwd)
+}
+
+/// Reviewer candidates over `gh`: `gh repo view` names the repository (it
+/// follows `gh repo set-default`).
+fn gh_reviewer_candidates_via_view(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
+    let view = gh_repo_view_cmd(cwd, "nameWithOwner")
         .output()
         .map_err(|e| format!("Failed to inspect repo: {}", e))?;
     if !view.status.success() {
         return Err(format!(
             "gh repo view failed: {}",
-            String::from_utf8_lossy(&view.stderr)
+            String::from_utf8_lossy(&view.stderr).trim()
         ));
     }
-    #[derive(serde::Deserialize)]
-    struct OwnerLogin {
-        login: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct RepoView {
-        owner: OwnerLogin,
-        name: String,
-    }
-    let repo: RepoView = serde_json::from_slice(&view.stdout)
-        .map_err(|e| format!("Failed to parse repo view: {}", e))?;
-    let endpoint = format!("/repos/{}/{}/assignees", repo.owner.login, repo.name);
-
-    // Fetch up to ~300 candidates (3 pages of 100). Plenty for typical repos.
-    let output = gh_api_cmd(&cwd)
-        .args([
-            "api",
-            "--paginate",
-            "-H",
-            "Accept: application/vnd.github+json",
-            &endpoint,
-            "--jq",
-            "[.[] | {login: .login, name: .name, avatar_url: .avatar_url}]",
-        ])
-        .current_dir(&cwd)
+    let nwo = serde_json::from_slice::<serde_json::Value>(&view.stdout)
+        .ok()
+        .and_then(|v| v.get("nameWithOwner")?.as_str().map(String::from))
+        .ok_or("gh repo view returned no repository")?;
+    let output = gh_api_cmd(cwd)
+        .args(["api", "--paginate", &format!("repos/{}/assignees", nwo)])
+        .current_dir(cwd)
         .output()
         .map_err(|e| format!("Failed to list reviewer candidates: {}", e))?;
     if !output.status.success() {
         return Err(format!(
             "gh api assignees failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-
-    // --paginate concatenates JSON arrays page-by-page (one per line).
-    // Parse each non-empty line as a JSON array and flatten.
+    // --paginate concatenates one JSON array per page.
     let raw = String::from_utf8_lossy(&output.stdout);
-    let mut all: Vec<ReviewerCandidate> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for chunk in raw.split('\n') {
-        let trimmed = chunk.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        // gh might return either a single array per chunk (--jq with array wrapper)
-        // or NDJSON of arrays. Try to parse as Value and walk.
-        let value: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if let Some(arr) = value.as_array() {
-            for item in arr {
-                let login = item.get("login").and_then(|v| v.as_str()).unwrap_or("");
-                if login.is_empty() || !seen.insert(login.to_string()) {
-                    continue;
-                }
-                all.push(ReviewerCandidate {
-                    login: login.to_string(),
-                    name: item
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    avatar_url: item
-                        .get("avatar_url")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                });
-            }
-        }
-    }
-    // Sort alphabetically by login for stable UX.
-    all.sort_by_key(|a| a.login.to_lowercase());
-    Ok(all)
+    let items: Vec<serde_json::Value> = serde_json::Deserializer::from_str(&raw)
+        .into_iter::<serde_json::Value>()
+        .filter_map(Result::ok)
+        .flat_map(|v| v.as_array().cloned().unwrap_or_default())
+        .collect();
+    Ok(super::gh_issues::assignees_from(&items))
 }
 
 /// List candidate reviewers for the current repo using `gh` CLI.
@@ -1423,8 +1385,17 @@ impl GhRepo {
         self.enterprise_host().unwrap_or("github.com")
     }
 
+    /// A repository from its parts, for tests outside this module.
+    #[cfg(test)]
+    pub(crate) fn for_test(host_prefix: &str, nwo: &str) -> GhRepo {
+        GhRepo {
+            host_prefix: host_prefix.to_string(),
+            nwo: nwo.to_string(),
+        }
+    }
+
     /// Another repository on the same host (a fork's parent).
-    fn sibling(&self, nwo: String) -> GhRepo {
+    pub(crate) fn sibling(&self, nwo: String) -> GhRepo {
         GhRepo {
             host_prefix: self.host_prefix.clone(),
             nwo,
@@ -2165,6 +2136,44 @@ fn gh_api_json(cwd: &str, path: &str) -> Result<serde_json::Value, String> {
     gh_api_json_accept(cwd, path, None)
 }
 
+/// The error of a failed `gh api` call. `gh` prints GitHub's JSON answer on
+/// stdout and only "Validation Failed (HTTP 422)" on stderr: when stdout holds
+/// the answer, it is worded like the REST path's (`map_api_error`), field
+/// details included.
+fn gh_api_failure(what: &str, stderr: &str, stdout: &str) -> String {
+    let answer = serde_json::from_str::<serde_json::Value>(stdout.trim()).ok();
+    let status = stderr
+        .rsplit_once("(HTTP ")
+        .and_then(|(_, rest)| rest.split(')').next())
+        .and_then(|n| n.trim().parse::<i32>().ok());
+    match (answer.filter(|a| a.get("message").is_some()), status) {
+        (Some(_), Some(code)) => github_api::map_api_error(code, stdout),
+        _ => format!("{}: {}", what, stderr.trim()),
+    }
+}
+
+/// A finished `gh api` call: its stderr as the error on failure, else stdout
+/// parsed as JSON — `empty` when there is none (a 204, an empty list).
+fn gh_api_parse(
+    output: std::process::Output,
+    what: &str,
+    empty: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if !output.status.success() {
+        return Err(gh_api_failure(
+            what,
+            &String::from_utf8_lossy(&output.stderr),
+            &String::from_utf8_lossy(&output.stdout),
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Ok(empty);
+    }
+    serde_json::from_str(trimmed).map_err(|e| format!("parse {} response: {}", what, e))
+}
+
 /// [`gh_api_json`] with an `Accept` media type (e.g. [`github_api::HTML_ACCEPT`]).
 fn gh_api_json_accept(
     cwd: &str,
@@ -2181,18 +2190,36 @@ fn gh_api_json_accept(
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("gh api: {}", e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh api failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+    gh_api_parse(
+        output,
+        "gh api failed",
+        serde_json::Value::Array(Vec::new()),
+    )
+}
+
+/// `gh api -X {method} {path}` on `repo`'s host, `stdin` sent as the request
+/// body (`--input -`) when given — never in argv, where any local user can read
+/// it. The answer parsed as JSON (`Null` when empty).
+pub(crate) fn gh_api_on(
+    cwd: &str,
+    repo: &GhRepo,
+    method: &str,
+    path: &str,
+    stdin: Option<String>,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    let mut cmd = gh_host_cmd(Some(repo));
+    cmd.args(["api", "-X", method, path]).current_dir(cwd);
+    if stdin.is_some() {
+        cmd.args(["--input", "-"]);
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() {
-        return Ok(serde_json::Value::Array(Vec::new()));
-    }
-    serde_json::from_str(trimmed).map_err(|e| format!("parse gh api response: {}", e))
+    let output = crate::git::output_with_timeout_input(cmd, timeout, stdin)
+        .map_err(|e| format!("gh api: {}", e))?;
+    gh_api_parse(
+        output,
+        &format!("gh api {} {}", method, path),
+        serde_json::Value::Null,
+    )
 }
 
 /// Run a mutating `gh api` call (`POST`/`DELETE`) with optional `-f key=value` fields.
@@ -2212,19 +2239,11 @@ fn gh_api_write(
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("gh api write: {}", e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh api {}: {}",
-            method,
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() {
-        return Ok(serde_json::Value::Null);
-    }
-    serde_json::from_str(trimmed).map_err(|e| format!("parse gh api write response: {}", e))
+    gh_api_parse(
+        output,
+        &format!("gh api {}", method),
+        serde_json::Value::Null,
+    )
 }
 
 fn reactions_api_path(nwo: &str, target_type: &str, target_id: i64) -> String {
@@ -3129,5 +3148,32 @@ mod repo_targeting_tests {
         assert!(gh_repo_is_a_remote(&cwd, &as_repo("up/project")));
         assert!(gh_repo_is_a_remote(&cwd, &as_repo("me/fork")));
         assert!(!gh_repo_is_a_remote(&cwd, &as_repo("someone/else")));
+    }
+}
+
+#[cfg(test)]
+mod gh_api_failure_tests {
+    use super::gh_api_failure;
+
+    #[test]
+    fn gh_api_failure_keeps_githubs_validation_details() {
+        let stdout =
+            r#"{"message":"Validation Failed","errors":[{"field":"assignees","code":"invalid"}]}"#;
+        assert_eq!(
+            gh_api_failure(
+                "gh api POST repos/o/r/issues",
+                "gh: Validation Failed (HTTP 422)\n",
+                stdout
+            ),
+            "GitHub API error (422): Validation Failed (assignees: invalid)"
+        );
+    }
+
+    #[test]
+    fn gh_api_failure_without_a_json_answer_keeps_stderr() {
+        assert_eq!(
+            gh_api_failure("gh api GET x", "error connecting to api.github.com\n", ""),
+            "gh api GET x: error connecting to api.github.com"
+        );
     }
 }

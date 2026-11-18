@@ -18,6 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -1250,14 +1251,67 @@ async function resolvePrNwo(cwd, number, token) {
 }
 
 /** Fetch from GitHub REST API with auth. `accept` overrides the default JSON accept header. */
-async function githubFetch(path, token, accept = "application/vnd.github+json") {
+async function githubFetch(path, token, accept = "application/vnd.github+json", init = {}) {
   return fetch(`https://api.github.com${path}`, {
+    ...init,
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: accept,
       "X-GitHub-Api-Version": "2022-11-28",
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
     },
   });
+}
+
+// ─── Issue creation (#301) — mirrors `commands/gh_issues.rs` ────────────────
+
+/** Issue targets per `cwd` + origin, for 5 minutes, as `issue_targets_inner`. */
+const devIssueTargetsCache = new Map();
+
+/**
+ * Same rules as `targets_from`: origin, then its parent when it is a fork.
+ * `fresh` (the form opening) reads GitHub; the picker and create routes take
+ * the cached answer, as the Rust commands do.
+ */
+async function devIssueTargets(cwd, token, fresh = false) {
+  const nwo = getRepoNwo(cwd);
+  if (!nwo) return { targets: [], defaultRepo: null };
+  const key = `${cwd}\u0000${nwo}`;
+  const hit = devIssueTargetsCache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.targets;
+  const targets = await devIssueTargetsRead(nwo, token);
+  devIssueTargetsCache.set(key, { targets, at: Date.now() });
+  return targets;
+}
+
+async function devIssueTargetsRead(nwo, token) {
+  const resp = await githubFetch(`/repos/${nwo}`, token);
+  if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+  const origin = await resp.json();
+  // As in Rust: the embedded parent may lack the viewer's permissions.
+  if (origin.fork === true && origin.parent?.full_name) {
+    // As in Rust, a failed parent read keeps the copy embedded in origin's answer.
+    const p = await githubFetch(`/repos/${origin.parent.full_name}`, token).catch(() => null);
+    if (p?.ok) {
+      const parent = await p.json().catch(() => null);
+      if (parent) origin.parent = parent;
+    }
+  }
+  return devIssueTargetsFrom(origin);
+}
+
+/** Up to `maxPages` pages of 100 of the array at `path` (`query` ends with `&`). */
+async function devGithubPages(path, query, token, maxPages) {
+  const all = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const resp = await githubFetch(`${path}?${query}per_page=100&page=${page}`, token);
+    if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+    const arr = await resp.json();
+    if (!Array.isArray(arr)) break;
+    all.push(...arr);
+    if (arr.length < 100) break;
+  }
+  return all;
 }
 
 /** Run a GitHub GraphQL operation; returns `data`, throws on the first `errors[]` entry. */
@@ -5420,6 +5474,87 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/gh-issue-available?cwd=<path> — mirrors `gh_issue_available`:
+    // a local check (origin is a GitHub remote), no request.
+    if (url.pathname === "/api/gh-issue-available" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      return jsonResponse(req, res, getRepoNwo(resolve(cwd)) !== null);
+    }
+
+    // GET /api/gh-issue-targets?cwd=<path> — mirrors `gh_issue_targets`.
+    if (url.pathname === "/api/gh-issue-targets" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        return jsonResponse(req, res, await devIssueTargets(resolve(cwd), token, true));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-create-issue { cwd, input } — mirrors `gh_create_issue`.
+    if (url.pathname === "/api/gh-create-issue" && req.method === "POST") {
+      const { cwd, input } = await readBody(req);
+      if (!cwd || !input) return jsonResponse(req, res, { error: "Missing cwd or input" }, 400);
+      // Checked before any call, as in Rust: a blank title costs no request.
+      const built = devIssuePayload(input);
+      if (built.error) return jsonResponse(req, res, { error: built.error }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), input.repo);
+        if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
+        let resp;
+        try {
+          resp = await githubFetch(`/repos/${target.repo}/issues`, token, undefined, {
+            method: "POST",
+            body: JSON.stringify(built.payload),
+          });
+        } catch (err) {
+          // The request may have left before the failure: as in Rust, say so.
+          return jsonResponse(req, res, { error: MAY_HAVE_BEEN_CREATED + err.message }, 502);
+        }
+        const created = await resp.json().catch(() => ({}));
+        if (!resp.ok) return jsonResponse(req, res, { error: devCreateFailure(resp.status, created) }, resp.status);
+        return jsonResponse(req, res, { number: created.number, url: created.html_url || "" });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-list-{labels,milestones,assignees}?cwd=<path>&repo=<owner/repo>
+    // — mirror `gh_list_labels` / `gh_list_milestones` / `gh_list_assignees`.
+    // (The condition below names each route literally: commandRegistry.test
+    // reads the served routes from `url.pathname === "…"` comparisons.)
+    if (
+      (url.pathname === "/api/gh-list-labels" ||
+        url.pathname === "/api/gh-list-milestones" ||
+        url.pathname === "/api/gh-list-assignees") &&
+      req.method === "GET"
+    ) {
+      const issuePicker = {
+        "/api/gh-list-labels": { suffix: "labels", query: "", pages: 3, map: devLabelsFrom },
+        "/api/gh-list-milestones": { suffix: "milestones", query: "state=open&", pages: 1, map: devMilestonesFrom },
+        "/api/gh-list-assignees": { suffix: "assignees", query: "", pages: 3, map: devAssigneesFrom },
+      }[url.pathname];
+      const cwd = url.searchParams.get("cwd");
+      const repo = url.searchParams.get("repo");
+      if (!cwd || !repo) return jsonResponse(req, res, { error: "Missing cwd or repo" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
+        if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
+        const items = await devGithubPages(`/repos/${target.repo}/${issuePicker.suffix}`, issuePicker.query, token, issuePicker.pages);
+        return jsonResponse(req, res, issuePicker.map(items));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
     // GET /api/gh-reviewer-candidates?cwd=<path>
     // Lists assignees (users with push access) for autocomplete.
     if (url.pathname === "/api/gh-reviewer-candidates" && req.method === "GET") {
@@ -5430,27 +5565,10 @@ async function handleRequest(req, res) {
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
         const nwo = getRepoNwo(resolve(cwd));
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        // Paginate up to 3 pages of 100 = 300 candidates.
-        const all = [];
-        const seen = new Set();
-        for (let page = 1; page <= 3; page++) {
-          const resp = await githubFetch(`/repos/${nwo}/assignees?per_page=100&page=${page}`, token);
-          if (!resp.ok) break;
-          const raw = await resp.json();
-          if (!Array.isArray(raw) || raw.length === 0) break;
-          for (const u of raw) {
-            if (!u.login || seen.has(u.login)) continue;
-            seen.add(u.login);
-            all.push({
-              login: u.login,
-              name: u.name ?? null,
-              avatar_url: u.avatar_url ?? null,
-            });
-          }
-          if (raw.length < 100) break;
-        }
-        all.sort((a, b) => a.login.toLowerCase().localeCompare(b.login.toLowerCase()));
-        return jsonResponse(req, res, all);
+        // Up to 3 pages of 100, read like the Rust `api_get_pages` (an error
+        // page fails the call instead of returning partial data).
+        const items = await devGithubPages(`/repos/${nwo}/assignees`, "", token, 3);
+        return jsonResponse(req, res, devAssigneesFrom(items));
       } catch (err) {
         console.error("[gh-reviewer-candidates]", err.message);
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
@@ -9658,6 +9776,12 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    GET  /api/gh-pr-count?cwd=<path>&state=<state>`);
   console.log(`    GET  /api/gh-pr-freshness?cwd=<path>`);
   console.log(`    POST /api/gh-create-pr  { cwd, title, body, base?, draft?, reviewers? }`);
+  console.log(`    GET  /api/gh-issue-available?cwd=<path>`);
+  console.log(`    GET  /api/gh-issue-targets?cwd=<path>`);
+  console.log(`    POST /api/gh-create-issue  { cwd, input }`);
+  console.log(`    GET  /api/gh-list-labels?cwd=<path>&repo=<owner/repo>`);
+  console.log(`    GET  /api/gh-list-milestones?cwd=<path>&repo=<owner/repo>`);
+  console.log(`    GET  /api/gh-list-assignees?cwd=<path>&repo=<owner/repo>`);
   console.log(`    GET  /api/gh-reviewer-candidates?cwd=<path>`);
   console.log(`    GET  /api/gh-pr-detail?cwd=<path>&number=<n>`);
   console.log(`    GET  /api/gh-pr-diff?cwd=<path>&number=<n>`);
