@@ -314,6 +314,7 @@ const {
   isMerging,
   selectedCommitHash,
   commitDiffs,
+  commitDiffsHash,
   selectCommit,
   loadBranches,
   createBranch,
@@ -3995,19 +3996,25 @@ function onGlobalKeydown(e: KeyboardEvent) {
     return;
   }
   if (e.key !== "Escape") return;
+  // Each closes one thing and marks the key handled, so a diff's line
+  // selection (#301) stays when Escape was meant for this.
   if (showCommandLog.value) {
+    e.preventDefault();
     showCommandLog.value = false;
     return;
   }
   if (showHelp.value) {
+    e.preventDefault();
     showHelp.value = false;
     return;
   }
   if (pendingSwitchBranch.value) {
+    e.preventDefault();
     cancelSwitchStash();
     return;
   }
   if (showStash.value) {
+    e.preventDefault();
     showStash.value = false;
     return;
   }
@@ -4871,7 +4878,7 @@ onUnmounted(() => {
               <aside v-if="showSidebar" class="view__rail">
                 <RepoSidebar pane="history" v-bind="repoSidebarProps" v-on="repoSidebarListeners" />
               </aside>
-              <CommitDiffViewer class="view__content" :diffs="commitDiffs" :commit-hash="selectedCommitHash"
+              <CommitDiffViewer class="view__content" :diffs="commitDiffs" :diffs-hash="commitDiffsHash" :commit-hash="selectedCommitHash"
                 :commit-info="repoLog.find(e => e.hashFull === selectedCommitHash) ?? null" :diff-mode="diffMode"
                 :scroll-to-file-idx="scrollToFileIdx" @update:diff-mode="onDiffModeChange"
                 @update:visible-file-idx="historyVisibleFileIdx = $event" />
@@ -4965,7 +4972,7 @@ onUnmounted(() => {
                     </svg>
                   </button>
                   <CommitDiffViewer class="graph-diff"
-                    :diffs="commitDiffs" :commit-hash="selectedCommitHash"
+                    :diffs="commitDiffs" :diffs-hash="commitDiffsHash" :commit-hash="selectedCommitHash"
                     :commit-info="repoLog.find(e => e.hashFull === selectedCommitHash) ?? null" :diff-mode="diffMode"
                     :scroll-to-file-idx="graphScrollIdx" @update:diff-mode="onDiffModeChange"
                     @update:visible-file-idx="graphFileIdx = $event" />

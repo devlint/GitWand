@@ -78,7 +78,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function mount(opts: { available?: boolean; withProvider?: boolean; diffMode?: "inline" | "side-by-side"; commitInfo?: GitLogEntry | null } = {}) {
+function mount(opts: { available?: boolean; withProvider?: boolean; diffMode?: "inline" | "side-by-side"; commitInfo?: GitLogEntry | null; diffsHash?: string | null } = {}) {
   const activeSelection = ref<DiffSelection | null>(null) as Ref<DiffSelection | null>;
   const openFromSelection = vi.fn(async (_sel: DiffSelection) => {});
   const fake = {
@@ -89,6 +89,8 @@ function mount(opts: { available?: boolean; withProvider?: boolean; diffMode?: "
   };
   const commitHash = ref<string | null>(SHA);
   const diffs = ref<GitDiff[]>(DIFFS);
+  // The commit the diffs on screen belong to (the producer says it).
+  const diffsHash = ref<string | null>(opts.diffsHash === undefined ? SHA : opts.diffsHash);
   container = document.createElement("div");
   document.body.appendChild(container);
   app = createApp({
@@ -96,6 +98,7 @@ function mount(opts: { available?: boolean; withProvider?: boolean; diffMode?: "
       return () =>
         h(CommitDiffViewer as any, {
           diffs: diffs.value,
+          diffsHash: diffsHash.value,
           commitHash: commitHash.value,
           commitInfo: opts.commitInfo === undefined ? ENTRY : opts.commitInfo,
           diffMode: opts.diffMode ?? "inline",
@@ -104,7 +107,7 @@ function mount(opts: { available?: boolean; withProvider?: boolean; diffMode?: "
   });
   if (opts.withProvider !== false) app.provide(CREATE_ISSUE_KEY, fake as any);
   app.mount(container);
-  return { fake, commitHash, diffs };
+  return { fake, commitHash, diffs, diffsHash };
 }
 
 /** The line-number cells of hunk `h`, row `r` (inline: old then new). */
@@ -175,11 +178,13 @@ describe("CommitDiffViewer — line selection for an issue", () => {
   });
 
   it("Escape, a click elsewhere, another commit and unmounting clear it", async () => {
-    const { fake, commitHash, diffs } = mount();
+    const { fake, commitHash, diffs, diffsHash } = mount();
     await nextTick();
     click(numberCell(0, 1));
     await nextTick();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    // Decided once every listener has seen the key.
+    await new Promise((res) => setTimeout(res, 0));
     await nextTick();
     expect(fake.activeSelection.value).toBeNull();
     expect(document.querySelector(".cdv-line--selected")).toBeNull();
@@ -197,6 +202,7 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     expect(fake.activeSelection.value).toBeNull();
     // That commit's diff arrives.
     diffs.value = [...DIFFS];
+    diffsHash.value = PARENT;
     await nextTick();
 
     click(numberCell(0, 1));
@@ -389,20 +395,20 @@ describe("CommitDiffViewer — line selection for an issue", () => {
   });
 
   it("nothing is selectable while another commit's diff is still shown", async () => {
-    const { fake, commitHash, diffs } = mount();
-    await nextTick();
-    // Commit B selected; its diff is still loading, A's is on screen.
-    commitHash.value = PARENT;
+    // Mounted mid-load: the commit is B, the diffs still A's.
+    const { fake, diffs, diffsHash } = mount({ diffsHash: PARENT });
     await nextTick();
     click(numberCell(0, 1));
     await nextTick();
     expect(fake.activeSelection.value).toBeNull();
     diffs.value = [...DIFFS];
+    diffsHash.value = SHA;
     await nextTick();
     click(numberCell(0, 1));
     await nextTick();
     expect(fake.activeSelection.value).not.toBeNull();
   });
+
 
   it("collapsing the selected lines' file clears them", async () => {
     const { fake } = mount();

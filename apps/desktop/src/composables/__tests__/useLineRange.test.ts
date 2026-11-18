@@ -50,26 +50,38 @@ describe("useLineRange", () => {
     expect(r.range.value).toEqual({ group: "h2", anchor: 1, focus: 1, lo: 1, hi: 1 });
   });
 
-  it("Escape clears it, and that is all it does", () => {
+  const tick = () => new Promise((res) => setTimeout(res, 0));
+
+  it("Escape clears it once nothing else handled the key, and lets it go on", async () => {
     const r = withRange({ dismiss: { keep: ".keep" } });
     r.pick("h", 1, false);
-    const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-    handled.preventDefault();
-    document.dispatchEvent(handled);
-    expect(r.range.value).not.toBeNull();
     const outer = vi.fn();
     window.addEventListener("keydown", outer);
     try {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await tick();
       expect(r.range.value).toBeNull();
-      // One key, one thing: panels listening further up stay open.
-      expect(outer).not.toHaveBeenCalled();
+      expect(outer).toHaveBeenCalled();
     } finally {
       window.removeEventListener("keydown", outer);
     }
   });
 
-  it("a menu or modal dialog on top gets Escape first; a field keeps its keys", () => {
+  it("an Escape something else handled (an overlay it closed) keeps it", async () => {
+    const r = withRange({ dismiss: { keep: ".keep" } });
+    r.pick("h", 1, false);
+    const overlay = (e: KeyboardEvent) => e.preventDefault();
+    window.addEventListener("keydown", overlay);
+    try {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      await tick();
+      expect(r.range.value).not.toBeNull();
+    } finally {
+      window.removeEventListener("keydown", overlay);
+    }
+  });
+
+  it("a menu or modal dialog on top gets Escape first; fields and the terminal keep their keys", async () => {
     const r = withRange({ dismiss: { keep: ".keep" } });
     r.pick("h", 1, false);
     for (const attrs of [{ role: "menu" }, { "aria-modal": "true" }]) {
@@ -77,22 +89,30 @@ describe("useLineRange", () => {
       for (const [k, v] of Object.entries(attrs)) top.setAttribute(k, v);
       document.body.appendChild(top);
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await tick();
       expect(r.range.value).not.toBeNull();
       top.remove();
     }
     const input = document.createElement("input");
-    document.body.appendChild(input);
+    const term = document.createElement("div");
+    term.className = "xterm";
+    const inTerm = document.createElement("span");
+    term.appendChild(inTerm);
+    document.body.append(input, term);
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    inTerm.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await tick();
     expect(r.range.value).not.toBeNull();
   });
 
-  it("a docked, non-modal panel (role=dialog) does not hold Escape back", () => {
+  it("a docked, non-modal panel (role=dialog) does not hold Escape back", async () => {
     const r = withRange({ dismiss: { keep: ".keep" } });
     r.pick("h", 1, false);
     const panel = document.createElement("div");
     panel.setAttribute("role", "dialog");
     document.body.appendChild(panel);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await new Promise((res) => setTimeout(res, 0));
     expect(r.range.value).toBeNull();
   });
 

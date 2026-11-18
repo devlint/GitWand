@@ -7,6 +7,7 @@
  * an extend anywhere else starts over there.
  */
 import { computed, onMounted, onUnmounted, ref, type ComputedRef } from "vue";
+import { isTypingTarget } from "../utils/typingTarget";
 
 export interface LineRange {
   group: string;
@@ -37,9 +38,9 @@ export function useLineRange(opts?: {
   /**
    * Clear on a press outside `keep` (nor on `scrollEl` itself: a press on
    * its scrollbar is scrolling, nor inside a dialog), and on Escape: the
-   * topmost thing first — a menu or modal dialog gets it, a field keeps its
-   * keys; otherwise it clears the range and goes no further (a docked panel
-   * stays open).
+   * topmost thing first — a menu or modal dialog gets it, a field or the
+   * terminal keeps it, an overlay that closes on it (marking it handled)
+   * keeps it; otherwise it clears the range. The key always goes on.
    */
   dismiss?: { keep: string; scrollEl?: () => HTMLElement | null };
 }): LineRangeApi {
@@ -77,13 +78,14 @@ export function useLineRange(opts?: {
     };
     const onKeydown = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || !state.value || e.defaultPrevented) return;
-      const target = e.target as HTMLElement | null;
-      if (target?.closest?.("input, textarea, select, [contenteditable]")) return;
+      if (isTypingTarget(e.target)) return;
       if (document.querySelector('[aria-modal="true"], [role="menu"]')) return;
-      clear();
-      e.stopPropagation();
-    };
-    onMounted(() => {
+      // Decided once every listener has seen the key: an overlay that closed
+      // on it (and marked it handled) keeps the range; otherwise it clears.
+      setTimeout(() => {
+        if (!e.defaultPrevented) clear();
+      }, 0);
+    };    onMounted(() => {
       document.addEventListener("mousedown", onMousedown);
       document.addEventListener("keydown", onKeydown);
     });

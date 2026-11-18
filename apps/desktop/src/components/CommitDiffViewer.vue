@@ -17,6 +17,9 @@ const { t } = useI18n();
 
 const props = defineProps<{
   diffs: GitDiff[];
+  /** The commit `diffs` belong to (the previous one's stay while a newly
+   *  selected commit loads). */
+  diffsHash?: string | null;
   commitHash: string | null;
   commitInfo: GitLogEntry | null;
   diffMode: DiffMode;
@@ -261,14 +264,8 @@ const createIssue = inject(CREATE_ISSUE_KEY, null);
 // file the lines against.
 // Nor while another commit's diff is still on screen (the selected commit's
 // is loading): its lines would be filed under the wrong commit.
-const diffsStale = ref(false);
-watch(() => props.commitHash, () => {
-  diffsStale.value = true;
-});
-watch(() => props.diffs, () => {
-  diffsStale.value = false;
-});
-const canSelectLines = computed(() => !!createIssue?.available.value && !!props.commitInfo && !diffsStale.value);
+const diffsAreThisCommits = computed(() => props.diffsHash === undefined || props.diffsHash === props.commitHash);
+const canSelectLines = computed(() => !!createIssue?.available.value && !!props.commitInfo && diffsAreThisCommits.value);
 
 /** `row`: inline rows; `old` / `new`: one column of the side-by-side pairs. */
 type SelSide = RowSide;

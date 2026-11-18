@@ -8,6 +8,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec } from "../utils/backend";
+import { isTypingTarget } from "../utils/typingTarget";
 import type {
   CreatedIssue,
   GitLogEntry,
@@ -49,19 +50,11 @@ export function newIssueShortcutLabel(mac: boolean): string {
   return mac ? "⌘⇧I" : "Ctrl+Alt+I";
 }
 
-/** A text field, an editable element or the terminal: where keys type, so
- *  the shortcut is left to it — unless it asks for the shortcut with
- *  `data-issue-shortcut` (the PR comment box, which may hold a range). */
-function isTypingTarget(t: EventTarget | null): boolean {
-  const el = t as (HTMLElement & { closest?: (s: string) => Element | null }) | null;
-  if (!el || typeof el !== "object") return false;
-  return (
-    el.tagName === "INPUT" ||
-    el.tagName === "TEXTAREA" ||
-    el.tagName === "SELECT" ||
-    el.isContentEditable === true ||
-    !!el.closest?.(".xterm")
-  ) && !el.closest?.("[data-issue-shortcut]");
+/** A field typed in keeps the shortcut's keys, unless it asks for them with
+ *  `data-issue-shortcut` (the PR comment box while it holds a range). */
+function leavesShortcutToField(t: EventTarget | null): boolean {
+  const el = t as { closest?: (s: string) => Element | null } | null;
+  return isTypingTarget(t) && !el?.closest?.("[data-issue-shortcut]");
 }
 
 /**
@@ -73,7 +66,7 @@ function isTypingTarget(t: EventTarget | null): boolean {
 export function isNewIssueShortcut(e: KeyboardEvent, mac: boolean): boolean {
   if (e.key !== "I" && e.key !== "i") return false;
   if (mac) return e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey;
-  if (e.getModifierState?.("AltGraph") || isTypingTarget(e.target)) return false;
+  if (e.getModifierState?.("AltGraph") || leavesShortcutToField(e.target)) return false;
   return e.ctrlKey && e.altKey && !e.metaKey;
 }
 

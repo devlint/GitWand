@@ -374,8 +374,7 @@ function onLineNoClick(e: MouseEvent, hunkIdx: number, lineIdx: number, dl: Diff
 }
 
 function isInComposeRange(hunkIdx: number, lineIdx: number): boolean {
-  const r = composeRange.value;
-  return !!r && composeLine.value?.hunkIdx === hunkIdx && lineIdx >= r.lo && lineIdx <= r.hi;
+  return !!composeRange.value && lineRange.isIn(String(hunkIdx), lineIdx);
 }
 
 function closeCompose() {
@@ -428,14 +427,17 @@ useSelectionPublisher(
 );
 // Another file, or another PR (its file may share the path): the box and its
 // line numbers belonged to the previous one.
+// The last PR number seen: one missing for a moment (a list refresh) is not
+// another PR, but A → nothing → B is.
+let lastPrNumber = props.prNumber;
 watch(
   () => [props.filePath, props.prNumber] as const,
-  ([path, pr], [prevPath, prevPr]) => {
-    // A number missing for a moment (a list refresh) is not another PR.
-    if (path !== prevPath || (pr !== undefined && prevPr !== undefined && pr !== prevPr)) closeCompose();
+  ([path, pr], [prevPath]) => {
+    const otherPr = pr !== undefined && lastPrNumber !== undefined && pr !== lastPrNumber;
+    if (pr !== undefined) lastPrNumber = pr;
+    if (path !== prevPath || otherPr) closeCompose();
   },
 );
-
 function fileIssueFromCompose() {
   const sel = composeSelection.value;
   // The box, its range and the draft stay either way (`onOpened` only stops

@@ -329,6 +329,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // Commit diff state (for history view)
   const selectedCommitHash = ref<string | null>(null);
   const commitDiffs = ref<GitDiff[]>([]);
+  /** The commit `commitDiffs` belong to: while a newly selected commit
+   *  loads, the previous one's are still shown (#301 files lines by it). */
+  const commitDiffsHash = ref<string | null>(null);
 
   /**
    * Search-palette invalidation on active-repo change.
@@ -606,6 +609,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     // Reset previous repo state
     selectedCommitHash.value = null;
     commitDiffs.value = [];
+    commitDiffsHash.value = null;
     log.value = [];
     branches.value = []; // ← reset so the palette doesn't show stale branches from the previous repo
     selectedFilePath.value = null;
@@ -641,6 +645,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     log.value = [];
     selectedCommitHash.value = null;
     commitDiffs.value = [];
+    commitDiffsHash.value = null;
     branches.value = [];
     worktrees.value = [];
     error.value = null;
@@ -942,10 +947,12 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       }
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
-        commitDiffs.value = await getGitShow(
-          folderPath.value,
-          selectedCommitHash.value,
-        );
+        const hash = selectedCommitHash.value;
+        const diffs = await getGitShow(folderPath.value, hash);
+        if (selectedCommitHash.value === hash) {
+          commitDiffs.value = diffs;
+          commitDiffsHash.value = hash;
+        }
       }
     } catch (err: any) {
       error.value = `git log: ${err?.message ?? err}`;
@@ -1060,8 +1067,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       }
       if (selectedCommitHash.value !== hash) return;
       commitDiffs.value = diffs;
+      commitDiffsHash.value = hash;
     } catch (err: any) {
       commitDiffs.value = [];
+      commitDiffsHash.value = hash;
       error.value = `git show: ${err?.message ?? err}`;
     }
   }
@@ -1839,6 +1848,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     worktreeBranches,
     selectedCommitHash,
     commitDiffs,
+    commitDiffsHash,
     // Computed
     hasRepo,
     branchDisplay,

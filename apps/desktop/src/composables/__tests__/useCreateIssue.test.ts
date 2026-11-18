@@ -609,6 +609,46 @@ describe("commitOnOriginWith — real git repository", () => {
   });
 });
 
+describe("openFromSelection — real git repository", () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+  const exec = async (cwd: string, args: string[]) => {
+    try {
+      return { stdout: execFileSync("git", args, { cwd, encoding: "utf-8" }), stderr: "", exitCode: 0 };
+    } catch (e) {
+      const err = e as { stdout?: string; status?: number };
+      return { stdout: err.stdout ?? "", stderr: "", exitCode: err.status ?? 1 };
+    }
+  };
+  let dir = "";
+  afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+  it("links the lines of a commit origin has, and not those of a local one", async () => {
+    dir = mkdtempSync(join(tmpdir(), "gw-sel-"));
+    git(dir, "init", "-q");
+    git(dir, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base");
+    const base = git(dir, "rev-parse", "HEAD");
+    git(dir, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "pushed");
+    const pushed = git(dir, "rev-parse", "HEAD");
+    git(dir, "update-ref", "refs/remotes/origin/main", pushed);
+    git(dir, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "local");
+    const local = git(dir, "rev-parse", "HEAD");
+    const sel = (sha: string, parent: string): DiffSelection => ({
+      path: "src/a.ts",
+      lines: [{ type: "delete", content: "y", oldLineNo: 7 }],
+      source: { kind: "commit", hash: sha.slice(0, 7), hashFull: sha, parent },
+    });
+    const a = setup(provider(), ref<string | null>(dir), commitOnOriginWith(exec));
+    await a.api.refreshAvailability();
+    await a.api.openFromSelection(sel(pushed, base));
+    // Deleted lines: the parent's version, on origin's page.
+    expect(a.api.body.value.startsWith(`https://github.com/me/app/blob/${base}/src/a.ts?plain=1#L7\n`)).toBe(true);
+    const b = setup(provider(), ref<string | null>(dir), commitOnOriginWith(exec));
+    await b.api.refreshAvailability();
+    await b.api.openFromSelection(sel(local, pushed));
+    expect(b.api.body.value).not.toContain("/blob/");
+  });
+});
+
 describe("isNewIssueShortcut", () => {
   const ev = (o: Partial<KeyboardEvent>) => ({ key: "I", metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...o }) as KeyboardEvent;
   it("is ⌘⇧I on macOS", () => {
