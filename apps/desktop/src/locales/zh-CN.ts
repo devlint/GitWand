@@ -2735,6 +2735,8 @@ const zhCN: Locale = {
       secretWarning: "第 {0} 行可能有密钥（{1}）：发送前请检查",
       secretBlockingTitle: "标题中可能有密钥（{0}）：删除后才能发送",
       secretWarningTitle: "标题中可能有密钥（{0}）：发送前请检查",
+      secretBlockingAnswer: "回答中可能有密钥（{0}）：删除后才能发送",
+      secretWarningAnswer: "回答中可能有密钥（{0}）：发送前请检查",
       secretWarningMore: "……另有 {0} 处可能的密钥（高熵字符串）",
       replaceTitle: "替换标题和描述？",
       replaceEdits: "你对标题和描述的修改将被替换",

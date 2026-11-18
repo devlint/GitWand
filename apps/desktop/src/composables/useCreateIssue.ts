@@ -10,7 +10,7 @@ import type { ForgeProvider } from "./forge/types";
 import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, readGitwandrc } from "../utils/backend";
 import { parseGitwandrc, type SecretPattern } from "@gitwand/core";
 import { IS_MAC } from "../utils/platform";
-import { gitwandReportPrefill, repoReportPrefill, type ResolutionReport } from "../utils/resolutionReport";
+import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
 import { scanReportBody, type ReportScan } from "../utils/reportGuard";
 import type { SecretFinding } from "@gitwand/core";
 import { isEditableTarget } from "../utils/editableTarget";
@@ -163,6 +163,9 @@ export interface CreateIssueApi {
   /** What is sent: the answer on top of the description. */
   finalBody: ComputedRef<string>;
   openFromResolution(r: ResolutionReport): Promise<void>;
+  /** Changes every time the form is opened or closed: a question asked about
+   *  one form must not be applied to the next. */
+  openId: Readonly<Ref<number>>;
   /** Retarget the report; regenerates title and description (the caller
    *  confirms first when `bodyEdited`). */
   setGitwand(on: boolean): void;
@@ -171,11 +174,6 @@ export interface CreateIssueApi {
 /** GitWand's own repository, where resolver reports go (mirrors Rust `GITWAND_REPO`). */
 export const GITWAND_REPO = "devlint/GitWand";
 
-/** The answer to "What should it have been?" on top of a report's body. */
-export function withAnswer(answer: string, body: string): string {
-  const a = answer.trim();
-  return a ? `### What it should have been\n\n${a}\n\n${body}` : body;
-}
 
 /** What report mode needs from outside (tests replace it). */
 export interface ReportDeps {
@@ -298,6 +296,7 @@ export function useCreateIssue(deps: {
   const outcomeUnknown = ref(false);
   const initial = ref<IssuePrefill>({ title: "", body: "" });
   const report = shallowRef<ResolutionReport | null>(null);
+  const openId = ref(0);
   const answer = ref("");
   const toGitwand = ref(false);
   const gitwandLocked = ref(false);
@@ -307,6 +306,10 @@ export function useCreateIssue(deps: {
   // A change not scanned yet: a secret typed a moment ago must not slip out.
   const scanPending = ref(false);
   let secretsOpts: { extraPatterns: SecretPattern[]; entropyThreshold: number } = { extraPatterns: [], entropyThreshold: 4 };
+  // Bumped when the repository's patterns arrive (they change the findings).
+  let secretsVersion = 0;
+  // A public report waits for the repository's own patterns.
+  const secretsLoaded = ref(false);
   // The repository the report would go to without the switch.
   let repoTarget: string | null = null;
   // The repository the open form files on: an app tab switch while it is open
@@ -343,6 +346,7 @@ export function useCreateIssue(deps: {
       (!toGitwand.value ||
         (confirmedPublic.value &&
           gitwandWritable.value === true &&
+          secretsLoaded.value &&
           !scanPending.value &&
           findings.value.blocking.length === 0)),
   );
@@ -404,6 +408,7 @@ export function useCreateIssue(deps: {
   function reset() {
     generation++;
     openGeneration++;
+    openId.value = openGeneration;
     repo.value = null;
     title.value = "";
     body.value = "";
@@ -429,6 +434,7 @@ export function useCreateIssue(deps: {
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = { extraPatterns: [], entropyThreshold: 4 };
+    secretsLoaded.value = false;
   }
 
   async function open(
@@ -536,20 +542,34 @@ export function useCreateIssue(deps: {
     scanTimer = null;
     scanPending.value = false;
     if (!report.value) return;
+    lastScanKey = scanKey();
     const opts = { ...secretsOpts, blockAt: toGitwand.value ? ("medium" as const) : ("never" as const) };
-    // The title is sent too; its findings carry line 0.
-    const inTitle = scanReportBody(title.value, opts);
-    const inBody = scanReportBody(finalBody.value, opts);
-    const atTitle = (f: SecretFinding) => ({ ...f, line: 0 });
-    findings.value = {
-      blocking: [...inTitle.blocking.map(atTitle), ...inBody.blocking],
-      warnings: [...inTitle.warnings.map(atTitle), ...inBody.warnings],
-    };
+    // Each part on its own, so a finding names the field the user can edit
+    // and a line number that is that field's own.
+    const parts: Array<[SecretFinding["file"], string]> = [
+      ["title", title.value],
+      ["answer", answer.value],
+      ["description", body.value],
+    ];
+    const next: ReportScan = { blocking: [], warnings: [] };
+    for (const [where, text] of parts) {
+      const r = scanReportBody(text, opts);
+      next.blocking.push(...r.blocking.map((f) => ({ ...f, file: where })));
+      next.warnings.push(...r.warnings.map((f) => ({ ...f, file: where })));
+    }
+    findings.value = next;
+  }
+
+  /** What a scan depends on: the same key means the same findings. */
+  function scanKey(): string {
+    return [toGitwand.value, secretsVersion, title.value, answer.value, body.value].join("\u0000");
   }
 
   let scanTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastScanKey = "";
   watch([finalBody, title], () => {
-    if (!report.value) return;
+    // Already scanned (a switch or an open scans at once).
+    if (!report.value || scanKey() === lastScanKey) return;
     scanPending.value = true;
     if (scanTimer) clearTimeout(scanTimer);
     scanTimer = setTimeout(scanNow, scanDebounceMs);
@@ -562,7 +582,7 @@ export function useCreateIssue(deps: {
   function regenerate() {
     const r = report.value;
     if (!r) return;
-    const p = toGitwand.value ? gitwandReportPrefill(r, "", reportEnv()) : repoReportPrefill(r, "");
+    const p = toGitwand.value ? gitwandReportPrefill(r, reportEnv()) : repoReportPrefill(r);
     initial.value = p;
     title.value = p.title;
     body.value = p.body;
@@ -572,6 +592,8 @@ export function useCreateIssue(deps: {
     if (!report.value || submitting.value || outcomeUnknown.value) return;
     if (!on && gitwandLocked.value) return;
     generation++;
+    // The previous target's failure is not this one's.
+    error.value = null;
     toGitwand.value = on;
     // Re-confirm every time the report heads for the public repository.
     confirmedPublic.value = false;
@@ -611,9 +633,14 @@ export function useCreateIssue(deps: {
       (o) => {
         if (openGen !== openGeneration) return;
         secretsOpts = o;
+        secretsVersion++;
+        secretsLoaded.value = true;
         scanNow();
       },
-      () => {},
+      () => {
+        // Unreadable: the built-in patterns still apply.
+        if (openGen === openGeneration) secretsLoaded.value = true;
+      },
     );
   }
 
@@ -729,6 +756,7 @@ export function useCreateIssue(deps: {
     bodyEdited,
     finalBody,
     openFromResolution,
+    openId,
     setGitwand,
   };
 }

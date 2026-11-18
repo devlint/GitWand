@@ -2765,6 +2765,8 @@ const en = {
       secretWarning: "Possible secret on line {0} ({1}): check before sending",
       secretBlockingTitle: "Possible secret in the title ({0}): remove it to send",
       secretWarningTitle: "Possible secret in the title ({0}): check before sending",
+      secretBlockingAnswer: "Possible secret in the answer ({0}): remove it to send",
+      secretWarningAnswer: "Possible secret in the answer ({0}): check before sending",
       secretWarningMore: "…and {0} more possible secrets (high-entropy strings)",
       replaceTitle: "Replace the title and description?",
       replaceEdits: "Your edits to the title and description will be replaced",

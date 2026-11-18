@@ -2725,6 +2725,8 @@ const ptBR: Locale = {
       secretWarning: "Possível segredo na linha {0} ({1}): verifique antes de enviar",
       secretBlockingTitle: "Possível segredo no título ({0}): remova-o para enviar",
       secretWarningTitle: "Possível segredo no título ({0}): verifique antes de enviar",
+      secretBlockingAnswer: "Possível segredo na resposta ({0}): remova-o para enviar",
+      secretWarningAnswer: "Possível segredo na resposta ({0}): verifique antes de enviar",
       secretWarningMore: "…e mais {0} possíveis segredos (sequências de alta entropia)",
       replaceTitle: "Substituir o título e a descrição?",
       replaceEdits: "Suas edições no título e na descrição serão substituídas",

@@ -2725,6 +2725,8 @@ const es: Locale = {
       secretWarning: "Posible secreto en la línea {0} ({1}): compruébalo antes de enviar",
       secretBlockingTitle: "Posible secreto en el título ({0}): quítalo para enviar",
       secretWarningTitle: "Posible secreto en el título ({0}): compruébalo antes de enviar",
+      secretBlockingAnswer: "Posible secreto en la respuesta ({0}): quítalo para enviar",
+      secretWarningAnswer: "Posible secreto en la respuesta ({0}): compruébalo antes de enviar",
       secretWarningMore: "…y {0} posibles secretos más (cadenas de alta entropía)",
       replaceTitle: "¿Reemplazar el título y la descripción?",
       replaceEdits: "Tus cambios en el título y la descripción se reemplazarán",

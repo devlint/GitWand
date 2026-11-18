@@ -117,10 +117,12 @@ describe("CreateIssueModal — report mode", () => {
     const { form } = await mount();
     await flip();
     $<HTMLInputElement>('[data-testid="ci-confirm-public"]')!.click();
-    form.answer.value = `token ${TOKEN}`;
+    form.body.value = `a\nb\ntoken ${TOKEN}`;
+    form.answer.value = `x ${TOKEN}`;
     await flush();
     const alert = $('[data-testid="ci-secrets"]');
     expect(alert?.textContent).toContain("createIssue.report.secretBlocking:3,github_pat_classic");
+    expect(alert?.textContent).toContain("createIssue.report.secretBlockingAnswer:github_pat_classic");
     expect(createButton()?.disabled).toBe(true);
   });
 
@@ -160,6 +162,22 @@ describe("CreateIssueModal — report mode", () => {
     expect(sw().checked).toBe(true);
     expect(document.body.textContent).toContain("gh: not signed in to ghe.acme");
     expect(document.body.textContent).not.toContain("createIssue.targetsFailed");
+  });
+
+  it("a switch confirmed after the form changed does nothing", async () => {
+    const { form, askConfirm } = await mount();
+    let answer!: (ok: boolean) => void;
+    askConfirm.mockImplementationOnce(() => new Promise<boolean>((r) => { answer = r; }));
+    form.body.value += "\nmine";
+    await flush();
+    sw().click();
+    await flush();
+    form.close();
+    await form.openFromResolution(REPORT);
+    await flush();
+    answer(true);
+    await flush();
+    expect(form.toGitwand.value).toBe(false);
   });
 
   it("asks before replacing an edited description, and keeps it on cancel", async () => {

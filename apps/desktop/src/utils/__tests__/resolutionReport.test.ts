@@ -10,6 +10,8 @@ import {
   repoReportPrefill,
   gitwandReportPrefill,
   REPORT_BODY_MAX,
+  ANSWER_MAX,
+  withAnswer,
   type ResolutionReport,
 } from "../resolutionReport";
 
@@ -54,9 +56,8 @@ describe("fileKind", () => {
 
 describe("repoReportPrefill", () => {
   it("names the file and carries the versions, the result and the reasoning", () => {
-    const p = repoReportPrefill(report(), "keep both values");
+    const p = repoReportPrefill(report());
     expect(p.title).toBe("Bad merge resolution in `src/x.ts`");
-    expect(p.body.startsWith("### What it should have been\n\nkeep both values")).toBe(true);
     expect(p.body).toContain("`src/x.ts`");
     for (const s of ["ours", "theirs", "base", "const a = 2;", "const a = 3;", "const a = 1;"]) expect(p.body).toContain(s);
     expect(p.body).toContain("### GitWand's result");
@@ -66,19 +67,15 @@ describe("repoReportPrefill", () => {
     expect(p.body).toContain("confidence 90 (high)");
   });
 
-  it("leaves the answer section out when nothing was typed", () => {
-    expect(repoReportPrefill(report(), "  ").body).not.toContain("What it should have been");
-  });
-
   it("prints no base block for a conflict without one", () => {
     const r = report({ hunk: hunk({ baseLines: [], trace: { steps: [], selected: "non_overlapping", summary: "s", hasBase: false } }) });
-    expect(repoReportPrefill(r, "").body).not.toMatch(/\*\*base\*\*/);
+    expect(repoReportPrefill(r).body).not.toMatch(/\*\*base\*\*/);
   });
 });
 
 describe("gitwandReportPrefill", () => {
   it("describes the file by its kind and never by its path or name", () => {
-    const p = gitwandReportPrefill(report({ path: "secret-project/billing/x.ts" }), "", env);
+    const p = gitwandReportPrefill(report({ path: "secret-project/billing/x.ts" }), env);
     expect(p.title).toBe("Resolver: bad `non_overlapping` resolution (`.ts`)");
     expect(p.body).toContain("GitWand 3.13.2");
     expect(p.body).toContain("macOS");
@@ -94,14 +91,14 @@ describe("gitwandReportPrefill", () => {
       explanation: "Generated file (user pattern: clients/acme-bank/**) — taken from theirs.",
       trace: { steps: [], selected: "generated_file", summary: "Generated (user pattern: clients/acme-bank/**) in clients/acme-bank/api.ts", hasBase: true },
     });
-    const p = gitwandReportPrefill(report({ path: "clients/acme-bank/api.ts", hunk: h }), "", env);
+    const p = gitwandReportPrefill(report({ path: "clients/acme-bank/api.ts", hunk: h }), env);
     expect(p.body).not.toContain("acme-bank");
     expect(p.body).not.toContain("api.ts");
     expect(p.body).toContain("user pattern");
   });
 
   it("names the format resolver when one handled the hunk", () => {
-    const p = gitwandReportPrefill(report({ path: "package.json", hunk: hunk({ formatResolver: "json" }) }), "", env);
+    const p = gitwandReportPrefill(report({ path: "package.json", hunk: hunk({ formatResolver: "json" }) }), env);
     expect(p.body).toContain("resolver: `json`");
   });
 
@@ -125,7 +122,7 @@ describe("gitwandReportPrefill", () => {
         },
       } as ConflictHunk["trace"],
     });
-    const p = gitwandReportPrefill(report({ kind: "ai", hunk: h }), "", env);
+    const p = gitwandReportPrefill(report({ kind: "ai", hunk: h }), env);
     expect(p.body).toContain("claude-test");
     expect(p.body).toContain("validation 82");
     expect(p.body).toContain("history: 4 commits");
@@ -143,20 +140,17 @@ describe("gitwandReportPrefill", () => {
         tokenMergeTrace: { mergedLines: ["x"], pass1Count: 3, pass2Count: 1, lineDetails: [] },
       } as ConflictHunk["trace"],
     });
-    expect(gitwandReportPrefill(report({ kind: "token", hunk: h }), "", env).body).toContain("pass 1: 3 lines, pass 2: 1 line");
+    expect(gitwandReportPrefill(report({ kind: "token", hunk: h }), env).body).toContain("pass 1: 3 lines, pass 2: 1 line");
   });
 
-  it("puts the answer first, like the repository report", () => {
-    expect(gitwandReportPrefill(report(), "should keep 2", env).body.startsWith("### What it should have been\n\nshould keep 2")).toBe(true);
-  });
 });
 
 describe("budget", () => {
   it("stays under REPORT_BODY_MAX and says what was cut", () => {
     const big = Array.from({ length: 5000 }, (_, i) => `line ${i} `.padEnd(40, "x"));
     for (const build of [
-      (r: ResolutionReport) => repoReportPrefill(r, ""),
-      (r: ResolutionReport) => gitwandReportPrefill(r, "", env),
+      (r: ResolutionReport) => repoReportPrefill(r),
+      (r: ResolutionReport) => gitwandReportPrefill(r, env),
     ]) {
       const p = build(report({ hunk: hunk({ oursLines: big, theirsLines: big, baseLines: big }), resolvedLines: big }));
       expect(p.body.length).toBeLessThanOrEqual(REPORT_BODY_MAX);
@@ -164,3 +158,29 @@ describe("budget", () => {
     }
   });
 });
+
+describe("withAnswer", () => {
+  it("puts the answer on top, and nothing when it is blank", () => {
+    expect(withAnswer("keep both", "BODY")).toBe("### What it should have been\n\nkeep both\n\nBODY");
+    expect(withAnswer("  ", "BODY")).toBe("BODY");
+  });
+
+  it("a full answer on a full report stays under GitHub's 65,536 characters", () => {
+    const big = Array.from({ length: 5000 }, (_, i) => `line ${i} `.padEnd(40, "x"));
+    const body = repoReportPrefill(report({ hunk: hunk({ oursLines: big, theirsLines: big, baseLines: big }), resolvedLines: big })).body;
+    expect(withAnswer("a".repeat(ANSWER_MAX), body).length).toBeLessThan(65_536);
+  });
+});
+
+describe("budget — one enormous line", () => {
+  it("cuts inside the block and keeps every fence closed and the reasoning", () => {
+    const huge = ["x".repeat(80_000)];
+    const p = repoReportPrefill(report({ hunk: hunk({ oursLines: huge, theirsLines: ["b"], baseLines: ["a"] }), resolvedLines: huge }));
+    expect(p.body.length).toBeLessThanOrEqual(REPORT_BODY_MAX);
+    expect(p.body).toContain("### Why");
+    const fences = p.body.split("\n").filter((l) => /^```/.test(l));
+    expect(fences.length % 2).toBe(0);
+    expect(p.body).toContain("characters)_");
+  });
+});
+

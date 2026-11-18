@@ -601,17 +601,22 @@ function onReport(kind: ProposalKind, hunkId: string | number) {
 /**
  * Accepting an engine or token-level proposal writes the file: the hunk, and
  * its panel, are gone after the reparse. A copy keeps it reportable for as
- * long as this file is open — in memory only.
+ * long as this file is open — in memory only. It is listed once the reparse
+ * shows the write landed (see the per-file watcher below), never on a write
+ * that failed.
  */
 const acceptedReports = ref<ResolutionReport[]>([]);
+let pendingAccepted: { idx: number; report: ResolutionReport } | null = null;
 
 function keepAccepted(kind: ProposalKind, idx: number) {
   const r = reportFor(kind, idx);
-  if (r && createIssue) acceptedReports.value = [...acceptedReports.value, r];
+  pendingAccepted = r && createIssue ? { idx, report: r } : null;
 }
 
-watch(() => props.file.path, () => {
+// Another file, or the same path in another repository.
+watch([() => props.file.path, () => props.cwd], () => {
   acceptedReports.value = [];
+  pendingAccepted = null;
 });
 
 // ─── Generic resolution preview (non_overlapping, one_side_change, …) ───
@@ -670,6 +675,8 @@ watch(
     // content moved under it) must not be believed by some later re-parse.
     const consumed = consumedHunkIndex;
     consumedHunkIndex = null;
+    const pending = pendingAccepted;
+    pendingAccepted = null;
 
     // Renumber only when the shape of the change is known: the same file, one
     // conflict fewer, and the index of the one that went. Anything else (an
@@ -684,6 +691,8 @@ watch(
       && nextPath === prevPath
       && nextHunks.length === prevHunks.length - 1;
     if (renumber) {
+      // The accepted hunk is the one that went: its write landed.
+      if (pending && pending.idx === consumed) acceptedReports.value = [...acceptedReports.value, pending.report];
       aiQueue.remapAfterApply([consumed]);
       aiBatchIndices.value = new Set(
         remapHunkIndices(aiBatchIndices.value, [consumed]).values(),

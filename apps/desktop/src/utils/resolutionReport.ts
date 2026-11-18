@@ -26,8 +26,21 @@ export interface ResolutionReport {
   resolvedLines: string[];
 }
 
-/** Under GitHub's 65,536-character body limit, with room for the user's edits. */
-export const REPORT_BODY_MAX = 60_000;
+/**
+ * The generated description's budget. With the answer field (`ANSWER_MAX`)
+ * and its heading on top, the sent body stays under GitHub's 65,536
+ * characters, with room left for the user's edits.
+ */
+export const REPORT_BODY_MAX = 50_000;
+
+/** The "What should it have been?" field's limit. */
+export const ANSWER_MAX = 10_000;
+
+/** The answer on top of a report's description (the one place that writes it). */
+export function withAnswer(answer: string, body: string): string {
+  const a = answer.trim();
+  return a ? `### What it should have been\n\n${a}\n\n${body}` : body;
+}
 
 /** Files without an extension whose name says their kind (and nothing private). */
 const KNOWN_NAMES = new Set([
@@ -62,13 +75,35 @@ interface Block {
   lines: string[];
   /** How many lines are kept (cut from the end when the body is too long). */
   kept: number;
+  /** How many characters of those lines are kept (one enormous line). */
+  maxChars: number;
+}
+
+/** `text` cut to `n` UTF-16 units, never splitting a surrogate pair. */
+function cutChars(text: string, n: number): string {
+  let cut = text.slice(0, n);
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+  return cut;
+}
+
+function shownText(b: Block): string {
+  const text = b.lines.slice(0, b.kept).join("\n");
+  return text.length > b.maxChars ? cutChars(text, b.maxChars) : text;
 }
 
 function renderBlock(b: Block, withLabel = true): string {
-  const shown = b.lines.slice(0, b.kept).join("\n");
-  const note = b.kept < b.lines.length ? `\n\n_(cut to its first ${b.kept} of ${b.lines.length} lines)_` : "";
+  const full = b.lines.slice(0, b.kept).join("\n");
+  const shown = shownText(b);
+  // Cut inside the block, so its fence always closes.
+  const notes: string[] = [];
+  if (b.kept < b.lines.length) notes.push(`_(cut to its first ${b.kept} of ${b.lines.length} lines)_`);
+  if (shown.length < full.length) notes.push(`_(cut to its first ${shown.length} characters)_`);
+  const note = notes.length ? `\n\n${notes.join(" ")}` : "";
   return `${withLabel ? `**${b.label}**\n\n` : ""}${codeBlock(shown)}${note}`;
 }
+
+/** An engine sentence can quote code: never let one line outgrow the budget. */
+const REASON_LINE_MAX = 1_000;
 
 function confidenceLine(h: ConflictHunk): string {
   return `${codeSpan(h.type)}, confidence ${h.confidence.score} (${h.confidence.label})`;
@@ -94,8 +129,9 @@ function scrubberFor(path: string): Scrub {
 /** The engine's reasoning: explanation, trace summary, and the proposal's own trace. */
 function reasoning(r: ResolutionReport, scrub: Scrub): string[] {
   const h = r.hunk;
-  const out = [`- Conflict type: ${confidenceLine(h)}`, `- Explanation: ${scrub(h.explanation)}`];
-  if (h.trace.summary) out.push(`- Decision: ${scrub(h.trace.summary)}`);
+  const clip = (t: string) => (t.length > REASON_LINE_MAX ? `${cutChars(t, REASON_LINE_MAX)}…` : t);
+  const out = [`- Conflict type: ${confidenceLine(h)}`, `- Explanation: ${clip(scrub(h.explanation))}`];
+  if (h.trace.summary) out.push(`- Decision: ${clip(scrub(h.trace.summary))}`);
   const llm = h.trace.llmTrace;
   if (r.kind === "ai" && llm) {
     out.push(`- AI proposal: model ${codeSpan(llm.model)}, validation ${llm.validationScore}`);
@@ -110,23 +146,23 @@ function reasoning(r: ResolutionReport, scrub: Scrub): string[] {
 }
 
 /**
- * The body: the user's answer first (when given), `head` lines, the three
- * versions and the result, then the reasoning — the longest block cut by half
- * until the whole fits `REPORT_BODY_MAX`.
+ * The description: `head` lines, the three versions and the result, then the
+ * reasoning — the longest block halved (by lines, then by characters) until
+ * the whole fits `REPORT_BODY_MAX`. The answer goes on top separately
+ * (`withAnswer`).
  */
-function assemble(r: ResolutionReport, answer: string, head: string[], scrub: Scrub = (t) => t): string {
+function assemble(r: ResolutionReport, head: string[], scrub: Scrub = (t) => t): string {
   const h = r.hunk;
   const blocks: Block[] = [
-    { label: "ours", lines: h.oursLines, kept: h.oursLines.length },
-    { label: "theirs", lines: h.theirsLines, kept: h.theirsLines.length },
+    { label: "ours", lines: h.oursLines, kept: h.oursLines.length, maxChars: Infinity },
+    { label: "theirs", lines: h.theirsLines, kept: h.theirsLines.length, maxChars: Infinity },
   ];
   // A 2-way conflict has no base: say nothing rather than show an empty one.
-  if (h.trace.hasBase && h.baseLines.length > 0) blocks.push({ label: "base", lines: h.baseLines, kept: h.baseLines.length });
-  const result: Block = { label: "GitWand's result", lines: r.resolvedLines, kept: r.resolvedLines.length };
+  if (h.trace.hasBase && h.baseLines.length > 0) blocks.push({ label: "base", lines: h.baseLines, kept: h.baseLines.length, maxChars: Infinity });
+  const result: Block = { label: "GitWand's result", lines: r.resolvedLines, kept: r.resolvedLines.length, maxChars: Infinity };
 
   const render = () => {
     const parts: string[] = [];
-    if (answer.trim()) parts.push(`### What it should have been\n\n${answer.trim()}`);
     parts.push(head.join("\n"));
     parts.push(`### The conflict\n\n${blocks.map((b) => renderBlock(b)).join("\n\n")}`);
     parts.push(`### GitWand's result\n\n${renderBlock(result, false)}`);
@@ -137,24 +173,21 @@ function assemble(r: ResolutionReport, answer: string, head: string[], scrub: Sc
   let body = render();
   const all = [...blocks, result];
   while (body.length > REPORT_BODY_MAX) {
-    const longest = all.reduce((a, b) => (b.lines.slice(0, b.kept).join("\n").length > a.lines.slice(0, a.kept).join("\n").length ? b : a));
-    if (longest.kept <= 1) break;
-    longest.kept = Math.max(1, Math.floor(longest.kept / 2));
+    const longest = all.reduce((a, b) => (shownText(b).length > shownText(a).length ? b : a));
+    const len = shownText(longest).length;
+    if (longest.kept > 1) longest.kept = Math.max(1, Math.floor(longest.kept / 2));
+    else if (len > 200) longest.maxChars = Math.floor(len / 2);
+    else break;
     body = render();
-  }
-  // A few enormous lines can still overflow: cut the text itself.
-  if (body.length > REPORT_BODY_MAX) {
-    const note = `\n\n_(cut to its first ${REPORT_BODY_MAX - 200} characters)_\n`;
-    body = body.slice(0, REPORT_BODY_MAX - 200) + note;
   }
   return body;
 }
 
 /** A report on the repository being worked on: names the file. */
-export function repoReportPrefill(r: ResolutionReport, answer: string): IssuePrefill {
+export function repoReportPrefill(r: ResolutionReport): IssuePrefill {
   return {
     title: issueTitle(`Bad merge resolution in ${codeSpan(r.path)}`),
-    body: assemble(r, answer, [`File: ${codeSpan(r.path)}, conflict starting at line ${r.hunk.startLine}.`]),
+    body: assemble(r, [`File: ${codeSpan(r.path)}, conflict starting at line ${r.hunk.startLine}.`]),
   };
 }
 
@@ -164,7 +197,6 @@ export function repoReportPrefill(r: ResolutionReport, answer: string): IssuePre
  */
 export function gitwandReportPrefill(
   r: ResolutionReport,
-  answer: string,
   env: { version: string; platform: string },
 ): IssuePrefill {
   const kind = fileKind(r.path);
@@ -172,6 +204,6 @@ export function gitwandReportPrefill(
   if (r.hunk.formatResolver) head.push(`Format resolver: ${codeSpan(r.hunk.formatResolver)}.`);
   return {
     title: issueTitle(`Resolver: bad ${codeSpan(r.hunk.type)} resolution (${codeSpan(kind)})`),
-    body: assemble(r, answer, head, scrubberFor(r.path)),
+    body: assemble(r, head, scrubberFor(r.path)),
   };
 }

@@ -2734,6 +2734,8 @@ const fr: Locale = {
       secretWarning: "Secret possible ligne {0} ({1}) : vérifiez avant d'envoyer",
       secretBlockingTitle: "Secret possible dans le titre ({0}) : retirez-le pour envoyer",
       secretWarningTitle: "Secret possible dans le titre ({0}) : vérifiez avant d'envoyer",
+      secretBlockingAnswer: "Secret possible dans la réponse ({0}) : retirez-le pour envoyer",
+      secretWarningAnswer: "Secret possible dans la réponse ({0}) : vérifiez avant d'envoyer",
       secretWarningMore: "…et {0} autres secrets possibles (chaînes à forte entropie)",
       replaceTitle: "Remplacer le titre et la description ?",
       replaceEdits: "Vos modifications du titre et de la description seront remplacées",

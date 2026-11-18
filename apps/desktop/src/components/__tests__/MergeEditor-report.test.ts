@@ -108,10 +108,10 @@ afterEach(() => {
 });
 
 function mountWithFile(initial: ConflictFile, withIssues = true) {
-  const state = reactive({ file: initial });
+  const state = reactive({ file: initial, cwd: "/repo-a" });
   const Wrapper = defineComponent({
     setup() {
-      return () => h(MergeEditor, { file: state.file });
+      return () => h(MergeEditor, { file: state.file, cwd: state.cwd });
     },
   });
   container = document.createElement("div");
@@ -176,11 +176,47 @@ describe("MergeEditor — report a resolution", () => {
     expect(lastCall()).toMatchObject({ kind: "token", path: PATH, resolvedLines: ["M"] });
   });
 
+  /** The parent's re-parse after hunk 0 was written: one conflict fewer. */
+  function afterWrite(file: ConflictFile): ConflictFile {
+    return {
+      ...file,
+      result: {
+        ...file.result,
+        hunks: file.result.hunks.slice(1),
+        resolutions: file.result.resolutions.slice(1),
+        stats: { ...file.result.stats, totalConflicts: 1, autoResolved: 1 },
+      },
+    } as ConflictFile;
+  }
+
+  it("an accept whose write never landed lists nothing", async () => {
+    mountWithFile(twoResolvableHunks());
+    await nextTick();
+    container.querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--accept")!.click();
+    await nextTick();
+    expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(0);
+  });
+
+  it("another repository's file at the same path empties the list", async () => {
+    const file = twoResolvableHunks();
+    const state = mountWithFile(file);
+    await nextTick();
+    container.querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--accept")!.click();
+    state.file = afterWrite(file);
+    await nextTick();
+    expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(1);
+    state.cwd = "/repo-b";
+    state.file = twoResolvableHunks();
+    await nextTick();
+    expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(0);
+  });
+
   it("an accepted proposal stays reportable from the list, until the file changes", async () => {
     const file = twoResolvableHunks();
     const state = mountWithFile(file);
     await nextTick();
     container.querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--accept")!.click();
+    state.file = afterWrite(file);
     await nextTick();
     const rows = container.querySelectorAll(".me-accepted-item");
     expect(rows).toHaveLength(1);

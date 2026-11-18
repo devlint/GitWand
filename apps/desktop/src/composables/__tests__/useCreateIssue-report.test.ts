@@ -75,7 +75,7 @@ describe("useCreateIssue — report mode", () => {
     expect(api.toGitwand.value).toBe(false);
     expect(api.gitwandLocked.value).toBe(false);
     expect(api.repo.value).toBe("me/app");
-    const expected = repoReportPrefill(REPORT, "");
+    const expected = repoReportPrefill(REPORT);
     expect(api.title.value).toBe(expected.title);
     expect(api.body.value).toBe(expected.body);
     expect(api.dirty.value).toBe(false);
@@ -112,8 +112,8 @@ describe("useCreateIssue — report mode", () => {
     api.answer.value = "keep both";
     api.setGitwand(true);
     expect(api.repo.value).toBe("devlint/GitWand");
-    expect(api.body.value).toBe(gitwandReportPrefill(REPORT, "", ENV).body);
-    expect(api.title.value).toBe(gitwandReportPrefill(REPORT, "", ENV).title);
+    expect(api.body.value).toBe(gitwandReportPrefill(REPORT, ENV).body);
+    expect(api.title.value).toBe(gitwandReportPrefill(REPORT, ENV).title);
     expect(api.finalBody.value.startsWith("### What it should have been\n\nkeep both")).toBe(true);
     expect(api.finalBody.value).not.toContain("src/x.ts");
     expect(api.answer.value).toBe("keep both");
@@ -122,7 +122,7 @@ describe("useCreateIssue — report mode", () => {
     api.confirmedPublic.value = true;
     api.setGitwand(false);
     expect(api.repo.value).toBe("me/app");
-    expect(api.body.value).toBe(repoReportPrefill(REPORT, "").body);
+    expect(api.body.value).toBe(repoReportPrefill(REPORT).body);
     expect(api.confirmedPublic.value).toBe(false);
   });
 
@@ -146,7 +146,7 @@ describe("useCreateIssue — report mode", () => {
     expect(api.canSubmit.value).toBe(true);
   });
 
-  it("a secret in the title blocks too (line 0 = the title)", async () => {
+  it("a secret in the title blocks too, named as in the title", async () => {
     const { api } = setup();
     await api.openFromResolution(REPORT);
     await settle();
@@ -154,8 +154,54 @@ describe("useCreateIssue — report mode", () => {
     api.confirmedPublic.value = true;
     api.title.value = `Leak ${TOKEN}`;
     await settle();
-    expect(api.findings.value.blocking.map((f) => f.line)).toEqual([0]);
+    expect(api.findings.value.blocking.map((f) => f.file)).toEqual(["title"]);
     expect(api.canSubmit.value).toBe(false);
+  });
+
+  it("names where a secret is: the answer, or the description's own line", async () => {
+    const { api } = setup();
+    await api.openFromResolution(REPORT);
+    await settle();
+    api.setGitwand(true);
+    api.answer.value = `one\ntwo ${TOKEN}`;
+    api.body.value = `l1\nl2\nl3\nl4\nkey ${TOKEN}`;
+    await settle();
+    expect(api.findings.value.blocking.map((f) => [f.file, f.line])).toEqual([["answer", 2], ["description", 5]]);
+  });
+
+  it("holds Create until the repository's secret patterns are loaded", async () => {
+    let release!: (o: { extraPatterns: never[]; entropyThreshold: number }) => void;
+    const api = useCreateIssue({
+      cwd: ref("/repo"),
+      provider: ref(provider()),
+      onCreated: vi.fn(),
+      report: {
+        createGitwandIssue: vi.fn(),
+        gitwandWritable: async () => true,
+        env: () => ENV,
+        secretsOptions: () => new Promise((r) => { release = r; }),
+        scanDebounceMs: 0,
+      },
+    });
+    await api.openFromResolution(REPORT);
+    api.setGitwand(true);
+    api.confirmedPublic.value = true;
+    await settle();
+    expect(api.canSubmit.value).toBe(false);
+    release({ extraPatterns: [], entropyThreshold: 4 });
+    await settle();
+    expect(api.canSubmit.value).toBe(true);
+  });
+
+  it("switching clears the previous target's error", async () => {
+    const { api, p } = setup();
+    (p.createIssue as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("403 Resource not accessible"));
+    await api.openFromResolution(REPORT);
+    await settle();
+    await api.submit();
+    expect(api.error.value).toContain("403");
+    api.setGitwand(true);
+    expect(api.error.value).toBeNull();
   });
 
   it("on the repository, a secret only warns", async () => {

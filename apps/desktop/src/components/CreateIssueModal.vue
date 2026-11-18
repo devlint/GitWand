@@ -12,6 +12,7 @@ import { CREATE_ISSUE_KEY, GITWAND_REPO } from "../composables/useCreateIssue";
 import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables/useSafeHtml";
 import { useI18n } from "../composables/useI18n";
 import { ISSUE_TITLE_MAX } from "../utils/issuePrefill";
+import { ANSWER_MAX } from "../utils/resolutionReport";
 import { openExternalUrl } from "../utils/backend";
 
 const { t } = useI18n();
@@ -92,6 +93,13 @@ const WARNINGS_SHOWN = 5;
 const shownWarnings = computed(() => form.findings.value.warnings.slice(0, WARNINGS_SHOWN));
 const hiddenWarnings = computed(() => Math.max(0, form.findings.value.warnings.length - WARNINGS_SHOWN));
 
+/** A finding, named by the field it is in (and the line, in the description). */
+function findingText(f: { file: string; line: number; patternId: string }, blocking: boolean): string {
+  if (f.file === "title") return t(blocking ? "createIssue.report.secretBlockingTitle" : "createIssue.report.secretWarningTitle", f.patternId);
+  if (f.file === "answer") return t(blocking ? "createIssue.report.secretBlockingAnswer" : "createIssue.report.secretWarningAnswer", f.patternId);
+  return t(blocking ? "createIssue.report.secretBlocking" : "createIssue.report.secretWarning", f.line, f.patternId);
+}
+
 /** The switch: regenerates title and description, after asking when either was edited. */
 async function onSwitch(e: Event) {
   const box = e.target as HTMLInputElement;
@@ -99,12 +107,15 @@ async function onSwitch(e: Event) {
   // The state decides what the box shows (a cancelled switch leaves it as it was).
   box.checked = form.toGitwand.value;
   if (form.bodyEdited.value) {
+    const asked = form.openId.value;
     const ok = await askConfirm({
       title: t("createIssue.report.replaceTitle"),
       message: t("createIssue.report.replaceEdits"),
       confirmLabel: t("createIssue.report.replace"),
     });
-    if (!ok) return;
+    // Another report (or none) may be on screen by now: the answer was about
+    // the one the question was asked for.
+    if (!ok || !form.isOpen.value || form.openId.value !== asked) return;
   }
   form.setGitwand(wanted);
 }
@@ -180,7 +191,7 @@ function onMilestone(e: Event) {
             v-model="form.answer.value"
             data-testid="ci-answer"
             class="ci-textarea ci-answer"
-            maxlength="10000"
+            :maxlength="ANSWER_MAX"
             rows="2"
             :placeholder="t('createIssue.report.answerPlaceholder')"
             :disabled="form.submitting.value"
@@ -308,20 +319,8 @@ function onMilestone(e: Event) {
           data-testid="ci-secrets"
           role="alert"
         >
-          <p v-for="(f, i) in form.findings.value.blocking" :key="`b${i}`">
-            {{
-              f.line === 0
-                ? t("createIssue.report.secretBlockingTitle", f.patternId)
-                : t("createIssue.report.secretBlocking", f.line, f.patternId)
-            }}
-          </p>
-          <p v-for="(f, i) in shownWarnings" :key="`w${i}`" class="ci-secret-warning">
-            {{
-              f.line === 0
-                ? t("createIssue.report.secretWarningTitle", f.patternId)
-                : t("createIssue.report.secretWarning", f.line, f.patternId)
-            }}
-          </p>
+          <p v-for="(f, i) in form.findings.value.blocking" :key="`b${i}`">{{ findingText(f, true) }}</p>
+          <p v-for="(f, i) in shownWarnings" :key="`w${i}`" class="ci-secret-warning">{{ findingText(f, false) }}</p>
           <p v-if="hiddenWarnings > 0">{{ t("createIssue.report.secretWarningMore", hiddenWarnings) }}</p>
         </div>
 
