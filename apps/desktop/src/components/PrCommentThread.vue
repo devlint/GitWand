@@ -17,6 +17,7 @@ import { formatRelativeAge } from "../utils/relativeTime";
 import Avatar from "./Avatar.vue";
 import { forgeAvatarUrl } from "../composables/useAvatar";
 import PrReactions from "./PrReactions.vue";
+import { commentLineRange } from "../utils/diffRange";
 
 const { t } = useI18n();
 
@@ -134,7 +135,7 @@ function timeAgo(dateStr: string): string {
   <div class="pct-thread">
     <!-- Comments -->
     <div
-      v-for="comment in comments"
+      v-for="(comment, idx) in comments"
       :key="comment.id"
       class="pct-comment"
     >
@@ -142,6 +143,8 @@ function timeAgo(dateStr: string): string {
       <div class="pct-comment-header">
         <Avatar class="pct-avatar" :name="comment.author" :url="forgeAvatarUrl(forgeName, comment.author)" />
         <span class="pct-author">{{ comment.author }}</span>
+        <!-- A multi-line comment's lines (shown on the thread's first comment). -->
+        <span v-if="idx === 0 && commentLineRange(comment)" class="pct-range">{{ t('pr.comment.lineRange', ...commentLineRange(comment)!) }}</span>
         <span class="pct-time" :title="comment.created_at">{{ timeAgo(comment.created_at) }}</span>
         <div class="pct-actions" v-if="(canEdit || canDelete) && (comment.author === currentUser || !currentUser)">
           <button
@@ -263,6 +266,12 @@ function timeAgo(dateStr: string): string {
   font-weight: 600;
   color: var(--color-text);
   font-size: 11px;
+}
+
+.pct-range {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-family: var(--font-mono);
 }
 
 .pct-time {

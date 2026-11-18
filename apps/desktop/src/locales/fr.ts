@@ -1076,6 +1076,7 @@ const fr: Locale = {
       unresolveThread: "Rouvrir la conversation",
       copyLink: "Copier le lien",
       linkCopied: "Lien copié",
+      lineRange: "Lignes {0}\u2013{1}",
       deleteConfirm: "Supprimer ce commentaire ?",
     },
     reactions: {

@@ -918,14 +918,26 @@ function onContentScroll(e: Event) {
 }
 
 /* Line selection for an issue (#301) */
+/* Number cells are dimmed with opacity, which would let the row's add/delete
+   tint through the highlight: dim the text instead while picked. */
+.cdv-line--selected > .cdv-line-no,
+.cdv-cell--selected.cdv-line-no {
+  opacity: 1;
+  color: var(--color-text-muted);
+}
 .cdv-line-no--pick { cursor: pointer; }
 .cdv-line-no--pick:hover { color: var(--color-accent); }
+/* Opaque, so picked lines read as one block whatever their kind (added,
+   deleted, context); the +/− markers still tell them apart. */
 .cdv-line--selected > td,
 .cdv-cell--selected {
-  box-shadow: inset 0 0 0 9999px var(--color-accent-soft);
+  box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--color-accent) 16%, var(--color-bg-secondary));
 }
 .cdv-issue-btn {
   flex-shrink: 0;
+  /* Taller than the header's text: pulled in so it doesn't grow the header
+     (and shift the rows below) when it appears. */
+  margin-block: -3px;
   padding: 2px 8px;
   border: 1px solid var(--color-accent);
   border-radius: var(--radius-sm);

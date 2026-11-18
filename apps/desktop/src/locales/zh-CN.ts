@@ -1074,6 +1074,7 @@ const zhCN: Locale = {
       unresolveThread: "重新打开对话",
       copyLink: "复制链接",
       linkCopied: "链接已复制",
+      lineRange: "第 {0}\u2013{1} 行",
       deleteConfirm: "删除此评论？",
     },
     reactions: {

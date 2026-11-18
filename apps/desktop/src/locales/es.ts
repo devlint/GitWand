@@ -1067,6 +1067,7 @@ const es: Locale = {
       unresolveThread: "Reabrir conversación",
       copyLink: "Copiar enlace",
       linkCopied: "Enlace copiado",
+      lineRange: "Líneas {0}\u2013{1}",
       deleteConfirm: "¿Eliminar este comentario?",
     },
     reactions: {

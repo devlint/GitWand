@@ -91,3 +91,21 @@ export function rowsInColumn(
     .map((p) => (side === "old" ? p.left : p.right))
     .filter((l): l is DiffLine => l !== null);
 }
+
+/**
+ * The ends of a multi-line review comment as shown above it ("20", "22"), or
+ * null for a single-line one. A range from the old version to the new signs
+ * both ends (−28, +30), since its numbers belong to different files.
+ */
+export function commentLineRange(c: {
+  start_line: number | null;
+  start_side: "LEFT" | "RIGHT" | null;
+  line: number | null;
+  side: "LEFT" | "RIGHT";
+}): [string, string] | null {
+  if (c.start_line === null || c.line === null) return null;
+  const startSide = c.start_side ?? c.side;
+  if (startSide === c.side) return c.start_line === c.line ? null : [String(c.start_line), String(c.line)];
+  const sign = (s: "LEFT" | "RIGHT") => (s === "LEFT" ? "−" : "+");
+  return [sign(startSide) + c.start_line, sign(c.side) + c.line];
+}

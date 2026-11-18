@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { githubRangeStart, findBlock, rowGroup, parseRowGroup, rowsInColumn } from "../diffRange";
+import { githubRangeStart, findBlock, rowGroup, parseRowGroup, rowsInColumn, commentLineRange } from "../diffRange";
 import type { DiffLine, GitDiff } from "../backend";
 
 const add = (n: number, c: string): DiffLine => ({ type: "add", content: c, newLineNo: n });
@@ -79,5 +79,31 @@ describe("row groups and columns", () => {
     ];
     expect(rowsInColumn(pairs, "old", 0, 2).map((l) => l.content)).toEqual(["a", "b"]);
     expect(rowsInColumn(pairs, "new", 1, 2).map((l) => l.content)).toEqual(["B", "C"]);
+  });
+});
+
+describe("commentLineRange", () => {
+  const c = (start_line: number | null, start_side: "LEFT" | "RIGHT" | null, line: number | null, side: "LEFT" | "RIGHT") => ({
+    start_line,
+    start_side,
+    line,
+    side,
+  });
+
+  it("is null for a single-line comment", () => {
+    expect(commentLineRange(c(null, null, 22, "RIGHT"))).toBeNull();
+    expect(commentLineRange(c(22, "RIGHT", 22, "RIGHT"))).toBeNull();
+    expect(commentLineRange(c(20, "RIGHT", null, "RIGHT"))).toBeNull();
+  });
+
+  it("gives the first and last line of a range on one side", () => {
+    expect(commentLineRange(c(20, "RIGHT", 22, "RIGHT"))).toEqual(["20", "22"]);
+    expect(commentLineRange(c(28, "LEFT", 29, "LEFT"))).toEqual(["28", "29"]);
+    // GitHub may omit start_side: the range is then on the comment's side.
+    expect(commentLineRange(c(20, null, 22, "RIGHT"))).toEqual(["20", "22"]);
+  });
+
+  it("signs both ends when the range goes from the old version to the new", () => {
+    expect(commentLineRange(c(28, "LEFT", 30, "RIGHT"))).toEqual(["\u221228", "+30"]);
   });
 });

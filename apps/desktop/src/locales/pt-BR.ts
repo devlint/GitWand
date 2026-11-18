@@ -1068,6 +1068,7 @@ const ptBR: Locale = {
       unresolveThread: "Reabrir conversa",
       copyLink: "Copiar link",
       linkCopied: "Link copiado",
+      lineRange: "Linhas {0}\u2013{1}",
       deleteConfirm: "Excluir este comentário?",
     },
     reactions: {

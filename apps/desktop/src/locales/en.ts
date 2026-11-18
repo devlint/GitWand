@@ -1083,6 +1083,7 @@ const en = {
       unresolveThread: "Unresolve conversation",
       copyLink: "Copy link",
       linkCopied: "Link copied",
+      lineRange: "Lines {0}\u2013{1}",
       deleteConfirm: "Delete this comment?",
     },
     reactions: {

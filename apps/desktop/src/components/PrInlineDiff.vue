@@ -1592,9 +1592,17 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
 }
 
 /* Shift+click range (#301) */
+/* Opaque, so a range reads as one block whatever its rows' kind. */
 .pid-row--selected {
-  box-shadow: inset 3px 0 0 var(--color-accent), inset 0 0 0 9999px var(--color-accent-soft);
+  box-shadow: inset 3px 0 0 var(--color-accent),
+    inset 0 0 0 9999px color-mix(in srgb, var(--color-accent) 16%, var(--color-bg-secondary));
 }
+/* The number cells are opaque: give them the same tint, and carry the
+   range's accent edge on the first one (it would hide the row's). */
+.pid-row--selected .pid-lno {
+  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-bg-secondary));
+}
+.pid-row--selected .pid-lno:first-of-type { box-shadow: inset 3px 0 0 var(--color-accent); }
 .pid-issue-btn {
   padding: 4px 10px;
   border: 1px solid var(--color-border);
