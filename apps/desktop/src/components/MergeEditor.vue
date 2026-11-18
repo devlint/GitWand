@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, inject, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ConflictFile } from "../composables/useGitWand";
 import { useResolutionSelection, contentStamp } from "../composables/useResolutionSelection";
 import { summarizeTiers, type ConflictHunk } from "@gitwand/core";
@@ -24,6 +24,8 @@ import {
 import LlmTracePanel from "./LlmTracePanel.vue";
 import TokenMergePanel from "./TokenMergePanel.vue";
 import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
+import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
+import type { ProposalKind, ResolutionReport } from "../utils/resolutionReport";
 // Async on purpose, and NOT a contradiction of the static-import justification
 // above: that one covers thin BaseModal wrappers with no heavy dependencies.
 // CodeEditor is the entry point to CodeMirror (~400 KB), and it sits behind a
@@ -556,6 +558,7 @@ function onTokenMergeAccept(hunkIndex: number) {
   const hunk = hunks.value[hunkIndex];
   const proposal = hunk?.trace.tokenMergeTrace;
   if (!proposal) return;
+  keepAccepted("token", hunkIndex);
   consumedHunkIndex = hunkIndex;
   emit("resolveHunkCustom", props.file.path, hunkIndex, proposal.mergedLines.join("\n"));
 }
@@ -572,6 +575,45 @@ function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean 
   return !rejectedTokenMergeHunks.value.has(hunkIndex);
 }
 
+// ─── "Report" a resolution (#301 part 3) ─────────────────
+// The issue form (App.vue provides it); without it, no Report button.
+const createIssue = inject(CREATE_ISSUE_KEY, null);
+const canReport = computed(() => !!createIssue);
+
+/** What a report needs about hunk `idx`, as the panel shows it. */
+function reportFor(kind: ProposalKind, idx: number): ResolutionReport | null {
+  const hunk = hunks.value[idx];
+  if (!hunk) return null;
+  const resolvedLines =
+    kind === "token" ? hunk.trace.tokenMergeTrace?.mergedLines : resolutions.value[idx]?.resolvedLines;
+  if (!resolvedLines) return null;
+  return { kind, path: props.file.path, hunk, resolvedLines };
+}
+
+function sendReport(r: ResolutionReport | null) {
+  if (r && createIssue) void createIssue.openFromResolution(r);
+}
+
+function onReport(kind: ProposalKind, hunkId: string | number) {
+  sendReport(reportFor(kind, Number(hunkId)));
+}
+
+/**
+ * Accepting an engine or token-level proposal writes the file: the hunk, and
+ * its panel, are gone after the reparse. A copy keeps it reportable for as
+ * long as this file is open — in memory only.
+ */
+const acceptedReports = ref<ResolutionReport[]>([]);
+
+function keepAccepted(kind: ProposalKind, idx: number) {
+  const r = reportFor(kind, idx);
+  if (r && createIssue) acceptedReports.value = [...acceptedReports.value, r];
+}
+
+watch(() => props.file.path, () => {
+  acceptedReports.value = [];
+});
+
 // ─── Generic resolution preview (non_overlapping, one_side_change, …) ───
 // Unlike llm_proposed/token_level_merge, these types are already pre-resolved
 // by the core (autoResolved: true) — accepting applies the SAME resolvedLines
@@ -581,6 +623,7 @@ function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean 
 function onPreviewAccept(hunkIndex: number) {
   const resolution = resolutions.value[hunkIndex];
   if (!resolution?.resolvedLines) return;
+  keepAccepted("engine", hunkIndex);
   consumedHunkIndex = hunkIndex;
   emit("resolveHunkCustom", props.file.path, hunkIndex, resolution.resolvedLines.join("\n"));
 }
@@ -1040,6 +1083,17 @@ useResizeObserver(contentEl, drawMinimap);
       </button>
     </div>
 
+    <!-- Proposals accepted in this session, still reportable (#301) -->
+    <div v-if="acceptedReports.length" class="me-accepted" role="region" :aria-label="t('createIssue.report.acceptedTitle')">
+      <span class="me-accepted-title">{{ t("createIssue.report.acceptedTitle") }}</span>
+      <span v-for="(r, i) in acceptedReports" :key="i" class="me-accepted-item">
+        {{ t("createIssue.report.acceptedItem", r.hunk.startLine) }}
+        <button type="button" class="me-accepted-btn" :title="t('createIssue.report.buttonTitle')" @click="sendReport(r)">
+          {{ t("createIssue.report.button") }}
+        </button>
+      </span>
+    </div>
+
     <!-- Custom Automation banner -->
     <div v-if="matchingRule" class="me-automation-banner">
       <div class="me-automation-body">
@@ -1211,8 +1265,10 @@ useResizeObserver(contentEl, drawMinimap);
               :file-path="file.path"
               :hunk-id="seg.hunkIndex"
               :accepted="acceptedLlmHunks.has(seg.hunkIndex)"
+              :can-report="canReport"
               @accept="onLlmAccept"
               @reject="onLlmReject"
+              @report="onReport('ai', $event)"
             />
 
             <!-- ── v3.4 token_level_merge proposal (when not rejected) ────── -->
@@ -1220,8 +1276,10 @@ useResizeObserver(contentEl, drawMinimap);
               v-if="hunkForSegment(seg) && seg.hunkIndex != null && showTokenMergePanelFor(seg.hunkIndex, hunkForSegment(seg)!)"
               :trace="hunkForSegment(seg)!.trace.tokenMergeTrace!"
               :hunk-id="seg.hunkIndex"
+              :can-report="canReport"
               @accept="onTokenMergeAccept"
               @reject="onTokenMergeReject"
+              @report="onReport('token', $event)"
             />
 
             <!-- ── Résolution générique pré-calculée (non_overlapping, one_side_change, …) ── -->
@@ -1232,8 +1290,10 @@ useResizeObserver(contentEl, drawMinimap);
               :explanation="hunkForSegment(seg)!.explanation"
               :confidence-score="hunkForSegment(seg)!.confidence.score"
               :confidence-label="hunkForSegment(seg)!.confidence.label"
+              :can-report="canReport"
               @accept="onPreviewAccept"
               @reject="onPreviewReject"
+              @report="onReport('engine', $event)"
             />
 
             <!-- ── VS Code-style inline action bar ─────────── -->
@@ -1514,6 +1574,37 @@ useResizeObserver(contentEl, drawMinimap);
 </template>
 
 <style scoped>
+.me-accepted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.me-accepted-title {
+  font-weight: 600;
+}
+.me-accepted-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.me-accepted-btn {
+  padding: 1px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+.me-accepted-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
 .merge-editor {
   display: flex;
   flex-direction: column;

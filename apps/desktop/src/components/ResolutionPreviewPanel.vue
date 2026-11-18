@@ -9,11 +9,14 @@ const props = defineProps<{
   /** v3.11 — the engine's per-hunk confidence, 0-100, and its discrete label. */
   confidenceScore?: number;
   confidenceLabel?: string;
+  /** Show "Report" (the issue form is available, #301). */
+  canReport?: boolean;
 }>();
 
 const emit = defineEmits<{
   accept: [hunkId: number];
   reject: [hunkId: number];
+  report: [hunkId: number];
 }>();
 
 const { t } = useI18n();
@@ -51,6 +54,16 @@ const { t } = useI18n();
       <span v-else class="resolution-preview-panel__accepted-badge">
         {{ t('mergeEditor.resolutionPreview.accepted') }}
       </span>
+      <button
+        v-if="props.canReport"
+        type="button"
+        class="resolution-preview-panel__btn resolution-preview-panel__btn--reject"
+        data-action="report"
+        :title="t('createIssue.report.buttonTitle')"
+        @click="emit('report', props.hunkId)"
+      >
+        {{ t('createIssue.report.button') }}
+      </button>
     </div>
   </div>
 </template>
