@@ -178,7 +178,7 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     await nextTick();
     click(numberCell(0, 1));
     await nextTick();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    document.querySelector(".commit-diff-viewer")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await nextTick();
     expect(fake.activeSelection.value).toBeNull();
     expect(document.querySelector(".cdv-line--selected")).toBeNull();
@@ -300,6 +300,27 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     await nextTick();
     expect(fake.activeSelection.value).toBeNull();
     expect(document.querySelector(".cdv-line--selected")).toBeNull();
+  });
+
+  it("a click on a line number puts the focus on the diff (where Escape works)", async () => {
+    mount();
+    await nextTick();
+    click(numberCell(0, 1));
+    await nextTick();
+    expect(document.activeElement).toBe(document.querySelector(".commit-diff-viewer"));
+  });
+
+  it("losing issue creation clears the selection", async () => {
+    const { fake } = mount();
+    await nextTick();
+    click(numberCell(0, 1));
+    await nextTick();
+    fake.available.value = false;
+    await nextTick();
+    expect(document.querySelector(".cdv-line--selected")).toBeNull();
+    fake.available.value = true;
+    await nextTick();
+    expect(fake.activeSelection.value).toBeNull();
   });
 
   it("Escape meant for something else keeps the selection", async () => {

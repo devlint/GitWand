@@ -50,32 +50,31 @@ describe("useLineRange", () => {
     expect(r.range.value).toEqual({ group: "h2", anchor: 1, focus: 1, lo: 1, hi: 1 });
   });
 
-  it("Escape clears it and goes no further; not from a field, a dialog or once handled", () => {
+  it("Escape on the diff clears it and lets the key go on; not under a dialog or once handled", () => {
     const r = withRange({ dismiss: { keep: ".keep" } });
-    const outer = vi.fn();
-    window.addEventListener("keydown", outer);
-    try {
-      r.pick("h", 1, false);
-      const input = document.createElement("input");
-      document.body.appendChild(input);
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-      handled.preventDefault();
-      document.dispatchEvent(handled);
-      const dialog = document.createElement("div");
-      dialog.setAttribute("aria-modal", "true");
-      document.body.appendChild(dialog);
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      expect(r.range.value).not.toBeNull();
-      dialog.remove();
-      outer.mockClear();
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      expect(r.range.value).toBeNull();
-      // One key, one thing: an overlay listening further up stays open.
-      expect(outer).not.toHaveBeenCalled();
-    } finally {
-      window.removeEventListener("keydown", outer);
-    }
+    r.pick("h", 1, false);
+    const handled = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    handled.preventDefault();
+    r.onKeydown(handled);
+    const dialog = document.createElement("div");
+    dialog.setAttribute("aria-modal", "true");
+    document.body.appendChild(dialog);
+    r.onKeydown(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(r.range.value).not.toBeNull();
+    dialog.remove();
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+    const stop = vi.spyOn(esc, "stopPropagation");
+    r.onKeydown(esc);
+    expect(r.range.value).toBeNull();
+    // Menus and overlays listening further up still get it.
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("an Escape elsewhere in the document leaves it alone", () => {
+    const r = withRange({ dismiss: { keep: ".keep" } });
+    r.pick("h", 1, false);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(r.range.value).not.toBeNull();
   });
 
   it("a press elsewhere clears it; not on kept elements nor on the scroll area", () => {
@@ -95,7 +94,6 @@ describe("useLineRange", () => {
   it("without dismiss options, nothing outside clears it", () => {
     const r = withRange();
     r.pick("h", 1, false);
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     expect(r.range.value).not.toBeNull();
     r.clear();

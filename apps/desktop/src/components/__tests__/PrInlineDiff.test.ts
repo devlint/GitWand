@@ -244,7 +244,7 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(params.start_line).toBeUndefined();
   });
 
-  it("Create issue files the range with the typed text; the draft stays, the range goes", async () => {
+  it("Create issue files the range with the typed text; the draft and range stay for the comment", async () => {
     const r = mountRange();
     mounted = r.mounted;
     const c = r.mounted.container;
@@ -260,9 +260,10 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(sel.lines.map((l) => l.content)).toEqual(["c3", "c4", "c5", "c6"]);
     expect(sel.intro).toBe("x");
     expect(sel.source).toEqual({ kind: "pr", number: 12, url: "https://github.com/o/r/pull/12", headSha: "h".repeat(40) });
-    // Cancelling the issue must not have cost the comment draft.
+    // Cancelling the issue must not have cost the comment draft, nor its range.
     expect(c.querySelector<HTMLTextAreaElement>(".pid-compose textarea")?.value).toBe("x");
-    expect(c.querySelectorAll(".pid-row--selected")).toHaveLength(0);
+    expect(c.querySelectorAll(".pid-row--selected")).toHaveLength(4);
+    // Filed: ⌘⇧I is about something else now.
     expect(r.fake.activeSelection.value).toBeNull();
   });
 
@@ -567,5 +568,30 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     const ev = new MouseEvent("mousedown", { bubbles: true, cancelable: true, shiftKey: true });
     newNo(r.mounted.container, 3).dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it("after filing an issue, the comment still covers the range", async () => {
+    const created = vi.fn();
+    const r = mountRange({ onCreateComment: created });
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 6), true);
+    await nextTick();
+    await typeInCompose(c, "x");
+    c.querySelector<HTMLButtonElement>(".pid-issue-btn")!.click();
+    await nextTick();
+    c.querySelector<HTMLButtonElement>(".pid-submit-btn")!.click();
+    expect(created).toHaveBeenCalledWith(expect.objectContaining({ line: 6, start_line: 3 }));
+  });
+
+  it("the comment box lets the new-issue shortcut through", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    await nextTick();
+    clickNo(newNo(r.mounted.container, 3));
+    await nextTick();
+    expect(r.mounted.container.querySelector(".pid-compose textarea")?.hasAttribute("data-issue-shortcut")).toBe(true);
   });
 });

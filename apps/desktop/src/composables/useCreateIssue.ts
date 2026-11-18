@@ -50,6 +50,8 @@ export function newIssueShortcutLabel(mac: boolean): string {
 }
 
 /** A text field, an editable element or the terminal: where keys type. */
+/** A field typed in (the shortcut is left to it), unless it asks for the
+ *  shortcut with `data-issue-shortcut` (the PR comment box: a range). */
 function isTypingTarget(t: EventTarget | null): boolean {
   const el = t as (HTMLElement & { closest?: (s: string) => Element | null }) | null;
   if (!el || typeof el !== "object") return false;
@@ -59,7 +61,7 @@ function isTypingTarget(t: EventTarget | null): boolean {
     el.tagName === "SELECT" ||
     el.isContentEditable === true ||
     !!el.closest?.(".xterm")
-  );
+  ) && !el.closest?.("[data-issue-shortcut]");
 }
 
 /**
@@ -396,9 +398,10 @@ export function useCreateIssue(deps: {
         }),
       );
     }
-    // The form is on screen from here (`open` shows it before reading).
-    sel.onOpened?.();
     await opened;
+    // Handed over only once the form could read its targets: a form that
+    // failed (signed out…) must not have cost the selection.
+    if (isOpen.value && !targetsFailed.value) sel.onOpened?.();
     return true;
   }
 

@@ -231,4 +231,14 @@ describe("selectionIssuePrefill", () => {
     expect(body.length).toBeLessThan(65536);
     expect(body).toMatch(/\n\(cut to its first \d+ characters\)\n/);
   });
+
+  it("a PR's deleted lines with context link the context at the head (no base SHA)", () => {
+    const sel: DiffSelection = {
+      path: "x.ts", lines: [ctx(9, 9, "a"), del(10, "b"), ctx(11, 10, "c")],
+      source: { kind: "pr", number: 1, url: "https://github.com/o/r/pull/1", headSha: "h" },
+    };
+    const body = selectionIssuePrefill(sel, { repoHtmlUrl: "https://github.com/o/r", newSha: "h", oldSha: null, commitUrl: null }).body;
+    expect(body.startsWith("https://github.com/o/r/blob/h/x.ts#L9-L10\n")).toBe(true);
+    expect(body).toContain("`x.ts` lines 9–10, ");
+  });
 });

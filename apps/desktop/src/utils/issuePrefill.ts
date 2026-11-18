@@ -81,8 +81,9 @@ export interface DiffSelection {
   side?: "old" | "new";
   /** Text typed before (the PR compose box): starts the body. */
   intro?: string;
-  /** Told once the issue form has opened with this selection (the view
-   *  that owns it then lets it go: the PR compose box closes). */
+  /** Told once the issue form has opened with this selection and read its
+   *  targets: the view that owns it stops offering it to ⌘⇧I (the commit
+   *  diff clears it; the PR diff keeps the range and draft for the comment). */
   onOpened?: () => void;
 }
 
@@ -145,7 +146,10 @@ export function selectionIssuePrefill(
   sel: DiffSelection,
   at: SelectionLinks,
 ): IssuePrefill {
-  const span = permalinkSpan(sel.lines, sel.side);
+  let span = permalinkSpan(sel.lines, sel.side);
+  // No old version to link (a PR: its base is unknown) but context lines
+  // picked with the deleted ones: link those where they are now.
+  if (span?.side === "old" && !at.oldSha && !sel.side) span = permalinkSpan(sel.lines, "new") ?? span;
   // Deleted lines of a renamed file live under its old path.
   const path = span?.side === "old" && sel.oldPath ? sel.oldPath : sel.path;
   const sha = span?.side === "old" ? at.oldSha : at.newSha;

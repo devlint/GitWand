@@ -502,6 +502,15 @@ describe("useCreateIssue — from a diff selection", () => {
 });
 
 describe("useCreateIssue — selection hand-off", () => {
+  it("lets the selection go only once the form could read its targets", async () => {
+    const failing = setup(provider({ issueTargets: vi.fn(async () => { throw new Error("auth"); }) }));
+    await failing.api.refreshAvailability();
+    const kept = vi.fn();
+    await failing.api.openFromSelection({ ...prSel(ADDED), onOpened: kept });
+    expect(failing.api.targetsFailed.value).toBe(true);
+    expect(kept).not.toHaveBeenCalled();
+  });
+
   it("reports whether it opened, and tells the selection's view only then", async () => {
     const { api } = setup(provider());
     await api.refreshAvailability();
@@ -602,5 +611,11 @@ describe("isNewIssueShortcut — off macOS", () => {
   it("is labelled for the platform", () => {
     expect(newIssueShortcutLabel(true)).toBe("⌘⇧I");
     expect(newIssueShortcutLabel(false)).toBe("Ctrl+Alt+I");
+  });
+
+  it("works from a field that asks for it (the PR comment box holding a range)", () => {
+    const target = { tagName: "TEXTAREA", closest: (q: string) => (q.includes("data-issue-shortcut") ? {} : null) };
+    const e = { key: "i", ctrlKey: true, altKey: true, metaKey: false, shiftKey: false, target, getModifierState: () => false } as unknown as KeyboardEvent;
+    expect(isNewIssueShortcut(e, false)).toBe(true);
   });
 });

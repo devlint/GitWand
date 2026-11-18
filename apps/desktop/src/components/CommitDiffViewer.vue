@@ -267,9 +267,20 @@ const lineRange = useLineRange({
   dismiss: { keep: ".cdv-line-no, .cdv-issue-btn", scrollEl: () => contentEl.value },
 });
 
+/** The viewer's root: focused on a pick, so Escape there clears the range. */
+const rootEl = ref<HTMLElement | null>(null);
+
 function onLineNoClick(e: MouseEvent, fileIdx: number, hunkIdx: number, idx: number, side: SelSide) {
-  if (canSelectLines.value) lineRange.pick(groupOf(fileIdx, hunkIdx, side), idx, e.shiftKey);
+  if (!canSelectLines.value) return;
+  lineRange.pick(groupOf(fileIdx, hunkIdx, side), idx, e.shiftKey);
+  rootEl.value?.focus({ preventScroll: true });
 }
+
+// Issues no longer possible here (another origin, signed out): nothing to
+// file the highlighted lines with.
+watch(canSelectLines, (can) => {
+  if (!can) lineRange.clear();
+});
 
 function isSelected(fileIdx: number, hunkIdx: number, idx: number, side: SelSide): boolean {
   return lineRange.isIn(groupOf(fileIdx, hunkIdx, side), idx);
@@ -451,7 +462,7 @@ function onContentScroll(e: Event) {
 </script>
 
 <template>
-  <div class="commit-diff-viewer">
+  <div ref="rootEl" class="commit-diff-viewer" tabindex="-1" @keydown="lineRange.onKeydown">
     <!-- Commit card -->
     <div class="cdv-commit-card" v-if="commitInfo">
       <!-- Row 1: avatar + subject + hash -->
@@ -660,6 +671,7 @@ function onContentScroll(e: Event) {
 </template>
 
 <style scoped>
+.commit-diff-viewer:focus { outline: none; }
 .commit-diff-viewer {
   display: flex;
   flex-direction: column;

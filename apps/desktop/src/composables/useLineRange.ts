@@ -23,6 +23,8 @@ export interface LineRangeApi {
   pick(group: string, idx: number, extend: boolean): void;
   isIn(group: string, idx: number): boolean;
   clear(): void;
+  /** Bind on the diff's root (`@keydown`): Escape there clears the range. */
+  onKeydown(e: KeyboardEvent): void;
 }
 
 /**
@@ -35,9 +37,10 @@ export function preventShiftSelect(e: MouseEvent): void {
 
 export function useLineRange(opts?: {
   /**
-   * Clear on Escape (not from a field, not under a dialog, not once handled;
-   * the key then goes no further) and on a press outside `keep` (nor on
-   * `scrollEl` itself: a press on its scrollbar is scrolling).
+   * Clear on a press outside `keep` (nor on `scrollEl` itself: a press on
+   * its scrollbar is scrolling). Escape clears through `onKeydown`, bound on
+   * the diff: only when the user is in the diff, and the key goes on to menus
+   * and overlays listening further up.
    */
   dismiss?: { keep: string; scrollEl?: () => HTMLElement | null };
 }): LineRangeApi {
@@ -63,17 +66,14 @@ export function useLineRange(opts?: {
     state.value = null;
   }
 
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key !== "Escape" || !state.value || e.defaultPrevented) return;
+    if (document.querySelector('[aria-modal="true"]')) return;
+    clear();
+  }
+
   const dismiss = opts?.dismiss;
   if (dismiss) {
-    const onKeydown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || !state.value || e.defaultPrevented) return;
-      const target = e.target as HTMLElement | null;
-      if (target?.closest?.("input, textarea, select, [contenteditable]")) return;
-      if (document.querySelector('[aria-modal="true"]')) return;
-      clear();
-      // One key, one thing: an overlay closed by a window-level Escape stays.
-      e.stopPropagation();
-    };
     const onMousedown = (e: MouseEvent) => {
       if (!state.value) return;
       const target = e.target as Element | null;
@@ -81,15 +81,9 @@ export function useLineRange(opts?: {
       if (target && target === dismiss.scrollEl?.()) return;
       clear();
     };
-    onMounted(() => {
-      document.addEventListener("keydown", onKeydown);
-      document.addEventListener("mousedown", onMousedown);
-    });
-    onUnmounted(() => {
-      document.removeEventListener("keydown", onKeydown);
-      document.removeEventListener("mousedown", onMousedown);
-    });
+    onMounted(() => document.addEventListener("mousedown", onMousedown));
+    onUnmounted(() => document.removeEventListener("mousedown", onMousedown));
   }
 
-  return { range, pick, isIn, clear };
+  return { range, pick, isIn, clear, onKeydown };
 }
