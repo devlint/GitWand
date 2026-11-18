@@ -41,8 +41,9 @@ lines, so whoever picks it up lands on them.
 
 ## Approaches (decided with the user: commit + PR)
 
-- **Commit + PR — chosen.** Both have a permalink. The PR diff reuses its drag
-  selection; the commit diff gets a new one.
+- **Commit + PR — chosen.** Both have a permalink. Both get click /
+  Shift+click on line numbers (the PR diff's promised drag selection turned out
+  never to have been wired, see below).
 - Commit only: smaller, PR diff later.
 - All three views: adds the working tree, without a permalink and with a
   selection to reconcile with staging checkboxes.
@@ -57,9 +58,15 @@ lines, so whoever picks it up lands on them.
   mode: either number column selects the row. Side-by-side: the left numbers
   select old-side lines, the right numbers new-side lines. Selected rows are
   highlighted; a small "Create issue" button appears beside the selection.
-- **PR diff (existing):** the compose box that opens on a line or a dragged
-  range gets a "Create issue" action next to Comment; text already typed in the
-  box becomes the start of the issue body.
+- **PR diff:** the "drag selection" its header comment promises was never wired
+  (`selectionStart` is declared and read, never set): only one line can be
+  commented today. Decided with the user: clicking a line number keeps opening
+  the compose box on that line; **Shift+click** another line number of the same
+  hunk extends it to the range, highlighted. The range applies to **both** the
+  comment (sent as a GitHub multi-line comment through the existing
+  `start_line` / `start_side` plumbing, Rust REST and dev-server alike) and a
+  new "Create issue" action next to Comment; text already typed in the box
+  becomes the start of the issue body.
 
 ### Which side the permalink points at
 
