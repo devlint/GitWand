@@ -493,6 +493,8 @@ const prPanel = usePrPanel(prCwd, {
   // loadLog) so the two collapse to a single refresh if they race.
   onVisibilityResume: () => {
     commitReview.resume();
+    // A `gh auth login` done meanwhile can make reports possible (#301).
+    void createIssue.refreshAvailability();
     watcherRefreshQueue.schedule("worktree-index", async () => {
       await repoRefresh();
       if (viewMode.value === "history" || showGitTree.value) await loadLog();

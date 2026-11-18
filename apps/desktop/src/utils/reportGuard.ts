@@ -16,12 +16,15 @@ const SCAN_CAP = 500;
  *  stays far under SCAN_CAP. */
 const SLICE_LINES = 50;
 
-/** `text` in pieces of about PIECE_CHARS, cut at whitespace (never inside a token). */
+/** `text` in pieces of about PIECE_CHARS, cut outside tokens (never inside one). */
 function piecesOf(text: string): string[] {
   const out: string[] = [];
   let rest = text;
   while (rest.length > PIECE_CHARS) {
-    const cut = rest.lastIndexOf(" ", PIECE_CHARS);
+    // The last character before the limit that cannot be part of a token
+    // (the scanner's token class), so no token is cut in two.
+    let cut = PIECE_CHARS;
+    while (cut > 0 && /[A-Za-z0-9+/=_-]/.test(rest[cut - 1])) cut--;
     const at = cut > 0 ? cut : PIECE_CHARS;
     out.push(rest.slice(0, at));
     rest = rest.slice(at);

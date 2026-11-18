@@ -332,6 +332,8 @@ export function useCreateIssue(deps: {
   // not discard the prefill still on its way.
   let openGeneration = 0;
   let availabilitySeq = 0;
+  // Whether `reportAvailable` has been answered for the current repository.
+  let availabilityChecked = false;
 
   const finalBody = computed(() => (report.value ? withAnswer(answer.value, body.value, toGitwand.value) : body.value));
   // Title or description no longer what was generated for the current target.
@@ -396,11 +398,15 @@ export function useCreateIssue(deps: {
         writable = false;
       }
     }
-    if (seq === availabilitySeq) reportAvailable.value = ok || writable;
+    if (seq === availabilitySeq) {
+      reportAvailable.value = ok || writable;
+      availabilityChecked = true;
+    }
   }
 
   function forgetAvailability() {
     availabilitySeq++;
+    availabilityChecked = false;
     available.value = false;
     reportAvailable.value = false;
   }
@@ -633,7 +639,11 @@ export function useCreateIssue(deps: {
   }
 
   async function openFromResolution(r: ResolutionReport): Promise<void> {
-    if (!makeRoom()) return;
+    // Not checked yet for this repository (a click before the first check):
+    // check now. Then, nowhere to send it (not a GitHub repository, no
+    // github.com sign-in): nothing to open.
+    if (!availabilityChecked) await refreshAvailability();
+    if (!reportAvailable.value || !makeRoom()) return;
     // False when the form was closed (or reopened) while its targets loaded:
     // the report must not attach to whatever form is on screen now.
     if (!(await open())) return;

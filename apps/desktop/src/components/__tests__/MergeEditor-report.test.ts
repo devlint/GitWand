@@ -289,6 +289,23 @@ describe("MergeEditor — report a resolution", () => {
     }
   });
 
+  it("hides the accepted list too when no report could be sent", async () => {
+    const file = twoResolvableHunks();
+    const state = mountWithFile(file);
+    await nextTick();
+    container.querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--accept")!.click();
+    state.file = afterWrite(file);
+    await nextTick();
+    expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(1);
+    issues.reportAvailable.value = false;
+    try {
+      await nextTick();
+      expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(0);
+    } finally {
+      issues.reportAvailable.value = true;
+    }
+  });
+
   it("offers no Report without the issue form", async () => {
     mountWithFile(twoResolvableHunks(), false);
     await nextTick();

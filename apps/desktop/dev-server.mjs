@@ -1079,6 +1079,9 @@ function devCoalesceRepoPaths(batch) {
  *  2. `gh auth token` CLI
  *  3. Parse ~/.config/gh/hosts.yml directly
  */
+/** `/api/gh-gitwand-writable`'s last answer and when (#301). */
+let devGitwandWritable = null;
+
 function getGithubToken() {
   if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
   if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
@@ -5528,7 +5531,13 @@ async function handleRequest(req, res) {
     // GET /api/gh-gitwand-writable — mirrors `gh_gitwand_writable`: the
     // dev-server writes with the `gh` token, so a token is enough.
     if (url.pathname === "/api/gh-gitwand-writable" && req.method === "GET") {
-      return jsonResponse(req, res, !!getGithubToken());
+      // getGithubToken() spawns `gh auth token` synchronously: reused for
+      // 30 s, as the Rust side does, so tab switches don't block the server.
+      const now = Date.now();
+      if (!devGitwandWritable || now - devGitwandWritable.at > 30_000) {
+        devGitwandWritable = { ok: !!getGithubToken(), at: now };
+      }
+      return jsonResponse(req, res, devGitwandWritable.ok);
     }
 
     // POST /api/gh-create-gitwand-issue { input } — mirrors

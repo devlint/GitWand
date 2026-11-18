@@ -155,20 +155,35 @@ export function retractForInvariant(
   resolutions: HunkResolution[],
   why: string,
 ): { hunks: ConflictHunk[]; resolutions: HunkResolution[] } {
-  const retractedIdx = new Set(resolutions.flatMap((r, i) => (r.autoResolved ? [i] : [])));
+  const retracted = new Set(resolutions.flatMap((r, i) => (r.autoResolved ? [i] : [])));
+  const out = forgetRetractedFormatResolvers(hunks, resolutions, (i) => retracted.has(i));
   return {
-    hunks: hunks.map((h, i) => (retractedIdx.has(i) ? withoutFormatResolver(h) : h)),
-    resolutions: resolutions.map((r) =>
-      r.autoResolved
+    hunks: out.hunks,
+    resolutions: out.resolutions.map((r, i) =>
+      retracted.has(i)
         ? {
             ...r,
-            hunk: withoutFormatResolver(r.hunk),
             autoResolved: false,
             resolvedLines: null,
             resolutionReason: `Retracted: the merged content violates a format invariant. ${why}`,
           }
         : r,
     ),
+  };
+}
+
+/**
+ * #301 — Every retraction (format invariant, parse tree) goes through here:
+ * a retracted hunk names no format resolver, in `hunks` and in `resolutions`.
+ */
+export function forgetRetractedFormatResolvers(
+  hunks: ConflictHunk[],
+  resolutions: HunkResolution[],
+  isRetracted: (index: number) => boolean,
+): { hunks: ConflictHunk[]; resolutions: HunkResolution[] } {
+  return {
+    hunks: hunks.map((h, i) => (isRetracted(i) ? withoutFormatResolver(h) : h)),
+    resolutions: resolutions.map((r, i) => (isRetracted(i) ? { ...r, hunk: withoutFormatResolver(r.hunk) } : r)),
   };
 }
 
@@ -637,12 +652,13 @@ export async function resolveAsync(
     // Parse-tree invalide → rétraction de toutes les résolutions automatiques.
     // On ne peut pas savoir quel hunk a cassé la syntaxe sans une analyse fine,
     // donc on est conservatif : tout remettre en conflits manuels.
-    const retractedResolutions = result.resolutions.map((r) =>
-      r.autoResolved ? applyPostMergeRiskPenalty(r) : r,
-    );
+    const penalized = result.resolutions.map((r) => (r.autoResolved ? applyPostMergeRiskPenalty(r) : r));
+    const forgotten = forgetRetractedFormatResolvers(result.hunks, penalized, (i) => result.resolutions[i].autoResolved);
+    const retractedResolutions = forgotten.resolutions;
 
     return {
       ...result,
+      hunks: forgotten.hunks,
       // mergedContent = null indique aux consommateurs que des conflits subsistent.
       // Le contenu original (avec marqueurs) est conservé dans conflictedContent
       // par l'appelant — ici on expose uniquement la MergeResult enrichie.

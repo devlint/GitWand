@@ -1101,7 +1101,7 @@ useResizeObserver(contentEl, drawMinimap);
     </div>
 
     <!-- Proposals accepted in this session, still reportable (#301) -->
-    <div v-if="acceptedReports.length" class="me-accepted" role="region" :aria-label="t('createIssue.report.acceptedTitle')">
+    <div v-if="canReport && acceptedReports.length" class="me-accepted" role="region" :aria-label="t('createIssue.report.acceptedTitle')">
       <span class="me-accepted-title">{{ t("createIssue.report.acceptedTitle") }}</span>
       <span v-for="(r, i) in acceptedReports" :key="i" class="me-accepted-item">
         {{ t("createIssue.report.acceptedItem", r.hunk.type, acceptedSnippet(r)) }}

@@ -3,7 +3,7 @@
  * resolver: the hunk was not resolved by it in the end.
  */
 import { describe, it, expect } from "vitest";
-import { retractForInvariant } from "../resolver/index.js";
+import { retractForInvariant, forgetRetractedFormatResolvers } from "../resolver/index.js";
 import type { ConflictHunk, HunkResolution } from "../types.js";
 
 const hunk = { type: "format_semantic", formatResolver: "json" } as unknown as ConflictHunk;
@@ -24,3 +24,15 @@ describe("retractForInvariant", () => {
     expect(retractForInvariant([hunk], [res], "x").resolutions[0]).toBe(res);
   });
 });
+
+describe("forgetRetractedFormatResolvers (parse-tree retraction)", () => {
+  it("clears the resolver's name on every retracted hunk and resolution", () => {
+    const kept: HunkResolution = { hunk, resolvedLines: null, autoResolved: false, resolutionReason: "manual" };
+    const out = forgetRetractedFormatResolvers([hunk, hunk], [kept, kept], (i) => i === 1);
+    expect(out.hunks[0].formatResolver).toBe("json");
+    expect(out.hunks[1].formatResolver).toBeUndefined();
+    expect(out.resolutions[1].hunk.formatResolver).toBeUndefined();
+    expect(out.resolutions[0]).toBe(kept);
+  });
+});
+

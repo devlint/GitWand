@@ -71,5 +71,11 @@ describe("scanReportBody", () => {
     const line = Array.from({ length: 1200 }, (_, i) => tok(i)).join(" ");
     expect(scanReportBody(line, opts).warnings).toHaveLength(1200);
   });
+
+  it("never cuts an entropy token in two on a minified line with no spaces", () => {
+    const tok = (i: number) => `Q${i}xT3kL0pQ8rW2vY5zN1mH6jC4bD7eF0gA3`;
+    const line = Array.from({ length: 1200 }, (_, i) => tok(i)).join(",");
+    expect(scanReportBody(line, opts).warnings).toHaveLength(1200);
+  });
 });
 

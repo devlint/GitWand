@@ -81,6 +81,15 @@ describe("useCreateIssue — report mode", () => {
     expect(c.reportAvailable.value).toBe(true);
   });
 
+  it("does not open a report that could not be sent", async () => {
+    const none = provider();
+    (none.issueAvailable as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    const { api } = setup(none, false);
+    await api.refreshAvailability();
+    await api.openFromResolution(REPORT);
+    expect(api.isOpen.value).toBe(false);
+  });
+
   it("opens for the current repository with the repository report", async () => {
     const { api } = setup();
     await api.openFromResolution(REPORT);

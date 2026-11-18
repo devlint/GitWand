@@ -49,6 +49,7 @@ const flush = async () => {
 async function mount(opts: { targets?: IssueTargets; writable?: boolean; confirm?: boolean; targetsError?: string } = {}) {
   const provider = {
     name: "github",
+    issueAvailable: vi.fn(async () => true),
     issueTargets: vi.fn(async () => {
       if (opts.targetsError) throw new Error(opts.targetsError);
       return opts.targets ?? { targets: [ORIGIN], defaultRepo: "me/app" };
