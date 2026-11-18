@@ -412,22 +412,36 @@ fn gitwand_payload(input: &GitwandIssueInput) -> Result<serde_json::Value, Strin
     Ok(serde_json::json!({ "title": title, "body": input.body }))
 }
 
+/// GitHub refused the Settings token itself (401 bad credentials, 403 not
+/// allowed: a fine-grained PAT scoped to the user's own repositories, an org
+/// restriction): nothing was created, and `gh` may still be allowed.
+fn token_refused(err: &str) -> bool {
+    err.starts_with("GitHub API error ") && (err.contains("(401)") || err.contains("(403)"))
+}
+
 fn create_gitwand_issue_inner(input: &GitwandIssueInput) -> Result<CreatedIssue, String> {
     let payload = gitwand_payload(input)?.to_string();
     let path = format!("repos/{}/issues", GITWAND_REPO);
     // Its own github.com path: the helpers behind `api_call` choose the token
     // and the host from the working directory's `origin`, which may be a
     // GitHub Enterprise host, another forge, or nothing at all.
-    let attempt = match issue_token() {
-        Some(tok) => rest_api_json("POST", &path, &tok, Some(&payload), Some(60)),
-        None => gh_api_on(
+    let via_gh = |payload: String| {
+        gh_api_on(
             &std::env::temp_dir().to_string_lossy(),
             &gitwand_repo(),
             "POST",
             &path,
             Some(payload),
             Duration::from_secs(60),
-        ),
+        )
+    };
+    let attempt = match issue_token() {
+        Some(tok) => match rest_api_json("POST", &path, &tok, Some(&payload), Some(60)) {
+            // The token may not reach GitWand's repository where `gh` can.
+            Err(e) if token_refused(&e) && gh_signed_in_to("github.com") => via_gh(payload),
+            other => other,
+        },
+        None => via_gh(payload),
     };
     match attempt {
         Ok(created) => created_from(&created),
@@ -650,6 +664,17 @@ pub(crate) async fn gh_list_assignees(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_refused_token_falls_back_to_gh() {
+        assert!(token_refused(
+            "GitHub API error (403): Resource not accessible by personal access token"
+        ));
+        assert!(token_refused("GitHub API error (401): Bad credentials"));
+        assert!(!token_refused("GitHub API error (422): Validation Failed"));
+        assert!(!token_refused("GitHub API error (502): Bad gateway"));
+        assert!(!token_refused("Operation timed out"));
+    }
 
     #[test]
     fn gitwand_repo_is_on_github_com() {

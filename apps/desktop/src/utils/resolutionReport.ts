@@ -22,8 +22,9 @@ export interface ResolutionReport {
   /** The file's path in the repository (only the repository variant prints it). */
   path: string;
   hunk: ConflictHunk;
-  /** What GitWand proposed (or applied) for the hunk. */
-  resolvedLines: string[];
+  /** What GitWand proposed (or applied) for the hunk; `null` for an AI
+   *  proposal that failed validation (its raw answer is reported instead). */
+  resolvedLines: string[] | null;
 }
 
 /**
@@ -36,10 +37,16 @@ export const REPORT_BODY_MAX = 50_000;
 /** The "What should it have been?" field's limit. */
 export const ANSWER_MAX = 10_000;
 
-/** The answer on top of a report's description (the one place that writes it). */
-export function withAnswer(answer: string, body: string): string {
+/**
+ * The answer on top of a report's description (the one place that writes
+ * it). `inert` (a public report on GitWand's repository) puts it in a code
+ * block, like everything else there: no `@mention` pings anyone, no `#N`
+ * links into another project's issues.
+ */
+export function withAnswer(answer: string, body: string, inert = false): string {
   const a = answer.trim();
-  return a ? `### What it should have been\n\n${a}\n\n${body}` : body;
+  if (!a) return body;
+  return `### What it should have been\n\n${inert ? codeBlock(a) : a}\n\n${body}`;
 }
 
 /** Files without an extension whose name says their kind (and nothing private). */
@@ -159,13 +166,20 @@ function assemble(r: ResolutionReport, head: string[], scrub: Scrub = (t) => t):
   ];
   // A 2-way conflict has no base: say nothing rather than show an empty one.
   if (h.trace.hasBase && h.baseLines.length > 0) blocks.push({ label: "base", lines: h.baseLines, kept: h.baseLines.length, maxChars: Infinity });
-  const result: Block = { label: "GitWand's result", lines: r.resolvedLines, kept: r.resolvedLines.length, maxChars: Infinity };
+  // An AI proposal that failed validation has no result: report its answer.
+  const raw = h.trace.llmTrace?.rawResponseTruncated ?? "";
+  const resultLines = r.resolvedLines ?? raw.split("\n");
+  const result: Block = { label: "GitWand's result", lines: resultLines, kept: resultLines.length, maxChars: Infinity };
+  const resultIntro =
+    r.resolvedLines === null
+      ? `No result: the AI proposal failed validation (score ${h.trace.llmTrace?.validationScore ?? "?"}). Its answer (first 500 characters):\n\n`
+      : "";
 
   const render = () => {
     const parts: string[] = [];
     parts.push(head.join("\n"));
     parts.push(`### The conflict\n\n${blocks.map((b) => renderBlock(b)).join("\n\n")}`);
-    parts.push(`### GitWand's result\n\n${renderBlock(result, false)}`);
+    parts.push(`### GitWand's result\n\n${resultIntro}${renderBlock(result, false)}`);
     parts.push(`### Why\n\n${reasoning(r, scrub).join("\n")}`);
     return parts.join("\n\n") + "\n";
   };

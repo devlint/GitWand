@@ -167,6 +167,18 @@ describe("MergeEditor — report a resolution", () => {
     expect(lastCall()).toMatchObject({ kind: "ai", path: PATH, resolvedLines: ["RESOLVED"] });
   });
 
+  it("an AI proposal that failed validation can still be reported", async () => {
+    const base = withType(twoResolvableHunks(), "llm_proposed", { llmTrace: { ...LLM_TRACE, accepted: false } });
+    const file = {
+      ...base,
+      result: { ...base.result, resolutions: base.result.resolutions.map((r, i) => (i === 0 ? { ...r, resolvedLines: null, autoResolved: false } : r)) },
+    } as ConflictFile;
+    mountWithFile(file);
+    await nextTick();
+    reportButtons("llm-trace")[0].click();
+    expect(lastCall()).toMatchObject({ kind: "ai", path: PATH, resolvedLines: null });
+  });
+
   it("a token-level proposal reports its merged lines", async () => {
     const trace = { tokenMergeTrace: { mergedLines: ["M"], pass1Count: 1, pass2Count: 0, lineDetails: [] } };
     const file = withType(twoResolvableHunks(), "token_level_merge", trace);
@@ -193,6 +205,22 @@ describe("MergeEditor — report a resolution", () => {
     mountWithFile(twoResolvableHunks());
     await nextTick();
     container.querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--accept")!.click();
+    await nextTick();
+    expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(0);
+  });
+
+  it("a refused accept is not credited to the user's own later choice for that hunk", async () => {
+    const file = twoResolvableHunks();
+    const state = mountWithFile(file);
+    await nextTick();
+    // Accept: the write is refused (no reparse comes back).
+    container.querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--accept")!.click();
+    await nextTick();
+    // Reject the proposal, then keep "ours" for the same hunk.
+    container.querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--reject")!.click();
+    await nextTick();
+    container.querySelector<HTMLAnchorElement>(".inline-action--current")!.click();
+    state.file = afterWrite(file);
     await nextTick();
     expect(container.querySelectorAll(".me-accepted-item")).toHaveLength(0);
   });

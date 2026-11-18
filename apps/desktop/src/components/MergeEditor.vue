@@ -25,6 +25,7 @@ import LlmTracePanel from "./LlmTracePanel.vue";
 import TokenMergePanel from "./TokenMergePanel.vue";
 import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
 import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
+import { useAcceptedReports } from "../composables/useAcceptedReports";
 import type { ProposalKind, ResolutionReport } from "../utils/resolutionReport";
 // Async on purpose, and NOT a contradiction of the static-import justification
 // above: that one covers thin BaseModal wrappers with no heavy dependencies.
@@ -124,6 +125,16 @@ const aiQueue = useAiHunkQueue(
 // undo, a redo or a file-wide resolve records nothing, so those still drop
 // the lot, which is safe by construction.
 let consumedHunkIndex: number | null = null;
+
+/**
+ * A resolution of hunk `idx` is being sent. `acceptedReport` is the report of
+ * the proposal being accepted, `null` for any other resolution (so a refused
+ * accept is never later credited to a different resolution of that hunk).
+ */
+function consume(idx: number, acceptedReport: ResolutionReport | null = null) {
+  consumedHunkIndex = idx;
+  accepted.resolving(idx, acceptedReport);
+}
 
 /**
  * Open a hunk's already-staged suggestion for review. Reads the stored
@@ -279,7 +290,7 @@ function applyFileMemory(hunkIndex: number, hunk: ConflictHunk) {
   const resolved = applyMemory(fileMemory.value, hunk);
   if (resolved !== null) {
     markUsed(fileMemory.value.id);
-    consumedHunkIndex = hunkIndex;
+    consume(hunkIndex);
     emit("resolveHunkCustom", props.file.path, hunkIndex, resolved);
   }
 }
@@ -293,7 +304,7 @@ function autoDetectPattern(hunk: ConflictHunk): ResolutionStrategy | null {
 
 // ─── Override resolveHunk to capture memory offer ───────
 function resolveHunkWithMemory(path: string, hunkIndex: number, choice: ManualChoice) {
-  consumedHunkIndex = hunkIndex;
+  consume(hunkIndex);
   emit("resolveHunk", path, hunkIndex, choice);
   const strategy: ResolutionStrategy = choice === "ours" ? "ours"
     : choice === "theirs" ? "theirs"
@@ -303,7 +314,7 @@ function resolveHunkWithMemory(path: string, hunkIndex: number, choice: ManualCh
 }
 
 function resolveHunkCustomWithMemory(path: string, hunkIndex: number, content: string) {
-  consumedHunkIndex = hunkIndex;
+  consume(hunkIndex);
   emit("resolveHunkCustom", path, hunkIndex, content);
   // For custom edits, try to detect an auto-learnable pattern
   const hunk = hunks.value[hunkIndex];
@@ -558,8 +569,7 @@ function onTokenMergeAccept(hunkIndex: number) {
   const hunk = hunks.value[hunkIndex];
   const proposal = hunk?.trace.tokenMergeTrace;
   if (!proposal) return;
-  keepAccepted("token", hunkIndex);
-  consumedHunkIndex = hunkIndex;
+  consume(hunkIndex, createIssue ? reportFor("token", hunkIndex) : null);
   emit("resolveHunkCustom", props.file.path, hunkIndex, proposal.mergedLines.join("\n"));
 }
 
@@ -586,7 +596,8 @@ function reportFor(kind: ProposalKind, idx: number): ResolutionReport | null {
   if (!hunk) return null;
   const resolvedLines =
     kind === "token" ? hunk.trace.tokenMergeTrace?.mergedLines : resolutions.value[idx]?.resolvedLines;
-  if (!resolvedLines) return null;
+  // An AI proposal that failed validation has no lines; its answer is reported.
+  if (!resolvedLines) return kind === "ai" && hunk.trace.llmTrace ? { kind, path: props.file.path, hunk, resolvedLines: null } : null;
   return { kind, path: props.file.path, hunk, resolvedLines };
 }
 
@@ -598,26 +609,13 @@ function onReport(kind: ProposalKind, hunkId: string | number) {
   sendReport(reportFor(kind, Number(hunkId)));
 }
 
-/**
- * Accepting an engine or token-level proposal writes the file: the hunk, and
- * its panel, are gone after the reparse. A copy keeps it reportable for as
- * long as this file is open — in memory only. It is listed once the reparse
- * shows the write landed (see the per-file watcher below), never on a write
- * that failed.
- */
-const acceptedReports = ref<ResolutionReport[]>([]);
-let pendingAccepted: { idx: number; report: ResolutionReport } | null = null;
-
-function keepAccepted(kind: ProposalKind, idx: number) {
-  const r = reportFor(kind, idx);
-  pendingAccepted = r && createIssue ? { idx, report: r } : null;
-}
+// Accepted engine / token-level proposals stay reportable after their write
+// (the hunk and its panel are gone after the reparse): see useAcceptedReports.
+const accepted = useAcceptedReports();
+const acceptedReports = accepted.list;
 
 // Another file, or the same path in another repository.
-watch([() => props.file.path, () => props.cwd], () => {
-  acceptedReports.value = [];
-  pendingAccepted = null;
-});
+watch([() => props.file.path, () => props.cwd], () => accepted.clear());
 
 // ─── Generic resolution preview (non_overlapping, one_side_change, …) ───
 // Unlike llm_proposed/token_level_merge, these types are already pre-resolved
@@ -628,8 +626,7 @@ watch([() => props.file.path, () => props.cwd], () => {
 function onPreviewAccept(hunkIndex: number) {
   const resolution = resolutions.value[hunkIndex];
   if (!resolution?.resolvedLines) return;
-  keepAccepted("engine", hunkIndex);
-  consumedHunkIndex = hunkIndex;
+  consume(hunkIndex, createIssue ? reportFor("engine", hunkIndex) : null);
   emit("resolveHunkCustom", props.file.path, hunkIndex, resolution.resolvedLines.join("\n"));
 }
 
@@ -675,8 +672,6 @@ watch(
     // content moved under it) must not be believed by some later re-parse.
     const consumed = consumedHunkIndex;
     consumedHunkIndex = null;
-    const pending = pendingAccepted;
-    pendingAccepted = null;
 
     // Renumber only when the shape of the change is known: the same file, one
     // conflict fewer, and the index of the one that went. Anything else (an
@@ -690,9 +685,9 @@ watch(
       consumed !== null
       && nextPath === prevPath
       && nextHunks.length === prevHunks.length - 1;
+    // An accepted proposal is listed only when its own write is what landed.
+    accepted.landed(renumber ? consumed : null);
     if (renumber) {
-      // The accepted hunk is the one that went: its write landed.
-      if (pending && pending.idx === consumed) acceptedReports.value = [...acceptedReports.value, pending.report];
       aiQueue.remapAfterApply([consumed]);
       aiBatchIndices.value = new Set(
         remapHunkIndices(aiBatchIndices.value, [consumed]).values(),

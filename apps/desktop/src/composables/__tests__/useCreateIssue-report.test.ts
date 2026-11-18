@@ -114,7 +114,7 @@ describe("useCreateIssue — report mode", () => {
     expect(api.repo.value).toBe("devlint/GitWand");
     expect(api.body.value).toBe(gitwandReportPrefill(REPORT, ENV).body);
     expect(api.title.value).toBe(gitwandReportPrefill(REPORT, ENV).title);
-    expect(api.finalBody.value.startsWith("### What it should have been\n\nkeep both")).toBe(true);
+    expect(api.finalBody.value.startsWith("### What it should have been\n\n```text\nkeep both\n```")).toBe(true);
     expect(api.finalBody.value).not.toContain("src/x.ts");
     expect(api.answer.value).toBe("keep both");
     expect(api.labels.value).toEqual([]);
@@ -124,6 +124,17 @@ describe("useCreateIssue — report mode", () => {
     expect(api.repo.value).toBe("me/app");
     expect(api.body.value).toBe(repoReportPrefill(REPORT).body);
     expect(api.confirmedPublic.value).toBe(false);
+  });
+
+  it("switching back returns to the repository the user picked", async () => {
+    const PARENT = { repo: "org/app", htmlUrl: "https://github.com/org/app", hasIssues: true, isOrigin: false, canTriage: true };
+    const { api } = setup(provider({ targets: [ORIGIN, PARENT], defaultRepo: "me/app" }));
+    await api.openFromResolution(REPORT);
+    await settle();
+    api.setRepo("org/app");
+    api.setGitwand(true);
+    api.setGitwand(false);
+    expect(api.repo.value).toBe("org/app");
   });
 
   it("on GitWand, Create needs the confirmation and no blocking secret", async () => {
@@ -224,7 +235,7 @@ describe("useCreateIssue — report mode", () => {
     await settle();
     const title = api.title.value;
     await api.submit();
-    expect(createGitwandIssue).toHaveBeenCalledWith({ title, body: expect.stringContaining("### What it should have been\n\nx") });
+    expect(createGitwandIssue).toHaveBeenCalledWith({ title, body: expect.stringContaining("### What it should have been\n\n```text\nx\n```") });
     expect(p.createIssue).not.toHaveBeenCalled();
     expect(api.isOpen.value).toBe(false);
   });

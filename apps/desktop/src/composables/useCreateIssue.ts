@@ -324,7 +324,7 @@ export function useCreateIssue(deps: {
   let openGeneration = 0;
   let availabilitySeq = 0;
 
-  const finalBody = computed(() => (report.value ? withAnswer(answer.value, body.value) : body.value));
+  const finalBody = computed(() => (report.value ? withAnswer(answer.value, body.value, toGitwand.value) : body.value));
   // Title or description no longer what was generated for the current target.
   const bodyEdited = computed(() => body.value !== initial.value.body || title.value !== initial.value.title);
   const dirty = computed(
@@ -591,6 +591,8 @@ export function useCreateIssue(deps: {
   function setGitwand(on: boolean) {
     if (!report.value || submitting.value || outcomeUnknown.value) return;
     if (!on && gitwandLocked.value) return;
+    // Leaving the repository: remember the one the user had picked.
+    if (on && !toGitwand.value) repoTarget = repo.value;
     generation++;
     // The previous target's failure is not this one's.
     error.value = null;

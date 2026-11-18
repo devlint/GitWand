@@ -129,6 +129,19 @@ describe("gitwandReportPrefill", () => {
     expect(p.body).not.toContain("deadbeefcafe");
   });
 
+  it("reports an AI proposal that failed validation, with its answer and no result", () => {
+    const h = hunk({
+      type: "llm_proposed",
+      trace: {
+        steps: [], selected: "llm_proposed", summary: "s", hasBase: true,
+        llmTrace: { calledAt: "", model: "m", latencyMs: 1, promptHash: "h", rawResponseTruncated: "const a = 9;", validationScore: 12, accepted: false },
+      } as ConflictHunk["trace"],
+    });
+    const body = gitwandReportPrefill(report({ kind: "ai", hunk: h, resolvedLines: null }), env).body;
+    expect(body).toContain("No result: the AI proposal failed validation");
+    expect(body).toContain("const a = 9;");
+  });
+
   it("carries a token-level merge's pass counts", () => {
     const h = hunk({
       type: "token_level_merge",
@@ -163,6 +176,12 @@ describe("withAnswer", () => {
   it("puts the answer on top, and nothing when it is blank", () => {
     expect(withAnswer("keep both", "BODY")).toBe("### What it should have been\n\nkeep both\n\nBODY");
     expect(withAnswer("  ", "BODY")).toBe("BODY");
+  });
+
+  it("makes the answer inert for a public report: no @mention, no #N link", () => {
+    expect(withAnswer("keep @alice's change from #12", "BODY", true)).toBe(
+      "### What it should have been\n\n```text\nkeep @alice's change from #12\n```\n\nBODY",
+    );
   });
 
   it("a full answer on a full report stays under GitHub's 65,536 characters", () => {

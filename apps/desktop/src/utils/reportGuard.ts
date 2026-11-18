@@ -10,6 +10,9 @@
  */
 import { scanSecrets, type SecretFinding, type SecretPattern } from "@gitwand/core";
 
+/** The core scanner's finding cap (`MAX_FINDINGS` in secrets/scanner.ts). */
+const SCAN_CAP = 500;
+
 export interface ReportScan {
   /** Findings that keep the report from being sent. */
   blocking: SecretFinding[];
@@ -23,14 +26,15 @@ export function scanReportBody(
 ): ReportScan {
   const files = [{ path: "issue-body.md", addedLines: body.split("\n").map((text, i) => ({ line: i + 1, text })) }];
   const config = { enabled: true, extraPatterns: opts.extraPatterns, ignore: [] };
-  // Two passes: the scanner keeps its first 500 findings in line order, so a
-  // lockfile's hundreds of entropy hits would push a real secret past the
-  // cut. The pattern pass (no entropy) carries everything that can block.
-  const patterns = scanSecrets(files, { ...config, entropyThreshold: 0 });
-  const entropy =
-    opts.entropyThreshold > 0
-      ? scanSecrets(files, { ...config, entropyThreshold: opts.entropyThreshold }).filter((f) => f.patternId === "high_entropy")
-      : [];
+  const all = scanSecrets(files, { ...config, entropyThreshold: opts.entropyThreshold });
+  // The scanner keeps its first findings in line order (SCAN_CAP): a
+  // lockfile's hundreds of entropy hits could push a real secret past the
+  // cut. Only then, a second pass without entropy finds every pattern hit.
+  const capped = all.length >= SCAN_CAP;
+  const patterns = capped
+    ? scanSecrets(files, { ...config, entropyThreshold: 0 })
+    : all.filter((f) => f.patternId !== "high_entropy");
+  const entropy = all.filter((f) => f.patternId === "high_entropy");
   const blocks = (f: SecretFinding) => opts.blockAt === "medium" && f.severity !== "low";
   return {
     blocking: patterns.filter(blocks),
