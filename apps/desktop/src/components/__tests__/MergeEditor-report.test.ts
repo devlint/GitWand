@@ -248,6 +248,8 @@ describe("MergeEditor — report a resolution", () => {
     await nextTick();
     const rows = container.querySelectorAll(".me-accepted-item");
     expect(rows).toHaveLength(1);
+    // Named by what it was, not by a line number the file has since moved past.
+    expect(rows[0].textContent).toContain("non_overlapping: RESOLVED");
     rows[0].querySelector<HTMLButtonElement>("button")!.click();
     expect(lastCall()).toEqual({ kind: "engine", path: PATH, hunk: file.result.hunks[0], resolvedLines: ["RESOLVED"] });
     state.file = { ...twoResolvableHunks(), path: "other.ts" } as ConflictFile;

@@ -2736,7 +2736,7 @@ const ptBR: Locale = {
       button: "Relatar",
       buttonTitle: "Relatar esta resolução como errada",
       acceptedTitle: "Aceitas nesta sessão",
-      acceptedItem: "Bloco na linha {0}",
+      acceptedItem: "{0}: {1}",
     },
   },
   help: {

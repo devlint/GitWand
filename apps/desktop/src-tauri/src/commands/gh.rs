@@ -1566,9 +1566,20 @@ fn ssh_resolved_host(host: &str) -> Option<String> {
     })
 }
 
-/// Whether `gh` is signed in to `host` (an Enterprise host, or github.com for
-/// GitWand's resolver reports). Cached for the session.
-pub(crate) fn gh_signed_in_to(host: &str) -> bool {
+/// Whether `gh` is signed in to `host` right now, without the session cache
+/// (GitWand's resolver reports ask it each time their form opens, #301).
+pub(crate) fn gh_signed_in_now(host: &str) -> bool {
+    if !is_plain_host(host) {
+        return false;
+    }
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["auth", "status", "--hostname", host]);
+    output_with_timeout(cmd, GH_PROBE_TIMEOUT).is_ok_and(|o| o.status.success())
+}
+
+/// Whether `gh` is signed in to `host` (an Enterprise host; github.com is
+/// always a GitHub host). Cached for the session.
+fn gh_signed_in_to(host: &str) -> bool {
     if !is_plain_host(host) {
         return false;
     }

@@ -58,4 +58,38 @@ describe("useCreateIssue — scans", () => {
     // One scan = the title, the answer and the description.
     expect(scan.calls - before).toBe(3);
   });
+
+  it("typing in one field rescans only that field", async () => {
+    const provider = {
+      name: "github",
+      issueTargets: vi.fn(async () => ({ targets: [{ repo: "me/app", htmlUrl: "", hasIssues: true, isOrigin: true, canTriage: false }], defaultRepo: "me/app" })),
+      createIssue: vi.fn(),
+    } as unknown as ForgeProvider;
+    const api = useCreateIssue({
+      cwd: ref("/repo"),
+      provider: ref(provider),
+      onCreated: vi.fn(),
+      report: {
+        gitwandWritable: async () => true,
+        env: () => ({ version: "1", platform: "x" }),
+        secretsOptions: async () => ({ extraPatterns: [], entropyThreshold: 4 }),
+        scanDebounceMs: 0,
+      },
+    });
+    await api.openFromResolution({
+      kind: "engine",
+      path: "a.ts",
+      hunk: {
+        baseLines: ["a"], oursLines: ["b"], theirsLines: ["c"], startLine: 1, type: "non_overlapping",
+        confidence: { score: 90, label: "high", dimensions: {}, boosters: [], penalties: [] },
+        explanation: "e", trace: { steps: [], selected: "non_overlapping", summary: "s", hasBase: true },
+      } as unknown as ConflictHunk,
+      resolvedLines: ["bc"],
+    });
+    for (let i = 0; i < 4; i++) await flush();
+    const before = scan.calls;
+    api.answer.value = "typed";
+    for (let i = 0; i < 4; i++) await flush();
+    expect(scan.calls - before).toBe(1);
+  });
 });

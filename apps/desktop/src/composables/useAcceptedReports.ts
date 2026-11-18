@@ -20,18 +20,26 @@ export interface AcceptedReports {
   clear(): void;
 }
 
-export function useAcceptedReports(): AcceptedReports {
+/**
+ * How long a write may take to come back as a reparse. Past it, a refused
+ * write's copy must not be credited to an unrelated change (an external
+ * edit) that happens to remove a hunk at the same index.
+ */
+const PENDING_TTL_MS = 10_000;
+
+export function useAcceptedReports(now: () => number = Date.now): AcceptedReports {
   const list = ref<ResolutionReport[]>([]);
-  let pending: { idx: number; report: ResolutionReport | null } | null = null;
+  let pending: { idx: number; report: ResolutionReport | null; at: number } | null = null;
 
   function resolving(idx: number, accepted: ResolutionReport | null) {
-    pending = { idx, report: accepted };
+    pending = { idx, report: accepted, at: now() };
   }
 
   function landed(idx: number | null) {
     const p = pending;
     pending = null;
-    if (p?.report && idx !== null && p.idx === idx) list.value = [...list.value, p.report];
+    if (!p?.report || idx === null || p.idx !== idx || now() - p.at > PENDING_TTL_MS) return;
+    list.value = [...list.value, p.report];
   }
 
   function clear() {

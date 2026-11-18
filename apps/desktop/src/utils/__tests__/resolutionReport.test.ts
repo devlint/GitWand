@@ -97,6 +97,18 @@ describe("gitwandReportPrefill", () => {
     expect(p.body).toContain("user pattern");
   });
 
+  it("scrubs a glob with parentheses, and the path's folders, out of engine text", () => {
+    const h = hunk({
+      type: "generated_file",
+      explanation: "Generated file (user pattern: clients/(acme)/gen/**) — taken from theirs.",
+      trace: { steps: [], selected: "generated_file", summary: "Moved from acme-bank/internal", hasBase: true },
+    });
+    const p = gitwandReportPrefill(report({ path: "acme-bank/internal/api.ts", hunk: h }), env);
+    expect(p.body).not.toContain("acme");
+    expect(p.body).not.toContain("gen/**");
+    expect(p.body).not.toContain("internal");
+  });
+
   it("names the format resolver when one handled the hunk", () => {
     const p = gitwandReportPrefill(report({ path: "package.json", hunk: hunk({ formatResolver: "json" }) }), env);
     expect(p.body).toContain("resolver: `json`");

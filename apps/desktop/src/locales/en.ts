@@ -2776,7 +2776,7 @@ const en = {
       button: "Report",
       buttonTitle: "Report this resolution as wrong",
       acceptedTitle: "Accepted in this session",
-      acceptedItem: "Hunk at line {0}",
+      acceptedItem: "{0}: {1}",
     },
   },
   // \u2500\u2500\u2500 In-app help view \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500

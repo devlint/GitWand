@@ -2746,7 +2746,7 @@ const zhCN: Locale = {
       button: "报告",
       buttonTitle: "将此解决结果报告为错误",
       acceptedTitle: "本次会话中已接受",
-      acceptedItem: "第 {0} 行的代码块",
+      acceptedItem: "{0}：{1}",
     },
   },
   help: {

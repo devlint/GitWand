@@ -9,7 +9,7 @@ import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type I
 import type { ForgeProvider } from "./forge/types";
 import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, readGitwandrc } from "../utils/backend";
 import { parseGitwandrc, type SecretPattern } from "@gitwand/core";
-import { IS_MAC } from "../utils/platform";
+import { platformName } from "../utils/platform";
 import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
 import { scanReportBody, type ReportScan } from "../utils/reportGuard";
 import type { SecretFinding } from "@gitwand/core";
@@ -187,9 +187,7 @@ export interface ReportDeps {
 
 function defaultEnv(): { version: string; platform: string } {
   const version = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
-  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  const platform = IS_MAC ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "unknown";
-  return { version, platform };
+  return { version, platform: platformName() };
 }
 
 /** `.gitwandrc`'s extra secret patterns and entropy threshold (4.0 when unset). */
@@ -306,8 +304,11 @@ export function useCreateIssue(deps: {
   // A change not scanned yet: a secret typed a moment ago must not slip out.
   const scanPending = ref(false);
   let secretsOpts: { extraPatterns: SecretPattern[]; entropyThreshold: number } = { extraPatterns: [], entropyThreshold: 4 };
-  // Bumped when the repository's patterns arrive (they change the findings).
+  // Bumped when the patterns change (they arrive, or the form is reset): part
+  // of every scan's cache key.
   let secretsVersion = 0;
+  // The last scan of each field, reused while its text and options are unchanged.
+  const scanCache = new Map<string, { key: string; result: ReportScan }>();
   // A public report waits for the repository's own patterns.
   const secretsLoaded = ref(false);
   // The repository the report would go to without the switch.
@@ -434,6 +435,8 @@ export function useCreateIssue(deps: {
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = { extraPatterns: [], entropyThreshold: 4 };
+    secretsVersion++;
+    scanCache.clear();
     secretsLoaded.value = false;
   }
 
@@ -553,7 +556,14 @@ export function useCreateIssue(deps: {
     ];
     const next: ReportScan = { blocking: [], warnings: [] };
     for (const [where, text] of parts) {
-      const r = scanReportBody(text, opts);
+      // A field unchanged since its last scan (same text, same options) is
+      // not scanned again: typing in the answer leaves a 50 KB body alone.
+      const key = `${opts.blockAt}\u0000${secretsVersion}\u0000${text}`;
+      let r = scanCache.get(where)?.key === key ? scanCache.get(where)!.result : null;
+      if (!r) {
+        r = scanReportBody(text, opts);
+        scanCache.set(where, { key, result: r });
+      }
       next.blocking.push(...r.blocking.map((f) => ({ ...f, file: where })));
       next.warnings.push(...r.warnings.map((f) => ({ ...f, file: where })));
     }

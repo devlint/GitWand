@@ -47,9 +47,14 @@ export const ISSUE_TITLE_MAX = 256;
  */
 export function issueTitle(text: string): string {
   if (text.length <= ISSUE_TITLE_MAX) return text;
-  let cut = text.slice(0, ISSUE_TITLE_MAX - 1);
+  return cutUtf16(text, ISSUE_TITLE_MAX - 1) + "…";
+}
+
+/** `text` cut to `n` UTF-16 units, never splitting a surrogate pair. */
+export function cutUtf16(text: string, n: number): string {
+  let cut = text.slice(0, n);
   if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
-  return cut + "…";
+  return cut;
 }
 
 /**

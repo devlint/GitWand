@@ -5,7 +5,7 @@
 //! command that takes a `repo` checks it against those targets, recomputed
 //! here, so the frontend cannot aim a write anywhere else.
 
-use super::gh::{gh_api_on, gh_origin_repo, gh_signed_in_to, GhRepo};
+use super::gh::{gh_api_on, gh_origin_repo, gh_signed_in_now, GhRepo};
 use super::github_api::{
     rest_api_json, rest_api_json_cached, settings_github_token, with_rest_other_repo_using,
     with_rest_using,
@@ -414,9 +414,11 @@ fn gitwand_payload(input: &GitwandIssueInput) -> Result<serde_json::Value, Strin
 
 /// GitHub refused the Settings token itself (401 bad credentials, 403 not
 /// allowed: a fine-grained PAT scoped to the user's own repositories, an org
-/// restriction): nothing was created, and `gh` may still be allowed.
+/// restriction; 404: a token that cannot see the repository): nothing was
+/// created, and `gh` may still be allowed.
 fn token_refused(err: &str) -> bool {
-    err.starts_with("GitHub API error ") && (err.contains("(401)") || err.contains("(403)"))
+    err.starts_with("GitHub API error ")
+        && ["(401)", "(403)", "(404)"].iter().any(|c| err.contains(c))
 }
 
 fn create_gitwand_issue_inner(input: &GitwandIssueInput) -> Result<CreatedIssue, String> {
@@ -438,7 +440,7 @@ fn create_gitwand_issue_inner(input: &GitwandIssueInput) -> Result<CreatedIssue,
     let attempt = match issue_token() {
         Some(tok) => match rest_api_json("POST", &path, &tok, Some(&payload), Some(60)) {
             // The token may not reach GitWand's repository where `gh` can.
-            Err(e) if token_refused(&e) && gh_signed_in_to("github.com") => via_gh(payload),
+            Err(e) if token_refused(&e) && gh_signed_in_now("github.com") => via_gh(payload),
             other => other,
         },
         None => via_gh(payload),
@@ -464,8 +466,10 @@ pub(crate) async fn gh_create_gitwand_issue(
 /// Settings, else `gh` signed in to github.com. No API request.
 #[tauri::command]
 pub(crate) async fn gh_gitwand_writable() -> Result<bool, String> {
+    // Asked fresh each time the form opens: a `gh auth login` since the last
+    // report must unlock the switch without restarting the app.
     tauri::async_runtime::spawn_blocking(|| {
-        issue_token().is_some() || gh_signed_in_to("github.com")
+        issue_token().is_some() || gh_signed_in_now("github.com")
     })
     .await
     .map_err(|e| e.to_string())
@@ -671,6 +675,7 @@ mod tests {
             "GitHub API error (403): Resource not accessible by personal access token"
         ));
         assert!(token_refused("GitHub API error (401): Bad credentials"));
+        assert!(token_refused("GitHub API error (404): Not Found"));
         assert!(!token_refused("GitHub API error (422): Validation Failed"));
         assert!(!token_refused("GitHub API error (502): Bad gateway"));
         assert!(!token_refused("Operation timed out"));

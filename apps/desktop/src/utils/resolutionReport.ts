@@ -12,7 +12,7 @@
  * The text is English, as it is read on GitHub.
  */
 import type { ConflictHunk } from "@gitwand/core";
-import { codeBlock, codeSpan, issueTitle, type IssuePrefill } from "./issuePrefill";
+import { codeBlock, codeSpan, cutUtf16, issueTitle, type IssuePrefill } from "./issuePrefill";
 
 /** Which proposal panel the report comes from. */
 export type ProposalKind = "engine" | "ai" | "token";
@@ -86,16 +86,9 @@ interface Block {
   maxChars: number;
 }
 
-/** `text` cut to `n` UTF-16 units, never splitting a surrogate pair. */
-function cutChars(text: string, n: number): string {
-  let cut = text.slice(0, n);
-  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
-  return cut;
-}
-
 function shownText(b: Block): string {
   const text = b.lines.slice(0, b.kept).join("\n");
-  return text.length > b.maxChars ? cutChars(text, b.maxChars) : text;
+  return text.length > b.maxChars ? cutUtf16(text, b.maxChars) : text;
 }
 
 function renderBlock(b: Block, withLabel = true): string {
@@ -124,10 +117,16 @@ type Scrub = (text: string) => string;
  * path or name. Both are replaced.
  */
 function scrubberFor(path: string): Scrub {
-  const name = path.split(/[\\/]/).pop() ?? "";
-  const secrets = [path, name].filter((x) => x.length > 2).sort((a, b) => b.length - a.length);
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  // The whole path, the file name, and every folder name long enough to say
+  // something (a 3-letter `src` or `lib` says nothing about the project).
+  const name = parts[parts.length - 1] ?? "";
+  const folders = parts.slice(0, -1).filter((x) => x.length > 3);
+  const secrets = [...new Set([path, name, ...folders])].filter((x) => x.length > 2).sort((a, b) => b.length - a.length);
   return (text) => {
-    let out = text.replace(/user pattern: [^)\n]*/g, "user pattern");
+    // A glob may hold parentheses: drop up to the line's last one (and the
+    // whole rest of the line when it has none). Saying too little is safe.
+    let out = text.replace(/user pattern: [^\n]*\)/g, "user pattern)").replace(/user pattern: [^\n)]*$/gm, "user pattern");
     for (const s of secrets) out = out.split(s).join("<file>");
     return out;
   };
@@ -136,7 +135,7 @@ function scrubberFor(path: string): Scrub {
 /** The engine's reasoning: explanation, trace summary, and the proposal's own trace. */
 function reasoning(r: ResolutionReport, scrub: Scrub): string[] {
   const h = r.hunk;
-  const clip = (t: string) => (t.length > REASON_LINE_MAX ? `${cutChars(t, REASON_LINE_MAX)}…` : t);
+  const clip = (t: string) => (t.length > REASON_LINE_MAX ? `${cutUtf16(t, REASON_LINE_MAX)}…` : t);
   const out = [`- Conflict type: ${confidenceLine(h)}`, `- Explanation: ${clip(scrub(h.explanation))}`];
   if (h.trace.summary) out.push(`- Decision: ${clip(scrub(h.trace.summary))}`);
   const llm = h.trace.llmTrace;

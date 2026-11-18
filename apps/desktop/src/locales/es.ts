@@ -2736,7 +2736,7 @@ const es: Locale = {
       button: "Informar",
       buttonTitle: "Informar de que esta resolución es incorrecta",
       acceptedTitle: "Aceptadas en esta sesión",
-      acceptedItem: "Bloque en la línea {0}",
+      acceptedItem: "{0}: {1}",
     },
   },
   help: {

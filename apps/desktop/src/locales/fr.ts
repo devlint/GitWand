@@ -2745,7 +2745,7 @@ const fr: Locale = {
       button: "Signaler",
       buttonTitle: "Signaler cette résolution comme fausse",
       acceptedTitle: "Acceptées dans cette session",
-      acceptedItem: "Bloc ligne {0}",
+      acceptedItem: "{0} : {1}",
     },
   },
   // ─── Vue d'aide intégrée ─────────────────────────────────

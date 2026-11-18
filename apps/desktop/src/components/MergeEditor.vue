@@ -26,6 +26,7 @@ import TokenMergePanel from "./TokenMergePanel.vue";
 import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
 import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
 import { useAcceptedReports } from "../composables/useAcceptedReports";
+import { cutUtf16 } from "../utils/issuePrefill";
 import type { ProposalKind, ResolutionReport } from "../utils/resolutionReport";
 // Async on purpose, and NOT a contradiction of the static-import justification
 // above: that one covers thin BaseModal wrappers with no heavy dependencies.
@@ -614,6 +615,14 @@ function onReport(kind: ProposalKind, hunkId: string | number) {
 const accepted = useAcceptedReports();
 const acceptedReports = accepted.list;
 
+/** An accepted copy's label: the first line of what was written (its line
+ *  number would be stale as soon as another hunk is resolved). */
+function acceptedSnippet(r: ResolutionReport): string {
+  const first = (r.resolvedLines ?? []).find((l) => l.trim()) ?? "";
+  const s = first.trim();
+  return s.length > 40 ? `${cutUtf16(s, 40)}…` : s;
+}
+
 // Another file, or the same path in another repository.
 watch([() => props.file.path, () => props.cwd], () => accepted.clear());
 
@@ -1091,7 +1100,7 @@ useResizeObserver(contentEl, drawMinimap);
     <div v-if="acceptedReports.length" class="me-accepted" role="region" :aria-label="t('createIssue.report.acceptedTitle')">
       <span class="me-accepted-title">{{ t("createIssue.report.acceptedTitle") }}</span>
       <span v-for="(r, i) in acceptedReports" :key="i" class="me-accepted-item">
-        {{ t("createIssue.report.acceptedItem", r.hunk.startLine) }}
+        {{ t("createIssue.report.acceptedItem", r.hunk.type, acceptedSnippet(r)) }}
         <button type="button" class="me-accepted-btn" :title="t('createIssue.report.buttonTitle')" @click="sendReport(r)">
           {{ t("createIssue.report.button") }}
         </button>

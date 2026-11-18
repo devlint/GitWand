@@ -51,4 +51,13 @@ describe("useAcceptedReports", () => {
     a.landed(1);
     expect(a.list.value).toHaveLength(0);
   });
+
+  it("a pending copy expires: a much later reparse is not its write", () => {
+    let t = 0;
+    const a = useAcceptedReports(() => t);
+    a.resolving(2, r("a"));
+    t = 15_000;
+    a.landed(2);
+    expect(a.list.value).toHaveLength(0);
+  });
 });

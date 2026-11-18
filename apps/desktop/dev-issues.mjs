@@ -53,10 +53,13 @@ export function devIssuePayload(input) {
  * `env.GITWAND_DEV_REPORT_REPO` when set, so QA under dev:web can file on a
  * test fork instead of the real repository.
  */
+/** GitWand's own repository (Rust and TS `GITWAND_REPO`; a test keeps the three equal). */
+export const GITWAND_REPO = "devlint/GitWand";
+
 export function devGitwandReport(input, env) {
   const built = devIssuePayload({ title: input?.title, body: input?.body });
   if (built.error) return built;
-  return { repo: env?.GITWAND_DEV_REPORT_REPO || "devlint/GitWand", payload: built.payload };
+  return { repo: env?.GITWAND_DEV_REPORT_REPO || GITWAND_REPO, payload: built.payload };
 }
 
 /**
