@@ -237,7 +237,10 @@ function truncatedHunks(idx: number) {
   const diff = props.diffs[idx];
   const cached = truncatedCache.get(diff);
   if (cached) return cached;
-  if (!isFileTruncated(idx)) return diff.hunks;
+  if (!isFileTruncated(idx)) {
+    truncatedCache.set(diff, diff.hunks);
+    return diff.hunks;
+  }
 
   const result: typeof diff.hunks = [];
   let remaining = MAX_LINES_PER_FILE;
@@ -333,7 +336,9 @@ function fileIssue() {
 /** The line numbers' tooltip, computed once rather than per cell. */
 const pickTitle = computed(() => (canSelectLines.value ? t("createIssue.selectionHint") : undefined));
 
-watch(() => [props.commitHash, props.diffs, props.diffMode], lineRange.clear);
+// Another commit, or another layout: row indices mean other lines. The same
+// commit's diffs reloaded (a refresh) keep them.
+watch(() => [props.commitHash, props.diffsHash, props.diffMode], lineRange.clear);
 
 // Reset expansion and rendered count when diffs change (subsequent prop updates)
 watch(

@@ -1598,7 +1598,7 @@ function submitRequestReviewers() {
                 :cwd="p.cwd.value"
                 :pr-number="p.selectedPr.value?.number"
                 :pr-url="detailOfSelectedPr?.url"
-                :head-sha="detailOfSelectedPr?.headSha"
+                :head-sha="detailOfSelectedPr ? (p.permalinkHeadSha.value ?? undefined) : undefined"
                 :forge-name="p.forge.value.name"
                 :annotations="p.selectedDiffFile.value ? (p.mergedAnnotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
                 :can-edit-comments="p.forgeSupportsCommentEdit.value"

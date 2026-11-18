@@ -419,4 +419,14 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     await nextTick();
     expect(fake.activeSelection.value).toBeNull();
   });
+
+  it("the same commit's diffs reloaded keep the selection", async () => {
+    const { fake, diffs } = mount();
+    await nextTick();
+    click(numberCell(0, 1));
+    await nextTick();
+    diffs.value = [...DIFFS];
+    await nextTick();
+    expect(fake.activeSelection.value).not.toBeNull();
+  });
 });

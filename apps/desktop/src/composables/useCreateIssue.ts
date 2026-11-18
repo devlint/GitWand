@@ -8,7 +8,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec } from "../utils/backend";
-import { isTypingTarget } from "../utils/typingTarget";
+import { isEditableTarget } from "../utils/editableTarget";
 import type {
   CreatedIssue,
   GitLogEntry,
@@ -54,7 +54,7 @@ export function newIssueShortcutLabel(mac: boolean): string {
  *  `data-issue-shortcut` (the PR comment box while it holds a range). */
 function leavesShortcutToField(t: EventTarget | null): boolean {
   const el = t as { closest?: (s: string) => Element | null } | null;
-  return isTypingTarget(t) && !el?.closest?.("[data-issue-shortcut]");
+  return isEditableTarget(t) && !el?.closest?.("[data-issue-shortcut]");
 }
 
 /**

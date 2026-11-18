@@ -137,6 +137,25 @@ describe("useLineRange", () => {
     expect(r.range.value).toBeNull();
   });
 
+  it("a press on an inner scrollbar (past the element's client area) keeps it", () => {
+    const r = withRange({ dismiss: { keep: ".keep" } });
+    const wide = document.createElement("div");
+    Object.defineProperty(wide, "clientWidth", { value: 100 });
+    Object.defineProperty(wide, "clientHeight", { value: 50 });
+    document.body.appendChild(wide);
+    r.pick("h", 1, false);
+    const onBar = new MouseEvent("mousedown", { bubbles: true });
+    Object.defineProperty(onBar, "offsetX", { value: 40 });
+    Object.defineProperty(onBar, "offsetY", { value: 52 });
+    wide.dispatchEvent(onBar);
+    expect(r.range.value).not.toBeNull();
+    const inside = new MouseEvent("mousedown", { bubbles: true });
+    Object.defineProperty(inside, "offsetX", { value: 40 });
+    Object.defineProperty(inside, "offsetY", { value: 20 });
+    wide.dispatchEvent(inside);
+    expect(r.range.value).toBeNull();
+  });
+
   it("without dismiss options, nothing outside clears it", () => {
     const r = withRange();
     r.pick("h", 1, false);

@@ -7,7 +7,7 @@
  * an extend anywhere else starts over there.
  */
 import { computed, onMounted, onUnmounted, ref, type ComputedRef } from "vue";
-import { isTypingTarget } from "../utils/typingTarget";
+import { isEditableTarget } from "../utils/editableTarget";
 
 export interface LineRange {
   group: string;
@@ -74,11 +74,15 @@ export function useLineRange(opts?: {
       // Its own controls, and a dialog (the issue form opened from it).
       if (target?.closest?.(dismiss.keep) || target?.closest?.('[aria-modal="true"]')) return;
       if (target && target === dismiss.scrollEl?.()) return;
+      // A press past an element's client area is on its scrollbar (a hunk
+      // scrolled sideways): scrolling, not a click elsewhere.
+      const el = target as HTMLElement | null;
+      if (el && el.clientWidth > 0 && (e.offsetX >= el.clientWidth || e.offsetY >= el.clientHeight)) return;
       clear();
     };
     const onKeydown = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || !state.value || e.defaultPrevented) return;
-      if (isTypingTarget(e.target)) return;
+      if (isEditableTarget(e.target)) return;
       if (document.querySelector('[aria-modal="true"], [role="menu"]')) return;
       // Decided once every listener has seen the key: an overlay that closed
       // on it (and marked it handled) keeps the range; otherwise it clears.

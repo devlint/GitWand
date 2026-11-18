@@ -9,17 +9,22 @@
  * from there unmodified.
  */
 
-/** True when `el` is a text input, textarea, select, or contenteditable —
- *  the keymap must stay completely inert while the user is typing there. */
+/** True when `el` is a text input, textarea, select, contenteditable or the
+ *  terminal — keymaps and shortcuts must stay inert while the user is typing
+ *  there. The one such rule in the app (#301 merged `isTypingTarget` in). */
 export function isEditableTarget(el: EventTarget | null): boolean {
-  if (!(el instanceof HTMLElement)) return false;
-  const tag = el.tagName;
+  // Duck-typed (not `instanceof HTMLElement`) so plain objects in node tests
+  // and elements from other realms are read the same way.
+  const e = el as (HTMLElement & { closest?: (s: string) => Element | null }) | null;
+  if (!e || typeof e !== "object" || typeof e.tagName !== "string") return false;
+  const tag = e.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
   // `isContentEditable` computes inherited editability but jsdom doesn't
   // fully implement it — check the attribute directly too so this guard is
   // reliable in both the browser and the test environment.
-  if (el.isContentEditable) return true;
-  const attr = el.getAttribute("contenteditable");
+  if (e.isContentEditable) return true;
+  const attr = e.getAttribute?.("contenteditable");
   if (attr === "" || attr === "true") return true;
-  return false;
+  // The terminal: its keys go to the shell.
+  return !!e.closest?.(".xterm");
 }
