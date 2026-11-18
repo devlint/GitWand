@@ -277,9 +277,11 @@ const composeRange = computed<{ lo: number; hi: number } | null>(() => {
 });
 
 
-function openCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
+/** Open the box on a row; `keepText` carries the draft over (a Shift+click
+ *  that could not extend must not cost what was typed). */
+function openCompose(hunkIdx: number, lineIdx: number, dl: DiffLine, keepText = false) {
   composeLine.value = { hunkIdx, lineIdx, line: lineNoOf(dl), side: sideOf(dl) };
-  composeText.value = "";
+  if (!keepText) composeText.value = "";
   lineRange.pick(String(hunkIdx), lineIdx, false);
   handedOver.value = false;
 }
@@ -294,7 +296,7 @@ function extendCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
   const cur = composeLine.value;
   const hunk = props.diff?.hunks[hunkIdx];
   if (!cur || cur.hunkIdx !== hunkIdx || !hunk) {
-    openCompose(hunkIdx, lineIdx, dl);
+    openCompose(hunkIdx, lineIdx, dl, true);
     return;
   }
   lineRange.pick(String(hunkIdx), lineIdx, true);
@@ -363,7 +365,7 @@ const canRange = computed(() => props.forgeName === "github");
 
 function onLineNoClick(e: MouseEvent, hunkIdx: number, lineIdx: number, dl: DiffLine) {
   if (e.shiftKey && canRange.value) extendCompose(hunkIdx, lineIdx, dl);
-  else openCompose(hunkIdx, lineIdx, dl);
+  else openCompose(hunkIdx, lineIdx, dl, e.shiftKey);
 }
 
 function isInComposeRange(hunkIdx: number, lineIdx: number): boolean {
@@ -391,6 +393,7 @@ const composeSelection = computed<DiffSelection | null>(() => {
     return null;
   }
   const r = composeRange.value;
+  const pick = lineRange.range.value;
   const lines = r ? hunk.lines.slice(r.lo, r.hi + 1) : hunk.lines.slice(c.lineIdx, c.lineIdx + 1);
   if (lines.length === 0) return null;
   return {
@@ -405,16 +408,22 @@ const composeSelection = computed<DiffSelection | null>(() => {
     // Filed (button or ⌘⇧I): no longer offered to ⌘⇧I; the box, its range
     // and the draft stay for the comment (cancelling the issue costs nothing).
     onOpened: () => {
-      handedOver.value = true;
+      // The range filed, not one picked since.
+      if (lineRange.range.value === pick) handedOver.value = true;
     },
   };
 });
 
 // Only a Shift+click range is a selection for ⌘⇧I: a box opened to comment
 // on one line is not.
-useSelectionPublisher(createIssue, () => (composeRange.value && !handedOver.value ? composeSelection.value : null));
-// Another file: the box (and its line numbers) belonged to the previous one.
-watch(() => props.filePath, closeCompose);
+useSelectionPublisher(
+  createIssue,
+  () => (composeRange.value && !handedOver.value ? composeSelection.value : null),
+  () => lineRange.range.value,
+);
+// Another file, or another PR (its file may share the path): the box and its
+// line numbers belonged to the previous one.
+watch(() => [props.filePath, props.prNumber], closeCompose);
 
 function fileIssueFromCompose() {
   const sel = composeSelection.value;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { githubRangeStart, findBlock } from "../diffRange";
+import { githubRangeStart, findBlock, rowGroup, parseRowGroup, rowsInColumn } from "../diffRange";
 import type { DiffLine, GitDiff } from "../backend";
 
 const add = (n: number, c: string): DiffLine => ({ type: "add", content: c, newLineNo: n });
@@ -51,5 +51,22 @@ describe("findBlock", () => {
 
   it("is null when the rows are gone", () => {
     expect(findBlock(diffOf([ctx(1, 1, "a")]), [ctx(3, 3, "zz")])).toBeNull();
+  });
+});
+
+describe("row groups and columns", () => {
+  it("encodes and decodes a file, hunk and column", () => {
+    expect(parseRowGroup(rowGroup(3, 7, "old"))).toEqual({ fileIdx: 3, hunkIdx: 7, side: "old" });
+    expect(parseRowGroup(rowGroup(0, 0, "row"))).toEqual({ fileIdx: 0, hunkIdx: 0, side: "row" });
+  });
+
+  it("takes one column of side-by-side pairs, dropping the gaps", () => {
+    const pairs = [
+      { left: ctx(1, 1, "a"), right: ctx(1, 1, "a") },
+      { left: del(2, "b"), right: add(2, "B") },
+      { left: null, right: add(3, "C") },
+    ];
+    expect(rowsInColumn(pairs, "old", 0, 2).map((l) => l.content)).toEqual(["a", "b"]);
+    expect(rowsInColumn(pairs, "new", 1, 2).map((l) => l.content)).toEqual(["B", "C"]);
   });
 });

@@ -511,7 +511,7 @@ describe("useCreateIssue — selection hand-off", () => {
     await flush();
     api.title.value = "typed first";
     onOrigin.resolve(true);
-    await pending;
+    expect(await pending).toBe(false);
     expect(api.body.value).toBe("");
     expect(onOpened).not.toHaveBeenCalled();
   });

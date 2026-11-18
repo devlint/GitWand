@@ -23,8 +23,6 @@ export interface LineRangeApi {
   pick(group: string, idx: number, extend: boolean): void;
   isIn(group: string, idx: number): boolean;
   clear(): void;
-  /** Bind on the diff's root (`@keydown`): Escape there clears the range. */
-  onKeydown(e: KeyboardEvent): void;
 }
 
 /**
@@ -38,8 +36,10 @@ export function preventShiftSelect(e: MouseEvent): void {
 export function useLineRange(opts?: {
   /**
    * Clear on a press outside `keep` (nor on `scrollEl` itself: a press on
-   * its scrollbar is scrolling, nor inside a dialog). Escape clears through
-   * `onKeydown`, bound on the diff, so only when the user is in the diff.
+   * its scrollbar is scrolling, nor inside a dialog), and on Escape: the
+   * topmost thing first — a menu or modal dialog gets it, a field keeps its
+   * keys; otherwise it clears the range and goes no further (a docked panel
+   * stays open).
    */
   dismiss?: { keep: string; scrollEl?: () => HTMLElement | null };
 }): LineRangeApi {
@@ -65,15 +65,6 @@ export function useLineRange(opts?: {
     state.value = null;
   }
 
-  /** Escape: the topmost thing first. A menu or dialog open over the diff
-   *  gets it (the range stays); otherwise it clears the range, and only that. */
-  function onKeydown(e: KeyboardEvent) {
-    if (e.key !== "Escape" || !state.value || e.defaultPrevented) return;
-    if (document.querySelector('[aria-modal="true"], [role="menu"], [role="dialog"]')) return;
-    clear();
-    e.stopPropagation();
-  }
-
   const dismiss = opts?.dismiss;
   if (dismiss) {
     const onMousedown = (e: MouseEvent) => {
@@ -84,9 +75,23 @@ export function useLineRange(opts?: {
       if (target && target === dismiss.scrollEl?.()) return;
       clear();
     };
-    onMounted(() => document.addEventListener("mousedown", onMousedown));
-    onUnmounted(() => document.removeEventListener("mousedown", onMousedown));
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !state.value || e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.("input, textarea, select, [contenteditable]")) return;
+      if (document.querySelector('[aria-modal="true"], [role="menu"]')) return;
+      clear();
+      e.stopPropagation();
+    };
+    onMounted(() => {
+      document.addEventListener("mousedown", onMousedown);
+      document.addEventListener("keydown", onKeydown);
+    });
+    onUnmounted(() => {
+      document.removeEventListener("mousedown", onMousedown);
+      document.removeEventListener("keydown", onKeydown);
+    });
   }
 
-  return { range, pick, isIn, clear, onKeydown };
+  return { range, pick, isIn, clear };
 }

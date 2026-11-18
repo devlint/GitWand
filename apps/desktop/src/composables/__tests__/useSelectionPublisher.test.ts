@@ -14,10 +14,10 @@ const sel = (path: string): DiffSelection => ({
   source: { kind: "pr", number: 1, url: "u", headSha: null },
 });
 
-function view(api: any, source: Ref<DiffSelection | null>) {
+function view(api: any, source: Ref<DiffSelection | null>, rank?: () => unknown) {
   return defineComponent({
     setup() {
-      useSelectionPublisher(api, () => source.value);
+      useSelectionPublisher(api, () => source.value, rank);
       return () => h("div");
     },
   });
@@ -47,5 +47,28 @@ describe("useSelectionPublisher", () => {
     expect(api.activeSelection.value?.path).toBe("a");
     appA.unmount();
     expect(api.activeSelection.value).toBeNull();
+  });
+
+  it("a selection rebuilt without a new pick keeps its rank", async () => {
+    const activeSelection = shallowRef<DiffSelection | null>(null);
+    const api = { available: ref(true), activeSelection, publishSelection: createSelectionRegistry(activeSelection) };
+    const a = ref<DiffSelection | null>(null);
+    const b = ref<DiffSelection | null>(null);
+    const pickA = ref(0);
+    createApp(view(api, a, () => pickA.value)).mount(document.createElement("div"));
+    createApp(view(api, b)).mount(document.createElement("div"));
+    a.value = sel("a");
+    await nextTick();
+    b.value = sel("b");
+    await nextTick();
+    // A background refresh rebuilds A's object, same pick.
+    a.value = sel("a");
+    await nextTick();
+    expect(api.activeSelection.value?.path).toBe("b");
+    // A new pick in A does take over.
+    pickA.value++;
+    a.value = sel("a2");
+    await nextTick();
+    expect(api.activeSelection.value?.path).toBe("a2");
   });
 });

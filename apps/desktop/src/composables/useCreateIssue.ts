@@ -133,7 +133,7 @@ export interface CreateIssueApi {
   activeSelection: Ref<DiffSelection | null>;
   /** A view publishes (or, with `null`, withdraws) its selection; the most
    *  recent one still live becomes `activeSelection`. */
-  publishSelection(id: symbol, sel: DiffSelection | null): void;
+  publishSelection(id: symbol, sel: DiffSelection | null, key?: unknown): void;
   /**
    * "Create issue from these lines": the form opens prefilled with a
    * permalink (when GitHub has the lines), the lines and their origin.
@@ -156,10 +156,15 @@ export const CREATE_ISSUE_KEY: InjectionKey<CreateIssueApi> = Symbol("createIssu
  */
 export function createSelectionRegistry(target: Ref<DiffSelection | null>) {
   let seq = 0;
-  const live = new Map<symbol, { sel: DiffSelection; at: number }>();
-  return (id: symbol, sel: DiffSelection | null): void => {
-    if (sel) live.set(id, { sel, at: ++seq });
-    else live.delete(id);
+  const live = new Map<symbol, { sel: DiffSelection; at: number; key: unknown }>();
+  /** `key` names the pick behind `sel`: a selection rebuilt for the same
+   *  pick (a refresh) keeps its rank; without a key every update ranks. */
+  return (id: symbol, sel: DiffSelection | null, key?: unknown): void => {
+    const prev = live.get(id);
+    if (sel) {
+      const same = key !== undefined && prev !== undefined && prev.key === key;
+      live.set(id, { sel, at: same ? prev.at : ++seq, key });
+    } else live.delete(id);
     let best: { sel: DiffSelection; at: number } | null = null;
     for (const entry of live.values()) if (!best || entry.at > best.at) best = entry;
     target.value = best?.sel ?? null;
@@ -171,12 +176,18 @@ export function createSelectionRegistry(target: Ref<DiffSelection | null>) {
  * created; withdrawn when it goes away, availability drops or the view
  * unmounts. Call from a component's setup.
  */
-export function useSelectionPublisher(api: CreateIssueApi | null, source: () => DiffSelection | null): void {
+export function useSelectionPublisher(
+  api: CreateIssueApi | null,
+  source: () => DiffSelection | null,
+  /** The pick behind the selection (its range): rebuilt for the same pick,
+   *  the selection keeps its rank among the views'. */
+  pick?: () => unknown,
+): void {
   if (!api) return;
   const id = Symbol("selection");
   watch(
-    () => (api.available.value ? source() : null),
-    (sel) => api.publishSelection(id, sel),
+    () => [api.available.value ? source() : null, pick?.()] as const,
+    ([sel, key]) => api.publishSelection(id, sel, key),
   );
   onUnmounted(() => api.publishSelection(id, null));
 }
@@ -377,8 +388,9 @@ export function useCreateIssue(deps: {
   const activeSelection = shallowRef<DiffSelection | null>(null);
   const publishSelection = createSelectionRegistry(activeSelection);
 
-  /** Resolves `true` when the form opened with `sel` (then `sel.onOpened`
-   *  has run), `false` when it could not (no GitHub, a form being typed in). */
+  /** Resolves `true` when the form holds `sel`'s lines (then `sel.onOpened`
+   *  has run, unless its targets could not be read), `false` otherwise: no
+   *  GitHub, a form being typed in, typed first, another form meanwhile. */
   async function openFromSelection(sel: DiffSelection): Promise<boolean> {
     const cwd = deps.cwd.value;
     if (!cwd || !available.value || !makeRoom()) return false;
@@ -403,8 +415,9 @@ export function useCreateIssue(deps: {
     // Handed over only once its lines are in this very form and the form
     // could read its targets: a prefill dropped (typed first, form closed
     // and another opened) or a failed read (signed out…) must not cost it.
-    if ((await opened) && !targetsFailed.value) sel.onOpened?.();
-    return true;
+    const landed = await opened;
+    if (landed && !targetsFailed.value) sel.onOpened?.();
+    return landed;
   }
 
   async function openFromShortcut(): Promise<void> {

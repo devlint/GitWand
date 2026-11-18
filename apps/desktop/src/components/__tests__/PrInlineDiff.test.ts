@@ -636,4 +636,61 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     newNo(r.mounted.container, 3).dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(false);
   });
+
+  it("another PR closes the box even when the file has the same path", async () => {
+    const prNumber = vueRef(12);
+    const activeSelection = vueRef<DiffSelection | null>(null);
+    const fake = { available: vueRef(true), activeSelection, openFromSelection: vi.fn(), publishSelection: createSelectionRegistry(activeSelection) };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const app = createApp({
+      render: () => h(PrInlineDiff as any, {
+        diff: rangeDiff(), filePath: "src/r.ts", comments: [], prNumber: prNumber.value,
+        prUrl: `https://github.com/o/r/pull/${prNumber.value}`, headSha: "h".repeat(40), forgeName: "github",
+      }),
+    });
+    app.provide(CREATE_ISSUE_KEY, fake as any);
+    app.mount(container);
+    mounted = { app, container, vm: null };
+    await nextTick();
+    clickNo(newNo(container, 3));
+    await nextTick();
+    prNumber.value = 13;
+    await nextTick();
+    await nextTick();
+    expect(container.querySelector(".pid-compose")).toBeNull();
+  });
+
+  it("a Shift+click that cannot extend keeps the draft (another hunk, another forge)", async () => {
+    for (const forgeName of ["github", "gitlab"]) {
+      const r = mountRange({ forgeName });
+      mounted = r.mounted;
+      const c = r.mounted.container;
+      await nextTick();
+      clickNo(newNo(c, 3));
+      await nextTick();
+      await typeInCompose(c, "keep");
+      clickNo(newNo(c, forgeName === "github" ? 40 : 5), true);
+      await nextTick();
+      expect(c.querySelector<HTMLTextAreaElement>(".pid-compose textarea")?.value).toBe("keep");
+      unmount(r.mounted);
+      mounted = null;
+    }
+  });
+
+  it("filing stops offering the filed range only, not a range picked since", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 4), true);
+    await nextTick();
+    const filed = r.fake.activeSelection.value!;
+    clickNo(newNo(c, 6), true);
+    await nextTick();
+    filed.onOpened?.();
+    await nextTick();
+    expect(r.fake.activeSelection.value?.lines.map((l) => l.content)).toEqual(["c3", "c4", "c5", "c6"]);
+  });
 });

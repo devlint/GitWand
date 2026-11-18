@@ -64,3 +64,29 @@ export function findBlock(diff: GitDiff, rows: DiffLine[]): { hunkIdx: number; s
   }
   return best;
 }
+
+/** A range group in a commit diff: one hunk of one file, inline rows or one
+ *  side-by-side column. */
+export type RowSide = "row" | "old" | "new";
+
+export function rowGroup(fileIdx: number, hunkIdx: number, side: RowSide): string {
+  return `${fileIdx}:${hunkIdx}:${side}`;
+}
+
+export function parseRowGroup(group: string): { fileIdx: number; hunkIdx: number; side: RowSide } {
+  const [f, h, side] = group.split(":");
+  return { fileIdx: Number(f), hunkIdx: Number(h), side: side as RowSide };
+}
+
+/** Rows `lo..hi` of one column of side-by-side pairs, gaps dropped. */
+export function rowsInColumn(
+  pairs: { left: DiffLine | null; right: DiffLine | null }[],
+  side: "old" | "new",
+  lo: number,
+  hi: number,
+): DiffLine[] {
+  return pairs
+    .slice(lo, hi + 1)
+    .map((p) => (side === "old" ? p.left : p.right))
+    .filter((l): l is DiffLine => l !== null);
+}

@@ -50,44 +50,50 @@ describe("useLineRange", () => {
     expect(r.range.value).toEqual({ group: "h2", anchor: 1, focus: 1, lo: 1, hi: 1 });
   });
 
-  it("Escape on the diff clears it, and that is all it does", () => {
+  it("Escape clears it, and that is all it does", () => {
     const r = withRange({ dismiss: { keep: ".keep" } });
     r.pick("h", 1, false);
-    const handled = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
     handled.preventDefault();
-    r.onKeydown(handled);
+    document.dispatchEvent(handled);
     expect(r.range.value).not.toBeNull();
-    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
-    const stop = vi.spyOn(esc, "stopPropagation");
-    r.onKeydown(esc);
-    expect(r.range.value).toBeNull();
-    // One key, one thing: panels listening further up stay open.
-    expect(stop).toHaveBeenCalled();
-  });
-
-  it("a menu or dialog on top gets Escape first; the range stays", () => {
-    for (const role of ["menu", "dialog"]) {
-      const r = withRange();
-      r.pick("h", 1, false);
-      const top = document.createElement("div");
-      top.setAttribute("role", role);
-      document.body.appendChild(top);
-      const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
-      const stop = vi.spyOn(esc, "stopPropagation");
-      r.onKeydown(esc);
-      expect(r.range.value).not.toBeNull();
-      expect(stop).not.toHaveBeenCalled();
-      top.remove();
-      app?.unmount();
-      app = null;
+    const outer = vi.fn();
+    window.addEventListener("keydown", outer);
+    try {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(r.range.value).toBeNull();
+      // One key, one thing: panels listening further up stay open.
+      expect(outer).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", outer);
     }
   });
 
-  it("an Escape elsewhere in the document leaves it alone", () => {
+  it("a menu or modal dialog on top gets Escape first; a field keeps its keys", () => {
     const r = withRange({ dismiss: { keep: ".keep" } });
     r.pick("h", 1, false);
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    for (const attrs of [{ role: "menu" }, { "aria-modal": "true" }]) {
+      const top = document.createElement("div");
+      for (const [k, v] of Object.entries(attrs)) top.setAttribute(k, v);
+      document.body.appendChild(top);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(r.range.value).not.toBeNull();
+      top.remove();
+    }
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(r.range.value).not.toBeNull();
+  });
+
+  it("a docked, non-modal panel (role=dialog) does not hold Escape back", () => {
+    const r = withRange({ dismiss: { keep: ".keep" } });
+    r.pick("h", 1, false);
+    const panel = document.createElement("div");
+    panel.setAttribute("role", "dialog");
+    document.body.appendChild(panel);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(r.range.value).toBeNull();
   });
 
   it("a press elsewhere clears it; not on kept elements nor on the scroll area", () => {

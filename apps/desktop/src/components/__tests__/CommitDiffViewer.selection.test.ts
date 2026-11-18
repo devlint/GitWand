@@ -178,7 +178,7 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     await nextTick();
     click(numberCell(0, 1));
     await nextTick();
-    document.querySelector(".commit-diff-viewer")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await nextTick();
     expect(fake.activeSelection.value).toBeNull();
     expect(document.querySelector(".cdv-line--selected")).toBeNull();
@@ -302,12 +302,28 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     expect(document.querySelector(".cdv-line--selected")).toBeNull();
   });
 
-  it("a click on a line number puts the focus on the diff (where Escape works)", async () => {
+  it("a click on a line number leaves the focus where it was", async () => {
     mount();
+    await nextTick();
+    const list = document.createElement("button");
+    document.body.appendChild(list);
+    list.focus();
+    click(numberCell(0, 1));
+    await nextTick();
+    expect(document.activeElement).toBe(list);
+  });
+
+  it("filing lets go of the filed lines only, not lines picked since", async () => {
+    const { fake } = mount();
     await nextTick();
     click(numberCell(0, 1));
     await nextTick();
-    expect(document.activeElement).toBe(document.querySelector(".commit-diff-viewer"));
+    const filed = fake.activeSelection.value!;
+    click(numberCell(0, 3));
+    await nextTick();
+    filed.onOpened?.();
+    await nextTick();
+    expect(contents(fake.activeSelection.value)).toEqual(["c"]);
   });
 
   it("losing issue creation clears the selection", async () => {

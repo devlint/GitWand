@@ -10,6 +10,7 @@ import { safeHtml } from "../composables/useSafeHtml";
 import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
 import { CREATE_ISSUE_KEY, useSelectionPublisher } from "../composables/useCreateIssue";
 import { useLineRange, preventShiftSelect } from "../composables/useLineRange";
+import { parseRowGroup, rowGroup, rowsInColumn, type RowSide } from "../utils/diffRange";
 import type { DiffSelection } from "../utils/issuePrefill";
 
 const { t } = useI18n();
@@ -259,21 +260,14 @@ const createIssue = inject(CREATE_ISSUE_KEY, null);
 const canSelectLines = computed(() => !!createIssue?.available.value && !!props.commitInfo);
 
 /** `row`: inline rows; `old` / `new`: one column of the side-by-side pairs. */
-type SelSide = "row" | "old" | "new";
-/** One hunk (and column) of one file: the rows a range may span. */
-const groupOf = (fileIdx: number, hunkIdx: number, side: SelSide) => `${fileIdx}:${hunkIdx}:${side}`;
+type SelSide = RowSide;
 
 const lineRange = useLineRange({
   dismiss: { keep: ".cdv-line-no, .cdv-issue-btn", scrollEl: () => contentEl.value },
 });
 
-/** The viewer's root: focused on a pick, so Escape there clears the range. */
-const rootEl = ref<HTMLElement | null>(null);
-
 function onLineNoClick(e: MouseEvent, fileIdx: number, hunkIdx: number, idx: number, side: SelSide) {
-  if (!canSelectLines.value) return;
-  lineRange.pick(groupOf(fileIdx, hunkIdx, side), idx, e.shiftKey);
-  rootEl.value?.focus({ preventScroll: true });
+  if (canSelectLines.value) lineRange.pick(rowGroup(fileIdx, hunkIdx, side), idx, e.shiftKey);
 }
 
 // Issues no longer possible here (another origin, signed out): nothing to
@@ -283,15 +277,13 @@ watch(canSelectLines, (can) => {
 });
 
 function isSelected(fileIdx: number, hunkIdx: number, idx: number, side: SelSide): boolean {
-  return lineRange.isIn(groupOf(fileIdx, hunkIdx, side), idx);
+  return lineRange.isIn(rowGroup(fileIdx, hunkIdx, side), idx);
 }
 
 /** The selected range's file, hunk and column. */
 const selectedAt = computed(() => {
   const r = lineRange.range.value;
-  if (!r) return null;
-  const [f, h, side] = r.group.split(":");
-  return { fileIdx: Number(f), hunkIdx: Number(h), side: side as SelSide, lo: r.lo, hi: r.hi };
+  return r ? { ...parseRowGroup(r.group), lo: r.lo, hi: r.hi, pick: r } : null;
 });
 
 function isHunkSelected(fileIdx: number, hunkIdx: number): boolean {
@@ -305,12 +297,7 @@ const selection = computed<DiffSelection | null>(() => {
   const hunk = s && diff ? truncatedHunks(s.fileIdx)[s.hunkIdx] : undefined;
   if (!s || !info || !diff || !hunk) return null;
   const lines =
-    s.side === "row"
-      ? hunk.lines.slice(s.lo, s.hi + 1)
-      : pairsOf(hunk.lines, diff.path)
-          .slice(s.lo, s.hi + 1)
-          .map((p) => (s.side === "old" ? p.left : p.right))
-          .filter((l): l is DiffLine => l !== null);
+    s.side === "row" ? hunk.lines.slice(s.lo, s.hi + 1) : rowsInColumn(pairsOf(hunk.lines, diff.path), s.side, s.lo, s.hi);
   if (lines.length === 0) return null;
   return {
     path: diff.path,
@@ -319,13 +306,16 @@ const selection = computed<DiffSelection | null>(() => {
     ...(s.side !== "row" ? { side: s.side } : {}),
     lines,
     source: { kind: "commit", hash: info.hash, hashFull: info.hashFull, parent: info.parents[0] ?? null },
-    // Filed: the next ⌘⇧I is about something else, not these lines again.
-    onOpened: lineRange.clear,
+    // Filed: the next ⌘⇧I is about something else, not these lines again —
+    // unless other lines were picked since (they stay).
+    onOpened: () => {
+      if (lineRange.range.value === s.pick) lineRange.clear();
+    },
   };
 });
 
 // Published for ⌘⇧I while issues can be created (#301).
-useSelectionPublisher(createIssue, () => selection.value);
+useSelectionPublisher(createIssue, () => selection.value, () => lineRange.range.value);
 
 function fileIssue() {
   const sel = selection.value;
@@ -462,7 +452,7 @@ function onContentScroll(e: Event) {
 </script>
 
 <template>
-  <div ref="rootEl" class="commit-diff-viewer" tabindex="-1" @keydown="lineRange.onKeydown">
+  <div class="commit-diff-viewer">
     <!-- Commit card -->
     <div class="cdv-commit-card" v-if="commitInfo">
       <!-- Row 1: avatar + subject + hash -->
@@ -671,7 +661,6 @@ function onContentScroll(e: Event) {
 </template>
 
 <style scoped>
-.commit-diff-viewer:focus { outline: none; }
 .commit-diff-viewer {
   display: flex;
   flex-direction: column;

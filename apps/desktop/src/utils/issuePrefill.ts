@@ -146,10 +146,9 @@ export function selectionIssuePrefill(
   sel: DiffSelection,
   at: SelectionLinks,
 ): IssuePrefill {
-  let span = permalinkSpan(sel.lines, sel.side);
-  // No old version to link (a PR: its base is unknown) but context lines
-  // picked with the deleted ones: link those where they are now.
-  if (span?.side === "old" && !at.oldSha && !sel.side) span = permalinkSpan(sel.lines, "new") ?? span;
+  // No old version known (a PR's base): no link, rather than one to the
+  // context lines alone that would not show the deleted lines quoted.
+  const span = permalinkSpan(sel.lines, sel.side);
   // Deleted lines of a renamed file live under its old path.
   const path = span?.side === "old" && sel.oldPath ? sel.oldPath : sel.path;
   const sha = span?.side === "old" ? at.oldSha : at.newSha;
