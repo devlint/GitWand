@@ -7,13 +7,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createApp, defineComponent, h, reactive, nextTick, toRaw, type App } from "vue";
+import { createApp, defineComponent, h, reactive, nextTick, ref, toRaw, type App } from "vue";
 import MergeEditor from "../MergeEditor.vue";
 import type { ConflictFile } from "../../composables/useGitWand";
 import { useResolutionSelection } from "../../composables/useResolutionSelection";
 import { CREATE_ISSUE_KEY, type CreateIssueApi } from "../../composables/useCreateIssue";
 
-const issues = { openFromResolution: vi.fn(async () => {}) };
+const issues = { openFromResolution: vi.fn(async () => {}), reportAvailable: ref(true) };
 
 class FakeResizeObserver {
   constructor(_cb: ResizeObserverCallback) {}
@@ -276,6 +276,17 @@ describe("MergeEditor — report a resolution", () => {
     const btn = reportButtons("resolution-preview-panel")[0];
     expect(btn.classList.contains("resolution-preview-panel__btn--reject")).toBe(false);
     expect(btn.classList.contains("resolution-preview-panel__btn--report")).toBe(true);
+  });
+
+  it("offers no Report when no report could be sent", async () => {
+    issues.reportAvailable.value = false;
+    try {
+      mountWithFile(twoResolvableHunks());
+      await nextTick();
+      expect(reportButtons("resolution-preview-panel")).toHaveLength(0);
+    } finally {
+      issues.reportAvailable.value = true;
+    }
   });
 
   it("offers no Report without the issue form", async () => {

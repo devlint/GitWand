@@ -2718,6 +2718,7 @@ const en = {
   },
 
   createIssue: {
+    tooLong: "The text is {0} characters long; GitHub accepts at most {1}.",
     fromSelection: "Create issue from these lines",
     selectionHint: "Click a line number to select it for an issue; Shift+click to extend",
     title: "New issue",
@@ -2768,7 +2769,6 @@ const en = {
       secretBlockingAnswer: "Possible secret in the answer ({0}): remove it to send",
       secretWarningAnswer: "Possible secret in the answer ({0}): check before sending",
       secretWarningMore: "…and {0} more possible secrets (high-entropy strings)",
-      tooLong: "The text is {0} characters long; GitHub accepts at most {1}. Shorten the answer or the description.",
       replaceTitle: "Replace the title and description?",
       replaceEdits: "Your edits to the title and description will be replaced",
       replace: "Replace",

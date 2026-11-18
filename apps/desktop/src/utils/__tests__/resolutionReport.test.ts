@@ -135,7 +135,7 @@ describe("gitwandReportPrefill", () => {
         hasBase: true,
         llmTrace: {
           calledAt: "2026-11-18T10:00:00Z",
-          model: "claude-test",
+          model: "claude-sonnet-4-6",
           latencyMs: 1200,
           promptHash: "deadbeefcafe",
           rawResponseTruncated: "…",
@@ -146,7 +146,7 @@ describe("gitwandReportPrefill", () => {
       } as ConflictHunk["trace"],
     });
     const p = gitwandReportPrefill(report({ kind: "ai", hunk: h }), env);
-    expect(p.body).toContain("claude-test");
+    expect(p.body).toContain("claude-sonnet-4-6");
     expect(p.body).toContain("validation 82");
     expect(p.body).toContain("history: 4 commits");
     expect(p.body).not.toContain("deadbeefcafe");
@@ -160,23 +160,27 @@ describe("gitwandReportPrefill", () => {
         llmTrace: { calledAt: "", model: "m", latencyMs: 1, promptHash: "h", rawResponseTruncated: "const a = 9;", validationScore: 12, accepted: false },
       } as ConflictHunk["trace"],
     });
-    const body = gitwandReportPrefill(report({ kind: "ai", hunk: h, resolvedLines: null }), env).body;
+    const body = repoReportPrefill(report({ kind: "ai", hunk: h, resolvedLines: null })).body;
     expect(body).toContain("No result: the AI proposal failed validation");
     expect(body).toContain("const a = 9;");
   });
 
-  it("scrubs the AI's raw answer too", () => {
+  it("leaves the AI's raw answer out of a public report", () => {
     const h = hunk({
       type: "llm_proposed",
       trace: {
         steps: [], selected: "llm_proposed", summary: "s", hasBase: true,
-        llmTrace: { calledAt: "", model: "m", latencyMs: 1, promptHash: "h", rawResponseTruncated: "I cannot merge clients/acme/billing.ts because", validationScore: 10, accepted: false },
+        llmTrace: { calledAt: "", model: "m", latencyMs: 1, promptHash: "h", rawResponseTruncated: "Merged feature/acme-billing into main", validationScore: 10, accepted: false },
       } as ConflictHunk["trace"],
     });
-    const body = gitwandReportPrefill(report({ kind: "ai", path: "clients/acme/billing.ts", hunk: h, resolvedLines: null }), env).body;
-    expect(body).not.toContain("acme");
-    expect(body).not.toContain("billing.ts");
+    const pub = gitwandReportPrefill(report({ kind: "ai", path: "x.ts", hunk: h, resolvedLines: null }), env).body;
+    expect(pub).not.toContain("acme");
+    expect(pub).toContain("failed validation (score 10)");
+    expect(pub).toContain("not included in a public report");
+    // The repository's own report keeps it.
+    expect(repoReportPrefill(report({ kind: "ai", path: "x.ts", hunk: h, resolvedLines: null })).body).toContain("feature/acme-billing");
   });
+
 
   it("keeps the engine's reasoning inert in a public report, and drops private hosts", () => {
     const h = hunk({
@@ -215,6 +219,14 @@ describe("gitwandReportPrefill", () => {
     const priv = gitwandReportPrefill(report({ kind: "ai", hunk: withModel("acme-payments-gpt4") }), env).body;
     expect(priv).not.toContain("acme");
     expect(priv).toContain("a custom model");
+    for (const ok of ["gpt-4o-mini", "qwen2.5-coder:32b", "llama3.1:70b-instruct", "claude-3-5-sonnet-20240620"]) {
+      expect(gitwandReportPrefill(report({ kind: "ai", hunk: withModel(ok) }), env).body, ok).toContain(ok);
+    }
+    for (const bad of ["gpt-4o-acmecorp-internal", "llama3-acme-legal"]) {
+      const body = gitwandReportPrefill(report({ kind: "ai", hunk: withModel(bad) }), env).body;
+      expect(body, bad).not.toContain("acme");
+      expect(body, bad).toContain("a custom model");
+    }
   });
 
   it("scrubs folder names whatever their case, short ones too, but not generic words", () => {

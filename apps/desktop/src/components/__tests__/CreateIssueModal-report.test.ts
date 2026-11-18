@@ -174,7 +174,7 @@ describe("CreateIssueModal — report mode", () => {
     const { form } = await mount();
     form.body.value = "x".repeat(70_000);
     await flush();
-    expect(document.body.textContent).toContain("createIssue.report.tooLong");
+    expect(document.body.textContent).toContain("createIssue.tooLong");
     expect(createButton()?.disabled).toBe(true);
   });
 

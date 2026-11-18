@@ -336,7 +336,7 @@ function onMilestone(e: Event) {
         </div>
 
         <p v-if="form.tooLong.value" class="ci-status ci-status--error" role="alert">
-          {{ t("createIssue.report.tooLong", form.finalBody.value.length, ISSUE_BODY_MAX) }}
+          {{ t("createIssue.tooLong", form.finalBody.value.length, ISSUE_BODY_MAX) }}
         </p>
 
         <div v-if="form.outcomeUnknown.value" class="ci-unknown" role="alert">

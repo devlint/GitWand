@@ -67,6 +67,20 @@ async function settle() {
 }
 
 describe("useCreateIssue — report mode", () => {
+  it("a report is available when the repository takes issues or GitWand can be written to", async () => {
+    const none = provider();
+    (none.issueAvailable as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    const a = setup(none, false).api;
+    await a.refreshAvailability();
+    expect(a.reportAvailable.value).toBe(false);
+    const b = setup(none, true).api;
+    await b.refreshAvailability();
+    expect(b.reportAvailable.value).toBe(true);
+    const c = setup(provider(), false).api;
+    await c.refreshAvailability();
+    expect(c.reportAvailable.value).toBe(true);
+  });
+
   it("opens for the current repository with the repository report", async () => {
     const { api } = setup();
     await api.openFromResolution(REPORT);

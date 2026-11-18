@@ -79,6 +79,9 @@ export interface CreateIssueApi {
   isOpen: Ref<boolean>;
   /** The current repository's `origin` is on GitHub (a local check, no request). */
   available: Ref<boolean>;
+  /** A resolution report can be sent: the repository takes issues, or
+   *  GitWand's repository can be written to (shows the Report buttons). */
+  reportAvailable: Ref<boolean>;
   /** Targets are being read when the form opens. */
   loading: Ref<boolean>;
   /** Reading the targets failed: nothing can be filed until the form reopens. */
@@ -195,9 +198,15 @@ function defaultEnv(): { version: string; platform: string } {
   return { version, platform: platformName() };
 }
 
-/** Without the app's scanner config (tests): the built-in patterns at 4.0. */
+/** The scan's options until the repository's arrive (and without the app's
+ *  scanner config, in tests): the built-in patterns, entropy at 4.0. */
+const DEFAULT_SECRETS_OPTIONS: Readonly<{ extraPatterns: SecretPattern[]; entropyThreshold: number }> = {
+  extraPatterns: [],
+  entropyThreshold: 4.0,
+};
+
 async function defaultSecretsOptions(_cwd: string | null) {
-  return { extraPatterns: [] as SecretPattern[], entropyThreshold: 4.0 };
+  return DEFAULT_SECRETS_OPTIONS;
 }
 
 export const CREATE_ISSUE_KEY: InjectionKey<CreateIssueApi> = Symbol("createIssue");
@@ -274,6 +283,7 @@ export function useCreateIssue(deps: {
   const commitOnOrigin = deps.commitOnOrigin ?? gitCommitOnOrigin;
   const isOpen = ref(false);
   const available = ref(false);
+  const reportAvailable = ref(false);
   const loading = ref(false);
   const targetsFailed = ref(false);
   const targetsError = ref<string | null>(null);
@@ -301,7 +311,7 @@ export function useCreateIssue(deps: {
   const findings = ref<ReportScan>({ blocking: [], warnings: [] });
   // A change not scanned yet: a secret typed a moment ago must not slip out.
   const scanPending = ref(false);
-  let secretsOpts: { extraPatterns: SecretPattern[]; entropyThreshold: number } = { extraPatterns: [], entropyThreshold: 4 };
+  let secretsOpts: { extraPatterns: SecretPattern[]; entropyThreshold: number } = DEFAULT_SECRETS_OPTIONS;
   // Bumped when the patterns change (they arrive, or the form is reset): part
   // of every scan's cache key.
   let secretsVersion = 0;
@@ -376,12 +386,23 @@ export function useCreateIssue(deps: {
     } catch {
       ok = false;
     }
-    if (seq === availabilitySeq) available.value = ok;
+    if (seq !== availabilitySeq) return;
+    available.value = ok;
+    let writable = false;
+    if (!ok) {
+      try {
+        writable = await checkGitwandWritable();
+      } catch {
+        writable = false;
+      }
+    }
+    if (seq === availabilitySeq) reportAvailable.value = ok || writable;
   }
 
   function forgetAvailability() {
     availabilitySeq++;
     available.value = false;
+    reportAvailable.value = false;
   }
 
   function clearPickers() {
@@ -436,7 +457,7 @@ export function useCreateIssue(deps: {
     repoTarget = null;
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
-    secretsOpts = { extraPatterns: [], entropyThreshold: 4 };
+    secretsOpts = DEFAULT_SECRETS_OPTIONS;
     secretsVersion++;
     scanCache.clear();
     secretsLoaded.value = false;
@@ -722,6 +743,7 @@ export function useCreateIssue(deps: {
   return {
     isOpen,
     available,
+    reportAvailable,
     loading,
     targetsFailed,
     targetsError,

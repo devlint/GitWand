@@ -2687,6 +2687,7 @@ const fr: Locale = {
   },
 
   createIssue: {
+    tooLong: "Le texte fait {0} caractères ; GitHub en accepte au plus {1}.",
     fromSelection: "Créer une issue depuis ces lignes",
     selectionHint: "Cliquez sur un numéro de ligne pour la sélectionner pour une issue ; Maj+clic pour étendre",
     title: "Nouvelle issue",
@@ -2737,7 +2738,6 @@ const fr: Locale = {
       secretBlockingAnswer: "Secret possible dans la réponse ({0}) : retirez-le pour envoyer",
       secretWarningAnswer: "Secret possible dans la réponse ({0}) : vérifiez avant d'envoyer",
       secretWarningMore: "…et {0} autres secrets possibles (chaînes à forte entropie)",
-      tooLong: "Le texte fait {0} caractères ; GitHub en accepte au plus {1}. Raccourcissez la réponse ou la description.",
       replaceTitle: "Remplacer le titre et la description ?",
       replaceEdits: "Vos modifications du titre et de la description seront remplacées",
       replace: "Remplacer",

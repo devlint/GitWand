@@ -589,7 +589,8 @@ function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean 
 // ─── "Report" a resolution (#301 part 3) ─────────────────
 // The issue form (App.vue provides it); without it, no Report button.
 const createIssue = inject(CREATE_ISSUE_KEY, null);
-const canReport = computed(() => !!createIssue);
+// Only when a report could actually be sent (see `reportAvailable`).
+const canReport = computed(() => !!createIssue && createIssue.reportAvailable.value);
 
 /** What a report needs about hunk `idx`, as the panel shows it. */
 function reportFor(kind: ProposalKind, idx: number): ResolutionReport | null {

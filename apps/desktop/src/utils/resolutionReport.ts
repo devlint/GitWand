@@ -129,13 +129,32 @@ function confidenceLine(h: ConflictHunk): string {
 
 type Scrub = ((text: string) => string) & { isPublic?: boolean };
 
-/** Public model families; a self-hosted deployment's name can name its owner. */
-const PUBLIC_MODEL = /^(claude|gpt|o\d|chatgpt|gemini|gemma|llama|codellama|mistral|mixtral|codestral|qwen|deepseek|phi|command|grok)[\w.:-]*$/i;
+/** Public model families, each optionally followed by its version digits. */
+const MODEL_FAMILY = /^(claude|gpt|o\d|chatgpt|gemini|gemma|llama|codellama|mistral|mixtral|codestral|qwen|deepseek|phi|command|grok)[\d.]*$/i;
+/** Words a public model id is made of after its family. */
+const MODEL_WORDS = new Set(
+  (
+    "sonnet opus haiku mini nano turbo preview latest instruct chat coder code pro flash lite exp " +
+    "vision large medium small tiny base it r plus omni reasoner v r1 r2 o"
+  ).split(" "),
+);
+
+/**
+ * A public model id: a known family, then only version numbers, sizes
+ * (`70b`, `4o`) and the vocabulary of public releases. Anything else — a
+ * private deployment or fine-tune (`gpt-4o-acmecorp-internal`) — can name
+ * its owner.
+ */
+function isPublicModel(model: string): boolean {
+  const [family, ...rest] = model.split(/[-:_/]/);
+  if (!MODEL_FAMILY.test(family ?? "")) return false;
+  return rest.every((w) => /^[\d.]+[a-z]?$/i.test(w) || /^\d+[a-z]\d*$/i.test(w) || MODEL_WORDS.has(w.toLowerCase()));
+}
 
 /** The model as a public report may show it (the repository report shows it as is). */
 function modelName(model: string, scrub: Scrub): string {
   if (!scrub.isPublic) return `model ${codeSpan(model)}`;
-  return PUBLIC_MODEL.test(model) ? `model ${codeSpan(model)}` : "a custom model";
+  return isPublicModel(model) ? `model ${codeSpan(model)}` : "a custom model";
 }
 
 /**
@@ -212,16 +231,16 @@ function assemble(r: ResolutionReport, head: string[], scrub: Scrub = (t) => t, 
   ];
   // A 2-way conflict has no base: say nothing rather than show an empty one.
   if (h.trace.hasBase) blocks.push({ label: "base", lines: h.baseLines, kept: h.baseLines.length, maxChars: Infinity });
-  // An AI proposal with no result: report its answer (scrubbed: the model
-  // was given the file's path and may repeat it), or say there was none.
-  const raw = scrub(h.trace.llmTrace?.rawResponseTruncated ?? "");
-  const noAnswer = r.resolvedLines === null && !raw.trim();
+  // An AI proposal with no result: report its answer, or say there was none.
+  // A public report leaves the answer out: the model was given the file's
+  // path, the branches and the code around, and may echo any of them.
+  const raw = inert ? "" : h.trace.llmTrace?.rawResponseTruncated ?? "";
+  const noAnswer = r.resolvedLines === null && !(h.trace.llmTrace?.rawResponseTruncated ?? "").trim();
+  const answerOmitted = r.resolvedLines === null && !noAnswer && inert;
   const resultLines = r.resolvedLines ?? raw.split("\n");
   const result: Block = { label: "GitWand's result", lines: resultLines, kept: resultLines.length, maxChars: Infinity };
-  const resultIntro =
-    r.resolvedLines === null && !noAnswer
-      ? `No result: the AI proposal failed validation (score ${h.trace.llmTrace?.validationScore ?? "?"}). Its answer (first 500 characters):\n\n`
-      : "";
+  const failed = `No result: the AI proposal failed validation (score ${h.trace.llmTrace?.validationScore ?? "?"}).`;
+  const resultIntro = r.resolvedLines === null && !noAnswer ? `${failed} Its answer (first 500 characters):\n\n` : "";
   // In a public report the engine's prose is inert too: it can quote code
   // (`@user`, `#N`) or an endpoint's error.
   const why = () => (inert ? codeBlock(reasoning(r, scrub).join("\n")) : reasoning(r, scrub).join("\n"));
@@ -230,7 +249,12 @@ function assemble(r: ResolutionReport, head: string[], scrub: Scrub = (t) => t, 
     const parts: string[] = [];
     parts.push(head.join("\n"));
     parts.push(`### The conflict\n\n${blocks.map((b) => renderBlock(b)).join("\n\n")}`);
-    parts.push(`### GitWand's result\n\n${noAnswer ? NO_ANSWER : `${resultIntro}${renderBlock(result, false)}`}`);
+    const resultSection = noAnswer
+      ? NO_ANSWER
+      : answerOmitted
+        ? `${failed} Its answer is not included in a public report.`
+        : `${resultIntro}${renderBlock(result, false)}`;
+    parts.push(`### GitWand's result\n\n${resultSection}`);
     parts.push(`### Why\n\n${why()}`);
     return parts.join("\n\n") + "\n";
   };

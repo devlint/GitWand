@@ -2688,6 +2688,7 @@ const zhCN: Locale = {
   },
 
   createIssue: {
+    tooLong: "文本长度为 {0} 个字符；GitHub 最多接受 {1} 个。",
     fromSelection: "从这些行创建 Issue",
     selectionHint: "点击行号以选中该行用于 Issue；Shift+点击以扩展选区",
     title: "新建 Issue",
@@ -2738,7 +2739,6 @@ const zhCN: Locale = {
       secretBlockingAnswer: "回答中可能有密钥（{0}）：删除后才能发送",
       secretWarningAnswer: "回答中可能有密钥（{0}）：发送前请检查",
       secretWarningMore: "……另有 {0} 处可能的密钥（高熵字符串）",
-      tooLong: "文本长度为 {0} 个字符；GitHub 最多接受 {1} 个。请缩短回答或描述。",
       replaceTitle: "替换标题和描述？",
       replaceEdits: "你对标题和描述的修改将被替换",
       replace: "替换",

@@ -2678,6 +2678,7 @@ const ptBR: Locale = {
   },
 
   createIssue: {
+    tooLong: "O texto tem {0} caracteres; o GitHub aceita no máximo {1}.",
     fromSelection: "Criar issue a partir destas linhas",
     selectionHint: "Clique no número de uma linha para selecioná-la para uma issue; Shift+clique para estender",
     title: "Nova issue",
@@ -2728,7 +2729,6 @@ const ptBR: Locale = {
       secretBlockingAnswer: "Possível segredo na resposta ({0}): remova-o para enviar",
       secretWarningAnswer: "Possível segredo na resposta ({0}): verifique antes de enviar",
       secretWarningMore: "…e mais {0} possíveis segredos (sequências de alta entropia)",
-      tooLong: "O texto tem {0} caracteres; o GitHub aceita no máximo {1}. Encurte a resposta ou a descrição.",
       replaceTitle: "Substituir o título e a descrição?",
       replaceEdits: "Suas edições no título e na descrição serão substituídas",
       replace: "Substituir",

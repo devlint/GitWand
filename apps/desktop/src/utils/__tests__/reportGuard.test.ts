@@ -51,5 +51,19 @@ describe("scanReportBody", () => {
   it("scans a title given with the body", () => {
     expect(scanReportBody(`Leak ${token}`, opts).blocking).toHaveLength(1);
   });
+
+  it("counts every entropy warning, past the scanner's 500-finding cap", () => {
+    const hashes = Array.from({ length: 1200 }, (_, i) => `"integrity": "sha512-${"Zm9vYmFyYmF6cXV4cXV1eA9xT3kL0pQ8rW2vY5zN1mH6jC4bD7eF0gA3iK9oU1sR8tE2wQ5yP4lM6nV3xB0cZ7" + i}",`);
+    const r = scanReportBody([...hashes, `token = "${token}"`].join("\n"), opts);
+    expect(r.warnings).toHaveLength(1200);
+    expect(r.blocking.map((f) => f.line)).toEqual([1201]);
+  });
+
+  it("finds a secret right after one line that alone fills the scanner's cap", () => {
+    const tok = (i: number) => `Q${i}xT3kL0pQ8rW2vY5zN1mH6jC4bD7eF0gA3`;
+    const line = Array.from({ length: 600 }, (_, i) => tok(i)).join(" ");
+    const r = scanReportBody([line, `token = "${token}"`].join("\n"), opts);
+    expect(r.blocking.map((f) => f.line)).toEqual([2]);
+  });
 });
 
