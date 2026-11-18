@@ -514,6 +514,24 @@ describe("useCreateIssue — selection hand-off", () => {
     expect(later).not.toHaveBeenCalled();
   });
 
+  it("links deleted lines with their context at the first parent", async () => {
+    const { api } = setup(provider(), undefined, async () => true);
+    await api.refreshAvailability();
+    await api.openFromSelection(commitSel([...DELETED, { type: "context", content: "z", oldLineNo: 8, newLineNo: 5 }]));
+    expect(api.body.value.startsWith(`https://github.com/me/app/blob/${PARENT_SHA}/src/a.ts#L7-L8\n`)).toBe(true);
+  });
+
+  it("publishes a view's selection through the API (most recent wins)", () => {
+    const { api } = setup(provider());
+    const a = Symbol("a");
+    const b = Symbol("b");
+    api.publishSelection(a, commitSel(ADDED));
+    api.publishSelection(b, prSel(ADDED));
+    expect(api.activeSelection.value?.source.kind).toBe("pr");
+    api.publishSelection(b, null);
+    expect(api.activeSelection.value?.source.kind).toBe("commit");
+  });
+
   it("links a renamed file's deleted lines under its old path", async () => {
     const { api } = setup(provider(), undefined, async () => true);
     await api.refreshAvailability();

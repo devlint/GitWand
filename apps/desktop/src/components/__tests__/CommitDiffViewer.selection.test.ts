@@ -8,7 +8,7 @@
 import { describe, it, expect, afterEach, beforeAll, vi } from "vitest";
 import { createApp, h, nextTick, ref, type App, type Ref } from "vue";
 import CommitDiffViewer from "../CommitDiffViewer.vue";
-import { CREATE_ISSUE_KEY } from "../../composables/useCreateIssue";
+import { CREATE_ISSUE_KEY, createSelectionRegistry } from "../../composables/useCreateIssue";
 import type { DiffLine, GitDiff, GitLogEntry } from "../../utils/backend";
 import type { DiffSelection } from "../../utils/issuePrefill";
 
@@ -81,7 +81,12 @@ afterEach(() => {
 function mount(opts: { available?: boolean; withProvider?: boolean; diffMode?: "inline" | "side-by-side"; commitInfo?: GitLogEntry | null } = {}) {
   const activeSelection = ref<DiffSelection | null>(null) as Ref<DiffSelection | null>;
   const openFromSelection = vi.fn(async (_sel: DiffSelection) => {});
-  const fake = { available: ref(opts.available ?? true), activeSelection, openFromSelection };
+  const fake = {
+    available: ref(opts.available ?? true),
+    activeSelection,
+    openFromSelection,
+    publishSelection: createSelectionRegistry(activeSelection),
+  };
   const commitHash = ref<string | null>(SHA);
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -156,6 +161,16 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     click(rows[1].querySelectorAll<HTMLElement>(".cdv-line-no")[0], true);
     await nextTick();
     expect(contents(fake.activeSelection.value)).toEqual(["a", "b"]);
+    // Picked in the old column: the link is to the old version.
+    expect(fake.activeSelection.value?.side).toBe("old");
+  });
+
+  it("Shift+press on a line number does not start a text selection", async () => {
+    mount();
+    await nextTick();
+    const ev = new MouseEvent("mousedown", { bubbles: true, cancelable: true, shiftKey: true });
+    numberCell(0, 1).dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
   });
 
   it("Escape, a click elsewhere, another commit and unmounting clear it", async () => {
@@ -268,7 +283,7 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     document.body.appendChild(container);
     const activeSelection = ref<DiffSelection | null>(null);
     app = createApp({ setup: () => () => h(CommitDiffViewer as any, { diffs: renamed, commitHash: SHA, commitInfo: ENTRY, diffMode: "inline" }) });
-    app.provide(CREATE_ISSUE_KEY, { available: ref(true), activeSelection, openFromSelection: vi.fn() } as any);
+    app.provide(CREATE_ISSUE_KEY, { available: ref(true), activeSelection, openFromSelection: vi.fn(), publishSelection: createSelectionRegistry(activeSelection) } as any);
     app.mount(container);
     await nextTick();
     click(numberCell(0, 1));
@@ -312,7 +327,8 @@ describe("CommitDiffViewer — line selection for an issue", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     app = createApp({ setup: () => () => h(CommitDiffViewer as any, { diffs: big, commitHash: SHA, commitInfo: ENTRY, diffMode: "side-by-side" }) });
-    app.provide(CREATE_ISSUE_KEY, { available: ref(true), activeSelection: ref(null), openFromSelection: vi.fn() } as any);
+    const sink = ref<DiffSelection | null>(null);
+    app.provide(CREATE_ISSUE_KEY, { available: ref(true), activeSelection: sink, openFromSelection: vi.fn(), publishSelection: createSelectionRegistry(sink) } as any);
     app.mount(container);
     await nextTick();
     const before = wordDiffCalls.n;

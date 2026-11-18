@@ -48,6 +48,14 @@ const emit = defineEmits<{
 }>();
 
 const p = inject<PrPanelState>(PR_PANEL_KEY)!;
+
+/** The loaded detail, only once it is the selected PR's: while another PR's
+ *  detail is still loading, its URL and head would pair with the wrong
+ *  number in an issue (#301). */
+const detailOfSelectedPr = computed(() => {
+  const d = p.prDetail.value;
+  return d && d.number === p.selectedPr.value?.number ? d : null;
+});
 const { settings } = useSettings();
 
 // window.open is a no-op in the Tauri webview — hand the URL to the OS opener.
@@ -1589,8 +1597,8 @@ function submitRequestReviewers() {
                 :review-draft-count="p.draftReviewComments.value.length"
                 :cwd="p.cwd.value"
                 :pr-number="p.selectedPr.value?.number"
-                :pr-url="p.prDetail.value?.url"
-                :head-sha="p.prDetail.value?.headSha"
+                :pr-url="detailOfSelectedPr?.url"
+                :head-sha="detailOfSelectedPr?.headSha"
                 :forge-name="p.forge.value.name"
                 :annotations="p.selectedDiffFile.value ? (p.mergedAnnotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
                 :can-edit-comments="p.forgeSupportsCommentEdit.value"

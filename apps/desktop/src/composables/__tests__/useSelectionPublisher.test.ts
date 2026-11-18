@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { createApp, defineComponent, h, nextTick, ref, shallowRef, type Ref } from "vue";
-import { useSelectionPublisher } from "../useCreateIssue";
+import { useSelectionPublisher, createSelectionRegistry } from "../useCreateIssue";
 import type { DiffSelection } from "../../utils/issuePrefill";
 
 const sel = (path: string): DiffSelection => ({
@@ -25,7 +25,8 @@ function view(api: any, source: Ref<DiffSelection | null>) {
 
 describe("useSelectionPublisher", () => {
   it("falls back to another view's selection when the latest one goes away", async () => {
-    const api = { available: ref(true), activeSelection: shallowRef<DiffSelection | null>(null) };
+    const activeSelection = shallowRef<DiffSelection | null>(null);
+    const api = { available: ref(true), activeSelection, publishSelection: createSelectionRegistry(activeSelection) };
     const a = ref<DiffSelection | null>(null);
     const b = ref<DiffSelection | null>(null);
     const appA = createApp(view(api, a));

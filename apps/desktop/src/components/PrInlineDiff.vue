@@ -12,6 +12,7 @@
  */
 import { ref, computed, watch, inject, nextTick } from "vue";
 import { CREATE_ISSUE_KEY, useSelectionPublisher } from "../composables/useCreateIssue";
+import { useLineRange, preventShiftSelect } from "../composables/useLineRange";
 import type { DiffSelection } from "../utils/issuePrefill";
 import type { GitDiff, DiffLine, PrReviewComment } from "../utils/backend";
 import { annotationsByLine as groupAnnotationsByLine, worstSeverity, type LineAnnotation } from "../composables/prAnnotations";
@@ -261,10 +262,14 @@ function isSuggestAnchoredAt(dl: DiffLine): boolean {
   return suggestLine.value.line === dl.newLineNo && dl.type !== "delete";
 }
 
-/** The row a Shift+click range is measured from (the row first clicked). */
-const rangeAnchorIdx = ref<number | null>(null);
+/** Shift+click ranges, one hunk at a time (group = the hunk's index). */
+const lineRange = useLineRange();
 /** The rows a Shift+click range covers in the compose box's hunk. */
-const composeRange = ref<{ lo: number; hi: number } | null>(null);
+const composeRange = computed<{ lo: number; hi: number } | null>(() => {
+  const r = lineRange.range.value;
+  if (!r || r.lo === r.hi || composeLine.value?.hunkIdx !== Number(r.group)) return null;
+  return { lo: r.lo, hi: r.hi };
+});
 
 function sideOf(dl: DiffLine): "LEFT" | "RIGHT" {
   return dl.type === "delete" ? "LEFT" : "RIGHT";
@@ -276,8 +281,7 @@ function lineNoOf(dl: DiffLine): number {
 function openCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
   composeLine.value = { hunkIdx, lineIdx, line: lineNoOf(dl), side: sideOf(dl) };
   composeText.value = "";
-  rangeAnchorIdx.value = lineIdx;
-  composeRange.value = null;
+  lineRange.pick(String(hunkIdx), lineIdx, false);
 }
 
 /**
@@ -293,15 +297,65 @@ function extendCompose(hunkIdx: number, lineIdx: number, dl: DiffLine) {
     openCompose(hunkIdx, lineIdx, dl);
     return;
   }
-  const anchor = rangeAnchorIdx.value ?? cur.lineIdx;
-  const lo = Math.min(anchor, lineIdx);
-  const hi = Math.max(anchor, lineIdx);
-  const last = hunk.lines[hi];
-  composeLine.value = { hunkIdx, lineIdx: hi, line: lineNoOf(last), side: sideOf(last) };
-  composeRange.value = lo === hi ? null : { lo, hi };
+  lineRange.pick(String(hunkIdx), lineIdx, true);
+  placeComposeAtRangeEnd(hunkIdx);
   // The box is drawn again under its new last row: keep typing where it was.
   void nextTick(() => composeTextarea?.focus());
 }
+
+/** The compose box under the range's last row (where GitHub anchors it). */
+function placeComposeAtRangeEnd(hunkIdx: number) {
+  const r = lineRange.range.value;
+  const last = r ? props.diff?.hunks[hunkIdx]?.lines[r.hi] : undefined;
+  if (!r || !last) return;
+  composeLine.value = { hunkIdx, lineIdx: r.hi, line: lineNoOf(last), side: sideOf(last) };
+}
+
+/**
+ * The same line in a reloaded diff (a push to the PR): same kind and text,
+ * at the same old line number when it has one, else at the nearest new one.
+ */
+function findRow(diff: GitDiff, row: DiffLine): { hunkIdx: number; lineIdx: number } | null {
+  let best: { hunkIdx: number; lineIdx: number; dist: number } | null = null;
+  diff.hunks.forEach((h, hunkIdx) =>
+    h.lines.forEach((l, lineIdx) => {
+      if (l.type !== row.type || l.content !== row.content) return;
+      const dist =
+        row.oldLineNo !== undefined && l.oldLineNo !== undefined
+          ? Math.abs(l.oldLineNo - row.oldLineNo) * 2
+          : Math.abs((l.newLineNo ?? 0) - (row.newLineNo ?? 0)) * 2 + 1;
+      if (!best || dist < best.dist) best = { hunkIdx, lineIdx, dist };
+    }),
+  );
+  return best;
+}
+
+/**
+ * A reloaded diff for the same file: the box (and its range) follow their
+ * lines, or close when the lines are gone; the draft is kept either way
+ * until then. Rows are addressed by index, so stale ones would point at
+ * other code.
+ */
+watch(
+  () => props.diff,
+  (next, prev) => {
+    const c = composeLine.value;
+    if (!c || !next || !prev || next === prev) return;
+    const r = lineRange.range.value;
+    const oldHunk = prev.hunks[c.hunkIdx];
+    const anchorRow = oldHunk?.lines[r ? r.anchor : c.lineIdx];
+    const focusRow = oldHunk?.lines[r ? r.focus : c.lineIdx];
+    const a = anchorRow ? findRow(next, anchorRow) : null;
+    const f = focusRow ? findRow(next, focusRow) : null;
+    if (!a || !f || a.hunkIdx !== f.hunkIdx) {
+      closeCompose();
+      return;
+    }
+    lineRange.pick(String(a.hunkIdx), a.lineIdx, false);
+    lineRange.pick(String(a.hunkIdx), f.lineIdx, true);
+    placeComposeAtRangeEnd(a.hunkIdx);
+  },
+);
 
 /** The open compose box's textarea (one at a time). */
 let composeTextarea: HTMLTextAreaElement | null = null;
@@ -346,8 +400,7 @@ function isInComposeRange(hunkIdx: number, lineIdx: number): boolean {
 function closeCompose() {
   composeLine.value = null;
   composeText.value = "";
-  rangeAnchorIdx.value = null;
-  composeRange.value = null;
+  lineRange.clear();
 }
 
 // ─── Create an issue from the compose box's lines (#301) ─
@@ -371,8 +424,9 @@ const composeSelection = computed<DiffSelection | null>(() => {
     lines,
     intro: composeText.value,
     source: { kind: "pr", number: props.prNumber, url: props.prUrl, headSha: props.headSha || null },
-    // Filed (button or ⌘⇧I): the box has handed its lines and text over.
-    onOpened: closeCompose,
+    // Filed (button or ⌘⇧I): the range is handed over; the box stays on its
+    // last row with the draft, which cancelling the issue must not cost.
+    onOpened: () => lineRange.pick(String(c.hunkIdx), c.lineIdx, false),
   };
 });
 
@@ -684,6 +738,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
           <div
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
+            @mousedown="preventShiftSelect"
             @click="row.dl.type !== 'add' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
             :title="row.dl.type !== 'add' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
           >
@@ -694,6 +749,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
           <div
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
+            @mousedown="preventShiftSelect"
             @click="row.dl.type !== 'delete' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
             :title="row.dl.type !== 'delete' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
           >
@@ -937,7 +993,8 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               <div
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
-                @click="row.dl.type !== 'add' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
+                @mousedown="preventShiftSelect"
+            @click="row.dl.type !== 'add' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
                 :title="row.dl.type !== 'add' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
               >
                 <span class="pid-lno-num">{{ row.dl.oldLineNo ?? '' }}</span>
@@ -946,7 +1003,8 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               <div
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
-                @click="row.dl.type !== 'delete' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
+                @mousedown="preventShiftSelect"
+            @click="row.dl.type !== 'delete' && onLineNoClick($event, row.hunkIdx, row.lineIdx, row.dl)"
                 :title="row.dl.type !== 'delete' ? (canRange ? t('pr.inline.commentRangeTooltip') : t('pr.inline.commentTooltip')) : undefined"
               >
                 <span class="pid-lno-num">{{ row.dl.newLineNo ?? '' }}</span>

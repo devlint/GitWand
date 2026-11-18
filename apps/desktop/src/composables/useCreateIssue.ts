@@ -5,7 +5,7 @@
  * ⌘K, ⌘⇧I) calls `open(prefill?)`, a commit's menu `openFromCommit(entry)`.
  */
 
-import { computed, onUnmounted, ref, shallowRef, toRaw, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
+import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec } from "../utils/backend";
 import type {
@@ -18,10 +18,8 @@ import type {
   ReviewerCandidate,
 } from "../utils/backend";
 import {
-  blobPermalink,
   commitIssuePrefill,
   commitUrlFor,
-  permalinkSpan,
   selectionIssuePrefill,
   type DiffSelection,
   type IssuePrefill,
@@ -131,6 +129,9 @@ export interface CreateIssueApi {
   openFromCommit(entry: GitLogEntry): Promise<void>;
   /** The selection a diff view currently shows, if any (⌘⇧I uses it). */
   activeSelection: Ref<DiffSelection | null>;
+  /** A view publishes (or, with `null`, withdraws) its selection; the most
+   *  recent one still live becomes `activeSelection`. */
+  publishSelection(id: symbol, sel: DiffSelection | null): void;
   /**
    * "Create issue from these lines": the form opens prefilled with a
    * permalink (when GitHub has the lines), the lines and their origin.
@@ -145,35 +146,37 @@ export interface CreateIssueApi {
 
 export const CREATE_ISSUE_KEY: InjectionKey<CreateIssueApi> = Symbol("createIssue");
 
-/** Every view's live selection, per issue-form instance (most recent wins). */
-const selectionRegistries = new WeakMap<object, { seq: number; live: Map<symbol, { sel: DiffSelection; at: number }> }>();
+/**
+ * The selections diff views publish, of which `target` shows the most
+ * recently changed one still live: when it goes away (cleared, view gone) the
+ * next most recent takes over. Returns the publish function (`null` removes
+ * the caller's).
+ */
+export function createSelectionRegistry(target: Ref<DiffSelection | null>) {
+  let seq = 0;
+  const live = new Map<symbol, { sel: DiffSelection; at: number }>();
+  return (id: symbol, sel: DiffSelection | null): void => {
+    if (sel) live.set(id, { sel, at: ++seq });
+    else live.delete(id);
+    let best: { sel: DiffSelection; at: number } | null = null;
+    for (const entry of live.values()) if (!best || entry.at > best.at) best = entry;
+    target.value = best?.sel ?? null;
+  };
+}
 
 /**
- * Publish a diff view's selection as `api.activeSelection` (what ⌘⇧I files)
- * while issues can be created. Several views may hold one: the most recently
- * changed wins, and when it goes away (cleared, availability dropped, view
- * unmounted) the next most recent one still shown takes over. Call from a
- * component's setup.
+ * Publish a diff view's selection (what ⌘⇧I files) while issues can be
+ * created; withdrawn when it goes away, availability drops or the view
+ * unmounts. Call from a component's setup.
  */
 export function useSelectionPublisher(api: CreateIssueApi | null, source: () => DiffSelection | null): void {
   if (!api) return;
-  const key = toRaw(api) as object;
-  let reg = selectionRegistries.get(key);
-  if (!reg) {
-    reg = { seq: 0, live: new Map() };
-    selectionRegistries.set(key, reg);
-  }
-  const registry = reg;
   const id = Symbol("selection");
-  function set(next: DiffSelection | null) {
-    if (next) registry.live.set(id, { sel: next, at: ++registry.seq });
-    else registry.live.delete(id);
-    let best: { sel: DiffSelection; at: number } | null = null;
-    for (const entry of registry.live.values()) if (!best || entry.at > best.at) best = entry;
-    api!.activeSelection.value = best?.sel ?? null;
-  }
-  watch(() => (api.available.value ? source() : null), set);
-  onUnmounted(() => set(null));
+  watch(
+    () => (api.available.value ? source() : null),
+    (sel) => api.publishSelection(id, sel),
+  );
+  onUnmounted(() => api.publishSelection(id, null));
 }
 
 function message(e: unknown): string {
@@ -341,57 +344,57 @@ export function useCreateIssue(deps: {
     body.value = filled.body;
   }
 
+  /**
+   * Open the form with a prefill that links `sha` only once `origin` has it
+   * (the links go to origin's page; a commit only elsewhere would answer
+   * 404). The check starts now, alongside the targets read.
+   */
+  function openLinkedTo(cwd: string, sha: string, build: (origin: string | null) => IssuePrefill): Promise<void> {
+    const onOrigin = commitOnOrigin(cwd, sha).catch(() => false);
+    return open(async (origin) => build((await onOrigin) ? origin : null));
+  }
+
+  /** A form opened but untouched gives way; one being typed in stays. */
+  function makeRoom(): boolean {
+    if (!isOpen.value) return true;
+    if (dirty.value || submitting.value) return false;
+    close();
+    return true;
+  }
+
   async function openFromCommit(entry: GitLogEntry): Promise<void> {
     const cwd = deps.cwd.value;
-    if (!cwd || !available.value) return;
-    // A form opened but untouched gives way to this commit's.
-    if (isOpen.value) {
-      if (dirty.value || submitting.value) return;
-      close();
-    }
-    // Started now, alongside the targets read; the link waits for both.
-    const onOrigin = commitOnOrigin(cwd, entry.hashFull).catch(() => false);
-    await open(async (origin) =>
-      commitIssuePrefill(entry, (await onOrigin) && origin ? commitUrlFor(origin, entry.hashFull) : null),
+    if (!cwd || !available.value || !makeRoom()) return;
+    await openLinkedTo(cwd, entry.hashFull, (origin) =>
+      commitIssuePrefill(entry, origin ? commitUrlFor(origin, entry.hashFull) : null),
     );
   }
 
-  // Shallow: replaced whole, never mutated, and compared by identity.
   const activeSelection = shallowRef<DiffSelection | null>(null);
+  const publishSelection = createSelectionRegistry(activeSelection);
 
   /** Resolves `true` when the form opened with `sel` (then `sel.onOpened`
    *  has run), `false` when it could not (no GitHub, a form being typed in). */
   async function openFromSelection(sel: DiffSelection): Promise<boolean> {
     const cwd = deps.cwd.value;
-    if (!cwd || !available.value) return false;
-    if (isOpen.value) {
-      if (dirty.value || submitting.value) return false;
-      close();
-    }
-    const span = permalinkSpan(sel.lines);
-    // Deleted lines of a renamed file live under its old path.
-    const path = span?.side === "old" && sel.oldPath ? sel.oldPath : sel.path;
+    if (!cwd || !available.value || !makeRoom()) return false;
     const src = sel.source;
     let opened: Promise<void>;
     if (src.kind === "pr") {
       // The PR's own repository (it may be a fork's parent); its base SHA is
-      // unknown, so deleted lines get no permalink.
-      const m = /^(https?:\/\/.+)\/pull\/\d+\/?$/.exec(src.url);
-      const permalink =
-        m && span && span.side === "new" && src.headSha ? blobPermalink(m[1], src.headSha, path, span) : null;
-      opened = open(selectionIssuePrefill(sel, { permalink, commitUrl: null }));
+      // unknown, so the old version of its lines gets no permalink.
+      const repo = /^(https?:\/\/.+)\/pull\/\d+\/?$/.exec(src.url)?.[1] ?? null;
+      opened = open(selectionIssuePrefill(sel, { repoHtmlUrl: repo, newSha: src.headSha, oldSha: null, commitUrl: null }));
     } else {
-      // Started now, alongside the targets read; the links wait for both.
-      const onOrigin = commitOnOrigin(cwd, src.hashFull).catch(() => false);
-      opened = open(async (origin) => {
-        if (!(await onOrigin) || !origin) return selectionIssuePrefill(sel, { permalink: null, commitUrl: null });
-        // Deleted lines live in the first parent, on origin too once the commit is.
-        const sha = span?.side === "old" ? src.parent : src.hashFull;
-        return selectionIssuePrefill(sel, {
-          permalink: span && sha ? blobPermalink(origin, sha, path, span) : null,
-          commitUrl: commitUrlFor(origin, src.hashFull),
-        });
-      });
+      // The old version is the first parent, on origin too once the commit is.
+      opened = openLinkedTo(cwd, src.hashFull, (origin) =>
+        selectionIssuePrefill(sel, {
+          repoHtmlUrl: origin,
+          newSha: origin ? src.hashFull : null,
+          oldSha: origin ? src.parent : null,
+          commitUrl: origin ? commitUrlFor(origin, src.hashFull) : null,
+        }),
+      );
     }
     // The form is on screen from here (`open` shows it before reading).
     sel.onOpened?.();
@@ -491,6 +494,7 @@ export function useCreateIssue(deps: {
     open,
     openFromCommit,
     activeSelection,
+    publishSelection,
     openFromSelection,
     openFromShortcut,
     close,

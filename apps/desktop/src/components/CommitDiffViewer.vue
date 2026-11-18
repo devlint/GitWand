@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, inject } from "vue";
+import { ref, computed, watch, onUnmounted, nextTick, inject } from "vue";
 import type { GitDiff, GitLogEntry, DiffLine, FolderDiffNode } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { avatarStyle } from "../composables/useAvatar";
@@ -9,6 +9,7 @@ import { detectLanguage, highlightLine } from "../utils/highlight";
 import { safeHtml } from "../composables/useSafeHtml";
 import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
 import { CREATE_ISSUE_KEY, useSelectionPublisher } from "../composables/useCreateIssue";
+import { useLineRange, preventShiftSelect } from "../composables/useLineRange";
 import type { DiffSelection } from "../utils/issuePrefill";
 
 const { t } = useI18n();
@@ -259,67 +260,61 @@ const canSelectLines = computed(() => !!createIssue?.available.value && !!props.
 
 /** `row`: inline rows; `old` / `new`: one column of the side-by-side pairs. */
 type SelSide = "row" | "old" | "new";
-interface LineSel {
-  fileIdx: number;
-  hunkIdx: number;
-  side: SelSide;
-  anchor: number;
-  focus: number;
-}
-const lineSel = ref<LineSel | null>(null);
+/** One hunk (and column) of one file: the rows a range may span. */
+const groupOf = (fileIdx: number, hunkIdx: number, side: SelSide) => `${fileIdx}:${hunkIdx}:${side}`;
+
+const lineRange = useLineRange({
+  dismiss: { keep: ".cdv-line-no, .cdv-issue-btn", scrollEl: () => contentEl.value },
+});
 
 function onLineNoClick(e: MouseEvent, fileIdx: number, hunkIdx: number, idx: number, side: SelSide) {
-  if (!canSelectLines.value) return;
-  const cur = lineSel.value;
-  if (e.shiftKey && cur && cur.fileIdx === fileIdx && cur.hunkIdx === hunkIdx && cur.side === side) {
-    lineSel.value = { ...cur, focus: idx };
-  } else {
-    lineSel.value = { fileIdx, hunkIdx, side, anchor: idx, focus: idx };
-  }
+  if (canSelectLines.value) lineRange.pick(groupOf(fileIdx, hunkIdx, side), idx, e.shiftKey);
 }
 
 function isSelected(fileIdx: number, hunkIdx: number, idx: number, side: SelSide): boolean {
-  const s = lineSel.value;
-  if (!s || s.fileIdx !== fileIdx || s.hunkIdx !== hunkIdx || s.side !== side) return false;
-  return idx >= Math.min(s.anchor, s.focus) && idx <= Math.max(s.anchor, s.focus);
+  return lineRange.isIn(groupOf(fileIdx, hunkIdx, side), idx);
 }
 
+/** The selected range's file, hunk and column. */
+const selectedAt = computed(() => {
+  const r = lineRange.range.value;
+  if (!r) return null;
+  const [f, h, side] = r.group.split(":");
+  return { fileIdx: Number(f), hunkIdx: Number(h), side: side as SelSide, lo: r.lo, hi: r.hi };
+});
+
 function isHunkSelected(fileIdx: number, hunkIdx: number): boolean {
-  return lineSel.value?.fileIdx === fileIdx && lineSel.value?.hunkIdx === hunkIdx;
+  return selectedAt.value?.fileIdx === fileIdx && selectedAt.value?.hunkIdx === hunkIdx;
 }
 
 const selection = computed<DiffSelection | null>(() => {
-  const s = lineSel.value;
+  const s = selectedAt.value;
   const info = props.commitInfo;
   const diff = s ? props.diffs[s.fileIdx] : undefined;
   const hunk = s && diff ? truncatedHunks(s.fileIdx)[s.hunkIdx] : undefined;
   if (!s || !info || !diff || !hunk) return null;
-  const lo = Math.min(s.anchor, s.focus);
-  const hi = Math.max(s.anchor, s.focus);
   const lines =
     s.side === "row"
-      ? hunk.lines.slice(lo, hi + 1)
+      ? hunk.lines.slice(s.lo, s.hi + 1)
       : pairsOf(hunk.lines, diff.path)
-          .slice(lo, hi + 1)
+          .slice(s.lo, s.hi + 1)
           .map((p) => (s.side === "old" ? p.left : p.right))
           .filter((l): l is DiffLine => l !== null);
   if (lines.length === 0) return null;
   return {
     path: diff.path,
     ...(diff.oldPath ? { oldPath: diff.oldPath } : {}),
+    // Picked in one column: link that version, whatever the lines' types.
+    ...(s.side !== "row" ? { side: s.side } : {}),
     lines,
     source: { kind: "commit", hash: info.hash, hashFull: info.hashFull, parent: info.parents[0] ?? null },
     // Filed: the next ⌘⇧I is about something else, not these lines again.
-    onOpened: clearLineSel,
+    onOpened: lineRange.clear,
   };
 });
 
 // Published for ⌘⇧I while issues can be created (#301).
 useSelectionPublisher(createIssue, () => selection.value);
-
-function clearLineSel() {
-  lineSel.value = null;
-}
 
 function fileIssue() {
   const sel = selection.value;
@@ -329,31 +324,7 @@ function fileIssue() {
 /** The line numbers' tooltip, computed once rather than per cell. */
 const pickTitle = computed(() => (canSelectLines.value ? t("createIssue.selectionHint") : undefined));
 
-function onDocKeydown(e: KeyboardEvent) {
-  if (e.key !== "Escape" || !lineSel.value || e.defaultPrevented) return;
-  // Escape meant for a field, or for a dialog over the diff.
-  const target = e.target as HTMLElement | null;
-  if (target?.closest?.("input, textarea, select, [contenteditable]")) return;
-  if (document.querySelector('[aria-modal="true"]')) return;
-  clearLineSel();
-}
-function onDocMousedown(e: MouseEvent) {
-  if (!lineSel.value) return;
-  const target = e.target as Element | null;
-  if (target?.closest?.(".cdv-line-no, .cdv-issue-btn")) return;
-  // The diff's own scroll area: a press on its scrollbar is scrolling.
-  if (target && target === contentEl.value) return;
-  clearLineSel();
-}
-onMounted(() => {
-  document.addEventListener("keydown", onDocKeydown);
-  document.addEventListener("mousedown", onDocMousedown);
-});
-onUnmounted(() => {
-  document.removeEventListener("keydown", onDocKeydown);
-  document.removeEventListener("mousedown", onDocMousedown);
-});
-watch(() => [props.commitHash, props.diffs, props.diffMode], clearLineSel);
+watch(() => [props.commitHash, props.diffs, props.diffMode], lineRange.clear);
 
 // Reset expansion and rendered count when diffs change (subsequent prop updates)
 watch(
@@ -599,12 +570,14 @@ function onContentScroll(e: Event) {
                       class="cdv-line-no mono"
                       :class="{ 'cdv-line-no--pick': canSelectLines }"
                       :title="pickTitle"
+                      @mousedown="preventShiftSelect"
                       @click="onLineNoClick($event, fileIdx - 1, hunkIdx, lineIdx, 'row')"
                     >{{ line.oldLineNo ?? '' }}</td>
                     <td
                       class="cdv-line-no mono"
                       :class="{ 'cdv-line-no--pick': canSelectLines }"
                       :title="pickTitle"
+                      @mousedown="preventShiftSelect"
                       @click="onLineNoClick($event, fileIdx - 1, hunkIdx, lineIdx, 'row')"
                     >{{ line.newLineNo ?? '' }}</td>
                     <td class="cdv-line-marker mono">
@@ -629,6 +602,7 @@ function onContentScroll(e: Event) {
                       class="cdv-line-no mono"
                       :class="[pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty', { 'cdv-line-no--pick': canSelectLines && pair.left, 'cdv-cell--selected': isSelected(fileIdx - 1, hunkIdx, pairIdx, 'old') }]"
                       :title="pair.left ? pickTitle : undefined"
+                      @mousedown="preventShiftSelect"
                       @click="pair.left && onLineNoClick($event, fileIdx - 1, hunkIdx, pairIdx, 'old')"
                     >
                       {{ pair.left?.oldLineNo ?? '' }}
@@ -644,6 +618,7 @@ function onContentScroll(e: Event) {
                       class="cdv-line-no mono"
                       :class="[pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty', { 'cdv-line-no--pick': canSelectLines && pair.right, 'cdv-cell--selected': isSelected(fileIdx - 1, hunkIdx, pairIdx, 'new') }]"
                       :title="pair.right ? pickTitle : undefined"
+                      @mousedown="preventShiftSelect"
                       @click="pair.right && onLineNoClick($event, fileIdx - 1, hunkIdx, pairIdx, 'new')"
                     >
                       {{ pair.right?.newLineNo ?? '' }}

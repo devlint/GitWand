@@ -77,6 +77,8 @@ export interface DiffSelection {
   source:
     | { kind: "commit"; hash: string; hashFull: string; parent: string | null }
     | { kind: "pr"; number: number; url: string; headSha: string | null };
+  /** The column the lines were picked in (side-by-side), when there was one. */
+  side?: "old" | "new";
   /** Text typed before (the PR compose box): starts the body. */
   intro?: string;
   /** Told once the issue form has opened with this selection (the view
@@ -99,18 +101,19 @@ const SELECTION_MAX_CHARS = 60_000;
 const SELECTION_MAX_INTRO = 20_000;
 
 /**
- * The lines a selection covers in one version of the file: the old version
- * when every line is a deletion (they exist nowhere else), the new one
- * otherwise. Null when no line carries a number on that side.
+ * The lines a selection covers in one version of the file: the column they
+ * were picked in when there is one; otherwise the old version when nothing
+ * was added (deleted lines and context all exist there), the new one when
+ * something was. Null when no line carries a number on that side.
  */
-export function permalinkSpan(lines: DiffLine[]): LineSpan | null {
-  const old = lines.length > 0 && lines.every((l) => l.type === "delete");
+export function permalinkSpan(lines: DiffLine[], side?: "old" | "new"): LineSpan | null {
+  const chosen =
+    side ?? (lines.some((l) => l.type === "delete") && !lines.some((l) => l.type === "add") ? "old" : "new");
   const nums = lines
-    .filter((l) => (old ? l.type === "delete" : l.type !== "delete"))
-    .map((l) => (old ? l.oldLineNo : l.newLineNo))
+    .map((l) => (chosen === "old" ? l.oldLineNo : l.newLineNo))
     .filter((n): n is number => typeof n === "number");
   if (nums.length === 0) return null;
-  return { side: old ? "old" : "new", from: Math.min(...nums), to: Math.max(...nums) };
+  return { side: chosen, from: Math.min(...nums), to: Math.max(...nums) };
 }
 
 /** GitHub's link to `span` of `path` at `sha` (each path segment encoded). */
@@ -120,26 +123,40 @@ export function blobPermalink(repoHtmlUrl: string, sha: string, path: string, sp
   return `${repoHtmlUrl.replace(/\/+$/, "")}/blob/${sha}/${file}#${lines}`;
 }
 
+/** Where the selected lines can be linked on GitHub; nulls where they cannot. */
+export interface SelectionLinks {
+  /** The repository holding the commits (origin, or the PR's own). */
+  repoHtmlUrl: string | null;
+  /** The commit with the new version of the lines. */
+  newSha: string | null;
+  /** The commit with the old version (a commit's parent); null when unknown. */
+  oldSha: string | null;
+  /** The commit's page, for a commit source; null writes its full SHA. */
+  commitUrl: string | null;
+}
+
 /**
  * An issue about the selected lines: the text typed before, the permalink
- * (when the lines are reachable on GitHub), the lines as a diff block, and
- * where they come from. `commitUrl` links a commit source; null writes its
- * full SHA unlinked, like `commitIssuePrefill`.
+ * (when GitHub has that version of the lines), the lines as a diff block, and
+ * where they come from. The version, path (a renamed file's deleted lines
+ * live under its old path) and SHA are decided here, once.
  */
 export function selectionIssuePrefill(
   sel: DiffSelection,
-  links: { permalink: string | null; commitUrl: string | null },
+  at: SelectionLinks,
 ): IssuePrefill {
-  const span = permalinkSpan(sel.lines);
+  const span = permalinkSpan(sel.lines, sel.side);
   // Deleted lines of a renamed file live under its old path.
   const path = span?.side === "old" && sel.oldPath ? sel.oldPath : sel.path;
+  const sha = span?.side === "old" ? at.oldSha : at.newSha;
+  const permalink = span && sha && at.repoHtmlUrl ? blobPermalink(at.repoHtmlUrl, sha, path, span) : null;
   const old = span?.side === "old" ? " old" : "";
   const where = span ? (span.from === span.to ? `${old} line ${span.from}` : `${old} lines ${span.from}–${span.to}`) : "";
   const src = sel.source;
   const origin =
     src.kind === "commit"
-      ? links.commitUrl
-        ? `commit [\`${src.hash}\`](${links.commitUrl})`
+      ? at.commitUrl
+        ? `commit [\`${src.hash}\`](${at.commitUrl})`
         : `commit \`${src.hashFull}\``
       : `pull request [#${src.number}](${src.url})`;
   const footer = `${codeSpan(path)}${where}, ${origin}`;
@@ -147,7 +164,7 @@ export function selectionIssuePrefill(
   if (intro.length > SELECTION_MAX_INTRO) intro = intro.slice(0, SELECTION_MAX_INTRO) + "…";
 
   // Whatever the rest takes comes off the lines' share of the budget.
-  const budget = Math.max(1000, SELECTION_MAX_CHARS - intro.length - (links.permalink?.length ?? 0) - footer.length);
+  const budget = Math.max(1000, SELECTION_MAX_CHARS - intro.length - (permalink?.length ?? 0) - footer.length);
   const all = sel.lines.map((l) => (l.type === "add" ? "+" : l.type === "delete" ? "-" : " ") + l.content);
   const rows: string[] = [];
   let chars = 0;
@@ -157,14 +174,16 @@ export function selectionIssuePrefill(
     chars += row.length + 1;
   }
   // One line longer than the whole budget: show its start rather than nothing.
-  if (rows.length === 0 && all.length > 0) rows.push(all[0].slice(0, budget));
+  const cut = rows.length === 0 && all.length > 0;
+  if (cut) rows.push(all[0].slice(0, budget));
   let block = codeBlock(rows.join("\n"), "diff");
+  if (cut) block += `\n(cut to its first ${budget} characters)`;
   if (sel.lines.length > rows.length) {
     block += `\n(first ${rows.length} of ${sel.lines.length} lines)`;
   }
   const parts: string[] = [];
   if (intro) parts.push(intro);
-  if (links.permalink) parts.push(links.permalink);
+  if (permalink) parts.push(permalink);
   parts.push(block, footer);
   return { title: "", body: parts.join("\n\n") + "\n" };
 }

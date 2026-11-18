@@ -123,7 +123,7 @@ describe("PrInlineDiff — flat row model", () => {
 // ─── Shift+click ranges: multi-line comments and issues (#301) ───────────────
 import { ref as vueRef, h } from "vue";
 import { vi } from "vitest";
-import { CREATE_ISSUE_KEY } from "../../composables/useCreateIssue";
+import { CREATE_ISSUE_KEY, createSelectionRegistry } from "../../composables/useCreateIssue";
 import type { DiffSelection } from "../../utils/issuePrefill";
 
 function rangeDiff(): GitDiff {
@@ -145,7 +145,13 @@ function mountRange(props: Record<string, unknown> = {}, available = true) {
     if (opens) sel.onOpened?.();
     return opens;
   });
-  const fake = { available: vueRef(available), activeSelection, openFromSelection, refuse: () => { opens = false; } };
+  const fake = {
+    available: vueRef(available),
+    activeSelection,
+    openFromSelection,
+    publishSelection: createSelectionRegistry(activeSelection),
+    refuse: () => { opens = false; },
+  };
   const container = document.createElement("div");
   document.body.appendChild(container);
   const app = createApp(PrInlineDiff as any, {
@@ -238,7 +244,7 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(params.start_line).toBeUndefined();
   });
 
-  it("Create issue files the range with the typed text and closes the box", async () => {
+  it("Create issue files the range with the typed text; the draft stays, the range goes", async () => {
     const r = mountRange();
     mounted = r.mounted;
     const c = r.mounted.container;
@@ -254,7 +260,9 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(sel.lines.map((l) => l.content)).toEqual(["c3", "c4", "c5", "c6"]);
     expect(sel.intro).toBe("x");
     expect(sel.source).toEqual({ kind: "pr", number: 12, url: "https://github.com/o/r/pull/12", headSha: "h".repeat(40) });
-    expect(c.querySelector(".pid-compose")).toBeNull();
+    // Cancelling the issue must not have cost the comment draft.
+    expect(c.querySelector<HTMLTextAreaElement>(".pid-compose textarea")?.value).toBe("x");
+    expect(c.querySelectorAll(".pid-row--selected")).toHaveLength(0);
     expect(r.fake.activeSelection.value).toBeNull();
   });
 
@@ -290,7 +298,7 @@ describe("PrInlineDiff — Shift+click ranges", () => {
 
   it("changing file closes the box and clears the selection", async () => {
     const activeSelection = vueRef<DiffSelection | null>(null);
-    const fake = { available: vueRef(true), activeSelection, openFromSelection: vi.fn() };
+    const fake = { available: vueRef(true), activeSelection, openFromSelection: vi.fn(), publishSelection: createSelectionRegistry(activeSelection) };
     const filePath = vueRef("src/r.ts");
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -393,10 +401,11 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     expect(r.fake.activeSelection.value).not.toBeNull();
     await typeInCompose(c, "typing");
     expect(r.fake.activeSelection.value?.intro).toBe("typing");
-    // ⌘⇧I files it: the box closes like with the button.
+    // ⌘⇧I files it: the range is handed over, the draft stays.
     r.fake.activeSelection.value?.onOpened?.();
     await nextTick();
-    expect(c.querySelector(".pid-compose")).toBeNull();
+    expect(c.querySelector<HTMLTextAreaElement>(".pid-compose textarea")?.value).toBe("typing");
+    expect(r.fake.activeSelection.value).toBeNull();
   });
 
   it("keeps the box and its text when the issue form does not open", async () => {
@@ -494,5 +503,69 @@ describe("PrInlineDiff — Shift+click ranges", () => {
     clickNo(c.querySelectorAll<HTMLElement>(".pid-row")[1].querySelectorAll<HTMLElement>(".pid-lno")[1]);
     await nextTick();
     expect(c.querySelectorAll(".pid-compose-row")).toHaveLength(1);
+  });
+
+  function mountReactive(diff: { value: GitDiff }) {
+    const activeSelection = vueRef<DiffSelection | null>(null);
+    const fake = { available: vueRef(true), activeSelection, openFromSelection: vi.fn(), publishSelection: createSelectionRegistry(activeSelection) };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const app = createApp({
+      render: () => h(PrInlineDiff as any, {
+        diff: diff.value, filePath: "src/r.ts", comments: [], prNumber: 12,
+        prUrl: "https://github.com/o/r/pull/12", headSha: "h".repeat(40), forgeName: "github",
+      }),
+    });
+    app.provide(CREATE_ISSUE_KEY, fake as any);
+    app.mount(container);
+    return { mounted: { app, container, vm: null } as MountResult, fake };
+  }
+
+  it("a reloaded diff keeps the box and range on the same lines", async () => {
+    const diff = vueRef(rangeDiff());
+    const r = mountReactive(diff);
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 5), true);
+    await nextTick();
+    await typeInCompose(c, "draft");
+    // Same file, one more line on top: every row moves down by one.
+    const shifted = rangeDiff();
+    shifted.hunks[0] = {
+      ...shifted.hunks[0],
+      lines: [line("add", "new top", undefined, 1), ...shifted.hunks[0].lines.map((l) => ({ ...l, newLineNo: (l.newLineNo ?? 0) + 1 }))],
+    };
+    diff.value = shifted;
+    await nextTick();
+    await nextTick();
+    expect(c.querySelector<HTMLTextAreaElement>(".pid-compose textarea")?.value).toBe("draft");
+    expect(r.fake.activeSelection.value?.lines.map((l) => l.content)).toEqual(["c3", "c4", "c5"]);
+  });
+
+  it("a reloaded diff without those lines closes the box", async () => {
+    const diff = vueRef(rangeDiff());
+    const r = mountReactive(diff);
+    mounted = r.mounted;
+    const c = r.mounted.container;
+    await nextTick();
+    clickNo(newNo(c, 3));
+    clickNo(newNo(c, 5), true);
+    await nextTick();
+    diff.value = { ...rangeDiff(), hunks: [rangeDiff().hunks[1]] };
+    await nextTick();
+    await nextTick();
+    expect(c.querySelector(".pid-compose")).toBeNull();
+    expect(r.fake.activeSelection.value).toBeNull();
+  });
+
+  it("Shift+press on a line number does not start a text selection", async () => {
+    const r = mountRange();
+    mounted = r.mounted;
+    await nextTick();
+    const ev = new MouseEvent("mousedown", { bubbles: true, cancelable: true, shiftKey: true });
+    newNo(r.mounted.container, 3).dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
   });
 });
