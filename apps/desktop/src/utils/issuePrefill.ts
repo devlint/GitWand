@@ -4,7 +4,7 @@
  * read, so it is fixed English, not the app's locale.
  */
 
-import type { GitLogEntry } from "./backend";
+import type { DiffLine, GitLogEntry } from "./backend";
 
 export interface IssuePrefill {
   title: string;
@@ -22,10 +22,10 @@ export function commitUrlFor(repoHtmlUrl: string, sha: string): string {
  * adding events to other issues). The fence is longer than any backtick run
  * in `text`, so the message cannot close it.
  */
-function codeBlock(text: string): string {
+function codeBlock(text: string, lang = "text"): string {
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
   const fence = "`".repeat(Math.max(3, longest + 1));
-  return `${fence}text\n${text}\n${fence}`;
+  return `${fence}${lang}\n${text}\n${fence}`;
 }
 
 /** `text` as an inline code span (inert: no mention, reference or link). */
@@ -65,4 +65,81 @@ export function commitIssuePrefill(entry: GitLogEntry, commitUrl: string | null)
     title: issueTitle(entry.message),
     body: `Commit ${sha} by ${codeSpan(entry.author)}\n\n${codeBlock(message)}\n`,
   };
+}
+
+/** Lines selected in a commit or PR diff, to file an issue about (#301). */
+export interface DiffSelection {
+  path: string;
+  /** Selected rows, in diff order, all from one hunk. */
+  lines: DiffLine[];
+  source:
+    | { kind: "commit"; hash: string; hashFull: string; parent: string | null }
+    | { kind: "pr"; number: number; url: string; headSha: string | null };
+  /** Text typed before (the PR compose box): starts the body. */
+  intro?: string;
+}
+
+/** Which version of the file, and which of its lines, a permalink points at. */
+export interface LineSpan {
+  side: "old" | "new";
+  from: number;
+  to: number;
+}
+
+/** The most selected lines written into an issue's block. */
+export const SELECTION_MAX_LINES = 200;
+
+/**
+ * The lines a selection covers in one version of the file: the old version
+ * when every line is a deletion (they exist nowhere else), the new one
+ * otherwise. Null when no line carries a number on that side.
+ */
+export function permalinkSpan(lines: DiffLine[]): LineSpan | null {
+  const old = lines.length > 0 && lines.every((l) => l.type === "delete");
+  const nums = lines
+    .filter((l) => (old ? l.type === "delete" : l.type !== "delete"))
+    .map((l) => (old ? l.oldLineNo : l.newLineNo))
+    .filter((n): n is number => typeof n === "number");
+  if (nums.length === 0) return null;
+  return { side: old ? "old" : "new", from: Math.min(...nums), to: Math.max(...nums) };
+}
+
+/** GitHub's link to `span` of `path` at `sha` (each path segment encoded). */
+export function blobPermalink(repoHtmlUrl: string, sha: string, path: string, span: LineSpan): string {
+  const file = path.split("/").map(encodeURIComponent).join("/");
+  const lines = span.from === span.to ? `L${span.from}` : `L${span.from}-L${span.to}`;
+  return `${repoHtmlUrl.replace(/\/+$/, "")}/blob/${sha}/${file}#${lines}`;
+}
+
+/**
+ * An issue about the selected lines: the text typed before, the permalink
+ * (when the lines are reachable on GitHub), the lines as a diff block, and
+ * where they come from. `commitUrl` links a commit source; null writes its
+ * full SHA unlinked, like `commitIssuePrefill`.
+ */
+export function selectionIssuePrefill(
+  sel: DiffSelection,
+  links: { permalink: string | null; commitUrl: string | null },
+): IssuePrefill {
+  const shown = sel.lines.slice(0, SELECTION_MAX_LINES);
+  const rows = shown.map((l) => (l.type === "add" ? "+" : l.type === "delete" ? "-" : " ") + l.content);
+  const parts: string[] = [];
+  if (sel.intro?.trim()) parts.push(sel.intro.trim());
+  if (links.permalink) parts.push(links.permalink);
+  let block = codeBlock(rows.join("\n"), "diff");
+  if (sel.lines.length > shown.length) {
+    block += `\n(first ${shown.length} of ${sel.lines.length} lines)`;
+  }
+  parts.push(block);
+  const span = permalinkSpan(sel.lines);
+  const where = span ? (span.from === span.to ? ` line ${span.from}` : ` lines ${span.from}–${span.to}`) : "";
+  const src = sel.source;
+  const origin =
+    src.kind === "commit"
+      ? links.commitUrl
+        ? `commit [\`${src.hash}\`](${links.commitUrl})`
+        : `commit \`${src.hashFull}\``
+      : `pull request [#${src.number}](${src.url})`;
+  parts.push(`${codeSpan(sel.path)}${where}, ${origin}`);
+  return { title: "", body: parts.join("\n\n") + "\n" };
 }

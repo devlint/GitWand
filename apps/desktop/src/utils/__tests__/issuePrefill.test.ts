@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { commitIssuePrefill, commitUrlFor } from "../issuePrefill";
-import type { GitLogEntry } from "../backend";
+import {
+  commitIssuePrefill,
+  commitUrlFor,
+  permalinkSpan,
+  blobPermalink,
+  selectionIssuePrefill,
+  SELECTION_MAX_LINES,
+  type DiffSelection,
+} from "../issuePrefill";
+import type { DiffLine, GitLogEntry } from "../backend";
 
 const FULL = "abc1234ff00112233445566778899aabbccddeeff";
 
@@ -90,5 +98,79 @@ describe("commitUrlFor", () => {
 
   it("does not double a trailing slash", () => {
     expect(commitUrlFor("https://github.com/o/r/", "abc")).toBe("https://github.com/o/r/commit/abc");
+  });
+});
+
+const add = (n: number, c: string): DiffLine => ({ type: "add", content: c, newLineNo: n });
+const del = (n: number, c: string): DiffLine => ({ type: "delete", content: c, oldLineNo: n });
+const ctx = (o: number, n: number, c: string): DiffLine => ({ type: "context", content: c, oldLineNo: o, newLineNo: n });
+
+describe("permalinkSpan", () => {
+  it("spans the new side unless every line is a deletion", () => {
+    expect(permalinkSpan([ctx(9, 10, "a"), del(10, "b"), add(11, "c")])).toEqual({ side: "new", from: 10, to: 11 });
+    expect(permalinkSpan([del(4, "x"), del(5, "y")])).toEqual({ side: "old", from: 4, to: 5 });
+    expect(permalinkSpan([])).toBeNull();
+  });
+});
+
+describe("blobPermalink", () => {
+  it("builds a blob permalink, one line or a range, path segments encoded", () => {
+    expect(blobPermalink("https://github.com/o/r/", "abc", "src/a b#c/é.ts", { side: "new", from: 3, to: 3 }))
+      .toBe("https://github.com/o/r/blob/abc/src/a%20b%23c/%C3%A9.ts#L3");
+    expect(blobPermalink("https://github.com/o/r", "abc", "x.ts", { side: "new", from: 3, to: 7 }))
+      .toBe("https://github.com/o/r/blob/abc/x.ts#L3-L7");
+  });
+});
+
+describe("selectionIssuePrefill", () => {
+  it("writes the permalink, a diff block and the origin of the lines", () => {
+    const sel: DiffSelection = {
+      path: "src/x.ts",
+      lines: [ctx(9, 10, "a"), del(10, "b"), add(11, "c")],
+      source: { kind: "commit", hash: "abc1234", hashFull: "abc1234ffff", parent: "p" },
+    };
+    expect(
+      selectionIssuePrefill(sel, {
+        permalink: "https://g/o/r/blob/abc/src/x.ts#L10-L11",
+        commitUrl: "https://g/o/r/commit/abc1234ffff",
+      }),
+    ).toEqual({
+      title: "",
+      body:
+        "https://g/o/r/blob/abc/src/x.ts#L10-L11\n\n```diff\n a\n-b\n+c\n```\n\n`src/x.ts` lines 10–11, commit [`abc1234`](https://g/o/r/commit/abc1234ffff)\n",
+    });
+  });
+
+  it("without links: no permalink line, the full SHA unlinked", () => {
+    const sel: DiffSelection = {
+      path: "x.ts",
+      lines: [add(3, "c")],
+      source: { kind: "commit", hash: "abc1234", hashFull: "abc1234ffff", parent: null },
+    };
+    expect(selectionIssuePrefill(sel, { permalink: null, commitUrl: null }).body).toBe(
+      "```diff\n+c\n```\n\n`x.ts` line 3, commit `abc1234ffff`\n",
+    );
+  });
+
+  it("a PR selection names the pull request and starts with the typed text", () => {
+    const sel: DiffSelection = {
+      path: "x.ts",
+      lines: [add(3, "c")],
+      intro: "Looks wrong",
+      source: { kind: "pr", number: 12, url: "https://github.com/o/r/pull/12", headSha: "h" },
+    };
+    expect(selectionIssuePrefill(sel, { permalink: null, commitUrl: null }).body).toBe(
+      "Looks wrong\n\n```diff\n+c\n```\n\n`x.ts` line 3, pull request [#12](https://github.com/o/r/pull/12)\n",
+    );
+  });
+
+  it("fences past backtick runs and caps the block at 200 lines", () => {
+    const pr = { kind: "pr" as const, number: 1, url: "u", headSha: null };
+    const ticks = selectionIssuePrefill({ path: "x", lines: [add(1, "```")], source: pr }, { permalink: null, commitUrl: null });
+    expect(ticks.body.startsWith("````diff\n+```\n````\n")).toBe(true);
+    const many = Array.from({ length: 250 }, (_, i) => add(i + 1, "x"));
+    const body = selectionIssuePrefill({ path: "x", lines: many, source: pr }, { permalink: null, commitUrl: null }).body;
+    expect(body.split("\n").filter((l) => l === "+x")).toHaveLength(SELECTION_MAX_LINES);
+    expect(body).toContain("\n(first 200 of 250 lines)\n");
   });
 });
