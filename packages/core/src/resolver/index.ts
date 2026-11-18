@@ -14,6 +14,7 @@
  * `resolve` depuis `../resolver.js`.
  */
 
+import { retractForInvariant, retractForParseTree, withoutFormatResolver } from "./retract.js";
 import type {
   ClassifyInput,
   ConfidenceScore,
@@ -35,7 +36,7 @@ import {
 import { parseConflictMarkers, toConflictHunk } from "../parser.js";
 
 import { EMPTY_VALIDATION, validateMergedContent } from "./validation.js";
-import { checkParseTreeValid, applyPostMergeRiskPenalty } from "./validate-parse-tree.js";
+import { checkParseTreeValid } from "./validate-parse-tree.js";
 import { runStrictValidation } from "./validate-strict.js";
 import { isGeneratedFile, reclassifyIfGenerated } from "./generated-detection.js";
 import { findEcosystem } from "../regenerate/registry.js";
@@ -145,53 +146,6 @@ function reclassifyFormatConflict(hunk: ConflictHunk, resolverUsed: string, reas
   };
 }
 
-/**
- * accuracy lot 1 — Les résolutions automatiques d'un fichier dont le contenu
- * fusionné viole un invariant de format sont rétractées. #301 — un hunk
- * rétracté ne nomme plus de résolveur de format : ce n'est pas lui qui l'a résolu.
- */
-export function retractForInvariant(
-  hunks: ConflictHunk[],
-  resolutions: HunkResolution[],
-  why: string,
-): { hunks: ConflictHunk[]; resolutions: HunkResolution[] } {
-  const retracted = new Set(resolutions.flatMap((r, i) => (r.autoResolved ? [i] : [])));
-  const out = forgetRetractedFormatResolvers(hunks, resolutions, (i) => retracted.has(i));
-  return {
-    hunks: out.hunks,
-    resolutions: out.resolutions.map((r, i) =>
-      retracted.has(i)
-        ? {
-            ...r,
-            autoResolved: false,
-            resolvedLines: null,
-            resolutionReason: `Retracted: the merged content violates a format invariant. ${why}`,
-          }
-        : r,
-    ),
-  };
-}
-
-/**
- * #301 — Every retraction (format invariant, parse tree) goes through here:
- * a retracted hunk names no format resolver, in `hunks` and in `resolutions`.
- */
-export function forgetRetractedFormatResolvers(
-  hunks: ConflictHunk[],
-  resolutions: HunkResolution[],
-  isRetracted: (index: number) => boolean,
-): { hunks: ConflictHunk[]; resolutions: HunkResolution[] } {
-  return {
-    hunks: hunks.map((h, i) => (isRetracted(i) ? withoutFormatResolver(h) : h)),
-    resolutions: resolutions.map((r, i) => (isRetracted(i) ? { ...r, hunk: withoutFormatResolver(r.hunk) } : r)),
-  };
-}
-
-/** #301 — A hunk whose format-aware resolution was not applied names no resolver. */
-function withoutFormatResolver(hunk: ConflictHunk): ConflictHunk {
-  const { formatResolver: _unused, ...rest } = hunk;
-  return rest;
-}
 
 /**
  * accuracy lot 1 — Un hunk non-complex résolu par un résolveur format-aware garde son
@@ -652,13 +606,12 @@ export async function resolveAsync(
     // Parse-tree invalide → rétraction de toutes les résolutions automatiques.
     // On ne peut pas savoir quel hunk a cassé la syntaxe sans une analyse fine,
     // donc on est conservatif : tout remettre en conflits manuels.
-    const penalized = result.resolutions.map((r) => (r.autoResolved ? applyPostMergeRiskPenalty(r) : r));
-    const forgotten = forgetRetractedFormatResolvers(result.hunks, penalized, (i) => result.resolutions[i].autoResolved);
-    const retractedResolutions = forgotten.resolutions;
+    const retracted = retractForParseTree(result.hunks, result.resolutions);
+    const retractedResolutions = retracted.resolutions;
 
     return {
       ...result,
-      hunks: forgotten.hunks,
+      hunks: retracted.hunks,
       // mergedContent = null indique aux consommateurs que des conflits subsistent.
       // Le contenu original (avec marqueurs) est conservé dans conflictedContent
       // par l'appelant — ici on expose uniquement la MergeResult enrichie.
@@ -700,3 +653,5 @@ export async function resolveAsync(
     },
   };
 }
+
+export { retractForInvariant, forgetRetractedFormatResolvers, retractForParseTree } from "./retract.js";

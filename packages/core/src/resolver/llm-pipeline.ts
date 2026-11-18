@@ -18,6 +18,7 @@
  * les nouvelles résolutions.
  */
 
+import { retractForParseTree } from "./retract.js";
 import type {
   ConflictHunk,
   GitWandOptions,
@@ -29,7 +30,7 @@ import type {
 import type { StructuralLoaderOptions } from "../structural/index.js";
 import { parseConflictMarkers } from "../parser.js";
 import { tryLlmFallbackResolve } from "../resolvers/llm-fallback.js";
-import { checkParseTreeValid, applyPostMergeRiskPenalty } from "./validate-parse-tree.js";
+import { checkParseTreeValid } from "./validate-parse-tree.js";
 import { validateMergedContent } from "./validation.js";
 import {
   collectHunkHistory,
@@ -268,13 +269,11 @@ export async function runLlmFallbackPhase(
 
     if (parseTreeValid === false) {
       // Parse-tree invalide après fallback LLM → rétraction de tout
-      const retractedResolutions = updatedResolutions.map((r) =>
-        r.autoResolved ? applyPostMergeRiskPenalty(r) : r,
-      );
+      const retracted = retractForParseTree(updatedHunks, updatedResolutions);
       return {
         ...result,
-        hunks: updatedHunks,
-        resolutions: retractedResolutions,
+        hunks: retracted.hunks,
+        resolutions: retracted.resolutions,
         stats: { ...updatedStats, autoResolved: 0, remaining: updatedStats.totalConflicts },
         mergedContent: null,
         validation: { ...validation, isValid: false, parseTreeValid: false, externalValidation: null },

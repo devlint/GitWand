@@ -5,7 +5,7 @@
  * scan, no path in the text).
  */
 import { describe, it, expect, vi } from "vitest";
-import { ref } from "vue";
+import { nextTick, ref } from "vue";
 import type { ConflictHunk } from "@gitwand/core";
 import { useCreateIssue } from "../useCreateIssue";
 import type { ForgeProvider } from "../forge/types";
@@ -236,6 +236,27 @@ describe("useCreateIssue — report mode", () => {
     expect(api.error.value).toContain("403");
     api.setGitwand(true);
     expect(api.error.value).toBeNull();
+  });
+
+  it("a switch does not hold Create for a debounce it does not need", async () => {
+    const api = useCreateIssue({
+      cwd: ref("/repo"),
+      provider: ref(provider()),
+      onCreated: vi.fn(),
+      report: {
+        createGitwandIssue: vi.fn(),
+        gitwandWritable: async () => true,
+        env: () => ENV,
+        secretsOptions: async () => ({ extraPatterns: [], entropyThreshold: 4 }),
+        scanDebounceMs: 60_000,
+      },
+    });
+    await api.openFromResolution(REPORT);
+    await settle();
+    api.setGitwand(true);
+    api.confirmedPublic.value = true;
+    await nextTick();
+    expect(api.canSubmit.value).toBe(true);
   });
 
   it("on the repository, a secret only warns", async () => {

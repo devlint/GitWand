@@ -8,11 +8,10 @@
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec, ghCreateGitwandIssue, ghGitwandWritable } from "../utils/backend";
-import type { SecretPattern } from "@gitwand/core";
+import type { SecretFinding, SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
 import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
 import { scanReportBody, type ReportScan } from "../utils/reportGuard";
-import type { SecretFinding } from "@gitwand/core";
 import { isEditableTarget } from "../utils/editableTarget";
 import type {
   CreatedIssue,
@@ -181,7 +180,6 @@ export const GITWAND_REPO = "devlint/GitWand";
 
 /** GitHub's limit on an issue body. */
 export const ISSUE_BODY_MAX = 65_536;
-
 
 /** What report mode needs from outside (tests replace it). */
 export interface ReportDeps {
@@ -569,6 +567,18 @@ export function useCreateIssue(deps: {
     return landed;
   }
 
+  /** A field's scan depends on its text, the blocking rule and the patterns. */
+  function scanCacheKey(blockAt: string, text: string): string {
+    return `${blockAt}\u0000${secretsVersion}\u0000${text}`;
+  }
+
+  /** Each field's text is the one last scanned, with the current options. */
+  function allScanned(): boolean {
+    const blockAt = toGitwand.value ? "medium" : "never";
+    const parts: Array<[string, string]> = [["title", title.value], ["answer", answer.value], ["description", body.value]];
+    return parts.every(([where, text]) => scanCache.get(where)?.key === scanCacheKey(blockAt, text));
+  }
+
   function scanNow() {
     if (scanTimer) clearTimeout(scanTimer);
     scanTimer = null;
@@ -586,7 +596,7 @@ export function useCreateIssue(deps: {
     for (const [where, text] of parts) {
       // A field unchanged since its last scan (same text, same options) is
       // not scanned again: typing in the answer leaves a 50 KB body alone.
-      const key = `${opts.blockAt}\u0000${secretsVersion}\u0000${text}`;
+      const key = scanCacheKey(opts.blockAt, text);
       let r = scanCache.get(where)?.key === key ? scanCache.get(where)!.result : null;
       if (!r) {
         r = scanReportBody(text, opts);
@@ -598,10 +608,10 @@ export function useCreateIssue(deps: {
     findings.value = next;
   }
 
-
   let scanTimer: ReturnType<typeof setTimeout> | null = null;
   watch([finalBody, title], () => {
-    if (!report.value) return;
+    // Nothing new to scan (a switch or an open just scanned this very text).
+    if (!report.value || allScanned()) return;
     scanPending.value = true;
     if (scanTimer) clearTimeout(scanTimer);
     scanTimer = setTimeout(scanNow, scanDebounceMs);

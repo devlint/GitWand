@@ -3,7 +3,7 @@
  * resolver: the hunk was not resolved by it in the end.
  */
 import { describe, it, expect } from "vitest";
-import { retractForInvariant, forgetRetractedFormatResolvers } from "../resolver/index.js";
+import { retractForInvariant, forgetRetractedFormatResolvers, retractForParseTree } from "../resolver/retract.js";
 import type { ConflictHunk, HunkResolution } from "../types.js";
 
 const hunk = { type: "format_semantic", formatResolver: "json" } as unknown as ConflictHunk;
@@ -33,6 +33,22 @@ describe("forgetRetractedFormatResolvers (parse-tree retraction)", () => {
     expect(out.hunks[1].formatResolver).toBeUndefined();
     expect(out.resolutions[1].hunk.formatResolver).toBeUndefined();
     expect(out.resolutions[0]).toBe(kept);
+  });
+});
+
+describe("retractForParseTree (both resolver paths, the LLM fallback included)", () => {
+  it("retracts the automatic resolutions and forgets their format resolver", () => {
+    const h = {
+      type: "format_semantic",
+      formatResolver: "json",
+      confidence: { score: 90, label: "high", dimensions: {}, boosters: [], penalties: [] },
+    } as unknown as ConflictHunk;
+    const res: HunkResolution = { hunk: h, resolvedLines: ["{}"], autoResolved: true, resolutionReason: "r" };
+    const out = retractForParseTree([h], [res]);
+    expect(out.resolutions[0].autoResolved).toBe(false);
+    expect(out.resolutions[0].resolvedLines).toBeNull();
+    expect(out.hunks[0].formatResolver).toBeUndefined();
+    expect(out.resolutions[0].hunk.formatResolver).toBeUndefined();
   });
 });
 

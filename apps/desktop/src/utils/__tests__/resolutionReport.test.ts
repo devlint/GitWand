@@ -63,6 +63,8 @@ describe("repoReportPrefill", () => {
     const p = repoReportPrefill(report());
     expect(p.title).toBe("Bad merge resolution in `src/x.ts`");
     expect(p.body).toContain("`src/x.ts`");
+    // A line of the conflicted file, which no longer exists once written.
+    expect(p.body).toContain("started at line 10 of the conflicted file");
     for (const s of ["ours", "theirs", "base", "const a = 2;", "const a = 3;", "const a = 1;"]) expect(p.body).toContain(s);
     expect(p.body).toContain("### GitWand's result");
     expect(p.body).toContain("const a = 23;");

@@ -280,7 +280,7 @@ function assemble(r: ResolutionReport, head: string[], scrub: Scrub = (t) => t, 
 export function repoReportPrefill(r: ResolutionReport): IssuePrefill {
   return {
     title: issueTitle(`Bad merge resolution in ${codeSpan(r.path)}`),
-    body: assemble(r, [`File: ${codeSpan(r.path)}, conflict starting at line ${r.hunk.startLine}.`]),
+    body: assemble(r, [`File: ${codeSpan(r.path)}, the conflict that started at line ${r.hunk.startLine} of the conflicted file.`]),
   };
 }
 

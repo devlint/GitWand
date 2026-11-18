@@ -1073,15 +1073,15 @@ function devCoalesceRepoPaths(batch) {
   };
 }
 
+/** `/api/gh-gitwand-writable`'s last answer and when (#301). */
+let devGitwandWritable = null;
+
 /**
  * Get a GitHub OAuth token — tries in order:
  *  1. GH_TOKEN / GITHUB_TOKEN env vars
  *  2. `gh auth token` CLI
  *  3. Parse ~/.config/gh/hosts.yml directly
  */
-/** `/api/gh-gitwand-writable`'s last answer and when (#301). */
-let devGitwandWritable = null;
-
 function getGithubToken() {
   if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
   if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
