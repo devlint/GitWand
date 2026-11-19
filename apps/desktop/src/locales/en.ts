@@ -2761,6 +2761,7 @@ const en = {
     paletteLabel: "New GitHub issue",
     created: "Issue #{0} created",
     open: "Open",
+    addToCommit: "Add to commit",
     report: {
       answerLabel: "What should it have been?",
       answerPlaceholder: "The result you expected, or what GitWand got wrong",

@@ -89,6 +89,7 @@ import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import { useIssuePanel, ISSUE_PANEL_KEY } from "./composables/useIssuePanel";
 import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
+import { addCreatedIssueToCommit } from "./utils/issueRefs";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
 import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
@@ -364,15 +365,16 @@ const commitReviewNav = useCommitReviewNav({
  * dismissed; a toast shown meanwhile parks it, and it comes back once that
  * one is gone.
  */
-function showDetailToast(title: string, detail: string | null, ms = 3000, link?: ToastLink) {
+function showDetailToast(title: string, detail: string | null, ms = 3000, link?: ToastLink, action?: ToastAction) {
   if (stickyToast) parkedToasts.push(stickyToast);
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   if (dismissTimer != null) { window.clearTimeout(dismissTimer); dismissTimer = null; }
-  stickyToast = ms === 0 ? { title, detail, link } : null;
+  stickyToast = ms === 0 ? { title, detail, link, action } : null;
   successToastLeaving.value = false;
   successToast.value = title;
   successToastDetail.value = detail || null;
   successToastLink.value = link ?? null;
+  successToastAction.value = action ?? null;
   if (ms > 0) successTimer = window.setTimeout(dismissToast, ms);
 }
 
@@ -509,13 +511,32 @@ provide(PR_PANEL_KEY, prPanel);
 const createIssue = useCreateIssue({
   cwd: computed(() => repoFolderPath.value ?? null),
   provider: ref(githubProvider),
-  onCreated: (issue) =>
+  onCreated: (issue) => {
+    // "Add to commit" (#301) writes into the repository the issue was filed
+    // from, and only while it is still the active one.
+    const createdIn = repoFolderPath.value ?? "";
+    const pushRepo = createdIn
+      ? gitRemoteInfo(createdIn).then((r) => (r.owner && r.repo ? `${r.owner}/${r.repo}` : null), () => null)
+      : Promise.resolve(null);
     showDetailToast(
       t("createIssue.created", issue.number),
       null,
       8000,
       issue.url ? { label: t("createIssue.open"), url: issue.url } : undefined,
-    ),
+      {
+        label: t("createIssue.addToCommit"),
+        run: () => {
+          void pushRepo.then((push) => {
+            const next = addCreatedIssueToCommit(
+              issue.url, issue.number, createdIn, repoFolderPath.value ?? "", push,
+              commitSummary.value, commitDescription.value,
+            );
+            if (next !== null) commitDescription.value = next;
+          });
+        },
+      },
+    );
+  },
   report: {
     // A resolver report is scanned like a commit: the repository's
     // .gitwandrc patterns, and its or the app's entropy threshold.
@@ -807,13 +828,17 @@ const successToastLeaving = ref(false);
 /** An optional link the toast offers (e.g. "Open" a just-created issue, #301). */
 type ToastLink = { label: string; url: string };
 const successToastLink = ref<ToastLink | null>(null);
+/** An optional action button (e.g. "Add to commit" for a created issue, #301). */
+type ToastAction = { label: string; run: () => void };
+const successToastAction = ref<ToastAction | null>(null);
 const memorizeToast = ref<{ path: string; strategy: ResolutionStrategy } | null>(null);
 let successTimer: number | null = null;
 // The fade-out of a dismissed toast, cancelled when a new one replaces it.
 let dismissTimer: number | null = null;
 // The sticky toast on screen, and the ones covered since, shown again in turn.
-let stickyToast: { title: string; detail: string | null; link?: ToastLink } | null = null;
-const parkedToasts: { title: string; detail: string | null; link?: ToastLink }[] = [];
+type ParkedToast = { title: string; detail: string | null; link?: ToastLink; action?: ToastAction };
+let stickyToast: ParkedToast | null = null;
+const parkedToasts: ParkedToast[] = [];
 
 function dismissToast() {
   if (dismissTimer != null) return; // already fading out (double click)
@@ -825,11 +850,12 @@ function dismissToast() {
     successToast.value = null;
     successToastDetail.value = null;
     successToastLink.value = null;
+    successToastAction.value = null;
     successToastLeaving.value = false;
     successTimer = null;
     dismissTimer = null;
     const parked = parkedToasts.pop();
-    if (parked) showDetailToast(parked.title, parked.detail, 0, parked.link);
+    if (parked) showDetailToast(parked.title, parked.detail, 0, parked.link, parked.action);
   }, 200);
 }
 
@@ -5152,6 +5178,7 @@ onUnmounted(() => {
         <div class="toast-detail" v-if="successToastDetail">{{ successToastDetail }}</div>
       </div>
       <button v-if="successToastLink" class="toast-dismiss" @click="openExternalUrl(successToastLink.url)">{{ successToastLink.label }}</button>
+      <button v-if="successToastAction" class="toast-dismiss" @click="successToastAction.run(); dismissToast()">{{ successToastAction.label }}</button>
       <button class="toast-dismiss" @click="dismissToast">OK</button>
     </div>
 

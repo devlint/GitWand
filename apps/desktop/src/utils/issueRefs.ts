@@ -79,3 +79,23 @@ export function appendRef(description: string, ref: string, summary = ""): strin
   const trimmed = description.replace(/\s+$/, "");
   return trimmed ? `${trimmed} ${ref}` : ref;
 }
+
+/**
+ * The "issue created" toast's "Add to commit" (#301): the new description, or
+ * null when the repository changed since the issue was filed, or the message
+ * already cites it.
+ */
+export function addCreatedIssueToCommit(
+  issueUrl: string,
+  number: number,
+  createdIn: string,
+  activeCwd: string,
+  pushRepo: string | null,
+  summary: string,
+  description: string,
+): string | null {
+  if (createdIn !== activeCwd) return null;
+  const ref = issueRef(number, repoSlugFromUrl(issueUrl), pushRepo);
+  if (hasRef(summary, ref) || hasRef(description, ref)) return null;
+  return appendRef(description, ref, summary);
+}

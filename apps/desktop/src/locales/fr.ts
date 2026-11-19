@@ -2730,6 +2730,7 @@ const fr: Locale = {
     paletteLabel: "Nouvelle issue GitHub",
     created: "Issue #{0} créée",
     open: "Ouvrir",
+    addToCommit: "Ajouter au commit",
     report: {
       answerLabel: "Qu'aurait-il fallu obtenir ?",
       answerPlaceholder: "Le résultat attendu, ou ce que GitWand a mal fait",

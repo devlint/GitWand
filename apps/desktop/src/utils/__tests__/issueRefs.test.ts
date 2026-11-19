@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import type { Issue } from "../backend";
-import { hashTokenAt, filterIssues, repoSlugFromUrl, issueRef, insertRef, appendRef } from "../issueRefs";
+import { hashTokenAt, filterIssues, repoSlugFromUrl, issueRef, insertRef, appendRef, addCreatedIssueToCommit } from "../issueRefs";
 
 function issue(number: number, title: string, updatedAt: string, url = `https://github.com/me/app/issues/${number}`): Issue {
   return { number, title, state: "OPEN", author: "a", assignees: [], labels: [], url, createdAt: updatedAt, updatedAt, milestone: "" };
@@ -73,4 +73,17 @@ describe("appendRef", () => {
     expect(appendRef("see #42", "#4")).toBe("see #42 #4");
     expect(appendRef("up/app#4", "#4")).toBe("up/app#4 #4");
   });
+});
+
+describe("addCreatedIssueToCommit", () => {
+  const URL7 = "https://github.com/me/app/issues/7";
+  it("appends the reference to the active repository's description", () =>
+    expect(addCreatedIssueToCommit(URL7, 7, "/r", "/r", "me/app", "s", "d")).toBe("d #7"));
+  it("sets an empty description", () => expect(addCreatedIssueToCommit(URL7, 7, "/r", "/r", "me/app", "", "")).toBe("#7"));
+  it("qualifies an issue filed on the parent", () =>
+    expect(addCreatedIssueToCommit("https://github.com/up/app/issues/7", 7, "/r", "/r", "me/app", "", "")).toBe("up/app#7"));
+  it("does nothing after a repository switch", () =>
+    expect(addCreatedIssueToCommit(URL7, 7, "/r", "/other", "me/app", "", "")).toBeNull());
+  it("does nothing when already referenced", () =>
+    expect(addCreatedIssueToCommit(URL7, 7, "/r", "/r", "me/app", "Fix #7", "")).toBeNull());
 });

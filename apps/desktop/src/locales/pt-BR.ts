@@ -2721,6 +2721,7 @@ const ptBR: Locale = {
     paletteLabel: "Nova issue do GitHub",
     created: "Issue #{0} criada",
     open: "Abrir",
+    addToCommit: "Adicionar ao commit",
     report: {
       answerLabel: "O que deveria ter sido?",
       answerPlaceholder: "O resultado esperado, ou o que o GitWand errou",

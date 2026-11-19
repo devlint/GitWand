@@ -2721,6 +2721,7 @@ const es: Locale = {
     paletteLabel: "Nueva issue de GitHub",
     created: "Issue #{0} creada",
     open: "Abrir",
+    addToCommit: "Añadir al commit",
     report: {
       answerLabel: "¿Qué debería haber resultado?",
       answerPlaceholder: "El resultado esperado, o lo que GitWand hizo mal",
