@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport } from "../../dev-issues.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,
@@ -131,5 +131,51 @@ describe("devGitwandReport", () => {
   });
   it("refuses a blank title", () => {
     expect(devGitwandReport({ title: " ", body: "b" }, {})).toEqual({ error: "Title is required" });
+  });
+});
+
+describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => {
+  const b64 = (t: string) => Buffer.from(t).toString("base64").replace(/(.{60})/g, "$1\n");
+  const file = (t: string) => ({ encoding: "base64", content: b64(t), size: t.length });
+  const entry = (name: string, size = 10) => ({ name, path: `.github/ISSUE_TEMPLATE/${name}`, type: "file", size });
+  const fake = (m: Record<string, unknown>) => async (nwo: string, path: string) => (m[`${nwo}:${path}`] ?? null);
+
+  it("reads the directory, sorted and capped, skipping other files", async () => {
+    const dir = [...Array.from({ length: 22 }, (_, i) => entry(`t${String(21 - i).padStart(2, "0")}.md`)), entry("config.yml"), entry("notes.txt")];
+    const m: Record<string, unknown> = { "me/app:.github/ISSUE_TEMPLATE": dir, "me/app:.github/ISSUE_TEMPLATE/config.yml": file("blank_issues_enabled: false") };
+    for (let i = 0; i < 22; i++) m[`me/app:.github/ISSUE_TEMPLATE/t${String(i).padStart(2, "0")}.md`] = file("body");
+    const got = await devTemplateFiles("me/app", fake(m));
+    expect(got.source).toBe("me/app");
+    expect(got.files).toHaveLength(21);
+    expect(got.files[0].path).toBe(".github/ISSUE_TEMPLATE/config.yml");
+    expect(got.files[20].path).toBe(".github/ISSUE_TEMPLATE/t19.md");
+    expect(got.files[1].content).toBe("body");
+  });
+
+  it("skips a file over 64 KiB", async () => {
+    const got = await devTemplateFiles("me/app", fake({
+      "me/app:.github/ISSUE_TEMPLATE": [entry("big.md", 65_537), entry("ok.yml")],
+      "me/app:.github/ISSUE_TEMPLATE/ok.yml": file("name: ok"),
+    }));
+    expect(got.files.map((f: { path: string }) => f.path)).toEqual([".github/ISSUE_TEMPLATE/ok.yml"]);
+  });
+
+  it("falls back to a single-template file, then the owner's .github repository", async () => {
+    const single = await devTemplateFiles("me/app", fake({ "me/app:docs/ISSUE_TEMPLATE.md": file("legacy") }));
+    expect(single.files[0].path).toBe("docs/ISSUE_TEMPLATE.md");
+    const org = await devTemplateFiles("me/app", fake({
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(org.source).toBe("me/.github");
+    expect(org.files[0].content).toBe("name: Bug");
+  });
+
+  it("nothing anywhere is an empty list", async () => {
+    expect((await devTemplateFiles("me/app", fake({}))).files).toEqual([]);
+  });
+
+  it("a non-404 error fails the read", async () => {
+    await expect(devTemplateFiles("me/app", async () => { throw new Error("502"); })).rejects.toThrow("502");
   });
 });

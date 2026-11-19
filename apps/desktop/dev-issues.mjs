@@ -129,3 +129,65 @@ export function devCreateFailure(status, json) {
   const msg = devGithubError(status, json);
   return status >= 500 ? MAY_HAVE_BEEN_CREATED + msg : msg;
 }
+
+// ─── Issue templates (#301, part 5) — mirrors gh_issue_templates ───────────
+const TEMPLATE_DIR = ".github/ISSUE_TEMPLATE";
+const SINGLE_TEMPLATES = [".github/ISSUE_TEMPLATE.md", "ISSUE_TEMPLATE.md", "docs/ISSUE_TEMPLATE.md"];
+const MAX_TEMPLATES = 20;
+const MAX_TEMPLATE_BYTES = 65_536;
+
+function decodeContent(v) {
+  if (typeof v?.content !== "string") return null;
+  try {
+    return Buffer.from(v.content.replace(/\s+/g, ""), "base64").toString("utf8");
+  } catch {
+    return null;
+  }
+}
+const smallEnough = (v) => typeof v?.size === "number" && v.size <= MAX_TEMPLATE_BYTES;
+const isConfig = (n) => ["config.yml", "config.yaml"].includes(n.toLowerCase());
+const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+async function templatesIn(nwo, get) {
+  const items = await get(nwo, TEMPLATE_DIR);
+  if (Array.isArray(items)) {
+    const named = items
+      .filter((i) => i?.type === "file" && smallEnough(i) && typeof i.name === "string" && typeof i.path === "string")
+      .filter((i) => /\.(md|ya?ml)$/i.test(i.name))
+      .map((i) => [i.name, i.path])
+      .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
+    const kept = [...named.filter(([n]) => isConfig(n)), ...named.filter(([n]) => !isConfig(n)).slice(0, MAX_TEMPLATES)]
+      .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
+    const files = [];
+    for (const [, path] of kept) {
+      const content = decodeContent(await get(nwo, path));
+      if (content !== null) files.push({ path, content });
+    }
+    if (files.length) return files;
+  }
+  for (const path of SINGLE_TEMPLATES) {
+    const v = await get(nwo, path);
+    if (v && smallEnough(v)) {
+      const content = decodeContent(v);
+      if (content !== null) return [{ path, content }];
+    }
+  }
+  return [];
+}
+
+/**
+ * A target's issue template files, as `gh_issue_templates` reads them: the
+ * template directory, else a single-template file, else the same in the
+ * owner's `.github` repository. `get(nwo, path)` resolves `null` on a 404.
+ */
+export async function devTemplateFiles(nwo, get) {
+  const own = await templatesIn(nwo, get);
+  if (own.length) return { source: nwo, files: own };
+  const owner = nwo.split("/")[0];
+  const org = `${owner}/.github`;
+  if (org.toLowerCase() !== nwo.toLowerCase()) {
+    const files = await templatesIn(org, get);
+    if (files.length) return { source: org, files };
+  }
+  return { source: nwo, files: [] };
+}

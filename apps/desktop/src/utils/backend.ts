@@ -4672,6 +4672,23 @@ export async function ghListLabels(cwd: string, repo: string): Promise<RepoLabel
   return devGet<RepoLabel[]>("/api/gh-list-labels", { cwd, repo }, "gh list labels");
 }
 
+/** One issue template file of a target, raw (parsed in `utils/issueTemplates`). */
+export interface TemplateFile {
+  path: string;
+  content: string;
+}
+
+/** A target's issue template files, and the repository they came from (#301). */
+export interface IssueTemplateFiles {
+  source: string;
+  files: TemplateFile[];
+}
+
+export async function ghIssueTemplates(cwd: string, repo: string): Promise<IssueTemplateFiles> {
+  if (isTauri()) return tauriInvoke<IssueTemplateFiles>("gh_issue_templates", { cwd, repo }, IPC_TIMEOUT.NETWORK);
+  return devGet<IssueTemplateFiles>("/api/gh-issue-templates", { cwd, repo }, "gh issue templates");
+}
+
 export async function ghListMilestones(cwd: string, repo: string): Promise<RepoMilestone[]> {
   if (isTauri()) return tauriInvoke<RepoMilestone[]>("gh_list_milestones", { cwd, repo }, IPC_TIMEOUT.NETWORK);
   return devGet<RepoMilestone[]>("/api/gh-list-milestones", { cwd, repo }, "gh list milestones");
