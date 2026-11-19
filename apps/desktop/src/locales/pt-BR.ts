@@ -220,6 +220,12 @@ const ptBR: Locale = {
     failed: "Não foi possível parar de rastrear os arquivos: {0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "Carregando issues…",
+      unavailable: "Issues indisponíveis",
+      empty: "Nenhuma issue aberta corresponde",
+      hint: "↵ #N · ⇧↵ Fixes #N",
+    },
     tabChanges: "Alterações",
     tabBranches: "Branches",
     tabLog: "Histórico",

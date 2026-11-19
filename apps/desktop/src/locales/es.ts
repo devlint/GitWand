@@ -219,6 +219,12 @@ const es: Locale = {
     failed: "No se pudieron dejar de rastrear los archivos: {0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "Cargando issues…",
+      unavailable: "Issues no disponibles",
+      empty: "Ninguna issue abierta coincide",
+      hint: "↵ #N · ⇧↵ Fixes #N",
+    },
     tabChanges: "Cambios",
     tabBranches: "Ramas",
     tabLog: "Historial",

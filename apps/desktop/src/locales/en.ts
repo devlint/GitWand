@@ -220,6 +220,12 @@ const en = {
     failed: "Could not untrack the files: {0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "Loading issues…",
+      unavailable: "Issues unavailable",
+      empty: "No matching open issue",
+      hint: "↵ #N · ⇧↵ Fixes #N",
+    },
     tabChanges: "Changes",
     tabBranches: "Branches",
     tabLog: "Log",

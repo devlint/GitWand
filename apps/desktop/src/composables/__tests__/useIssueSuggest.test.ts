@@ -149,6 +149,16 @@ describe("useIssueSuggest", () => {
     expect(s.open.value).toBe(false);
   });
 
+  it("a key with Cmd, Ctrl or Alt never picks", async () => {
+    const { s } = setup();
+    s.update("#", 1);
+    await flush();
+    expect(s.keydown(key("Enter", { metaKey: true }), "#")).toBeNull();
+    expect(s.keydown(key("Enter", { ctrlKey: true }), "#")).toBeNull();
+    expect(s.keydown(key("ArrowDown", { altKey: true }), "#")).toBeNull();
+    expect(s.open.value).toBe(true);
+  });
+
   it("keys pass through when the list is closed", () => {
     const { s } = setup();
     expect(s.keydown(key("Enter"), "x")).toBeNull();

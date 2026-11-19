@@ -223,6 +223,12 @@ const zhCN: Locale = {
     failed: "无法取消跟踪这些文件：{0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "正在加载 issue…",
+      unavailable: "无法获取 issue",
+      empty: "没有匹配的未关闭 issue",
+      hint: "↵ #N · ⇧↵ Fixes #N",
+    },
     tabChanges: "更改",
     tabBranches: "分支",
     tabLog: "日志",

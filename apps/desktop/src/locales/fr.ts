@@ -213,6 +213,12 @@ const fr: Locale = {
     failed: "Impossible de retirer les fichiers du suivi : {0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "Chargement des issues…",
+      unavailable: "Issues indisponibles",
+      empty: "Aucune issue ouverte ne correspond",
+      hint: "↵ #N · ⇧↵ Fixes #N",
+    },
     tabChanges: "Changements",
     tabBranches: "Branches",
     tabLog: "Log",

@@ -5,7 +5,7 @@
  * the list's state, a per-repository cache (refreshed after 60 s) and the key
  * handling. Nothing is fetched until a `#` opens the list.
  */
-import { computed, ref, type ComputedRef, type Ref } from "vue";
+import { computed, nextTick, ref, type ComputedRef, type Ref } from "vue";
 import type { Issue } from "../utils/backend";
 import { filterIssues, hashTokenAt, insertRef, issueRef, repoSlugFromUrl } from "../utils/issueRefs";
 
@@ -114,6 +114,8 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
 
   function keydown(e: KeyboardEvent, text: string): Picked | "handled" | null {
     if (!open.value || e.isComposing) return null;
+    // Cmd/Ctrl+Enter commits; a modified key is never the list's.
+    if (e.metaKey || e.ctrlKey || e.altKey) return null;
     if (e.key === "Escape") {
       close();
       return "handled";
@@ -129,4 +131,44 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   }
 
   return { open, status, rows, active, update, keydown, pick, close };
+}
+
+export type IssueSuggest = ReturnType<typeof useIssueSuggest>;
+type Field = HTMLInputElement | HTMLTextAreaElement;
+
+/** Re-read the `#token` at the field's caret (on input, click, caret keys). */
+export function refreshIssueSuggest(s: IssueSuggest, el: Field): void {
+  s.update(el.value, el.selectionStart ?? el.value.length);
+}
+
+/** Put the caret at `at` once the new value is rendered. */
+function placeCaret(el: Field, at: number): void {
+  void nextTick(() => {
+    if (document.activeElement === el) el.setSelectionRange(at, at);
+  });
+}
+
+/**
+ * The field's keydown, before its own handling. Returns true when the list
+ * took the key: it is then stopped here, so App's Escape ladder never sees it.
+ */
+export function handleIssueKeydown(s: IssueSuggest, e: KeyboardEvent, el: Field, write: (text: string) => void): boolean {
+  const out = s.keydown(e, el.value);
+  if (out === null) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  if (out !== "handled") {
+    write(out.text);
+    placeCaret(el, out.caret);
+  }
+  return true;
+}
+
+/** A row picked with the mouse. */
+export function pickIssueRow(s: IssueSuggest, index: number, fixes: boolean, el: Field | null, write: (text: string) => void): void {
+  if (!el) return;
+  const out = s.pick(index, fixes, el.value);
+  if (!out) return;
+  write(out.text);
+  placeCaret(el, out.caret);
 }

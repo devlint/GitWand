@@ -27,6 +27,9 @@ import {
 } from "../composables/useFileTree";
 import type { CommitTemplate } from "../composables/useSettings";
 import { gitBranchMerged } from "../utils/backend";
+import IssueSuggestList from "./IssueSuggestList.vue";
+import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, pickIssueRow, type IssueSuggest } from "../composables/useIssueSuggest";
+import { forgeFromRemoteInfo } from "../composables/forge/useForge";
 import { loadSettings } from "../composables/useSettings";
 
 const props = defineProps<{
@@ -430,14 +433,49 @@ onUnmounted(() => {
 
 // ─── Remote info (for the "Open repository" quick action) ─────
 const remoteInfo = ref<RemoteInfo | null>(null);
+/** The repository `remoteInfo` was read for (it lags a tab switch). */
+const remoteInfoCwd = ref<string | null>(null);
 
 async function loadRemoteInfo() {
-  if (!props.cwd) { remoteInfo.value = null; return; }
-  try { remoteInfo.value = await gitRemoteInfo(props.cwd); }
-  catch { remoteInfo.value = null; }
+  const cwd = props.cwd;
+  if (!cwd) { remoteInfo.value = null; remoteInfoCwd.value = null; return; }
+  let info: RemoteInfo | null = null;
+  try { info = await gitRemoteInfo(cwd); }
+  catch { info = null; }
+  if (cwd !== props.cwd) return;
+  remoteInfo.value = info;
+  remoteInfoCwd.value = cwd;
 }
 onMounted(loadRemoteInfo);
 watch(() => props.cwd, loadRemoteInfo);
+
+// ─── `#` in the commit message lists open issues (#301) ──────
+const issueDeps = {
+  cwd: () => props.cwd || null,
+  /** null (no list) until the remote is known, or when its forge cannot list issues. */
+  loadIssues: (cwd: string) => {
+    const info = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
+    if (!info) return null;
+    const forge = forgeFromRemoteInfo(info);
+    return forge.listIssues ? forge.listIssues(cwd, { limit: 100 }) : null;
+  },
+  pushRepo: async (cwd: string) => {
+    const info = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
+    return info?.owner && info.repo ? `${info.owner}/${info.repo}` : null;
+  },
+};
+const summaryIssues = useIssueSuggest(issueDeps);
+const descriptionIssues = useIssueSuggest(issueDeps);
+const summaryEl = ref<HTMLInputElement | null>(null);
+const descriptionEl = ref<HTMLTextAreaElement | null>(null);
+const writeSummary = (text: string) => emit("update:commitSummary", text);
+const writeDescription = (text: string) => emit("update:commitDescription", text);
+/** Caret keys and clicks move the caret without an input event. */
+const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
+function onIssueCaretKeyup(s: IssueSuggest, e: KeyboardEvent) {
+  if (CARET_KEYS.has(e.key)) refreshIssueSuggest(s, e.target as HTMLInputElement | HTMLTextAreaElement);
+}
+watch(() => props.cwd, () => { summaryIssues.close(); descriptionIssues.close(); });
 
 
 /**
@@ -779,6 +817,7 @@ function onUnstageClick(e: Event, path: string) {
 function onSummaryInput(e: Event) {
   onSummaryInputForTemplate(e);
   emit("update:commitSummary", (e.target as HTMLInputElement).value);
+  refreshIssueSuggest(summaryIssues, e.target as HTMLInputElement);
 }
 
 // ─── Conventional Commits prefix picker ──────────────────
@@ -833,6 +872,17 @@ function setCommitType(type: string) {
 
 function onDescriptionInput(e: Event) {
   emit("update:commitDescription", (e.target as HTMLTextAreaElement).value);
+  refreshIssueSuggest(descriptionIssues, e.target as HTMLTextAreaElement);
+}
+
+function onSummaryKeydown(e: KeyboardEvent) {
+  if (handleIssueKeydown(summaryIssues, e, e.target as HTMLInputElement, writeSummary)) return;
+  onCommitKeydown(e);
+}
+
+function onDescriptionKeydown(e: KeyboardEvent) {
+  if (handleIssueKeydown(descriptionIssues, e, e.target as HTMLTextAreaElement, writeDescription)) return;
+  onCommitKeydown(e);
 }
 
 function onCommitKeydown(e: KeyboardEvent) {
@@ -1552,14 +1602,24 @@ function formatActivityDate(dateStr: string): string {
             <span v-if="tmpl.subject" class="template-slash-subject mono">{{ tmpl.subject }}</span>
           </div>
         </div>
+        <IssueSuggestList
+          v-if="summaryIssues.open.value"
+          :status="summaryIssues.status.value"
+          :rows="summaryIssues.rows.value"
+          :active="summaryIssues.active.value"
+          @pick="(i, fixes) => pickIssueRow(summaryIssues, i, fixes, summaryEl, writeSummary)"
+        />
         <input
+          ref="summaryEl"
           class="commit-summary mono"
           :class="{ 'commit-summary--ai': ai.isAvailable.value }"
           type="text"
           :value="commitSummary"
           @input="onSummaryInput"
-          @keydown="onCommitKeydown"
-          @blur="templateSlashOpen = false"
+          @keydown="onSummaryKeydown"
+          @keyup="onIssueCaretKeyup(summaryIssues, $event)"
+          @click="refreshIssueSuggest(summaryIssues, $event.target as HTMLInputElement)"
+          @blur="templateSlashOpen = false; summaryIssues.close()"
           :placeholder="t('sidebar.summaryPlaceholder')"
         />
         <!-- AI commit message: overlaid split-button at top-right of summary input -->
@@ -1615,14 +1675,27 @@ function formatActivityDate(dateStr: string): string {
       </div>
       <!-- AI error feedback -->
       <div v-if="aiError" class="commit-ai-error">{{ aiError }}</div>
-      <textarea
-        class="commit-description mono"
-        :value="commitDescription"
-        @input="onDescriptionInput"
-        @keydown="onCommitKeydown"
-        :placeholder="t('sidebar.descriptionPlaceholder')"
-        rows="4"
-      ></textarea>
+      <div class="commit-description-wrap">
+        <IssueSuggestList
+          v-if="descriptionIssues.open.value"
+          :status="descriptionIssues.status.value"
+          :rows="descriptionIssues.rows.value"
+          :active="descriptionIssues.active.value"
+          @pick="(i, fixes) => pickIssueRow(descriptionIssues, i, fixes, descriptionEl, writeDescription)"
+        />
+        <textarea
+          ref="descriptionEl"
+          class="commit-description mono"
+          :value="commitDescription"
+          @input="onDescriptionInput"
+          @keydown="onDescriptionKeydown"
+          @keyup="onIssueCaretKeyup(descriptionIssues, $event)"
+          @click="refreshIssueSuggest(descriptionIssues, $event.target as HTMLTextAreaElement)"
+          @blur="descriptionIssues.close()"
+          :placeholder="t('sidebar.descriptionPlaceholder')"
+          rows="4"
+        ></textarea>
+      </div>
       <!-- Trailers — collapsed by default, unlocked by a toggle -->
       <div class="commit-trailers">
         <button
@@ -2517,6 +2590,9 @@ function formatActivityDate(dateStr: string): string {
   color: var(--color-text-muted);
 }
 
+.commit-description-wrap {
+  position: relative;
+}
 .commit-description {
   width: 100%;
   padding: var(--space-3) var(--space-5);
