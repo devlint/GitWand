@@ -91,7 +91,6 @@ import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
 import { repoRemotes } from "./composables/useRepoRemote";
 import { COMMIT_SIGNATURE, withoutSignature } from "./utils/commitSignature";
-import { createdIssueToast } from "./composables/createdIssueToast";
 import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
@@ -520,7 +519,9 @@ provide(PR_PANEL_KEY, prPanel);
 const createIssue = useCreateIssue({
   cwd: computed(() => repoFolderPath.value ?? null),
   provider: ref(githubProvider),
-  onCreated: (issue, ctx) => {
+  onCreated: async (issue, ctx) => {
+    // Loaded once an issue exists, not in the main chunk.
+    const { createdIssueToast } = await import("./composables/createdIssueToast");
     const toast = createdIssueToast(issue, ctx, {
       t,
       activeCwd: () => repoFolderPath.value ?? "",

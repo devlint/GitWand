@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
+import { computed, ref, nextTick, onMounted, onUnmounted, watch, inject, defineAsyncComponent } from "vue";
 import { TOGGLE_GIT_TREE_KEY, COMMIT_MESSAGE_SINK_KEY, OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
 import { getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
@@ -27,9 +27,10 @@ import {
 } from "../composables/useFileTree";
 import type { CommitTemplate } from "../composables/useSettings";
 import { gitBranchMerged } from "../utils/backend";
-import IssueSuggestList from "./IssueSuggestList.vue";
 import { useIssueSuggest, handleIssueKeydown, issueSuggestAt, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
 import { repoRemotes } from "../composables/useRepoRemote";
+// Shown only while a `#` list is open (v-if): loaded then, not in the main chunk.
+const IssueSuggestList = defineAsyncComponent(() => import("./IssueSuggestList.vue"));
 import { issueListerFor } from "../composables/issueLister";
 import { COMMIT_SIGNATURE } from "../utils/commitSignature";
 import { loadSettings } from "../composables/useSettings";
