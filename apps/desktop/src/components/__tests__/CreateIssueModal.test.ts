@@ -57,6 +57,15 @@ const createButton = () =>
   [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "createIssue.create");
 
 describe("CreateIssueModal", () => {
+  it("holds Create and says why when the body is over GitHub's limit", async () => {
+    const { form } = await mount();
+    form.title.value = "Bug";
+    form.body.value = "x".repeat(70_000);
+    await nextTick();
+    expect(document.body.textContent).toContain("createIssue.tooLong:70000,65536");
+    expect(createButton()?.disabled).toBe(true);
+  });
+
   it("disables Create while the title is empty", async () => {
     const { form } = await mount();
     expect(createButton()?.disabled).toBe(true);

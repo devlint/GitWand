@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, inject, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ConflictFile } from "../composables/useGitWand";
 import { useResolutionSelection, contentStamp } from "../composables/useResolutionSelection";
 import { summarizeTiers, type ConflictHunk } from "@gitwand/core";
@@ -24,6 +24,9 @@ import {
 import LlmTracePanel from "./LlmTracePanel.vue";
 import TokenMergePanel from "./TokenMergePanel.vue";
 import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
+import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
+import { useAcceptedReports } from "../composables/useAcceptedReports";
+import { acceptedLabel, reportFor as buildReport, type ProposalKind, type ResolutionReport } from "../utils/resolutionReport";
 // Async on purpose, and NOT a contradiction of the static-import justification
 // above: that one covers thin BaseModal wrappers with no heavy dependencies.
 // CodeEditor is the entry point to CodeMirror (~400 KB), and it sits behind a
@@ -122,6 +125,26 @@ const aiQueue = useAiHunkQueue(
 // undo, a redo or a file-wide resolve records nothing, so those still drop
 // the lot, which is safe by construction.
 let consumedHunkIndex: number | null = null;
+
+/**
+ * A resolution of hunk `idx` is being sent. `acceptedReport` is the report of
+ * the proposal being accepted, `null` for any other resolution (so a refused
+ * accept is never later credited to a different resolution of that hunk).
+ */
+function consume(idx: number, acceptedReport: ResolutionReport | null = null) {
+  consumedHunkIndex = idx;
+  accepted.resolving(idx, acceptedReport);
+}
+
+/**
+ * A whole-file write (Resolve auto, a file-level choice, a memory rule): no
+ * single hunk is consumed, and an earlier single-hunk write that never came
+ * back (refused) must not be credited to this one's reparse.
+ */
+function consumeWholeFile() {
+  consumedHunkIndex = null;
+  accepted.landed(null);
+}
 
 /**
  * Open a hunk's already-staged suggestion for review. Reads the stored
@@ -277,7 +300,7 @@ function applyFileMemory(hunkIndex: number, hunk: ConflictHunk) {
   const resolved = applyMemory(fileMemory.value, hunk);
   if (resolved !== null) {
     markUsed(fileMemory.value.id);
-    consumedHunkIndex = hunkIndex;
+    consume(hunkIndex);
     emit("resolveHunkCustom", props.file.path, hunkIndex, resolved);
   }
 }
@@ -291,7 +314,7 @@ function autoDetectPattern(hunk: ConflictHunk): ResolutionStrategy | null {
 
 // ─── Override resolveHunk to capture memory offer ───────
 function resolveHunkWithMemory(path: string, hunkIndex: number, choice: ManualChoice) {
-  consumedHunkIndex = hunkIndex;
+  consume(hunkIndex);
   emit("resolveHunk", path, hunkIndex, choice);
   const strategy: ResolutionStrategy = choice === "ours" ? "ours"
     : choice === "theirs" ? "theirs"
@@ -301,7 +324,7 @@ function resolveHunkWithMemory(path: string, hunkIndex: number, choice: ManualCh
 }
 
 function resolveHunkCustomWithMemory(path: string, hunkIndex: number, content: string) {
-  consumedHunkIndex = hunkIndex;
+  consume(hunkIndex);
   emit("resolveHunkCustom", path, hunkIndex, content);
   // For custom edits, try to detect an auto-learnable pattern
   const hunk = hunks.value[hunkIndex];
@@ -389,6 +412,7 @@ const memoryApplicableCount = computed(() => {
 /** Apply the saved rule to every hunk in the file (one click). */
 function applyMemoryToWholeFile() {
   if (!fileMemory.value) return;
+  consumeWholeFile();
   emit("applyFileMemory", props.file.path, fileMemory.value);
   markUsed(fileMemory.value.id);
 }
@@ -400,6 +424,7 @@ const isGeneratedFileLocal = computed(() =>
 );
 
 function bulkResolve(choice: "ours" | "theirs" | "both") {
+  consumeWholeFile();
   emit("resolveFileBulk", props.file.path, choice);
 }
 
@@ -556,7 +581,7 @@ function onTokenMergeAccept(hunkIndex: number) {
   const hunk = hunks.value[hunkIndex];
   const proposal = hunk?.trace.tokenMergeTrace;
   if (!proposal) return;
-  consumedHunkIndex = hunkIndex;
+  consume(hunkIndex, createIssue ? reportFor("token", hunkIndex) : null);
   emit("resolveHunkCustom", props.file.path, hunkIndex, proposal.mergedLines.join("\n"));
 }
 
@@ -572,6 +597,35 @@ function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean 
   return !rejectedTokenMergeHunks.value.has(hunkIndex);
 }
 
+// ─── "Report" a resolution (#301 part 3) ─────────────────
+// The issue form (App.vue provides it); without it, no Report button.
+const createIssue = inject(CREATE_ISSUE_KEY, null);
+// Only when a report could actually be sent (see `reportAvailable`).
+const canReport = computed(() => !!createIssue && createIssue.reportAvailable.value);
+
+/** What a report needs about hunk `idx`, as the panel shows it. */
+function reportFor(kind: ProposalKind, idx: number): ResolutionReport | null {
+  const hunk = hunks.value[idx];
+  return hunk ? buildReport(kind, props.file.path, hunk, resolutions.value[idx]) : null;
+}
+
+function sendReport(r: ResolutionReport | null) {
+  if (r && createIssue) void createIssue.openFromResolution(r);
+}
+
+function onReport(kind: ProposalKind, hunkId: string | number) {
+  sendReport(reportFor(kind, Number(hunkId)));
+}
+
+// Accepted engine / token-level proposals stay reportable after their write
+// (the hunk and its panel are gone after the reparse): see useAcceptedReports.
+const accepted = useAcceptedReports();
+const acceptedReports = accepted.list;
+
+
+// Another file, or the same path in another repository.
+watch([() => props.file.path, () => props.cwd], () => accepted.clear());
+
 // ─── Generic resolution preview (non_overlapping, one_side_change, …) ───
 // Unlike llm_proposed/token_level_merge, these types are already pre-resolved
 // by the core (autoResolved: true) — accepting applies the SAME resolvedLines
@@ -581,7 +635,7 @@ function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean 
 function onPreviewAccept(hunkIndex: number) {
   const resolution = resolutions.value[hunkIndex];
   if (!resolution?.resolvedLines) return;
-  consumedHunkIndex = hunkIndex;
+  consume(hunkIndex, createIssue ? reportFor("engine", hunkIndex) : null);
   emit("resolveHunkCustom", props.file.path, hunkIndex, resolution.resolvedLines.join("\n"));
 }
 
@@ -640,6 +694,11 @@ watch(
       consumed !== null
       && nextPath === prevPath
       && nextHunks.length === prevHunks.length - 1;
+    // An accepted proposal is listed only when its own write is what landed.
+    accepted.landed(renumber ? consumed : null);
+    // More conflicts than before in the same file (an undo, a reload): the
+    // accepted resolutions may be undone, so they are no longer listed.
+    if (nextPath === prevPath && nextHunks.length > prevHunks.length) accepted.clear();
     if (renumber) {
       aiQueue.remapAfterApply([consumed]);
       aiBatchIndices.value = new Set(
@@ -713,6 +772,7 @@ function toggleSummaryRow(hunkIndex: number) {
 
 function confirmResolveAuto() {
   showResolveAutoSummary.value = false;
+  consumeWholeFile();
   emit("resolve", props.file.path);
 }
 
@@ -1040,6 +1100,17 @@ useResizeObserver(contentEl, drawMinimap);
       </button>
     </div>
 
+    <!-- Proposals accepted in this session, still reportable (#301) -->
+    <div v-if="canReport && acceptedReports.length" class="me-accepted" role="region" :aria-label="t('createIssue.report.acceptedTitle')">
+      <span class="me-accepted-title">{{ t("createIssue.report.acceptedTitle") }}</span>
+      <span v-for="(r, i) in acceptedReports" :key="i" class="me-accepted-item">
+        {{ t("createIssue.report.acceptedItem", ...acceptedLabel(r)) }}
+        <button type="button" class="me-accepted-btn" :title="t('createIssue.report.buttonTitle')" @click="sendReport(r)">
+          {{ t("createIssue.report.button") }}
+        </button>
+      </span>
+    </div>
+
     <!-- Custom Automation banner -->
     <div v-if="matchingRule" class="me-automation-banner">
       <div class="me-automation-body">
@@ -1211,8 +1282,10 @@ useResizeObserver(contentEl, drawMinimap);
               :file-path="file.path"
               :hunk-id="seg.hunkIndex"
               :accepted="acceptedLlmHunks.has(seg.hunkIndex)"
+              :can-report="canReport"
               @accept="onLlmAccept"
               @reject="onLlmReject"
+              @report="onReport('ai', $event)"
             />
 
             <!-- ── v3.4 token_level_merge proposal (when not rejected) ────── -->
@@ -1220,8 +1293,10 @@ useResizeObserver(contentEl, drawMinimap);
               v-if="hunkForSegment(seg) && seg.hunkIndex != null && showTokenMergePanelFor(seg.hunkIndex, hunkForSegment(seg)!)"
               :trace="hunkForSegment(seg)!.trace.tokenMergeTrace!"
               :hunk-id="seg.hunkIndex"
+              :can-report="canReport"
               @accept="onTokenMergeAccept"
               @reject="onTokenMergeReject"
+              @report="onReport('token', $event)"
             />
 
             <!-- ── Résolution générique pré-calculée (non_overlapping, one_side_change, …) ── -->
@@ -1232,8 +1307,10 @@ useResizeObserver(contentEl, drawMinimap);
               :explanation="hunkForSegment(seg)!.explanation"
               :confidence-score="hunkForSegment(seg)!.confidence.score"
               :confidence-label="hunkForSegment(seg)!.confidence.label"
+              :can-report="canReport"
               @accept="onPreviewAccept"
               @reject="onPreviewReject"
+              @report="onReport('engine', $event)"
             />
 
             <!-- ── VS Code-style inline action bar ─────────── -->
@@ -1514,6 +1591,37 @@ useResizeObserver(contentEl, drawMinimap);
 </template>
 
 <style scoped>
+.me-accepted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.me-accepted-title {
+  font-weight: 600;
+}
+.me-accepted-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.me-accepted-btn {
+  padding: 1px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+.me-accepted-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
 .merge-editor {
   display: flex;
   flex-direction: column;

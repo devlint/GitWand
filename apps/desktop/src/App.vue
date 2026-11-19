@@ -493,6 +493,8 @@ const prPanel = usePrPanel(prCwd, {
   // loadLog) so the two collapse to a single refresh if they race.
   onVisibilityResume: () => {
     commitReview.resume();
+    // A `gh auth login` done meanwhile can make reports possible (#301).
+    void createIssue.refreshAvailability();
     watcherRefreshQueue.schedule("worktree-index", async () => {
       await repoRefresh();
       if (viewMode.value === "history" || showGitTree.value) await loadLog();
@@ -514,6 +516,15 @@ const createIssue = useCreateIssue({
       8000,
       issue.url ? { label: t("createIssue.open"), url: issue.url } : undefined,
     ),
+  report: {
+    // A resolver report is scanned like a commit: the repository's
+    // .gitwandrc patterns, and its or the app's entropy threshold.
+    secretsOptions: async (cwd) => {
+      if (!cwd) return { extraPatterns: [], entropyThreshold: settings.value.secretsEntropyThreshold };
+      const cfg = await secretsScanner.resolveConfig(cwd, settings.value);
+      return { extraPatterns: cfg.extraPatterns, entropyThreshold: cfg.entropyThreshold, ignore: cfg.ignore };
+    },
+  },
 });
 provide(CREATE_ISSUE_KEY, createIssue);
 watch(repoFolderPath, () => {

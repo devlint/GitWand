@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure } from "../../dev-issues.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,
@@ -116,5 +116,20 @@ describe("devCreateFailure", () => {
   });
   it("keeps a refusal a plain error", () => {
     expect(devCreateFailure(422, { message: "Validation Failed" })).toBe("GitHub API error (422): Validation Failed");
+  });
+});
+
+describe("devGitwandReport", () => {
+  it("targets devlint/GitWand with a title and body only", () => {
+    expect(devGitwandReport({ title: " t ", body: "b", labels: ["x"], milestone: 1 }, {})).toEqual({
+      repo: "devlint/GitWand",
+      payload: { title: "t", body: "b" },
+    });
+  });
+  it("goes to GITWAND_DEV_REPORT_REPO when set (QA on a test fork)", () => {
+    expect(devGitwandReport({ title: "t", body: "" }, { GITWAND_DEV_REPORT_REPO: "me/fork" }).repo).toBe("me/fork");
+  });
+  it("refuses a blank title", () => {
+    expect(devGitwandReport({ title: " ", body: "b" }, {})).toEqual({ error: "Title is required" });
   });
 });

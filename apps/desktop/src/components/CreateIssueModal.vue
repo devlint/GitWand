@@ -8,10 +8,11 @@ import { IS_MAC } from "../utils/platform";
 import { computed, inject, nextTick, ref, watch } from "vue";
 import BaseModal from "./BaseModal.vue";
 import RemoteImagesNotice from "./RemoteImagesNotice.vue";
-import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
+import { CREATE_ISSUE_KEY, GITWAND_REPO, ISSUE_BODY_MAX } from "../composables/useCreateIssue";
 import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables/useSafeHtml";
 import { useI18n } from "../composables/useI18n";
 import { ISSUE_TITLE_MAX } from "../utils/issuePrefill";
+import { ANSWER_MAX } from "../utils/resolutionReport";
 import { openExternalUrl } from "../utils/backend";
 
 const { t } = useI18n();
@@ -38,7 +39,8 @@ watch(showForm, async (shown) => {
 // on every keystroke of a long body.
 const preview = computed(() => {
   if (tab.value !== "preview") return "";
-  const src = form.body.value;
+  // A report sends the answer on top of the description: preview that.
+  const src = form.finalBody.value;
   if (!src.trim()) return `<p class="ci-preview-empty">${t("createIssue.previewEmpty")}</p>`;
   return safeHtml(renderMarkdown(src, { allowRemoteImages: imagesShown.value }), {
     allowRemoteImages: imagesShown.value,
@@ -77,8 +79,60 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+// ─── Report mode (#301 part 3) ───────────────────────────
+const switchDisabled = computed(
+  () =>
+    form.gitwandLocked.value ||
+    (form.gitwandWritable.value !== true && !form.toGitwand.value) ||
+    form.submitting.value ||
+    form.outcomeUnknown.value,
+);
+
+// A lockfile can raise hundreds of entropy warnings: show a few, count the
+// rest. A known pattern is always shown, never folded into that count.
+const WARNINGS_SHOWN = 5;
+const isEntropy = (f: { patternId: string }) => f.patternId === "high_entropy";
+const shownWarnings = computed(() => {
+  const w = form.findings.value.warnings;
+  return [...w.filter((f) => !isEntropy(f)), ...w.filter(isEntropy).slice(0, WARNINGS_SHOWN)];
+});
+const hiddenWarnings = computed(() =>
+  Math.max(0, form.findings.value.warnings.filter(isEntropy).length - WARNINGS_SHOWN),
+);
+
+/** A finding, named by the field it is in (and the line, in the description). */
+function findingText(f: { file: string; line: number; patternId: string }, blocking: boolean): string {
+  if (f.file === "title") return t(blocking ? "createIssue.report.secretBlockingTitle" : "createIssue.report.secretWarningTitle", f.patternId);
+  if (f.file === "answer") return t(blocking ? "createIssue.report.secretBlockingAnswer" : "createIssue.report.secretWarningAnswer", f.patternId);
+  return t(blocking ? "createIssue.report.secretBlocking" : "createIssue.report.secretWarning", f.line, f.patternId);
+}
+
+/** The switch: regenerates title and description, after asking when either was edited. */
+async function onSwitch(e: Event) {
+  const box = e.target as HTMLInputElement;
+  const wanted = box.checked;
+  // The state decides what the box shows (a cancelled switch leaves it as it was).
+  box.checked = form.toGitwand.value;
+  if (form.bodyEdited.value) {
+    const asked = form.openId.value;
+    const ok = await askConfirm({
+      title: t("createIssue.report.replaceTitle"),
+      message: t("createIssue.report.replaceEdits"),
+      confirmLabel: t("createIssue.report.replace"),
+    });
+    // Another report (or none) may be on screen by now: the answer was about
+    // the one the question was asked for.
+    if (!ok || !form.isOpen.value || form.openId.value !== asked) return;
+  }
+  form.setGitwand(wanted);
+}
+
 /** The target's issue list, to see whether a timed-out create went through. */
 function openIssuesPage() {
+  if (form.toGitwand.value) {
+    void openExternalUrl(`https://github.com/${GITWAND_REPO}/issues`);
+    return;
+  }
   const target = form.targets.value.find((x) => x.repo === form.repo.value);
   if (target?.htmlUrl) void openExternalUrl(`${target.htmlUrl}/issues`);
 }
@@ -108,7 +162,54 @@ function onMilestone(e: Event) {
       </p>
 
       <template v-if="showForm">
-        <fieldset v-if="form.targets.value.length > 1" class="ci-targets">
+        <template v-if="form.report.value">
+          <label class="ci-switch" :title="t('createIssue.report.toGitwandHint')">
+            <input
+              type="checkbox"
+              data-testid="ci-gitwand"
+              :checked="form.toGitwand.value"
+              :disabled="switchDisabled"
+              @change="onSwitch"
+            />
+            {{ t("createIssue.report.toGitwand") }}
+          </label>
+          <p v-if="form.gitwandLocked.value" class="ci-status">{{ t("createIssue.report.repoUnavailable") }}</p>
+          <p v-if="form.gitwandLocked.value && form.targetsError.value" class="ci-status ci-detail">
+            {{ form.targetsError.value }}
+          </p>
+          <p
+            v-if="form.gitwandWritable.value === false"
+            class="ci-status"
+            :class="{ 'ci-status--error': form.toGitwand.value }"
+          >
+            {{ t("createIssue.report.gitwandUnavailable") }}
+          </p>
+          <div v-if="form.toGitwand.value" class="ci-public" role="note">
+            <p>{{ t("createIssue.report.publicWarning", GITWAND_REPO) }}</p>
+            <label class="ci-confirm">
+              <input
+                v-model="form.confirmedPublic.value"
+                type="checkbox"
+                data-testid="ci-confirm-public"
+                :disabled="form.submitting.value"
+              />
+              {{ t("createIssue.report.confirmPublic") }}
+            </label>
+          </div>
+          <label class="ci-label" for="ci-answer">{{ t("createIssue.report.answerLabel") }}</label>
+          <textarea
+            id="ci-answer"
+            v-model="form.answer.value"
+            data-testid="ci-answer"
+            class="ci-textarea ci-answer"
+            :maxlength="ANSWER_MAX"
+            rows="2"
+            :placeholder="t('createIssue.report.answerPlaceholder')"
+            :disabled="form.submitting.value"
+          />
+        </template>
+
+        <fieldset v-if="form.targets.value.length > 1 && !form.toGitwand.value" class="ci-targets">
           <legend class="ci-label">{{ t("createIssue.target") }}</legend>
           <label
             v-for="target in form.targets.value"
@@ -222,6 +323,22 @@ function onMilestone(e: Event) {
           </select>
         </div>
 
+        <div
+          v-if="form.report.value && (form.findings.value.blocking.length || form.findings.value.warnings.length)"
+          class="ci-secrets"
+          :class="{ 'ci-secrets--blocking': form.findings.value.blocking.length > 0 }"
+          data-testid="ci-secrets"
+          role="alert"
+        >
+          <p v-for="(f, i) in form.findings.value.blocking" :key="`b${i}`">{{ findingText(f, true) }}</p>
+          <p v-for="(f, i) in shownWarnings" :key="`w${i}`" class="ci-secret-warning">{{ findingText(f, false) }}</p>
+          <p v-if="hiddenWarnings > 0">{{ t("createIssue.report.secretWarningMore", hiddenWarnings) }}</p>
+        </div>
+
+        <p v-if="form.tooLong.value" class="ci-status ci-status--error" role="alert">
+          {{ t("createIssue.tooLong", form.finalBody.value.length, ISSUE_BODY_MAX) }}
+        </p>
+
         <div v-if="form.outcomeUnknown.value" class="ci-unknown" role="alert">
           <p class="ci-status ci-status--error">{{ t("createIssue.maybeCreated") }}</p>
           <div class="ci-unknown-actions">
@@ -252,6 +369,44 @@ function onMilestone(e: Event) {
 </template>
 
 <style scoped>
+.ci-switch,
+.ci-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+.ci-public {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft, transparent);
+  font-size: var(--text-sm);
+}
+.ci-public p {
+  margin: 0;
+}
+.ci-answer {
+  min-height: 0;
+}
+.ci-secrets {
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.ci-secrets--blocking {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+.ci-secrets p {
+  margin: 2px 0;
+}
 .ci {
   display: flex;
   flex-direction: column;
@@ -301,6 +456,10 @@ function onMilestone(e: Event) {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow-wrap: anywhere;
+}
+/* A long code line scrolls inside its block instead of widening the modal. */
+.ci-preview :deep(pre) {
+  overflow-x: auto;
 }
 .ci-preview :deep(ul),
 .ci-preview :deep(ol) {

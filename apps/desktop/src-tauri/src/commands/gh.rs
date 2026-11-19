@@ -1394,6 +1394,15 @@ impl GhRepo {
         }
     }
 
+    /// A repository on github.com, whatever the working directory's remote
+    /// (GitWand's own repository, for resolver reports, #301).
+    pub(crate) fn github_com(nwo: &str) -> GhRepo {
+        GhRepo {
+            host_prefix: String::new(),
+            nwo: nwo.to_string(),
+        }
+    }
+
     /// Another repository on the same host (a fork's parent).
     pub(crate) fn sibling(&self, nwo: String) -> GhRepo {
         GhRepo {
@@ -1555,6 +1564,17 @@ fn ssh_resolved_host(host: &str) -> Option<String> {
                 .filter(|h| !h.is_empty())
         })
     })
+}
+
+/// Whether `gh` is signed in to `host` right now, without the session cache
+/// (GitWand's resolver reports ask it each time their form opens, #301).
+pub(crate) fn gh_signed_in_now(host: &str) -> bool {
+    if !is_plain_host(host) {
+        return false;
+    }
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["auth", "status", "--hostname", host]);
+    output_with_timeout(cmd, GH_PROBE_TIMEOUT).is_ok_and(|o| o.status.success())
 }
 
 /// Whether `gh` is signed in to `host` (an Enterprise host; github.com is

@@ -7,7 +7,11 @@
 
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
-import { gitExec } from "../utils/backend";
+import { gitExec, ghCreateGitwandIssue, ghGitwandWritable } from "../utils/backend";
+import type { SecretFinding, SecretPattern } from "@gitwand/core";
+import { platformName } from "../utils/platform";
+import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
+import { scanReportBody, type ReportScan } from "../utils/reportGuard";
 import { isEditableTarget } from "../utils/editableTarget";
 import type {
   CreatedIssue,
@@ -74,6 +78,9 @@ export interface CreateIssueApi {
   isOpen: Ref<boolean>;
   /** The current repository's `origin` is on GitHub (a local check, no request). */
   available: Ref<boolean>;
+  /** A resolution report can be sent: the repository takes issues, or
+   *  GitWand's repository can be written to (shows the Report buttons). */
+  reportAvailable: Ref<boolean>;
   /** Targets are being read when the form opens. */
   loading: Ref<boolean>;
   /** Reading the targets failed: nothing can be filed until the form reopens. */
@@ -137,6 +144,67 @@ export interface CreateIssueApi {
   close(): void;
   setRepo(repo: string): void;
   submit(): Promise<void>;
+
+  // ─── Report mode ("Report bad resolution", #301 part 3) ───────────────
+  /** The resolution being reported, `null` for any other issue. */
+  report: Ref<ResolutionReport | null>;
+  /** "What should it have been?": its own field, kept across switches. */
+  answer: Ref<string>;
+  /** The report goes to GitWand's repository instead of the current one. */
+  toGitwand: Ref<boolean>;
+  /** The current repository cannot take the issue: GitWand only. */
+  gitwandLocked: Ref<boolean>;
+  /** A report can be written to GitWand (`null` while checking). */
+  gitwandWritable: Ref<boolean | null>;
+  /** "I reviewed the code, it can be public" (GitWand only). */
+  confirmedPublic: Ref<boolean>;
+  /** The secrets scan of what would be sent. */
+  findings: Ref<ReportScan>;
+  /** Title or description differ from those generated for the current target. */
+  bodyEdited: ComputedRef<boolean>;
+  /** The text is over GitHub's body limit: Create is held. */
+  tooLong: ComputedRef<boolean>;
+  /** What is sent: the answer on top of the description. */
+  finalBody: ComputedRef<string>;
+  openFromResolution(r: ResolutionReport): Promise<void>;
+  /** Changes every time the form is opened or closed: a question asked about
+   *  one form must not be applied to the next. */
+  openId: Readonly<Ref<number>>;
+  /** Retarget the report; regenerates title and description (the caller
+   *  confirms first when `bodyEdited`). */
+  setGitwand(on: boolean): void;
+}
+
+/** GitWand's own repository, where resolver reports go (mirrors Rust `GITWAND_REPO`). */
+export const GITWAND_REPO = "devlint/GitWand";
+
+/** GitHub's limit on an issue body. */
+export const ISSUE_BODY_MAX = 65_536;
+
+/** What report mode needs from outside (tests replace it). */
+export interface ReportDeps {
+  createGitwandIssue?: (input: { title: string; body: string }) => Promise<CreatedIssue>;
+  gitwandWritable?: () => Promise<boolean>;
+  env?: () => { version: string; platform: string };
+  /** The repository's extra secret patterns and entropy threshold. */
+  secretsOptions?: (cwd: string | null) => Promise<{ extraPatterns: SecretPattern[]; entropyThreshold: number; ignore?: string[] }>;
+  scanDebounceMs?: number;
+}
+
+function defaultEnv(): { version: string; platform: string } {
+  const version = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
+  return { version, platform: platformName() };
+}
+
+/** The scan's options until the repository's arrive (and without the app's
+ *  scanner config, in tests): the built-in patterns, entropy at 4.0. */
+const DEFAULT_SECRETS_OPTIONS: Readonly<{ extraPatterns: SecretPattern[]; entropyThreshold: number; ignore?: string[] }> = {
+  extraPatterns: [],
+  entropyThreshold: 4.0,
+};
+
+async function defaultSecretsOptions(_cwd: string | null) {
+  return DEFAULT_SECRETS_OPTIONS;
 }
 
 export const CREATE_ISSUE_KEY: InjectionKey<CreateIssueApi> = Symbol("createIssue");
@@ -202,10 +270,18 @@ export function useCreateIssue(deps: {
   onCreated: (issue: CreatedIssue) => void;
   /** Whether `origin` has the commit (tests replace the git check). */
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
+  report?: ReportDeps;
 }): CreateIssueApi {
+  const rdeps = deps.report ?? {};
+  const createGitwandIssue = rdeps.createGitwandIssue ?? ghCreateGitwandIssue;
+  const checkGitwandWritable = rdeps.gitwandWritable ?? ghGitwandWritable;
+  const reportEnv = rdeps.env ?? defaultEnv;
+  const secretsOptions = rdeps.secretsOptions ?? defaultSecretsOptions;
+  const scanDebounceMs = rdeps.scanDebounceMs ?? 300;
   const commitOnOrigin = deps.commitOnOrigin ?? gitCommitOnOrigin;
   const isOpen = ref(false);
   const available = ref(false);
+  const reportAvailable = ref(false);
   const loading = ref(false);
   const targetsFailed = ref(false);
   const targetsError = ref<string | null>(null);
@@ -223,6 +299,26 @@ export function useCreateIssue(deps: {
   const error = ref<string | null>(null);
   const outcomeUnknown = ref(false);
   const initial = ref<IssuePrefill>({ title: "", body: "" });
+  const report = shallowRef<ResolutionReport | null>(null);
+  const openId = ref(0);
+  const answer = ref("");
+  const toGitwand = ref(false);
+  const gitwandLocked = ref(false);
+  const gitwandWritable = ref<boolean | null>(null);
+  const confirmedPublic = ref(false);
+  const findings = ref<ReportScan>({ blocking: [], warnings: [] });
+  // A change not scanned yet: a secret typed a moment ago must not slip out.
+  const scanPending = ref(false);
+  let secretsOpts: { extraPatterns: SecretPattern[]; entropyThreshold: number; ignore?: string[] } = DEFAULT_SECRETS_OPTIONS;
+  // Bumped when the patterns change (they arrive, or the form is reset): part
+  // of every scan's cache key.
+  let secretsVersion = 0;
+  // The last scan of each field, reused while its text and options are unchanged.
+  const scanCache = new Map<string, { key: string; result: ReportScan }>();
+  // A public report waits for the repository's own patterns.
+  const secretsLoaded = ref(false);
+  // The repository the report would go to without the switch.
+  let repoTarget: string | null = null;
   // The repository the open form files on: an app tab switch while it is open
   // must not send the issue (or its picker reads) somewhere else.
   let formCwd: string | null = null;
@@ -234,9 +330,18 @@ export function useCreateIssue(deps: {
   // not discard the prefill still on its way.
   let openGeneration = 0;
   let availabilitySeq = 0;
+  // Whether `reportAvailable` has been answered for the current repository.
+  let availabilityChecked = false;
 
+  const finalBody = computed(() => (report.value ? withAnswer(answer.value, body.value, toGitwand.value) : body.value));
+  // Title or description no longer what was generated for the current target.
+  // GitHub refuses a body over 65,536 characters (422) — after the user has
+  // already confirmed a public report: hold Create instead.
+  const tooLong = computed(() => finalBody.value.length > ISSUE_BODY_MAX);
+  const bodyEdited = computed(() => body.value !== initial.value.body || title.value !== initial.value.title);
   const dirty = computed(
     () =>
+      answer.value.trim() !== "" ||
       title.value !== initial.value.title ||
       body.value !== initial.value.body ||
       labels.value.length > 0 ||
@@ -245,7 +350,18 @@ export function useCreateIssue(deps: {
   );
   const canSubmit = computed(
     () =>
-      isOpen.value && !!repo.value && title.value.trim() !== "" && !submitting.value && !outcomeUnknown.value,
+      isOpen.value &&
+      !!repo.value &&
+      title.value.trim() !== "" &&
+      !submitting.value &&
+      !outcomeUnknown.value &&
+      !tooLong.value &&
+      (!toGitwand.value ||
+        (confirmedPublic.value &&
+          gitwandWritable.value === true &&
+          secretsLoaded.value &&
+          !scanPending.value &&
+          findings.value.blocking.length === 0)),
   );
   const originHtmlUrl = computed(() => targets.value.find((t) => t.isOrigin)?.htmlUrl || null);
 
@@ -270,12 +386,27 @@ export function useCreateIssue(deps: {
     } catch {
       ok = false;
     }
-    if (seq === availabilitySeq) available.value = ok;
+    if (seq !== availabilitySeq) return;
+    available.value = ok;
+    let writable = false;
+    if (!ok) {
+      try {
+        writable = await checkGitwandWritable();
+      } catch {
+        writable = false;
+      }
+    }
+    if (seq === availabilitySeq) {
+      reportAvailable.value = ok || writable;
+      availabilityChecked = true;
+    }
   }
 
   function forgetAvailability() {
     availabilitySeq++;
+    availabilityChecked = false;
     available.value = false;
+    reportAvailable.value = false;
   }
 
   function clearPickers() {
@@ -305,6 +436,7 @@ export function useCreateIssue(deps: {
   function reset() {
     generation++;
     openGeneration++;
+    openId.value = openGeneration;
     repo.value = null;
     title.value = "";
     body.value = "";
@@ -318,6 +450,21 @@ export function useCreateIssue(deps: {
     targets.value = [];
     initial.value = { title: "", body: "" };
     clearPickers();
+    report.value = null;
+    answer.value = "";
+    toGitwand.value = false;
+    gitwandLocked.value = false;
+    gitwandWritable.value = null;
+    confirmedPublic.value = false;
+    findings.value = { blocking: [], warnings: [] };
+    scanPending.value = false;
+    repoTarget = null;
+    // The previous repository's extra patterns must not stand in for this
+    // one's while its `.gitwandrc` is read.
+    secretsOpts = DEFAULT_SECRETS_OPTIONS;
+    secretsVersion++;
+    scanCache.clear();
+    secretsLoaded.value = false;
   }
 
   async function open(
@@ -420,6 +567,131 @@ export function useCreateIssue(deps: {
     return landed;
   }
 
+  /** A field's scan depends on its text, the blocking rule and the patterns. */
+  function scanCacheKey(blockAt: string, text: string): string {
+    return `${blockAt}\u0000${secretsVersion}\u0000${text}`;
+  }
+
+  /** Each field's text is the one last scanned, with the current options. */
+  function allScanned(): boolean {
+    const blockAt = toGitwand.value ? "medium" : "never";
+    const parts: Array<[string, string]> = [["title", title.value], ["answer", answer.value], ["description", body.value]];
+    return parts.every(([where, text]) => scanCache.get(where)?.key === scanCacheKey(blockAt, text));
+  }
+
+  function scanNow() {
+    if (scanTimer) clearTimeout(scanTimer);
+    scanTimer = null;
+    scanPending.value = false;
+    if (!report.value) return;
+    const opts = { ...secretsOpts, blockAt: toGitwand.value ? ("medium" as const) : ("never" as const) };
+    // Each part on its own, so a finding names the field the user can edit
+    // and a line number that is that field's own.
+    const parts: Array<[SecretFinding["file"], string]> = [
+      ["title", title.value],
+      ["answer", answer.value],
+      ["description", body.value],
+    ];
+    const next: ReportScan = { blocking: [], warnings: [] };
+    for (const [where, text] of parts) {
+      // A field unchanged since its last scan (same text, same options) is
+      // not scanned again: typing in the answer leaves a 50 KB body alone.
+      const key = scanCacheKey(opts.blockAt, text);
+      let r = scanCache.get(where)?.key === key ? scanCache.get(where)!.result : null;
+      if (!r) {
+        r = scanReportBody(text, opts);
+        scanCache.set(where, { key, result: r });
+      }
+      next.blocking.push(...r.blocking.map((f) => ({ ...f, file: where })));
+      next.warnings.push(...r.warnings.map((f) => ({ ...f, file: where })));
+    }
+    findings.value = next;
+  }
+
+  let scanTimer: ReturnType<typeof setTimeout> | null = null;
+  watch([finalBody, title], () => {
+    // Nothing new to scan (a switch or an open just scanned this very text).
+    if (!report.value || allScanned()) return;
+    scanPending.value = true;
+    if (scanTimer) clearTimeout(scanTimer);
+    scanTimer = setTimeout(scanNow, scanDebounceMs);
+  });
+  onUnmounted(() => {
+    if (scanTimer) clearTimeout(scanTimer);
+  });
+
+  /** Title and description for the current target (the answer stays apart). */
+  function regenerate() {
+    const r = report.value;
+    if (!r) return;
+    const p = toGitwand.value ? gitwandReportPrefill(r, reportEnv()) : repoReportPrefill(r);
+    initial.value = p;
+    title.value = p.title;
+    body.value = p.body;
+  }
+
+  function setGitwand(on: boolean) {
+    if (!report.value || submitting.value || outcomeUnknown.value) return;
+    if (!on && gitwandLocked.value) return;
+    // Leaving the repository: remember the one the user had picked.
+    if (on && !toGitwand.value) repoTarget = repo.value;
+    generation++;
+    // The previous target's failure is not this one's.
+    error.value = null;
+    toGitwand.value = on;
+    // Re-confirm every time the report heads for the public repository.
+    confirmedPublic.value = false;
+    clearPickers();
+    repo.value = on ? GITWAND_REPO : repoTarget;
+    if (!on && repo.value) loadPickers(repo.value);
+    regenerate();
+    scanNow();
+  }
+
+  async function openFromResolution(r: ResolutionReport): Promise<void> {
+    // Not checked yet for this repository (a click before the first check):
+    // check now. Then, nowhere to send it (not a GitHub repository, no
+    // github.com sign-in): nothing to open.
+    if (!availabilityChecked) await refreshAvailability();
+    if (!reportAvailable.value || !makeRoom()) return;
+    // False when the form was closed (or reopened) while its targets loaded:
+    // the report must not attach to whatever form is on screen now.
+    if (!(await open())) return;
+    const openGen = openGeneration;
+    report.value = r;
+    // The repository's targets could not be read: a report can still go to
+    // GitWand (github.com only), so the form opens locked there, the read's
+    // error kept as the reason.
+    targetsFailed.value = false;
+    repoTarget = repo.value;
+    gitwandLocked.value = !repoTarget;
+    toGitwand.value = gitwandLocked.value;
+    if (toGitwand.value) {
+      clearPickers();
+      repo.value = GITWAND_REPO;
+    }
+    regenerate();
+    scanNow();
+    const cwd = formCwd;
+    checkGitwandWritable().then(
+      (ok) => { if (openGen === openGeneration) gitwandWritable.value = ok; },
+      () => { if (openGen === openGeneration) gitwandWritable.value = false; },
+    );
+    secretsOptions(cwd).then(
+      (o) => {
+        if (openGen !== openGeneration) return;
+        secretsOpts = o;
+        secretsVersion++;
+        secretsLoaded.value = true;
+        scanNow();
+      },
+      () => {
+        // Unreadable: the built-in patterns still apply.
+        if (openGen === openGeneration) secretsLoaded.value = true;
+      },
+    );
+  }
+
   async function openFromShortcut(): Promise<void> {
     const sel = activeSelection.value;
     if (sel) await openFromSelection(sel);
@@ -455,20 +727,24 @@ export function useCreateIssue(deps: {
   async function submit(): Promise<void> {
     const p = deps.provider.value;
     const cwd = formCwd;
-    if (!canSubmit.value || !p?.createIssue || !cwd || !repo.value) return;
+    // A GitWand report needs neither the repository's forge nor its folder.
+    if (!canSubmit.value || !repo.value) return;
+    if (!toGitwand.value && (!p?.createIssue || !cwd)) return;
     // Set before the first await: a second call in the same tick sees it.
     submitting.value = true;
     error.value = null;
     const gen = generation;
     try {
-      const created = await p.createIssue(cwd, {
-        repo: repo.value,
-        title: title.value,
-        body: body.value,
-        labels: [...labels.value],
-        assignees: [...assignees.value],
-        milestone: milestone.value,
-      });
+      const created = toGitwand.value
+        ? await createGitwandIssue({ title: title.value, body: finalBody.value })
+        : await p!.createIssue!(cwd!, {
+            repo: repo.value,
+            title: title.value,
+            body: finalBody.value,
+            labels: [...labels.value],
+            assignees: [...assignees.value],
+            milestone: milestone.value,
+          });
       if (gen !== generation) return;
       deps.onCreated(created);
       close();
@@ -487,6 +763,7 @@ export function useCreateIssue(deps: {
   return {
     isOpen,
     available,
+    reportAvailable,
     loading,
     targetsFailed,
     targetsError,
@@ -518,5 +795,18 @@ export function useCreateIssue(deps: {
     close,
     setRepo,
     submit,
+    report,
+    answer,
+    toGitwand,
+    gitwandLocked,
+    gitwandWritable,
+    confirmedPublic,
+    findings,
+    bodyEdited,
+    tooLong,
+    finalBody,
+    openFromResolution,
+    openId,
+    setGitwand,
   };
 }

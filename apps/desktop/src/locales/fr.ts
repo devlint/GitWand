@@ -2687,6 +2687,7 @@ const fr: Locale = {
   },
 
   createIssue: {
+    tooLong: "Le texte fait {0} caractères ; GitHub en accepte au plus {1}.",
     fromSelection: "Créer une issue depuis ces lignes",
     selectionHint: "Cliquez sur un numéro de ligne pour la sélectionner pour une issue ; Maj+clic pour étendre",
     title: "Nouvelle issue",
@@ -2723,6 +2724,30 @@ const fr: Locale = {
     paletteLabel: "Nouvelle issue GitHub",
     created: "Issue #{0} créée",
     open: "Ouvrir",
+    report: {
+      answerLabel: "Qu'aurait-il fallu obtenir ?",
+      answerPlaceholder: "Le résultat attendu, ou ce que GitWand a mal fait",
+      toGitwand: "Envoyer à GitWand (rapport sur le moteur)",
+      toGitwandHint: "Signaler l'erreur du moteur aux développeurs de GitWand plutôt qu'à ce dépôt",
+      publicWarning: "Ce rapport sera public sur github.com/{0}. Il contient le code ci-dessous : relisez-le et retirez tout ce qui est privé.",
+      confirmPublic: "J'ai relu le code, il peut être public",
+      secretBlocking: "Secret possible ligne {0} ({1}) : retirez-le pour envoyer",
+      secretWarning: "Secret possible ligne {0} ({1}) : vérifiez avant d'envoyer",
+      secretBlockingTitle: "Secret possible dans le titre ({0}) : retirez-le pour envoyer",
+      secretWarningTitle: "Secret possible dans le titre ({0}) : vérifiez avant d'envoyer",
+      secretBlockingAnswer: "Secret possible dans la réponse ({0}) : retirez-le pour envoyer",
+      secretWarningAnswer: "Secret possible dans la réponse ({0}) : vérifiez avant d'envoyer",
+      secretWarningMore: "…et {0} autres secrets possibles (chaînes à forte entropie)",
+      replaceTitle: "Remplacer le titre et la description ?",
+      replaceEdits: "Vos modifications du titre et de la description seront remplacées",
+      replace: "Remplacer",
+      gitwandUnavailable: "Connectez-vous à GitHub (github.com) pour envoyer des rapports à GitWand",
+      repoUnavailable: "Ce dépôt ne peut pas recevoir d'issue ici : le rapport part chez GitWand",
+      button: "Signaler",
+      buttonTitle: "Signaler cette résolution comme fausse",
+      acceptedTitle: "Acceptées dans cette session",
+      acceptedItem: "{0} : {1}",
+    },
   },
   // ─── Vue d'aide intégrée ─────────────────────────────────
   help: {

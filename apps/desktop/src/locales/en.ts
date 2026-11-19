@@ -2718,6 +2718,7 @@ const en = {
   },
 
   createIssue: {
+    tooLong: "The text is {0} characters long; GitHub accepts at most {1}.",
     fromSelection: "Create issue from these lines",
     selectionHint: "Click a line number to select it for an issue; Shift+click to extend",
     title: "New issue",
@@ -2754,6 +2755,30 @@ const en = {
     paletteLabel: "New GitHub issue",
     created: "Issue #{0} created",
     open: "Open",
+    report: {
+      answerLabel: "What should it have been?",
+      answerPlaceholder: "The result you expected, or what GitWand got wrong",
+      toGitwand: "Send to GitWand (resolver report)",
+      toGitwandHint: "Report the resolver's mistake to GitWand's developers instead of this repository",
+      publicWarning: "This report will be public on github.com/{0}. It contains the code shown below; review it and remove anything private.",
+      confirmPublic: "I reviewed the code, it can be public",
+      secretBlocking: "Possible secret on line {0} ({1}): remove it to send",
+      secretWarning: "Possible secret on line {0} ({1}): check before sending",
+      secretBlockingTitle: "Possible secret in the title ({0}): remove it to send",
+      secretWarningTitle: "Possible secret in the title ({0}): check before sending",
+      secretBlockingAnswer: "Possible secret in the answer ({0}): remove it to send",
+      secretWarningAnswer: "Possible secret in the answer ({0}): check before sending",
+      secretWarningMore: "…and {0} more possible secrets (high-entropy strings)",
+      replaceTitle: "Replace the title and description?",
+      replaceEdits: "Your edits to the title and description will be replaced",
+      replace: "Replace",
+      gitwandUnavailable: "Sign in to GitHub (github.com) to send reports to GitWand",
+      repoUnavailable: "This repository can't receive issues here; the report goes to GitWand",
+      button: "Report",
+      buttonTitle: "Report this resolution as wrong",
+      acceptedTitle: "Accepted in this session",
+      acceptedItem: "{0}: {1}",
+    },
   },
   // \u2500\u2500\u2500 In-app help view \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   help: {

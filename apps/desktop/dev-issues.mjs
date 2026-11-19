@@ -47,6 +47,21 @@ export function devIssuePayload(input) {
   return { payload: p };
 }
 
+/** GitWand's own repository (Rust and TS `GITWAND_REPO`; a test keeps the three equal). */
+export const GITWAND_REPO = "devlint/GitWand";
+
+/**
+ * A resolver report for GitWand's repository (#301), as Rust's
+ * `gh_create_gitwand_issue` builds it: a title and a body only. Goes to
+ * `env.GITWAND_DEV_REPORT_REPO` when set, so QA under dev:web can file on a
+ * test fork instead of the real repository.
+ */
+export function devGitwandReport(input, env) {
+  const built = devIssuePayload({ title: input?.title, body: input?.body });
+  if (built.error) return built;
+  return { repo: env?.GITWAND_DEV_REPORT_REPO || GITWAND_REPO, payload: built.payload };
+}
+
 /**
  * GitHub `/assignees` items → `{login, name, avatar_url}`, deduplicated and
  * sorted by login (case-insensitive, byte order like the Rust

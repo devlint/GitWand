@@ -6,11 +6,14 @@ const props = defineProps<{
   trace: TokenMergeTrace;
   hunkId: number;
   accepted?: boolean;
+  /** Show "Report" (the issue form is available, #301). */
+  canReport?: boolean;
 }>();
 
 const emit = defineEmits<{
   accept: [hunkId: number];
   reject: [hunkId: number];
+  report: [hunkId: number];
 }>();
 
 const { t } = useI18n();
@@ -46,6 +49,16 @@ const { t } = useI18n();
       <span v-else class="token-merge-panel__accepted-badge">
         {{ t('mergeEditor.tokenLevelMerge.accepted') }}
       </span>
+      <button
+        v-if="props.canReport"
+        type="button"
+        class="token-merge-panel__btn token-merge-panel__btn--report"
+        data-action="report"
+        :title="t('createIssue.report.buttonTitle')"
+        @click="emit('report', props.hunkId)"
+      >
+        {{ t('createIssue.report.button') }}
+      </button>
     </div>
   </div>
 </template>
@@ -101,7 +114,8 @@ const { t } = useI18n();
   color: var(--color-accent-text);
   border-color: var(--color-accent);
 }
-.token-merge-panel__btn--reject {
+.token-merge-panel__btn--reject,
+.token-merge-panel__btn--report {
   background: transparent;
 }
 .token-merge-panel__accepted-badge {

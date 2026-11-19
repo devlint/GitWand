@@ -22,14 +22,14 @@ export function commitUrlFor(repoHtmlUrl: string, sha: string): string {
  * adding events to other issues). The fence is longer than any backtick run
  * in `text`, so the message cannot close it.
  */
-function codeBlock(text: string, lang = "text"): string {
+export function codeBlock(text: string, lang = "text"): string {
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
   const fence = "`".repeat(Math.max(3, longest + 1));
   return `${fence}${lang}\n${text}\n${fence}`;
 }
 
 /** `text` as an inline code span (inert: no mention, reference or link). */
-function codeSpan(text: string): string {
+export function codeSpan(text: string): string {
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
   const fence = "`".repeat(longest + 1);
   // A span that starts or ends with a backtick needs a space inside its fence.
@@ -45,11 +45,16 @@ export const ISSUE_TITLE_MAX = 256;
  * units, like the title field's `maxlength` (the stricter count), and never
  * splitting a surrogate pair.
  */
-function issueTitle(text: string): string {
+export function issueTitle(text: string): string {
   if (text.length <= ISSUE_TITLE_MAX) return text;
-  let cut = text.slice(0, ISSUE_TITLE_MAX - 1);
+  return cutUtf16(text, ISSUE_TITLE_MAX - 1) + "…";
+}
+
+/** `text` cut to `n` UTF-16 units, never splitting a surrogate pair. */
+export function cutUtf16(text: string, n: number): string {
+  let cut = text.slice(0, n);
   if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
-  return cut + "…";
+  return cut;
 }
 
 /**

@@ -201,4 +201,15 @@ describe("useSecretsScanner", () => {
       expect(scanner.activeFindings.value).toEqual([f2]);
     });
   });
+
+  it("exposes the effective config: .gitwandrc patterns, the app's entropy threshold when the rc has none (#301)", async () => {
+    vi.mocked(readGitwandrc).mockResolvedValue(
+      JSON.stringify({ secrets: { patterns: [{ id: "acme", regex: "ACME-[0-9]{6}", severity: "high", description: "d" }] } }),
+    );
+    const s = useSecretsScanner();
+    const cfg = await s.resolveConfig("/repo-config", { secretsScannerEnabled: true, secretsEntropyThreshold: 5.5 });
+    expect(cfg.extraPatterns.map((p) => p.id)).toEqual(["acme"]);
+    expect(cfg.entropyThreshold).toBe(5.5);
+  });
 });
+
