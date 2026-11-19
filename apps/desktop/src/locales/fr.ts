@@ -2695,6 +2695,22 @@ const fr: Locale = {
   },
 
   createIssue: {
+    template: {
+      clearMessage: "Le titre et la description seront vidés.",
+      clear: "Vider",
+      replaceMessage: "Le titre et la description seront remplacés par ceux du modèle.",
+      use: "Utiliser le modèle",
+      fromOther: "(texte d'un modèle)",
+      needsTriage: "Non appliqués sans droits de tri sur ce dépôt : {0}",
+      fromOwner: "Modèles partagés par {0}",
+      clearTitle: "Repartir d'une issue vierge ?",
+      loading: "Recherche des modèles d'issue de ce dépôt…",
+      label: "Modèle",
+      blank: "Issue vierge",
+      expectsTemplate: "Ce dépôt attend des issues qui partent d'un modèle.",
+      contact: "Ailleurs :",
+      replaceTitle: "Utiliser ce modèle ?",
+    },
     tooLong: "Le texte fait {0} caractères ; GitHub en accepte au plus {1}.",
     fromSelection: "Créer une issue depuis ces lignes",
     selectionHint: "Cliquez sur un numéro de ligne pour la sélectionner pour une issue ; Maj+clic pour étendre",

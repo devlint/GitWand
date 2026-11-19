@@ -2696,6 +2696,22 @@ const zhCN: Locale = {
   },
 
   createIssue: {
+    template: {
+      clearMessage: "标题和描述将被清空。",
+      clear: "清空",
+      replaceMessage: "标题和描述将被替换为模板的内容。",
+      use: "使用模板",
+      fromOther: "（来自模板的文本）",
+      needsTriage: "在此仓库没有分类权限，以下不会设置：{0}",
+      fromOwner: "由 {0} 共享的模板",
+      clearTitle: "从空白 issue 开始？",
+      loading: "正在查找此仓库的 issue 模板…",
+      label: "模板",
+      blank: "空白 issue",
+      expectsTemplate: "此仓库希望 issue 从模板开始。",
+      contact: "其他渠道：",
+      replaceTitle: "使用此模板？",
+    },
     tooLong: "文本长度为 {0} 个字符；GitHub 最多接受 {1} 个。",
     fromSelection: "从这些行创建 Issue",
     selectionHint: "点击行号以选中该行用于 Issue；Shift+点击以扩展选区",

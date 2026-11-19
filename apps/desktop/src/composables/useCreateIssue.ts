@@ -7,7 +7,8 @@
 
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
-import { gitExec, ghCreateGitwandIssue, ghGitwandWritable } from "../utils/backend";
+import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, type IssueTemplateFiles } from "../utils/backend";
+import { loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
 import type { SecretFinding, SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
 import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
@@ -173,6 +174,45 @@ export interface CreateIssueApi {
   /** Retarget the report; regenerates title and description (the caller
    *  confirms first when `bodyEdited`). */
   setGitwand(on: boolean): void;
+  /** The form was opened blank (no commit, lines or report): it offers templates. */
+  blankForm: Ref<boolean>;
+  /** The target's issue templates, null until read (or when the read failed). */
+  templateSet: Ref<IssueTemplateSet | null>;
+  templatesLoading: Ref<boolean>;
+  /** The template applied, null for "Blank issue". */
+  templateId: Ref<string | null>;
+  /** The repository the templates come from (the owner's `.github` one, maybe). */
+  templateSource: Ref<string | null>;
+  /** The text was filled by a template of the target left. */
+  templateLeftover: Ref<boolean>;
+  /** The applied template's labels and people that will not be set (no triage rights, or not offered by the target). */
+  templatePicksUnset: ComputedRef<string[]>;
+  /** The owner's `.github` repository, when the templates come from it. */
+  templateFromOwner: ComputedRef<string | null>;
+  /** A template chosen in the picker, `confirm` asked first when it would replace edits. */
+  chooseTemplate(wanted: string | null, confirm: (kind: "replace" | "clear") => Promise<boolean>): Promise<void>;
+}
+
+/** How long a target's templates are kept (each read is up to 20 requests). */
+const TEMPLATE_CACHE_MS = 5 * 60_000;
+const templateCache = new Map<string, { at: number; set: IssueTemplateSet; source: string }>();
+/** Template reads under way, per target, shared by every form that asks. */
+const templateInflight = new Map<string, Promise<{ set: IssueTemplateSet; complete: boolean; source: string }>>();
+/** Keep a target's templates, at most `TEMPLATE_CACHE_MAX` targets (the oldest goes). */
+const TEMPLATE_CACHE_MAX = 50;
+function rememberTemplates(key: string, entry: { at: number; set: IssueTemplateSet; source: string }) {
+  templateCache.delete(key);
+  templateCache.set(key, entry);
+  for (const [k, e] of templateCache) {
+    if (templateCache.size <= TEMPLATE_CACHE_MAX && Date.now() - e.at < TEMPLATE_CACHE_MS) break;
+    templateCache.delete(k);
+  }
+}
+
+/** Forget the cached templates (tests). */
+export function clearTemplateCache(): void {
+  templateCache.clear();
+  templateInflight.clear();
 }
 
 /** GitWand's own repository, where resolver reports go (mirrors Rust `GITWAND_REPO`). */
@@ -276,7 +316,14 @@ export function useCreateIssue(deps: {
   /** Whether `origin` has the commit (tests replace the git check). */
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
   report?: ReportDeps;
+  /** A target's raw template files (tests replace the GitHub read). */
+  issueTemplates?: (
+    cwd: string,
+    repo: string,
+  ) => Promise<Omit<IssueTemplateFiles, "files"> & { files: { path: string; content: string; single?: boolean }[] }>;
 }): CreateIssueApi {
+  /** The forge's template read (none on a forge without templates: no request). */
+  const readTemplates = deps.issueTemplates ?? ((cwd: string, r: string) => deps.provider.value?.issueTemplates?.(cwd, r) ?? null);
   const rdeps = deps.report ?? {};
   const createGitwandIssue = rdeps.createGitwandIssue ?? ghCreateGitwandIssue;
   const checkGitwandWritable = rdeps.gitwandWritable ?? ghGitwandWritable;
@@ -298,6 +345,25 @@ export function useCreateIssue(deps: {
   const assignees = ref<string[]>([]);
   const milestone = ref<number | null>(null);
   const labelOptions = ref<RepoLabel[]>([]);
+  /** Whether the target's label and people lists have answered (or failed). */
+  const listsAnswered = ref({ labels: false, assignees: false });
+  const blankForm = ref(false);
+  const templateSet = ref<IssueTemplateSet | null>(null);
+  const templatesLoading = ref(false);
+  const templateId = ref<string | null>(null);
+  /** The repository the templates were read from (the owner's `.github` one, maybe). */
+  const templateSource = ref<string | null>(null);
+  /** The text comes from a template of the target left: no template is chosen, yet it is not blank. */
+  const templateLeftover = ref(false);
+  /** The template the leftover text came from, to restore on the way back to its repository. */
+  type LeftoverFrom = { repo: string; id: string; title: string; body: string; picks: { labels: string[]; assignees: string[] } };
+  let leftoverFrom: LeftoverFrom | null = null;
+  /** The applied template's own labels and people (all it names). */
+  let appliedPicks = { labels: [] as string[], assignees: [] as string[] };
+  /** The applied template was a single-template file put there by itself (not chosen). */
+  let templatePrefilled = false;
+  /** A choice to restore once the target's templates are known to hold it. */
+  let restoreOnLoad: LeftoverFrom | null = null;
   const assigneeOptions = ref<ReviewerCandidate[]>([]);
   const milestoneOptions = ref<RepoMilestone[]>([]);
   const submitting = ref(false);
@@ -349,8 +415,9 @@ export function useCreateIssue(deps: {
       answer.value.trim() !== "" ||
       title.value !== initial.value.title ||
       body.value !== initial.value.body ||
-      labels.value.length > 0 ||
-      assignees.value.length > 0 ||
+      // A template's own labels and people are not the user's work; those
+      // picked by hand, or the template's removed by hand, are.
+      picksEditedByHand() ||
       milestone.value !== null,
   );
   const canSubmit = computed(
@@ -421,6 +488,7 @@ export function useCreateIssue(deps: {
     labelOptions.value = [];
     assigneeOptions.value = [];
     milestoneOptions.value = [];
+    listsAnswered.value = { labels: false, assignees: false };
   }
 
   function loadPickers(target: string) {
@@ -433,9 +501,218 @@ export function useCreateIssue(deps: {
     const gen = generation;
     const current = () => gen === generation && repo.value === target;
     // Each list is optional: a read GitHub refuses (no triage rights) leaves it empty.
-    p.listLabels?.(cwd, target).then((v) => { if (current()) labelOptions.value = v; }, () => {});
+    const answered = (key: "labels" | "assignees") => () => {
+      if (current()) listsAnswered.value = { ...listsAnswered.value, [key]: true };
+    };
+    (p.listLabels?.(cwd, target).then((v) => { if (current()) labelOptions.value = v; }, () => {}) ?? Promise.resolve()).finally(answered("labels"));
     p.listMilestones?.(cwd, target).then((v) => { if (current()) milestoneOptions.value = v; }, () => {});
-    p.listAssignees?.(cwd, target).then((v) => { if (current()) assigneeOptions.value = v; }, () => {});
+    (p.listAssignees?.(cwd, target).then((v) => { if (current()) assigneeOptions.value = v; }, () => {}) ?? Promise.resolve()).finally(answered("assignees"));
+  }
+
+  /**
+   * The target's templates, for a blank form; kept a few minutes per target
+   * (each read is up to 20 requests). A late answer for another target is
+   * dropped.
+   */
+  function loadTemplates(target: string) {
+    const cwd = formCwd;
+    if (!blankForm.value || !cwd) return;
+    // Per repository and host (its page URL): another worktree of it reads
+    // none; the same owner/repo on another host is another repository.
+    const key = (targets.value.find((x) => x.repo === target)?.htmlUrl ?? target).toLowerCase();
+    const cached = templateCache.get(key);
+    if (cached && Date.now() - cached.at >= TEMPLATE_CACHE_MS) templateCache.delete(key);
+    else if (cached) {
+      templateSet.value = cached.set;
+      templateSource.value = cached.source;
+      onTemplateSet();
+      templatesLoading.value = false; // another target's read may still be in flight
+      return;
+    }
+    const gen = generation;
+    const current = () => gen === generation && repo.value === target;
+    // A read already in flight for this target (A → B → A) is reused.
+    let read = templateInflight.get(key);
+    if (!read) {
+      const started = readTemplates(cwd, target);
+      if (!started) return; // this forge has no templates
+      const parsed = started.then(async (r) => ({ set: await loadTemplateSet(r.files), complete: r.complete, source: r.source }));
+      templateInflight.set(key, parsed);
+      parsed.then(
+        () => templateInflight.delete(key),
+        () => templateInflight.delete(key),
+      );
+      read = parsed;
+    }
+    templateSet.value = null;
+    templateSource.value = null;
+    templatesLoading.value = true;
+    read
+      .then(
+        ({ set, complete, source }) => {
+          // A set missing a file that failed is shown, not kept: the next
+          // form tries again.
+          if (complete) rememberTemplates(key, { at: Date.now(), set, source });
+          if (current()) {
+            templateSet.value = set;
+            templateSource.value = source;
+            onTemplateSet();
+          }
+        },
+        () => {}, // No templates is a blank form, never an error.
+      )
+      .finally(() => { if (current()) templatesLoading.value = false; });
+  }
+
+  /**
+   * The applied template's labels and people: `pending` waits for the target
+   * to offer them (its pickers load meanwhile), each granted once (one the
+   * user then removes stays removed); `added` is what the template put there
+   * itself, all it takes back (one picked by hand before stays).
+   */
+  type Picks = { labels: string[]; assignees: string[] };
+  const noPicks = (): Picks => ({ labels: [], assignees: [] });
+  const templatePending = ref<Picks>(noPicks());
+  const templateAdded = ref<Picks>(noPicks());
+
+  /**
+   * The applied template's labels and people that will not be set, said
+   * rather than dropped silently: all it still waits for without triage
+   * rights (the lists never load), else those its target's lists, once
+   * answered (or failed), do not offer.
+   */
+  const templatePicksUnset = computed(() => {
+    if (templateId.value === null) return [];
+    const pending = templatePending.value;
+    const canTriage = targets.value.find((x) => x.repo === repo.value)?.canTriage ?? false;
+    const named = canTriage
+      ? [...(listsAnswered.value.labels ? pending.labels : []), ...(listsAnswered.value.assignees ? pending.assignees : [])]
+      : [...pending.labels, ...pending.assignees];
+    // Once each, whatever the case the template wrote it in.
+    const seen = new Set<string>();
+    return named.filter((x) => !seen.has(x.toLowerCase()) && !!seen.add(x.toLowerCase()));
+  });
+
+  function forgetTemplatePicks() {
+    templatePending.value = noPicks();
+    templateAdded.value = noPicks();
+  }
+
+  /** Picks the user made by hand, or a template's they removed by hand. */
+  function picksEditedByHand(): boolean {
+    const added = templateAdded.value;
+    const byHand = labels.value.some((l) => !added.labels.includes(l)) || assignees.value.some((a) => !added.assignees.includes(a));
+    return byHand || templatePicksRemoved();
+  }
+
+  /** A label or person the template added that the user removed. */
+  function templatePicksRemoved(): boolean {
+    const added = templateAdded.value;
+    return added.labels.some((l) => !labels.value.includes(l)) || added.assignees.some((a) => !assignees.value.includes(a));
+  }
+
+  /** Grant what the template wants and the target now offers, each once. */
+  function grantTemplateWants() {
+    // Without case (GitHub's label names and logins), in the target's spelling.
+    const grant = (have: Ref<string[]>, key: "labels" | "assignees", offeredNames: string[]) => {
+      const offered = new Map(offeredNames.map((x) => [x.toLowerCase(), x]));
+      const pending = templatePending.value[key];
+      const now = [...new Set(pending.filter((x) => offered.has(x.toLowerCase())).map((x) => offered.get(x.toLowerCase())!))];
+      if (!now.length) return;
+      templatePending.value = { ...templatePending.value, [key]: pending.filter((x) => !offered.has(x.toLowerCase())) };
+      const fresh = now.filter((x) => !have.value.includes(x));
+      templateAdded.value = { ...templateAdded.value, [key]: [...templateAdded.value[key], ...fresh] };
+      have.value = [...have.value, ...fresh];
+    };
+    grant(labels, "labels", labelOptions.value.map((l) => l.name));
+    grant(assignees, "assignees", assigneeOptions.value.map((a) => a.login));
+  }
+  watch([labelOptions, assigneeOptions], () => {
+    if (templatePending.value.labels.length || templatePending.value.assignees.length) grantTemplateWants();
+  });
+
+  /**
+   * GitHub prefills a new issue with a repository's single-template file
+   * (`ISSUE_TEMPLATE.md`): so does a blank form still untouched.
+   */
+  function prefillSingleTemplate() {
+    const only = templateSet.value?.templates;
+    if (!only || only.length !== 1 || !only[0].single) return;
+    if (templateId.value !== null || templateLeftover.value || dirty.value) return;
+    applyTemplate(only[0].id);
+    templatePrefilled = true;
+  }
+
+  /** A template set arrived for the target: restore a pending choice, or prefill. */
+  function onTemplateSet() {
+    const back = restoreOnLoad;
+    restoreOnLoad = null;
+    const same = back && templateSet.value?.templates.find((x) => x.id === back.id);
+    // The template must still read as it did (it may have changed upstream),
+    // and its text be untouched since.
+    if (back && same && same.title === back.title && same.body === back.body && title.value === back.title && body.value === back.body) {
+      // Back where the template came from, its text untouched: chosen again.
+      templateId.value = back.id;
+      initial.value = { title: back.title, body: back.body };
+      templateLeftover.value = false;
+      leftoverFrom = null;
+      appliedPicks = back.picks;
+      templatePending.value = { labels: [...back.picks.labels], assignees: [...back.picks.assignees] };
+      grantTemplateWants();
+      return;
+    }
+    prefillSingleTemplate();
+  }
+
+  /** The owner's `.github` repository, when the templates come from it. */
+  const templateFromOwner = computed(() => {
+    const source = templateSource.value;
+    return source && source.toLowerCase() !== (repo.value ?? "").toLowerCase() ? source : null;
+  });
+
+  /**
+   * A template chosen in the picker: nothing for the same choice (except
+   * "Blank issue" over a leftover text, which clears it); `confirm` first
+   * when what it would replace was edited. An answer that comes after the
+   * form, or its target, changed applies nothing (another target may have a
+   * template at the same path).
+   */
+  async function chooseTemplate(wanted: string | null, confirm: (kind: "replace" | "clear") => Promise<boolean>): Promise<void> {
+    if (wanted === templateId.value && !(wanted === null && templateLeftover.value)) return;
+    // Another template replaces the title and description only (a label of
+    // the template removed by hand would not come back either way).
+    if (bodyEdited.value) {
+      const asked = openGeneration;
+      const target = repo.value;
+      const ok = await confirm(wanted === null ? "clear" : "replace");
+      if (!ok || !isOpen.value || openGeneration !== asked || repo.value !== target) return;
+    }
+    applyTemplate(wanted);
+  }
+
+  /** Fill the form from a template (null: blank), unasked: `chooseTemplate` asks first. */
+  function applyTemplate(id: string | null) {
+    const chosen = id === null ? null : templateSet.value?.templates.find((x) => x.id === id) ?? null;
+    if (id !== null && !chosen) return;
+    templateId.value = chosen ? chosen.id : null;
+    title.value = chosen?.title ?? "";
+    body.value = chosen?.body ?? "";
+    // What the previous template added goes; what was picked by hand stays.
+    const added = templateAdded.value;
+    labels.value = labels.value.filter((l) => !added.labels.includes(l));
+    assignees.value = assignees.value.filter((a) => !added.assignees.includes(a));
+    forgetTemplatePicks();
+    templateLeftover.value = false;
+    leftoverFrom = null;
+    templatePrefilled = false;
+    restoreOnLoad = null;
+    appliedPicks = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
+    templatePending.value = { labels: [...appliedPicks.labels], assignees: [...appliedPicks.assignees] };
+    // Only what the target offers (GitHub refuses unknown labels and people),
+    // now or once its pickers arrive.
+    grantTemplateWants();
+    // The template's text is the new starting point: editing it is what asks.
+    initial.value = { title: title.value, body: body.value };
   }
 
   function reset() {
@@ -464,6 +741,17 @@ export function useCreateIssue(deps: {
     findings.value = { blocking: [], warnings: [] };
     scanPending.value = false;
     repoTarget = null;
+    blankForm.value = false;
+    templateSet.value = null;
+    templatesLoading.value = false;
+    templateId.value = null;
+    forgetTemplatePicks();
+    templateSource.value = null;
+    templateLeftover.value = false;
+    leftoverFrom = null;
+    appliedPicks = { labels: [], assignees: [] };
+    templatePrefilled = false;
+    restoreOnLoad = null;
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = DEFAULT_SECRETS_OPTIONS;
@@ -474,11 +762,14 @@ export function useCreateIssue(deps: {
 
   async function open(
     prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>),
+    opts: { templates?: boolean } = {},
   ): Promise<boolean> {
     // Already open (⌘⇧I again, the palette): never wipe what is being typed,
     // nor drop the answer of a create in flight.
     if (isOpen.value) return false;
     reset();
+    // Templates are for a blank form; a commit's, lines' or report's keeps its own.
+    blankForm.value = prefill === undefined && opts.templates !== false;
     const gen = generation;
     const openGen = openGeneration;
     formCwd = deps.cwd.value;
@@ -492,7 +783,10 @@ export function useCreateIssue(deps: {
       targets.value = t.targets;
       // The backend decides the default (the same rule for every caller).
       repo.value = t.defaultRepo;
-      if (repo.value) loadPickers(repo.value);
+      if (repo.value) {
+        loadPickers(repo.value);
+        loadTemplates(repo.value);
+      }
     }
     // The form is on screen; the prefill (a commit's, after its git check)
     // lands when ready, unless the user has started typing meanwhile.
@@ -661,7 +955,8 @@ export function useCreateIssue(deps: {
     if (!reportAvailable.value || !makeRoom()) return;
     // False when the form was closed (or reopened) while its targets loaded:
     // the report must not attach to whatever form is on screen now.
-    if (!(await open())) return;
+    // A report is not a blank form: no templates (one would replace it).
+    if (!(await open(undefined, { templates: false }))) return;
     const openGen = openGeneration;
     report.value = r;
     // The repository's targets could not be read: a report can still go to
@@ -712,10 +1007,36 @@ export function useCreateIssue(deps: {
     const target = targets.value.find((t) => t.repo === next);
     if (!target?.hasIssues) return;
     generation++;
+    const from = repo.value;
     repo.value = next;
     // Labels, people and milestones belong to one repository.
     clearPickers();
     loadPickers(next);
+    // The text a template filled stays, now the user's (so "Blank issue" asks
+    // before clearing it); the choice, and the labels and people it wanted,
+    // were about the other target.
+    if (templateId.value !== null && templatePrefilled && !bodyEdited.value) {
+      // Put there by itself and untouched: it gives way, and the new target
+      // may prefill its own.
+      title.value = "";
+      body.value = "";
+      initial.value = { title: "", body: "" };
+      templatePrefilled = false;
+    } else if (templateId.value !== null && from) {
+      // Remembered, to restore on the way back if the text is untouched.
+      leftoverFrom = { repo: from, id: templateId.value, title: initial.value.title, body: initial.value.body, picks: appliedPicks };
+      initial.value = { title: "", body: "" };
+      // The select then says so ("from the other repository"), and "Blank
+      // issue" can clear it.
+      templateLeftover.value = true;
+    }
+    templateId.value = null;
+    // Its labels and people were the other target's (clearPickers dropped them).
+    forgetTemplatePicks();
+    // Back where the template came from: restored once that target's set is
+    // known to still hold it (it is read again, or taken from the cache).
+    restoreOnLoad = leftoverFrom && leftoverFrom.repo === next ? leftoverFrom : null;
+    loadTemplates(next);
   }
 
   function retryAnyway() {
@@ -815,5 +1136,14 @@ export function useCreateIssue(deps: {
     openFromResolution,
     openId,
     setGitwand,
+    blankForm,
+    templateSet,
+    templatesLoading,
+    templateId,
+    templateSource,
+    templateLeftover,
+    templatePicksUnset,
+    templateFromOwner,
+    chooseTemplate,
   };
 }

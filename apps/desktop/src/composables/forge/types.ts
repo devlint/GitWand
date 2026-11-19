@@ -31,6 +31,7 @@ import type {
   PrEdit,
   IssueTargets,
   IssueTarget,
+  IssueTemplateFiles,
   CreateIssueInput,
   CreatedIssue,
   RepoLabel,
@@ -59,6 +60,7 @@ export type {
   PrEdit,
   IssueTargets,
   IssueTarget,
+  IssueTemplateFiles,
   CreateIssueInput,
   CreatedIssue,
   RepoLabel,
@@ -204,6 +206,8 @@ export interface ForgeProvider {
   listLabels?(cwd: string, repo: string): Promise<RepoLabel[]>;
   listMilestones?(cwd: string, repo: string): Promise<RepoMilestone[]>;
   listAssignees?(cwd: string, repo: string): Promise<ReviewerCandidate[]>;
+  /** A target's issue template files (raw; the form parses them). */
+  issueTemplates?(cwd: string, repo: string): Promise<IssueTemplateFiles>;
 
   getPRCount(cwd: string, state?: string): Promise<number>;
 

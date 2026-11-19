@@ -138,6 +138,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
       "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured.",
   },
   gh_list_issues: { route: "/api/gh-list-issues" },
+  gh_issue_templates: { route: "/api/gh-issue-templates" },
   gh_list_prs: { route: "/api/gh-list-prs" },
   gh_merge_pr: {
     route: "/api/gh-merge-pr",

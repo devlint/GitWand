@@ -127,6 +127,36 @@ async function onSwitch(e: Event) {
   form.setGitwand(wanted);
 }
 
+/** A blank form's own (`blankForm` is false for a commit, lines or a report). */
+const offersTemplates = computed(() => form.blankForm.value);
+const templates = computed(() => (offersTemplates.value ? form.templateSet.value?.templates ?? [] : []));
+const contactLinks = computed(() => (offersTemplates.value ? form.templateSet.value?.contactLinks ?? [] : []));
+const blankAllowed = computed(() => form.templateSet.value?.blankAllowed ?? true);
+
+/** A template chosen: the form decides; the component only asks the question. */
+async function onTemplate(e: Event) {
+  const select = e.target as HTMLSelectElement;
+  if (select.value === "__other") return;
+  const wanted = select.value || null;
+  // The state decides what the select shows (a cancelled choice leaves it as it was).
+  select.value = form.templateId.value ?? (form.templateLeftover.value ? "__other" : "");
+  await form.chooseTemplate(wanted, (kind) =>
+    askConfirm(
+      kind === "clear"
+        ? {
+            title: t("createIssue.template.clearTitle"),
+            message: t("createIssue.template.clearMessage"),
+            confirmLabel: t("createIssue.template.clear"),
+          }
+        : {
+            title: t("createIssue.template.replaceTitle"),
+            message: t("createIssue.template.replaceMessage"),
+            confirmLabel: t("createIssue.template.use"),
+          },
+    ),
+  );
+}
+
 /** The target's issue list, to see whether a timed-out create went through. */
 function openIssuesPage() {
   if (form.toGitwand.value) {
@@ -232,6 +262,45 @@ function onMilestone(e: Event) {
             <span v-if="!target.hasIssues" class="ci-target-off">{{ t("createIssue.issuesOff") }}</span>
           </label>
         </fieldset>
+
+        <p v-if="offersTemplates && form.templatesLoading.value && !form.templateSet.value" class="ci-status">
+          {{ t("createIssue.template.loading") }}
+        </p>
+        <div v-if="templates.length || contactLinks.length" class="ci-group" data-testid="ci-templates">
+          <label v-if="templates.length" class="ci-label" for="ci-template">{{ t("createIssue.template.label") }}</label>
+          <select
+            v-if="templates.length"
+            id="ci-template"
+            data-testid="ci-template"
+            class="ci-input"
+            :value="form.templateId.value ?? (form.templateLeftover.value ? '__other' : '')"
+            :disabled="form.submitting.value"
+            @change="onTemplate"
+          >
+            <option v-if="form.templateLeftover.value" value="__other" disabled>{{ t("createIssue.template.fromOther") }}</option>
+            <option value="">{{ t("createIssue.template.blank") }}</option>
+            <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id" :title="tpl.about">{{ tpl.name }}</option>
+          </select>
+          <p v-if="templates.length && !blankAllowed" class="ci-status">{{ t("createIssue.template.expectsTemplate") }}</p>
+          <p v-if="templates.length && form.templateFromOwner.value" class="ci-status">
+            {{ t("createIssue.template.fromOwner", form.templateFromOwner.value) }}
+          </p>
+          <p v-if="form.templatePicksUnset.value.length" class="ci-status" data-testid="ci-template-unset">
+            {{ t("createIssue.template.needsTriage", form.templatePicksUnset.value.join(", ")) }}
+          </p>
+          <ul v-if="contactLinks.length" class="ci-contacts">
+            <li v-for="(l, i) in contactLinks" :key="`${i}:${l.url}`">
+              <!-- The space survives the template's whitespace condensing. -->
+              <span class="ci-status">{{ `${t("createIssue.template.contact")} ` }}</span>
+              <a
+                :href="l.url"
+                data-testid="ci-contact-link"
+                @click.prevent="openExternalUrl(l.url)"
+              >{{ l.name }}</a>
+              <span v-if="l.about" class="ci-status"> — {{ l.about }}</span>
+            </li>
+          </ul>
+        </div>
 
         <label class="ci-label" for="ci-title">{{ t("createIssue.titleLabel") }}</label>
         <input
@@ -528,6 +597,15 @@ function onMilestone(e: Event) {
 .ci-status {
   margin: 0;
   color: var(--color-text-muted);
+}
+.ci-contacts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-sm, 12px);
 }
 .ci-detail {
   font-family: var(--font-mono, ui-monospace, monospace);

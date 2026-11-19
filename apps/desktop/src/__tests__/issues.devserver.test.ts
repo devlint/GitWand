@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport } from "../../dev-issues.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,
@@ -131,5 +131,268 @@ describe("devGitwandReport", () => {
   });
   it("refuses a blank title", () => {
     expect(devGitwandReport({ title: " ", body: "b" }, {})).toEqual({ error: "Title is required" });
+  });
+});
+
+describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => {
+  const b64 = (t: string) => Buffer.from(t).toString("base64").replace(/(.{60})/g, "$1\n");
+  const file = (t: string) => ({ encoding: "base64", content: b64(t), size: t.length });
+  const entry = (name: string, size = 10) => ({ name, path: `.github/ISSUE_TEMPLATE/${name}`, type: "file", size });
+  const PUBLIC = async () => true;
+  /** A single-template file `name` in `dir` ("" = root): its folder listing and contents. */
+  const single = (nwo: string, dir: string, name: string, content: string, size = content.length) => {
+    const path = dir ? `${dir}/${name}` : name;
+    return { [`${nwo}:${dir}`]: [{ name, path, type: "file", size }], [`${nwo}:${path}`]: file(content) };
+  };
+  const fake = (m: Record<string, unknown>) => async (nwo: string, path: string) => (m[`${nwo}:${path}`] ?? null);
+
+  it("reads the directory, sorted and capped, skipping other files", async () => {
+    const dir = [...Array.from({ length: 22 }, (_, i) => entry(`t${String(21 - i).padStart(2, "0")}.md`)), entry("config.yml"), entry("notes.txt")];
+    const m: Record<string, unknown> = { "me/app:.github/ISSUE_TEMPLATE": dir, "me/app:.github/ISSUE_TEMPLATE/config.yml": file("blank_issues_enabled: false") };
+    for (let i = 0; i < 22; i++) m[`me/app:.github/ISSUE_TEMPLATE/t${String(i).padStart(2, "0")}.md`] = file("body");
+    const got = await devTemplateFiles("me/app", PUBLIC, fake(m));
+    expect(got.source).toBe("me/app");
+    expect(got.files).toHaveLength(21);
+    expect(got.files[0].path).toBe(".github/ISSUE_TEMPLATE/config.yml");
+    expect(got.files[20].path).toBe(".github/ISSUE_TEMPLATE/t19.md");
+    expect(got.files[1].content).toBe("body");
+  });
+
+  it("skips a file over 64 KiB", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [entry("big.md", 65_537), entry("ok.yml")],
+      "me/app:.github/ISSUE_TEMPLATE/ok.yml": file("name: ok"),
+    }));
+    expect(got.files.map((f: { path: string }) => f.path)).toEqual([".github/ISSUE_TEMPLATE/ok.yml"]);
+  });
+
+  it("falls back to a single-template file, then the owner's .github repository", async () => {
+    const one = await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "legacy")));
+    expect(one.files[0].path).toBe("docs/ISSUE_TEMPLATE.md");
+    const org = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(org.source).toBe("me/.github");
+    expect(org.files[0].content).toBe("name: Bug");
+  });
+
+  it("any file in the template folder rules out the other places", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [entry("config.yml")],
+      "me/app:.github/ISSUE_TEMPLATE/config.yml": file("blank_issues_enabled: false"),
+      "me/app:.github/ISSUE_TEMPLATE.md": file("legacy"),
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(got.source).toBe("me/app");
+    expect(got.files.map((f: { path: string }) => f.path)).toEqual([".github/ISSUE_TEMPLATE/config.yml"]);
+  });
+
+  it("templates listed but unreadable never fall back to the owner", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string, path: string) => {
+      if (nwo === "me/app" && path === ".github/ISSUE_TEMPLATE") return [entry("bug.yml")];
+      if (nwo === "me/app") throw new Error("timeout");
+      return [entry("x.yml")];
+    });
+    expect(got.source).toBe("me/app");
+    expect(got.files).toEqual([]);
+    expect(got.complete).toBe(false);
+  });
+
+  it("a failing single-template probe is skipped, not fatal", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (_: string, path: string) => {
+      if (path === ".github") throw new Error("502");
+      if (path === "docs") return [{ name: "ISSUE_TEMPLATE.md", path: "docs/ISSUE_TEMPLATE.md", type: "file", size: 4 }];
+      if (path === "docs/ISSUE_TEMPLATE.md") return file("docs");
+      return null;
+    });
+    expect(got.files[0].path).toBe("docs/ISSUE_TEMPLATE.md");
+    expect(got.complete).toBe(false);
+  });
+
+  it("sorts names by UTF-8 bytes, as Rust", async () => {
+    const wide = "\uFF21.md"; // fullwidth A: before a non-BMP letter in UTF-8, after it in UTF-16
+    const math = "\u{1D400}.md";
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [entry(math), entry(wide)],
+      [`me/app:.github/ISSUE_TEMPLATE/${encodeURIComponent(wide)}`]: file("w"),
+      [`me/app:.github/ISSUE_TEMPLATE/${encodeURIComponent(math)}`]: file("m"),
+    }));
+    expect(got.files.map((f: { content: string }) => f.content)).toEqual(["w", "m"]);
+  });
+
+  it("a single-template file is found in any case, also at the root", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", ".github", "Issue_Template.md", "mixed")));
+    expect(got.files[0].path).toBe(".github/Issue_Template.md");
+    const root = await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", "", "issue_template.md", "r")));
+    expect(root.files[0].path).toBe("issue_template.md");
+  });
+
+  it("an unreadable single template still rules out the owner", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github": [{ name: "ISSUE_TEMPLATE.md", path: ".github/ISSUE_TEMPLATE.md", type: "file", size: 70_000 }],
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(got.source).toBe("me/app");
+    expect(got.files).toEqual([]);
+  });
+
+  it("a failing owner .github keeps what the repository has, marked incomplete", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string) => {
+      if (nwo === "me/.github") throw new Error("GitHub API 403");
+      return null;
+    });
+    expect(got.files).toEqual([]);
+    expect(got.complete).toBe(false);
+  });
+
+  it("a set with an unreadable file is marked incomplete", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (_: string, path: string) => {
+      if (path === ".github/ISSUE_TEMPLATE") return [entry("a.md"), entry("b.md")];
+      if (path === ".github/ISSUE_TEMPLATE/a.md") throw new Error("timeout");
+      return file("b");
+    });
+    expect(got.complete).toBe(false);
+    expect((await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "x")))).complete).toBe(true);
+  });
+
+  it("an owner .github repository may keep its templates at its root", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/.github:ISSUE_TEMPLATE": [{ name: "bug.yml", path: "ISSUE_TEMPLATE/bug.yml", type: "file", size: 9 }],
+      "me/.github:ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(got.source).toBe("me/.github");
+    expect(got.files[0].path).toBe("ISSUE_TEMPLATE/bug.yml");
+  });
+
+  it("a listed single template that reads 404 is incomplete", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github": [{ name: "ISSUE_TEMPLATE.md", path: ".github/ISSUE_TEMPLATE.md", type: "file", size: 4 }],
+    }));
+    expect(got.files).toEqual([]);
+    expect(got.complete).toBe(false);
+  });
+
+  it("the owner's .github template folder wins over its root one", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("a.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/a.yml": file("name: A"),
+      "me/.github:ISSUE_TEMPLATE": [{ name: "b.yml", path: "ISSUE_TEMPLATE/b.yml", type: "file", size: 9 }],
+      "me/.github:ISSUE_TEMPLATE/b.yml": file("name: B"),
+    }));
+    expect(got.files[0].path).toBe(".github/ISSUE_TEMPLATE/a.yml");
+  });
+
+  it("an owner folder failing after one holding templates does not matter, as in Rust", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string, path: string) => {
+      if (nwo === "me/.github" && path === ".github/ISSUE_TEMPLATE") return [entry("bug.yml")];
+      if (nwo === "me/.github" && path === ".github/ISSUE_TEMPLATE/bug.yml") return file("name: Bug");
+      if (nwo === "me/.github" && path === "docs/ISSUE_TEMPLATE") throw new Error("502");
+      return null;
+    });
+    expect(got.source).toBe("me/.github");
+    expect(got.files).toHaveLength(1);
+  });
+
+  it("a failed single-template listing does not fall back to the owner", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string, path: string) => {
+      if (nwo === "me/app" && path === ".github") throw new Error("502");
+      if (nwo === "me/.github" && path === ".github/ISSUE_TEMPLATE") return [entry("bug.yml")];
+      if (nwo === "me/.github") return file("name: Bug");
+      return null;
+    });
+    expect(got.source).toBe("me/app");
+    expect(got.files).toEqual([]);
+    expect(got.complete).toBe(false);
+  });
+
+  it("a file that does not decode is skipped, the set stays complete", async () => {
+    const bad = { encoding: "base64", content: "/w==", size: 1 };
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [entry("a.md", 1), entry("b.md", 1)],
+      "me/app:.github/ISSUE_TEMPLATE/a.md": bad,
+      "me/app:.github/ISSUE_TEMPLATE/b.md": file("b"),
+    }));
+    expect(got.files).toHaveLength(1);
+    expect(got.complete).toBe(true);
+  });
+
+  it("the single-template file is flagged", async () => {
+    const one = await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "legacy")));
+    expect(one.files[0].single).toBe(true);
+    const folder = await devTemplateFiles("me/app", PUBLIC, fake({ "me/app:.github/ISSUE_TEMPLATE": [entry("a.md", 1)], "me/app:.github/ISSUE_TEMPLATE/a.md": file("a") }));
+    expect(folder.files[0].single).toBe(false);
+  });
+
+  it("any file in the template folder counts, even not a template", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [{ name: "README.txt", path: ".github/ISSUE_TEMPLATE/README.txt", type: "file", size: 5 }],
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(got.source).toBe("me/app");
+    expect(got.files).toEqual([]);
+  });
+
+  it("nothing anywhere is an empty list", async () => {
+    expect((await devTemplateFiles("me/app", PUBLIC, fake({}))).files).toEqual([]);
+  });
+
+  it("percent-encodes a file name with a space or brackets", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [entry("bug report.md"), entry("a[b].yml")],
+      "me/app:.github/ISSUE_TEMPLATE/bug%20report.md": file("a"),
+      "me/app:.github/ISSUE_TEMPLATE/a%5Bb%5D.yml": file("b"),
+    }));
+    expect(got.files.map((f: { path: string }) => f.path)).toEqual([".github/ISSUE_TEMPLATE/a[b].yml", ".github/ISSUE_TEMPLATE/bug report.md"]);
+  });
+
+  it("one file that fails is skipped, the others kept", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string, path: string) => {
+      if (path === ".github/ISSUE_TEMPLATE") return [entry("a.md"), entry("b.md")];
+      if (path === ".github/ISSUE_TEMPLATE/a.md") throw new Error("timeout");
+      return nwo === "me/app" ? file("b") : null;
+    });
+    expect(got.files.map((f: { path: string }) => f.path)).toEqual([".github/ISSUE_TEMPLATE/b.md"]);
+  });
+
+  it("a private owner .github repository is not used", async () => {
+    const got = await devTemplateFiles("me/app", async () => false, fake({
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(got.files).toEqual([]);
+  });
+
+  it("a file that is not UTF-8 is skipped, as in Rust", async () => {
+    const bad = { encoding: "base64", content: Buffer.from([0xff, 0xfe, 0x41]).toString("base64"), size: 3 };
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({ "me/app:.github/ISSUE_TEMPLATE": [entry("x.md")], "me/app:.github/ISSUE_TEMPLATE/x.md": bad }));
+    expect(got.files).toEqual([]);
+  });
+
+  it("a failed template folder listing is an empty, incomplete answer", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async () => { throw new Error("502"); });
+    expect(got).toEqual({ source: "me/app", files: [], complete: false });
+  });
+
+  const recording = (m: Record<string, unknown>) => {
+    const asked: string[] = [];
+    const get = async (nwo: string, path: string) => { asked.push(`${nwo}:${path}`); return m[`${nwo}:${path}`] ?? null; };
+    return { get, asked };
+  };
+
+  it("a template folder spares the single-template listings", async () => {
+    const { get, asked } = recording({ "me/app:.github/ISSUE_TEMPLATE": [entry("bug.md")], "me/app:.github/ISSUE_TEMPLATE/bug.md": file("---\nname: Bug\n---\nx") });
+    const got = await devTemplateFiles("me/app", PUBLIC, get);
+    expect(got.files).toHaveLength(1);
+    expect(asked.filter((a) => ["me/app:", "me/app:.github", "me/app:docs"].includes(a))).toEqual([]);
+  });
+
+  it("a private or missing owner .github is not listed", async () => {
+    const { get, asked } = recording({});
+    await devTemplateFiles("me/app", async () => false, get);
+    expect(asked.filter((a) => a.startsWith("me/.github:"))).toEqual([]);
   });
 });

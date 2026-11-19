@@ -129,3 +129,129 @@ export function devCreateFailure(status, json) {
   const msg = devGithubError(status, json);
   return status >= 500 ? MAY_HAVE_BEEN_CREATED + msg : msg;
 }
+
+// ─── Issue templates (#301, part 5) — mirrors gh_issue_templates ───────────
+const TEMPLATE_DIR = ".github/ISSUE_TEMPLATE";
+/** Where an owner's `.github` repository may keep the default templates. */
+const OWNER_TEMPLATE_DIRS = [TEMPLATE_DIR, "ISSUE_TEMPLATE", "docs/ISSUE_TEMPLATE"];
+/** Folders of the single-template file (`ISSUE_TEMPLATE.md`, any case): `.github`, the root (""), `docs`. */
+const SINGLE_TEMPLATE_DIRS = [".github", "", "docs"];
+const MAX_TEMPLATES = 20;
+const MAX_TEMPLATE_BYTES = 65_536;
+
+function decodeContent(v) {
+  if (typeof v?.content !== "string") return null;
+  try {
+    // Fatal: a file that is not UTF-8 is skipped, as Rust's from_utf8 does.
+    return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(v.content.replace(/\s+/g, ""), "base64"));
+  } catch {
+    return null;
+  }
+}
+
+/** Each segment percent-encoded as Rust's `encode_path` (unreserved kept). */
+const encodePath = (path) =>
+  path.split("/").map((seg) => [...Buffer.from(seg, "utf8")].map((b) => (/[A-Za-z0-9\-._~]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, "0")}`)).join("")).join("/");
+const smallEnough = (v) => typeof v?.size === "number" && v.size <= MAX_TEMPLATE_BYTES;
+// By UTF-8 bytes, as Rust sorts strings (JS `<` compares UTF-16 units).
+const cmp = (a, b) => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+
+const isConfigPath = (path) => ["config.yml", "config.yaml"].includes((path.split("/").pop() ?? path).toLowerCase());
+
+/**
+ * `[file | null, complete, present]`, as Rust's `single_template`: the three
+ * folders listed in parallel, the name matched in any case; an unreadable
+ * file is still present (the repository's own).
+ */
+async function singleTemplate(nwo, listings, get) {
+  let complete = listings.every((l) => !l.e);
+  for (const { v } of listings) {
+    if (!Array.isArray(v)) continue;
+    const found = v.find((i) => i?.type === "file" && typeof i.name === "string" && i.name.toLowerCase() === "issue_template.md");
+    if (!found || typeof found.path !== "string") continue;
+    if (!smallEnough(found)) return [null, complete, true];
+    try {
+      const v = await get(nwo, encodePath(found.path));
+      // Listed, then gone: a race, not an answer worth keeping.
+      if (v === null) return [null, false, true];
+      const content = decodeContent(v);
+      return [content === null ? null : { path: found.path, content, single: true }, complete, true];
+    } catch {
+      complete = false;
+      return [null, complete, true];
+    }
+  }
+  return [null, complete, false];
+}
+
+const listDirs = (nwo, dirs, get) => Promise.all(dirs.map((dir) => get(nwo, dir).then((v) => ({ v }), (e) => ({ e }))));
+
+/**
+ * One repository's templates `{ files, complete, present }`, as Rust: any
+ * file in its template folder (config.yml included) makes that folder the
+ * whole answer; only without one is a single-template file looked for. A
+ * folder listing that fails leaves the answer unknown: nothing, incomplete.
+ */
+async function templatesIn(nwo, dirs, get) {
+  // The template folders first (at once), as Rust; the single-template
+  // folders only without one. In order: a failure only counts before the
+  // folder that answers; any file in a folder (a README too) makes it the answer.
+  for (const { v: items, e } of await listDirs(nwo, dirs, get)) {
+    if (e) return { files: [], complete: false, present: false };
+    if (!Array.isArray(items) || !items.length) continue;
+    const listed = items.filter((i) => i?.type === "file" && typeof i.name === "string" && /\.(md|ya?ml)$/i.test(i.name));
+    // In name order: config.yml always, templates up to the cap.
+    let templates = 0;
+    const paths = listed
+      .filter((i) => smallEnough(i) && typeof i.path === "string")
+      .map((i) => [i.name, i.path])
+      .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]))
+      .filter(([, p]) => isConfigPath(p) || ++templates <= MAX_TEMPLATES)
+      .map(([, p]) => p);
+    const files = [];
+    let complete = true;
+    // Six at a time, as Rust; a file that cannot be read is skipped.
+    for (let i = 0; i < paths.length; i += 6) {
+      // A failed request (or a file gone since the listing) is retried next
+      // time; a file read but not text is a lasting answer.
+      const read = await Promise.all(paths.slice(i, i + 6).map(async (path) => {
+        const v = await get(nwo, encodePath(path)).catch(() => null);
+        if (v === null) return { failed: true };
+        const content = decodeContent(v);
+        return { file: content === null ? null : { path, content, single: false } };
+      }));
+      if (read.some((r) => r.failed)) complete = false;
+      files.push(...read.map((r) => r.file).filter(Boolean));
+    }
+    return { files, complete, present: true };
+  }
+  const [single, complete, present] = await singleTemplate(nwo, await listDirs(nwo, SINGLE_TEMPLATE_DIRS, get), get);
+  return { files: single ? [single] : [], complete, present };
+}
+
+/**
+ * A target's issue template files, as `gh_issue_templates` reads them: the
+ * template directory, else a single-template file, else the same in the
+ * owner's public `.github` repository. `get(nwo, path)` resolves `null` on a
+ * 404; `isPublic(nwo)` whether a repository is public.
+ */
+export async function devTemplateFiles(nwo, isPublic, get) {
+  const own = await templatesIn(nwo, [TEMPLATE_DIR], get);
+  const mine = (complete) => ({ source: nwo, files: own.files, complete });
+  // Only a repository with no template folder and no single template gets
+  // its owner's; a failed listing leaves that unknown (no fallback, not cached).
+  if (own.present || !own.complete) return mine(own.complete);
+  const org = `${nwo.split("/")[0]}/.github`;
+  if (org.toLowerCase() === nwo.toLowerCase()) return mine(own.complete);
+  // Its folders only if it is public (a missing one is not), as Rust.
+  let pub;
+  try {
+    pub = await isPublic(org);
+  } catch {
+    return mine(false);
+  }
+  if (!pub) return mine(own.complete);
+  const theirs = await templatesIn(org, OWNER_TEMPLATE_DIRS, get);
+  if (theirs.present) return { source: org, files: theirs.files, complete: theirs.complete };
+  return mine(own.complete && theirs.complete);
+}

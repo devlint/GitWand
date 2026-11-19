@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
+import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -5596,6 +5596,38 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/gh-issue-templates?cwd=<path>&repo=<owner/repo> — mirrors
+    // `gh_issue_templates` (#301): the target's template files. github.com
+    // only, like every issue route of this server (Rust reads Enterprise).
+    if (url.pathname === "/api/gh-issue-templates" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const repo = url.searchParams.get("repo");
+      if (!cwd || !repo) return jsonResponse(req, res, { error: "Missing cwd or repo" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
+        if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
+        // Each read bounded at 30 s, as Rust's.
+        const bounded = () => ({ signal: AbortSignal.timeout(30_000) });
+        const get = async (nwo, path) => {
+          const resp = await githubFetch(path ? `/repos/${nwo}/contents/${path}` : `/repos/${nwo}/contents`, token, undefined, bounded());
+          if (resp.status === 404) return null;
+          if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+          return resp.json();
+        };
+        const isPublic = async (nwo) => {
+          const resp = await githubFetch(`/repos/${nwo}`, token, undefined, bounded());
+          if (resp.status === 404) return false;
+          if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+          return (await resp.json())?.private === false;
+        };
+        return jsonResponse(req, res, await devTemplateFiles(target.repo, isPublic, get));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
     // GET /api/gh-reviewer-candidates?cwd=<path>
     // Lists assignees (users with push access) for autocomplete.
     if (url.pathname === "/api/gh-reviewer-candidates" && req.method === "GET") {
@@ -9823,6 +9855,7 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    GET  /api/gh-gitwand-writable`);
   console.log(`    POST /api/gh-create-gitwand-issue  { input }`);
   console.log(`    GET  /api/gh-list-labels?cwd=<path>&repo=<owner/repo>`);
+  console.log(`    GET  /api/gh-issue-templates?cwd=<path>&repo=<owner/repo>`);
   console.log(`    GET  /api/gh-list-milestones?cwd=<path>&repo=<owner/repo>`);
   console.log(`    GET  /api/gh-list-assignees?cwd=<path>&repo=<owner/repo>`);
   console.log(`    GET  /api/gh-reviewer-candidates?cwd=<path>`);

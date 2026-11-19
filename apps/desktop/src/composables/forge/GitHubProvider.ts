@@ -46,6 +46,7 @@ import {
   ghListIssues,
   ghIssueAvailable,
   ghIssueTargets,
+  ghIssueTemplates,
   ghCreateIssue,
   ghListLabels,
   ghListMilestones,
@@ -75,6 +76,7 @@ import type {
   Account,
   PrEdit,
   IssueTargets,
+  IssueTemplateFiles,
   CreateIssueInput,
   CreatedIssue,
   RepoLabel,
@@ -135,6 +137,10 @@ export class GitHubProvider implements ForgeProvider {
 
   listLabels(cwd: string, repo: string): Promise<RepoLabel[]> {
     return ghListLabels(cwd, repo);
+  }
+
+  issueTemplates(cwd: string, repo: string): Promise<IssueTemplateFiles> {
+    return ghIssueTemplates(cwd, repo);
   }
 
   listMilestones(cwd: string, repo: string): Promise<RepoMilestone[]> {

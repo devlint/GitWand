@@ -2686,6 +2686,22 @@ const es: Locale = {
   },
 
   createIssue: {
+    template: {
+      clearMessage: "El título y la descripción se vaciarán.",
+      clear: "Vaciar",
+      replaceMessage: "El título y la descripción se sustituirán por los de la plantilla.",
+      use: "Usar la plantilla",
+      fromOther: "(texto de una plantilla)",
+      needsTriage: "No se aplican sin permisos de clasificación en este repositorio: {0}",
+      fromOwner: "Plantillas compartidas por {0}",
+      clearTitle: "¿Empezar desde una issue en blanco?",
+      loading: "Buscando las plantillas de issue de este repositorio…",
+      label: "Plantilla",
+      blank: "Issue en blanco",
+      expectsTemplate: "Este repositorio espera que las issues partan de una plantilla.",
+      contact: "En otro lugar:",
+      replaceTitle: "¿Usar esta plantilla?",
+    },
     tooLong: "El texto tiene {0} caracteres; GitHub acepta como máximo {1}.",
     fromSelection: "Crear issue desde estas líneas",
     selectionHint: "Haz clic en un número de línea para seleccionarla para un issue; Mayús+clic para ampliar",

@@ -353,6 +353,7 @@ pub(crate) fn curl_with_status_bounded(
 ///
 /// We don't follow redirects (no `-L`), so exactly one header block precedes the
 /// body; the trailing status marker is stripped before splitting the two.
+/// Bounded by curl `--max-time` when `max_time_secs` is set (`None`: unbounded).
 pub(crate) fn curl_with_headers(
     method: &str,
     url: &str,
@@ -360,6 +361,7 @@ pub(crate) fn curl_with_headers(
     body_json: Option<&str>,
     extra_headers: &[&str],
     accept: &str,
+    max_time_secs: Option<u32>,
 ) -> Result<(i32, std::collections::HashMap<String, String>, String), String> {
     let body = body_json.map(RequestBody::new).transpose()?;
     let (args, stdin) = curl_request(
@@ -371,6 +373,7 @@ pub(crate) fn curl_with_headers(
         accept,
         RequestOpts {
             dump_headers: true,
+            max_time_secs,
             ..RequestOpts::default()
         },
     );

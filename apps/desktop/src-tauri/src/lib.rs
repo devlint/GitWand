@@ -896,6 +896,7 @@ pub fn run() {
             commands::gh_issues::gh_create_gitwand_issue,
             commands::gh_issues::gh_gitwand_writable,
             commands::gh_issues::gh_list_labels,
+            commands::gh_issues::gh_issue_templates,
             commands::gh_issues::gh_list_milestones,
             commands::gh_issues::gh_list_assignees,
             commands::gh::gh_branches,

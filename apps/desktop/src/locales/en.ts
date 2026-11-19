@@ -2726,6 +2726,22 @@ const en = {
   },
 
   createIssue: {
+    template: {
+      clearMessage: "Your title and description will be emptied.",
+      clear: "Clear",
+      replaceMessage: "Your title and description will be replaced by the template's.",
+      use: "Use template",
+      fromOther: "(text from a template)",
+      needsTriage: "Not set without triage rights on this repository: {0}",
+      fromOwner: "Templates shared by {0}",
+      clearTitle: "Start from a blank issue?",
+      loading: "Looking for this repository's issue templates…",
+      label: "Template",
+      blank: "Blank issue",
+      expectsTemplate: "This repository expects issues to start from a template.",
+      contact: "Elsewhere:",
+      replaceTitle: "Use this template?",
+    },
     tooLong: "The text is {0} characters long; GitHub accepts at most {1}.",
     fromSelection: "Create issue from these lines",
     selectionHint: "Click a line number to select it for an issue; Shift+click to extend",
