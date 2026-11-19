@@ -275,6 +275,16 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(got.complete).toBe(false);
   });
 
+  it("the owner's .github template folder wins over its root one", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("a.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/a.yml": file("name: A"),
+      "me/.github:ISSUE_TEMPLATE": [{ name: "b.yml", path: "ISSUE_TEMPLATE/b.yml", type: "file", size: 9 }],
+      "me/.github:ISSUE_TEMPLATE/b.yml": file("name: B"),
+    }));
+    expect(got.files[0].path).toBe(".github/ISSUE_TEMPLATE/a.yml");
+  });
+
   it("nothing anywhere is an empty list", async () => {
     expect((await devTemplateFiles("me/app", PUBLIC, fake({}))).files).toEqual([]);
   });

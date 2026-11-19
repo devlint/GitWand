@@ -132,35 +132,21 @@ const offersTemplates = computed(() => form.blankForm.value && !form.report.valu
 const templates = computed(() => (offersTemplates.value ? form.templateSet.value?.templates ?? [] : []));
 const contactLinks = computed(() => (offersTemplates.value ? form.templateSet.value?.contactLinks ?? [] : []));
 const blankAllowed = computed(() => form.templateSet.value?.blankAllowed ?? true);
-/** The owner's `.github` repository, when the templates come from it. */
-const fromOwner = computed(() => {
-  const source = form.templateSource.value;
-  return source && source.toLowerCase() !== (form.repo.value ?? "").toLowerCase() ? source : null;
-});
 
-/** A template chosen: confirm first when the title or description was edited. */
+/** A template chosen: the form decides; the component only asks the question. */
 async function onTemplate(e: Event) {
   const select = e.target as HTMLSelectElement;
   if (select.value === "__other") return;
   const wanted = select.value || null;
   // The state decides what the select shows (a cancelled choice leaves it as it was).
   select.value = form.templateId.value ?? (form.templateLeftover.value ? "__other" : "");
-  // The same choice does nothing, except "Blank issue" over a text left by
-  // another target's template: it clears that.
-  if (wanted === form.templateId.value && !(wanted === null && form.templateLeftover.value)) return;
-  if (form.templateEdited.value) {
-    const asked = form.openId.value;
-    const target = form.repo.value;
-    const ok = await askConfirm({
-      title: t(wanted === null ? "createIssue.template.clearTitle" : "createIssue.template.replaceTitle"),
+  await form.chooseTemplate(wanted, (kind) =>
+    askConfirm({
+      title: t(kind === "clear" ? "createIssue.template.clearTitle" : "createIssue.template.replaceTitle"),
       message: t("createIssue.report.replaceEdits"),
       confirmLabel: t("createIssue.report.replace"),
-    });
-    // The answer was about this form and this target's template (another
-    // target may have one at the same path).
-    if (!ok || !form.isOpen.value || form.openId.value !== asked || form.repo.value !== target) return;
-  }
-  form.applyTemplate(wanted);
+    }),
+  );
 }
 
 /** The target's issue list, to see whether a timed-out create went through. */
@@ -288,7 +274,9 @@ function onMilestone(e: Event) {
             <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id" :title="tpl.about">{{ tpl.name }}</option>
           </select>
           <p v-if="templates.length && !blankAllowed" class="ci-status">{{ t("createIssue.template.expectsTemplate") }}</p>
-          <p v-if="templates.length && fromOwner" class="ci-status">{{ t("createIssue.template.fromOwner", fromOwner) }}</p>
+          <p v-if="templates.length && form.templateFromOwner.value" class="ci-status">
+            {{ t("createIssue.template.fromOwner", form.templateFromOwner.value) }}
+          </p>
           <ul v-if="contactLinks.length" class="ci-contacts">
             <li v-for="(l, i) in contactLinks" :key="`${i}:${l.url}`">
               <span class="ci-status">{{ t("createIssue.template.contact") }}</span>

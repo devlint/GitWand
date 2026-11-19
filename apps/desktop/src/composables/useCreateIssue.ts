@@ -189,6 +189,10 @@ export interface CreateIssueApi {
   templateSource: Ref<string | null>;
   /** The text was filled by a template of the target left. */
   templateLeftover: Ref<boolean>;
+  /** The owner's `.github` repository, when the templates come from it. */
+  templateFromOwner: ComputedRef<string | null>;
+  /** A template chosen in the picker, `confirm` asked first when it would replace edits. */
+  chooseTemplate(wanted: string | null, confirm: (kind: "replace" | "clear") => Promise<boolean>): Promise<void>;
 }
 
 /** How long a target's templates are kept (each read is up to 20 requests). */
@@ -344,6 +348,10 @@ export function useCreateIssue(deps: {
   const templateSource = ref<string | null>(null);
   /** The text comes from a template of the target left: no template is chosen, yet it is not blank. */
   const templateLeftover = ref(false);
+  /** The template the leftover text came from, to restore on the way back to its repository. */
+  let leftoverFrom: { repo: string; id: string; title: string; body: string; picks: { labels: string[]; assignees: string[] } } | null = null;
+  /** The applied template's own labels and people (all it names). */
+  let appliedPicks = { labels: [] as string[], assignees: [] as string[] };
   const assigneeOptions = ref<ReviewerCandidate[]>([]);
   const milestoneOptions = ref<RepoMilestone[]>([]);
   const submitting = ref(false);
@@ -493,8 +501,9 @@ export function useCreateIssue(deps: {
   function loadTemplates(target: string) {
     const cwd = formCwd;
     if (!blankForm.value || !cwd) return;
-    // Per repository: another worktree, another folder of it, reads none.
-    const key = target.toLowerCase();
+    // Per repository and host (its page URL): another worktree of it reads
+    // none; the same owner/repo on another host is another repository.
+    const key = (targets.value.find((x) => x.repo === target)?.htmlUrl ?? target).toLowerCase();
     const cached = templateCache.get(key);
     if (cached && Date.now() - cached.at >= TEMPLATE_CACHE_MS) templateCache.delete(key);
     else if (cached) {
@@ -566,7 +575,7 @@ export function useCreateIssue(deps: {
     // Without case (GitHub's label names and logins), in the target's spelling.
     const grant = (have: Ref<string[]>, key: "labels" | "assignees", offeredNames: string[]) => {
       const offered = new Map(offeredNames.map((x) => [x.toLowerCase(), x]));
-      const now = templatePending[key].filter((x) => offered.has(x.toLowerCase())).map((x) => offered.get(x.toLowerCase())!);
+      const now = [...new Set(templatePending[key].filter((x) => offered.has(x.toLowerCase())).map((x) => offered.get(x.toLowerCase())!))];
       if (!now.length) return;
       templatePending[key] = templatePending[key].filter((x) => !offered.has(x.toLowerCase()));
       const fresh = now.filter((x) => !have.value.includes(x));
@@ -580,6 +589,30 @@ export function useCreateIssue(deps: {
     if (templatePending.labels.length || templatePending.assignees.length) grantTemplateWants();
   });
 
+  /** The owner's `.github` repository, when the templates come from it. */
+  const templateFromOwner = computed(() => {
+    const source = templateSource.value;
+    return source && source.toLowerCase() !== (repo.value ?? "").toLowerCase() ? source : null;
+  });
+
+  /**
+   * A template chosen in the picker: nothing for the same choice (except
+   * "Blank issue" over a leftover text, which clears it); `confirm` first
+   * when what it would replace was edited. An answer that comes after the
+   * form, or its target, changed applies nothing (another target may have a
+   * template at the same path).
+   */
+  async function chooseTemplate(wanted: string | null, confirm: (kind: "replace" | "clear") => Promise<boolean>): Promise<void> {
+    if (wanted === templateId.value && !(wanted === null && templateLeftover.value)) return;
+    if (templateEdited.value) {
+      const asked = openGeneration;
+      const target = repo.value;
+      const ok = await confirm(wanted === null ? "clear" : "replace");
+      if (!ok || !isOpen.value || openGeneration !== asked || repo.value !== target) return;
+    }
+    applyTemplate(wanted);
+  }
+
   function applyTemplate(id: string | null) {
     const chosen = id === null ? null : templateSet.value?.templates.find((x) => x.id === id) ?? null;
     if (id !== null && !chosen) return;
@@ -592,7 +625,9 @@ export function useCreateIssue(deps: {
     assignees.value = assignees.value.filter((a) => !added.assignees.includes(a));
     forgetTemplatePicks();
     templateLeftover.value = false;
-    templatePending = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
+    leftoverFrom = null;
+    appliedPicks = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
+    templatePending = { labels: [...appliedPicks.labels], assignees: [...appliedPicks.assignees] };
     // Only what the target offers (GitHub refuses unknown labels and people),
     // now or once its pickers arrive.
     grantTemplateWants();
@@ -633,6 +668,8 @@ export function useCreateIssue(deps: {
     forgetTemplatePicks();
     templateSource.value = null;
     templateLeftover.value = false;
+    leftoverFrom = null;
+    appliedPicks = { labels: [], assignees: [] };
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = DEFAULT_SECRETS_OPTIONS;
@@ -888,6 +925,7 @@ export function useCreateIssue(deps: {
     const target = targets.value.find((t) => t.repo === next);
     if (!target?.hasIssues) return;
     generation++;
+    const from = repo.value;
     repo.value = next;
     // Labels, people and milestones belong to one repository.
     clearPickers();
@@ -895,7 +933,9 @@ export function useCreateIssue(deps: {
     // The text a template filled stays, now the user's (so "Blank issue" asks
     // before clearing it); the choice, and the labels and people it wanted,
     // were about the other target.
-    if (templateId.value !== null) {
+    if (templateId.value !== null && from) {
+      // Remembered, to restore on the way back if the text is untouched.
+      leftoverFrom = { repo: from, id: templateId.value, title: title.value, body: body.value, picks: appliedPicks };
       initial.value = { title: "", body: "" };
       // The select then says so ("from the other repository"), and "Blank
       // issue" can clear it.
@@ -904,6 +944,16 @@ export function useCreateIssue(deps: {
     templateId.value = null;
     // Its labels and people were the other target's (clearPickers dropped them).
     forgetTemplatePicks();
+    const back = leftoverFrom;
+    if (back && back.repo === next && title.value === back.title && body.value === back.body) {
+      // Back where the template came from, its text untouched: chosen again.
+      templateId.value = back.id;
+      initial.value = { title: back.title, body: back.body };
+      templateLeftover.value = false;
+      appliedPicks = back.picks;
+      templatePending = { labels: [...back.picks.labels], assignees: [...back.picks.assignees] };
+      leftoverFrom = null;
+    }
     loadTemplates(next);
   }
 
@@ -1012,5 +1062,7 @@ export function useCreateIssue(deps: {
     templateEdited,
     templateSource,
     templateLeftover,
+    templateFromOwner,
+    chooseTemplate,
   };
 }

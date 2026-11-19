@@ -718,9 +718,7 @@ type IsPublic<'a> = &'a (dyn Fn(&str) -> Result<bool, String> + Sync);
 /// A GitHub error that means "not there" (REST: `(404)`, gh: `HTTP 404`), and
 /// not a failure that merely mentions 404 (a repository named `error-404`).
 pub(crate) fn is_not_found(e: &str) -> bool {
-    // Anchored on the status, as `checks_unavailable` does: a path echoed in
-    // gh's message (`crash (404).md`) is not a 404.
-    e.starts_with("GitHub API error (404)") || e.contains("(HTTP 404)")
+    super::github_api::api_error_has_status(e, 404)
 }
 
 /// `path` with each segment percent-encoded: a file named `bug report.md` or
@@ -859,8 +857,23 @@ struct RepoTemplates {
 /// Up to 20 templates by name, plus `config.yml`. The folder listing failing
 /// fails; a file that cannot be read is skipped.
 fn templates_in(nwo: &str, dirs: &[&str], get: ContentsGet) -> Result<RepoTemplates, String> {
-    for dir in dirs {
-        let Some(serde_json::Value::Array(items)) = get(nwo, dir)? else {
+    // Several folders (an owner's `.github` repository) are listed at once;
+    // the first, in order, that holds a template-like file is the answer.
+    let listings: Vec<Result<Option<serde_json::Value>, String>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = dirs
+            .iter()
+            .map(|dir| scope.spawn(move || get(nwo, dir)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join()
+                    .unwrap_or_else(|_| Err("template read panicked".into()))
+            })
+            .collect()
+    });
+    for listing in listings {
+        let Some(serde_json::Value::Array(items)) = listing? else {
             continue;
         };
         // Every template-like file listed counts (GitHub looks no further);
@@ -876,7 +889,9 @@ fn templates_in(nwo: &str, dirs: &[&str], get: ContentsGet) -> Result<RepoTempla
                     .any(|ext| lower.ends_with(ext))
             })
             .collect();
-        let present = !listed.is_empty();
+        if listed.is_empty() {
+            continue;
+        }
         let mut named: Vec<(String, String)> = listed
             .into_iter()
             .filter(|i| small_enough(i))
@@ -887,28 +902,25 @@ fn templates_in(nwo: &str, dirs: &[&str], get: ContentsGet) -> Result<RepoTempla
             })
             .collect();
         named.sort();
-        let mut kept: Vec<(String, String)> = named
-            .iter()
-            .filter(|(_, p)| is_config_path(p))
-            .cloned()
+        // In name order: `config.yml` always, templates up to the cap.
+        let mut templates = 0;
+        let paths: Vec<String> = named
+            .into_iter()
+            .filter(|(_, p)| {
+                if is_config_path(p) {
+                    return true;
+                }
+                templates += 1;
+                templates <= MAX_TEMPLATES
+            })
+            .map(|(_, p)| p)
             .collect();
-        kept.extend(
-            named
-                .iter()
-                .filter(|(_, p)| !is_config_path(p))
-                .take(MAX_TEMPLATES)
-                .cloned(),
-        );
-        kept.sort();
-        if present {
-            let paths: Vec<String> = kept.into_iter().map(|(_, p)| p).collect();
-            let (files, complete) = read_files(nwo, &paths, get);
-            return Ok(RepoTemplates {
-                files,
-                complete,
-                present,
-            });
-        }
+        let (files, complete) = read_files(nwo, &paths, get);
+        return Ok(RepoTemplates {
+            files,
+            complete,
+            present: true,
+        });
     }
     let (single, complete, present) = single_template(nwo, get);
     Ok(RepoTemplates {
@@ -966,12 +978,13 @@ pub(crate) fn template_files(
     }
 }
 
-/// The issue templates of a target (#301): what its blank form offers.
 /// How long an owner `.github` repository's answers are kept.
 const OWNER_READ_TTL: Duration = Duration::from_secs(5 * 60);
 
-/// `read` for `(nwo, path)`, kept for 5 minutes when `nwo` is an owner's
+/// `read` for `(repo, path)`, kept for 5 minutes when `repo` is an owner's
 /// `.github` repository (successful answers only; a failure is retried).
+/// `repo` is host-qualified (`GhRepo::selector`): github.com's `acme/.github`
+/// is not an Enterprise host's.
 fn owner_read(
     nwo: &str,
     path: &str,
@@ -997,6 +1010,7 @@ fn owner_read(
     Ok(answer)
 }
 
+/// The issue templates of a target (#301): what its blank form offers.
 #[tauri::command]
 pub(crate) async fn gh_issue_templates(
     cwd: String,
@@ -1024,10 +1038,12 @@ pub(crate) async fn gh_issue_templates(
         // that owner: its answers are kept 5 minutes (each repository without
         // templates falls back to it).
         let get = |nwo: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
-            owner_read(nwo, path, || get_uncached(nwo, path))
+            owner_read(&r.sibling(nwo.to_string()).selector(), path, || {
+                get_uncached(nwo, path)
+            })
         };
         let is_public = |nwo: &str| -> Result<bool, String> {
-            let answer = owner_read(nwo, "#repo", || {
+            let answer = owner_read(&r.sibling(nwo.to_string()).selector(), "#repo", || {
                 let on = r.sibling(nwo.to_string());
                 match api_get(&cwd, token, &on, &format!("repos/{nwo}")) {
                     Ok(v) => Ok(Some(v)),
@@ -1435,6 +1451,36 @@ mod tests {
         .unwrap();
         assert!(got.files.is_empty());
         assert!(!got.complete);
+    }
+
+    #[test]
+    fn the_owners_dot_github_template_folder_wins_over_its_root_one() {
+        let got = template_files(
+            "me/app",
+            &PUBLIC,
+            &fake(vec![
+                ("me/.github", ".github/ISSUE_TEMPLATE", json!([entry("a.yml", 9)])),
+                ("me/.github", ".github/ISSUE_TEMPLATE/a.yml", file("name: A")),
+                ("me/.github", "ISSUE_TEMPLATE", json!([{ "name": "b.yml", "path": "ISSUE_TEMPLATE/b.yml", "type": "file", "size": 9 }])),
+                ("me/.github", "ISSUE_TEMPLATE/b.yml", file("name: B")),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(got.files[0].path, ".github/ISSUE_TEMPLATE/a.yml");
+    }
+
+    #[test]
+    fn owner_reads_are_kept_per_host() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = AtomicUsize::new(0);
+        let read = || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(json!({ "private": false })))
+        };
+        owner_read("test-host-a/acme/.github", "#repo", read).unwrap();
+        owner_read("test-host-b/acme/.github", "#repo", read).unwrap();
+        owner_read("test-host-a/acme/.github", "#repo", read).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[test]

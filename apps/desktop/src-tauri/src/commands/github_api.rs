@@ -138,11 +138,16 @@ fn mark_restricted(cwd: &str) {
 /// 403)`). Not a rate limit (GitHub answers those with 403 too) and not an
 /// organization's OAuth app restriction, which `with_rest` retries through gh.
 pub(crate) fn checks_unavailable(err: &str) -> bool {
-    let code = ["403", "404"].iter().any(|c| {
-        err.starts_with(&format!("GitHub API error ({})", c))
-            || err.contains(&format!("(HTTP {})", c))
-    });
+    let code = [403, 404].iter().any(|&c| api_error_has_status(err, c));
     code && !err.to_lowercase().contains("rate limit") && !is_oauth_restricted(err)
+}
+
+/// Whether a GitHub error carries HTTP status `code`, in the REST format
+/// (`GitHub API error (404): …`) or gh's (`… (HTTP 404)`); anchored on the
+/// status, so a path echoed in the message (`crash (404).md`) does not count.
+pub(crate) fn api_error_has_status(err: &str, code: u16) -> bool {
+    err.starts_with(&format!("GitHub API error ({code})"))
+        || err.contains(&format!("(HTTP {code})"))
 }
 
 /// True for GitHub's 403 "organization has enabled OAuth App access
@@ -3129,7 +3134,24 @@ mod tests {
 
 #[cfg(test)]
 mod checks_unavailable_tests {
-    use super::checks_unavailable;
+    use super::{api_error_has_status, checks_unavailable};
+
+    #[test]
+    fn an_api_error_status_is_read_from_both_formats() {
+        assert!(api_error_has_status(
+            "GitHub API error (404): Not Found",
+            404
+        ));
+        assert!(api_error_has_status("gh: Not Found (HTTP 404)", 404));
+        assert!(!api_error_has_status(
+            "gh api GET repos/o/r/contents/crash (404).md: HTTP 502",
+            404
+        ));
+        assert!(!api_error_has_status(
+            "GitHub API error (403): Forbidden",
+            404
+        ));
+    }
 
     #[test]
     fn forbidden_or_not_found_means_no_checks_to_show() {

@@ -193,6 +193,70 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     expect(form.templateLeftover.value).toBe(false);
   });
 
+  it("a template listing a label twice, in two cases, adds it once", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: "---\nname: X\nlabels: bug, Bug\n---\nb" }] });
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    expect(form.labels.value).toEqual(["bug"]);
+  });
+
+  it("switching back to the template's repository restores the choice", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    form.setRepo("up/app");
+    await flush();
+    form.setRepo("me/app");
+    await flush();
+    expect(form.templateId.value).toBe("a.md");
+    expect(form.templateLeftover.value).toBe(false);
+    expect(form.bodyEdited.value).toBe(false);
+    expect(form.labels.value).toEqual(["bug"]);
+  });
+
+  it("chooseTemplate drops an answer given after the target changed", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
+    await form.open();
+    await flush();
+    form.body.value = "mine";
+    let answer!: (ok: boolean) => void;
+    const pending = form.chooseTemplate("a.md", () => new Promise<boolean>((r) => { answer = r; }));
+    form.setRepo("up/app");
+    answer(true);
+    await pending;
+    expect(form.body.value).toBe("mine");
+  });
+
+  it("templates come from the owner's repository: said by templateFromOwner", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.open();
+    await flush();
+    expect(form.templateFromOwner.value).toBe("me/.github");
+  });
+
+  it("templates are kept per target host: the same owner/repo on another host reads again", async () => {
+    const reads = vi.fn(async () => ({ files: [{ path: "a.md", content: BUG }], complete: true, source: "me/app" }));
+    const targetsFor = (host: string) => ({ targets: [{ ...ORIGIN, htmlUrl: `https://${host}/me/app` }], defaultRepo: "me/app" });
+    let host = "github.com";
+    const provider = {
+      name: "github",
+      issueAvailable: vi.fn(async () => true),
+      issueTargets: vi.fn(async () => targetsFor(host)),
+      listLabels: vi.fn(async () => []), listMilestones: vi.fn(async () => []), listAssignees: vi.fn(async () => []),
+      createIssue: vi.fn(),
+    } as unknown as ForgeProvider;
+    const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: reads });
+    await form.open();
+    await flush();
+    form.close();
+    host = "ghe.acme.com";
+    await form.open();
+    await flush();
+    expect(reads).toHaveBeenCalledTimes(2);
+  });
+
   it("templates are kept per target: another worktree of the same repository reads none", async () => {
     const cwd = ref("/repo");
     const reads = vi.fn(async () => ({ files: [{ path: "a.md", content: BUG }], complete: true, source: "me/app" }));

@@ -34,6 +34,15 @@ describe("parseTemplateSet — Markdown templates", () => {
     expect(set.templates.map((t) => t.name)).toEqual(["ISSUE_TEMPLATE"]);
   });
 
+  it("an owner's root or docs ISSUE_TEMPLATE folder follows the same rules", () => {
+    const set = parseTemplateSet([
+      { path: "ISSUE_TEMPLATE/README.md", content: "# How to file\n" },
+      { path: "docs/ISSUE_TEMPLATE/bug.md", content: "---\nlabels: x\n---\nb" },
+      { path: "ISSUE_TEMPLATE/ok.md", content: "---\nname: Ok\n---\nb" },
+    ], parse);
+    expect(set.templates.map((t) => t.name)).toEqual(["Ok"]);
+  });
+
   it("a Markdown file in the template folder without front matter (a README) is not a template", () => {
     const set = parseTemplateSet([{ path: dir("README.md"), content: "# How to file\n" }], parse);
     expect(set.templates).toEqual([]);

@@ -192,30 +192,33 @@ async function singleTemplate(nwo, get) {
  * whole answer; only without one is a single-template file looked for.
  */
 async function templatesIn(nwo, dirs, get) {
-  for (const dir of dirs) {
-    const items = await get(nwo, dir);
+  // Several folders (an owner's .github repository) are listed at once; the
+  // first, in order, holding a template-like file is the answer.
+  const listings = await Promise.all(dirs.map((dir) => get(nwo, dir)));
+  for (const items of listings) {
     if (!Array.isArray(items)) continue;
     const listed = items.filter((i) => i?.type === "file" && typeof i.name === "string" && /\.(md|ya?ml)$/i.test(i.name));
-    if (listed.length) {
-      const named = listed
-        .filter((i) => smallEnough(i) && typeof i.path === "string")
-        .map((i) => [i.name, i.path])
-        .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
-      const kept = [...named.filter(([, p]) => isConfigPath(p)), ...named.filter(([, p]) => !isConfigPath(p)).slice(0, MAX_TEMPLATES)]
-        .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
-      const files = [];
-      let complete = true;
-      // Six at a time, as Rust; a file that cannot be read is skipped.
-      for (let i = 0; i < kept.length; i += 6) {
-        const read = await Promise.all(kept.slice(i, i + 6).map(async ([, path]) => {
-          const content = decodeContent(await get(nwo, encodePath(path)).catch(() => null));
-          return content === null ? null : { path, content };
-        }));
-        if (read.some((f) => f === null)) complete = false;
-        files.push(...read.filter(Boolean));
-      }
-      return { files, complete, present: true };
+    if (!listed.length) continue;
+    // In name order: config.yml always, templates up to the cap.
+    let templates = 0;
+    const paths = listed
+      .filter((i) => smallEnough(i) && typeof i.path === "string")
+      .map((i) => [i.name, i.path])
+      .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]))
+      .filter(([, p]) => isConfigPath(p) || ++templates <= MAX_TEMPLATES)
+      .map(([, p]) => p);
+    const files = [];
+    let complete = true;
+    // Six at a time, as Rust; a file that cannot be read is skipped.
+    for (let i = 0; i < paths.length; i += 6) {
+      const read = await Promise.all(paths.slice(i, i + 6).map(async (path) => {
+        const content = decodeContent(await get(nwo, encodePath(path)).catch(() => null));
+        return content === null ? null : { path, content };
+      }));
+      if (read.some((f) => f === null)) complete = false;
+      files.push(...read.filter(Boolean));
     }
+    return { files, complete, present: true };
   }
   const [single, complete, present] = await singleTemplate(nwo, get);
   return { files: single ? [single] : [], complete, present };
