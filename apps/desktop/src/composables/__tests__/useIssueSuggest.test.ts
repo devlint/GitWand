@@ -1,0 +1,157 @@
+/**
+ * useIssueSuggest (#301, part 4): `#` in a commit field lists open issues.
+ */
+import { describe, it, expect, vi } from "vitest";
+import type { Issue } from "../../utils/backend";
+import { useIssueSuggest, ISSUE_CACHE_TTL_MS, type IssueSuggestDeps } from "../useIssueSuggest";
+
+function issue(number: number, title: string, updatedAt = "2026-11-10T00:00:00Z", repo = "me/app"): Issue {
+  return { number, title, state: "OPEN", author: "a", assignees: [], labels: [], url: `https://github.com/${repo}/issues/${number}`, createdAt: updatedAt, updatedAt, milestone: "" };
+}
+const ISSUES = [issue(42, "Login fails"), issue(57, "Logout cache", "2026-11-12T00:00:00Z")];
+const flush = async () => { for (let i = 0; i < 3; i++) await Promise.resolve(); };
+const key = (k: string, extra: Partial<KeyboardEvent> = {}) => ({ key: k, shiftKey: false, isComposing: false, ...extra }) as KeyboardEvent;
+
+function setup(over: Partial<IssueSuggestDeps> = {}) {
+  let t = 1_000;
+  let cwd: string | null = "/r";
+  const loadIssues = vi.fn(async (_c: string) => ISSUES);
+  const deps: IssueSuggestDeps = {
+    cwd: () => cwd,
+    loadIssues,
+    pushRepo: async () => "me/app",
+    now: () => t,
+    ...over,
+  };
+  const s = useIssueSuggest(deps);
+  return { s, loadIssues: (over.loadIssues as typeof loadIssues) ?? loadIssues, advance: (ms: number) => { t += ms; }, setCwd: (c: string) => { cwd = c; } };
+}
+
+describe("useIssueSuggest", () => {
+  it("fetches nothing until a # opens the list", () => {
+    const { s, loadIssues } = setup();
+    s.update("abc", 3);
+    expect(loadIssues).not.toHaveBeenCalled();
+    expect(s.open.value).toBe(false);
+  });
+
+  it("shows loading, then rows filtered by the query", async () => {
+    const { s } = setup();
+    s.update("fix #", 5);
+    expect(s.open.value).toBe(true);
+    expect(s.status.value).toBe("loading");
+    await flush();
+    expect(s.status.value).toBe("ready");
+    expect(s.rows.value.map((i) => i.number)).toEqual([57, 42]);
+    s.update("fix #4", 6);
+    expect(s.rows.value.map((i) => i.number)).toEqual([42]);
+  });
+
+  it("fetches once, then again after 60 s", async () => {
+    const { s, loadIssues, advance } = setup();
+    s.update("#", 1);
+    await flush();
+    s.close();
+    s.update("#", 1);
+    await flush();
+    expect(loadIssues).toHaveBeenCalledTimes(1);
+    advance(ISSUE_CACHE_TTL_MS + 1);
+    s.update("#", 1);
+    await flush();
+    expect(loadIssues).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows error and keeps the text on failure", async () => {
+    const { s } = setup({ loadIssues: vi.fn(async () => { throw new Error("offline"); }) });
+    s.update("#", 1);
+    await flush();
+    expect(s.status.value).toBe("error");
+    expect(s.rows.value).toEqual([]);
+    expect(s.keydown(key("Enter"), "#")).toBeNull();
+  });
+
+  it("no list when the forge cannot list issues", () => {
+    const { s } = setup({ loadIssues: vi.fn(() => null) });
+    s.update("#", 1);
+    expect(s.open.value).toBe(false);
+  });
+
+  it("Enter inserts #N, Shift+Enter Fixes #N, Tab like Enter", async () => {
+    const { s } = setup();
+    s.update("fix #lo", 7);
+    await flush();
+    expect(s.keydown(key("Enter"), "fix #lo")).toEqual({ text: "fix #57 ", caret: 8 });
+    expect(s.open.value).toBe(false);
+    s.update("#lo", 3);
+    expect(s.keydown(key("Enter", { shiftKey: true }), "#lo")).toEqual({ text: "Fixes #57 ", caret: 10 });
+    s.update("#lo", 3);
+    expect(s.keydown(key("Tab"), "#lo")).toEqual({ text: "#57 ", caret: 4 });
+  });
+
+  it("arrows move the active row and wrap", async () => {
+    const { s } = setup();
+    s.update("#", 1);
+    await flush();
+    expect(s.keydown(key("ArrowDown"), "#")).toBe("handled");
+    expect(s.active.value).toBe(1);
+    expect(s.keydown(key("ArrowDown"), "#")).toBe("handled");
+    expect(s.active.value).toBe(0);
+    expect(s.keydown(key("ArrowUp"), "#")).toBe("handled");
+    expect(s.active.value).toBe(1);
+    expect(s.keydown(key("Enter"), "#")).toEqual({ text: "#42 ", caret: 4 });
+  });
+
+  it("Escape closes and is handled, even with no row", () => {
+    const { s } = setup();
+    s.update("#", 1);
+    expect(s.keydown(key("Escape"), "#")).toBe("handled");
+    expect(s.open.value).toBe(false);
+    expect(s.keydown(key("Escape"), "#")).toBeNull();
+  });
+
+  it("ignores Enter while composing (IME)", async () => {
+    const { s } = setup();
+    s.update("#", 1);
+    await flush();
+    expect(s.keydown(key("Enter", { isComposing: true }), "#")).toBeNull();
+    expect(s.open.value).toBe(true);
+  });
+
+  it("Enter with no row falls through", () => {
+    const { s } = setup();
+    s.update("#", 1);
+    expect(s.status.value).toBe("loading");
+    expect(s.keydown(key("Enter"), "#")).toBeNull();
+  });
+
+  it("drops a late answer for another repository", async () => {
+    let resolve!: (v: Issue[]) => void;
+    const { s, setCwd } = setup({ loadIssues: vi.fn(() => new Promise<Issue[]>((r) => { resolve = r; })) });
+    s.update("#", 1);
+    setCwd("/other");
+    resolve(ISSUES);
+    await flush();
+    expect(s.rows.value).toEqual([]);
+  });
+
+  it("qualifies issues from another repository", async () => {
+    const { s } = setup({ loadIssues: vi.fn(async () => [issue(4, "Up", undefined, "up/app")]) });
+    s.update("#", 1);
+    await flush();
+    expect(s.keydown(key("Enter"), "#")).toEqual({ text: "up/app#4 ", caret: 9 });
+  });
+
+  it("closes when the caret leaves the token", async () => {
+    const { s } = setup();
+    s.update("ab #12", 6);
+    expect(s.open.value).toBe(true);
+    s.update("ab #12", 2);
+    expect(s.open.value).toBe(false);
+  });
+
+  it("keys pass through when the list is closed", () => {
+    const { s } = setup();
+    expect(s.keydown(key("Enter"), "x")).toBeNull();
+    expect(s.keydown(key("ArrowDown"), "x")).toBeNull();
+  });
+});
