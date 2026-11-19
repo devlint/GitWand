@@ -16,11 +16,14 @@ const issues = [
 const many = (n: number) => Array.from({ length: n }, (_, i) => issue(i + 1, `t${i}`, `2026-11-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z`));
 
 describe("hashTokenAt", () => {
+  it("gives the token's end, past the caret", () => {
+    expect(hashTokenAt("see #123 x", 7)).toEqual({ start: 4, query: "12", end: 8 });
+  });
   it("opens at the start, after a space, a newline or (", () => {
-    expect(hashTokenAt("#", 1)).toEqual({ start: 0, query: "" });
-    expect(hashTokenAt("fix #12", 7)).toEqual({ start: 4, query: "12" });
-    expect(hashTokenAt("a\n#lo", 5)).toEqual({ start: 2, query: "lo" });
-    expect(hashTokenAt("(#4", 3)).toEqual({ start: 1, query: "4" });
+    expect(hashTokenAt("#", 1)).toEqual({ start: 0, query: "", end: 1 });
+    expect(hashTokenAt("fix #12", 7)).toEqual({ start: 4, query: "12", end: 7 });
+    expect(hashTokenAt("a\n#lo", 5)).toEqual({ start: 2, query: "lo", end: 5 });
+    expect(hashTokenAt("(#4", 3)).toEqual({ start: 1, query: "4", end: 3 });
   });
   it("never after a letter or a digit", () => {
     expect(hashTokenAt("C#", 2)).toBeNull();
@@ -31,7 +34,7 @@ describe("hashTokenAt", () => {
     expect(hashTokenAt("#12,", 4)).toBeNull();
     expect(hashTokenAt("see #12.", 8)).toBeNull();
     expect(hashTokenAt("#a/b", 4)).toBeNull();
-    expect(hashTokenAt("#log-in_v2", 10)).toEqual({ start: 0, query: "log-in_v2" });
+    expect(hashTokenAt("#log-in_v2", 10)).toEqual({ start: 0, query: "log-in_v2", end: 10 });
   });
   it("closes on a space after the query, or when the caret is before the #", () => {
     expect(hashTokenAt("#12 x", 5)).toBeNull();
@@ -86,8 +89,12 @@ describe("issueRef", () => {
 });
 
 describe("insertRef", () => {
-  it("replaces #query with the reference and a space", () =>
-    expect(insertRef("fix #lo now", 4, 7, "#42", false)).toEqual({ text: "fix #42  now", caret: 8 }));
+  it("replaces the whole #token, adding a space only when none follows", () => {
+    expect(insertRef("fix #lo now", 4, 7, "#42", false)).toEqual({ text: "fix #42 now", caret: 8 });
+    expect(insertRef("see #123", 4, 8, "#12", false)).toEqual({ text: "see #12 ", caret: 8 });
+    expect(insertRef("#foobar", 0, 7, "#42", false)).toEqual({ text: "#42 ", caret: 4 });
+    expect(insertRef("Fixes # the bug", 6, 7, "#12", false)).toEqual({ text: "Fixes #12 the bug", caret: 10 });
+  });
   it("Fixes form", () => expect(insertRef("#4", 0, 2, "#42", true)).toEqual({ text: "Fixes #42 ", caret: 10 }));
 });
 
@@ -133,6 +140,8 @@ describe("addCreatedIssueToCommit", () => {
   it("falls back to the target repository when the issue has no URL", () =>
     expect(addCreatedIssueToCommit({ url: "", number: 7, repo: "up/app" }, ctx({ description: "" })))
       .toEqual({ status: "added", description: "up/app#7" }));
+  it("no repository open is not a match", () =>
+    expect(addCreatedIssueToCommit(ISSUE7, ctx({ createdIn: "", activeCwd: "" }))).toEqual({ status: "otherRepo" }));
   it("says so after a repository switch", () =>
     expect(addCreatedIssueToCommit(ISSUE7, ctx({ activeCwd: "/other" }))).toEqual({ status: "otherRepo" }));
   it("an issue already cited in another form is not added again", () => {

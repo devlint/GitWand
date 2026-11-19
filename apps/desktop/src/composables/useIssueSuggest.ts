@@ -89,6 +89,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   query: Ref<string>;
   update(text: string, caret: number): void;
   refresh(text: string, caret: number): void;
+  retry(text: string, caret: number): void;
   keydown(e: KeyboardEvent, text: string): Picked | "handled" | null;
   pick(index: number, fixes: boolean, text: string): Picked | null;
   close(): void;
@@ -101,7 +102,9 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   const query = ref("");
   const active = ref(0);
   let start = 0;
-  let caret = 0;
+  let end = 0;
+  /** A `#` was typed while the forge was not known yet: `retry` opens it then. */
+  let missed = false;
   /** The text `update` last read; a different one (set by code) closes the list. */
   let lastText = "";
   /** An arrow chose a row (`armed` explains when Enter and Tab pick). */
@@ -145,7 +148,9 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     const pending = deps.loadIssues(cwd);
     if (!pending) return false;
     const req = ++nextRequest;
-    remember(store, cwd, { at: now(), status: "loading", issues: cached?.issues ?? [], req, slug });
+    // A refresh offers the issues it replaces, never another remote's.
+    const previous = cached?.slug === slug ? cached.issues : [];
+    remember(store, cwd, { at: now(), status: "loading", issues: previous, req, slug });
     // Only the answer to the entry's own request lands: one that an
     // invalidation, an eviction or a newer request replaced would bring back
     // an older list (without the issue just created, say).
@@ -154,7 +159,6 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     };
     // A failed refresh keeps offering the issues it would have replaced
     // (retried after the TTL); with none, the list says it is unavailable.
-    const previous = cached?.slug === slug ? cached.issues : [];
     pending.then(
       (issues) => settle("ready", issues),
       () => settle(previous.length ? "ready" : "error", previous),
@@ -172,14 +176,18 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   function update(text: string, at: number) {
     const token = hashTokenAt(text, at);
     const cwd = deps.cwd();
+    missed = false;
     if (!token || !cwd) return close();
-    if (!ensureLoaded(cwd, !open.value)) return close();
+    if (!ensureLoaded(cwd, !open.value)) {
+      missed = true;
+      return close();
+    }
     if (!open.value || token.query !== query.value) {
       active.value = 0;
       navigated.value = false;
     }
     start = token.start;
-    caret = at;
+    end = token.end;
     lastText = text;
     query.value = token.query;
     open.value = true;
@@ -190,7 +198,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     if (!open.value || !chosen) return null;
     const cwd = deps.cwd();
     const ref = issueRef(chosen.number, repoSlugFromUrl(chosen.url), cwd ? deps.pushRepo(cwd) : null);
-    const out = insertRef(text, start, caret, ref, fixes);
+    const out = insertRef(text, start, end, ref, fixes);
     close();
     return out;
   }
@@ -206,7 +214,8 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     }
     const n = rows.value.length;
     if (n === 0) return null;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    // On a bare `#` (a Markdown heading) the arrows still move through the text.
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && query.value !== "") {
       active.value = (active.value + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
       navigated.value = true;
       return "handled";
@@ -222,12 +231,17 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     if (open.value) update(text, at);
   }
 
+  /** The forge just became known: open the list a typed `#` could not. */
+  function retry(text: string, at: number) {
+    if (missed) update(text, at);
+  }
+
   /** The field's value as rendered: a change no `update` saw closes the list. */
   function sync(text: string) {
     if (open.value && text !== lastText) close();
   }
 
-  return { open, status, rows, active, armed, query, update, refresh, keydown, pick, close, sync };
+  return { open, status, rows, active, armed, query, update, refresh, retry, keydown, pick, close, sync };
 }
 
 export type IssueSuggest = ReturnType<typeof useIssueSuggest>;
@@ -236,6 +250,11 @@ type Field = HTMLInputElement | HTMLTextAreaElement;
 /** Read the `#token` at the field's caret after typing: may open the list. */
 export function refreshIssueSuggest(s: IssueSuggest, el: Field): void {
   s.update(el.value, el.selectionStart ?? el.value.length);
+}
+
+/** The forge just became known: open the list a `#` typed before could not. */
+export function retryIssueSuggest(s: IssueSuggest, el: Field): void {
+  s.retry(el.value, el.selectionStart ?? el.value.length);
 }
 
 /** Follow a caret move (click, caret keys): only an open list is updated. */

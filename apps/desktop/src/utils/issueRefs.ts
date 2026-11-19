@@ -17,16 +17,22 @@ const OPENS_AFTER = /[\s(]/;
  * The `#query` the caret is in, or null. The `#` must start the text or follow
  * whitespace or `(`; the query runs from it to the caret with no whitespace.
  */
-export function hashTokenAt(text: string, caret: number): { start: number; query: string } | null {
+/** A character that continues a `#token`. */
+const TOKEN_CHAR = /[\p{L}\p{N}_-]/u;
+
+export function hashTokenAt(text: string, caret: number): { start: number; query: string; end: number } | null {
   if (caret < 1 || caret > text.length) return null;
   const before = text.slice(0, caret);
   const start = before.lastIndexOf("#");
   if (start < 0) return null;
   const query = before.slice(start + 1);
   // Letters, digits, `_` and `-` only: a space or punctuation (`#12)`, `#12,`, `#12.`) ends it.
-  if (!/^[\p{L}\p{N}_-]*$/u.test(query)) return null;
+  if (![...query].every((c) => TOKEN_CHAR.test(c))) return null;
   if (start > 0 && !OPENS_AFTER.test(text[start - 1])) return null;
-  return { start, query };
+  // The token runs on past the caret (`#12|3`): a pick replaces all of it.
+  let end = caret;
+  while (end < text.length && TOKEN_CHAR.test(text[end])) end++;
+  return { start, query, end };
 }
 
 /**
@@ -68,16 +74,21 @@ export function issueRef(number: number, issueRepo: string | null, pushRepo: str
   return `${issueRepo}#${number}`;
 }
 
-/** Replace `text[start, caret)` (the `#query`) with the reference and a space. */
+/**
+ * Replace `text[start, end)` (the whole `#token`) with the reference, followed
+ * by a space unless one is already there; the caret goes after that space.
+ */
 export function insertRef(
   text: string,
   start: number,
-  caret: number,
+  end: number,
   ref: string,
   fixes: boolean,
 ): { text: string; caret: number } {
-  const inserted = `${fixes ? "Fixes " : ""}${ref} `;
-  return { text: text.slice(0, start) + inserted + text.slice(caret), caret: start + inserted.length };
+  const inserted = `${fixes ? "Fixes " : ""}${ref}`;
+  const rest = text.slice(end);
+  const spaced = /^\s/.test(rest) ? inserted : `${inserted} `;
+  return { text: text.slice(0, start) + spaced + rest, caret: start + inserted.length + 1 };
 }
 
 function escapeRegExp(s: string): string {
@@ -125,7 +136,7 @@ export function addCreatedIssueToCommit(
   issue: { url: string; number: number; repo: string | null },
   ctx: { createdIn: string; activeCwd: string; pushRepo: string | null; summary: string; description: string },
 ): AddToCommit {
-  if (ctx.createdIn !== ctx.activeCwd) return { status: "otherRepo" };
+  if (!ctx.createdIn || ctx.createdIn !== ctx.activeCwd) return { status: "otherRepo" };
   const repo = repoSlugFromUrl(issue.url) ?? issue.repo;
   const ref = issueRef(issue.number, repo, ctx.pushRepo);
   // Already cited in any form: `#N`, `owner/repo#N` or the issue's URL.

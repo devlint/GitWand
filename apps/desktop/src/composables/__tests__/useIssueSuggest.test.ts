@@ -95,15 +95,15 @@ describe("useIssueSuggest", () => {
 
   it("arrows move the active row and wrap", async () => {
     const { s } = setup();
-    s.update("#", 1);
+    s.update("#lo", 3);
     await flush();
-    expect(s.keydown(key("ArrowDown"), "#")).toBe("handled");
+    expect(s.keydown(key("ArrowDown"), "#lo")).toBe("handled");
     expect(s.active.value).toBe(1);
-    expect(s.keydown(key("ArrowDown"), "#")).toBe("handled");
+    expect(s.keydown(key("ArrowDown"), "#lo")).toBe("handled");
     expect(s.active.value).toBe(0);
-    expect(s.keydown(key("ArrowUp"), "#")).toBe("handled");
+    expect(s.keydown(key("ArrowUp"), "#lo")).toBe("handled");
     expect(s.active.value).toBe(1);
-    expect(s.keydown(key("Enter"), "#")).toEqual({ text: "#42 ", caret: 4 });
+    expect(s.keydown(key("Enter"), "#lo")).toEqual({ text: "#42 ", caret: 4 });
   });
 
   it("Escape closes and is handled, even with no row", () => {
@@ -249,6 +249,50 @@ describe("useIssueSuggest", () => {
     expect(s.keydown(key("Enter"), "Tested on #lo")).not.toBeNull();
   });
 
+  it("a bare # leaves the arrows to the text (a Markdown heading)", async () => {
+    const { s } = setup();
+    s.update("#", 1);
+    await flush();
+    expect(s.rows.value.length).toBeGreaterThan(0);
+    expect(s.keydown(key("ArrowUp"), "#")).toBeNull();
+    expect(s.keydown(key("ArrowDown"), "#")).toBeNull();
+  });
+
+  it("picking with the caret inside a token replaces the whole token", async () => {
+    const { s } = setup();
+    s.update("see #423", 6);
+    await flush();
+    s.keydown(key("ArrowDown"), "see #423");
+    expect(s.keydown(key("Enter"), "see #423")).toEqual({ text: "see #42 ", caret: 8 });
+  });
+
+  it("does not offer the old remote's issues while the new one loads", async () => {
+    let push: string | null = "me/app";
+    let resolve!: (v: I[]) => void;
+    const loadIssues = vi.fn().mockResolvedValueOnce(ISSUES).mockImplementation(() => new Promise<I[]>((r) => { resolve = r; }));
+    const { s } = setup({ loadIssues, pushRepo: () => push });
+    s.update("#4", 2);
+    await flush();
+    s.close();
+    push = "me/other";
+    s.update("#4", 2);
+    expect(s.rows.value).toEqual([]);
+    resolve([]);
+  });
+
+  it("retry opens a list missed because the remote was not known yet", async () => {
+    let known = false;
+    const loadIssues = vi.fn((_c: string) => (known ? Promise.resolve(ISSUES) : null));
+    const { s } = setup({ loadIssues });
+    s.retry("#", 1);
+    expect(s.open.value).toBe(false);
+    s.update("#", 1);
+    expect(s.open.value).toBe(false);
+    known = true;
+    s.retry("#", 1);
+    expect(s.open.value).toBe(true);
+  });
+
   it("a typed number never takes Enter or Tab: it already is the reference", async () => {
     const { s } = setup();
     s.update("Fixes #42", 9);
@@ -318,8 +362,6 @@ describe("useIssueSuggest", () => {
     await flush();
     expect(s.keydown(key("Tab"), "#")).toBeNull();
     expect(s.keydown(key("Enter"), "#")).toBeNull();
-    expect(s.keydown(key("ArrowDown"), "#")).toBe("handled");
-    expect(s.keydown(key("Enter"), "#")).toEqual({ text: "#42 ", caret: 4 });
   });
 
   it("drops an answer that started before an invalidation", async () => {

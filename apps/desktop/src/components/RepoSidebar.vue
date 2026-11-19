@@ -28,7 +28,7 @@ import {
 import type { CommitTemplate } from "../composables/useSettings";
 import { gitBranchMerged } from "../utils/backend";
 import IssueSuggestList from "./IssueSuggestList.vue";
-import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, followIssueCaret, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
+import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, followIssueCaret, retryIssueSuggest, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
 import { issueListerFor } from "../composables/issueLister";
 import { remoteSlug } from "../utils/issueRefs";
 import { loadSettings } from "../composables/useSettings";
@@ -472,12 +472,15 @@ function onIssueCaretKeyup(s: IssueSuggest, e: KeyboardEvent) {
 }
 watch(() => props.cwd, () => { summaryIssues.close(); descriptionIssues.close(); });
 // A `#` typed before the remote was known (just after a tab switch) opens
-// its list once it is.
-watch(remoteInfoCwd, () => {
-  const el = document.activeElement;
-  if (el && el === summaryEl.value) refreshIssueSuggest(summaryIssues, summaryEl.value);
-  else if (el && el === descriptionEl.value) refreshIssueSuggest(descriptionIssues, descriptionEl.value);
+// its list once it is; an existing `#12` under the caret does not.
+watch([remoteInfoCwd, remoteInfo], () => {
+  if (summaryEl.value) retryIssueSuggest(summaryIssues, summaryEl.value);
+  if (descriptionEl.value) retryIssueSuggest(descriptionIssues, descriptionEl.value);
 });
+/** Re-read the remote when a commit field gets focus: `git remote set-url` since. */
+function onCommitFieldFocus() {
+  void loadRemoteInfo();
+}
 // A value set by code (cleared after a commit, an AI message…) closes the list.
 watch(() => props.commitSummary, (v) => summaryIssues.sync(v ?? ""));
 watch(() => props.commitDescription, (v) => descriptionIssues.sync(v ?? ""));
@@ -1636,6 +1639,7 @@ function formatActivityDate(dateStr: string): string {
           @keydown="onSummaryKeydown"
           @keyup="onIssueCaretKeyup(summaryIssues, $event)"
           @click="followIssueCaret(summaryIssues, $event.target as HTMLInputElement)"
+          @focus="onCommitFieldFocus"
           @blur="templateSlashOpen = false; summaryIssues.close()"
           :placeholder="t('sidebar.summaryPlaceholder')"
         />
@@ -1714,6 +1718,7 @@ function formatActivityDate(dateStr: string): string {
           @keydown="onDescriptionKeydown"
           @keyup="onIssueCaretKeyup(descriptionIssues, $event)"
           @click="followIssueCaret(descriptionIssues, $event.target as HTMLTextAreaElement)"
+          @focus="onCommitFieldFocus"
           @blur="descriptionIssues.close()"
           :placeholder="t('sidebar.descriptionPlaceholder')"
           rows="4"
