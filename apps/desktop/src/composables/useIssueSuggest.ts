@@ -32,6 +32,8 @@ export interface Entry {
   issues: Issue[];
   /** The request this entry belongs to; an answer for another one is dropped. */
   req: number;
+  /** The pushed repository when fetched: a remote changed since makes it stale. */
+  slug: string | null;
 }
 
 export type Picked = { text: string; caret: number };
@@ -51,10 +53,20 @@ let nextRequest = 0;
 /** The cache the commit fields share for the app's lifetime (#301). */
 export const sharedIssueCache = createIssueCache();
 
-/** Forget `cwd`'s issues (one was just created): the next `#` fetches them again. */
-export function invalidateIssues(cache: IssueCache, cwd: string): void {
-  // The entry (and with it its request id) goes: an answer still in flight is dropped.
-  if (cache.map.delete(cwd)) cache.version.value++;
+/**
+ * Forget the issues of `cwd`, and of every folder holding `repo`'s (another
+ * worktree, a fork listing its parent's): one was just created there. An
+ * answer still in flight goes with its entry, so it is dropped.
+ */
+export function invalidateIssues(cache: IssueCache, target: { cwd?: string; repo?: string | null }): void {
+  const repo = target.repo?.toLowerCase();
+  const holds = (e: Entry) =>
+    !!repo && (e.slug?.toLowerCase() === repo || e.issues.some((i) => repoSlugFromUrl(i.url)?.toLowerCase() === repo));
+  let changed = false;
+  for (const [key, e] of [...cache.map]) {
+    if (key === target.cwd || holds(e)) changed = cache.map.delete(key) || changed;
+  }
+  if (changed) cache.version.value++;
 }
 
 /**
@@ -76,6 +88,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   armed: ComputedRef<boolean>;
   query: Ref<string>;
   update(text: string, caret: number): void;
+  refresh(text: string, caret: number): void;
   keydown(e: KeyboardEvent, text: string): Picked | "handled" | null;
   pick(index: number, fixes: boolean, text: string): Picked | null;
   close(): void;
@@ -101,15 +114,11 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   };
 
   /**
-   * Whether Enter and Tab pick the highlighted row: once an arrow chose it, or
-   * when the typed number is exactly that issue. A word (`#android`) or a bare
-   * `#` is never replaced by an issue nobody chose.
+   * Whether Enter and Tab pick the highlighted row: only once an arrow chose
+   * it. A typed `#12` already is the reference, and a word (`#android`) or a
+   * bare `#` must keep Enter (a newline) and Tab (the next field).
    */
-  const armed = computed(() => {
-    const first = rows.value[0];
-    if (!first) return false;
-    return navigated.value || (/^\d+$/.test(query.value) && String(first.number) === query.value);
-  });
+  const armed = computed(() => navigated.value && rows.value.length > 0);
 
   const status = computed<SuggestStatus>(() => (open.value ? entry()?.status ?? "loading" : "idle"));
   const rows = computed<Issue[]>(() => {
@@ -127,7 +136,8 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     const cached = cache.get(cwd);
     // Within the TTL: a loading entry is in flight (one that never settles is
     // retried after it), a ready one is fresh, an error waits for a reopening.
-    const young = !!cached && now() - cached.at <= ISSUE_CACHE_TTL_MS;
+    const slug = deps.pushRepo(cwd);
+    const young = !!cached && now() - cached.at <= ISSUE_CACHE_TTL_MS && cached.slug === slug;
     if (cached && young && (cached.status !== "error" || !opening)) {
       remember(store, cwd, cached, false);
       return true;
@@ -135,16 +145,19 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     const pending = deps.loadIssues(cwd);
     if (!pending) return false;
     const req = ++nextRequest;
-    remember(store, cwd, { at: now(), status: "loading", issues: cached?.issues ?? [], req });
+    remember(store, cwd, { at: now(), status: "loading", issues: cached?.issues ?? [], req, slug });
     // Only the answer to the entry's own request lands: one that an
     // invalidation, an eviction or a newer request replaced would bring back
     // an older list (without the issue just created, say).
     const settle = (status: "ready" | "error", issues: Issue[]) => {
-      if (cache.get(cwd)?.req === req) remember(store, cwd, { at: now(), status, issues, req });
+      if (cache.get(cwd)?.req === req) remember(store, cwd, { at: now(), status, issues, req, slug });
     };
+    // A failed refresh keeps offering the issues it would have replaced
+    // (retried after the TTL); with none, the list says it is unavailable.
+    const previous = cached?.slug === slug ? cached.issues : [];
     pending.then(
       (issues) => settle("ready", issues),
-      () => settle("error", []),
+      () => settle(previous.length ? "ready" : "error", previous),
     );
     return true;
   }
@@ -204,20 +217,30 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     return null;
   }
 
+  /** A caret move (click, arrows): follows an open list, never opens one. */
+  function refresh(text: string, at: number) {
+    if (open.value) update(text, at);
+  }
+
   /** The field's value as rendered: a change no `update` saw closes the list. */
   function sync(text: string) {
     if (open.value && text !== lastText) close();
   }
 
-  return { open, status, rows, active, armed, query, update, keydown, pick, close, sync };
+  return { open, status, rows, active, armed, query, update, refresh, keydown, pick, close, sync };
 }
 
 export type IssueSuggest = ReturnType<typeof useIssueSuggest>;
 type Field = HTMLInputElement | HTMLTextAreaElement;
 
-/** Re-read the `#token` at the field's caret (on input, click, caret keys). */
+/** Read the `#token` at the field's caret after typing: may open the list. */
 export function refreshIssueSuggest(s: IssueSuggest, el: Field): void {
   s.update(el.value, el.selectionStart ?? el.value.length);
+}
+
+/** Follow a caret move (click, caret keys): only an open list is updated. */
+export function followIssueCaret(s: IssueSuggest, el: Field): void {
+  s.refresh(el.value, el.selectionStart ?? el.value.length);
 }
 
 /** Put the caret at `at` once the new value is rendered. */
@@ -235,7 +258,7 @@ export function handleIssueKeydown(s: IssueSuggest, e: KeyboardEvent, el: Field,
   if (!s.open.value) return false;
   // The caret may have moved with no refresh (Cmd+Right, PageDown, a drag):
   // re-read it, so a list left behind never takes the key.
-  refreshIssueSuggest(s, el);
+  followIssueCaret(s, el);
   const out = s.keydown(e, el.value);
   if (out === null) return false;
   e.preventDefault();

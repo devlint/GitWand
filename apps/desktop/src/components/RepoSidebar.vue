@@ -28,7 +28,7 @@ import {
 import type { CommitTemplate } from "../composables/useSettings";
 import { gitBranchMerged } from "../utils/backend";
 import IssueSuggestList from "./IssueSuggestList.vue";
-import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
+import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, followIssueCaret, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
 import { issueListerFor } from "../composables/issueLister";
 import { remoteSlug } from "../utils/issueRefs";
 import { loadSettings } from "../composables/useSettings";
@@ -468,9 +468,16 @@ const writeDescription = (text: string) => emit("update:commitDescription", text
 /** Caret keys and clicks move the caret without an input event. */
 const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
 function onIssueCaretKeyup(s: IssueSuggest, e: KeyboardEvent) {
-  if (CARET_KEYS.has(e.key)) refreshIssueSuggest(s, e.target as HTMLInputElement | HTMLTextAreaElement);
+  if (CARET_KEYS.has(e.key)) followIssueCaret(s, e.target as HTMLInputElement | HTMLTextAreaElement);
 }
 watch(() => props.cwd, () => { summaryIssues.close(); descriptionIssues.close(); });
+// A `#` typed before the remote was known (just after a tab switch) opens
+// its list once it is.
+watch(remoteInfoCwd, () => {
+  const el = document.activeElement;
+  if (el && el === summaryEl.value) refreshIssueSuggest(summaryIssues, summaryEl.value);
+  else if (el && el === descriptionEl.value) refreshIssueSuggest(descriptionIssues, descriptionEl.value);
+});
 // A value set by code (cleared after a commit, an AI message…) closes the list.
 watch(() => props.commitSummary, (v) => summaryIssues.sync(v ?? ""));
 watch(() => props.commitDescription, (v) => descriptionIssues.sync(v ?? ""));
@@ -1619,7 +1626,7 @@ function formatActivityDate(dateStr: string): string {
           ref="summaryEl"
           aria-autocomplete="list"
           :aria-expanded="summaryIssues.open.value"
-          aria-controls="commit-summary-issues"
+          :aria-controls="summaryIssues.open.value ? 'commit-summary-issues' : undefined"
           :aria-activedescendant="activeIssueId(summaryIssues, 'commit-summary-issues')"
           class="commit-summary mono"
           :class="{ 'commit-summary--ai': ai.isAvailable.value }"
@@ -1628,7 +1635,7 @@ function formatActivityDate(dateStr: string): string {
           @input="onSummaryInput"
           @keydown="onSummaryKeydown"
           @keyup="onIssueCaretKeyup(summaryIssues, $event)"
-          @click="refreshIssueSuggest(summaryIssues, $event.target as HTMLInputElement)"
+          @click="followIssueCaret(summaryIssues, $event.target as HTMLInputElement)"
           @blur="templateSlashOpen = false; summaryIssues.close()"
           :placeholder="t('sidebar.summaryPlaceholder')"
         />
@@ -1699,14 +1706,14 @@ function formatActivityDate(dateStr: string): string {
           ref="descriptionEl"
           aria-autocomplete="list"
           :aria-expanded="descriptionIssues.open.value"
-          aria-controls="commit-description-issues"
+          :aria-controls="descriptionIssues.open.value ? 'commit-description-issues' : undefined"
           :aria-activedescendant="activeIssueId(descriptionIssues, 'commit-description-issues')"
           class="commit-description mono"
           :value="commitDescription"
           @input="onDescriptionInput"
           @keydown="onDescriptionKeydown"
           @keyup="onIssueCaretKeyup(descriptionIssues, $event)"
-          @click="refreshIssueSuggest(descriptionIssues, $event.target as HTMLTextAreaElement)"
+          @click="followIssueCaret(descriptionIssues, $event.target as HTMLTextAreaElement)"
           @blur="descriptionIssues.close()"
           :placeholder="t('sidebar.descriptionPlaceholder')"
           rows="4"

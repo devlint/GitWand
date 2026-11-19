@@ -135,6 +135,10 @@ describe("addCreatedIssueToCommit", () => {
       .toEqual({ status: "added", description: "up/app#7" }));
   it("says so after a repository switch", () =>
     expect(addCreatedIssueToCommit(ISSUE7, ctx({ activeCwd: "/other" }))).toEqual({ status: "otherRepo" }));
+  it("an issue already cited in another form is not added again", () => {
+    expect(addCreatedIssueToCommit(ISSUE7, ctx({ description: "see me/app#7" }))).toEqual({ status: "alreadyCited" });
+    expect(addCreatedIssueToCommit(ISSUE7, ctx({ description: "see https://github.com/me/app/issues/7" }))).toEqual({ status: "alreadyCited" });
+  });
   it("says so when already referenced", () =>
     expect(addCreatedIssueToCommit(ISSUE7, ctx({ summary: "Fix #7" }))).toEqual({ status: "alreadyCited" }));
 });

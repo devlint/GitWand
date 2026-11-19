@@ -89,7 +89,8 @@ import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import { useIssuePanel, ISSUE_PANEL_KEY } from "./composables/useIssuePanel";
 import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
-import { addCreatedIssueToCommit, remoteSlug } from "./utils/issueRefs";
+import { remoteSlug } from "./utils/issueRefs";
+import { createdIssueToast } from "./composables/createdIssueToast";
 import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
@@ -512,42 +513,19 @@ provide(PR_PANEL_KEY, prPanel);
 const createIssue = useCreateIssue({
   cwd: computed(() => repoFolderPath.value ?? null),
   provider: ref(githubProvider),
-  onCreated: (issue, { toGitwand, repo, cwd: createdIn }) => {
-    const open = issue.url ? { label: t("createIssue.open"), url: issue.url } : undefined;
-    // A resolver report on GitWand's public repository is never cited in the
-    // user's commit: GitHub would show that commit, and its repository, on it.
-    if (toGitwand) {
-      showDetailToast(t("createIssue.created", issue.number), null, 8000, open);
-      return;
-    }
-    // "Add to commit" (#301) writes into the repository the issue was filed
-    // from, and only while it is still the active one.
-    // The new issue belongs in the `#` list at once, not after the cache's minute.
-    if (createdIn) invalidateIssues(sharedIssueCache, createdIn);
+  onCreated: (issue, ctx) => {
+    const toast = createdIssueToast(issue, ctx, {
+      t,
+      activeCwd: () => repoFolderPath.value ?? "",
+      message: () => ({ summary: commitSummary.value, description: commitDescription.value }),
+      setDescription: (d) => { commitDescription.value = d; },
+      readPushRepo: (cwd) => gitRemoteInfo(cwd).then(remoteSlug),
+      invalidate: (target) => invalidateIssues(sharedIssueCache, target),
+      notify: (title) => showDetailToast(title, null, 4000),
+    });
     showDetailToast(
-      t("createIssue.created", issue.number),
-      null,
-      8000,
-      open,
-      {
-        label: t("createIssue.addToCommit"),
-        run: () => {
-          // The remote is read only if the button is used.
-          const pushRepo = createdIn ? gitRemoteInfo(createdIn).then(remoteSlug, () => null) : Promise.resolve(null);
-          void pushRepo.then((push) => {
-            const out = addCreatedIssueToCommit(
-              { url: issue.url, number: issue.number, repo },
-              {
-                createdIn, activeCwd: repoFolderPath.value ?? "", pushRepo: push,
-                summary: commitSummary.value, description: commitDescription.value,
-              },
-            );
-            // Never a silent click: say why nothing was added.
-            if (out.status === "added") commitDescription.value = out.description;
-            else showDetailToast(t(out.status === "otherRepo" ? "createIssue.addToCommitOtherRepo" : "createIssue.addToCommitAlready"), null, 4000);
-          });
-        },
-      },
+      toast.title, null, 8000, toast.link,
+      toast.action ? { label: toast.action.label, run: () => { void toast.action!.run(); } } : undefined,
     );
   },
   report: {

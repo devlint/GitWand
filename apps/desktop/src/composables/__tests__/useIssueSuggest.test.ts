@@ -79,14 +79,18 @@ describe("useIssueSuggest", () => {
 
   it("Enter inserts #N, Shift+Enter Fixes #N, Tab like Enter", async () => {
     const { s } = setup();
-    s.update("fix #57", 7);
+    s.update("fix #lo", 7);
     await flush();
-    expect(s.keydown(key("Enter"), "fix #57")).toEqual({ text: "fix #57 ", caret: 8 });
+    s.keydown(key("ArrowDown"), "fix #lo");
+    s.keydown(key("ArrowUp"), "fix #lo");
+    expect(s.keydown(key("Enter"), "fix #lo")).toEqual({ text: "fix #57 ", caret: 8 });
     expect(s.open.value).toBe(false);
-    s.update("#57", 3);
-    expect(s.keydown(key("Enter", { shiftKey: true }), "#57")).toEqual({ text: "Fixes #57 ", caret: 10 });
-    s.update("#57", 3);
-    expect(s.keydown(key("Tab"), "#57")).toEqual({ text: "#57 ", caret: 4 });
+    s.update("#lo", 3);
+    s.keydown(key("ArrowDown"), "#lo"); s.keydown(key("ArrowUp"), "#lo");
+    expect(s.keydown(key("Enter", { shiftKey: true }), "#lo")).toEqual({ text: "Fixes #57 ", caret: 10 });
+    s.update("#lo", 3);
+    s.keydown(key("ArrowDown"), "#lo"); s.keydown(key("ArrowUp"), "#lo");
+    expect(s.keydown(key("Tab"), "#lo")).toEqual({ text: "#57 ", caret: 4 });
   });
 
   it("arrows move the active row and wrap", async () => {
@@ -139,6 +143,7 @@ describe("useIssueSuggest", () => {
     const { s } = setup({ loadIssues: vi.fn(async () => [issue(4, "Up", undefined, "up/app")]) });
     s.update("#4", 2);
     await flush();
+    s.keydown(key("ArrowDown"), "#4");
     expect(s.keydown(key("Enter"), "#4")).toEqual({ text: "up/app#4 ", caret: 9 });
   });
 
@@ -177,6 +182,7 @@ describe("useIssueSuggest", () => {
     s.update("#57", 3);
     expect(loadIssues).toHaveBeenCalledTimes(2);
     expect(s.rows.value.map((i) => i.number)).toEqual([57]);
+    s.keydown(key("ArrowDown"), "#57");
     expect(s.keydown(key("Enter"), "#57")).toEqual({ text: "#57 ", caret: 4 });
   });
 
@@ -212,7 +218,7 @@ describe("useIssueSuggest", () => {
     s.update("#", 1);
     await flush();
     s.close();
-    invalidateIssues(cache, "/r");
+    invalidateIssues(cache, { cwd: "/r" });
     s.update("#", 1);
     expect(loadIssues).toHaveBeenCalledTimes(2);
   });
@@ -243,21 +249,66 @@ describe("useIssueSuggest", () => {
     expect(s.keydown(key("Enter"), "Tested on #lo")).not.toBeNull();
   });
 
-  it("a typed number takes Enter only when that exact issue is listed", async () => {
+  it("a typed number never takes Enter or Tab: it already is the reference", async () => {
     const { s } = setup();
-    s.update("#4", 2);
+    s.update("Fixes #42", 9);
     await flush();
-    expect(s.rows.value.map((i) => i.number)).toEqual([42]);
-    expect(s.keydown(key("Enter"), "#4")).toBeNull();
-    s.update("#42", 3);
-    expect(s.armed.value).toBe(true);
-    expect(s.keydown(key("Enter"), "#42")).toEqual({ text: "#42 ", caret: 4 });
+    expect(s.armed.value).toBe(false);
+    expect(s.keydown(key("Enter"), "Fixes #42")).toBeNull();
+    expect(s.keydown(key("Tab"), "Fixes #42")).toBeNull();
+  });
+
+  it("refresh only follows an open list: a caret landing after a # does not open it", async () => {
+    const { s } = setup();
+    s.refresh("see #3", 6);
+    expect(s.open.value).toBe(false);
+    s.update("see #3", 6);
+    expect(s.open.value).toBe(true);
+    s.refresh("see #3", 2);
+    expect(s.open.value).toBe(false);
+  });
+
+  it("a failed refresh keeps the issues it would have replaced", async () => {
+    const loadIssues = vi.fn().mockResolvedValueOnce(ISSUES).mockRejectedValue(new Error("offline"));
+    const { s, advance } = setup({ loadIssues });
+    s.update("#", 1);
+    await flush();
+    s.close();
+    advance(ISSUE_CACHE_TTL_MS + 1);
+    s.update("#", 1);
+    await flush();
+    expect(s.status.value).toBe("ready");
+    expect(s.rows.value).toHaveLength(2);
+  });
+
+  it("a remote that changed since the fetch is fetched again", async () => {
+    let push: string | null = "me/app";
+    const { s, loadIssues } = setup({ pushRepo: () => push });
+    s.update("#", 1);
+    await flush();
+    s.close();
+    push = "me/other";
+    s.update("#", 1);
+    expect(loadIssues).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidating a repository clears every folder holding its issues (worktrees)", async () => {
+    const cache = createIssueCache();
+    let cwd = "/main";
+    const loadIssues = vi.fn(async () => ISSUES);
+    const s = useIssueSuggest({ cwd: () => cwd, loadIssues, pushRepo: () => "me/app", cache });
+    s.update("#", 1); await flush(); s.close();
+    cwd = "/wt";
+    s.update("#", 1); await flush(); s.close();
+    invalidateIssues(cache, { cwd: "/main", repo: "me/app" });
+    expect(cache.map.size).toBe(0);
   });
 
   it("Shift+Tab never picks", async () => {
     const { s } = setup();
     s.update("#42", 3);
     await flush();
+    s.keydown(key("ArrowDown"), "#42");
     expect(s.keydown(key("Tab", { shiftKey: true }), "#42")).toBeNull();
   });
 
@@ -277,7 +328,7 @@ describe("useIssueSuggest", () => {
     const loadIssues = vi.fn(() => new Promise<I[]>((r) => { resolve = r; }));
     const s = useIssueSuggest({ cwd: () => "/r", loadIssues, pushRepo: () => null, cache });
     s.update("#", 1);
-    invalidateIssues(cache, "/r");
+    invalidateIssues(cache, { cwd: "/r" });
     resolve(ISSUES);
     await flush();
     expect(cache.map.get("/r")?.status).not.toBe("ready");

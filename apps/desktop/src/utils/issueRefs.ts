@@ -126,7 +126,10 @@ export function addCreatedIssueToCommit(
   ctx: { createdIn: string; activeCwd: string; pushRepo: string | null; summary: string; description: string },
 ): AddToCommit {
   if (ctx.createdIn !== ctx.activeCwd) return { status: "otherRepo" };
-  const ref = issueRef(issue.number, repoSlugFromUrl(issue.url) ?? issue.repo, ctx.pushRepo);
-  const description = appendRef(ctx.description, ref, ctx.summary);
-  return description === ctx.description ? { status: "alreadyCited" } : { status: "added", description };
+  const repo = repoSlugFromUrl(issue.url) ?? issue.repo;
+  const ref = issueRef(issue.number, repo, ctx.pushRepo);
+  // Already cited in any form: `#N`, `owner/repo#N` or the issue's URL.
+  const forms = [ref, repo ? `${repo}#${issue.number}` : null, issue.url || null].filter((f): f is string => !!f);
+  if (forms.some((f) => hasRef(ctx.summary, f) || hasRef(ctx.description, f))) return { status: "alreadyCited" };
+  return { status: "added", description: appendRef(ctx.description, ref, ctx.summary) };
 }
