@@ -32,8 +32,12 @@ export function hashTokenAt(text: string, caret: number): { start: number; query
   if (![...query].every((c) => TOKEN_CHAR.test(c))) return null;
   if (start > 0 && !OPENS_AFTER.test(text[start - 1])) return null;
   // The token runs on past the caret (`#12|3`): a pick replaces all of it.
+  // By code point: a letter outside the BMP is two UTF-16 units.
   let end = caret;
-  while (end < text.length && TOKEN_CHAR.test(text[end])) end++;
+  for (const c of text.slice(caret)) {
+    if (!TOKEN_CHAR.test(c)) break;
+    end += c.length;
+  }
   return { start, query, end };
 }
 
@@ -110,7 +114,7 @@ export function hasRef(text: string, ref: string): boolean {
 const TRAILER = /^[A-Za-z][\w-]*: \S/;
 
 /** A paragraph is a trailer block only with one of these (`Note: …` alone is prose). */
-const KNOWN_TRAILER = /^(Signed-off-by|Co-authored-by|Reviewed-by|Acked-by|Tested-by|Reported-by|Suggested-by|Helped-by|Cc|Change-Id):/i;
+const KNOWN_TRAILER = /^(Signed-off-by|Co-authored-by|Reviewed-by|Acked-by|Tested-by|Reported-by|Suggested-by|Helped-by|Cc|Change-Id|Fixes|Closes|Resolves|Refs|Issue|See-also):/i;
 
 /**
  * The description with `ref` as a paragraph of its own (a closing fence, a

@@ -2,7 +2,7 @@
 import { computed, ref, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
 import { TOGGLE_GIT_TREE_KEY, COMMIT_MESSAGE_SINK_KEY, OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
-import { gitRemoteInfo, getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
+import { getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
 import PrListSidebar from "./PrListSidebar.vue";
 import ScopePicker from "./ScopePicker.vue";
 import TrackedIgnoredNotice from "./TrackedIgnoredNotice.vue";
@@ -28,9 +28,9 @@ import {
 import type { CommitTemplate } from "../composables/useSettings";
 import { gitBranchMerged } from "../utils/backend";
 import IssueSuggestList from "./IssueSuggestList.vue";
-import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, followIssueCaret, retryIssueSuggest, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
+import { useIssueSuggest, handleIssueKeydown, issueSuggestAt, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
+import { repoRemotes } from "../composables/useRepoRemote";
 import { issueListerFor } from "../composables/issueLister";
-import { remoteSlug } from "../utils/issueRefs";
 import { COMMIT_SIGNATURE } from "../utils/commitSignature";
 import { loadSettings } from "../composables/useSettings";
 
@@ -433,34 +433,11 @@ onUnmounted(() => {
   window.removeEventListener("contextmenu", closeContextMenu);
 });
 
-// ─── Remote info (for the "Open repository" quick action) ─────
-const remoteInfo = ref<RemoteInfo | null>(null);
-/** The repository `remoteInfo` was read for (it lags a tab switch). */
-const remoteInfoCwd = ref<string | null>(null);
-
-/** When the remote was last read (an opening `#` list re-reads it at most every 5 min). */
-let remoteInfoAt = 0;
-/** The latest read: an older one landing after it is dropped. */
-let remoteInfoSeq = 0;
-async function loadRemoteInfo() {
-  const cwd = props.cwd;
-  const seq = ++remoteInfoSeq;
-  if (!cwd) { remoteInfo.value = null; remoteInfoCwd.value = null; return; }
-  remoteInfoAt = Date.now();
-  let info: RemoteInfo | null = null;
-  try { info = await gitRemoteInfo(cwd); }
-  catch (e) {
-    // A transient failure keeps what this folder's remote was known to be;
-    // a remote that is gone ("No remote found") is forgotten.
-    if (remoteInfoCwd.value === cwd && !/no remote/i.test(String(e))) return;
-    info = null;
-  }
-  if (cwd !== props.cwd || seq !== remoteInfoSeq) return;
-  // The same remote again: keep the object, so nothing watching it re-runs.
-  const was = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
-  if (was && info && was.url === info.url && was.provider === info.provider && was.owner === info.owner && was.repo === info.repo) return;
-  remoteInfo.value = info;
-  remoteInfoCwd.value = cwd;
+// ─── Remote info (for the "Open repository" quick action, and `#`) ─────
+// One store per folder, shared with the created-issue notice (#301).
+const remoteInfo = computed<RemoteInfo | null>(() => (props.cwd ? repoRemotes.info(props.cwd) : null));
+function loadRemoteInfo() {
+  if (props.cwd) void repoRemotes.load(props.cwd);
 }
 onMounted(loadRemoteInfo);
 watch(() => props.cwd, loadRemoteInfo);
@@ -470,13 +447,14 @@ const issueDeps = {
   cwd: () => props.cwd || null,
   /** null (no list) until the remote is known, or when its forge cannot list issues. */
   loadIssues: (cwd: string) => {
-    const info = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
-    // No remote known (none at open, `git remote add` since, a failed read):
-    // read it again, at most every 10 s; its arrival retries the `#`.
-    if (!info && Date.now() - remoteInfoAt > 10_000) void loadRemoteInfo();
+    const info = repoRemotes.info(cwd);
+    // No usable remote (none at open, `git remote add` or `set-url` since, an
+    // account connected since, a failed read): read it again, at most every
+    // 10 s; its arrival retries the `#`.
+    if (!info || info.provider === "unknown") repoRemotes.loadIfOlder(cwd, 10_000);
     return issueListerFor(info, cwd);
   },
-  pushRepo: (cwd: string) => remoteSlug(remoteInfoCwd.value === cwd ? remoteInfo.value : null),
+  pushRepo: (cwd: string) => repoRemotes.slug(cwd),
   // Both fields, and every mount of this panel, share one fetch per repository.
   cache: sharedIssueCache,
 };
@@ -489,16 +467,16 @@ const writeDescription = (text: string) => emit("update:commitDescription", text
 /** Caret keys and clicks move the caret without an input event. */
 const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
 function onIssueCaretKeyup(s: IssueSuggest, e: KeyboardEvent) {
-  if (CARET_KEYS.has(e.key)) followIssueCaret(s, e.target as HTMLInputElement | HTMLTextAreaElement);
+  if (CARET_KEYS.has(e.key)) issueSuggestAt(s, e.target as HTMLInputElement | HTMLTextAreaElement, "caret");
 }
 watch(() => props.cwd, () => { summaryIssues.close(); descriptionIssues.close(); });
 // A `#` typed before the remote was known (just after a tab switch) opens
 // its list once it is; an existing `#12` under the caret does not.
-watch([remoteInfoCwd, remoteInfo], () => {
+watch(remoteInfo, () => {
   // Only the field being typed in: a list never opens under another one.
   const el = document.activeElement;
-  if (el && el === summaryEl.value) retryIssueSuggest(summaryIssues, summaryEl.value);
-  else if (el && el === descriptionEl.value) retryIssueSuggest(descriptionIssues, descriptionEl.value);
+  if (el && el === summaryEl.value) issueSuggestAt(summaryIssues, summaryEl.value, "retry");
+  else if (el && el === descriptionEl.value) issueSuggestAt(descriptionIssues, descriptionEl.value, "retry");
 });
 // A `git remote set-url` since the folder opened: re-read the remote when a
 // list opens, at most every 5 min (for an unknown host, the backend also
@@ -506,7 +484,7 @@ watch([remoteInfoCwd, remoteInfo], () => {
 watch(
   () => summaryIssues.open.value || descriptionIssues.open.value,
   (opened) => {
-    if (opened && Date.now() - remoteInfoAt > 300_000) void loadRemoteInfo();
+    if (opened && props.cwd) repoRemotes.loadIfOlder(props.cwd, 300_000);
   },
 );
 // A value set by code (cleared after a commit, an AI message…) closes the list.
@@ -857,7 +835,7 @@ function onUnstageClick(e: Event, path: string) {
 function onSummaryInput(e: Event) {
   onSummaryInputForTemplate(e);
   emit("update:commitSummary", (e.target as HTMLInputElement).value);
-  refreshIssueSuggest(summaryIssues, e.target as HTMLInputElement);
+  issueSuggestAt(summaryIssues, e.target as HTMLInputElement, "type");
   // Never two lists over the summary at once.
   if (summaryIssues.open.value) templateSlashOpen.value = false;
 }
@@ -914,7 +892,7 @@ function setCommitType(type: string) {
 
 function onDescriptionInput(e: Event) {
   emit("update:commitDescription", (e.target as HTMLTextAreaElement).value);
-  refreshIssueSuggest(descriptionIssues, e.target as HTMLTextAreaElement);
+  issueSuggestAt(descriptionIssues, e.target as HTMLTextAreaElement, "type");
 }
 
 function onSummaryKeydown(e: KeyboardEvent) {
@@ -1673,7 +1651,7 @@ function formatActivityDate(dateStr: string): string {
           @input="onSummaryInput"
           @keydown="onSummaryKeydown"
           @keyup="onIssueCaretKeyup(summaryIssues, $event)"
-          @click="followIssueCaret(summaryIssues, $event.target as HTMLInputElement)"
+          @click="issueSuggestAt(summaryIssues, $event.target as HTMLInputElement, 'caret')"
           @blur="templateSlashOpen = false; summaryIssues.close()"
           :placeholder="t('sidebar.summaryPlaceholder')"
         />
@@ -1752,7 +1730,7 @@ function formatActivityDate(dateStr: string): string {
           @input="onDescriptionInput"
           @keydown="onDescriptionKeydown"
           @keyup="onIssueCaretKeyup(descriptionIssues, $event)"
-          @click="followIssueCaret(descriptionIssues, $event.target as HTMLTextAreaElement)"
+          @click="issueSuggestAt(descriptionIssues, $event.target as HTMLTextAreaElement, 'caret')"
           @blur="descriptionIssues.close()"
           :placeholder="t('sidebar.descriptionPlaceholder')"
           rows="4"

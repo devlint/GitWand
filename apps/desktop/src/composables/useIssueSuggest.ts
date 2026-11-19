@@ -286,19 +286,16 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
 export type IssueSuggest = ReturnType<typeof useIssueSuggest>;
 type Field = HTMLInputElement | HTMLTextAreaElement;
 
-/** Read the `#token` at the field's caret after typing: may open the list. */
-export function refreshIssueSuggest(s: IssueSuggest, el: Field): void {
-  s.update(el.value, el.selectionStart ?? el.value.length);
-}
-
-/** The forge just became known: open the list a `#` typed before could not. */
-export function retryIssueSuggest(s: IssueSuggest, el: Field): void {
-  s.retry(el.value, el.selectionStart ?? el.value.length);
-}
-
-/** Follow a caret move (click, caret keys): only an open list is updated. */
-export function followIssueCaret(s: IssueSuggest, el: Field): void {
-  s.refresh(el.value, el.selectionStart ?? el.value.length);
+/**
+ * Re-read the `#token` at the field's caret. `type` (after typing) may open
+ * the list; `caret` (a click, caret keys) only follows an open one; `retry`
+ * (the forge just became known) opens one a typed `#` could not.
+ */
+export function issueSuggestAt(s: IssueSuggest, el: Field, mode: "type" | "caret" | "retry"): void {
+  const at = el.selectionStart ?? el.value.length;
+  if (mode === "type") s.update(el.value, at);
+  else if (mode === "caret") s.refresh(el.value, at);
+  else s.retry(el.value, at);
 }
 
 /** Put the caret at `at` once the new value is rendered. */
@@ -316,7 +313,7 @@ export function handleIssueKeydown(s: IssueSuggest, e: KeyboardEvent, el: Field,
   if (!s.open.value) return false;
   // The caret may have moved with no refresh (Cmd+Right, PageDown, a drag):
   // re-read it, so a list left behind never takes the key.
-  followIssueCaret(s, el);
+  issueSuggestAt(s, el, "caret");
   const out = s.keydown(e, el.value);
   if (out === null) return false;
   e.preventDefault();

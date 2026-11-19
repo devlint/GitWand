@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { nextTick } from "vue";
 import type { Issue } from "../../utils/backend";
-import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest } from "../useIssueSuggest";
+import { useIssueSuggest, handleIssueKeydown, issueSuggestAt } from "../useIssueSuggest";
 
 const ISSUES: Issue[] = [
   { number: 42, title: "Login fails", state: "OPEN", author: "a", assignees: [], labels: [], url: "https://github.com/me/app/issues/42", createdAt: "x", updatedAt: "2026-11-10", milestone: "" },
@@ -21,7 +21,7 @@ async function field(tag: "input" | "textarea", value: string) {
   el.focus();
   el.setSelectionRange(value.length, value.length);
   const s = useIssueSuggest({ cwd: () => "/r", loadIssues: async () => ISSUES, pushRepo: () => "me/app" });
-  refreshIssueSuggest(s, el);
+  issueSuggestAt(s, el, "type");
   await flush();
   const written: string[] = [];
   const write = (t: string) => { written.push(t); el.value = t; };

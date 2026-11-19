@@ -16,6 +16,9 @@ const issues = [
 const many = (n: number) => Array.from({ length: n }, (_, i) => issue(i + 1, `t${i}`, `2026-11-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z`));
 
 describe("hashTokenAt", () => {
+  it("the token's end steps over letters outside the BMP whole", () => {
+    expect(hashTokenAt("#fix\u{1D400}bc x", 4)).toEqual({ start: 0, query: "fix", end: 8 });
+  });
   it("gives the token's end, past the caret", () => {
     expect(hashTokenAt("see #123 x", 7)).toEqual({ start: 4, query: "12", end: 8 });
   });
@@ -136,6 +139,9 @@ describe("appendRef", () => {
   });
   it("a blank line holding spaces still separates the trailer block", () => {
     expect(appendRef("body\n  \nSigned-off-by: A <a@x>", "#7")).toBe("body\n  \n#7\n\nSigned-off-by: A <a@x>");
+  });
+  it("issue trailers (Refs:, Closes:, Fixes:…) form a closing block too", () => {
+    expect(appendRef("body\n\nRefs: #10\nCloses: #11", "#12")).toBe("body\n\n#12\n\nRefs: #10\nCloses: #11");
   });
   it("goes before a trailer block, which must stay last", () => {
     expect(appendRef("body\n\nSigned-off-by: A <a@x.com>", "#4")).toBe("body\n\n#4\n\nSigned-off-by: A <a@x.com>");

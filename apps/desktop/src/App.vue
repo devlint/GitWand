@@ -89,7 +89,7 @@ import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import { useIssuePanel, ISSUE_PANEL_KEY } from "./composables/useIssuePanel";
 import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
-import { remoteSlug } from "./utils/issueRefs";
+import { repoRemotes } from "./composables/useRepoRemote";
 import { COMMIT_SIGNATURE, withoutSignature } from "./utils/commitSignature";
 import { createdIssueToast } from "./composables/createdIssueToast";
 import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
@@ -368,7 +368,11 @@ const commitReviewNav = useCommitReviewNav({
  * dismissed; a toast shown meanwhile parks it, and it comes back once that
  * one is gone.
  */
-function showDetailToast(title: string, detail: string | null, ms = 3000, link?: ToastLink, action?: ToastAction, key?: string) {
+/** A notice's link, action button and kind (a newer one of a kind replaces a parked one). */
+type ToastExtras = { link?: ToastLink; action?: ToastAction; key?: string };
+
+function showDetailToast(title: string, detail: string | null, ms = 3000, extras: ToastExtras = {}) {
+  const { link, action, key } = extras;
   // A newer notice of the same kind replaces a parked one rather than piling up.
   if (key) for (let i = parkedToasts.length - 1; i >= 0; i--) if (parkedToasts[i].key === key) parkedToasts.splice(i, 1);
   if (stickyToast && !(key && stickyToast.key === key)) parkedToasts.push(stickyToast);
@@ -522,17 +526,19 @@ const createIssue = useCreateIssue({
       activeCwd: () => repoFolderPath.value ?? "",
       message: () => ({ summary: commitSummary.value, description: commitDescription.value }),
       setDescription: (d) => { commitDescription.value = d; },
-      readPushRepo: (cwd) => gitRemoteInfo(cwd).then(remoteSlug),
+      // The same store as the commit panel's `#` list, read fresh.
+      readPushRepo: (cwd) => repoRemotes.load(cwd).then(() => repoRemotes.slug(cwd)),
       invalidate: (target) => invalidateIssues(sharedIssueCache, target),
       notify: (title) => showDetailToast(title, null, 4000),
     });
     // With "Add to commit", the notice stays until dismissed (a toast shown
     // meanwhile parks it), so the action is never lost to another notice.
-    showDetailToast(
-      toast.title, null, toast.action ? 0 : 8000, toast.link,
-      toast.action ? { label: toast.action.label, run: () => { void toast.action!.run(); } } : undefined,
-      "created-issue",
-    );
+    const action = toast.action;
+    showDetailToast(toast.title, null, action ? 0 : 8000, {
+      link: toast.link,
+      action: action ? { label: action.label, run: () => { void action.run(); } } : undefined,
+      key: "created-issue",
+    });
   },
   report: {
     // A resolver report is scanned like a commit: the repository's
@@ -852,7 +858,7 @@ function dismissToast() {
     successTimer = null;
     dismissTimer = null;
     const parked = parkedToasts.pop();
-    if (parked) showDetailToast(parked.title, parked.detail, 0, parked.link, parked.action, parked.key);
+    if (parked) showDetailToast(parked.title, parked.detail, 0, parked);
   }, 200);
 }
 
