@@ -135,6 +135,11 @@ describe("CreateIssueModal — templates", () => {
     expect(document.querySelector('[data-testid="ci-template-unset"]')?.textContent).toContain("createIssue.template.needsTriage:bug, alice");
   });
 
+  it("a contact link is spaced from its label", async () => {
+    await mount([{ path: "a.md", content: BUG }, { path: ".github/ISSUE_TEMPLATE/config.yml", content: CONFIG }]);
+    expect(document.querySelector(".ci-contacts li")?.textContent).toContain("createIssue.template.contact Discussions");
+  });
+
   it("lists two contact links to the same address", async () => {
     const cfg = "contact_links:\n  - name: Docs\n    url: https://x.dev/help\n    about: a\n  - name: FAQ\n    url: https://x.dev/help\n    about: b\n";
     await mount([{ path: "a.md", content: BUG }, { path: ".github/ISSUE_TEMPLATE/config.yml", content: cfg }]);

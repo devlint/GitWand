@@ -290,7 +290,8 @@ function onMilestone(e: Event) {
           </p>
           <ul v-if="contactLinks.length" class="ci-contacts">
             <li v-for="(l, i) in contactLinks" :key="`${i}:${l.url}`">
-              <span class="ci-status">{{ t("createIssue.template.contact") }}</span>
+              <!-- The space survives the template's whitespace condensing. -->
+              <span class="ci-status">{{ `${t("createIssue.template.contact")} ` }}</span>
               <a
                 :href="l.url"
                 data-testid="ci-contact-link"
