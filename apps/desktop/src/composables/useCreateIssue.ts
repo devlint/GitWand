@@ -8,7 +8,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, ghIssueTemplates, type IssueTemplateFiles } from "../utils/backend";
-import { isSingleTemplateFile, loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
+import { loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
 import type { SecretFinding, SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
 import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
@@ -316,7 +316,10 @@ export function useCreateIssue(deps: {
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
   report?: ReportDeps;
   /** A target's raw template files (tests replace the GitHub read). */
-  issueTemplates?: (cwd: string, repo: string) => Promise<IssueTemplateFiles>;
+  issueTemplates?: (
+    cwd: string,
+    repo: string,
+  ) => Promise<Omit<IssueTemplateFiles, "files"> & { files: { path: string; content: string; single?: boolean }[] }>;
 }): CreateIssueApi {
   const readTemplates = deps.issueTemplates ?? ghIssueTemplates;
   const rdeps = deps.report ?? {};
@@ -349,9 +352,14 @@ export function useCreateIssue(deps: {
   /** The text comes from a template of the target left: no template is chosen, yet it is not blank. */
   const templateLeftover = ref(false);
   /** The template the leftover text came from, to restore on the way back to its repository. */
-  let leftoverFrom: { repo: string; id: string; title: string; body: string; picks: { labels: string[]; assignees: string[] } } | null = null;
+  type LeftoverFrom = { repo: string; id: string; title: string; body: string; picks: { labels: string[]; assignees: string[] } };
+  let leftoverFrom: LeftoverFrom | null = null;
   /** The applied template's own labels and people (all it names). */
   let appliedPicks = { labels: [] as string[], assignees: [] as string[] };
+  /** The applied template was a single-template file put there by itself (not chosen). */
+  let templatePrefilled = false;
+  /** A choice to restore once the target's templates are known to hold it. */
+  let restoreOnLoad: LeftoverFrom | null = null;
   const assigneeOptions = ref<ReviewerCandidate[]>([]);
   const milestoneOptions = ref<RepoMilestone[]>([]);
   const submitting = ref(false);
@@ -509,7 +517,7 @@ export function useCreateIssue(deps: {
     else if (cached) {
       templateSet.value = cached.set;
       templateSource.value = cached.source;
-      prefillSingleTemplate();
+      onTemplateSet();
       templatesLoading.value = false; // another target's read may still be in flight
       return;
     }
@@ -528,7 +536,7 @@ export function useCreateIssue(deps: {
           if (current()) {
             templateSet.value = set;
             templateSource.value = source;
-            prefillSingleTemplate();
+            onTemplateSet();
           }
         },
         () => {}, // No templates is a blank form, never an error.
@@ -599,9 +607,28 @@ export function useCreateIssue(deps: {
    */
   function prefillSingleTemplate() {
     const only = templateSet.value?.templates;
-    if (!only || only.length !== 1 || !isSingleTemplateFile(only[0].id)) return;
+    if (!only || only.length !== 1 || !only[0].single) return;
     if (templateId.value !== null || templateLeftover.value || dirty.value) return;
     applyTemplate(only[0].id);
+    templatePrefilled = true;
+  }
+
+  /** A template set arrived for the target: restore a pending choice, or prefill. */
+  function onTemplateSet() {
+    const back = restoreOnLoad;
+    restoreOnLoad = null;
+    if (back && templateSet.value?.templates.some((x) => x.id === back.id) && title.value === back.title && body.value === back.body) {
+      // Back where the template came from, its text untouched: chosen again.
+      templateId.value = back.id;
+      initial.value = { title: back.title, body: back.body };
+      templateLeftover.value = false;
+      leftoverFrom = null;
+      appliedPicks = back.picks;
+      templatePending = { labels: [...back.picks.labels], assignees: [...back.picks.assignees] };
+      grantTemplateWants();
+      return;
+    }
+    prefillSingleTemplate();
   }
 
   /** The owner's `.github` repository, when the templates come from it. */
@@ -641,6 +668,8 @@ export function useCreateIssue(deps: {
     forgetTemplatePicks();
     templateLeftover.value = false;
     leftoverFrom = null;
+    templatePrefilled = false;
+    restoreOnLoad = null;
     appliedPicks = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
     templatePending = { labels: [...appliedPicks.labels], assignees: [...appliedPicks.assignees] };
     // Only what the target offers (GitHub refuses unknown labels and people),
@@ -685,6 +714,8 @@ export function useCreateIssue(deps: {
     templateLeftover.value = false;
     leftoverFrom = null;
     appliedPicks = { labels: [], assignees: [] };
+    templatePrefilled = false;
+    restoreOnLoad = null;
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = DEFAULT_SECRETS_OPTIONS;
@@ -948,10 +979,15 @@ export function useCreateIssue(deps: {
     // The text a template filled stays, now the user's (so "Blank issue" asks
     // before clearing it); the choice, and the labels and people it wanted,
     // were about the other target.
-    if (templateId.value !== null && from) {
+    if (templateId.value !== null && templatePrefilled && !bodyEdited.value) {
+      // Put there by itself and untouched: it gives way, and the new target
+      // may prefill its own.
+      title.value = "";
+      body.value = "";
+      initial.value = { title: "", body: "" };
+      templatePrefilled = false;
+    } else if (templateId.value !== null && from) {
       // Remembered, to restore on the way back if the text is untouched.
-      // The template's own text (`initial`): the way back restores it only
-      // if the text still is that, untouched.
       leftoverFrom = { repo: from, id: templateId.value, title: initial.value.title, body: initial.value.body, picks: appliedPicks };
       initial.value = { title: "", body: "" };
       // The select then says so ("from the other repository"), and "Blank
@@ -961,16 +997,9 @@ export function useCreateIssue(deps: {
     templateId.value = null;
     // Its labels and people were the other target's (clearPickers dropped them).
     forgetTemplatePicks();
-    const back = leftoverFrom;
-    if (back && back.repo === next && title.value === back.title && body.value === back.body) {
-      // Back where the template came from, its text untouched: chosen again.
-      templateId.value = back.id;
-      initial.value = { title: back.title, body: back.body };
-      templateLeftover.value = false;
-      appliedPicks = back.picks;
-      templatePending = { labels: [...back.picks.labels], assignees: [...back.picks.assignees] };
-      leftoverFrom = null;
-    }
+    // Back where the template came from: restored once that target's set is
+    // known to still hold it (it is read again, or taken from the cache).
+    restoreOnLoad = leftoverFrom && leftoverFrom.repo === next ? leftoverFrom : null;
     loadTemplates(next);
   }
 

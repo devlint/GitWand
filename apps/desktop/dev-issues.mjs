@@ -176,7 +176,7 @@ async function singleTemplate(nwo, get) {
       // Listed, then gone: a race, not an answer worth keeping.
       if (v === null) return [null, false, true];
       const content = decodeContent(v);
-      return [content === null ? null : { path: found.path, content }, complete, true];
+      return [content === null ? null : { path: found.path, content, single: true }, complete, true];
     } catch {
       complete = false;
       return [null, complete, true];
@@ -212,12 +212,16 @@ async function templatesIn(nwo, dirs, get) {
     let complete = true;
     // Six at a time, as Rust; a file that cannot be read is skipped.
     for (let i = 0; i < paths.length; i += 6) {
+      // A failed request (or a file gone since the listing) is retried next
+      // time; a file read but not text is a lasting answer.
       const read = await Promise.all(paths.slice(i, i + 6).map(async (path) => {
-        const content = decodeContent(await get(nwo, encodePath(path)).catch(() => null));
-        return content === null ? null : { path, content };
+        const v = await get(nwo, encodePath(path)).catch(() => null);
+        if (v === null) return { failed: true };
+        const content = decodeContent(v);
+        return { file: content === null ? null : { path, content, single: false } };
       }));
-      if (read.some((f) => f === null)) complete = false;
-      files.push(...read.filter(Boolean));
+      if (read.some((r) => r.failed)) complete = false;
+      files.push(...read.map((r) => r.file).filter(Boolean));
     }
     return { files, complete, present: true };
   }
@@ -234,17 +238,17 @@ async function templatesIn(nwo, dirs, get) {
 export async function devTemplateFiles(nwo, isPublic, get) {
   const own = await templatesIn(nwo, [TEMPLATE_DIR], get);
   const mine = (complete) => ({ source: nwo, files: own.files, complete });
-  // Only a repository with no template folder and no single template gets its owner's.
-  if (own.present) return mine(own.complete);
+  // Only a repository with no template folder and no single template gets
+  // its owner's; a failed listing leaves that unknown (no fallback, not cached).
+  if (own.present || !own.complete) return mine(own.complete);
   const org = `${nwo.split("/")[0]}/.github`;
   if (org.toLowerCase() === nwo.toLowerCase()) return mine(own.complete);
-  let theirs = null;
-  try {
-    // GitHub only uses a public `.github` repository.
-    if (await isPublic(org)) theirs = await templatesIn(org, OWNER_TEMPLATE_DIRS, get);
-  } catch {
-    return mine(false); // a failing fallback keeps what nwo has, not cached
-  }
-  if (theirs?.present) return { source: org, files: theirs.files, complete: own.complete && theirs.complete };
+  // Visibility and folders asked at once; the folders count only if public.
+  const [pub, theirs] = await Promise.all([
+    isPublic(org).then((v) => ({ v }), (e) => ({ e })),
+    templatesIn(org, OWNER_TEMPLATE_DIRS, get).then((v) => ({ v }), (e) => ({ e })),
+  ]);
+  if (pub.e || theirs.e) return mine(false);
+  if (pub.v && theirs.v.present) return { source: org, files: theirs.v.files, complete: theirs.v.complete };
   return mine(own.complete);
 }

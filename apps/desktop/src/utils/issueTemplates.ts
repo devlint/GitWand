@@ -14,6 +14,8 @@
 export interface IssueTemplate {
   /** The file path: stable, unique. */
   id: string;
+  /** GitHub's single-template file: it prefills an untouched blank form. */
+  single: boolean;
   name: string;
   about: string;
   title: string;
@@ -112,10 +114,7 @@ const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 /** In a template folder: `.github/ISSUE_TEMPLATE/`, or an owner `.github` repository's root or `docs` one. */
 const inTemplateFolder = (path: string) => /(^|\/)ISSUE_TEMPLATE\//i.test(path);
 
-/** GitHub's single-template file (`ISSUE_TEMPLATE.md`): it prefills the form rather than being chosen. */
-export const isSingleTemplateFile = (path: string) => /^(\.github\/|docs\/)?issue_template\.md$/i.test(path);
-
-function markdownTemplate(path: string, raw: string, parseYaml: ParseYaml): IssueTemplate | null {
+function markdownTemplate(path: string, raw: string, parseYaml: ParseYaml, single: boolean): IssueTemplate | null {
   const content = raw.replace(/^\uFEFF/, ""); // a BOM before the front matter
   const m = FRONT_MATTER.exec(content);
   // In the template folder, a Markdown file without front matter (a README)
@@ -133,6 +132,7 @@ function markdownTemplate(path: string, raw: string, parseYaml: ParseYaml): Issu
   if (!name && inTemplateFolder(path)) return null;
   return {
     id: path,
+    single,
     name: name || baseName(path),
     about: str(meta.about).trim(),
     title: str(meta.title),
@@ -149,6 +149,7 @@ function formTemplate(path: string, content: string, parseYaml: ParseYaml): Issu
   if (!name) return null; // GitHub offers no form without a name
   return {
     id: path,
+    single: false,
     name,
     about: str(form.description).trim(),
     title: str(form.title),
@@ -161,9 +162,9 @@ function formTemplate(path: string, content: string, parseYaml: ParseYaml): Issu
 const isConfig = (path: string) => /(^|\/)config\.ya?ml$/i.test(path);
 
 /** The templates, and `config.yml`'s settings, from a target's raw files. */
-export function parseTemplateSet(files: { path: string; content: string }[], parseYaml: ParseYaml): IssueTemplateSet {
+export function parseTemplateSet(files: { path: string; content: string; single?: boolean }[], parseYaml: ParseYaml): IssueTemplateSet {
   const set: IssueTemplateSet = { templates: [], blankAllowed: true, contactLinks: [] };
-  for (const { path, content } of files) {
+  for (const { path, content, single = false } of files) {
     try {
       if (isConfig(path)) {
         const cfg = parseYaml(content);
@@ -180,7 +181,7 @@ export function parseTemplateSet(files: { path: string; content: string }[], par
         }
         continue;
       }
-      const t = /\.ya?ml$/i.test(path) ? formTemplate(path, content, parseYaml) : markdownTemplate(path, content, parseYaml);
+      const t = /\.ya?ml$/i.test(path) ? formTemplate(path, content, parseYaml) : markdownTemplate(path, content, parseYaml, single);
       if (t) set.templates.push(t);
     } catch {
       // A template that does not parse is skipped; the others are kept.
@@ -190,7 +191,7 @@ export function parseTemplateSet(files: { path: string; content: string }[], par
 }
 
 /** `parseTemplateSet` with the YAML parser loaded on demand (kept out of the main chunk). */
-export async function loadTemplateSet(files: { path: string; content: string }[]): Promise<IssueTemplateSet> {
+export async function loadTemplateSet(files: { path: string; content: string; single?: boolean }[]): Promise<IssueTemplateSet> {
   const { parse } = await import("yaml");
   return parseTemplateSet(files, parse);
 }

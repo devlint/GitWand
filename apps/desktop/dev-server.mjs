@@ -5597,7 +5597,8 @@ async function handleRequest(req, res) {
     }
 
     // GET /api/gh-issue-templates?cwd=<path>&repo=<owner/repo> — mirrors
-    // `gh_issue_templates` (#301): the target's template files.
+    // `gh_issue_templates` (#301): the target's template files. github.com
+    // only, like every issue route of this server (Rust reads Enterprise).
     if (url.pathname === "/api/gh-issue-templates" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
       const repo = url.searchParams.get("repo");

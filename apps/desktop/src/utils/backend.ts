@@ -4676,6 +4676,8 @@ export async function ghListLabels(cwd: string, repo: string): Promise<RepoLabel
 export interface TemplateFile {
   path: string;
   content: string;
+  /** GitHub's single-template file (`ISSUE_TEMPLATE.md`): it prefills the form. */
+  single: boolean;
 }
 
 /** A target's issue template files, and the repository they came from (#301). */

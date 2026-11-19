@@ -521,19 +521,10 @@ pub(crate) fn api_get_pages(
     max_pages: u32,
 ) -> Result<Vec<serde_json::Value>, String> {
     fetch_pages(max_pages, |page| {
-        let page_path = format!("{}?{}per_page=100&page={}", path, query, page);
         // Lists (labels, people, milestones) go through the ETag cache: an
         // unchanged page costs a 304 and no rate limit.
-        let cached = |tok: &str| rest_api_json_cached(&page_path, tok);
-        let attempt = if gh_origin_repo(cwd).is_some_and(|o| same_repo(&o, repo)) {
-            with_rest_using(cwd, token, cached)
-        } else {
-            with_rest_other_repo_using(cwd, &repo.nwo, token, cached)
-        };
-        match attempt {
-            Some(r) => r,
-            None => gh_api_on(cwd, repo, "GET", &page_path, None, Duration::from_secs(30)),
-        }
+        let page_path = format!("{}?{}per_page=100&page={}", path, query, page);
+        api_get_etag(cwd, token, repo, &page_path)
     })
 }
 
@@ -706,6 +697,9 @@ pub(crate) async fn gh_list_assignees(
 pub(crate) struct TemplateFile {
     pub(crate) path: String,
     pub(crate) content: String,
+    /// GitHub's single-template file (`ISSUE_TEMPLATE.md`): it prefills the
+    /// form rather than being chosen.
+    pub(crate) single: bool,
 }
 
 /// A target's template files and the repository they were read from (the
@@ -744,10 +738,17 @@ pub(crate) fn is_not_found(e: &str) -> bool {
 /// `path` with each segment percent-encoded: a file named `bug report.md` or
 /// `a[b].yml` is a valid URL (curl refuses spaces and treats `[]` as a glob).
 fn encode_path(path: &str) -> String {
-    path.split('/')
-        .map(super::azure::urlenc)
-        .collect::<Vec<_>>()
-        .join("/")
+    let segment = |s: &str| -> String {
+        s.bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect()
+    };
+    path.split('/').map(segment).collect::<Vec<_>>().join("/")
 }
 
 /// A contents API file's text (its base64 is wrapped by GitHub).
@@ -780,30 +781,30 @@ fn read_files(nwo: &str, paths: &[String], get: ContentsGet) -> (Vec<TemplateFil
     let mut files = Vec::new();
     let mut complete = true;
     for chunk in paths.chunks(6) {
-        let read: Vec<Option<TemplateFile>> = std::thread::scope(|scope| {
+        // Per file: `Err` when the request failed (or the file vanished since
+        // the listing), retried next time; `Ok(None)` when it was read but is
+        // not text, a lasting answer.
+        let read: Vec<Result<Option<TemplateFile>, ()>> = std::thread::scope(|scope| {
             let handles: Vec<_> = chunk
                 .iter()
                 .map(|path| {
-                    scope.spawn(move || {
-                        let content = get(nwo, &encode_path(path))
-                            .ok()
-                            .flatten()
-                            .as_ref()
-                            .and_then(decode_content)?;
-                        Some(TemplateFile {
+                    scope.spawn(move || match get(nwo, &encode_path(path)) {
+                        Ok(Some(v)) => Ok(decode_content(&v).map(|content| TemplateFile {
                             path: path.clone(),
                             content,
-                        })
+                            single: false,
+                        })),
+                        Ok(None) | Err(_) => Err(()),
                     })
                 })
                 .collect();
             handles
                 .into_iter()
-                .map(|h| h.join().ok().flatten())
+                .map(|h| h.join().unwrap_or(Err(())))
                 .collect()
         });
-        complete &= read.iter().all(|f| f.is_some());
-        files.extend(read.into_iter().flatten());
+        complete &= read.iter().all(|f| f.is_ok());
+        files.extend(read.into_iter().flatten().flatten());
     }
     (files, complete)
 }
@@ -858,6 +859,7 @@ fn single_template(nwo: &str, get: ContentsGet) -> (Option<TemplateFile>, bool, 
                 let file = decode_content(&v).map(|content| TemplateFile {
                     path: path.to_string(),
                     content,
+                    single: true,
                 });
                 (file, complete, true)
             }
@@ -962,36 +964,40 @@ pub(crate) fn template_files(
         complete,
     };
     // Only a repository with no template folder and no single template gets
-    // its owner's (GitHub's default community health files).
-    if own.present {
+    // its owner's (GitHub's default community health files). A listing that
+    // failed leaves that unknown: no fallback then (the repository may have
+    // its own), and the answer is not cached.
+    if own.present || !own.complete {
         return Ok(mine(own.complete));
     }
-    let Some(owner) = nwo.split('/').next() else {
-        return Ok(mine(own.complete));
-    };
+    let owner = nwo.split('/').next().unwrap_or(nwo);
     let org = format!("{owner}/.github");
     if org.eq_ignore_ascii_case(nwo) {
         return Ok(mine(own.complete));
     }
-    // A fallback: failing to read it (a 403 behind SSO, a rate limit) keeps
-    // what `nwo` has, marked incomplete so it is not cached.
-    let theirs = match is_public(&org).and_then(|public| {
-        if public {
-            templates_in(&org, &OWNER_TEMPLATE_DIRS, get).map(Some)
-        } else {
-            Ok(None)
-        }
-    }) {
-        Ok(t) => t,
-        Err(_) => return Ok(mine(false)),
-    };
-    match theirs {
-        Some(t) if t.present => Ok(IssueTemplateFiles {
+    // The visibility and the folders are asked at once (one round trip less
+    // for every repository without templates); the folders count only if the
+    // repository is public. A failure keeps what `nwo` has, not cached.
+    let (public, listing) = std::thread::scope(|scope| {
+        let public = scope.spawn(|| is_public(&org));
+        let listing = scope.spawn(|| templates_in(&org, &OWNER_TEMPLATE_DIRS, get));
+        let public = public
+            .join()
+            .unwrap_or_else(|_| Err("template read panicked".into()));
+        let listing = listing
+            .join()
+            .unwrap_or_else(|_| Err("template read panicked".into()));
+        (public, listing)
+    });
+    match (public, listing) {
+        (Ok(true), Ok(t)) if t.present => Ok(IssueTemplateFiles {
             source: org,
             files: t.files,
-            complete: own.complete && t.complete,
+            complete: t.complete,
         }),
-        _ => Ok(mine(own.complete)),
+        (Ok(false), _) => Ok(mine(own.complete)),
+        (Ok(true), Ok(_)) => Ok(mine(own.complete)),
+        _ => Ok(mine(false)),
     }
 }
 
@@ -1502,6 +1508,68 @@ mod tests {
         owner_read("test-host-b/acme/.github", "#repo", read).unwrap();
         owner_read("test-host-a/acme/.github", "#repo", read).unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_failed_single_template_listing_does_not_fall_back_to_the_owner() {
+        let get = |nwo: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
+            match (nwo, path) {
+                ("me/app", ".github") => Err("GitHub API error (502): Bad gateway".into()),
+                ("me/.github", ".github/ISSUE_TEMPLATE") => Ok(Some(json!([entry("bug.yml", 9)]))),
+                ("me/.github", _) => Ok(Some(file("name: Bug"))),
+                _ => Ok(None),
+            }
+        };
+        let got = template_files("me/app", &PUBLIC, &get).unwrap();
+        assert_eq!(got.source, "me/app");
+        assert!(got.files.is_empty());
+        assert!(!got.complete);
+    }
+
+    #[test]
+    fn a_file_that_does_not_decode_is_skipped_but_the_set_stays_complete() {
+        let bad = json!({ "encoding": "base64", "content": "/w==", "size": 1 }); // 0xFF
+        let got = template_files(
+            "me/app",
+            &PUBLIC,
+            &fake(vec![
+                (
+                    "me/app",
+                    ".github/ISSUE_TEMPLATE",
+                    json!([entry("a.md", 1), entry("b.md", 1)]),
+                ),
+                ("me/app", ".github/ISSUE_TEMPLATE/a.md", bad),
+                ("me/app", ".github/ISSUE_TEMPLATE/b.md", file("b")),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(got.files.len(), 1);
+        assert!(got.complete);
+    }
+
+    #[test]
+    fn the_single_template_file_is_flagged() {
+        let got = template_files(
+            "me/app",
+            &PUBLIC,
+            &fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "legacy")),
+        )
+        .unwrap();
+        assert!(got.files[0].single);
+        let folder = template_files(
+            "me/app",
+            &PUBLIC,
+            &fake(vec![
+                (
+                    "me/app",
+                    ".github/ISSUE_TEMPLATE",
+                    json!([entry("a.md", 1)]),
+                ),
+                ("me/app", ".github/ISSUE_TEMPLATE/a.md", file("a")),
+            ]),
+        )
+        .unwrap();
+        assert!(!folder.files[0].single);
     }
 
     #[test]

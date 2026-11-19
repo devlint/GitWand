@@ -127,8 +127,8 @@ async function onSwitch(e: Event) {
   form.setGitwand(wanted);
 }
 
-/** A blank form's own: never a report's (a template would replace it). */
-const offersTemplates = computed(() => form.blankForm.value && !form.report.value);
+/** A blank form's own (`blankForm` is false for a commit, lines or a report). */
+const offersTemplates = computed(() => form.blankForm.value);
 const templates = computed(() => (offersTemplates.value ? form.templateSet.value?.templates ?? [] : []));
 const contactLinks = computed(() => (offersTemplates.value ? form.templateSet.value?.contactLinks ?? [] : []));
 const blankAllowed = computed(() => form.templateSet.value?.blankAllowed ?? true);

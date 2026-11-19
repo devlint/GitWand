@@ -13,7 +13,7 @@ describe("parseTemplateSet — Markdown templates", () => {
     const md = "---\nname: Bug report\nabout: Something broke\ntitle: '[Bug] '\nlabels: bug, ui\nassignees: [alice]\n---\n## Steps\n\n1. \n";
     const set = parseTemplateSet([{ path: dir("bug.md"), content: md }], parse);
     expect(set.templates).toEqual([
-      { id: dir("bug.md"), name: "Bug report", about: "Something broke", title: "[Bug] ", labels: ["bug", "ui"], assignees: ["alice"], body: "## Steps\n\n1. \n" },
+      { id: dir("bug.md"), single: false, name: "Bug report", about: "Something broke", title: "[Bug] ", labels: ["bug", "ui"], assignees: ["alice"], body: "## Steps\n\n1. \n" },
     ]);
   });
 

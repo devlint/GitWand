@@ -14,7 +14,8 @@ const BUG = "---\nname: Bug\nabout: It broke\ntitle: '[Bug] '\nlabels: bug, nope
 
 beforeEach(() => clearTemplateCache());
 
-function setup(files: Record<string, { path: string; content: string }[] | (() => Promise<{ path: string; content: string }[]>)> = {}, incomplete = new Set<string>()) {
+type F = { path: string; content: string; single?: boolean };
+function setup(files: Record<string, F[] | (() => Promise<F[]>)> = {}, incomplete = new Set<string>()) {
   const provider = {
     name: "github",
     issueAvailable: vi.fn(async () => true),
@@ -231,7 +232,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
   });
 
   it("a single-template file prefills the blank form, as on GitHub", async () => {
-    const { form } = setup({ "me/app": [{ path: ".github/ISSUE_TEMPLATE.md", content: "## Steps\n" }] });
+    const { form } = setup({ "me/app": [{ path: ".github/ISSUE_TEMPLATE.md", content: "## Steps\n", single: true }] });
     await form.open();
     await flush();
     expect(form.templateId.value).toBe(".github/ISSUE_TEMPLATE.md");
@@ -239,13 +240,46 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
   });
 
   it("a single-template file never overwrites what was typed meanwhile", async () => {
-    let arrive!: (v: { path: string; content: string }[]) => void;
+    let arrive!: (v: F[]) => void;
     const { form } = setup({ "me/app": () => new Promise((r) => { arrive = r; }) });
     await form.open();
     form.body.value = "mine";
-    arrive([{ path: ".github/ISSUE_TEMPLATE.md", content: "## Steps\n" }]);
+    arrive([{ path: ".github/ISSUE_TEMPLATE.md", content: "## Steps\n", single: true }]);
     await flush();
     expect(form.body.value).toBe("mine");
+  });
+
+  it("an untouched prefill from one repository's single template gives way to the next one's", async () => {
+    const { form } = setup({
+      "me/app": [{ path: ".github/ISSUE_TEMPLATE.md", content: "A steps\n", single: true }],
+      "up/app": [{ path: "docs/ISSUE_TEMPLATE.md", content: "B steps\n", single: true }],
+    });
+    await form.open();
+    await flush();
+    expect(form.body.value).toBe("A steps\n");
+    form.setRepo("up/app");
+    await flush();
+    expect(form.body.value).toBe("B steps\n");
+    expect(form.templateLeftover.value).toBe(false);
+    expect(form.dirty.value).toBe(false);
+  });
+
+  it("switching back restores the template only once its repository's set has it", async () => {
+    let second = false;
+    const { form } = setup({
+      "me/app": () => Promise.resolve(second ? [] : [{ path: "a.md", content: BUG }]),
+      "up/app": [],
+    }, new Set(["me/app"]));
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    form.setRepo("up/app");
+    await flush();
+    second = true; // the template was removed from me/app meanwhile
+    form.setRepo("me/app");
+    await flush();
+    expect(form.templateId.value).toBeNull();
+    expect(form.templateLeftover.value).toBe(true);
   });
 
   it("chooseTemplate drops an answer given after the target changed", async () => {

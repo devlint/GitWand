@@ -296,6 +296,36 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(got.files).toHaveLength(1);
   });
 
+  it("a failed single-template listing does not fall back to the owner", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string, path: string) => {
+      if (nwo === "me/app" && path === ".github") throw new Error("502");
+      if (nwo === "me/.github" && path === ".github/ISSUE_TEMPLATE") return [entry("bug.yml")];
+      if (nwo === "me/.github") return file("name: Bug");
+      return null;
+    });
+    expect(got.source).toBe("me/app");
+    expect(got.files).toEqual([]);
+    expect(got.complete).toBe(false);
+  });
+
+  it("a file that does not decode is skipped, the set stays complete", async () => {
+    const bad = { encoding: "base64", content: "/w==", size: 1 };
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [entry("a.md", 1), entry("b.md", 1)],
+      "me/app:.github/ISSUE_TEMPLATE/a.md": bad,
+      "me/app:.github/ISSUE_TEMPLATE/b.md": file("b"),
+    }));
+    expect(got.files).toHaveLength(1);
+    expect(got.complete).toBe(true);
+  });
+
+  it("the single-template file is flagged", async () => {
+    const one = await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "legacy")));
+    expect(one.files[0].single).toBe(true);
+    const folder = await devTemplateFiles("me/app", PUBLIC, fake({ "me/app:.github/ISSUE_TEMPLATE": [entry("a.md", 1)], "me/app:.github/ISSUE_TEMPLATE/a.md": file("a") }));
+    expect(folder.files[0].single).toBe(false);
+  });
+
   it("nothing anywhere is an empty list", async () => {
     expect((await devTemplateFiles("me/app", PUBLIC, fake({}))).files).toEqual([]);
   });
