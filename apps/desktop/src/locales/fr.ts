@@ -2696,6 +2696,7 @@ const fr: Locale = {
 
   createIssue: {
     template: {
+      fromOther: "(modèle de l'autre dépôt)",
       fromOwner: "Modèles partagés par {0}",
       clearTitle: "Repartir d'une issue vierge ?",
       loading: "Recherche des modèles d'issue de ce dépôt…",

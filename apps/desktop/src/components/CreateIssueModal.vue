@@ -141,12 +141,13 @@ const fromOwner = computed(() => {
 /** A template chosen: confirm first when the title or description was edited. */
 async function onTemplate(e: Event) {
   const select = e.target as HTMLSelectElement;
+  if (select.value === "__other") return;
   const wanted = select.value || null;
   // The state decides what the select shows (a cancelled choice leaves it as it was).
-  select.value = form.templateId.value ?? "";
+  select.value = form.templateId.value ?? (form.templateLeftover.value ? "__other" : "");
   // The same choice does nothing, except "Blank issue" over a text left by
   // another target's template: it clears that.
-  if (wanted === form.templateId.value && !(wanted === null && form.bodyEdited.value)) return;
+  if (wanted === form.templateId.value && !(wanted === null && form.templateLeftover.value)) return;
   if (form.templateEdited.value) {
     const asked = form.openId.value;
     const target = form.repo.value;
@@ -278,10 +279,11 @@ function onMilestone(e: Event) {
             id="ci-template"
             data-testid="ci-template"
             class="ci-input"
-            :value="form.templateId.value ?? ''"
+            :value="form.templateId.value ?? (form.templateLeftover.value ? '__other' : '')"
             :disabled="form.submitting.value"
             @change="onTemplate"
           >
+            <option v-if="form.templateLeftover.value" value="__other" disabled>{{ t("createIssue.template.fromOther") }}</option>
             <option value="">{{ t("createIssue.template.blank") }}</option>
             <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id" :title="tpl.about">{{ tpl.name }}</option>
           </select>

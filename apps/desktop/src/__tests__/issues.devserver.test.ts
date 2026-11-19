@@ -258,6 +258,23 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect((await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "x")))).complete).toBe(true);
   });
 
+  it("an owner .github repository may keep its templates at its root", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/.github:ISSUE_TEMPLATE": [{ name: "bug.yml", path: "ISSUE_TEMPLATE/bug.yml", type: "file", size: 9 }],
+      "me/.github:ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(got.source).toBe("me/.github");
+    expect(got.files[0].path).toBe("ISSUE_TEMPLATE/bug.yml");
+  });
+
+  it("a listed single template that reads 404 is incomplete", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github": [{ name: "ISSUE_TEMPLATE.md", path: ".github/ISSUE_TEMPLATE.md", type: "file", size: 4 }],
+    }));
+    expect(got.files).toEqual([]);
+    expect(got.complete).toBe(false);
+  });
+
   it("nothing anywhere is an empty list", async () => {
     expect((await devTemplateFiles("me/app", PUBLIC, fake({}))).files).toEqual([]);
   });

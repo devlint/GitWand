@@ -25,6 +25,15 @@ describe("parseTemplateSet — Markdown templates", () => {
     expect(set.templates.map((t) => [t.name, t.body])).toEqual([["A", "body A"], ["ISSUE_TEMPLATE", "body B"]]);
   });
 
+  it("in the template folder, a template without a name is not offered (as on GitHub)", () => {
+    const set = parseTemplateSet([
+      { path: dir("notes.md"), content: "---\nlabels: x\n---\nbody" },
+      { path: dir("form.yml"), content: "body:\n  - type: input\n    attributes:\n      label: A\n" },
+      { path: "docs/ISSUE_TEMPLATE.md", content: "---\nlabels: y\n---\nlegacy" },
+    ], parse);
+    expect(set.templates.map((t) => t.name)).toEqual(["ISSUE_TEMPLATE"]);
+  });
+
   it("a Markdown file in the template folder without front matter (a README) is not a template", () => {
     const set = parseTemplateSet([{ path: dir("README.md"), content: "# How to file\n" }], parse);
     expect(set.templates).toEqual([]);

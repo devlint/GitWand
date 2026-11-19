@@ -104,9 +104,7 @@ describe("CreateIssueModal — templates", () => {
     await choose("a.md");
     form.setRepo("up/app");
     await flush();
-    expect(select()?.value ?? "").toBe("");
-    form.templateSet.value = { templates: [{ id: "a.md", name: "Bug", about: "", title: "", labels: [], assignees: [], body: "" }], blankAllowed: true, contactLinks: [] };
-    await flush();
+    expect(select()!.value).toBe("__other");
     await choose("");
     expect(askConfirm).toHaveBeenCalled();
     expect(form.body.value).toBe("");

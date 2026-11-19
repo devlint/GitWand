@@ -2727,6 +2727,7 @@ const en = {
 
   createIssue: {
     template: {
+      fromOther: "(from the other repository's template)",
       fromOwner: "Templates shared by {0}",
       clearTitle: "Start from a blank issue?",
       loading: "Looking for this repository's issue templates…",

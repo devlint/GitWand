@@ -699,6 +699,9 @@ pub(crate) struct IssueTemplateFiles {
 }
 
 const TEMPLATE_DIR: &str = ".github/ISSUE_TEMPLATE";
+/// Where an owner's `.github` repository may keep the default templates
+/// (GitHub reads community health files at its root, `.github` or `docs`).
+const OWNER_TEMPLATE_DIRS: [&str; 3] = [TEMPLATE_DIR, "ISSUE_TEMPLATE", "docs/ISSUE_TEMPLATE"];
 /// The folders holding GitHub's single-template file (`ISSUE_TEMPLATE.md`,
 /// its name in any case), tried when there is no template folder: `.github`,
 /// the root (""), `docs`.
@@ -831,7 +834,8 @@ fn single_template(nwo: &str, get: ContentsGet) -> (Option<TemplateFile>, bool, 
                 });
                 (file, complete, true)
             }
-            Ok(None) => (None, complete, true),
+            // Listed, then gone: a race, not an answer worth keeping.
+            Ok(None) => (None, false, true),
             Err(_) => {
                 complete = false;
                 (None, complete, true)
@@ -854,8 +858,11 @@ struct RepoTemplates {
 /// some reads fail; only without one is a single-template file looked for.
 /// Up to 20 templates by name, plus `config.yml`. The folder listing failing
 /// fails; a file that cannot be read is skipped.
-fn templates_in(nwo: &str, get: ContentsGet) -> Result<RepoTemplates, String> {
-    if let Some(serde_json::Value::Array(items)) = get(nwo, TEMPLATE_DIR)? {
+fn templates_in(nwo: &str, dirs: &[&str], get: ContentsGet) -> Result<RepoTemplates, String> {
+    for dir in dirs {
+        let Some(serde_json::Value::Array(items)) = get(nwo, dir)? else {
+            continue;
+        };
         // Every template-like file listed counts (GitHub looks no further);
         // only the small enough ones are read.
         let listed: Vec<&serde_json::Value> = items
@@ -919,7 +926,7 @@ pub(crate) fn template_files(
     is_public: IsPublic,
     get: ContentsGet,
 ) -> Result<IssueTemplateFiles, String> {
-    let own = templates_in(nwo, get)?;
+    let own = templates_in(nwo, &[TEMPLATE_DIR], get)?;
     let mine = |complete: bool| IssueTemplateFiles {
         source: nwo.to_string(),
         files: own.files.clone(),
@@ -941,7 +948,7 @@ pub(crate) fn template_files(
     // what `nwo` has, marked incomplete so it is not cached.
     let theirs = match is_public(&org).and_then(|public| {
         if public {
-            templates_in(&org, get).map(Some)
+            templates_in(&org, &OWNER_TEMPLATE_DIRS, get).map(Some)
         } else {
             Ok(None)
         }
@@ -960,6 +967,36 @@ pub(crate) fn template_files(
 }
 
 /// The issue templates of a target (#301): what its blank form offers.
+/// How long an owner `.github` repository's answers are kept.
+const OWNER_READ_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// `read` for `(nwo, path)`, kept for 5 minutes when `nwo` is an owner's
+/// `.github` repository (successful answers only; a failure is retried).
+fn owner_read(
+    nwo: &str,
+    path: &str,
+    read: impl FnOnce() -> Result<Option<serde_json::Value>, String>,
+) -> Result<Option<serde_json::Value>, String> {
+    type Answers = HashMap<(String, String), (Instant, Option<serde_json::Value>)>;
+    static CACHE: OnceLock<Mutex<Answers>> = OnceLock::new();
+    if !nwo.ends_with("/.github") {
+        return read();
+    }
+    let key = (nwo.to_ascii_lowercase(), path.to_string());
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut guard) = cache.lock() {
+        guard.retain(|_, (at, _)| at.elapsed() < OWNER_READ_TTL);
+        if let Some((_, v)) = guard.get(&key) {
+            return Ok(v.clone());
+        }
+    }
+    let answer = read()?;
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(key, (Instant::now(), answer.clone()));
+    }
+    Ok(answer)
+}
+
 #[tauri::command]
 pub(crate) async fn gh_issue_templates(
     cwd: String,
@@ -969,7 +1006,7 @@ pub(crate) async fn gh_issue_templates(
         let token = issue_token();
         let token = token.as_deref();
         let r = resolve_issue_target(&cwd, &repo, false, token)?;
-        let get = |nwo: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
+        let get_uncached = |nwo: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
             let on = r.sibling(nwo.to_string());
             // The root's listing is `contents` itself.
             let url = if path.is_empty() {
@@ -983,13 +1020,22 @@ pub(crate) async fn gh_issue_templates(
                 Err(e) => Err(e),
             }
         };
+        // The owner's `.github` repository is the same for every repository of
+        // that owner: its answers are kept 5 minutes (each repository without
+        // templates falls back to it).
+        let get = |nwo: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
+            owner_read(nwo, path, || get_uncached(nwo, path))
+        };
         let is_public = |nwo: &str| -> Result<bool, String> {
-            let on = r.sibling(nwo.to_string());
-            match api_get(&cwd, token, &on, &format!("repos/{nwo}")) {
-                Ok(v) => Ok(v.get("private").and_then(|p| p.as_bool()) == Some(false)),
-                Err(e) if is_not_found(&e) => Ok(false),
-                Err(e) => Err(e),
-            }
+            let answer = owner_read(nwo, "#repo", || {
+                let on = r.sibling(nwo.to_string());
+                match api_get(&cwd, token, &on, &format!("repos/{nwo}")) {
+                    Ok(v) => Ok(Some(v)),
+                    Err(e) if is_not_found(&e) => Ok(None),
+                    Err(e) => Err(e),
+                }
+            })?;
+            Ok(answer.and_then(|v| v.get("private").and_then(|p| p.as_bool())) == Some(false))
         };
         template_files(&r.nwo, &is_public, &get)
     })
@@ -1358,6 +1404,37 @@ mod tests {
         )
         .unwrap();
         assert!(all.complete);
+    }
+
+    #[test]
+    fn an_owner_dot_github_repository_may_keep_its_templates_at_its_root() {
+        let got = template_files(
+            "me/app",
+            &PUBLIC,
+            &fake(vec![
+                ("me/.github", "ISSUE_TEMPLATE", json!([{ "name": "bug.yml", "path": "ISSUE_TEMPLATE/bug.yml", "type": "file", "size": 9 }])),
+                ("me/.github", "ISSUE_TEMPLATE/bug.yml", file("name: Bug")),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(got.source, "me/.github");
+        assert_eq!(got.files[0].path, "ISSUE_TEMPLATE/bug.yml");
+    }
+
+    #[test]
+    fn a_listed_single_template_that_reads_404_is_incomplete() {
+        let got = template_files(
+            "me/app",
+            &PUBLIC,
+            &fake(vec![(
+                "me/app",
+                ".github",
+                json!([{ "name": "ISSUE_TEMPLATE.md", "path": ".github/ISSUE_TEMPLATE.md", "type": "file", "size": 4 }]),
+            )]),
+        )
+        .unwrap();
+        assert!(got.files.is_empty());
+        assert!(!got.complete);
     }
 
     #[test]

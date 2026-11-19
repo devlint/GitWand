@@ -187,11 +187,24 @@ export interface CreateIssueApi {
   templateEdited: ComputedRef<boolean>;
   /** The repository the templates come from (the owner's `.github` one, maybe). */
   templateSource: Ref<string | null>;
+  /** The text was filled by a template of the target left. */
+  templateLeftover: Ref<boolean>;
 }
 
 /** How long a target's templates are kept (each read is up to 20 requests). */
 const TEMPLATE_CACHE_MS = 5 * 60_000;
 const templateCache = new Map<string, { at: number; set: IssueTemplateSet; source: string }>();
+/** Keep a target's templates, at most `TEMPLATE_CACHE_MAX` targets (the oldest goes). */
+const TEMPLATE_CACHE_MAX = 50;
+function rememberTemplates(key: string, entry: { at: number; set: IssueTemplateSet; source: string }) {
+  templateCache.delete(key);
+  templateCache.set(key, entry);
+  for (const [k, e] of templateCache) {
+    if (templateCache.size <= TEMPLATE_CACHE_MAX && Date.now() - e.at < TEMPLATE_CACHE_MS) break;
+    templateCache.delete(k);
+  }
+}
+
 /** Forget the cached templates (tests). */
 export function clearTemplateCache(): void {
   templateCache.clear();
@@ -329,6 +342,8 @@ export function useCreateIssue(deps: {
   const templateId = ref<string | null>(null);
   /** The repository the templates were read from (the owner's `.github` one, maybe). */
   const templateSource = ref<string | null>(null);
+  /** The text comes from a template of the target left: no template is chosen, yet it is not blank. */
+  const templateLeftover = ref(false);
   const assigneeOptions = ref<ReviewerCandidate[]>([]);
   const milestoneOptions = ref<RepoMilestone[]>([]);
   const submitting = ref(false);
@@ -478,9 +493,11 @@ export function useCreateIssue(deps: {
   function loadTemplates(target: string) {
     const cwd = formCwd;
     if (!blankForm.value || !cwd) return;
-    const key = `${cwd}\u0000${target}`;
+    // Per repository: another worktree, another folder of it, reads none.
+    const key = target.toLowerCase();
     const cached = templateCache.get(key);
-    if (cached && Date.now() - cached.at < TEMPLATE_CACHE_MS) {
+    if (cached && Date.now() - cached.at >= TEMPLATE_CACHE_MS) templateCache.delete(key);
+    else if (cached) {
       templateSet.value = cached.set;
       templateSource.value = cached.source;
       templatesLoading.value = false; // another target's read may still be in flight
@@ -497,7 +514,7 @@ export function useCreateIssue(deps: {
         ({ set, complete, source }) => {
           // A set missing a file that failed is shown, not kept: the next
           // form tries again.
-          if (complete) templateCache.set(key, { at: Date.now(), set, source });
+          if (complete) rememberTemplates(key, { at: Date.now(), set, source });
           if (current()) {
             templateSet.value = set;
             templateSource.value = source;
@@ -509,20 +526,17 @@ export function useCreateIssue(deps: {
   }
 
   /**
-   * The applied template's labels and people. `wants` is all it names (kept
-   * across a target switch, to offer them again there); `pending` waits for
-   * the target to offer them (its pickers load meanwhile), each granted once
-   * (one the user then removes stays removed); `added` is what the template
-   * put there itself, all it takes back (one picked by hand before stays).
+   * The applied template's labels and people: `pending` waits for the target
+   * to offer them (its pickers load meanwhile), each granted once (one the
+   * user then removes stays removed); `added` is what the template put there
+   * itself, all it takes back (one picked by hand before stays).
    */
   type Picks = { labels: string[]; assignees: string[] };
   const noPicks = (): Picks => ({ labels: [], assignees: [] });
-  let templateWants: Picks = noPicks();
   let templatePending: Picks = noPicks();
   const templateAdded = ref<Picks>(noPicks());
 
   function forgetTemplatePicks() {
-    templateWants = noPicks();
     templatePending = noPicks();
     templateAdded.value = noPicks();
   }
@@ -577,8 +591,8 @@ export function useCreateIssue(deps: {
     labels.value = labels.value.filter((l) => !added.labels.includes(l));
     assignees.value = assignees.value.filter((a) => !added.assignees.includes(a));
     forgetTemplatePicks();
-    templateWants = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
-    templatePending = { labels: [...templateWants.labels], assignees: [...templateWants.assignees] };
+    templateLeftover.value = false;
+    templatePending = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
     // Only what the target offers (GitHub refuses unknown labels and people),
     // now or once its pickers arrive.
     grantTemplateWants();
@@ -618,6 +632,7 @@ export function useCreateIssue(deps: {
     templateId.value = null;
     forgetTemplatePicks();
     templateSource.value = null;
+    templateLeftover.value = false;
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = DEFAULT_SECRETS_OPTIONS;
@@ -880,12 +895,15 @@ export function useCreateIssue(deps: {
     // The text a template filled stays, now the user's (so "Blank issue" asks
     // before clearing it); the choice, and the labels and people it wanted,
     // were about the other target.
-    if (templateId.value !== null) initial.value = { title: "", body: "" };
+    if (templateId.value !== null) {
+      initial.value = { title: "", body: "" };
+      // The select then says so ("from the other repository"), and "Blank
+      // issue" can clear it.
+      templateLeftover.value = true;
+    }
     templateId.value = null;
-    // The template's labels and people are offered again on the new target
-    // (clearPickers dropped them): granted where it has them.
-    templatePending = { labels: [...templateWants.labels], assignees: [...templateWants.assignees] };
-    templateAdded.value = noPicks();
+    // Its labels and people were the other target's (clearPickers dropped them).
+    forgetTemplatePicks();
     loadTemplates(next);
   }
 
@@ -993,5 +1011,6 @@ export function useCreateIssue(deps: {
     applyTemplate,
     templateEdited,
     templateSource,
+    templateLeftover,
   };
 }

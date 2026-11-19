@@ -132,6 +132,8 @@ export function devCreateFailure(status, json) {
 
 // ─── Issue templates (#301, part 5) — mirrors gh_issue_templates ───────────
 const TEMPLATE_DIR = ".github/ISSUE_TEMPLATE";
+/** Where an owner's `.github` repository may keep the default templates. */
+const OWNER_TEMPLATE_DIRS = [TEMPLATE_DIR, "ISSUE_TEMPLATE", "docs/ISSUE_TEMPLATE"];
 /** Folders of the single-template file (`ISSUE_TEMPLATE.md`, any case): `.github`, the root (""), `docs`. */
 const SINGLE_TEMPLATE_DIRS = [".github", "", "docs"];
 const MAX_TEMPLATES = 20;
@@ -171,7 +173,10 @@ async function singleTemplate(nwo, get) {
     if (!found || typeof found.path !== "string") continue;
     if (!smallEnough(found)) return [null, complete, true];
     try {
-      const content = decodeContent(await get(nwo, encodePath(found.path)));
+      const v = await get(nwo, encodePath(found.path));
+      // Listed, then gone: a race, not an answer worth keeping.
+      if (v === null) return [null, false, true];
+      const content = decodeContent(v);
       return [content === null ? null : { path: found.path, content }, complete, true];
     } catch {
       complete = false;
@@ -186,9 +191,10 @@ async function singleTemplate(nwo, get) {
  * file in its template folder (config.yml included) makes that folder the
  * whole answer; only without one is a single-template file looked for.
  */
-async function templatesIn(nwo, get) {
-  const items = await get(nwo, TEMPLATE_DIR);
-  if (Array.isArray(items)) {
+async function templatesIn(nwo, dirs, get) {
+  for (const dir of dirs) {
+    const items = await get(nwo, dir);
+    if (!Array.isArray(items)) continue;
     const listed = items.filter((i) => i?.type === "file" && typeof i.name === "string" && /\.(md|ya?ml)$/i.test(i.name));
     if (listed.length) {
       const named = listed
@@ -222,7 +228,7 @@ async function templatesIn(nwo, get) {
  * 404; `isPublic(nwo)` whether a repository is public.
  */
 export async function devTemplateFiles(nwo, isPublic, get) {
-  const own = await templatesIn(nwo, get);
+  const own = await templatesIn(nwo, [TEMPLATE_DIR], get);
   const mine = (complete) => ({ source: nwo, files: own.files, complete });
   // Only a repository with no template folder and no single template gets its owner's.
   if (own.present) return mine(own.complete);
@@ -231,7 +237,7 @@ export async function devTemplateFiles(nwo, isPublic, get) {
   let theirs = null;
   try {
     // GitHub only uses a public `.github` repository.
-    if (await isPublic(org)) theirs = await templatesIn(org, get);
+    if (await isPublic(org)) theirs = await templatesIn(org, OWNER_TEMPLATE_DIRS, get);
   } catch {
     return mine(false); // a failing fallback keeps what nwo has, not cached
   }

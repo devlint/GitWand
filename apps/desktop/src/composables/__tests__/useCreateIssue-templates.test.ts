@@ -179,15 +179,38 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     expect(form.assignees.value).toEqual(["alice"]);
   });
 
-  it("switching target offers the template's labels and people again, where the new target has them", async () => {
+  it("switching target leaves the template's text (marked as left over) and none of its labels", async () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
     await form.open();
     await flush();
     form.applyTemplate("a.md");
     form.setRepo("up/app");
     await flush();
-    expect(form.labels.value).toEqual(["bug"]);
-    expect(form.assignees.value).toEqual(["alice"]);
+    expect(form.templateLeftover.value).toBe(true);
+    expect(form.labels.value).toEqual([]);
+    expect(form.assignees.value).toEqual([]);
+    form.applyTemplate(null);
+    expect(form.templateLeftover.value).toBe(false);
+  });
+
+  it("templates are kept per target: another worktree of the same repository reads none", async () => {
+    const cwd = ref("/repo");
+    const reads = vi.fn(async () => ({ files: [{ path: "a.md", content: BUG }], complete: true, source: "me/app" }));
+    const provider = {
+      name: "github",
+      issueAvailable: vi.fn(async () => true),
+      issueTargets: vi.fn(async () => ({ targets: [ORIGIN], defaultRepo: "me/app" })),
+      listLabels: vi.fn(async () => []), listMilestones: vi.fn(async () => []), listAssignees: vi.fn(async () => []),
+      createIssue: vi.fn(),
+    } as unknown as ForgeProvider;
+    const form = useCreateIssue({ cwd, provider: ref(provider), onCreated: vi.fn(), issueTemplates: reads });
+    await form.open();
+    await flush();
+    form.close();
+    cwd.value = "/repo-worktree";
+    await form.open();
+    await flush();
+    expect(reads).toHaveBeenCalledTimes(1);
   });
 
   it("a label picked by hand before the template stays when the template goes", async () => {

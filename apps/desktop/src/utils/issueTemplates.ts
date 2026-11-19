@@ -124,9 +124,13 @@ function markdownTemplate(path: string, raw: string, parseYaml: ParseYaml): Issu
     if (parsed !== null && parsed !== undefined && !isObj(parsed)) return null;
     meta = parsed ?? {};
   }
+  // In the template folder a template needs a name, as GitHub's chooser does;
+  // a single-template file elsewhere is named after its file.
+  const name = str(meta.name).trim();
+  if (!name && inTemplateFolder(path)) return null;
   return {
     id: path,
-    name: str(meta.name).trim() || baseName(path),
+    name: name || baseName(path),
     about: str(meta.about).trim(),
     title: str(meta.title),
     labels: list(meta.labels),
@@ -138,9 +142,11 @@ function markdownTemplate(path: string, raw: string, parseYaml: ParseYaml): Issu
 function formTemplate(path: string, content: string, parseYaml: ParseYaml): IssueTemplate | null {
   const form = parseYaml(content);
   if (!isObj(form) || !Array.isArray(form.body)) return null;
+  const name = str(form.name).trim();
+  if (!name) return null; // GitHub offers no form without a name
   return {
     id: path,
-    name: str(form.name).trim() || baseName(path),
+    name,
     about: str(form.description).trim(),
     title: str(form.title),
     labels: list(form.labels),
