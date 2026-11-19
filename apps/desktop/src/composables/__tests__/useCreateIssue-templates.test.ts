@@ -9,6 +9,7 @@ import type { ForgeProvider } from "../forge/types";
 
 const ORIGIN = { repo: "me/app", htmlUrl: "https://github.com/me/app", hasIssues: true, isOrigin: true, canTriage: true };
 const PARENT = { repo: "up/app", htmlUrl: "https://github.com/up/app", hasIssues: true, isOrigin: false, canTriage: true };
+const YES = async () => true;
 const flush = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); };
 const BUG = "---\nname: Bug\nabout: It broke\ntitle: '[Bug] '\nlabels: bug, nope\nassignees: alice, ghost\n---\n## Steps\n";
 
@@ -81,7 +82,7 @@ describe("useCreateIssue — issue templates", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     expect(form.templateId.value).toBe("a.md");
     expect(form.title.value).toBe("[Bug] ");
     expect(form.body.value).toBe("## Steps\n");
@@ -94,8 +95,8 @@ describe("useCreateIssue — issue templates", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
-    form.applyTemplate(null);
+    await form.chooseTemplate("a.md", YES);
+    await form.chooseTemplate(null, YES);
     expect(form.templateId.value).toBeNull();
     expect([form.title.value, form.body.value]).toEqual(["", ""]);
     expect(form.labels.value).toEqual([]);
@@ -131,10 +132,10 @@ describe("useCreateIssue — templates, review follow-ups", () => {
     await flush();
     form.labels.value = ["ui"];
     form.assignees.value = ["bob"];
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     expect(form.labels.value).toEqual(["ui", "bug"]);
     expect(form.assignees.value).toEqual(["bob", "alice"]);
-    form.applyTemplate(null);
+    await form.chooseTemplate(null, YES);
     expect(form.labels.value).toEqual(["ui"]);
     expect(form.assignees.value).toEqual(["bob"]);
   });
@@ -145,7 +146,7 @@ describe("useCreateIssue — templates, review follow-ups", () => {
     (provider.listLabels as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((r) => { labelsArrive = r; }));
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     expect(form.labels.value).toEqual([]);
     labelsArrive([{ name: "bug", color: "f00", description: null }]);
     await flush();
@@ -171,7 +172,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     (provider.listAssignees as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((r) => { peopleArrive = r; }));
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     expect(form.labels.value).toEqual(["bug"]);
     form.labels.value = [];
     peopleArrive([{ login: "alice", name: null, avatarUrl: null }]);
@@ -184,13 +185,13 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     form.setRepo("up/app");
     await flush();
     expect(form.templateLeftover.value).toBe(true);
     expect(form.labels.value).toEqual([]);
     expect(form.assignees.value).toEqual([]);
-    form.applyTemplate(null);
+    await form.chooseTemplate(null, YES);
     expect(form.templateLeftover.value).toBe(false);
   });
 
@@ -198,7 +199,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: "---\nname: X\nlabels: bug, Bug\n---\nb" }] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     expect(form.labels.value).toEqual(["bug"]);
   });
 
@@ -206,7 +207,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     form.setRepo("up/app");
     await flush();
     form.setRepo("me/app");
@@ -221,7 +222,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     form.body.value = "rewritten";
     form.setRepo("up/app");
     await flush();
@@ -272,7 +273,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     }, new Set(["me/app"]));
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     form.setRepo("up/app");
     await flush();
     second = true; // the template was removed from me/app meanwhile
@@ -295,7 +296,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: reads });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     expect(form.templatePicksUnset.value).toEqual(["bug", "nope", "alice", "ghost"]);
   });
 
@@ -395,8 +396,8 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     await form.open();
     await flush();
     form.labels.value = ["bug"];
-    form.applyTemplate("a.md");
-    form.applyTemplate(null);
+    await form.chooseTemplate("a.md", YES);
+    await form.chooseTemplate(null, YES);
     expect(form.labels.value).toEqual(["bug"]);
   });
 
@@ -414,7 +415,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: "---\nname: Plain\n---\nbody" }] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     // `dirty` is what makeRoom() and the close confirmation go by.
     expect(form.dirty.value).toBe(false);
   });
@@ -423,7 +424,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     expect(form.labels.value).toEqual(["bug"]);
     expect(form.dirty.value).toBe(false);
     form.assignees.value = [...form.assignees.value, "bob"];
@@ -436,7 +437,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     await flush();
     form.labels.value = ["ui"];
     expect(form.bodyEdited.value).toBe(false);
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     form.labels.value = form.labels.value.filter((l) => l !== "bug");
     // Another template would not bring it back: nothing is lost, nothing to confirm.
     expect(form.bodyEdited.value).toBe(false);
@@ -454,7 +455,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     form.close();
     await form.open();
     await flush();
@@ -476,8 +477,75 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: "---\nname: X\nlabels: BUG\nassignees: Alice\n---\nb" }] });
     await form.open();
     await flush();
-    form.applyTemplate("a.md");
+    await form.chooseTemplate("a.md", YES);
     expect(form.labels.value).toEqual(["bug"]);
     expect(form.assignees.value).toEqual(["alice"]);
+  });
+});
+
+describe("useCreateIssue — templates, tenth pass follow-ups", () => {
+  it("the triage notice follows the target: gone on one with rights, back on the way back", async () => {
+    const reads = vi.fn(async (_c: string, r: string) => ({ files: r === "me/app" ? [{ path: "a.md", content: BUG }] : [], complete: true, source: r }));
+    const provider = {
+      name: "github",
+      issueAvailable: vi.fn(async () => true),
+      issueTargets: vi.fn(async () => ({ targets: [{ ...ORIGIN, canTriage: false }, PARENT], defaultRepo: "me/app" })),
+      listLabels: vi.fn(async () => []), listMilestones: vi.fn(async () => []), listAssignees: vi.fn(async () => []),
+      createIssue: vi.fn(),
+    } as unknown as ForgeProvider;
+    const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: reads });
+    await form.open();
+    await flush();
+    await form.chooseTemplate("a.md", YES);
+    expect(form.templatePicksUnset.value).toEqual(["bug", "nope", "alice", "ghost"]);
+    form.setRepo("up/app");
+    await flush();
+    expect(form.templatePicksUnset.value).toEqual([]);
+    form.setRepo("me/app");
+    await flush();
+    expect(form.templateId.value).toBe("a.md");
+    expect(form.templatePicksUnset.value).toEqual(["bug", "nope", "alice", "ghost"]);
+  });
+
+  it("with triage rights, the template's labels and people the target does not offer are named once its lists answered", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.open();
+    await flush();
+    await form.chooseTemplate("a.md", YES);
+    await flush();
+    expect(form.templatePicksUnset.value).toEqual(["nope", "ghost"]);
+  });
+
+  it("a label list that fails names the template's labels as not set", async () => {
+    const { form, provider } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    (provider.listLabels as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => { throw new Error("502"); });
+    await form.open();
+    await flush();
+    await form.chooseTemplate("a.md", YES);
+    await flush();
+    expect(form.templatePicksUnset.value).toEqual(["bug", "nope", "ghost"]);
+  });
+
+  it("switching back does not restore a template whose text changed meanwhile", async () => {
+    let second = false;
+    const { form } = setup({
+      "me/app": () => Promise.resolve([{ path: "a.md", content: second ? BUG.replace("## Steps", "## New steps") : BUG }]),
+      "up/app": [],
+    }, new Set(["me/app"]));
+    await form.open();
+    await flush();
+    await form.chooseTemplate("a.md", YES);
+    form.setRepo("up/app");
+    await flush();
+    second = true;
+    form.setRepo("me/app");
+    await flush();
+    expect(form.templateId.value).toBeNull();
+    expect(form.templateLeftover.value).toBe(true);
+  });
+
+  it("only chooseTemplate fills the form from a template (it asks first)", () => {
+    const { form } = setup();
+    expect("applyTemplate" in form).toBe(false);
   });
 });

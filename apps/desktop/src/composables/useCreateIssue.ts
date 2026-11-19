@@ -181,14 +181,12 @@ export interface CreateIssueApi {
   templatesLoading: Ref<boolean>;
   /** The template applied, null for "Blank issue". */
   templateId: Ref<string | null>;
-  /** Fill the form from a template (null: blank). The caller confirms first when `bodyEdited`. */
-  applyTemplate(id: string | null): void;
   /** The repository the templates come from (the owner's `.github` one, maybe). */
   templateSource: Ref<string | null>;
   /** The text was filled by a template of the target left. */
   templateLeftover: Ref<boolean>;
-  /** The applied template's labels and people the target cannot take (no triage rights). */
-  templatePicksUnset: Ref<string[]>;
+  /** The applied template's labels and people that will not be set (no triage rights, or not offered by the target). */
+  templatePicksUnset: ComputedRef<string[]>;
   /** The owner's `.github` repository, when the templates come from it. */
   templateFromOwner: ComputedRef<string | null>;
   /** A template chosen in the picker, `confirm` asked first when it would replace edits. */
@@ -347,6 +345,8 @@ export function useCreateIssue(deps: {
   const assignees = ref<string[]>([]);
   const milestone = ref<number | null>(null);
   const labelOptions = ref<RepoLabel[]>([]);
+  /** Whether the target's label and people lists have answered (or failed). */
+  const listsAnswered = ref({ labels: false, assignees: false });
   const blankForm = ref(false);
   const templateSet = ref<IssueTemplateSet | null>(null);
   const templatesLoading = ref(false);
@@ -355,8 +355,6 @@ export function useCreateIssue(deps: {
   const templateSource = ref<string | null>(null);
   /** The text comes from a template of the target left: no template is chosen, yet it is not blank. */
   const templateLeftover = ref(false);
-  /** The applied template's labels and people that cannot be set (no triage rights): said, not dropped silently. */
-  const templatePicksUnset = ref<string[]>([]);
   /** The template the leftover text came from, to restore on the way back to its repository. */
   type LeftoverFrom = { repo: string; id: string; title: string; body: string; picks: { labels: string[]; assignees: string[] } };
   let leftoverFrom: LeftoverFrom | null = null;
@@ -490,6 +488,7 @@ export function useCreateIssue(deps: {
     labelOptions.value = [];
     assigneeOptions.value = [];
     milestoneOptions.value = [];
+    listsAnswered.value = { labels: false, assignees: false };
   }
 
   function loadPickers(target: string) {
@@ -502,9 +501,12 @@ export function useCreateIssue(deps: {
     const gen = generation;
     const current = () => gen === generation && repo.value === target;
     // Each list is optional: a read GitHub refuses (no triage rights) leaves it empty.
-    p.listLabels?.(cwd, target).then((v) => { if (current()) labelOptions.value = v; }, () => {});
+    const answered = (key: "labels" | "assignees") => () => {
+      if (current()) listsAnswered.value = { ...listsAnswered.value, [key]: true };
+    };
+    (p.listLabels?.(cwd, target).then((v) => { if (current()) labelOptions.value = v; }, () => {}) ?? Promise.resolve()).finally(answered("labels"));
     p.listMilestones?.(cwd, target).then((v) => { if (current()) milestoneOptions.value = v; }, () => {});
-    p.listAssignees?.(cwd, target).then((v) => { if (current()) assigneeOptions.value = v; }, () => {});
+    (p.listAssignees?.(cwd, target).then((v) => { if (current()) assigneeOptions.value = v; }, () => {}) ?? Promise.resolve()).finally(answered("assignees"));
   }
 
   /**
@@ -570,11 +572,29 @@ export function useCreateIssue(deps: {
    */
   type Picks = { labels: string[]; assignees: string[] };
   const noPicks = (): Picks => ({ labels: [], assignees: [] });
-  let templatePending: Picks = noPicks();
+  const templatePending = ref<Picks>(noPicks());
   const templateAdded = ref<Picks>(noPicks());
 
+  /**
+   * The applied template's labels and people that will not be set, said
+   * rather than dropped silently: all it still waits for without triage
+   * rights (the lists never load), else those its target's lists, once
+   * answered (or failed), do not offer.
+   */
+  const templatePicksUnset = computed(() => {
+    if (templateId.value === null) return [];
+    const pending = templatePending.value;
+    const canTriage = targets.value.find((x) => x.repo === repo.value)?.canTriage ?? false;
+    const named = canTriage
+      ? [...(listsAnswered.value.labels ? pending.labels : []), ...(listsAnswered.value.assignees ? pending.assignees : [])]
+      : [...pending.labels, ...pending.assignees];
+    // Once each, whatever the case the template wrote it in.
+    const seen = new Set<string>();
+    return named.filter((x) => !seen.has(x.toLowerCase()) && !!seen.add(x.toLowerCase()));
+  });
+
   function forgetTemplatePicks() {
-    templatePending = noPicks();
+    templatePending.value = noPicks();
     templateAdded.value = noPicks();
   }
 
@@ -591,16 +611,15 @@ export function useCreateIssue(deps: {
     return added.labels.some((l) => !labels.value.includes(l)) || added.assignees.some((a) => !assignees.value.includes(a));
   }
 
-
-
   /** Grant what the template wants and the target now offers, each once. */
   function grantTemplateWants() {
     // Without case (GitHub's label names and logins), in the target's spelling.
     const grant = (have: Ref<string[]>, key: "labels" | "assignees", offeredNames: string[]) => {
       const offered = new Map(offeredNames.map((x) => [x.toLowerCase(), x]));
-      const now = [...new Set(templatePending[key].filter((x) => offered.has(x.toLowerCase())).map((x) => offered.get(x.toLowerCase())!))];
+      const pending = templatePending.value[key];
+      const now = [...new Set(pending.filter((x) => offered.has(x.toLowerCase())).map((x) => offered.get(x.toLowerCase())!))];
       if (!now.length) return;
-      templatePending[key] = templatePending[key].filter((x) => !offered.has(x.toLowerCase()));
+      templatePending.value = { ...templatePending.value, [key]: pending.filter((x) => !offered.has(x.toLowerCase())) };
       const fresh = now.filter((x) => !have.value.includes(x));
       templateAdded.value = { ...templateAdded.value, [key]: [...templateAdded.value[key], ...fresh] };
       have.value = [...have.value, ...fresh];
@@ -609,7 +628,7 @@ export function useCreateIssue(deps: {
     grant(assignees, "assignees", assigneeOptions.value.map((a) => a.login));
   }
   watch([labelOptions, assigneeOptions], () => {
-    if (templatePending.labels.length || templatePending.assignees.length) grantTemplateWants();
+    if (templatePending.value.labels.length || templatePending.value.assignees.length) grantTemplateWants();
   });
 
   /**
@@ -628,14 +647,17 @@ export function useCreateIssue(deps: {
   function onTemplateSet() {
     const back = restoreOnLoad;
     restoreOnLoad = null;
-    if (back && templateSet.value?.templates.some((x) => x.id === back.id) && title.value === back.title && body.value === back.body) {
+    const same = back && templateSet.value?.templates.find((x) => x.id === back.id);
+    // The template must still read as it did (it may have changed upstream),
+    // and its text be untouched since.
+    if (back && same && same.title === back.title && same.body === back.body && title.value === back.title && body.value === back.body) {
       // Back where the template came from, its text untouched: chosen again.
       templateId.value = back.id;
       initial.value = { title: back.title, body: back.body };
       templateLeftover.value = false;
       leftoverFrom = null;
       appliedPicks = back.picks;
-      templatePending = { labels: [...back.picks.labels], assignees: [...back.picks.assignees] };
+      templatePending.value = { labels: [...back.picks.labels], assignees: [...back.picks.assignees] };
       grantTemplateWants();
       return;
     }
@@ -668,6 +690,7 @@ export function useCreateIssue(deps: {
     applyTemplate(wanted);
   }
 
+  /** Fill the form from a template (null: blank), unasked: `chooseTemplate` asks first. */
   function applyTemplate(id: string | null) {
     const chosen = id === null ? null : templateSet.value?.templates.find((x) => x.id === id) ?? null;
     if (id !== null && !chosen) return;
@@ -684,10 +707,7 @@ export function useCreateIssue(deps: {
     templatePrefilled = false;
     restoreOnLoad = null;
     appliedPicks = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
-    // Without triage rights the pickers never load: say what will not be set.
-    const canTriage = targets.value.find((x) => x.repo === repo.value)?.canTriage ?? false;
-    templatePicksUnset.value = canTriage ? [] : [...appliedPicks.labels, ...appliedPicks.assignees];
-    templatePending = { labels: [...appliedPicks.labels], assignees: [...appliedPicks.assignees] };
+    templatePending.value = { labels: [...appliedPicks.labels], assignees: [...appliedPicks.assignees] };
     // Only what the target offers (GitHub refuses unknown labels and people),
     // now or once its pickers arrive.
     grantTemplateWants();
@@ -731,7 +751,6 @@ export function useCreateIssue(deps: {
     leftoverFrom = null;
     appliedPicks = { labels: [], assignees: [] };
     templatePrefilled = false;
-    templatePicksUnset.value = [];
     restoreOnLoad = null;
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
@@ -1121,7 +1140,6 @@ export function useCreateIssue(deps: {
     templateSet,
     templatesLoading,
     templateId,
-    applyTemplate,
     templateSource,
     templateLeftover,
     templatePicksUnset,

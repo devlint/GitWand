@@ -372,7 +372,27 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(got.files).toEqual([]);
   });
 
-  it("a non-404 error fails the read", async () => {
-    await expect(devTemplateFiles("me/app", PUBLIC, async () => { throw new Error("502"); })).rejects.toThrow("502");
+  it("a failed template folder listing is an empty, incomplete answer", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async () => { throw new Error("502"); });
+    expect(got).toEqual({ source: "me/app", files: [], complete: false });
+  });
+
+  const recording = (m: Record<string, unknown>) => {
+    const asked: string[] = [];
+    const get = async (nwo: string, path: string) => { asked.push(`${nwo}:${path}`); return m[`${nwo}:${path}`] ?? null; };
+    return { get, asked };
+  };
+
+  it("a template folder spares the single-template listings", async () => {
+    const { get, asked } = recording({ "me/app:.github/ISSUE_TEMPLATE": [entry("bug.md")], "me/app:.github/ISSUE_TEMPLATE/bug.md": file("---\nname: Bug\n---\nx") });
+    const got = await devTemplateFiles("me/app", PUBLIC, get);
+    expect(got.files).toHaveLength(1);
+    expect(asked.filter((a) => ["me/app:", "me/app:.github", "me/app:docs"].includes(a))).toEqual([]);
+  });
+
+  it("a private or missing owner .github is not listed", async () => {
+    const { get, asked } = recording({});
+    await devTemplateFiles("me/app", async () => false, get);
+    expect(asked.filter((a) => a.startsWith("me/.github:"))).toEqual([]);
   });
 });

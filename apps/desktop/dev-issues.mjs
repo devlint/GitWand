@@ -184,22 +184,20 @@ async function singleTemplate(nwo, listings, get) {
   return [null, complete, false];
 }
 
+const listDirs = (nwo, dirs, get) => Promise.all(dirs.map((dir) => get(nwo, dir).then((v) => ({ v }), (e) => ({ e }))));
+
 /**
  * One repository's templates `{ files, complete, present }`, as Rust: any
  * file in its template folder (config.yml included) makes that folder the
- * whole answer; only without one is a single-template file looked for.
+ * whole answer; only without one is a single-template file looked for. A
+ * folder listing that fails leaves the answer unknown: nothing, incomplete.
  */
 async function templatesIn(nwo, dirs, get) {
-  // Several folders (an owner's .github repository) are listed at once; the
-  // first, in order, holding a template-like file is the answer.
-  // The template folders and the single-template folders in one round, as Rust.
-  const all = await Promise.all([...dirs, ...SINGLE_TEMPLATE_DIRS].map((dir) => get(nwo, dir).then((v) => ({ v }), (e) => ({ e }))));
-  const listings = all.slice(0, dirs.length);
-  const singles = all.slice(dirs.length);
-  // In order: a failure only counts before the folder that answers; any file
-  // in a folder (a README too) makes it the answer.
-  for (const { v: items, e } of listings) {
-    if (e) throw e;
+  // The template folders first (at once), as Rust; the single-template
+  // folders only without one. In order: a failure only counts before the
+  // folder that answers; any file in a folder (a README too) makes it the answer.
+  for (const { v: items, e } of await listDirs(nwo, dirs, get)) {
+    if (e) return { files: [], complete: false, present: false };
     if (!Array.isArray(items) || !items.length) continue;
     const listed = items.filter((i) => i?.type === "file" && typeof i.name === "string" && /\.(md|ya?ml)$/i.test(i.name));
     // In name order: config.yml always, templates up to the cap.
@@ -227,7 +225,7 @@ async function templatesIn(nwo, dirs, get) {
     }
     return { files, complete, present: true };
   }
-  const [single, complete, present] = await singleTemplate(nwo, singles, get);
+  const [single, complete, present] = await singleTemplate(nwo, await listDirs(nwo, SINGLE_TEMPLATE_DIRS, get), get);
   return { files: single ? [single] : [], complete, present };
 }
 
@@ -245,12 +243,15 @@ export async function devTemplateFiles(nwo, isPublic, get) {
   if (own.present || !own.complete) return mine(own.complete);
   const org = `${nwo.split("/")[0]}/.github`;
   if (org.toLowerCase() === nwo.toLowerCase()) return mine(own.complete);
-  // Visibility and folders asked at once; the folders count only if public.
-  const [pub, theirs] = await Promise.all([
-    isPublic(org).then((v) => ({ v }), (e) => ({ e })),
-    templatesIn(org, OWNER_TEMPLATE_DIRS, get).then((v) => ({ v }), (e) => ({ e })),
-  ]);
-  if (pub.e || theirs.e) return mine(false);
-  if (pub.v && theirs.v.present) return { source: org, files: theirs.v.files, complete: theirs.v.complete };
-  return mine(own.complete);
+  // Its folders only if it is public (a missing one is not), as Rust.
+  let pub;
+  try {
+    pub = await isPublic(org);
+  } catch {
+    return mine(false);
+  }
+  if (!pub) return mine(own.complete);
+  const theirs = await templatesIn(org, OWNER_TEMPLATE_DIRS, get);
+  if (theirs.present) return { source: org, files: theirs.files, complete: theirs.complete };
+  return mine(own.complete && theirs.complete);
 }
