@@ -127,7 +127,6 @@ async function onSwitch(e: Event) {
   form.setGitwand(wanted);
 }
 
-/** The target's templates (a blank form only). */
 /** A blank form's own: never a report's (a template would replace it). */
 const offersTemplates = computed(() => form.blankForm.value && !form.report.value);
 const templates = computed(() => (offersTemplates.value ? form.templateSet.value?.templates ?? [] : []));
@@ -140,8 +139,10 @@ async function onTemplate(e: Event) {
   const wanted = select.value || null;
   // The state decides what the select shows (a cancelled choice leaves it as it was).
   select.value = form.templateId.value ?? "";
-  if (wanted === form.templateId.value) return;
-  if (form.bodyEdited.value) {
+  // The same choice does nothing, except "Blank issue" over a text left by
+  // another target's template: it clears that.
+  if (wanted === form.templateId.value && !(wanted === null && form.bodyEdited.value)) return;
+  if (form.templateEdited.value) {
     const asked = form.openId.value;
     const target = form.repo.value;
     const ok = await askConfirm({

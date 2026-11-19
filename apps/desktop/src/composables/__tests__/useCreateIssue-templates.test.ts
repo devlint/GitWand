@@ -219,6 +219,17 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     expect(form.dirty.value).toBe(false);
   });
 
+  it("the previous form's template picks do not count as edits in the next", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    form.close();
+    await form.open();
+    await flush();
+    expect(form.templateEdited.value).toBe(false);
+  });
+
   it("an incomplete set (a file could not be read) is not kept", async () => {
     const { form, issueTemplates } = setup({ "me/app": [{ path: "a.md", content: BUG }] }, new Set(["me/app"]));
     await form.open();

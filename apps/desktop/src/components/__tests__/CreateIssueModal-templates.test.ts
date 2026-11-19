@@ -13,6 +13,7 @@ vi.mock("../../composables/useI18n", () => ({
 }));
 
 const ORIGIN = { repo: "me/app", htmlUrl: "https://github.com/me/app", hasIssues: true, isOrigin: true, canTriage: true };
+const PARENT = { repo: "up/app", htmlUrl: "https://github.com/up/app", hasIssues: true, isOrigin: false, canTriage: true };
 const BUG = "---\nname: Bug\nabout: It broke\ntitle: '[Bug] '\n---\n## Steps\n";
 const CONFIG = "blank_issues_enabled: false\ncontact_links:\n  - name: Discussions\n    url: https://github.com/me/app/discussions\n    about: Ask here\n";
 
@@ -25,7 +26,7 @@ async function mount(files: { path: string; content: string }[] | (() => Promise
   const provider = {
     name: "github",
     issueAvailable: vi.fn(async () => true),
-    issueTargets: vi.fn(async () => ({ targets: [ORIGIN], defaultRepo: "me/app" })),
+    issueTargets: vi.fn(async () => ({ targets: [ORIGIN, PARENT], defaultRepo: "me/app" })),
     listLabels: vi.fn(async () => []),
     listMilestones: vi.fn(async () => []),
     listAssignees: vi.fn(async () => []),
@@ -96,6 +97,29 @@ describe("CreateIssueModal — templates", () => {
     await flush();
     await choose("");
     expect(askConfirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: "createIssue.template.clearTitle" }));
+  });
+
+  it("after a target switch, Blank issue still clears the old target's template, asking first", async () => {
+    const { form, askConfirm } = await mount([{ path: "a.md", content: BUG }]);
+    await choose("a.md");
+    form.setRepo("up/app");
+    await flush();
+    expect(select()?.value ?? "").toBe("");
+    form.templateSet.value = { templates: [{ id: "a.md", name: "Bug", about: "", title: "", labels: [], assignees: [], body: "" }], blankAllowed: true, contactLinks: [] };
+    await flush();
+    await choose("");
+    expect(askConfirm).toHaveBeenCalled();
+    expect(form.body.value).toBe("");
+  });
+
+  it("labels changed by hand after a template count: switching templates asks", async () => {
+    const two = [{ path: "a.md", content: BUG }, { path: "b.md", content: "---\nname: Other\n---\nx" }];
+    const { form, askConfirm } = await mount(two);
+    await choose("a.md");
+    form.labels.value = [...form.labels.value, "ui"];
+    await flush();
+    await choose("b.md");
+    expect(askConfirm).toHaveBeenCalled();
   });
 
   it("says the repository expects a template, and lists its contact links", async () => {

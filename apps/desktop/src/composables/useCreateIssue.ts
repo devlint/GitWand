@@ -7,8 +7,7 @@
 
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
-import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, ghIssueTemplates, type TemplateFile } from "../utils/backend";
-type TemplateRead = { files: TemplateFile[]; complete: boolean };
+import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, ghIssueTemplates, type IssueTemplateFiles } from "../utils/backend";
 import { loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
 import type { SecretFinding, SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
@@ -182,8 +181,10 @@ export interface CreateIssueApi {
   templatesLoading: Ref<boolean>;
   /** The template applied, null for "Blank issue". */
   templateId: Ref<string | null>;
-  /** Fill the form from a template (null: blank). The caller confirms first when `bodyEdited`. */
+  /** Fill the form from a template (null: blank). The caller confirms first when `templateEdited`. */
   applyTemplate(id: string | null): void;
+  /** Title, description, labels or people changed since the template filled them. */
+  templateEdited: ComputedRef<boolean>;
 }
 
 /** How long a target's templates are kept (each read is up to 20 requests). */
@@ -296,7 +297,7 @@ export function useCreateIssue(deps: {
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
   report?: ReportDeps;
   /** A target's raw template files (tests replace the GitHub read). */
-  issueTemplates?: (cwd: string, repo: string) => Promise<TemplateRead>;
+  issueTemplates?: (cwd: string, repo: string) => Promise<Pick<IssueTemplateFiles, "files" | "complete">>;
 }): CreateIssueApi {
   const readTemplates = deps.issueTemplates ?? ghIssueTemplates;
   const rdeps = deps.report ?? {};
@@ -511,6 +512,17 @@ export function useCreateIssue(deps: {
     templateAdded = { labels: [], assignees: [] };
   }
 
+  /** The labels and people as the template left them (grants included). */
+  const templatePicks = ref({ labels: [] as string[], assignees: [] as string[] });
+  const snapshotPicks = () => { templatePicks.value = { labels: [...labels.value], assignees: [...assignees.value] }; };
+  const samePicks = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+  const templateEdited = computed(
+    () =>
+      bodyEdited.value ||
+      !samePicks(labels.value, templatePicks.value.labels) ||
+      !samePicks(assignees.value, templatePicks.value.assignees),
+  );
+
   /** Grant what the template wants and the target now offers, each once. */
   function grantTemplateWants() {
     // Without case (GitHub's label names and logins), in the target's spelling.
@@ -522,6 +534,8 @@ export function useCreateIssue(deps: {
       const fresh = now.filter((x) => !have.value.includes(x));
       templateAdded[key] = [...templateAdded[key], ...fresh];
       have.value = [...have.value, ...fresh];
+      // A late grant is the template's doing, not an edit.
+      templatePicks.value = { ...templatePicks.value, [key]: [...templatePicks.value[key], ...fresh] };
     };
     grant(labels, "labels", labelOptions.value.map((l) => l.name));
     grant(assignees, "assignees", assigneeOptions.value.map((a) => a.login));
@@ -541,6 +555,7 @@ export function useCreateIssue(deps: {
     assignees.value = assignees.value.filter((a) => !templateAdded.assignees.includes(a));
     forgetTemplatePicks();
     templatePending = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
+    snapshotPicks();
     // Only what the target offers (GitHub refuses unknown labels and people),
     // now or once its pickers arrive.
     grantTemplateWants();
@@ -579,6 +594,7 @@ export function useCreateIssue(deps: {
     templatesLoading.value = false;
     templateId.value = null;
     forgetTemplatePicks();
+    templatePicks.value = { labels: [], assignees: [] };
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = DEFAULT_SECRETS_OPTIONS;
@@ -838,8 +854,10 @@ export function useCreateIssue(deps: {
     // Labels, people and milestones belong to one repository.
     clearPickers();
     loadPickers(next);
-    // The text a template filled stays; the choice, and the labels and people
-    // it wanted, were about the other target.
+    // The text a template filled stays, now the user's (so "Blank issue" asks
+    // before clearing it); the choice, and the labels and people it wanted,
+    // were about the other target.
+    if (templateId.value !== null) initial.value = { title: "", body: "" };
     templateId.value = null;
     forgetTemplatePicks();
     loadTemplates(next);
@@ -947,5 +965,6 @@ export function useCreateIssue(deps: {
     templatesLoading,
     templateId,
     applyTemplate,
+    templateEdited,
   };
 }

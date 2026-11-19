@@ -155,52 +155,57 @@ const encodePath = (path) =>
   path.split("/").map((seg) => [...Buffer.from(seg, "utf8")].map((b) => (/[A-Za-z0-9\-._~]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, "0")}`)).join("")).join("/");
 const smallEnough = (v) => typeof v?.size === "number" && v.size <= MAX_TEMPLATE_BYTES;
 const isConfig = (n) => ["config.yml", "config.yaml"].includes(n.toLowerCase());
-const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+// By UTF-8 bytes, as Rust sorts strings (JS `<` compares UTF-16 units).
+const cmp = (a, b) => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
 const isConfigPath = (path) => isConfig(path.split("/").pop() ?? path);
-const hasTemplate = (files) => files.some((f) => !isConfigPath(f.path));
 
-/** The first single-template file of `nwo`, probed in parallel, in list order. */
+/** `[file | null, complete]`: the first single-template file, probed in parallel; a failing probe is skipped. */
 async function singleTemplate(nwo, get) {
   const answers = await Promise.all(SINGLE_TEMPLATES.map((path) => get(nwo, path).then((v) => ({ v }), (e) => ({ e }))));
+  const complete = answers.every((a) => !a.e);
   for (let i = 0; i < SINGLE_TEMPLATES.length; i++) {
-    if (answers[i].e) throw answers[i].e;
     const v = answers[i].v;
     if (v && smallEnough(v)) {
       const content = decodeContent(v);
-      if (content !== null) return { path: SINGLE_TEMPLATES[i], content };
+      if (content !== null) return [{ path: SINGLE_TEMPLATES[i], content }, complete];
     }
   }
-  return null;
+  return [null, complete];
 }
 
-/** `[files, complete]`: `complete` when every listed file was read. */
+/**
+ * One repository's templates `{ files, complete, present }`, as Rust: any
+ * file in its template folder (config.yml included) makes that folder the
+ * whole answer; only without one is a single-template file looked for.
+ */
 async function templatesIn(nwo, get) {
-  let found = [];
-  let complete = true;
   const items = await get(nwo, TEMPLATE_DIR);
   if (Array.isArray(items)) {
-    const named = items
-      .filter((i) => i?.type === "file" && smallEnough(i) && typeof i.name === "string" && typeof i.path === "string")
-      .filter((i) => /\.(md|ya?ml)$/i.test(i.name))
-      .map((i) => [i.name, i.path])
-      .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
-    const kept = [...named.filter(([, p]) => isConfigPath(p)), ...named.filter(([, p]) => !isConfigPath(p)).slice(0, MAX_TEMPLATES)]
-      .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
-    // Six at a time, as Rust; a file that cannot be read is skipped.
-    for (let i = 0; i < kept.length; i += 6) {
-      const read = await Promise.all(kept.slice(i, i + 6).map(async ([, path]) => {
-        const content = decodeContent(await get(nwo, encodePath(path)).catch(() => null));
-        return content === null ? null : { path, content };
-      }));
-      if (read.some((f) => f === null)) complete = false;
-      found.push(...read.filter(Boolean));
+    const listed = items.filter((i) => i?.type === "file" && typeof i.name === "string" && /\.(md|ya?ml)$/i.test(i.name));
+    if (listed.length) {
+      const named = listed
+        .filter((i) => smallEnough(i) && typeof i.path === "string")
+        .map((i) => [i.name, i.path])
+        .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
+      const kept = [...named.filter(([, p]) => isConfigPath(p)), ...named.filter(([, p]) => !isConfigPath(p)).slice(0, MAX_TEMPLATES)]
+        .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
+      const files = [];
+      let complete = true;
+      // Six at a time, as Rust; a file that cannot be read is skipped.
+      for (let i = 0; i < kept.length; i += 6) {
+        const read = await Promise.all(kept.slice(i, i + 6).map(async ([, path]) => {
+          const content = decodeContent(await get(nwo, encodePath(path)).catch(() => null));
+          return content === null ? null : { path, content };
+        }));
+        if (read.some((f) => f === null)) complete = false;
+        files.push(...read.filter(Boolean));
+      }
+      return { files, complete, present: true };
     }
-    if (hasTemplate(found)) return [found, complete];
   }
-  const single = await singleTemplate(nwo, get);
-  if (single) found = [...found, single];
-  return [found, complete];
+  const [single, complete] = await singleTemplate(nwo, get);
+  return { files: single ? [single] : [], complete, present: single !== null };
 }
 
 /**
@@ -210,25 +215,19 @@ async function templatesIn(nwo, get) {
  * 404; `isPublic(nwo)` whether a repository is public.
  */
 export async function devTemplateFiles(nwo, isPublic, get) {
-  const [own, ownComplete] = await templatesIn(nwo, get);
-  if (hasTemplate(own)) return { source: nwo, files: own, complete: ownComplete };
-  const owner = nwo.split("/")[0];
-  const org = `${owner}/.github`;
-  if (org.toLowerCase() !== nwo.toLowerCase()) {
-    // GitHub only uses a public `.github` repository; nwo's own config.yml
-    // wins. A failing fallback keeps what nwo has, marked incomplete.
-    let theirs = null;
-    try {
-      if (await isPublic(org)) theirs = await templatesIn(org, get);
-    } catch {
-      return { source: nwo, files: own, complete: false };
-    }
-    if (theirs && hasTemplate(theirs[0])) {
-      const ownConfig = own.filter((f) => isConfigPath(f.path));
-      const files = (ownConfig.length ? [...ownConfig, ...theirs[0].filter((f) => !isConfigPath(f.path))] : theirs[0])
-        .sort((a, b) => cmp(a.path, b.path));
-      return { source: org, files, complete: ownComplete && theirs[1] };
-    }
+  const own = await templatesIn(nwo, get);
+  const mine = (complete) => ({ source: nwo, files: own.files, complete });
+  // Only a repository with no template folder and no single template gets its owner's.
+  if (own.present) return mine(own.complete);
+  const org = `${nwo.split("/")[0]}/.github`;
+  if (org.toLowerCase() === nwo.toLowerCase()) return mine(own.complete);
+  let theirs = null;
+  try {
+    // GitHub only uses a public `.github` repository.
+    if (await isPublic(org)) theirs = await templatesIn(org, get);
+  } catch {
+    return mine(false); // a failing fallback keeps what nwo has, not cached
   }
-  return { source: nwo, files: own, complete: ownComplete };
+  if (theirs?.present) return { source: org, files: theirs.files, complete: own.complete && theirs.complete };
+  return mine(own.complete);
 }

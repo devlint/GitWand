@@ -172,13 +172,48 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(org.files[0].content).toBe("name: Bug");
   });
 
-  it("a template folder with only config.yml still tries the single-template file", async () => {
+  it("any file in the template folder rules out the other places", async () => {
     const got = await devTemplateFiles("me/app", PUBLIC, fake({
       "me/app:.github/ISSUE_TEMPLATE": [entry("config.yml")],
       "me/app:.github/ISSUE_TEMPLATE/config.yml": file("blank_issues_enabled: false"),
       "me/app:.github/ISSUE_TEMPLATE.md": file("legacy"),
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
     }));
-    expect(got.files.map((f: { path: string }) => f.path)).toEqual([".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE.md"]);
+    expect(got.source).toBe("me/app");
+    expect(got.files.map((f: { path: string }) => f.path)).toEqual([".github/ISSUE_TEMPLATE/config.yml"]);
+  });
+
+  it("templates listed but unreadable never fall back to the owner", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string, path: string) => {
+      if (nwo === "me/app" && path === ".github/ISSUE_TEMPLATE") return [entry("bug.yml")];
+      if (nwo === "me/app") throw new Error("timeout");
+      return [entry("x.yml")];
+    });
+    expect(got.source).toBe("me/app");
+    expect(got.files).toEqual([]);
+    expect(got.complete).toBe(false);
+  });
+
+  it("a failing single-template probe is skipped, not fatal", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (_: string, path: string) => {
+      if (path === ".github/ISSUE_TEMPLATE.md") throw new Error("502");
+      if (path === "docs/ISSUE_TEMPLATE.md") return file("docs");
+      return null;
+    });
+    expect(got.files[0].path).toBe("docs/ISSUE_TEMPLATE.md");
+    expect(got.complete).toBe(false);
+  });
+
+  it("sorts names by UTF-8 bytes, as Rust", async () => {
+    const wide = "\uFF21.md"; // fullwidth A: before a non-BMP letter in UTF-8, after it in UTF-16
+    const math = "\u{1D400}.md";
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [entry(math), entry(wide)],
+      [`me/app:.github/ISSUE_TEMPLATE/${encodeURIComponent(wide)}`]: file("w"),
+      [`me/app:.github/ISSUE_TEMPLATE/${encodeURIComponent(math)}`]: file("m"),
+    }));
+    expect(got.files.map((f: { content: string }) => f.content)).toEqual(["w", "m"]);
   });
 
   it("a lowercase single-template file is found", async () => {
@@ -186,14 +221,12 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(got.files[0].path).toBe(".github/issue_template.md");
   });
 
-  it("a failing owner .github keeps the repository's own config, marked incomplete", async () => {
-    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string, path: string) => {
+  it("a failing owner .github keeps what the repository has, marked incomplete", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string) => {
       if (nwo === "me/.github") throw new Error("GitHub API 403");
-      if (path === ".github/ISSUE_TEMPLATE") return [entry("config.yml")];
-      if (path === ".github/ISSUE_TEMPLATE/config.yml") return file("blank_issues_enabled: false");
       return null;
     });
-    expect(got.files).toHaveLength(1);
+    expect(got.files).toEqual([]);
     expect(got.complete).toBe(false);
   });
 
