@@ -326,6 +326,16 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(folder.files[0].single).toBe(false);
   });
 
+  it("any file in the template folder counts, even not a template", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [{ name: "README.txt", path: ".github/ISSUE_TEMPLATE/README.txt", type: "file", size: 5 }],
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(got.source).toBe("me/app");
+    expect(got.files).toEqual([]);
+  });
+
   it("nothing anywhere is an empty list", async () => {
     expect((await devTemplateFiles("me/app", PUBLIC, fake({}))).files).toEqual([]);
   });

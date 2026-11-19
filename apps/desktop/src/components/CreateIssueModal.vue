@@ -285,6 +285,9 @@ function onMilestone(e: Event) {
           <p v-if="templates.length && form.templateFromOwner.value" class="ci-status">
             {{ t("createIssue.template.fromOwner", form.templateFromOwner.value) }}
           </p>
+          <p v-if="form.templatePicksUnset.value.length" class="ci-status" data-testid="ci-template-unset">
+            {{ t("createIssue.template.needsTriage", form.templatePicksUnset.value.join(", ")) }}
+          </p>
           <ul v-if="contactLinks.length" class="ci-contacts">
             <li v-for="(l, i) in contactLinks" :key="`${i}:${l.url}`">
               <span class="ci-status">{{ t("createIssue.template.contact") }}</span>

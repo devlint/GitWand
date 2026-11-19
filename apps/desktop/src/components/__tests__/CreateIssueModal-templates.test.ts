@@ -22,11 +22,11 @@ beforeEach(() => clearTemplateCache());
 afterEach(() => { app?.unmount(); app = null; document.body.innerHTML = ""; });
 const flush = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); await nextTick(); };
 
-async function mount(files: { path: string; content: string }[] | (() => Promise<{ path: string; content: string }[]>), opts: { confirm?: boolean; prefill?: boolean; labels?: string[]; source?: string } = {}) {
+async function mount(files: { path: string; content: string }[] | (() => Promise<{ path: string; content: string }[]>), opts: { confirm?: boolean; prefill?: boolean; labels?: string[]; source?: string; canTriage?: boolean } = {}) {
   const provider = {
     name: "github",
     issueAvailable: vi.fn(async () => true),
-    issueTargets: vi.fn(async () => ({ targets: [ORIGIN, PARENT], defaultRepo: "me/app" })),
+    issueTargets: vi.fn(async () => ({ targets: [{ ...ORIGIN, canTriage: opts.canTriage ?? true }, PARENT], defaultRepo: "me/app" })),
     listLabels: vi.fn(async () => (opts.labels ?? []).map((name) => ({ name, color: "f00", description: null }))),
     listMilestones: vi.fn(async () => []),
     listAssignees: vi.fn(async () => []),
@@ -127,6 +127,12 @@ describe("CreateIssueModal — templates", () => {
   it("names the owner's repository when the templates come from it", async () => {
     await mount([{ path: "a.md", content: BUG }], { source: "me/.github" });
     expect(document.body.textContent).toContain("createIssue.template.fromOwner:me/.github");
+  });
+
+  it("names the template's labels and people it cannot set without triage rights", async () => {
+    await mount([{ path: "a.md", content: "---\nname: Bug\nlabels: bug\nassignees: alice\n---\nx" }], { canTriage: false });
+    await choose("a.md");
+    expect(document.querySelector('[data-testid="ci-template-unset"]')?.textContent).toContain("createIssue.template.needsTriage:bug, alice");
   });
 
   it("lists two contact links to the same address", async () => {

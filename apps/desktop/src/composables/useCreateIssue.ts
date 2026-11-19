@@ -7,7 +7,7 @@
 
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
-import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, ghIssueTemplates, type IssueTemplateFiles } from "../utils/backend";
+import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, type IssueTemplateFiles } from "../utils/backend";
 import { loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
 import type { SecretFinding, SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
@@ -181,14 +181,14 @@ export interface CreateIssueApi {
   templatesLoading: Ref<boolean>;
   /** The template applied, null for "Blank issue". */
   templateId: Ref<string | null>;
-  /** Fill the form from a template (null: blank). The caller confirms first when `templateEdited`. */
+  /** Fill the form from a template (null: blank). The caller confirms first when `bodyEdited`. */
   applyTemplate(id: string | null): void;
-  /** Title, description, labels or people changed since the template filled them. */
-  templateEdited: ComputedRef<boolean>;
   /** The repository the templates come from (the owner's `.github` one, maybe). */
   templateSource: Ref<string | null>;
   /** The text was filled by a template of the target left. */
   templateLeftover: Ref<boolean>;
+  /** The applied template's labels and people the target cannot take (no triage rights). */
+  templatePicksUnset: Ref<string[]>;
   /** The owner's `.github` repository, when the templates come from it. */
   templateFromOwner: ComputedRef<string | null>;
   /** A template chosen in the picker, `confirm` asked first when it would replace edits. */
@@ -198,6 +198,8 @@ export interface CreateIssueApi {
 /** How long a target's templates are kept (each read is up to 20 requests). */
 const TEMPLATE_CACHE_MS = 5 * 60_000;
 const templateCache = new Map<string, { at: number; set: IssueTemplateSet; source: string }>();
+/** Template reads under way, per target, shared by every form that asks. */
+const templateInflight = new Map<string, Promise<{ set: IssueTemplateSet; complete: boolean; source: string }>>();
 /** Keep a target's templates, at most `TEMPLATE_CACHE_MAX` targets (the oldest goes). */
 const TEMPLATE_CACHE_MAX = 50;
 function rememberTemplates(key: string, entry: { at: number; set: IssueTemplateSet; source: string }) {
@@ -212,6 +214,7 @@ function rememberTemplates(key: string, entry: { at: number; set: IssueTemplateS
 /** Forget the cached templates (tests). */
 export function clearTemplateCache(): void {
   templateCache.clear();
+  templateInflight.clear();
 }
 
 /** GitWand's own repository, where resolver reports go (mirrors Rust `GITWAND_REPO`). */
@@ -321,7 +324,8 @@ export function useCreateIssue(deps: {
     repo: string,
   ) => Promise<Omit<IssueTemplateFiles, "files"> & { files: { path: string; content: string; single?: boolean }[] }>;
 }): CreateIssueApi {
-  const readTemplates = deps.issueTemplates ?? ghIssueTemplates;
+  /** The forge's template read (none on a forge without templates: no request). */
+  const readTemplates = deps.issueTemplates ?? ((cwd: string, r: string) => deps.provider.value?.issueTemplates?.(cwd, r) ?? null);
   const rdeps = deps.report ?? {};
   const createGitwandIssue = rdeps.createGitwandIssue ?? ghCreateGitwandIssue;
   const checkGitwandWritable = rdeps.gitwandWritable ?? ghGitwandWritable;
@@ -351,6 +355,8 @@ export function useCreateIssue(deps: {
   const templateSource = ref<string | null>(null);
   /** The text comes from a template of the target left: no template is chosen, yet it is not blank. */
   const templateLeftover = ref(false);
+  /** The applied template's labels and people that cannot be set (no triage rights): said, not dropped silently. */
+  const templatePicksUnset = ref<string[]>([]);
   /** The template the leftover text came from, to restore on the way back to its repository. */
   type LeftoverFrom = { repo: string; id: string; title: string; body: string; picks: { labels: string[]; assignees: string[] } };
   let leftoverFrom: LeftoverFrom | null = null;
@@ -523,11 +529,23 @@ export function useCreateIssue(deps: {
     }
     const gen = generation;
     const current = () => gen === generation && repo.value === target;
+    // A read already in flight for this target (A → B → A) is reused.
+    let read = templateInflight.get(key);
+    if (!read) {
+      const started = readTemplates(cwd, target);
+      if (!started) return; // this forge has no templates
+      const parsed = started.then(async (r) => ({ set: await loadTemplateSet(r.files), complete: r.complete, source: r.source }));
+      templateInflight.set(key, parsed);
+      parsed.then(
+        () => templateInflight.delete(key),
+        () => templateInflight.delete(key),
+      );
+      read = parsed;
+    }
     templateSet.value = null;
     templateSource.value = null;
     templatesLoading.value = true;
-    readTemplates(cwd, target)
-      .then(async (read) => ({ set: await loadTemplateSet(read.files), complete: read.complete, source: read.source }))
+    read
       .then(
         ({ set, complete, source }) => {
           // A set missing a file that failed is shown, not kept: the next
@@ -573,14 +591,7 @@ export function useCreateIssue(deps: {
     return added.labels.some((l) => !labels.value.includes(l)) || added.assignees.some((a) => !assignees.value.includes(a));
   }
 
-  /**
-   * What another template would replace: the title and description, and the
-   * template's labels or people removed by hand. Those picked by hand stay
-   * across a switch, so they are no edit to confirm.
-   */
-  // A template's label removed by hand is not lost by another template (it
-  // would not come back): it is no edit to confirm, though closing asks.
-  const templateEdited = computed(() => bodyEdited.value);
+
 
   /** Grant what the template wants and the target now offers, each once. */
   function grantTemplateWants() {
@@ -646,7 +657,9 @@ export function useCreateIssue(deps: {
    */
   async function chooseTemplate(wanted: string | null, confirm: (kind: "replace" | "clear") => Promise<boolean>): Promise<void> {
     if (wanted === templateId.value && !(wanted === null && templateLeftover.value)) return;
-    if (templateEdited.value) {
+    // Another template replaces the title and description only (a label of
+    // the template removed by hand would not come back either way).
+    if (bodyEdited.value) {
       const asked = openGeneration;
       const target = repo.value;
       const ok = await confirm(wanted === null ? "clear" : "replace");
@@ -671,6 +684,9 @@ export function useCreateIssue(deps: {
     templatePrefilled = false;
     restoreOnLoad = null;
     appliedPicks = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
+    // Without triage rights the pickers never load: say what will not be set.
+    const canTriage = targets.value.find((x) => x.repo === repo.value)?.canTriage ?? false;
+    templatePicksUnset.value = canTriage ? [] : [...appliedPicks.labels, ...appliedPicks.assignees];
     templatePending = { labels: [...appliedPicks.labels], assignees: [...appliedPicks.assignees] };
     // Only what the target offers (GitHub refuses unknown labels and people),
     // now or once its pickers arrive.
@@ -715,6 +731,7 @@ export function useCreateIssue(deps: {
     leftoverFrom = null;
     appliedPicks = { labels: [], assignees: [] };
     templatePrefilled = false;
+    templatePicksUnset.value = [];
     restoreOnLoad = null;
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
@@ -1105,9 +1122,9 @@ export function useCreateIssue(deps: {
     templatesLoading,
     templateId,
     applyTemplate,
-    templateEdited,
     templateSource,
     templateLeftover,
+    templatePicksUnset,
     templateFromOwner,
     chooseTemplate,
   };

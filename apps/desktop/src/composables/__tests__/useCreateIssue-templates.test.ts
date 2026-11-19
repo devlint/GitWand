@@ -282,6 +282,53 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     expect(form.templateLeftover.value).toBe(true);
   });
 
+  it("a template's labels and people the target cannot take without triage are named", async () => {
+    const NO_TRIAGE = { ...ORIGIN, canTriage: false };
+    const reads = vi.fn(async () => ({ files: [{ path: "a.md", content: BUG }], complete: true, source: "me/app" }));
+    const provider = {
+      name: "github",
+      issueAvailable: vi.fn(async () => true),
+      issueTargets: vi.fn(async () => ({ targets: [NO_TRIAGE], defaultRepo: "me/app" })),
+      listLabels: vi.fn(async () => []), listMilestones: vi.fn(async () => []), listAssignees: vi.fn(async () => []),
+      createIssue: vi.fn(),
+    } as unknown as ForgeProvider;
+    const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: reads });
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    expect(form.templatePicksUnset.value).toEqual(["bug", "nope", "alice", "ghost"]);
+  });
+
+  it("a read in flight for a target is reused, not started again", async () => {
+    let resolve!: (v: F[]) => void;
+    const { form, issueTemplates } = setup({ "me/app": () => new Promise<F[]>((r) => { resolve = r; }), "up/app": [] });
+    await form.open();
+    form.setRepo("up/app");
+    await flush();
+    form.setRepo("me/app");
+    resolve([{ path: "a.md", content: BUG }]);
+    await flush();
+    expect(issueTemplates.mock.calls.filter((c) => c[1] === "me/app")).toHaveLength(1);
+    expect(form.templateSet.value?.templates).toHaveLength(1);
+  });
+
+  it("uses the forge provider's template read when none is injected", async () => {
+    const issueTemplates = vi.fn(async () => ({ source: "me/app", complete: true, files: [{ path: "a.md", content: BUG, single: false }] }));
+    const provider = {
+      name: "github",
+      issueAvailable: vi.fn(async () => true),
+      issueTargets: vi.fn(async () => ({ targets: [ORIGIN], defaultRepo: "me/app" })),
+      listLabels: vi.fn(async () => []), listMilestones: vi.fn(async () => []), listAssignees: vi.fn(async () => []),
+      createIssue: vi.fn(),
+      issueTemplates,
+    } as unknown as ForgeProvider;
+    const form = useCreateIssue({ cwd: ref("/repo-p"), provider: ref(provider), onCreated: vi.fn() });
+    await form.open();
+    await flush();
+    expect(issueTemplates).toHaveBeenCalledWith("/repo-p", "me/app");
+    expect(form.templateSet.value?.templates).toHaveLength(1);
+  });
+
   it("chooseTemplate drops an answer given after the target changed", async () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
     await form.open();
@@ -388,11 +435,11 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     await form.open();
     await flush();
     form.labels.value = ["ui"];
-    expect(form.templateEdited.value).toBe(false);
+    expect(form.bodyEdited.value).toBe(false);
     form.applyTemplate("a.md");
     form.labels.value = form.labels.value.filter((l) => l !== "bug");
     // Another template would not bring it back: nothing is lost, nothing to confirm.
-    expect(form.templateEdited.value).toBe(false);
+    expect(form.bodyEdited.value).toBe(false);
     expect(form.dirty.value).toBe(true);
   });
 
@@ -411,7 +458,7 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     form.close();
     await form.open();
     await flush();
-    expect(form.templateEdited.value).toBe(false);
+    expect(form.bodyEdited.value).toBe(false);
   });
 
   it("an incomplete set (a file could not be read) is not kept", async () => {

@@ -163,8 +163,7 @@ const isConfigPath = (path) => ["config.yml", "config.yaml"].includes((path.spli
  * folders listed in parallel, the name matched in any case; an unreadable
  * file is still present (the repository's own).
  */
-async function singleTemplate(nwo, get) {
-  const listings = await Promise.all(SINGLE_TEMPLATE_DIRS.map((dir) => get(nwo, dir).then((v) => ({ v }), (e) => ({ e }))));
+async function singleTemplate(nwo, listings, get) {
   let complete = listings.every((l) => !l.e);
   for (const { v } of listings) {
     if (!Array.isArray(v)) continue;
@@ -193,13 +192,16 @@ async function singleTemplate(nwo, get) {
 async function templatesIn(nwo, dirs, get) {
   // Several folders (an owner's .github repository) are listed at once; the
   // first, in order, holding a template-like file is the answer.
-  const listings = await Promise.all(dirs.map((dir) => get(nwo, dir).then((v) => ({ v }), (e) => ({ e }))));
-  // In order, as Rust: a failure only counts before the folder that answers.
+  // The template folders and the single-template folders in one round, as Rust.
+  const all = await Promise.all([...dirs, ...SINGLE_TEMPLATE_DIRS].map((dir) => get(nwo, dir).then((v) => ({ v }), (e) => ({ e }))));
+  const listings = all.slice(0, dirs.length);
+  const singles = all.slice(dirs.length);
+  // In order: a failure only counts before the folder that answers; any file
+  // in a folder (a README too) makes it the answer.
   for (const { v: items, e } of listings) {
     if (e) throw e;
-    if (!Array.isArray(items)) continue;
+    if (!Array.isArray(items) || !items.length) continue;
     const listed = items.filter((i) => i?.type === "file" && typeof i.name === "string" && /\.(md|ya?ml)$/i.test(i.name));
-    if (!listed.length) continue;
     // In name order: config.yml always, templates up to the cap.
     let templates = 0;
     const paths = listed
@@ -225,7 +227,7 @@ async function templatesIn(nwo, dirs, get) {
     }
     return { files, complete, present: true };
   }
-  const [single, complete, present] = await singleTemplate(nwo, get);
+  const [single, complete, present] = await singleTemplate(nwo, singles, get);
   return { files: single ? [single] : [], complete, present };
 }
 

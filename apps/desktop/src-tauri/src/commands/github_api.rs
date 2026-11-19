@@ -541,7 +541,17 @@ pub(crate) fn rest_api_json(
 /// [`api_json_cached`] for callers outside this module (`path` without a
 /// leading slash).
 pub(crate) fn rest_api_json_cached(path: &str, token: &str) -> Result<serde_json::Value, String> {
-    api_json_cached(&format!("{}/{}", API_BASE, path), token)
+    api_json_cached(&format!("{}/{}", API_BASE, path), token, None)
+}
+
+/// `rest_api_json_cached` bounded at `secs` (curl `--max-time`): a read the
+/// form waits on must not hang on a stalled transfer.
+pub(crate) fn rest_api_json_cached_within(
+    path: &str,
+    token: &str,
+    secs: u32,
+) -> Result<serde_json::Value, String> {
+    api_json_cached(&format!("{}/{}", API_BASE, path), token, Some(secs))
 }
 
 /// GET a GitHub JSON endpoint with ETag-based conditional requests.
@@ -549,8 +559,12 @@ pub(crate) fn rest_api_json_cached(path: &str, token: &str) -> Result<serde_json
 /// Sends `If-None-Match` when a cached ETag exists; a `304` serves the cached
 /// body without spending rate-limit quota. A `200` refreshes the cache from the
 /// response `ETag`. Falls back to a plain fetch when no ETag is returned.
-fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> {
-    let (status, body) = get_cached_raw(url, token)?;
+fn api_json_cached(
+    url: &str,
+    token: &str,
+    max_time_secs: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let (status, body) = get_cached_raw(url, token, max_time_secs)?;
     if status >= 400 {
         return Err(map_api_error(status, &body));
     }
@@ -561,7 +575,11 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
 /// against the rate limit and answers `(200, cached body)`. Other answers come
 /// back as they are; a 2xx with an ETag is cached. The live CI tab polls
 /// through this, so a long matrix doesn't drain the hourly budget.
-fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
+fn get_cached_raw(
+    url: &str,
+    token: &str,
+    max_time_secs: Option<u32>,
+) -> Result<(i32, String), String> {
     let cache = ETAG_CACHE.get_or_init(|| Mutex::new(EtagCache::new(ETAG_CACHE_MAX)));
     let key = etag_key(url, token);
     let cached = cache.lock().unwrap().get(&key);
@@ -582,6 +600,7 @@ fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
         None,
         &headers,
         "application/vnd.github+json",
+        max_time_secs,
     )?;
 
     if status == 304 {
@@ -826,6 +845,7 @@ pub(crate) fn rest_list_prs(
             API_BASE, base, api_state, per_page
         ),
         token,
+        None,
     )?
     .as_array()
     .cloned()
@@ -941,6 +961,7 @@ pub(crate) fn rest_pr_freshness_signal(
             API_BASE, base
         ),
         token,
+        None,
     )?
     .as_array()
     .cloned()
@@ -974,7 +995,7 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
         "{}/repos/{}/commits/{}/check-runs?per_page=100",
         API_BASE, repo, sha
     );
-    let v = match api_json_cached(&url, token) {
+    let v = match api_json_cached(&url, token, None) {
         Ok(v) => v,
         Err(_) => return String::new(),
     };
@@ -997,7 +1018,7 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
 /// Best effort — returns `None` on any error so the row keeps its current values.
 fn rest_pr_detail_enrich(repo: &str, number: i64, token: &str) -> Option<(i64, i64, String)> {
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
-    let v = api_json_cached(&url, token).ok()?;
+    let v = api_json_cached(&url, token, None).ok()?;
     let state = js(&v, "mergeable_state").to_uppercase();
     let merge_state = if state.is_empty() || state == "UNKNOWN" {
         String::new()
@@ -1072,6 +1093,7 @@ fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_jso
     let (st, body) = get_cached_raw(
         &format!("{}/repos/{}/pulls/{}", API_BASE, origin, number),
         token,
+        None,
     )?;
     if st < 400 {
         let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
@@ -1202,7 +1224,7 @@ pub(crate) fn rest_pr_checks(cwd: &str, number: i64, token: &str) -> Result<Vec<
     // failed fetch, and the CI tab must be able to tell the two apart (it
     // keeps a running list on screen through a failure, but not through "none").
     // A token that may not read checks (403/404) just has none to show.
-    let v = match api_json_cached(&url, token) {
+    let v = match api_json_cached(&url, token, None) {
         Ok(v) => v,
         Err(e) if checks_unavailable(&e) => return Ok(Vec::new()),
         Err(e) => return Err(e),
