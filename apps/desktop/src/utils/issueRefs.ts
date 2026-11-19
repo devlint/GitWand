@@ -6,6 +6,7 @@
  * issue that lives in another repository than the one pushed to).
  */
 import type { Issue } from "./backend";
+import { COMMIT_SIGNATURE } from "./commitSignature";
 
 /** The suggestion list never shows more rows than this. */
 export const MAX_ISSUE_ROWS = 8;
@@ -56,8 +57,14 @@ export function repoSlugFromUrl(url: string): string | null {
   return m ? m[1] : null;
 }
 
-/** `owner/repo` from a remote's parts (GitLab subgroups live in `repo`), or null. */
-export function remoteSlug(info: { owner: string; repo: string } | null | undefined): string | null {
+/**
+ * The pushed repository's path, as issue URLs spell it: an https remote's
+ * whole path (a forge served under `/gitlab/` keeps that prefix), otherwise
+ * `owner/repo` (GitLab subgroups live in `repo`). null when unknown.
+ */
+export function remoteSlug(info: { owner: string; repo: string; url?: string } | null | undefined): string | null {
+  const web = info?.url ? /^https?:\/\/[^/]+\/(.+?)(?:\.git)?\/*$/.exec(info.url) : null;
+  if (web) return web[1];
   return info?.owner && info.repo ? `${info.owner}/${info.repo}` : null;
 }
 
@@ -67,16 +74,15 @@ export function issueRef(number: number, issueRepo: string | null, pushRepo: str
   if (!issueRepo) return `#${number}`;
   // Pushed repository unknown: `owner/repo#N` is right wherever the commit lands.
   if (!pushRepo) return `${issueRepo}#${number}`;
-  const [issue, push] = [norm(issueRepo), norm(pushRepo)];
-  // A forge served under a path (`host/gitlab/grp/proj`) puts that path in
-  // the issue URL but not in the remote's owner/repo.
-  if (issue === push || issue.endsWith(`/${push}`)) return `#${number}`;
+  // Exact: `grp/acme/app` (a subgroup project) is not `acme/app`.
+  if (norm(issueRepo) === norm(pushRepo)) return `#${number}`;
   return `${issueRepo}#${number}`;
 }
 
 /**
  * Replace `text[start, end)` (the whole `#token`) with the reference, followed
- * by a space unless one is already there; the caret goes after that space.
+ * by a space unless whitespace already is. The caret goes after that space,
+ * but stays on the line when a newline follows.
  */
 export function insertRef(
   text: string,
@@ -88,7 +94,8 @@ export function insertRef(
   const inserted = `${fixes ? "Fixes " : ""}${ref}`;
   const rest = text.slice(end);
   const spaced = /^\s/.test(rest) ? inserted : `${inserted} `;
-  return { text: text.slice(0, start) + spaced + rest, caret: start + inserted.length + 1 };
+  const skip = /^[\n\r]/.test(rest) ? 0 : 1;
+  return { text: text.slice(0, start) + spaced + rest, caret: start + inserted.length + skip };
 }
 
 function escapeRegExp(s: string): string {
@@ -102,8 +109,7 @@ export function hasRef(text: string, ref: string): boolean {
 
 /** A trailer line (`Signed-off-by: A <a@x>`): git only reads them in the last paragraph. */
 const TRAILER = /^[A-Za-z][\w-]*: \S/;
-/** GitWand's commit signature (`useGitRepo`, App): a closing paragraph, kept last. */
-export const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
+
 /** A paragraph is a trailer block only with one of these (`Note: …` alone is prose). */
 const KNOWN_TRAILER = /^(Signed-off-by|Co-authored-by|Reviewed-by|Acked-by|Tested-by|Reported-by|Suggested-by|Helped-by|Cc|Change-Id):/i;
 

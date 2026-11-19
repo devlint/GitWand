@@ -82,21 +82,22 @@ describe("useIssueSuggest", () => {
     s.update("fix #lo", 7);
     await flush();
     s.keydown(key("ArrowDown"), "fix #lo");
-    s.keydown(key("ArrowUp"), "fix #lo");
     expect(s.keydown(key("Enter"), "fix #lo")).toEqual({ text: "fix #57 ", caret: 8 });
     expect(s.open.value).toBe(false);
     s.update("#lo", 3);
-    s.keydown(key("ArrowDown"), "#lo"); s.keydown(key("ArrowUp"), "#lo");
+    s.keydown(key("ArrowDown"), "#lo");
     expect(s.keydown(key("Enter", { shiftKey: true }), "#lo")).toEqual({ text: "Fixes #57 ", caret: 10 });
     s.update("#lo", 3);
-    s.keydown(key("ArrowDown"), "#lo"); s.keydown(key("ArrowUp"), "#lo");
+    s.keydown(key("ArrowDown"), "#lo");
     expect(s.keydown(key("Tab"), "#lo")).toEqual({ text: "#57 ", caret: 4 });
   });
 
-  it("arrows move the active row and wrap", async () => {
+  it("arrows move the active row and wrap; the first one highlights the top row", async () => {
     const { s } = setup();
     s.update("#lo", 3);
     await flush();
+    expect(s.keydown(key("ArrowDown"), "#lo")).toBe("handled");
+    expect(s.active.value).toBe(0);
     expect(s.keydown(key("ArrowDown"), "#lo")).toBe("handled");
     expect(s.active.value).toBe(1);
     expect(s.keydown(key("ArrowDown"), "#lo")).toBe("handled");
@@ -104,6 +105,43 @@ describe("useIssueSuggest", () => {
     expect(s.keydown(key("ArrowUp"), "#lo")).toBe("handled");
     expect(s.active.value).toBe(1);
     expect(s.keydown(key("Enter"), "#lo")).toEqual({ text: "#42 ", caret: 4 });
+  });
+
+  it("a first ArrowUp highlights the bottom row", async () => {
+    const { s } = setup();
+    s.update("#lo", 3);
+    await flush();
+    s.keydown(key("ArrowUp"), "#lo");
+    expect(s.active.value).toBe(1);
+  });
+
+  it("a typed number leaves the arrows to the text (moving to another line)", async () => {
+    const { s } = setup();
+    s.update("Fixes #42", 9);
+    await flush();
+    expect(s.keydown(key("ArrowDown"), "Fixes #42")).toBeNull();
+  });
+
+  it("a closed list forgets a missed #: retry later does not open it", () => {
+    let known = false;
+    const { s } = setup({ loadIssues: vi.fn(() => (known ? Promise.resolve(ISSUES) : null)) });
+    s.update("#", 1);
+    s.close();
+    known = true;
+    s.retry("#", 1);
+    expect(s.open.value).toBe(false);
+  });
+
+  it("an entry dropped while the list is open is fetched again", async () => {
+    const cache = createIssueCache();
+    const loadIssues = vi.fn(async () => ISSUES);
+    const s = useIssueSuggest({ cwd: () => "/r", loadIssues, pushRepo: () => "me/app", cache });
+    s.update("#lo", 3);
+    await flush();
+    invalidateIssues(cache, { cwd: "/r" });
+    await flush();
+    expect(loadIssues).toHaveBeenCalledTimes(2);
+    expect(s.status.value).toBe("ready");
   });
 
   it("Escape closes and is handled, even with no row", () => {
@@ -141,10 +179,10 @@ describe("useIssueSuggest", () => {
 
   it("qualifies issues from another repository", async () => {
     const { s } = setup({ loadIssues: vi.fn(async () => [issue(4, "Up", undefined, "up/app")]) });
-    s.update("#4", 2);
+    s.update("#Up", 3);
     await flush();
-    s.keydown(key("ArrowDown"), "#4");
-    expect(s.keydown(key("Enter"), "#4")).toEqual({ text: "up/app#4 ", caret: 9 });
+    s.keydown(key("ArrowDown"), "#Up");
+    expect(s.keydown(key("Enter"), "#Up")).toEqual({ text: "up/app#4 ", caret: 9 });
   });
 
   it("closes when the caret leaves the token", async () => {
@@ -179,11 +217,11 @@ describe("useIssueSuggest", () => {
     await flush();
     s.close();
     advance(ISSUE_CACHE_TTL_MS + 1);
-    s.update("#57", 3);
+    s.update("#Logout", 7);
     expect(loadIssues).toHaveBeenCalledTimes(2);
     expect(s.rows.value.map((i) => i.number)).toEqual([57]);
-    s.keydown(key("ArrowDown"), "#57");
-    expect(s.keydown(key("Enter"), "#57")).toEqual({ text: "#57 ", caret: 4 });
+    s.keydown(key("ArrowDown"), "#Logout");
+    expect(s.keydown(key("Enter"), "#Logout")).toEqual({ text: "#57 ", caret: 4 });
   });
 
   it("retries at once after an error", async () => {
@@ -260,10 +298,10 @@ describe("useIssueSuggest", () => {
 
   it("picking with the caret inside a token replaces the whole token", async () => {
     const { s } = setup();
-    s.update("see #423", 6);
+    s.update("see #Login", 7);
     await flush();
-    s.keydown(key("ArrowDown"), "see #423");
-    expect(s.keydown(key("Enter"), "see #423")).toEqual({ text: "see #42 ", caret: 8 });
+    s.keydown(key("ArrowDown"), "see #Login");
+    expect(s.keydown(key("Enter"), "see #Login")).toEqual({ text: "see #57 ", caret: 8 });
   });
 
   it("does not offer the old remote's issues while the new one loads", async () => {
@@ -350,10 +388,10 @@ describe("useIssueSuggest", () => {
 
   it("Shift+Tab never picks", async () => {
     const { s } = setup();
-    s.update("#42", 3);
+    s.update("#lo", 3);
     await flush();
-    s.keydown(key("ArrowDown"), "#42");
-    expect(s.keydown(key("Tab", { shiftKey: true }), "#42")).toBeNull();
+    s.keydown(key("ArrowDown"), "#lo");
+    expect(s.keydown(key("Tab", { shiftKey: true }), "#lo")).toBeNull();
   });
 
   it("Enter and Tab on a bare # are not taken: no issue was chosen", async () => {

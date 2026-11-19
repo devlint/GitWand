@@ -69,6 +69,10 @@ describe("remoteSlug", () => {
     expect(remoteSlug({ owner: "", repo: "r" })).toBeNull();
     expect(remoteSlug(null)).toBeNull();
   });
+  it("an https remote gives its whole path, so a forge under a path prefix matches its issue URLs", () => {
+    expect(remoteSlug({ owner: "grp", repo: "proj", url: "https://host/gitlab/grp/proj.git" })).toBe("gitlab/grp/proj");
+    expect(remoteSlug({ owner: "o", repo: "r", url: "git@github.com:o/r.git" })).toBe("o/r");
+  });
 });
 
 describe("issueRef", () => {
@@ -78,10 +82,8 @@ describe("issueRef", () => {
     expect(issueRef(4, "up/app", null)).toBe("up/app#4");
     expect(issueRef(4, "up/app", "me/app")).toBe("up/app#4");
   });
-  it("a forge served under a path prefix is still the same repository", () => {
-    expect(issueRef(5, "gitlab/grp/proj", "grp/proj")).toBe("#5");
-    expect(issueRef(5, "gitlab/grp/proj", "rp/proj")).toBe("gitlab/grp/proj#5");
-  });
+  it("a project in a subgroup is not the top-level project of the same name", () =>
+    expect(issueRef(5, "grp/acme/app", "acme/app")).toBe("grp/acme/app#5"));
   it("ignores a trailing slash or .git on the push repository", () => {
     expect(issueRef(4, "o/r", "o/r/")).toBe("#4");
     expect(issueRef(4, "o/r", "o/r.git")).toBe("#4");
@@ -94,6 +96,7 @@ describe("insertRef", () => {
     expect(insertRef("see #123", 4, 8, "#12", false)).toEqual({ text: "see #12 ", caret: 8 });
     expect(insertRef("#foobar", 0, 7, "#42", false)).toEqual({ text: "#42 ", caret: 4 });
     expect(insertRef("Fixes # the bug", 6, 7, "#12", false)).toEqual({ text: "Fixes #12 the bug", caret: 10 });
+    expect(insertRef("see #12\nmore", 4, 7, "#42", false)).toEqual({ text: "see #42\nmore", caret: 7 });
   });
   it("Fixes form", () => expect(insertRef("#4", 0, 2, "#42", true)).toEqual({ text: "Fixes #42 ", caret: 10 }));
 });

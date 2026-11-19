@@ -90,6 +90,7 @@ import { useIssuePanel, ISSUE_PANEL_KEY } from "./composables/useIssuePanel";
 import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
 import { remoteSlug } from "./utils/issueRefs";
+import { COMMIT_SIGNATURE } from "./utils/commitSignature";
 import { createdIssueToast } from "./composables/createdIssueToast";
 import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
@@ -4128,7 +4129,6 @@ function onTabSizeChange(size: number) {
   applyCodeStyles();
 }
 
-const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
 function onCommitSignatureChange(enabled: boolean) {
   if (enabled) {
     if (!commitDescription.value) {

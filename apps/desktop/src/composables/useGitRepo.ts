@@ -62,6 +62,7 @@ import { useWorkspaceScope } from "./useWorkspaceScope";
 import { useSettings } from "./useSettings";
 import { useUndoToast } from "./useUndoToast";
 import { commitIdentityFor } from "./useIdentity";
+import { COMMIT_SIGNATURE } from "../utils/commitSignature";
 
 export type ViewMode =
   | "dashboard"
@@ -288,7 +289,6 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   });
 
   // Commit editor state
-  const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
   const commitSummary = ref("");
 
   function getCommitSignatureDefault(): string {

@@ -31,6 +31,7 @@ import IssueSuggestList from "./IssueSuggestList.vue";
 import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, followIssueCaret, retryIssueSuggest, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
 import { issueListerFor } from "../composables/issueLister";
 import { remoteSlug } from "../utils/issueRefs";
+import { COMMIT_SIGNATURE } from "../utils/commitSignature";
 import { loadSettings } from "../composables/useSettings";
 
 const props = defineProps<{
@@ -437,12 +438,19 @@ const remoteInfo = ref<RemoteInfo | null>(null);
 /** The repository `remoteInfo` was read for (it lags a tab switch). */
 const remoteInfoCwd = ref<string | null>(null);
 
+/** When the remote was last read (a commit field's focus re-reads it at most every 30 s). */
+let remoteInfoAt = 0;
 async function loadRemoteInfo() {
   const cwd = props.cwd;
   if (!cwd) { remoteInfo.value = null; remoteInfoCwd.value = null; return; }
+  remoteInfoAt = Date.now();
   let info: RemoteInfo | null = null;
   try { info = await gitRemoteInfo(cwd); }
-  catch { info = null; }
+  catch {
+    // A transient failure keeps what this folder's remote was known to be.
+    if (remoteInfoCwd.value === cwd) return;
+    info = null;
+  }
   if (cwd !== props.cwd) return;
   remoteInfo.value = info;
   remoteInfoCwd.value = cwd;
@@ -474,12 +482,14 @@ watch(() => props.cwd, () => { summaryIssues.close(); descriptionIssues.close();
 // A `#` typed before the remote was known (just after a tab switch) opens
 // its list once it is; an existing `#12` under the caret does not.
 watch([remoteInfoCwd, remoteInfo], () => {
-  if (summaryEl.value) retryIssueSuggest(summaryIssues, summaryEl.value);
-  if (descriptionEl.value) retryIssueSuggest(descriptionIssues, descriptionEl.value);
+  // Only the field being typed in: a list never opens under another one.
+  const el = document.activeElement;
+  if (el && el === summaryEl.value) retryIssueSuggest(summaryIssues, summaryEl.value);
+  else if (el && el === descriptionEl.value) retryIssueSuggest(descriptionIssues, descriptionEl.value);
 });
-/** Re-read the remote when a commit field gets focus: `git remote set-url` since. */
+/** Re-read the remote when a commit field gets focus (`git remote set-url` since), at most every 30 s. */
 function onCommitFieldFocus() {
-  void loadRemoteInfo();
+  if (Date.now() - remoteInfoAt > 30_000) void loadRemoteInfo();
 }
 // A value set by code (cleared after a commit, an AI message…) closes the list.
 watch(() => props.commitSummary, (v) => summaryIssues.sync(v ?? ""));
@@ -713,7 +723,7 @@ function applyMessage(cwd: string, msg: string) {
     const raw = localStorage.getItem("gitwand-settings");
     const sig = !raw || JSON.parse(raw).commitSignature !== false;
     if (sig) {
-      const signature = "\u{1FA84} Commit via GitWand";
+      const signature = COMMIT_SIGNATURE;
       body = body ? `${body}\n\n${signature}` : signature;
     }
   } catch { /* ignore */ }

@@ -5,7 +5,7 @@
  * the list's state, a per-repository cache (refreshed after 60 s) and the key
  * handling. Nothing is fetched until a `#` opens the list.
  */
-import { computed, nextTick, ref, type ComputedRef, type Ref } from "vue";
+import { computed, nextTick, ref, watch, type ComputedRef, type Ref } from "vue";
 import type { Issue } from "../utils/backend";
 import { filterIssues, hashTokenAt, insertRef, issueRef, repoSlugFromUrl } from "../utils/issueRefs";
 
@@ -167,6 +167,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   }
 
   function close() {
+    missed = false;
     open.value = false;
     query.value = "";
     active.value = 0;
@@ -179,8 +180,9 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     missed = false;
     if (!token || !cwd) return close();
     if (!ensureLoaded(cwd, !open.value)) {
-      missed = true;
-      return close();
+      close();
+      missed = true; // after close(), which forgets it
+      return;
     }
     if (!open.value || token.query !== query.value) {
       active.value = 0;
@@ -214,9 +216,14 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     }
     const n = rows.value.length;
     if (n === 0) return null;
-    // On a bare `#` (a Markdown heading) the arrows still move through the text.
-    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && query.value !== "") {
-      active.value = (active.value + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+    // The arrows browse a title search (`#login`). A bare `#` (a Markdown
+    // heading) or a typed number (already the reference) leaves them to the
+    // text, so the caret can still move to another line.
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && query.value !== "" && !/^\d+$/.test(query.value)) {
+      // Nothing looks selected before the first arrow: it highlights the
+      // top row (or, going up, the bottom one) rather than moving past it.
+      if (!navigated.value) active.value = e.key === "ArrowDown" ? 0 : n - 1;
+      else active.value = (active.value + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
       navigated.value = true;
       return "handled";
     }
@@ -225,6 +232,13 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     if (e.key === "Enter" || e.key === "Tab") return pick(Math.min(active.value, n - 1), e.key === "Enter" && e.shiftKey, text);
     return null;
   }
+
+  // An entry dropped while the list shows it (an invalidation, an eviction)
+  // is fetched again, rather than "Loading…" with nothing in flight.
+  watch(version, () => {
+    const cwd = deps.cwd();
+    if (open.value && cwd && !cache.has(cwd)) ensureLoaded(cwd, true);
+  });
 
   /** A caret move (click, arrows): follows an open list, never opens one. */
   function refresh(text: string, at: number) {
