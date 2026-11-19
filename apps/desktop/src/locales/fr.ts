@@ -2696,6 +2696,7 @@ const fr: Locale = {
 
   createIssue: {
     template: {
+      clearTitle: "Repartir d'une issue vierge ?",
       loading: "Recherche des modèles d'issue de ce dépôt…",
       label: "Modèle",
       blank: "Issue vierge",

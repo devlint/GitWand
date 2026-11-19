@@ -181,6 +181,32 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(got.files.map((f: { path: string }) => f.path)).toEqual([".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE.md"]);
   });
 
+  it("a lowercase single-template file is found", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({ "me/app:.github/issue_template.md": file("lower") }));
+    expect(got.files[0].path).toBe(".github/issue_template.md");
+  });
+
+  it("a failing owner .github keeps the repository's own config, marked incomplete", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string, path: string) => {
+      if (nwo === "me/.github") throw new Error("GitHub API 403");
+      if (path === ".github/ISSUE_TEMPLATE") return [entry("config.yml")];
+      if (path === ".github/ISSUE_TEMPLATE/config.yml") return file("blank_issues_enabled: false");
+      return null;
+    });
+    expect(got.files).toHaveLength(1);
+    expect(got.complete).toBe(false);
+  });
+
+  it("a set with an unreadable file is marked incomplete", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (_: string, path: string) => {
+      if (path === ".github/ISSUE_TEMPLATE") return [entry("a.md"), entry("b.md")];
+      if (path === ".github/ISSUE_TEMPLATE/a.md") throw new Error("timeout");
+      return file("b");
+    });
+    expect(got.complete).toBe(false);
+    expect((await devTemplateFiles("me/app", PUBLIC, fake({ "me/app:docs/ISSUE_TEMPLATE.md": file("x") }))).complete).toBe(true);
+  });
+
   it("nothing anywhere is an empty list", async () => {
     expect((await devTemplateFiles("me/app", PUBLIC, fake({}))).files).toEqual([]);
   });

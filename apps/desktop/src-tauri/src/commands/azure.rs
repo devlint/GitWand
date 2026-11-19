@@ -207,7 +207,7 @@ impl AzureRepo {
 /// Minimal percent-encoding for path segments (space + a few reserved chars).
 /// Azure org/project names allow spaces; the rest of the chars we care about
 /// are alphanumerics, `-`, `_`, `.`.
-fn urlenc(s: &str) -> String {
+pub(crate) fn urlenc(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {

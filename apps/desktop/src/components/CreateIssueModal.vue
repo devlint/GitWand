@@ -143,12 +143,15 @@ async function onTemplate(e: Event) {
   if (wanted === form.templateId.value) return;
   if (form.bodyEdited.value) {
     const asked = form.openId.value;
+    const target = form.repo.value;
     const ok = await askConfirm({
-      title: t("createIssue.template.replaceTitle"),
+      title: t(wanted === null ? "createIssue.template.clearTitle" : "createIssue.template.replaceTitle"),
       message: t("createIssue.report.replaceEdits"),
       confirmLabel: t("createIssue.report.replace"),
     });
-    if (!ok || !form.isOpen.value || form.openId.value !== asked) return;
+    // The answer was about this form and this target's template (another
+    // target may have one at the same path).
+    if (!ok || !form.isOpen.value || form.openId.value !== asked || form.repo.value !== target) return;
   }
   form.applyTemplate(wanted);
 }

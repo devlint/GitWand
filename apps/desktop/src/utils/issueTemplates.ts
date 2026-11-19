@@ -88,7 +88,8 @@ export function flattenForm(body: unknown[]): string {
       case "dropdown": {
         const options = Array.isArray(a.options) ? a.options.map(str).filter(Boolean) : [];
         const chosen = typeof a.default === "number" ? options[a.default] : undefined;
-        const content = chosen ?? (options.length ? comment(`one of: ${options.join(", ")}`) : "");
+        // The choices alone (no words to translate in a body filed as is).
+        const content = chosen ?? (options.length ? comment(options.join(" | ")) : "");
         if (heading || content) sections.push(section(content));
         break;
       }

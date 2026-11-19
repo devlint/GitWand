@@ -4682,6 +4682,8 @@ export interface TemplateFile {
 export interface IssueTemplateFiles {
   source: string;
   files: TemplateFile[];
+  /** Every listed file was read (an incomplete set is not cached). */
+  complete: boolean;
 }
 
 export async function ghIssueTemplates(cwd: string, repo: string): Promise<IssueTemplateFiles> {

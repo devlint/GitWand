@@ -14,7 +14,7 @@ const BUG = "---\nname: Bug\nabout: It broke\ntitle: '[Bug] '\nlabels: bug, nope
 
 beforeEach(() => clearTemplateCache());
 
-function setup(files: Record<string, { path: string; content: string }[] | (() => Promise<{ path: string; content: string }[]>)> = {}) {
+function setup(files: Record<string, { path: string; content: string }[] | (() => Promise<{ path: string; content: string }[]>)> = {}, incomplete = new Set<string>()) {
   const provider = {
     name: "github",
     issueAvailable: vi.fn(async () => true),
@@ -26,7 +26,7 @@ function setup(files: Record<string, { path: string; content: string }[] | (() =
   } as unknown as ForgeProvider;
   const issueTemplates = vi.fn(async (_cwd: string, repo: string) => {
     const f = files[repo] ?? [];
-    return typeof f === "function" ? f() : f;
+    return { files: typeof f === "function" ? await f() : f, complete: !incomplete.has(repo) };
   });
   const form = useCreateIssue({
     cwd: ref("/repo"),
@@ -210,11 +210,32 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     expect(form.templatesLoading.value).toBe(false);
   });
 
-  it("a form filled from a template counts as started (closing it asks)", async () => {
+  it("a template merely picked gives way (it is one click to pick again)", async () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: "---\nname: Plain\n---\nbody" }] });
     await form.open();
     await flush();
     form.applyTemplate("a.md");
-    expect(form.dirty.value).toBe(true);
+    // `dirty` is what makeRoom() and the close confirmation go by.
+    expect(form.dirty.value).toBe(false);
+  });
+
+  it("an incomplete set (a file could not be read) is not kept", async () => {
+    const { form, issueTemplates } = setup({ "me/app": [{ path: "a.md", content: BUG }] }, new Set(["me/app"]));
+    await form.open();
+    await flush();
+    expect(form.templateSet.value?.templates).toHaveLength(1);
+    form.close();
+    await form.open();
+    await flush();
+    expect(issueTemplates).toHaveBeenCalledTimes(2);
+  });
+
+  it("matches labels and logins without case, keeping the repository's spelling", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: "---\nname: X\nlabels: BUG\nassignees: Alice\n---\nb" }] });
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    expect(form.labels.value).toEqual(["bug"]);
+    expect(form.assignees.value).toEqual(["alice"]);
   });
 });

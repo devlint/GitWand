@@ -2727,6 +2727,7 @@ const en = {
 
   createIssue: {
     template: {
+      clearTitle: "Start from a blank issue?",
       loading: "Looking for this repository's issue templates…",
       label: "Template",
       blank: "Blank issue",

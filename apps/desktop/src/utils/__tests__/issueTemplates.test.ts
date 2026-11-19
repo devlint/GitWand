@@ -74,7 +74,7 @@ describe("flattenForm", () => {
       { type: "checkboxes", attributes: { label: "Checks", options: [{ label: "I searched" }, { label: "I read the docs" }] } },
     ])).toBe(
       "### OS\n\nLinux\n\n" +
-      "### Browser\n\n<!-- one of: Chrome, Firefox -->\n\n" +
+      "### Browser\n\n<!-- Chrome | Firefox -->\n\n" +
       "### Checks\n\n- [ ] I searched\n- [ ] I read the docs\n",
     );
   });

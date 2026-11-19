@@ -132,7 +132,11 @@ export function devCreateFailure(status, json) {
 
 // ─── Issue templates (#301, part 5) — mirrors gh_issue_templates ───────────
 const TEMPLATE_DIR = ".github/ISSUE_TEMPLATE";
-const SINGLE_TEMPLATES = [".github/ISSUE_TEMPLATE.md", "ISSUE_TEMPLATE.md", "docs/ISSUE_TEMPLATE.md"];
+const SINGLE_TEMPLATES = [
+  ".github/ISSUE_TEMPLATE.md", ".github/issue_template.md",
+  "ISSUE_TEMPLATE.md", "issue_template.md",
+  "docs/ISSUE_TEMPLATE.md", "docs/issue_template.md",
+];
 const MAX_TEMPLATES = 20;
 const MAX_TEMPLATE_BYTES = 65_536;
 
@@ -156,8 +160,24 @@ const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const isConfigPath = (path) => isConfig(path.split("/").pop() ?? path);
 const hasTemplate = (files) => files.some((f) => !isConfigPath(f.path));
 
+/** The first single-template file of `nwo`, probed in parallel, in list order. */
+async function singleTemplate(nwo, get) {
+  const answers = await Promise.all(SINGLE_TEMPLATES.map((path) => get(nwo, path).then((v) => ({ v }), (e) => ({ e }))));
+  for (let i = 0; i < SINGLE_TEMPLATES.length; i++) {
+    if (answers[i].e) throw answers[i].e;
+    const v = answers[i].v;
+    if (v && smallEnough(v)) {
+      const content = decodeContent(v);
+      if (content !== null) return { path: SINGLE_TEMPLATES[i], content };
+    }
+  }
+  return null;
+}
+
+/** `[files, complete]`: `complete` when every listed file was read. */
 async function templatesIn(nwo, get) {
   let found = [];
+  let complete = true;
   const items = await get(nwo, TEMPLATE_DIR);
   if (Array.isArray(items)) {
     const named = items
@@ -173,18 +193,14 @@ async function templatesIn(nwo, get) {
         const content = decodeContent(await get(nwo, encodePath(path)).catch(() => null));
         return content === null ? null : { path, content };
       }));
+      if (read.some((f) => f === null)) complete = false;
       found.push(...read.filter(Boolean));
     }
-    if (hasTemplate(found)) return found;
+    if (hasTemplate(found)) return [found, complete];
   }
-  for (const path of SINGLE_TEMPLATES) {
-    const v = await get(nwo, path);
-    if (v && smallEnough(v)) {
-      const content = decodeContent(v);
-      if (content !== null) return [...found, { path, content }];
-    }
-  }
-  return found;
+  const single = await singleTemplate(nwo, get);
+  if (single) found = [...found, single];
+  return [found, complete];
 }
 
 /**
@@ -194,19 +210,25 @@ async function templatesIn(nwo, get) {
  * 404; `isPublic(nwo)` whether a repository is public.
  */
 export async function devTemplateFiles(nwo, isPublic, get) {
-  const own = await templatesIn(nwo, get);
-  if (hasTemplate(own)) return { source: nwo, files: own };
+  const [own, ownComplete] = await templatesIn(nwo, get);
+  if (hasTemplate(own)) return { source: nwo, files: own, complete: ownComplete };
   const owner = nwo.split("/")[0];
   const org = `${owner}/.github`;
-  // GitHub only uses a public `.github` repository; nwo's own config.yml wins.
-  if (org.toLowerCase() !== nwo.toLowerCase() && (await isPublic(org))) {
-    const theirs = await templatesIn(org, get);
-    if (hasTemplate(theirs)) {
+  if (org.toLowerCase() !== nwo.toLowerCase()) {
+    // GitHub only uses a public `.github` repository; nwo's own config.yml
+    // wins. A failing fallback keeps what nwo has, marked incomplete.
+    let theirs = null;
+    try {
+      if (await isPublic(org)) theirs = await templatesIn(org, get);
+    } catch {
+      return { source: nwo, files: own, complete: false };
+    }
+    if (theirs && hasTemplate(theirs[0])) {
       const ownConfig = own.filter((f) => isConfigPath(f.path));
-      const files = (ownConfig.length ? [...ownConfig, ...theirs.filter((f) => !isConfigPath(f.path))] : theirs)
+      const files = (ownConfig.length ? [...ownConfig, ...theirs[0].filter((f) => !isConfigPath(f.path))] : theirs[0])
         .sort((a, b) => cmp(a.path, b.path));
-      return { source: org, files };
+      return { source: org, files, complete: ownComplete && theirs[1] };
     }
   }
-  return { source: nwo, files: own };
+  return { source: nwo, files: own, complete: ownComplete };
 }

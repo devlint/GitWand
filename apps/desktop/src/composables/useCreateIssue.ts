@@ -8,6 +8,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, ghIssueTemplates, type TemplateFile } from "../utils/backend";
+type TemplateRead = { files: TemplateFile[]; complete: boolean };
 import { loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
 import type { SecretFinding, SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
@@ -295,9 +296,9 @@ export function useCreateIssue(deps: {
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
   report?: ReportDeps;
   /** A target's raw template files (tests replace the GitHub read). */
-  issueTemplates?: (cwd: string, repo: string) => Promise<TemplateFile[]>;
+  issueTemplates?: (cwd: string, repo: string) => Promise<TemplateRead>;
 }): CreateIssueApi {
-  const readTemplates = deps.issueTemplates ?? ((cwd: string, r: string) => ghIssueTemplates(cwd, r).then((x) => x.files));
+  const readTemplates = deps.issueTemplates ?? ghIssueTemplates;
   const rdeps = deps.report ?? {};
   const createGitwandIssue = rdeps.createGitwandIssue ?? ghCreateGitwandIssue;
   const checkGitwandWritable = rdeps.gitwandWritable ?? ghGitwandWritable;
@@ -375,7 +376,6 @@ export function useCreateIssue(deps: {
       title.value !== initial.value.title ||
       body.value !== initial.value.body ||
       labels.value.length > 0 ||
-      templateId.value !== null ||
       assignees.value.length > 0 ||
       milestone.value !== null,
   );
@@ -484,10 +484,12 @@ export function useCreateIssue(deps: {
     templateSet.value = null;
     templatesLoading.value = true;
     readTemplates(cwd, target)
-      .then((files) => loadTemplateSet(files))
+      .then(async (read) => ({ set: await loadTemplateSet(read.files), complete: read.complete }))
       .then(
-        (set) => {
-          templateCache.set(key, { at: Date.now(), set });
+        ({ set, complete }) => {
+          // A set missing a file that failed is shown, not kept: the next
+          // form tries again.
+          if (complete) templateCache.set(key, { at: Date.now(), set });
           if (current()) templateSet.value = set;
         },
         () => {}, // No templates is a blank form, never an error.
@@ -511,16 +513,18 @@ export function useCreateIssue(deps: {
 
   /** Grant what the template wants and the target now offers, each once. */
   function grantTemplateWants() {
-    const grant = (have: Ref<string[]>, key: "labels" | "assignees", offered: Set<string>) => {
-      const now = templatePending[key].filter((x) => offered.has(x));
+    // Without case (GitHub's label names and logins), in the target's spelling.
+    const grant = (have: Ref<string[]>, key: "labels" | "assignees", offeredNames: string[]) => {
+      const offered = new Map(offeredNames.map((x) => [x.toLowerCase(), x]));
+      const now = templatePending[key].filter((x) => offered.has(x.toLowerCase())).map((x) => offered.get(x.toLowerCase())!);
       if (!now.length) return;
-      templatePending[key] = templatePending[key].filter((x) => !offered.has(x));
+      templatePending[key] = templatePending[key].filter((x) => !offered.has(x.toLowerCase()));
       const fresh = now.filter((x) => !have.value.includes(x));
       templateAdded[key] = [...templateAdded[key], ...fresh];
       have.value = [...have.value, ...fresh];
     };
-    grant(labels, "labels", new Set(labelOptions.value.map((l) => l.name)));
-    grant(assignees, "assignees", new Set(assigneeOptions.value.map((a) => a.login)));
+    grant(labels, "labels", labelOptions.value.map((l) => l.name));
+    grant(assignees, "assignees", assigneeOptions.value.map((a) => a.login));
   }
   watch([labelOptions, assigneeOptions], () => {
     if (templatePending.labels.length || templatePending.assignees.length) grantTemplateWants();

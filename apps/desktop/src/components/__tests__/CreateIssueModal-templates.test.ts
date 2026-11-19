@@ -32,7 +32,7 @@ async function mount(files: { path: string; content: string }[] | (() => Promise
     createIssue: vi.fn(),
   } as unknown as ForgeProvider;
   const askConfirm = vi.fn(async () => opts.confirm ?? true);
-  const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: async () => (typeof files === "function" ? files() : files) });
+  const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: async () => ({ files: typeof files === "function" ? await files() : files, complete: true }) });
   const host = document.createElement("div");
   document.body.appendChild(host);
   app = createApp(CreateIssueModal);
@@ -74,6 +74,28 @@ describe("CreateIssueModal — templates", () => {
     expect(askConfirm).toHaveBeenCalled();
     expect(form.body.value).toBe("mine");
     expect(select()!.value).toBe("");
+  });
+
+  it("a target switched during the confirmation applies nothing", async () => {
+    const { form, askConfirm } = await mount([{ path: "a.md", content: BUG }]);
+    let answer!: (ok: boolean) => void;
+    askConfirm.mockImplementationOnce(() => new Promise<boolean>((r) => { answer = r; }));
+    form.body.value = "mine";
+    await flush();
+    await choose("a.md");
+    form.repo.value = "up/app";
+    answer(true);
+    await flush();
+    expect(form.body.value).toBe("mine");
+  });
+
+  it("asks with its own title before clearing to a blank issue", async () => {
+    const { form, askConfirm } = await mount([{ path: "a.md", content: BUG }]);
+    await choose("a.md");
+    form.body.value = "edited";
+    await flush();
+    await choose("");
+    expect(askConfirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: "createIssue.template.clearTitle" }));
   });
 
   it("says the repository expects a template, and lists its contact links", async () => {
