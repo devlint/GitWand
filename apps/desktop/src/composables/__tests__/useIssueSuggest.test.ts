@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import type { Issue } from "../../utils/backend";
-import { useIssueSuggest, createIssueCache, ISSUE_CACHE_TTL_MS, type IssueSuggestDeps } from "../useIssueSuggest";
+import { useIssueSuggest, createIssueCache, invalidateIssues, ISSUE_CACHE_TTL_MS, ISSUE_CACHE_MAX_REPOS, type IssueSuggestDeps } from "../useIssueSuggest";
 
 function issue(number: number, title: string, updatedAt = "2026-11-10T00:00:00Z", repo = "me/app"): Issue {
   return { number, title, state: "OPEN", author: "a", assignees: [], labels: [], url: `https://github.com/${repo}/issues/${number}`, createdAt: updatedAt, updatedAt, milestone: "" };
@@ -190,6 +190,44 @@ describe("useIssueSuggest", () => {
     await flush();
     expect(loadIssues).toHaveBeenCalledTimes(2);
     expect(s.status.value).toBe("ready");
+  });
+
+  it("after an error, typing in the open list does not fetch again", async () => {
+    const loadIssues = vi.fn(async () => { throw new Error("offline"); });
+    const { s } = setup({ loadIssues });
+    s.update("#", 1);
+    await flush();
+    s.update("#1", 2);
+    s.update("#12", 3);
+    await flush();
+    expect(loadIssues).toHaveBeenCalledTimes(1);
+    expect(s.status.value).toBe("error");
+  });
+
+  it("an invalidated repository is fetched again at the next #", async () => {
+    const cache = createIssueCache();
+    const loadIssues = vi.fn(async () => ISSUES);
+    const s = useIssueSuggest({ cwd: () => "/r", loadIssues, pushRepo: async () => null, cache });
+    s.update("#", 1);
+    await flush();
+    s.close();
+    invalidateIssues(cache, "/r");
+    s.update("#", 1);
+    expect(loadIssues).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps at most a few repositories, dropping the least recently used", async () => {
+    const cache = createIssueCache();
+    let cwd = "/r0";
+    const s = useIssueSuggest({ cwd: () => cwd, loadIssues: async () => ISSUES, pushRepo: async () => null, cache });
+    for (let i = 0; i <= ISSUE_CACHE_MAX_REPOS; i++) {
+      cwd = `/r${i}`;
+      s.update("#", 1);
+      await flush();
+      s.close();
+    }
+    expect(cache.map.size).toBe(ISSUE_CACHE_MAX_REPOS);
+    expect(cache.map.has("/r0")).toBe(false);
   });
 
   it("two fields sharing a cache fetch once", async () => {

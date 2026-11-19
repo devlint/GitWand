@@ -70,6 +70,15 @@ describe("handleIssueKeydown", () => {
     expect(s.open.value).toBe(true);
   });
 
+  it("a caret moved without a refresh (Cmd+Right, PageDown) lets Enter through", async () => {
+    const { el, written, s } = await field("textarea", "see #4");
+    el.setSelectionRange(0, 0);
+    const e = press(el, "Enter");
+    expect(e.defaultPrevented).toBe(false);
+    expect(written).toEqual([]);
+    expect(s.open.value).toBe(false);
+  });
+
   it("an Escape with the list closed reaches the window", async () => {
     const { el } = await field("input", "plain");
     const seen = vi.fn();

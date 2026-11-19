@@ -154,7 +154,7 @@ describe("useCreateIssue", () => {
     expect(p.createIssue).toHaveBeenCalledWith("/repo", {
       repo: "me/app", title: " t ", body: "b", labels: ["bug"], assignees: [], milestone: 1,
     });
-    expect(onCreated).toHaveBeenCalledWith({ number: 7, url: "https://github.com/me/app/issues/7" }, { toGitwand: false });
+    expect(onCreated).toHaveBeenCalledWith({ number: 7, url: "https://github.com/me/app/issues/7" }, { toGitwand: false, repo: "me/app" });
     expect(api.isOpen.value).toBe(false);
     expect(api.title.value).toBe("");
   });
@@ -195,7 +195,7 @@ describe("useCreateIssue", () => {
     expect(api.repo.value).toBe("me/app");
     created.resolve({ number: 9, url: "u" });
     await pending;
-    expect(onCreated).toHaveBeenCalledWith({ number: 9, url: "u" }, { toGitwand: false });
+    expect(onCreated).toHaveBeenCalledWith({ number: 9, url: "u" }, { toGitwand: false, repo: "me/app" });
     expect(api.isOpen.value).toBe(false);
   });
 
@@ -353,7 +353,7 @@ describe("useCreateIssue", () => {
     expect(api.canSubmit.value).toBe(true);
     expect(api.error.value).toBeNull();
     await api.submit();
-    expect(onCreated).toHaveBeenCalledWith({ number: 3, url: "u" }, { toGitwand: false });
+    expect(onCreated).toHaveBeenCalledWith({ number: 3, url: "u" }, { toGitwand: false, repo: "me/app" });
   });
 
   it("a timeout before anything was sent is an ordinary error", async () => {

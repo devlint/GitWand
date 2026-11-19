@@ -2722,6 +2722,8 @@ const ptBR: Locale = {
     created: "Issue #{0} criada",
     open: "Abrir",
     addToCommit: "Adicionar ao commit",
+    addToCommitOtherRepo: "Não adicionada: outro repositório está aberto",
+    addToCommitAlready: "Já citada na mensagem do commit",
     report: {
       answerLabel: "O que deveria ter sido?",
       answerPlaceholder: "O resultado esperado, ou o que o GitWand errou",

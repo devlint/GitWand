@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import type { Issue } from "../backend";
-import { hashTokenAt, filterIssues, repoSlugFromUrl, issueRef, insertRef, appendRef, addCreatedIssueToCommit } from "../issueRefs";
+import { hashTokenAt, filterIssues, repoSlugFromUrl, remoteSlug, issueRef, insertRef, appendRef, addCreatedIssueToCommit } from "../issueRefs";
 
 function issue(number: number, title: string, updatedAt: string, url = `https://github.com/me/app/issues/${number}`): Issue {
   return { number, title, state: "OPEN", author: "a", assignees: [], labels: [], url, createdAt: updatedAt, updatedAt, milestone: "" };
@@ -25,6 +25,11 @@ describe("hashTokenAt", () => {
   it("never after a letter or a digit", () => {
     expect(hashTokenAt("C#", 2)).toBeNull();
     expect(hashTokenAt("abc#1", 5)).toBeNull();
+  });
+  it("closes on punctuation after the query", () => {
+    expect(hashTokenAt("(#12)", 5)).toBeNull();
+    expect(hashTokenAt("#12,", 4)).toBeNull();
+    expect(hashTokenAt("#log-in.v2/x_y", 14)).toEqual({ start: 0, query: "log-in.v2/x_y" });
   });
   it("closes on a space after the query, or when the caret is before the #", () => {
     expect(hashTokenAt("#12 x", 5)).toBeNull();
@@ -49,6 +54,14 @@ describe("repoSlugFromUrl", () => {
   });
 });
 
+describe("remoteSlug", () => {
+  it("owner/repo, or null when a part is missing", () => {
+    expect(remoteSlug({ owner: "g", repo: "sub/p" })).toBe("g/sub/p");
+    expect(remoteSlug({ owner: "", repo: "r" })).toBeNull();
+    expect(remoteSlug(null)).toBeNull();
+  });
+});
+
 describe("issueRef", () => {
   it("bare when same repository or unknown, qualified otherwise", () => {
     expect(issueRef(4, "Me/App", "me/app")).toBe("#4");
@@ -69,25 +82,42 @@ describe("insertRef", () => {
 });
 
 describe("appendRef", () => {
-  it("appends, sets when empty, never duplicates", () => {
-    expect(appendRef("body", "#4")).toBe("body #4");
+  it("adds the reference as its own paragraph, sets when empty, never duplicates", () => {
+    expect(appendRef("body", "#4")).toBe("body\n\n#4");
+    expect(appendRef("body\n\n", "#4")).toBe("body\n\n#4");
     expect(appendRef("", "#4")).toBe("#4");
     expect(appendRef("see #4 here", "#4")).toBe("see #4 here");
     expect(appendRef("", "#4", "Fix #4")).toBe("");
-    expect(appendRef("see #42", "#4")).toBe("see #42 #4");
-    expect(appendRef("up/app#4", "#4")).toBe("up/app#4 #4");
+    expect(appendRef("see #42", "#4")).toBe("see #42\n\n#4");
+    expect(appendRef("up/app#4", "#4")).toBe("up/app#4\n\n#4");
+  });
+  it("never breaks a closing fence or a list item", () => {
+    expect(appendRef("```\nx\n```", "#4")).toBe("```\nx\n```\n\n#4");
+    expect(appendRef("- a\n- b", "#4")).toBe("- a\n- b\n\n#4");
+  });
+  it("goes before a trailer block, which must stay last", () => {
+    expect(appendRef("body\n\nSigned-off-by: A <a@x.com>", "#4")).toBe("body\n\n#4\n\nSigned-off-by: A <a@x.com>");
+    expect(appendRef("Signed-off-by: A <a@x.com>\nReviewed-by: B <b@x.com>", "#4")).toBe("#4\n\nSigned-off-by: A <a@x.com>\nReviewed-by: B <b@x.com>");
   });
 });
 
 describe("addCreatedIssueToCommit", () => {
-  const URL7 = "https://github.com/me/app/issues/7";
-  it("appends the reference to the active repository's description", () =>
-    expect(addCreatedIssueToCommit(URL7, 7, "/r", "/r", "me/app", "s", "d")).toBe("d #7"));
-  it("sets an empty description", () => expect(addCreatedIssueToCommit(URL7, 7, "/r", "/r", "me/app", "", "")).toBe("#7"));
+  const ctx = (o: Partial<{ createdIn: string; activeCwd: string; pushRepo: string | null; summary: string; description: string }> = {}) => ({
+    createdIn: "/r", activeCwd: "/r", pushRepo: "me/app", summary: "s", description: "d", ...o,
+  });
+  const ISSUE7 = { url: "https://github.com/me/app/issues/7", number: 7, repo: "me/app" };
+  it("adds the reference to the active repository's description", () =>
+    expect(addCreatedIssueToCommit(ISSUE7, ctx())).toEqual({ status: "added", description: "d\n\n#7" }));
+  it("sets an empty description", () =>
+    expect(addCreatedIssueToCommit(ISSUE7, ctx({ description: "" }))).toEqual({ status: "added", description: "#7" }));
   it("qualifies an issue filed on the parent", () =>
-    expect(addCreatedIssueToCommit("https://github.com/up/app/issues/7", 7, "/r", "/r", "me/app", "", "")).toBe("up/app#7"));
-  it("does nothing after a repository switch", () =>
-    expect(addCreatedIssueToCommit(URL7, 7, "/r", "/other", "me/app", "", "")).toBeNull());
-  it("does nothing when already referenced", () =>
-    expect(addCreatedIssueToCommit(URL7, 7, "/r", "/r", "me/app", "Fix #7", "")).toBeNull());
+    expect(addCreatedIssueToCommit({ ...ISSUE7, url: "https://github.com/up/app/issues/7", repo: "up/app" }, ctx({ description: "" })))
+      .toEqual({ status: "added", description: "up/app#7" }));
+  it("falls back to the target repository when the issue has no URL", () =>
+    expect(addCreatedIssueToCommit({ url: "", number: 7, repo: "up/app" }, ctx({ description: "" })))
+      .toEqual({ status: "added", description: "up/app#7" }));
+  it("says so after a repository switch", () =>
+    expect(addCreatedIssueToCommit(ISSUE7, ctx({ activeCwd: "/other" }))).toEqual({ status: "otherRepo" }));
+  it("says so when already referenced", () =>
+    expect(addCreatedIssueToCommit(ISSUE7, ctx({ summary: "Fix #7" }))).toEqual({ status: "alreadyCited" }));
 });

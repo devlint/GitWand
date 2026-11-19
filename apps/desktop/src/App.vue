@@ -89,7 +89,8 @@ import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import { useIssuePanel, ISSUE_PANEL_KEY } from "./composables/useIssuePanel";
 import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
-import { addCreatedIssueToCommit } from "./utils/issueRefs";
+import { addCreatedIssueToCommit, remoteSlug } from "./utils/issueRefs";
+import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
 import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
@@ -511,7 +512,7 @@ provide(PR_PANEL_KEY, prPanel);
 const createIssue = useCreateIssue({
   cwd: computed(() => repoFolderPath.value ?? null),
   provider: ref(githubProvider),
-  onCreated: (issue, { toGitwand }) => {
+  onCreated: (issue, { toGitwand, repo }) => {
     const open = issue.url ? { label: t("createIssue.open"), url: issue.url } : undefined;
     // A resolver report on GitWand's public repository is never cited in the
     // user's commit: GitHub would show that commit, and its repository, on it.
@@ -522,8 +523,10 @@ const createIssue = useCreateIssue({
     // "Add to commit" (#301) writes into the repository the issue was filed
     // from, and only while it is still the active one.
     const createdIn = repoFolderPath.value ?? "";
+    // The new issue belongs in the `#` list at once, not after the cache's minute.
+    if (createdIn) invalidateIssues(sharedIssueCache, createdIn);
     const pushRepo = createdIn
-      ? gitRemoteInfo(createdIn).then((r) => (r.owner && r.repo ? `${r.owner}/${r.repo}` : null), () => null)
+      ? gitRemoteInfo(createdIn).then((r) => remoteSlug(r), () => null)
       : Promise.resolve(null);
     showDetailToast(
       t("createIssue.created", issue.number),
@@ -534,11 +537,16 @@ const createIssue = useCreateIssue({
         label: t("createIssue.addToCommit"),
         run: () => {
           void pushRepo.then((push) => {
-            const next = addCreatedIssueToCommit(
-              issue.url, issue.number, createdIn, repoFolderPath.value ?? "", push,
-              commitSummary.value, commitDescription.value,
+            const out = addCreatedIssueToCommit(
+              { url: issue.url, number: issue.number, repo },
+              {
+                createdIn, activeCwd: repoFolderPath.value ?? "", pushRepo: push,
+                summary: commitSummary.value, description: commitDescription.value,
+              },
             );
-            if (next !== null) commitDescription.value = next;
+            // Never a silent click: say why nothing was added.
+            if (out.status === "added") commitDescription.value = out.description;
+            else showDetailToast(t(out.status === "otherRepo" ? "createIssue.addToCommitOtherRepo" : "createIssue.addToCommitAlready"), null, 4000);
           });
         },
       },

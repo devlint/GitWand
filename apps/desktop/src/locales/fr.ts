@@ -2731,6 +2731,8 @@ const fr: Locale = {
     created: "Issue #{0} créée",
     open: "Ouvrir",
     addToCommit: "Ajouter au commit",
+    addToCommitOtherRepo: "Non ajoutée : un autre dépôt est ouvert",
+    addToCommitAlready: "Déjà citée dans le message de commit",
     report: {
       answerLabel: "Qu'aurait-il fallu obtenir ?",
       answerPlaceholder: "Le résultat attendu, ou ce que GitWand a mal fait",

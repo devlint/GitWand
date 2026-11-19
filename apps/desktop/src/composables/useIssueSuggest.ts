@@ -10,6 +10,8 @@ import type { Issue } from "../utils/backend";
 import { filterIssues, hashTokenAt, insertRef, issueRef, repoSlugFromUrl } from "../utils/issueRefs";
 
 export const ISSUE_CACHE_TTL_MS = 60_000;
+/** Repositories whose issues stay cached; the least recently used goes first. */
+export const ISSUE_CACHE_MAX_REPOS = 8;
 
 export interface IssueSuggestDeps {
   cwd: () => string | null;
@@ -46,6 +48,19 @@ export function createIssueCache(): IssueCache {
 /** The cache the commit fields share for the app's lifetime (#301). */
 export const sharedIssueCache = createIssueCache();
 
+/** Forget `cwd`'s issues (one was just created): the next `#` fetches them again. */
+export function invalidateIssues(cache: IssueCache, cwd: string): void {
+  if (cache.map.delete(cwd)) cache.version.value++;
+}
+
+/** Store `cwd`'s entry as the most recently used, dropping the oldest beyond the cap. */
+function remember(cache: IssueCache, cwd: string, e: Entry): void {
+  cache.map.delete(cwd);
+  cache.map.set(cwd, e);
+  while (cache.map.size > ISSUE_CACHE_MAX_REPOS) cache.map.delete(cache.map.keys().next().value as string);
+  cache.version.value++;
+}
+
 export function useIssueSuggest(deps: IssueSuggestDeps): {
   open: Ref<boolean>;
   status: ComputedRef<SuggestStatus>;
@@ -58,7 +73,8 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   sync(text: string): void;
 } {
   const now = deps.now ?? (() => Date.now());
-  const { map: cache, version } = deps.cache ?? createIssueCache();
+  const store = deps.cache ?? createIssueCache();
+  const { map: cache, version } = store;
   const open = ref(false);
   const query = ref("");
   const active = ref(0);
@@ -80,25 +96,21 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     return open.value && e && e.status !== "error" ? filterIssues(e.issues, query.value) : [];
   });
 
-  /** Fetch the issues for `cwd` unless fresh ones are cached. false: this forge has no list. */
-  function ensureLoaded(cwd: string): boolean {
+  /**
+   * Fetch the issues for `cwd` unless fresh ones are cached. A failed fetch is
+   * retried when the list opens again, not on each key while it is open.
+   * false: this forge has no list.
+   */
+  function ensureLoaded(cwd: string, opening: boolean): boolean {
     const cached = cache.get(cwd);
-    const fresh = cached && cached.status !== "error" && now() - cached.at <= ISSUE_CACHE_TTL_MS;
+    const fresh = cached && now() - cached.at <= ISSUE_CACHE_TTL_MS && (cached.status !== "error" || !opening);
     if (cached && (cached.status === "loading" || fresh)) return true;
     const pending = deps.loadIssues(cwd);
     if (!pending) return false;
-    const e: Entry = { at: now(), status: "loading", issues: cached?.issues ?? [], pushRepo: cached?.pushRepo ?? null };
-    cache.set(cwd, e);
-    version.value++;
+    remember(store, cwd, { at: now(), status: "loading", issues: cached?.issues ?? [], pushRepo: cached?.pushRepo ?? null });
     Promise.all([pending, deps.pushRepo(cwd).catch(() => null)]).then(
-      ([issues, push]) => {
-        cache.set(cwd, { at: now(), status: "ready", issues, pushRepo: push });
-        version.value++;
-      },
-      () => {
-        cache.set(cwd, { at: now(), status: "error", issues: [], pushRepo: null });
-        version.value++;
-      },
+      ([issues, push]) => remember(store, cwd, { at: now(), status: "ready", issues, pushRepo: push }),
+      () => remember(store, cwd, { at: now(), status: "error", issues: [], pushRepo: null }),
     );
     return true;
   }
@@ -113,7 +125,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     const token = hashTokenAt(text, at);
     const cwd = deps.cwd();
     if (!token || !cwd) return close();
-    if (!ensureLoaded(cwd)) return close();
+    if (!ensureLoaded(cwd, !open.value)) return close();
     if (!open.value || token.query !== query.value) active.value = 0;
     start = token.start;
     caret = at;
@@ -178,6 +190,10 @@ function placeCaret(el: Field, at: number): void {
  * took the key: it is then stopped here, so App's Escape ladder never sees it.
  */
 export function handleIssueKeydown(s: IssueSuggest, e: KeyboardEvent, el: Field, write: (text: string) => void): boolean {
+  if (!s.open.value) return false;
+  // The caret may have moved with no refresh (Cmd+Right, PageDown, a drag):
+  // re-read it, so a list left behind never takes the key.
+  refreshIssueSuggest(s, el);
   const out = s.keydown(e, el.value);
   if (out === null) return false;
   e.preventDefault();

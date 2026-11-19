@@ -30,6 +30,7 @@ import { gitBranchMerged } from "../utils/backend";
 import IssueSuggestList from "./IssueSuggestList.vue";
 import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
 import { issueListerFor } from "../composables/issueLister";
+import { remoteSlug } from "../utils/issueRefs";
 import { loadSettings } from "../composables/useSettings";
 
 const props = defineProps<{
@@ -455,8 +456,7 @@ const issueDeps = {
   /** null (no list) until the remote is known, or when its forge cannot list issues. */
   loadIssues: (cwd: string) => issueListerFor(remoteInfoCwd.value === cwd ? remoteInfo.value : null, cwd),
   pushRepo: async (cwd: string) => {
-    const info = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
-    return info?.owner && info.repo ? `${info.owner}/${info.repo}` : null;
+    return remoteSlug(remoteInfoCwd.value === cwd ? remoteInfo.value : null);
   },
   // Both fields, and every mount of this panel, share one fetch per repository.
   cache: sharedIssueCache,

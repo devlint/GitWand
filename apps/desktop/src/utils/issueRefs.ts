@@ -23,7 +23,8 @@ export function hashTokenAt(text: string, caret: number): { start: number; query
   const start = before.lastIndexOf("#");
   if (start < 0) return null;
   const query = before.slice(start + 1);
-  if (/\s/.test(query)) return null;
+  // Letters, digits and `_-./` only: a space or punctuation (`#12)`, `#12,`) ends it.
+  if (!/^[\p{L}\p{N}_\-./]*$/u.test(query)) return null;
   if (start > 0 && !OPENS_AFTER.test(text[start - 1])) return null;
   return { start, query };
 }
@@ -44,6 +45,11 @@ export function filterIssues(issues: Issue[], query: string, max = MAX_ISSUE_ROW
 export function repoSlugFromUrl(url: string): string | null {
   const m = /^https?:\/\/[^/]+\/(.+?)\/(?:-\/)?issues\/\d+/.exec(url);
   return m ? m[1] : null;
+}
+
+/** `owner/repo` from a remote's parts (GitLab subgroups live in `repo`), or null. */
+export function remoteSlug(info: { owner: string; repo: string } | null | undefined): string | null {
+  return info?.owner && info.repo ? `${info.owner}/${info.repo}` : null;
 }
 
 /** `#N`, qualified as `issueRepo#N` when that is not the repository pushed to. */
@@ -74,29 +80,38 @@ export function hasRef(text: string, ref: string): boolean {
   return new RegExp(`(^|[^\\w/.-])${escapeRegExp(ref)}(?!\\w)`).test(text);
 }
 
-/** The description with ` ref` appended, unchanged when the message already cites it. */
+/** A trailer line (`Signed-off-by: A <a@x>`): git only reads them in the last paragraph. */
+const TRAILER = /^[A-Za-z][\w-]*: \S/;
+
+/**
+ * The description citing `ref`, unchanged when the message already does. The
+ * reference is a paragraph of its own (a closing fence, a list item or a
+ * trailer is never extended), placed before a closing trailer block.
+ */
 export function appendRef(description: string, ref: string, summary = ""): string {
   if (hasRef(summary, ref) || hasRef(description, ref)) return description;
   const trimmed = description.replace(/\s+$/, "");
-  return trimmed ? `${trimmed} ${ref}` : ref;
+  if (!trimmed) return ref;
+  const paragraphs = trimmed.split(/\n{2,}/);
+  const last = paragraphs[paragraphs.length - 1];
+  if (last.split("\n").every((line) => TRAILER.test(line))) {
+    return [...paragraphs.slice(0, -1), ref, last].join("\n\n");
+  }
+  return `${trimmed}\n\n${ref}`;
 }
 
+export type AddToCommit = { status: "added"; description: string } | { status: "otherRepo" } | { status: "alreadyCited" };
+
 /**
- * The "issue created" toast's "Add to commit" (#301): the new description, or
- * null when the repository changed since the issue was filed, or the message
- * already cites it.
+ * The "issue created" toast's "Add to commit" (#301). `issue.repo` is where it
+ * was filed, used when its URL says nothing.
  */
 export function addCreatedIssueToCommit(
-  issueUrl: string,
-  number: number,
-  createdIn: string,
-  activeCwd: string,
-  pushRepo: string | null,
-  summary: string,
-  description: string,
-): string | null {
-  if (createdIn !== activeCwd) return null;
-  const ref = issueRef(number, repoSlugFromUrl(issueUrl), pushRepo);
-  if (hasRef(summary, ref) || hasRef(description, ref)) return null;
-  return appendRef(description, ref, summary);
+  issue: { url: string; number: number; repo: string | null },
+  ctx: { createdIn: string; activeCwd: string; pushRepo: string | null; summary: string; description: string },
+): AddToCommit {
+  if (ctx.createdIn !== ctx.activeCwd) return { status: "otherRepo" };
+  const ref = issueRef(issue.number, repoSlugFromUrl(issue.url) ?? issue.repo, ctx.pushRepo);
+  const description = appendRef(ctx.description, ref, ctx.summary);
+  return description === ctx.description ? { status: "alreadyCited" } : { status: "added", description };
 }

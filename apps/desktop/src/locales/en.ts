@@ -2762,6 +2762,8 @@ const en = {
     created: "Issue #{0} created",
     open: "Open",
     addToCommit: "Add to commit",
+    addToCommitOtherRepo: "Not added: another repository is open now",
+    addToCommitAlready: "Already referenced in the commit message",
     report: {
       answerLabel: "What should it have been?",
       answerPlaceholder: "The result you expected, or what GitWand got wrong",

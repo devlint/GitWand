@@ -2732,6 +2732,8 @@ const zhCN: Locale = {
     created: "已创建 Issue #{0}",
     open: "打开",
     addToCommit: "添加到提交",
+    addToCommitOtherRepo: "未添加：当前打开的是另一个仓库",
+    addToCommitAlready: "提交信息中已引用",
     report: {
       answerLabel: "正确的结果应该是什么？",
       answerPlaceholder: "期望的结果，或 GitWand 哪里出错了",
