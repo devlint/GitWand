@@ -227,6 +227,7 @@ const zhCN: Locale = {
       loading: "正在加载 issue…",
       unavailable: "无法获取 issue",
       empty: "没有匹配的未关闭 issue",
+      emptyNumber: "#{0} 不在最近的未关闭 issue 中，将按原样保留",
       hint: "↵ #N · ⇧↵ Fixes #N",
     },
     tabChanges: "更改",

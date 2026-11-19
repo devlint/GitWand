@@ -224,6 +224,7 @@ const en = {
       loading: "Loading issues…",
       unavailable: "Issues unavailable",
       empty: "No matching open issue",
+      emptyNumber: "#{0} is not among the recent open issues; it stays as typed",
       hint: "↵ #N · ⇧↵ Fixes #N",
     },
     tabChanges: "Changes",

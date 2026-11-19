@@ -512,7 +512,7 @@ provide(PR_PANEL_KEY, prPanel);
 const createIssue = useCreateIssue({
   cwd: computed(() => repoFolderPath.value ?? null),
   provider: ref(githubProvider),
-  onCreated: (issue, { toGitwand, repo }) => {
+  onCreated: (issue, { toGitwand, repo, cwd: createdIn }) => {
     const open = issue.url ? { label: t("createIssue.open"), url: issue.url } : undefined;
     // A resolver report on GitWand's public repository is never cited in the
     // user's commit: GitHub would show that commit, and its repository, on it.
@@ -522,12 +522,8 @@ const createIssue = useCreateIssue({
     }
     // "Add to commit" (#301) writes into the repository the issue was filed
     // from, and only while it is still the active one.
-    const createdIn = repoFolderPath.value ?? "";
     // The new issue belongs in the `#` list at once, not after the cache's minute.
     if (createdIn) invalidateIssues(sharedIssueCache, createdIn);
-    const pushRepo = createdIn
-      ? gitRemoteInfo(createdIn).then((r) => remoteSlug(r), () => null)
-      : Promise.resolve(null);
     showDetailToast(
       t("createIssue.created", issue.number),
       null,
@@ -536,6 +532,8 @@ const createIssue = useCreateIssue({
       {
         label: t("createIssue.addToCommit"),
         run: () => {
+          // The remote is read only if the button is used.
+          const pushRepo = createdIn ? gitRemoteInfo(createdIn).then(remoteSlug, () => null) : Promise.resolve(null);
           void pushRepo.then((push) => {
             const out = addCreatedIssueToCommit(
               { url: issue.url, number: issue.number, repo },

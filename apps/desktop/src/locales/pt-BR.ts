@@ -224,6 +224,7 @@ const ptBR: Locale = {
       loading: "Carregando issues…",
       unavailable: "Issues indisponíveis",
       empty: "Nenhuma issue aberta corresponde",
+      emptyNumber: "#{0} não está entre as issues abertas recentes; fica como digitado",
       hint: "↵ #N · ⇧↵ Fixes #N",
     },
     tabChanges: "Alterações",

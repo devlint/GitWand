@@ -223,6 +223,7 @@ const es: Locale = {
       loading: "Cargando issues…",
       unavailable: "Issues no disponibles",
       empty: "Ninguna issue abierta coincide",
+      emptyNumber: "#{0} no está entre las issues abiertas recientes; se queda como está",
       hint: "↵ #N · ⇧↵ Fixes #N",
     },
     tabChanges: "Cambios",

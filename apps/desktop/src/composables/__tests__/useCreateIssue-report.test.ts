@@ -293,7 +293,7 @@ describe("useCreateIssue — report mode", () => {
     api.confirmedPublic.value = true;
     await settle();
     await api.submit();
-    expect(onCreated).toHaveBeenCalledWith({ number: 9, url: "g" }, { toGitwand: true, repo: "devlint/GitWand" });
+    expect(onCreated).toHaveBeenCalledWith({ number: 9, url: "g" }, { toGitwand: true, repo: "devlint/GitWand", cwd: "/repo" });
   });
 
   it("holds Create after a GitWand report that may have been created", async () => {

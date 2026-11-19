@@ -7,7 +7,7 @@ import type { Issue } from "../utils/backend";
 import type { SuggestStatus } from "../composables/useIssueSuggest";
 import { useI18n } from "../composables/useI18n";
 
-const props = defineProps<{ status: SuggestStatus; rows: Issue[]; active: number; listId?: string }>();
+const props = defineProps<{ status: SuggestStatus; rows: Issue[]; active: number; listId?: string; query?: string }>();
 const emit = defineEmits<{ pick: [index: number, fixes: boolean] }>();
 const { t } = useI18n();
 </script>
@@ -29,6 +29,8 @@ const { t } = useI18n();
     </div>
     <p v-if="rows.length === 0 && status === 'loading'" class="isl-note">{{ t("sidebar.issueSuggest.loading") }}</p>
     <p v-else-if="rows.length === 0 && status === 'error'" class="isl-note">{{ t("sidebar.issueSuggest.unavailable") }}</p>
+    <!-- Only the most recent open issues are fetched: a number not among them stays as typed. -->
+    <p v-else-if="rows.length === 0 && /^\d+$/.test(props.query ?? '')" class="isl-note">{{ t("sidebar.issueSuggest.emptyNumber", props.query ?? "") }}</p>
     <p v-else-if="rows.length === 0" class="isl-note">{{ t("sidebar.issueSuggest.empty") }}</p>
     <p class="isl-hint mono">{{ t("sidebar.issueSuggest.hint") }}</p>
   </div>

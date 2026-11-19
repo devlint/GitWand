@@ -20,7 +20,7 @@ async function field(tag: "input" | "textarea", value: string) {
   el.value = value;
   el.focus();
   el.setSelectionRange(value.length, value.length);
-  const s = useIssueSuggest({ cwd: () => "/r", loadIssues: async () => ISSUES, pushRepo: async () => "me/app" });
+  const s = useIssueSuggest({ cwd: () => "/r", loadIssues: async () => ISSUES, pushRepo: () => "me/app" });
   refreshIssueSuggest(s, el);
   await flush();
   const written: string[] = [];
@@ -37,7 +37,7 @@ const press = (el: HTMLElement, key: string, init: KeyboardEventInit = {}) => {
 
 describe("handleIssueKeydown", () => {
   it("Enter writes #N and puts the caret after it", async () => {
-    const { el, written } = await field("input", "Fix #");
+    const { el, written } = await field("input", "Fix #4");
     const e = press(el, "Enter");
     expect(e.defaultPrevented).toBe(true);
     expect(written).toEqual(["Fix #42 "]);

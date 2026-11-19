@@ -455,9 +455,7 @@ const issueDeps = {
   cwd: () => props.cwd || null,
   /** null (no list) until the remote is known, or when its forge cannot list issues. */
   loadIssues: (cwd: string) => issueListerFor(remoteInfoCwd.value === cwd ? remoteInfo.value : null, cwd),
-  pushRepo: async (cwd: string) => {
-    return remoteSlug(remoteInfoCwd.value === cwd ? remoteInfo.value : null);
-  },
+  pushRepo: (cwd: string) => remoteSlug(remoteInfoCwd.value === cwd ? remoteInfo.value : null),
   // Both fields, and every mount of this panel, share one fetch per repository.
   cache: sharedIssueCache,
 };
@@ -1614,6 +1612,7 @@ function formatActivityDate(dateStr: string): string {
           :rows="summaryIssues.rows.value"
           :active="summaryIssues.active.value"
           list-id="commit-summary-issues"
+          :query="summaryIssues.query.value"
           @pick="(i, fixes) => pickIssueRow(summaryIssues, i, fixes, summaryEl, writeSummary)"
         />
         <input
@@ -1693,6 +1692,7 @@ function formatActivityDate(dateStr: string): string {
           :rows="descriptionIssues.rows.value"
           :active="descriptionIssues.active.value"
           list-id="commit-description-issues"
+          :query="descriptionIssues.query.value"
           @pick="(i, fixes) => pickIssueRow(descriptionIssues, i, fixes, descriptionEl, writeDescription)"
         />
         <textarea
@@ -2610,6 +2610,7 @@ function formatActivityDate(dateStr: string): string {
   position: relative;
 }
 .commit-description {
+  display: block; /* no inline baseline gap under it inside its wrapper */
   width: 100%;
   padding: var(--space-3) var(--space-5);
   font-size: var(--font-size-sm);

@@ -217,6 +217,7 @@ const fr: Locale = {
       loading: "Chargement des issues…",
       unavailable: "Issues indisponibles",
       empty: "Aucune issue ouverte ne correspond",
+      emptyNumber: "#{0} ne fait pas partie des issues ouvertes récentes ; il reste tel quel",
       hint: "↵ #N · ⇧↵ Fixes #N",
     },
     tabChanges: "Changements",

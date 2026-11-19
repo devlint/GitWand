@@ -17,8 +17,8 @@ export interface IssueSuggestDeps {
   cwd: () => string | null;
   /** null when the forge cannot list issues (then there is no list at all). */
   loadIssues: (cwd: string) => Promise<Issue[]> | null;
-  /** `owner/repo` of the repository the commit is pushed to, or null. */
-  pushRepo: (cwd: string) => Promise<string | null>;
+  /** `owner/repo` of the repository the commit is pushed to, or null; read at pick time. */
+  pushRepo: (cwd: string) => string | null;
   now?: () => number;
   /** Shared between fields so a repository is fetched once (default: this instance's own). */
   cache?: IssueCache;
@@ -30,7 +30,6 @@ export interface Entry {
   at: number;
   status: "loading" | "ready" | "error";
   issues: Issue[];
-  pushRepo: string | null;
 }
 
 export type Picked = { text: string; caret: number };
@@ -39,10 +38,12 @@ export type Picked = { text: string; caret: number };
 export interface IssueCache {
   map: Map<string, Entry>;
   version: Ref<number>;
+  /** Bumped by `invalidateIssues`: an answer to an older request is dropped. */
+  generation: Map<string, number>;
 }
 
 export function createIssueCache(): IssueCache {
-  return { map: new Map(), version: ref(0) };
+  return { map: new Map(), version: ref(0), generation: new Map() };
 }
 
 /** The cache the commit fields share for the app's lifetime (#301). */
@@ -50,7 +51,14 @@ export const sharedIssueCache = createIssueCache();
 
 /** Forget `cwd`'s issues (one was just created): the next `#` fetches them again. */
 export function invalidateIssues(cache: IssueCache, cwd: string): void {
+  cache.generation.set(cwd, (cache.generation.get(cwd) ?? 0) + 1);
   if (cache.map.delete(cwd)) cache.version.value++;
+}
+
+/** Mark `cwd` as just used, so it is the last one evicted (no re-render). */
+function touch(cache: IssueCache, cwd: string, e: Entry): void {
+  cache.map.delete(cwd);
+  cache.map.set(cwd, e);
 }
 
 /** Store `cwd`'s entry as the most recently used, dropping the oldest beyond the cap. */
@@ -66,6 +74,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   status: ComputedRef<SuggestStatus>;
   rows: ComputedRef<Issue[]>;
   active: Ref<number>;
+  query: Ref<string>;
   update(text: string, caret: number): void;
   keydown(e: KeyboardEvent, text: string): Picked | "handled" | null;
   pick(index: number, fixes: boolean, text: string): Picked | null;
@@ -82,6 +91,8 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   let caret = 0;
   /** The text `update` last read; a different one (set by code) closes the list. */
   let lastText = "";
+  /** An arrow chose a row: only then does a bare `#` let Enter or Tab pick. */
+  let navigated = false;
 
   const entry = (): Entry | undefined => {
     void version.value;
@@ -103,14 +114,25 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
    */
   function ensureLoaded(cwd: string, opening: boolean): boolean {
     const cached = cache.get(cwd);
-    const fresh = cached && now() - cached.at <= ISSUE_CACHE_TTL_MS && (cached.status !== "error" || !opening);
-    if (cached && (cached.status === "loading" || fresh)) return true;
+    // Within the TTL: a loading entry is in flight (one that never settles is
+    // retried after it), a ready one is fresh, an error waits for a reopening.
+    const young = !!cached && now() - cached.at <= ISSUE_CACHE_TTL_MS;
+    if (cached && young && (cached.status !== "error" || !opening)) {
+      touch(store, cwd, cached);
+      return true;
+    }
     const pending = deps.loadIssues(cwd);
     if (!pending) return false;
-    remember(store, cwd, { at: now(), status: "loading", issues: cached?.issues ?? [], pushRepo: cached?.pushRepo ?? null });
-    Promise.all([pending, deps.pushRepo(cwd).catch(() => null)]).then(
-      ([issues, push]) => remember(store, cwd, { at: now(), status: "ready", issues, pushRepo: push }),
-      () => remember(store, cwd, { at: now(), status: "error", issues: [], pushRepo: null }),
+    const gen = store.generation.get(cwd) ?? 0;
+    remember(store, cwd, { at: now(), status: "loading", issues: cached?.issues ?? [] });
+    // An answer to a request older than an invalidation would bring back a
+    // list without the issue just created: drop it.
+    const settle = (e: Entry) => {
+      if ((store.generation.get(cwd) ?? 0) === gen) remember(store, cwd, e);
+    };
+    pending.then(
+      (issues) => settle({ at: now(), status: "ready", issues }),
+      () => settle({ at: now(), status: "error", issues: [] }),
     );
     return true;
   }
@@ -119,6 +141,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     open.value = false;
     query.value = "";
     active.value = 0;
+    navigated = false;
   }
 
   function update(text: string, at: number) {
@@ -126,7 +149,10 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     const cwd = deps.cwd();
     if (!token || !cwd) return close();
     if (!ensureLoaded(cwd, !open.value)) return close();
-    if (!open.value || token.query !== query.value) active.value = 0;
+    if (!open.value || token.query !== query.value) {
+      active.value = 0;
+      navigated = false;
+    }
     start = token.start;
     caret = at;
     lastText = text;
@@ -137,7 +163,8 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   function pick(index: number, fixes: boolean, text: string): Picked | null {
     const chosen = rows.value[index];
     if (!open.value || !chosen) return null;
-    const ref = issueRef(chosen.number, repoSlugFromUrl(chosen.url), entry()?.pushRepo ?? null);
+    const cwd = deps.cwd();
+    const ref = issueRef(chosen.number, repoSlugFromUrl(chosen.url), cwd ? deps.pushRepo(cwd) : null);
     const out = insertRef(text, start, caret, ref, fixes);
     close();
     return out;
@@ -156,8 +183,11 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     if (n === 0) return null;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       active.value = (active.value + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+      navigated = true;
       return "handled";
     }
+    // A bare `#` (a heading, a hashtag) is not a choice until an arrow makes one.
+    if (query.value === "" && !navigated) return null;
     if (e.key === "Enter" || e.key === "Tab") return pick(Math.min(active.value, n - 1), e.key === "Enter" && e.shiftKey, text);
     return null;
   }
@@ -167,7 +197,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     if (open.value && text !== lastText) close();
   }
 
-  return { open, status, rows, active, update, keydown, pick, close, sync };
+  return { open, status, rows, active, query, update, keydown, pick, close, sync };
 }
 
 export type IssueSuggest = ReturnType<typeof useIssueSuggest>;

@@ -4,6 +4,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Issue } from "../../utils/backend";
 import { useIssueSuggest, createIssueCache, invalidateIssues, ISSUE_CACHE_TTL_MS, ISSUE_CACHE_MAX_REPOS, type IssueSuggestDeps } from "../useIssueSuggest";
+import type { Issue as I } from "../../utils/backend";
 
 function issue(number: number, title: string, updatedAt = "2026-11-10T00:00:00Z", repo = "me/app"): Issue {
   return { number, title, state: "OPEN", author: "a", assignees: [], labels: [], url: `https://github.com/${repo}/issues/${number}`, createdAt: updatedAt, updatedAt, milestone: "" };
@@ -19,7 +20,7 @@ function setup(over: Partial<IssueSuggestDeps> = {}) {
   const deps: IssueSuggestDeps = {
     cwd: () => cwd,
     loadIssues,
-    pushRepo: async () => "me/app",
+    pushRepo: () => "me/app",
     now: () => t,
     ...over,
   };
@@ -136,9 +137,9 @@ describe("useIssueSuggest", () => {
 
   it("qualifies issues from another repository", async () => {
     const { s } = setup({ loadIssues: vi.fn(async () => [issue(4, "Up", undefined, "up/app")]) });
-    s.update("#", 1);
+    s.update("#4", 2);
     await flush();
-    expect(s.keydown(key("Enter"), "#")).toEqual({ text: "up/app#4 ", caret: 9 });
+    expect(s.keydown(key("Enter"), "#4")).toEqual({ text: "up/app#4 ", caret: 9 });
   });
 
   it("closes when the caret leaves the token", async () => {
@@ -173,10 +174,10 @@ describe("useIssueSuggest", () => {
     await flush();
     s.close();
     advance(ISSUE_CACHE_TTL_MS + 1);
-    s.update("#", 1);
+    s.update("#5", 2);
     expect(loadIssues).toHaveBeenCalledTimes(2);
-    expect(s.rows.value.map((i) => i.number)).toEqual([57, 42]);
-    expect(s.keydown(key("Enter"), "#")).toEqual({ text: "#57 ", caret: 4 });
+    expect(s.rows.value.map((i) => i.number)).toEqual([57]);
+    expect(s.keydown(key("Enter"), "#5")).toEqual({ text: "#57 ", caret: 4 });
   });
 
   it("retries at once after an error", async () => {
@@ -207,7 +208,7 @@ describe("useIssueSuggest", () => {
   it("an invalidated repository is fetched again at the next #", async () => {
     const cache = createIssueCache();
     const loadIssues = vi.fn(async () => ISSUES);
-    const s = useIssueSuggest({ cwd: () => "/r", loadIssues, pushRepo: async () => null, cache });
+    const s = useIssueSuggest({ cwd: () => "/r", loadIssues, pushRepo: () => null, cache });
     s.update("#", 1);
     await flush();
     s.close();
@@ -219,7 +220,7 @@ describe("useIssueSuggest", () => {
   it("keeps at most a few repositories, dropping the least recently used", async () => {
     const cache = createIssueCache();
     let cwd = "/r0";
-    const s = useIssueSuggest({ cwd: () => cwd, loadIssues: async () => ISSUES, pushRepo: async () => null, cache });
+    const s = useIssueSuggest({ cwd: () => cwd, loadIssues: async () => ISSUES, pushRepo: () => null, cache });
     for (let i = 0; i <= ISSUE_CACHE_MAX_REPOS; i++) {
       cwd = `/r${i}`;
       s.update("#", 1);
@@ -230,10 +231,57 @@ describe("useIssueSuggest", () => {
     expect(cache.map.has("/r0")).toBe(false);
   });
 
+  it("Enter and Tab on a bare # are not taken: no issue was chosen", async () => {
+    const { s } = setup();
+    s.update("#", 1);
+    await flush();
+    expect(s.keydown(key("Tab"), "#")).toBeNull();
+    expect(s.keydown(key("Enter"), "#")).toBeNull();
+    expect(s.keydown(key("ArrowDown"), "#")).toBe("handled");
+    expect(s.keydown(key("Enter"), "#")).toEqual({ text: "#42 ", caret: 4 });
+  });
+
+  it("drops an answer that started before an invalidation", async () => {
+    const cache = createIssueCache();
+    let resolve!: (v: I[]) => void;
+    const loadIssues = vi.fn(() => new Promise<I[]>((r) => { resolve = r; }));
+    const s = useIssueSuggest({ cwd: () => "/r", loadIssues, pushRepo: () => null, cache });
+    s.update("#", 1);
+    invalidateIssues(cache, "/r");
+    resolve(ISSUES);
+    await flush();
+    expect(cache.map.get("/r")?.status).not.toBe("ready");
+    s.close();
+    s.update("#", 1);
+    expect(loadIssues).toHaveBeenCalledTimes(2);
+  });
+
+  it("a fetch that never settles is retried after 60 s", async () => {
+    const loadIssues = vi.fn(() => new Promise<I[]>(() => {}));
+    const { s, advance } = setup({ loadIssues });
+    s.update("#", 1);
+    s.close();
+    advance(ISSUE_CACHE_TTL_MS + 1);
+    s.update("#", 1);
+    expect(loadIssues).toHaveBeenCalledTimes(2);
+  });
+
+  it("reading a repository keeps it from being evicted first", async () => {
+    const cache = createIssueCache();
+    let cwd = "/r0";
+    const s = useIssueSuggest({ cwd: () => cwd, loadIssues: async () => ISSUES, pushRepo: () => null, cache });
+    const visit = async (c: string) => { cwd = c; s.update("#", 1); await flush(); s.close(); };
+    for (let i = 0; i < ISSUE_CACHE_MAX_REPOS; i++) await visit(`/r${i}`);
+    await visit("/r0");
+    await visit("/new");
+    expect(cache.map.has("/r0")).toBe(true);
+    expect(cache.map.has("/r1")).toBe(false);
+  });
+
   it("two fields sharing a cache fetch once", async () => {
     const cache = createIssueCache();
     const loadIssues = vi.fn(async () => ISSUES);
-    const deps = { cwd: () => "/r", loadIssues, pushRepo: async () => "me/app", cache };
+    const deps = { cwd: () => "/r", loadIssues, pushRepo: () => "me/app", cache };
     const a = useIssueSuggest(deps);
     const b = useIssueSuggest(deps);
     a.update("#", 1);

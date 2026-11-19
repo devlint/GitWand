@@ -69,6 +69,10 @@ describe("issueRef", () => {
     expect(issueRef(4, "up/app", null)).toBe("#4");
     expect(issueRef(4, "up/app", "me/app")).toBe("up/app#4");
   });
+  it("a forge served under a path prefix is still the same repository", () => {
+    expect(issueRef(5, "gitlab/grp/proj", "grp/proj")).toBe("#5");
+    expect(issueRef(5, "gitlab/grp/proj", "rp/proj")).toBe("gitlab/grp/proj#5");
+  });
   it("ignores a trailing slash or .git on the push repository", () => {
     expect(issueRef(4, "o/r", "o/r/")).toBe("#4");
     expect(issueRef(4, "o/r", "o/r.git")).toBe("#4");
@@ -94,6 +98,9 @@ describe("appendRef", () => {
   it("never breaks a closing fence or a list item", () => {
     expect(appendRef("```\nx\n```", "#4")).toBe("```\nx\n```\n\n#4");
     expect(appendRef("- a\n- b", "#4")).toBe("- a\n- b\n\n#4");
+  });
+  it("a last paragraph that only looks like a trailer is prose", () => {
+    expect(appendRef("body\n\nNote: this also fixes the tooltip.", "#4")).toBe("body\n\nNote: this also fixes the tooltip.\n\n#4");
   });
   it("goes before a trailer block, which must stay last", () => {
     expect(appendRef("body\n\nSigned-off-by: A <a@x.com>", "#4")).toBe("body\n\n#4\n\nSigned-off-by: A <a@x.com>");

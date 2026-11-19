@@ -55,7 +55,11 @@ export function remoteSlug(info: { owner: string; repo: string } | null | undefi
 /** `#N`, qualified as `issueRepo#N` when that is not the repository pushed to. */
 export function issueRef(number: number, issueRepo: string | null, pushRepo: string | null): string {
   const norm = (r: string) => r.toLowerCase().replace(/\/+$/, "").replace(/\.git$/, "");
-  if (!issueRepo || !pushRepo || norm(issueRepo) === norm(pushRepo)) return `#${number}`;
+  if (!issueRepo || !pushRepo) return `#${number}`;
+  const [issue, push] = [norm(issueRepo), norm(pushRepo)];
+  // A forge served under a path (`host/gitlab/grp/proj`) puts that path in
+  // the issue URL but not in the remote's owner/repo.
+  if (issue === push || issue.endsWith(`/${push}`)) return `#${number}`;
   return `${issueRepo}#${number}`;
 }
 
@@ -82,6 +86,8 @@ export function hasRef(text: string, ref: string): boolean {
 
 /** A trailer line (`Signed-off-by: A <a@x>`): git only reads them in the last paragraph. */
 const TRAILER = /^[A-Za-z][\w-]*: \S/;
+/** A paragraph is a trailer block only with one of these (`Note: …` alone is prose). */
+const KNOWN_TRAILER = /^(Signed-off-by|Co-authored-by|Reviewed-by|Acked-by|Tested-by|Reported-by|Suggested-by|Helped-by|Cc|Change-Id):/i;
 
 /**
  * The description citing `ref`, unchanged when the message already does. The
@@ -94,7 +100,8 @@ export function appendRef(description: string, ref: string, summary = ""): strin
   if (!trimmed) return ref;
   const paragraphs = trimmed.split(/\n{2,}/);
   const last = paragraphs[paragraphs.length - 1];
-  if (last.split("\n").every((line) => TRAILER.test(line))) {
+  const lines = last.split("\n");
+  if (lines.every((line) => TRAILER.test(line)) && lines.some((line) => KNOWN_TRAILER.test(line))) {
     return [...paragraphs.slice(0, -1), ref, last].join("\n\n");
   }
   return `${trimmed}\n\n${ref}`;

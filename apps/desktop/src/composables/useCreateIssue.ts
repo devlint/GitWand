@@ -270,8 +270,9 @@ export function useCreateIssue(deps: {
   /**
    * `toGitwand`: a public resolver report (never added to the user's commit).
    * `repo`: where the issue was filed, for an issue whose URL says nothing.
+   * `cwd`: the folder the form was opened for (the active tab may have changed).
    */
-  onCreated: (issue: CreatedIssue, ctx: { toGitwand: boolean; repo: string }) => void;
+  onCreated: (issue: CreatedIssue, ctx: { toGitwand: boolean; repo: string; cwd: string }) => void;
   /** Whether `origin` has the commit (tests replace the git check). */
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
   report?: ReportDeps;
@@ -752,7 +753,7 @@ export function useCreateIssue(deps: {
             milestone: milestone.value,
           });
       if (gen !== generation) return;
-      deps.onCreated(created, { toGitwand: sentToGitwand, repo: sentTo });
+      deps.onCreated(created, { toGitwand: sentToGitwand, repo: sentTo, cwd: cwd ?? "" });
       close();
     } catch (e) {
       if (gen !== generation) return;
