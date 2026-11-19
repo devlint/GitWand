@@ -281,14 +281,14 @@ describe("budget", () => {
 });
 
 describe("withAnswer", () => {
-  it("puts the answer on top, and nothing when it is blank", () => {
-    expect(withAnswer("keep both", "BODY")).toBe("### What it should have been\n\nkeep both\n\nBODY");
+  it("puts the answer on top, set apart from the report, and nothing when it is blank", () => {
+    expect(withAnswer("keep both", "BODY")).toBe("### What it should have been\n\nkeep both\n\n---\n\nBODY");
     expect(withAnswer("  ", "BODY")).toBe("BODY");
   });
 
   it("makes the answer inert for a public report: no @mention, no #N link", () => {
     expect(withAnswer("keep @alice's change from #12", "BODY", true)).toBe(
-      "### What it should have been\n\n```text\nkeep @alice's change from #12\n```\n\nBODY",
+      "### What it should have been\n\n```text\nkeep @alice's change from #12\n```\n\n---\n\nBODY",
     );
   });
 

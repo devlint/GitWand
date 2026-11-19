@@ -46,7 +46,7 @@ export const ANSWER_MAX = 10_000;
 export function withAnswer(answer: string, body: string, inert = false): string {
   const a = answer.trim();
   if (!a) return body;
-  return `### What it should have been\n\n${inert ? codeBlock(a) : a}\n\n${body}`;
+  return `### What it should have been\n\n${inert ? codeBlock(a) : a}\n\n---\n\n${body}`;
 }
 
 /** Files without an extension whose name says their kind (and nothing private). */

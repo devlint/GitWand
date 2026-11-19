@@ -457,6 +457,10 @@ function onMilestone(e: Event) {
   border-radius: var(--radius-md);
   overflow-wrap: anywhere;
 }
+/* A long code line scrolls inside its block instead of widening the modal. */
+.ci-preview :deep(pre) {
+  overflow-x: auto;
+}
 .ci-preview :deep(ul),
 .ci-preview :deep(ol) {
   margin: 6px 0;
