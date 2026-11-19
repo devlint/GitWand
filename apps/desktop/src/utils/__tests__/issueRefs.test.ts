@@ -29,7 +29,9 @@ describe("hashTokenAt", () => {
   it("closes on punctuation after the query", () => {
     expect(hashTokenAt("(#12)", 5)).toBeNull();
     expect(hashTokenAt("#12,", 4)).toBeNull();
-    expect(hashTokenAt("#log-in.v2/x_y", 14)).toEqual({ start: 0, query: "log-in.v2/x_y" });
+    expect(hashTokenAt("see #12.", 8)).toBeNull();
+    expect(hashTokenAt("#a/b", 4)).toBeNull();
+    expect(hashTokenAt("#log-in_v2", 10)).toEqual({ start: 0, query: "log-in_v2" });
   });
   it("closes on a space after the query, or when the caret is before the #", () => {
     expect(hashTokenAt("#12 x", 5)).toBeNull();
@@ -38,7 +40,11 @@ describe("hashTokenAt", () => {
 });
 
 describe("filterIssues", () => {
-  it("digits match the number by prefix", () => expect(filterIssues(issues, "4").map((i) => i.number)).toEqual([42, 4]));
+  it("digits match the number by prefix", () => expect(filterIssues(issues, "4").map((i) => i.number)).toEqual([4, 42]));
+  it("an exact number comes first, before more recently updated longer ones", () => {
+    const list = [issue(120, "a", "2026-11-12T00:00:00Z"), issue(12, "b", "2026-11-01T00:00:00Z"), issue(121, "c", "2026-11-11T00:00:00Z")];
+    expect(filterIssues(list, "12").map((i) => i.number)).toEqual([12, 120, 121]);
+  });
   it("text matches the title, case-insensitively, most recently updated first", () =>
     expect(filterIssues(issues, "LOG").map((i) => i.number)).toEqual([57, 42]));
   it("an empty query lists the most recently updated first", () =>
@@ -66,7 +72,7 @@ describe("issueRef", () => {
   it("bare when same repository or unknown, qualified otherwise", () => {
     expect(issueRef(4, "Me/App", "me/app")).toBe("#4");
     expect(issueRef(4, null, "me/app")).toBe("#4");
-    expect(issueRef(4, "up/app", null)).toBe("#4");
+    expect(issueRef(4, "up/app", null)).toBe("up/app#4");
     expect(issueRef(4, "up/app", "me/app")).toBe("up/app#4");
   });
   it("a forge served under a path prefix is still the same repository", () => {
@@ -101,6 +107,10 @@ describe("appendRef", () => {
   });
   it("a last paragraph that only looks like a trailer is prose", () => {
     expect(appendRef("body\n\nNote: this also fixes the tooltip.", "#4")).toBe("body\n\nNote: this also fixes the tooltip.\n\n#4");
+  });
+  it("goes before GitWand's commit signature, which stays last", () => {
+    expect(appendRef("\u{1FA84} Commit via GitWand", "#4")).toBe("#4\n\n\u{1FA84} Commit via GitWand");
+    expect(appendRef("body\n\n\u{1FA84} Commit via GitWand", "#4")).toBe("body\n\n#4\n\n\u{1FA84} Commit via GitWand");
   });
   it("goes before a trailer block, which must stay last", () => {
     expect(appendRef("body\n\nSigned-off-by: A <a@x.com>", "#4")).toBe("body\n\n#4\n\nSigned-off-by: A <a@x.com>");

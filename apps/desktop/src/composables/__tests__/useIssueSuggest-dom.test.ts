@@ -37,7 +37,7 @@ const press = (el: HTMLElement, key: string, init: KeyboardEventInit = {}) => {
 
 describe("handleIssueKeydown", () => {
   it("Enter writes #N and puts the caret after it", async () => {
-    const { el, written } = await field("input", "Fix #4");
+    const { el, written } = await field("input", "Fix #42");
     const e = press(el, "Enter");
     expect(e.defaultPrevented).toBe(true);
     expect(written).toEqual(["Fix #42 "]);
@@ -46,7 +46,7 @@ describe("handleIssueKeydown", () => {
   });
 
   it("Shift+Enter in a textarea writes Fixes #N", async () => {
-    const { el, written } = await field("textarea", "line\n#4");
+    const { el, written } = await field("textarea", "line\n#42");
     press(el, "Enter", { shiftKey: true });
     expect(written).toEqual(["line\nFixes #42 "]);
   });

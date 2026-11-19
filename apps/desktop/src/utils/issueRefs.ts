@@ -23,21 +23,24 @@ export function hashTokenAt(text: string, caret: number): { start: number; query
   const start = before.lastIndexOf("#");
   if (start < 0) return null;
   const query = before.slice(start + 1);
-  // Letters, digits and `_-./` only: a space or punctuation (`#12)`, `#12,`) ends it.
-  if (!/^[\p{L}\p{N}_\-./]*$/u.test(query)) return null;
+  // Letters, digits, `_` and `-` only: a space or punctuation (`#12)`, `#12,`, `#12.`) ends it.
+  if (!/^[\p{L}\p{N}_-]*$/u.test(query)) return null;
   if (start > 0 && !OPENS_AFTER.test(text[start - 1])) return null;
   return { start, query };
 }
 
-/** Digits match the number by prefix; anything else the title. Most recently updated first. */
+/**
+ * Digits match the number by prefix, the exact number first; anything else
+ * the title. Then most recently updated first.
+ */
 export function filterIssues(issues: Issue[], query: string, max = MAX_ISSUE_ROWS): Issue[] {
   const q = query.trim().toLowerCase();
-  const match = /^\d+$/.test(q)
-    ? (i: Issue) => String(i.number).startsWith(q)
-    : (i: Issue) => i.title.toLowerCase().includes(q);
+  const digits = /^\d+$/.test(q);
+  const match = digits ? (i: Issue) => String(i.number).startsWith(q) : (i: Issue) => i.title.toLowerCase().includes(q);
+  const exact = (i: Issue) => (digits && String(i.number) === q ? 0 : 1);
   return issues
     .filter(match)
-    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : b.number - a.number))
+    .sort((a, b) => exact(a) - exact(b) || (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : b.number - a.number))
     .slice(0, max);
 }
 
@@ -55,7 +58,9 @@ export function remoteSlug(info: { owner: string; repo: string } | null | undefi
 /** `#N`, qualified as `issueRepo#N` when that is not the repository pushed to. */
 export function issueRef(number: number, issueRepo: string | null, pushRepo: string | null): string {
   const norm = (r: string) => r.toLowerCase().replace(/\/+$/, "").replace(/\.git$/, "");
-  if (!issueRepo || !pushRepo) return `#${number}`;
+  if (!issueRepo) return `#${number}`;
+  // Pushed repository unknown: `owner/repo#N` is right wherever the commit lands.
+  if (!pushRepo) return `${issueRepo}#${number}`;
   const [issue, push] = [norm(issueRepo), norm(pushRepo)];
   // A forge served under a path (`host/gitlab/grp/proj`) puts that path in
   // the issue URL but not in the remote's owner/repo.
@@ -86,6 +91,8 @@ export function hasRef(text: string, ref: string): boolean {
 
 /** A trailer line (`Signed-off-by: A <a@x>`): git only reads them in the last paragraph. */
 const TRAILER = /^[A-Za-z][\w-]*: \S/;
+/** GitWand's commit signature (`useGitRepo`, App): a closing paragraph, kept last. */
+export const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
 /** A paragraph is a trailer block only with one of these (`Note: …` alone is prose). */
 const KNOWN_TRAILER = /^(Signed-off-by|Co-authored-by|Reviewed-by|Acked-by|Tested-by|Reported-by|Suggested-by|Helped-by|Cc|Change-Id):/i;
 
@@ -101,7 +108,8 @@ export function appendRef(description: string, ref: string, summary = ""): strin
   const paragraphs = trimmed.split(/\n{2,}/);
   const last = paragraphs[paragraphs.length - 1];
   const lines = last.split("\n");
-  if (lines.every((line) => TRAILER.test(line)) && lines.some((line) => KNOWN_TRAILER.test(line))) {
+  const closing = last === COMMIT_SIGNATURE || (lines.every((line) => TRAILER.test(line)) && lines.some((line) => KNOWN_TRAILER.test(line)));
+  if (closing) {
     return [...paragraphs.slice(0, -1), ref, last].join("\n\n");
   }
   return `${trimmed}\n\n${ref}`;

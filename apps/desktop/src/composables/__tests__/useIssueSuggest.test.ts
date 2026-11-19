@@ -79,14 +79,14 @@ describe("useIssueSuggest", () => {
 
   it("Enter inserts #N, Shift+Enter Fixes #N, Tab like Enter", async () => {
     const { s } = setup();
-    s.update("fix #lo", 7);
+    s.update("fix #57", 7);
     await flush();
-    expect(s.keydown(key("Enter"), "fix #lo")).toEqual({ text: "fix #57 ", caret: 8 });
+    expect(s.keydown(key("Enter"), "fix #57")).toEqual({ text: "fix #57 ", caret: 8 });
     expect(s.open.value).toBe(false);
-    s.update("#lo", 3);
-    expect(s.keydown(key("Enter", { shiftKey: true }), "#lo")).toEqual({ text: "Fixes #57 ", caret: 10 });
-    s.update("#lo", 3);
-    expect(s.keydown(key("Tab"), "#lo")).toEqual({ text: "#57 ", caret: 4 });
+    s.update("#57", 3);
+    expect(s.keydown(key("Enter", { shiftKey: true }), "#57")).toEqual({ text: "Fixes #57 ", caret: 10 });
+    s.update("#57", 3);
+    expect(s.keydown(key("Tab"), "#57")).toEqual({ text: "#57 ", caret: 4 });
   });
 
   it("arrows move the active row and wrap", async () => {
@@ -174,10 +174,10 @@ describe("useIssueSuggest", () => {
     await flush();
     s.close();
     advance(ISSUE_CACHE_TTL_MS + 1);
-    s.update("#5", 2);
+    s.update("#57", 3);
     expect(loadIssues).toHaveBeenCalledTimes(2);
     expect(s.rows.value.map((i) => i.number)).toEqual([57]);
-    expect(s.keydown(key("Enter"), "#5")).toEqual({ text: "#57 ", caret: 4 });
+    expect(s.keydown(key("Enter"), "#57")).toEqual({ text: "#57 ", caret: 4 });
   });
 
   it("retries at once after an error", async () => {
@@ -229,6 +229,36 @@ describe("useIssueSuggest", () => {
     }
     expect(cache.map.size).toBe(ISSUE_CACHE_MAX_REPOS);
     expect(cache.map.has("/r0")).toBe(false);
+  });
+
+  it("a title match takes Enter only after an arrow chose it", async () => {
+    const { s } = setup();
+    s.update("Tested on #lo", 13);
+    await flush();
+    expect(s.rows.value.length).toBeGreaterThan(0);
+    expect(s.keydown(key("Enter"), "Tested on #lo")).toBeNull();
+    expect(s.armed.value).toBe(false);
+    expect(s.keydown(key("ArrowDown"), "Tested on #lo")).toBe("handled");
+    expect(s.armed.value).toBe(true);
+    expect(s.keydown(key("Enter"), "Tested on #lo")).not.toBeNull();
+  });
+
+  it("a typed number takes Enter only when that exact issue is listed", async () => {
+    const { s } = setup();
+    s.update("#4", 2);
+    await flush();
+    expect(s.rows.value.map((i) => i.number)).toEqual([42]);
+    expect(s.keydown(key("Enter"), "#4")).toBeNull();
+    s.update("#42", 3);
+    expect(s.armed.value).toBe(true);
+    expect(s.keydown(key("Enter"), "#42")).toEqual({ text: "#42 ", caret: 4 });
+  });
+
+  it("Shift+Tab never picks", async () => {
+    const { s } = setup();
+    s.update("#42", 3);
+    await flush();
+    expect(s.keydown(key("Tab", { shiftKey: true }), "#42")).toBeNull();
   });
 
   it("Enter and Tab on a bare # are not taken: no issue was chosen", async () => {

@@ -476,7 +476,7 @@ watch(() => props.commitSummary, (v) => summaryIssues.sync(v ?? ""));
 watch(() => props.commitDescription, (v) => descriptionIssues.sync(v ?? ""));
 /** aria-activedescendant for a field whose list is open. */
 function activeIssueId(s: IssueSuggest, listId: string): string | undefined {
-  return s.open.value && s.rows.value.length ? `${listId}-${s.active.value}` : undefined;
+  return s.open.value && s.armed.value ? `${listId}-${s.active.value}` : undefined;
 }
 
 
@@ -1610,7 +1610,7 @@ function formatActivityDate(dateStr: string): string {
           v-if="summaryIssues.open.value"
           :status="summaryIssues.status.value"
           :rows="summaryIssues.rows.value"
-          :active="summaryIssues.active.value"
+          :active="summaryIssues.armed.value ? summaryIssues.active.value : -1"
           list-id="commit-summary-issues"
           :query="summaryIssues.query.value"
           @pick="(i, fixes) => pickIssueRow(summaryIssues, i, fixes, summaryEl, writeSummary)"
@@ -1690,7 +1690,7 @@ function formatActivityDate(dateStr: string): string {
           v-if="descriptionIssues.open.value"
           :status="descriptionIssues.status.value"
           :rows="descriptionIssues.rows.value"
-          :active="descriptionIssues.active.value"
+          :active="descriptionIssues.armed.value ? descriptionIssues.active.value : -1"
           list-id="commit-description-issues"
           :query="descriptionIssues.query.value"
           @pick="(i, fixes) => pickIssueRow(descriptionIssues, i, fixes, descriptionEl, writeDescription)"
