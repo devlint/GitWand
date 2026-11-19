@@ -28,8 +28,8 @@ import {
 import type { CommitTemplate } from "../composables/useSettings";
 import { gitBranchMerged } from "../utils/backend";
 import IssueSuggestList from "./IssueSuggestList.vue";
-import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, pickIssueRow, type IssueSuggest } from "../composables/useIssueSuggest";
-import { forgeFromRemoteInfo } from "../composables/forge/useForge";
+import { useIssueSuggest, handleIssueKeydown, refreshIssueSuggest, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
+import { issueListerFor } from "../composables/issueLister";
 import { loadSettings } from "../composables/useSettings";
 
 const props = defineProps<{
@@ -453,16 +453,13 @@ watch(() => props.cwd, loadRemoteInfo);
 const issueDeps = {
   cwd: () => props.cwd || null,
   /** null (no list) until the remote is known, or when its forge cannot list issues. */
-  loadIssues: (cwd: string) => {
-    const info = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
-    if (!info) return null;
-    const forge = forgeFromRemoteInfo(info);
-    return forge.listIssues ? forge.listIssues(cwd, { limit: 100 }) : null;
-  },
+  loadIssues: (cwd: string) => issueListerFor(remoteInfoCwd.value === cwd ? remoteInfo.value : null, cwd),
   pushRepo: async (cwd: string) => {
     const info = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
     return info?.owner && info.repo ? `${info.owner}/${info.repo}` : null;
   },
+  // Both fields, and every mount of this panel, share one fetch per repository.
+  cache: sharedIssueCache,
 };
 const summaryIssues = useIssueSuggest(issueDeps);
 const descriptionIssues = useIssueSuggest(issueDeps);
@@ -476,6 +473,13 @@ function onIssueCaretKeyup(s: IssueSuggest, e: KeyboardEvent) {
   if (CARET_KEYS.has(e.key)) refreshIssueSuggest(s, e.target as HTMLInputElement | HTMLTextAreaElement);
 }
 watch(() => props.cwd, () => { summaryIssues.close(); descriptionIssues.close(); });
+// A value set by code (cleared after a commit, an AI message…) closes the list.
+watch(() => props.commitSummary, (v) => summaryIssues.sync(v ?? ""));
+watch(() => props.commitDescription, (v) => descriptionIssues.sync(v ?? ""));
+/** aria-activedescendant for a field whose list is open. */
+function activeIssueId(s: IssueSuggest, listId: string): string | undefined {
+  return s.open.value && s.rows.value.length ? `${listId}-${s.active.value}` : undefined;
+}
 
 
 /**
@@ -818,6 +822,8 @@ function onSummaryInput(e: Event) {
   onSummaryInputForTemplate(e);
   emit("update:commitSummary", (e.target as HTMLInputElement).value);
   refreshIssueSuggest(summaryIssues, e.target as HTMLInputElement);
+  // Never two lists over the summary at once.
+  if (summaryIssues.open.value) templateSlashOpen.value = false;
 }
 
 // ─── Conventional Commits prefix picker ──────────────────
@@ -1607,10 +1613,15 @@ function formatActivityDate(dateStr: string): string {
           :status="summaryIssues.status.value"
           :rows="summaryIssues.rows.value"
           :active="summaryIssues.active.value"
+          list-id="commit-summary-issues"
           @pick="(i, fixes) => pickIssueRow(summaryIssues, i, fixes, summaryEl, writeSummary)"
         />
         <input
           ref="summaryEl"
+          aria-autocomplete="list"
+          :aria-expanded="summaryIssues.open.value"
+          aria-controls="commit-summary-issues"
+          :aria-activedescendant="activeIssueId(summaryIssues, 'commit-summary-issues')"
           class="commit-summary mono"
           :class="{ 'commit-summary--ai': ai.isAvailable.value }"
           type="text"
@@ -1681,10 +1692,15 @@ function formatActivityDate(dateStr: string): string {
           :status="descriptionIssues.status.value"
           :rows="descriptionIssues.rows.value"
           :active="descriptionIssues.active.value"
+          list-id="commit-description-issues"
           @pick="(i, fixes) => pickIssueRow(descriptionIssues, i, fixes, descriptionEl, writeDescription)"
         />
         <textarea
           ref="descriptionEl"
+          aria-autocomplete="list"
+          :aria-expanded="descriptionIssues.open.value"
+          aria-controls="commit-description-issues"
+          :aria-activedescendant="activeIssueId(descriptionIssues, 'commit-description-issues')"
           class="commit-description mono"
           :value="commitDescription"
           @input="onDescriptionInput"

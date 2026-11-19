@@ -18,11 +18,13 @@ export interface IssueSuggestDeps {
   /** `owner/repo` of the repository the commit is pushed to, or null. */
   pushRepo: (cwd: string) => Promise<string | null>;
   now?: () => number;
+  /** Shared between fields so a repository is fetched once (default: this instance's own). */
+  cache?: IssueCache;
 }
 
 export type SuggestStatus = "idle" | "loading" | "ready" | "error";
 
-interface Entry {
+export interface Entry {
   at: number;
   status: "loading" | "ready" | "error";
   issues: Issue[];
@@ -30,6 +32,19 @@ interface Entry {
 }
 
 export type Picked = { text: string; caret: number };
+
+/** Issues per repository, with a counter the computeds read to see changes. */
+export interface IssueCache {
+  map: Map<string, Entry>;
+  version: Ref<number>;
+}
+
+export function createIssueCache(): IssueCache {
+  return { map: new Map(), version: ref(0) };
+}
+
+/** The cache the commit fields share for the app's lifetime (#301). */
+export const sharedIssueCache = createIssueCache();
 
 export function useIssueSuggest(deps: IssueSuggestDeps): {
   open: Ref<boolean>;
@@ -40,16 +55,17 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   keydown(e: KeyboardEvent, text: string): Picked | "handled" | null;
   pick(index: number, fixes: boolean, text: string): Picked | null;
   close(): void;
+  sync(text: string): void;
 } {
   const now = deps.now ?? (() => Date.now());
-  const cache = new Map<string, Entry>();
-  /** Bumped whenever the cache changes, so the computeds re-read it. */
-  const version = ref(0);
+  const { map: cache, version } = deps.cache ?? createIssueCache();
   const open = ref(false);
   const query = ref("");
   const active = ref(0);
   let start = 0;
   let caret = 0;
+  /** The text `update` last read; a different one (set by code) closes the list. */
+  let lastText = "";
 
   const entry = (): Entry | undefined => {
     void version.value;
@@ -60,13 +76,15 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   const status = computed<SuggestStatus>(() => (open.value ? entry()?.status ?? "loading" : "idle"));
   const rows = computed<Issue[]>(() => {
     const e = entry();
-    return open.value && e?.status === "ready" ? filterIssues(e.issues, query.value) : [];
+    // While a refresh is loading, the issues it replaces are still offered.
+    return open.value && e && e.status !== "error" ? filterIssues(e.issues, query.value) : [];
   });
 
   /** Fetch the issues for `cwd` unless fresh ones are cached. false: this forge has no list. */
   function ensureLoaded(cwd: string): boolean {
     const cached = cache.get(cwd);
-    if (cached && (cached.status === "loading" || now() - cached.at <= ISSUE_CACHE_TTL_MS)) return true;
+    const fresh = cached && cached.status !== "error" && now() - cached.at <= ISSUE_CACHE_TTL_MS;
+    if (cached && (cached.status === "loading" || fresh)) return true;
     const pending = deps.loadIssues(cwd);
     if (!pending) return false;
     const e: Entry = { at: now(), status: "loading", issues: cached?.issues ?? [], pushRepo: cached?.pushRepo ?? null };
@@ -99,6 +117,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     if (!open.value || token.query !== query.value) active.value = 0;
     start = token.start;
     caret = at;
+    lastText = text;
     query.value = token.query;
     open.value = true;
   }
@@ -113,7 +132,8 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   }
 
   function keydown(e: KeyboardEvent, text: string): Picked | "handled" | null {
-    if (!open.value || e.isComposing) return null;
+    // keyCode 229: WebKit ends a composition before the Enter that confirms it.
+    if (!open.value || e.isComposing || e.keyCode === 229) return null;
     // Cmd/Ctrl+Enter commits; a modified key is never the list's.
     if (e.metaKey || e.ctrlKey || e.altKey) return null;
     if (e.key === "Escape") {
@@ -130,7 +150,12 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     return null;
   }
 
-  return { open, status, rows, active, update, keydown, pick, close };
+  /** The field's value as rendered: a change no `update` saw closes the list. */
+  function sync(text: string) {
+    if (open.value && text !== lastText) close();
+  }
+
+  return { open, status, rows, active, update, keydown, pick, close, sync };
 }
 
 export type IssueSuggest = ReturnType<typeof useIssueSuggest>;

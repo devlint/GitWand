@@ -7,16 +7,17 @@ import type { Issue } from "../utils/backend";
 import type { SuggestStatus } from "../composables/useIssueSuggest";
 import { useI18n } from "../composables/useI18n";
 
-defineProps<{ status: SuggestStatus; rows: Issue[]; active: number }>();
+const props = defineProps<{ status: SuggestStatus; rows: Issue[]; active: number; listId?: string }>();
 const emit = defineEmits<{ pick: [index: number, fixes: boolean] }>();
 const { t } = useI18n();
 </script>
 
 <template>
-  <div class="isl" role="listbox" @mousedown.prevent>
+  <div :id="props.listId" class="isl" role="listbox" @mousedown.prevent>
     <div
       v-for="(issue, i) in rows"
       :key="issue.number + issue.url"
+      :id="props.listId ? `${props.listId}-${i}` : undefined"
       class="isl-row"
       :class="{ 'isl-row--active': i === active }"
       role="option"

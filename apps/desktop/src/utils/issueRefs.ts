@@ -48,7 +48,8 @@ export function repoSlugFromUrl(url: string): string | null {
 
 /** `#N`, qualified as `issueRepo#N` when that is not the repository pushed to. */
 export function issueRef(number: number, issueRepo: string | null, pushRepo: string | null): string {
-  if (!issueRepo || !pushRepo || issueRepo.toLowerCase() === pushRepo.toLowerCase()) return `#${number}`;
+  const norm = (r: string) => r.toLowerCase().replace(/\/+$/, "").replace(/\.git$/, "");
+  if (!issueRepo || !pushRepo || norm(issueRepo) === norm(pushRepo)) return `#${number}`;
   return `${issueRepo}#${number}`;
 }
 

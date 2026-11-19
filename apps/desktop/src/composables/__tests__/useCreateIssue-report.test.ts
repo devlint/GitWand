@@ -46,10 +46,11 @@ const REPORT: ResolutionReport = {
 
 function setup(p: ForgeProvider = provider(), writable = true) {
   const createGitwandIssue = vi.fn(async (): Promise<CreatedIssue> => ({ number: 9, url: "g" }));
+  const onCreated = vi.fn();
   const api = useCreateIssue({
     cwd: ref("/repo"),
     provider: ref(p),
-    onCreated: vi.fn(),
+    onCreated,
     report: {
       createGitwandIssue,
       gitwandWritable: async () => writable,
@@ -58,7 +59,7 @@ function setup(p: ForgeProvider = provider(), writable = true) {
       scanDebounceMs: 0,
     },
   });
-  return { api, p, createGitwandIssue };
+  return { api, p, createGitwandIssue, onCreated };
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -282,6 +283,17 @@ describe("useCreateIssue — report mode", () => {
     expect(createGitwandIssue).toHaveBeenCalledWith({ title, body: expect.stringContaining("### What it should have been\n\n```text\nx\n```") });
     expect(p.createIssue).not.toHaveBeenCalled();
     expect(api.isOpen.value).toBe(false);
+  });
+
+  it("tells onCreated whether the issue went to GitWand", async () => {
+    const { api, onCreated } = setup();
+    await api.openFromResolution(REPORT);
+    await settle();
+    api.setGitwand(true);
+    api.confirmedPublic.value = true;
+    await settle();
+    await api.submit();
+    expect(onCreated).toHaveBeenCalledWith({ number: 9, url: "g" }, { toGitwand: true });
   });
 
   it("holds Create after a GitWand report that may have been created", async () => {

@@ -17,7 +17,7 @@ const ISSUE = (n: number, title: string): Issue => ({
 let app: App | null = null;
 afterEach(() => { app?.unmount(); app = null; document.body.innerHTML = ""; });
 
-async function mount(props: { status: SuggestStatus; rows: Issue[]; active: number }, onPick = vi.fn()) {
+async function mount(props: { status: SuggestStatus; rows: Issue[]; active: number; listId?: string }, onPick = vi.fn()) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   app = createApp({ render: () => h(IssueSuggestList, { ...props, onPick }) });
@@ -34,6 +34,12 @@ describe("IssueSuggestList", () => {
     expect(rows[1].classList.contains("isl-row--active")).toBe(true);
     expect(rows[1].getAttribute("aria-selected")).toBe("true");
     expect(document.querySelector(".isl-hint")?.textContent).toContain("sidebar.issueSuggest.hint");
+  });
+
+  it("gives the listbox and each row an id for aria-activedescendant", async () => {
+    await mount({ status: "ready", rows: [ISSUE(42, "a"), ISSUE(57, "b")], active: 0, listId: "sum-issues" });
+    expect(document.querySelector('[role="listbox"]')?.id).toBe("sum-issues");
+    expect([...document.querySelectorAll(".isl-row")].map((r) => r.id)).toEqual(["sum-issues-0", "sum-issues-1"]);
   });
 
   it("says loading, unavailable, or no match", async () => {

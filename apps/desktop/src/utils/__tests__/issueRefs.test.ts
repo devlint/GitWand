@@ -56,6 +56,10 @@ describe("issueRef", () => {
     expect(issueRef(4, "up/app", null)).toBe("#4");
     expect(issueRef(4, "up/app", "me/app")).toBe("up/app#4");
   });
+  it("ignores a trailing slash or .git on the push repository", () => {
+    expect(issueRef(4, "o/r", "o/r/")).toBe("#4");
+    expect(issueRef(4, "o/r", "o/r.git")).toBe("#4");
+  });
 });
 
 describe("insertRef", () => {

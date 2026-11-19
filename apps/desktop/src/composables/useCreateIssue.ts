@@ -267,7 +267,8 @@ function message(e: unknown): string {
 export function useCreateIssue(deps: {
   cwd: Readonly<Ref<string | null>>;
   provider: Readonly<Ref<ForgeProvider | null>>;
-  onCreated: (issue: CreatedIssue) => void;
+  /** `toGitwand`: a public resolver report (never added to the user's commit). */
+  onCreated: (issue: CreatedIssue, ctx: { toGitwand: boolean }) => void;
   /** Whether `origin` has the commit (tests replace the git check). */
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
   report?: ReportDeps;
@@ -734,8 +735,9 @@ export function useCreateIssue(deps: {
     submitting.value = true;
     error.value = null;
     const gen = generation;
+    const sentToGitwand = toGitwand.value;
     try {
-      const created = toGitwand.value
+      const created = sentToGitwand
         ? await createGitwandIssue({ title: title.value, body: finalBody.value })
         : await p!.createIssue!(cwd!, {
             repo: repo.value,
@@ -746,7 +748,7 @@ export function useCreateIssue(deps: {
             milestone: milestone.value,
           });
       if (gen !== generation) return;
-      deps.onCreated(created);
+      deps.onCreated(created, { toGitwand: sentToGitwand });
       close();
     } catch (e) {
       if (gen !== generation) return;

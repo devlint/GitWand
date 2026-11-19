@@ -511,7 +511,14 @@ provide(PR_PANEL_KEY, prPanel);
 const createIssue = useCreateIssue({
   cwd: computed(() => repoFolderPath.value ?? null),
   provider: ref(githubProvider),
-  onCreated: (issue) => {
+  onCreated: (issue, { toGitwand }) => {
+    const open = issue.url ? { label: t("createIssue.open"), url: issue.url } : undefined;
+    // A resolver report on GitWand's public repository is never cited in the
+    // user's commit: GitHub would show that commit, and its repository, on it.
+    if (toGitwand) {
+      showDetailToast(t("createIssue.created", issue.number), null, 8000, open);
+      return;
+    }
     // "Add to commit" (#301) writes into the repository the issue was filed
     // from, and only while it is still the active one.
     const createdIn = repoFolderPath.value ?? "";
@@ -522,7 +529,7 @@ const createIssue = useCreateIssue({
       t("createIssue.created", issue.number),
       null,
       8000,
-      issue.url ? { label: t("createIssue.open"), url: issue.url } : undefined,
+      open,
       {
         label: t("createIssue.addToCommit"),
         run: () => {

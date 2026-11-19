@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import type { Issue } from "../../utils/backend";
-import { useIssueSuggest, ISSUE_CACHE_TTL_MS, type IssueSuggestDeps } from "../useIssueSuggest";
+import { useIssueSuggest, createIssueCache, ISSUE_CACHE_TTL_MS, type IssueSuggestDeps } from "../useIssueSuggest";
 
 function issue(number: number, title: string, updatedAt = "2026-11-10T00:00:00Z", repo = "me/app"): Issue {
   return { number, title, state: "OPEN", author: "a", assignees: [], labels: [], url: `https://github.com/${repo}/issues/${number}`, createdAt: updatedAt, updatedAt, milestone: "" };
@@ -157,6 +157,61 @@ describe("useIssueSuggest", () => {
     expect(s.keydown(key("Enter", { ctrlKey: true }), "#")).toBeNull();
     expect(s.keydown(key("ArrowDown", { altKey: true }), "#")).toBeNull();
     expect(s.open.value).toBe(true);
+  });
+
+  it("ignores the Enter that ends a WebKit composition (keyCode 229)", async () => {
+    const { s } = setup();
+    s.update("#", 1);
+    await flush();
+    expect(s.keydown(key("Enter", { keyCode: 229 } as Partial<KeyboardEvent>), "#")).toBeNull();
+    expect(s.open.value).toBe(true);
+  });
+
+  it("serves the cached rows while refreshing after 60 s", async () => {
+    const { s, loadIssues, advance } = setup();
+    s.update("#", 1);
+    await flush();
+    s.close();
+    advance(ISSUE_CACHE_TTL_MS + 1);
+    s.update("#", 1);
+    expect(loadIssues).toHaveBeenCalledTimes(2);
+    expect(s.rows.value.map((i) => i.number)).toEqual([57, 42]);
+    expect(s.keydown(key("Enter"), "#")).toEqual({ text: "#57 ", caret: 4 });
+  });
+
+  it("retries at once after an error", async () => {
+    const loadIssues = vi.fn().mockRejectedValueOnce(new Error("signed out")).mockResolvedValue(ISSUES);
+    const { s } = setup({ loadIssues });
+    s.update("#", 1);
+    await flush();
+    expect(s.status.value).toBe("error");
+    s.close();
+    s.update("#", 1);
+    await flush();
+    expect(loadIssues).toHaveBeenCalledTimes(2);
+    expect(s.status.value).toBe("ready");
+  });
+
+  it("two fields sharing a cache fetch once", async () => {
+    const cache = createIssueCache();
+    const loadIssues = vi.fn(async () => ISSUES);
+    const deps = { cwd: () => "/r", loadIssues, pushRepo: async () => "me/app", cache };
+    const a = useIssueSuggest(deps);
+    const b = useIssueSuggest(deps);
+    a.update("#", 1);
+    await flush();
+    b.update("#", 1);
+    expect(loadIssues).toHaveBeenCalledTimes(1);
+    expect(b.rows.value).toHaveLength(2);
+  });
+
+  it("sync closes the list when the text changed without an input event", () => {
+    const { s } = setup();
+    s.update("fix #", 5);
+    s.sync("fix #");
+    expect(s.open.value).toBe(true);
+    s.sync("");
+    expect(s.open.value).toBe(false);
   });
 
   it("keys pass through when the list is closed", () => {
