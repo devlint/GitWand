@@ -220,6 +220,14 @@ const en = {
     failed: "Could not untrack the files: {0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "Loading issues…",
+      unavailable: "Issues unavailable",
+      empty: "No matching open issue",
+      emptyNumber: "#{0} is not among the recent open issues; it stays as typed",
+      hint: "↑↓ choose · ↵ or ⇥ #N · ⇧↵ Fixes #N · Esc close",
+      hintType: "Type part of a title to choose an issue · a number stays as typed",
+    },
     tabChanges: "Changes",
     tabBranches: "Branches",
     tabLog: "Log",
@@ -2755,6 +2763,9 @@ const en = {
     paletteLabel: "New GitHub issue",
     created: "Issue #{0} created",
     open: "Open",
+    addToCommit: "Add to commit",
+    addToCommitOtherRepo: "Not added: another repository is open now",
+    addToCommitAlready: "Already referenced in the commit message",
     report: {
       answerLabel: "What should it have been?",
       answerPlaceholder: "The result you expected, or what GitWand got wrong",

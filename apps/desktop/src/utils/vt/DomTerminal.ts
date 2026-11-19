@@ -19,6 +19,7 @@ import {
 import { keyToSequence } from "./keys";
 import nerdSymbolsUrl from "../../assets/fonts/SymbolsNerdFontMono-Regular.woff2?url";
 import { escapeHtml } from "../escapeHtml";
+import { escapeRegExp } from "../escapeRegExp";
 
 export interface DomTerminalOptions {
   fontSize?: number;
@@ -616,7 +617,7 @@ export class DomTerminal {
     const total = this.emu.totalLines;
     let re: RegExp;
     try {
-      const src = opts.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const src = opts.regex ? query : escapeRegExp(query);
       re = new RegExp(src, opts.caseSensitive ? "g" : "gi");
     } catch {
       return false;

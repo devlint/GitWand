@@ -213,6 +213,14 @@ const fr: Locale = {
     failed: "Impossible de retirer les fichiers du suivi : {0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "Chargement des issues…",
+      unavailable: "Issues indisponibles",
+      empty: "Aucune issue ouverte ne correspond",
+      emptyNumber: "#{0} ne fait pas partie des issues ouvertes récentes ; il reste tel quel",
+      hint: "↑↓ choisir · ↵ ou ⇥ #N · ⇧↵ Fixes #N · Échap fermer",
+      hintType: "Tapez une partie du titre pour choisir une issue · un numéro reste tel quel",
+    },
     tabChanges: "Changements",
     tabBranches: "Branches",
     tabLog: "Log",
@@ -2724,6 +2732,9 @@ const fr: Locale = {
     paletteLabel: "Nouvelle issue GitHub",
     created: "Issue #{0} créée",
     open: "Ouvrir",
+    addToCommit: "Ajouter au commit",
+    addToCommitOtherRepo: "Non ajoutée : un autre dépôt est ouvert",
+    addToCommitAlready: "Déjà citée dans le message de commit",
     report: {
       answerLabel: "Qu'aurait-il fallu obtenir ?",
       answerPlaceholder: "Le résultat attendu, ou ce que GitWand a mal fait",

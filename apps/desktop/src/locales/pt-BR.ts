@@ -220,6 +220,14 @@ const ptBR: Locale = {
     failed: "Não foi possível parar de rastrear os arquivos: {0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "Carregando issues…",
+      unavailable: "Issues indisponíveis",
+      empty: "Nenhuma issue aberta corresponde",
+      emptyNumber: "#{0} não está entre as issues abertas recentes; fica como digitado",
+      hint: "↑↓ escolher · ↵ ou ⇥ #N · ⇧↵ Fixes #N · Esc fechar",
+      hintType: "Digite parte do título para escolher uma issue · um número fica como digitado",
+    },
     tabChanges: "Alterações",
     tabBranches: "Branches",
     tabLog: "Histórico",
@@ -2715,6 +2723,9 @@ const ptBR: Locale = {
     paletteLabel: "Nova issue do GitHub",
     created: "Issue #{0} criada",
     open: "Abrir",
+    addToCommit: "Adicionar ao commit",
+    addToCommitOtherRepo: "Não adicionada: outro repositório está aberto",
+    addToCommitAlready: "Já citada na mensagem do commit",
     report: {
       answerLabel: "O que deveria ter sido?",
       answerPlaceholder: "O resultado esperado, ou o que o GitWand errou",

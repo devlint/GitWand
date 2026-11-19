@@ -89,6 +89,9 @@ import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import { useIssuePanel, ISSUE_PANEL_KEY } from "./composables/useIssuePanel";
 import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
+import { repoRemotes } from "./composables/useRepoRemote";
+import { COMMIT_SIGNATURE, withoutSignature } from "./utils/commitSignature";
+import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
 import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
@@ -364,15 +367,22 @@ const commitReviewNav = useCommitReviewNav({
  * dismissed; a toast shown meanwhile parks it, and it comes back once that
  * one is gone.
  */
-function showDetailToast(title: string, detail: string | null, ms = 3000, link?: ToastLink) {
-  if (stickyToast) parkedToasts.push(stickyToast);
+/** A notice's link, action button and kind (a newer one of a kind replaces a parked one). */
+type ToastExtras = { link?: ToastLink; action?: ToastAction; key?: string };
+
+function showDetailToast(title: string, detail: string | null, ms = 3000, extras: ToastExtras = {}) {
+  const { link, action, key } = extras;
+  // A newer notice of the same kind replaces a parked one rather than piling up.
+  if (key) for (let i = parkedToasts.length - 1; i >= 0; i--) if (parkedToasts[i].key === key) parkedToasts.splice(i, 1);
+  if (stickyToast && !(key && stickyToast.key === key)) parkedToasts.push(stickyToast);
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   if (dismissTimer != null) { window.clearTimeout(dismissTimer); dismissTimer = null; }
-  stickyToast = ms === 0 ? { title, detail, link } : null;
+  stickyToast = ms === 0 ? { title, detail, link, action, key } : null;
   successToastLeaving.value = false;
   successToast.value = title;
   successToastDetail.value = detail || null;
   successToastLink.value = link ?? null;
+  successToastAction.value = action ?? null;
   if (ms > 0) successTimer = window.setTimeout(dismissToast, ms);
 }
 
@@ -509,13 +519,28 @@ provide(PR_PANEL_KEY, prPanel);
 const createIssue = useCreateIssue({
   cwd: computed(() => repoFolderPath.value ?? null),
   provider: ref(githubProvider),
-  onCreated: (issue) =>
-    showDetailToast(
-      t("createIssue.created", issue.number),
-      null,
-      8000,
-      issue.url ? { label: t("createIssue.open"), url: issue.url } : undefined,
-    ),
+  onCreated: async (issue, ctx) => {
+    // Loaded once an issue exists, not in the main chunk.
+    const { createdIssueToast } = await import("./composables/createdIssueToast");
+    const toast = createdIssueToast(issue, ctx, {
+      t,
+      activeCwd: () => repoFolderPath.value ?? "",
+      message: () => ({ summary: commitSummary.value, description: commitDescription.value }),
+      setDescription: (d) => { commitDescription.value = d; },
+      // The same store as the commit panel's `#` list, read fresh.
+      readPushRepo: (cwd) => repoRemotes.load(cwd).then(() => repoRemotes.slug(cwd)),
+      invalidate: (target) => invalidateIssues(sharedIssueCache, target),
+      notify: (title) => showDetailToast(title, null, 4000),
+    });
+    // With "Add to commit", the notice stays until dismissed (a toast shown
+    // meanwhile parks it), so the action is never lost to another notice.
+    const action = toast.action;
+    showDetailToast(toast.title, null, action ? 0 : 8000, {
+      link: toast.link,
+      action: action ? { label: action.label, run: () => { void action.run(); } } : undefined,
+      key: "created-issue",
+    });
+  },
   report: {
     // A resolver report is scanned like a commit: the repository's
     // .gitwandrc patterns, and its or the app's entropy threshold.
@@ -807,13 +832,17 @@ const successToastLeaving = ref(false);
 /** An optional link the toast offers (e.g. "Open" a just-created issue, #301). */
 type ToastLink = { label: string; url: string };
 const successToastLink = ref<ToastLink | null>(null);
+/** An optional action button (e.g. "Add to commit" for a created issue, #301). */
+type ToastAction = { label: string; run: () => void };
+const successToastAction = ref<ToastAction | null>(null);
 const memorizeToast = ref<{ path: string; strategy: ResolutionStrategy } | null>(null);
 let successTimer: number | null = null;
 // The fade-out of a dismissed toast, cancelled when a new one replaces it.
 let dismissTimer: number | null = null;
 // The sticky toast on screen, and the ones covered since, shown again in turn.
-let stickyToast: { title: string; detail: string | null; link?: ToastLink } | null = null;
-const parkedToasts: { title: string; detail: string | null; link?: ToastLink }[] = [];
+type ParkedToast = { title: string; detail: string | null; link?: ToastLink; action?: ToastAction; key?: string };
+let stickyToast: ParkedToast | null = null;
+const parkedToasts: ParkedToast[] = [];
 
 function dismissToast() {
   if (dismissTimer != null) return; // already fading out (double click)
@@ -825,11 +854,12 @@ function dismissToast() {
     successToast.value = null;
     successToastDetail.value = null;
     successToastLink.value = null;
+    successToastAction.value = null;
     successToastLeaving.value = false;
     successTimer = null;
     dismissTimer = null;
     const parked = parkedToasts.pop();
-    if (parked) showDetailToast(parked.title, parked.detail, 0, parked.link);
+    if (parked) showDetailToast(parked.title, parked.detail, 0, parked);
   }, 200);
 }
 
@@ -4111,16 +4141,14 @@ function onTabSizeChange(size: number) {
   applyCodeStyles();
 }
 
-const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
 function onCommitSignatureChange(enabled: boolean) {
   if (enabled) {
     if (!commitDescription.value) {
       commitDescription.value = COMMIT_SIGNATURE;
     }
   } else {
-    if (commitDescription.value === COMMIT_SIGNATURE) {
-      commitDescription.value = "";
-    }
+    // Alone, or closing a description (after "Add to commit", #301).
+    commitDescription.value = withoutSignature(commitDescription.value);
   }
 }
 
@@ -5152,6 +5180,7 @@ onUnmounted(() => {
         <div class="toast-detail" v-if="successToastDetail">{{ successToastDetail }}</div>
       </div>
       <button v-if="successToastLink" class="toast-dismiss" @click="openExternalUrl(successToastLink.url)">{{ successToastLink.label }}</button>
+      <button v-if="successToastAction" class="toast-dismiss" @click="successToastAction.run(); dismissToast()">{{ successToastAction.label }}</button>
       <button class="toast-dismiss" @click="dismissToast">OK</button>
     </div>
 

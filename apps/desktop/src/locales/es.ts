@@ -219,6 +219,14 @@ const es: Locale = {
     failed: "No se pudieron dejar de rastrear los archivos: {0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "Cargando issues…",
+      unavailable: "Issues no disponibles",
+      empty: "Ninguna issue abierta coincide",
+      emptyNumber: "#{0} no está entre las issues abiertas recientes; se queda como está",
+      hint: "↑↓ elegir · ↵ o ⇥ #N · ⇧↵ Fixes #N · Esc cerrar",
+      hintType: "Escribe parte del título para elegir una issue · un número se queda como está",
+    },
     tabChanges: "Cambios",
     tabBranches: "Ramas",
     tabLog: "Historial",
@@ -2715,6 +2723,9 @@ const es: Locale = {
     paletteLabel: "Nueva issue de GitHub",
     created: "Issue #{0} creada",
     open: "Abrir",
+    addToCommit: "Añadir al commit",
+    addToCommitOtherRepo: "No añadida: ahora hay otro repositorio abierto",
+    addToCommitAlready: "Ya citada en el mensaje del commit",
     report: {
       answerLabel: "¿Qué debería haber resultado?",
       answerPlaceholder: "El resultado esperado, o lo que GitWand hizo mal",

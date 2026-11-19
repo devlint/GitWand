@@ -223,6 +223,14 @@ const zhCN: Locale = {
     failed: "无法取消跟踪这些文件：{0}",
   },
   sidebar: {
+    issueSuggest: {
+      loading: "正在加载 issue…",
+      unavailable: "无法获取 issue",
+      empty: "没有匹配的未关闭 issue",
+      emptyNumber: "#{0} 不在最近的未关闭 issue 中，将按原样保留",
+      hint: "↑↓ 选择 · ↵ 或 ⇥ #N · ⇧↵ Fixes #N · Esc 关闭",
+      hintType: "输入标题的一部分来选择 issue · 数字将按原样保留",
+    },
     tabChanges: "更改",
     tabBranches: "分支",
     tabLog: "日志",
@@ -2725,6 +2733,9 @@ const zhCN: Locale = {
     paletteLabel: "新建 GitHub Issue",
     created: "已创建 Issue #{0}",
     open: "打开",
+    addToCommit: "添加到提交",
+    addToCommitOtherRepo: "未添加：当前打开的是另一个仓库",
+    addToCommitAlready: "提交信息中已引用",
     report: {
       answerLabel: "正确的结果应该是什么？",
       answerPlaceholder: "期望的结果，或 GitWand 哪里出错了",

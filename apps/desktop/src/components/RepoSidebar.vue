@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
+import { computed, ref, nextTick, onMounted, onUnmounted, watch, inject, defineAsyncComponent } from "vue";
 import { TOGGLE_GIT_TREE_KEY, COMMIT_MESSAGE_SINK_KEY, OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
-import { gitRemoteInfo, getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
+import { getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
 import PrListSidebar from "./PrListSidebar.vue";
 import ScopePicker from "./ScopePicker.vue";
 import TrackedIgnoredNotice from "./TrackedIgnoredNotice.vue";
@@ -27,6 +27,12 @@ import {
 } from "../composables/useFileTree";
 import type { CommitTemplate } from "../composables/useSettings";
 import { gitBranchMerged } from "../utils/backend";
+import { useIssueSuggest, handleIssueKeydown, issueSuggestAt, pickIssueRow, sharedIssueCache, type IssueSuggest } from "../composables/useIssueSuggest";
+import { repoRemotes } from "../composables/useRepoRemote";
+// Shown only while a `#` list is open (v-if): loaded then, not in the main chunk.
+const IssueSuggestList = defineAsyncComponent(() => import("./IssueSuggestList.vue"));
+import { issueListerFor } from "../composables/issueLister";
+import { COMMIT_SIGNATURE } from "../utils/commitSignature";
 import { loadSettings } from "../composables/useSettings";
 
 const props = defineProps<{
@@ -428,16 +434,67 @@ onUnmounted(() => {
   window.removeEventListener("contextmenu", closeContextMenu);
 });
 
-// ─── Remote info (for the "Open repository" quick action) ─────
-const remoteInfo = ref<RemoteInfo | null>(null);
-
-async function loadRemoteInfo() {
-  if (!props.cwd) { remoteInfo.value = null; return; }
-  try { remoteInfo.value = await gitRemoteInfo(props.cwd); }
-  catch { remoteInfo.value = null; }
+// ─── Remote info (for the "Open repository" quick action, and `#`) ─────
+// One store per folder, shared with the created-issue notice (#301).
+const remoteInfo = computed<RemoteInfo | null>(() => (props.cwd ? repoRemotes.info(props.cwd) : null));
+function loadRemoteInfo() {
+  if (props.cwd) void repoRemotes.load(props.cwd);
 }
 onMounted(loadRemoteInfo);
 watch(() => props.cwd, loadRemoteInfo);
+
+// ─── `#` in the commit message lists open issues (#301) ──────
+const issueDeps = {
+  cwd: () => props.cwd || null,
+  /** null (no list) until the remote is known, or when its forge cannot list issues. */
+  loadIssues: (cwd: string) => {
+    const info = repoRemotes.info(cwd);
+    // No usable remote (none at open, `git remote add` or `set-url` since, an
+    // account connected since, a failed read): read it again, at most every
+    // 10 s; its arrival retries the `#`.
+    if (!info || info.provider === "unknown") repoRemotes.loadIfOlder(cwd, 10_000);
+    return issueListerFor(info, cwd);
+  },
+  pushRepo: (cwd: string) => repoRemotes.slug(cwd),
+  // Both fields, and every mount of this panel, share one fetch per repository.
+  cache: sharedIssueCache,
+};
+const summaryIssues = useIssueSuggest(issueDeps);
+const descriptionIssues = useIssueSuggest(issueDeps);
+const summaryEl = ref<HTMLInputElement | null>(null);
+const descriptionEl = ref<HTMLTextAreaElement | null>(null);
+const writeSummary = (text: string) => emit("update:commitSummary", text);
+const writeDescription = (text: string) => emit("update:commitDescription", text);
+/** Caret keys and clicks move the caret without an input event. */
+const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
+function onIssueCaretKeyup(s: IssueSuggest, e: KeyboardEvent) {
+  if (CARET_KEYS.has(e.key)) issueSuggestAt(s, e.target as HTMLInputElement | HTMLTextAreaElement, "caret");
+}
+watch(() => props.cwd, () => { summaryIssues.close(); descriptionIssues.close(); });
+// A `#` typed before the remote was known (just after a tab switch) opens
+// its list once it is; an existing `#12` under the caret does not.
+watch(remoteInfo, () => {
+  // Only the field being typed in: a list never opens under another one.
+  const el = document.activeElement;
+  if (el && el === summaryEl.value) issueSuggestAt(summaryIssues, summaryEl.value, "retry");
+  else if (el && el === descriptionEl.value) issueSuggestAt(descriptionIssues, descriptionEl.value, "retry");
+});
+// A `git remote set-url` since the folder opened: re-read the remote when a
+// list opens, at most every 5 min (for an unknown host, the backend also
+// probes the forge CLIs, so not on every focus).
+watch(
+  () => summaryIssues.open.value || descriptionIssues.open.value,
+  (opened) => {
+    if (opened && props.cwd) repoRemotes.loadIfOlder(props.cwd, 300_000);
+  },
+);
+// A value set by code (cleared after a commit, an AI message…) closes the list.
+watch(() => props.commitSummary, (v) => summaryIssues.sync(v ?? ""));
+watch(() => props.commitDescription, (v) => descriptionIssues.sync(v ?? ""));
+/** aria-activedescendant for a field whose list is open. */
+function activeIssueId(s: IssueSuggest, listId: string): string | undefined {
+  return s.open.value && s.armed.value ? `${listId}-${s.active.value}` : undefined;
+}
 
 
 /**
@@ -663,7 +720,7 @@ function applyMessage(cwd: string, msg: string) {
     const raw = localStorage.getItem("gitwand-settings");
     const sig = !raw || JSON.parse(raw).commitSignature !== false;
     if (sig) {
-      const signature = "\u{1FA84} Commit via GitWand";
+      const signature = COMMIT_SIGNATURE;
       body = body ? `${body}\n\n${signature}` : signature;
     }
   } catch { /* ignore */ }
@@ -779,6 +836,9 @@ function onUnstageClick(e: Event, path: string) {
 function onSummaryInput(e: Event) {
   onSummaryInputForTemplate(e);
   emit("update:commitSummary", (e.target as HTMLInputElement).value);
+  issueSuggestAt(summaryIssues, e.target as HTMLInputElement, "type");
+  // Never two lists over the summary at once.
+  if (summaryIssues.open.value) templateSlashOpen.value = false;
 }
 
 // ─── Conventional Commits prefix picker ──────────────────
@@ -833,13 +893,30 @@ function setCommitType(type: string) {
 
 function onDescriptionInput(e: Event) {
   emit("update:commitDescription", (e.target as HTMLTextAreaElement).value);
+  issueSuggestAt(descriptionIssues, e.target as HTMLTextAreaElement, "type");
 }
 
-function onCommitKeydown(e: KeyboardEvent) {
+function onSummaryKeydown(e: KeyboardEvent) {
+  if (handleIssueKeydown(summaryIssues, e, e.target as HTMLInputElement, writeSummary)) return;
+  onCommitKeydown(e);
+}
+
+function onDescriptionKeydown(e: KeyboardEvent) {
+  if (handleIssueKeydown(descriptionIssues, e, e.target as HTMLTextAreaElement, writeDescription)) return;
+  // Only the commit shortcut: `/` templates belong to the summary.
+  commitOnShortcut(e);
+}
+
+/** Cmd/Ctrl+Enter commits, from either commit field. */
+function commitOnShortcut(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
     e.preventDefault();
     if (props.canCommit) emit("commit", buildTrailers());
   }
+}
+
+function onCommitKeydown(e: KeyboardEvent) {
+  commitOnShortcut(e);
   onSummaryKeydownForTemplate(e);
 }
 
@@ -1552,14 +1629,31 @@ function formatActivityDate(dateStr: string): string {
             <span v-if="tmpl.subject" class="template-slash-subject mono">{{ tmpl.subject }}</span>
           </div>
         </div>
+        <IssueSuggestList
+          v-if="summaryIssues.open.value"
+          :status="summaryIssues.status.value"
+          :rows="summaryIssues.rows.value"
+          :active="summaryIssues.armed.value ? summaryIssues.active.value : -1"
+          list-id="commit-summary-issues"
+          :query="summaryIssues.query.value"
+          :browsable="summaryIssues.browsable.value"
+          @pick="(i, fixes) => pickIssueRow(summaryIssues, i, fixes, summaryEl, writeSummary)"
+        />
         <input
+          ref="summaryEl"
+          aria-autocomplete="list"
+          :aria-expanded="summaryIssues.open.value"
+          :aria-controls="summaryIssues.open.value ? 'commit-summary-issues' : undefined"
+          :aria-activedescendant="activeIssueId(summaryIssues, 'commit-summary-issues')"
           class="commit-summary mono"
           :class="{ 'commit-summary--ai': ai.isAvailable.value }"
           type="text"
           :value="commitSummary"
           @input="onSummaryInput"
-          @keydown="onCommitKeydown"
-          @blur="templateSlashOpen = false"
+          @keydown="onSummaryKeydown"
+          @keyup="onIssueCaretKeyup(summaryIssues, $event)"
+          @click="issueSuggestAt(summaryIssues, $event.target as HTMLInputElement, 'caret')"
+          @blur="templateSlashOpen = false; summaryIssues.close()"
           :placeholder="t('sidebar.summaryPlaceholder')"
         />
         <!-- AI commit message: overlaid split-button at top-right of summary input -->
@@ -1615,14 +1709,34 @@ function formatActivityDate(dateStr: string): string {
       </div>
       <!-- AI error feedback -->
       <div v-if="aiError" class="commit-ai-error">{{ aiError }}</div>
-      <textarea
-        class="commit-description mono"
-        :value="commitDescription"
-        @input="onDescriptionInput"
-        @keydown="onCommitKeydown"
-        :placeholder="t('sidebar.descriptionPlaceholder')"
-        rows="4"
-      ></textarea>
+      <div class="commit-description-wrap">
+        <IssueSuggestList
+          v-if="descriptionIssues.open.value"
+          :status="descriptionIssues.status.value"
+          :rows="descriptionIssues.rows.value"
+          :active="descriptionIssues.armed.value ? descriptionIssues.active.value : -1"
+          list-id="commit-description-issues"
+          :query="descriptionIssues.query.value"
+          :browsable="descriptionIssues.browsable.value"
+          @pick="(i, fixes) => pickIssueRow(descriptionIssues, i, fixes, descriptionEl, writeDescription)"
+        />
+        <textarea
+          ref="descriptionEl"
+          aria-autocomplete="list"
+          :aria-expanded="descriptionIssues.open.value"
+          :aria-controls="descriptionIssues.open.value ? 'commit-description-issues' : undefined"
+          :aria-activedescendant="activeIssueId(descriptionIssues, 'commit-description-issues')"
+          class="commit-description mono"
+          :value="commitDescription"
+          @input="onDescriptionInput"
+          @keydown="onDescriptionKeydown"
+          @keyup="onIssueCaretKeyup(descriptionIssues, $event)"
+          @click="issueSuggestAt(descriptionIssues, $event.target as HTMLTextAreaElement, 'caret')"
+          @blur="descriptionIssues.close()"
+          :placeholder="t('sidebar.descriptionPlaceholder')"
+          rows="4"
+        ></textarea>
+      </div>
       <!-- Trailers — collapsed by default, unlocked by a toggle -->
       <div class="commit-trailers">
         <button
@@ -2517,7 +2631,11 @@ function formatActivityDate(dateStr: string): string {
   color: var(--color-text-muted);
 }
 
+.commit-description-wrap {
+  position: relative;
+}
 .commit-description {
+  display: block; /* no inline baseline gap under it inside its wrapper */
   width: 100%;
   padding: var(--space-3) var(--space-5);
   font-size: var(--font-size-sm);
