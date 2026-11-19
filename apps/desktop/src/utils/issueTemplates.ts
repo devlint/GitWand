@@ -62,10 +62,11 @@ export function flattenForm(body: unknown[]): string {
   for (const item of body) {
     if (!isObj(item)) continue;
     const a = isObj(item.attributes) ? item.attributes : {};
-    const required = isObj(item.validations) && item.validations.required === true;
     const label = str(a.label).trim();
-    // A field with no label gets no heading (never a bare `### `).
-    const heading = label ? `### ${label}${required ? " *" : ""}` : "";
+    // A field with no label gets no heading (never a bare `### `). Required
+    // fields are not marked: GitHub's issue carries the label as is, and
+    // tools find sections by it.
+    const heading = label ? `### ${label}` : "";
     const section = (content: string) => [heading, content].filter(Boolean).join("\n\n");
     switch (item.type) {
       case "markdown": {
@@ -105,9 +106,15 @@ export function flattenForm(body: unknown[]): string {
 /** A front matter, possibly empty (`---\n---`). */
 const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 
+/** A file in the template folder (not a single-template file elsewhere). */
+const inTemplateFolder = (path: string) => /(^|\/)\.github\/ISSUE_TEMPLATE\//i.test(path);
+
 function markdownTemplate(path: string, raw: string, parseYaml: ParseYaml): IssueTemplate | null {
   const content = raw.replace(/^\uFEFF/, ""); // a BOM before the front matter
   const m = FRONT_MATTER.exec(content);
+  // In the template folder, a Markdown file without front matter (a README)
+  // is not a template: GitHub's chooser does not offer it either.
+  if (!m && inTemplateFolder(path)) return null;
   let meta: Obj = {};
   if (m) {
     const parsed = m[1] === undefined ? null : parseYaml(m[1]);

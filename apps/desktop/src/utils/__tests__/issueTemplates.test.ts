@@ -20,9 +20,14 @@ describe("parseTemplateSet — Markdown templates", () => {
   it("a leading BOM or an empty front matter is still a front matter", () => {
     const set = parseTemplateSet([
       { path: dir("a.md"), content: "\uFEFF---\nname: A\n---\nbody A" },
-      { path: dir("b.md"), content: "---\n---\nbody B" },
+      { path: "docs/ISSUE_TEMPLATE.md", content: "---\n---\nbody B" },
     ], parse);
-    expect(set.templates.map((t) => [t.name, t.body])).toEqual([["A", "body A"], ["b", "body B"]]);
+    expect(set.templates.map((t) => [t.name, t.body])).toEqual([["A", "body A"], ["ISSUE_TEMPLATE", "body B"]]);
+  });
+
+  it("a Markdown file in the template folder without front matter (a README) is not a template", () => {
+    const set = parseTemplateSet([{ path: dir("README.md"), content: "# How to file\n" }], parse);
+    expect(set.templates).toEqual([]);
   });
 
   it("a template without front matter is named after its file", () => {
@@ -48,7 +53,7 @@ describe("flattenForm", () => {
       { type: "textarea", attributes: { label: "Logs", render: "shell" } },
     ])).toBe(
       "<!-- Thanks for the report! -->\n\n" +
-      "### What happened? *\n\n<!-- Tell us -->\n\n" +
+      "### What happened?\n\n<!-- Tell us -->\n\n" +
       "### Version\n\n3.13\n\n" +
       "### Logs\n\n```shell\n\n```\n",
     );

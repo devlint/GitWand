@@ -162,3 +162,59 @@ describe("useCreateIssue — templates, review follow-ups", () => {
     expect(form.templateSet.value?.templates).toHaveLength(1);
   });
 });
+
+describe("useCreateIssue — templates, first pass follow-ups", () => {
+  it("a template label removed by hand is not added back when other options arrive", async () => {
+    let peopleArrive!: (v: unknown) => void;
+    const { form, provider } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    (provider.listAssignees as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((r) => { peopleArrive = r; }));
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    expect(form.labels.value).toEqual(["bug"]);
+    form.labels.value = [];
+    peopleArrive([{ login: "alice", name: null, avatarUrl: null }]);
+    await flush();
+    expect(form.labels.value).toEqual([]);
+    expect(form.assignees.value).toEqual(["alice"]);
+  });
+
+  it("switching target forgets what the template wanted", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    form.setRepo("up/app");
+    await flush();
+    expect(form.labels.value).toEqual([]);
+    expect(form.assignees.value).toEqual([]);
+  });
+
+  it("a label picked by hand before the template stays when the template goes", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.open();
+    await flush();
+    form.labels.value = ["bug"];
+    form.applyTemplate("a.md");
+    form.applyTemplate(null);
+    expect(form.labels.value).toEqual(["bug"]);
+  });
+
+  it("a cache hit is not loading, even with another target's read in flight", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": () => new Promise(() => {}) });
+    await form.open();
+    await flush();
+    form.setRepo("up/app");
+    expect(form.templatesLoading.value).toBe(true);
+    form.setRepo("me/app");
+    expect(form.templatesLoading.value).toBe(false);
+  });
+
+  it("a form filled from a template counts as started (closing it asks)", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: "---\nname: Plain\n---\nbody" }] });
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    expect(form.dirty.value).toBe(true);
+  });
+});

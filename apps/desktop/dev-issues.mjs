@@ -153,7 +153,11 @@ const smallEnough = (v) => typeof v?.size === "number" && v.size <= MAX_TEMPLATE
 const isConfig = (n) => ["config.yml", "config.yaml"].includes(n.toLowerCase());
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
+const isConfigPath = (path) => isConfig(path.split("/").pop() ?? path);
+const hasTemplate = (files) => files.some((f) => !isConfigPath(f.path));
+
 async function templatesIn(nwo, get) {
+  let found = [];
   const items = await get(nwo, TEMPLATE_DIR);
   if (Array.isArray(items)) {
     const named = items
@@ -161,24 +165,26 @@ async function templatesIn(nwo, get) {
       .filter((i) => /\.(md|ya?ml)$/i.test(i.name))
       .map((i) => [i.name, i.path])
       .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
-    const kept = [...named.filter(([n]) => isConfig(n)), ...named.filter(([n]) => !isConfig(n)).slice(0, MAX_TEMPLATES)]
+    const kept = [...named.filter(([, p]) => isConfigPath(p)), ...named.filter(([, p]) => !isConfigPath(p)).slice(0, MAX_TEMPLATES)]
       .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
-    // In parallel; a file that cannot be read is skipped.
-    const read = await Promise.all(kept.map(async ([, path]) => {
-      const content = decodeContent(await get(nwo, encodePath(path)).catch(() => null));
-      return content === null ? null : { path, content };
-    }));
-    const files = read.filter(Boolean);
-    if (files.length) return files;
+    // Six at a time, as Rust; a file that cannot be read is skipped.
+    for (let i = 0; i < kept.length; i += 6) {
+      const read = await Promise.all(kept.slice(i, i + 6).map(async ([, path]) => {
+        const content = decodeContent(await get(nwo, encodePath(path)).catch(() => null));
+        return content === null ? null : { path, content };
+      }));
+      found.push(...read.filter(Boolean));
+    }
+    if (hasTemplate(found)) return found;
   }
   for (const path of SINGLE_TEMPLATES) {
     const v = await get(nwo, path);
     if (v && smallEnough(v)) {
       const content = decodeContent(v);
-      if (content !== null) return [{ path, content }];
+      if (content !== null) return [...found, { path, content }];
     }
   }
-  return [];
+  return found;
 }
 
 /**
@@ -189,13 +195,18 @@ async function templatesIn(nwo, get) {
  */
 export async function devTemplateFiles(nwo, isPublic, get) {
   const own = await templatesIn(nwo, get);
-  if (own.length) return { source: nwo, files: own };
+  if (hasTemplate(own)) return { source: nwo, files: own };
   const owner = nwo.split("/")[0];
   const org = `${owner}/.github`;
-  // GitHub only uses a public `.github` repository.
+  // GitHub only uses a public `.github` repository; nwo's own config.yml wins.
   if (org.toLowerCase() !== nwo.toLowerCase() && (await isPublic(org))) {
-    const files = await templatesIn(org, get);
-    if (files.length) return { source: org, files };
+    const theirs = await templatesIn(org, get);
+    if (hasTemplate(theirs)) {
+      const ownConfig = own.filter((f) => isConfigPath(f.path));
+      const files = (ownConfig.length ? [...ownConfig, ...theirs.filter((f) => !isConfigPath(f.path))] : theirs)
+        .sort((a, b) => cmp(a.path, b.path));
+      return { source: org, files };
+    }
   }
-  return { source: nwo, files: [] };
+  return { source: nwo, files: own };
 }

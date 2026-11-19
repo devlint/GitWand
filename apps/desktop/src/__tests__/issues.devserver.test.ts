@@ -172,6 +172,15 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(org.files[0].content).toBe("name: Bug");
   });
 
+  it("a template folder with only config.yml still tries the single-template file", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github/ISSUE_TEMPLATE": [entry("config.yml")],
+      "me/app:.github/ISSUE_TEMPLATE/config.yml": file("blank_issues_enabled: false"),
+      "me/app:.github/ISSUE_TEMPLATE.md": file("legacy"),
+    }));
+    expect(got.files.map((f: { path: string }) => f.path)).toEqual([".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE.md"]);
+  });
+
   it("nothing anywhere is an empty list", async () => {
     expect((await devTemplateFiles("me/app", PUBLIC, fake({}))).files).toEqual([]);
   });

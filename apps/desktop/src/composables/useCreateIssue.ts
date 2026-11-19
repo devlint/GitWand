@@ -375,6 +375,7 @@ export function useCreateIssue(deps: {
       title.value !== initial.value.title ||
       body.value !== initial.value.body ||
       labels.value.length > 0 ||
+      templateId.value !== null ||
       assignees.value.length > 0 ||
       milestone.value !== null,
   );
@@ -475,6 +476,7 @@ export function useCreateIssue(deps: {
     const cached = templateCache.get(key);
     if (cached && Date.now() - cached.at < TEMPLATE_CACHE_MS) {
       templateSet.value = cached.set;
+      templatesLoading.value = false; // another target's read may still be in flight
       return;
     }
     const gen = generation;
@@ -493,22 +495,35 @@ export function useCreateIssue(deps: {
       .finally(() => { if (current()) templatesLoading.value = false; });
   }
 
-  /** What the applied template asked for, offered or not yet (the pickers load meanwhile). */
-  let templateWants: { labels: string[]; assignees: string[] } = { labels: [], assignees: [] };
+  /**
+   * The applied template's labels and people: `pending` waits for the target
+   * to offer them (its pickers load meanwhile), each granted once — one the
+   * user then removes stays removed; `added` is what the template put there
+   * itself, all it takes back (one picked by hand before stays).
+   */
+  let templatePending = { labels: [] as string[], assignees: [] as string[] };
+  let templateAdded = { labels: [] as string[], assignees: [] as string[] };
 
-  /** Add what the template wants that the target now offers (the pickers arrive late). */
+  function forgetTemplatePicks() {
+    templatePending = { labels: [], assignees: [] };
+    templateAdded = { labels: [], assignees: [] };
+  }
+
+  /** Grant what the template wants and the target now offers, each once. */
   function grantTemplateWants() {
-    const offeredLabels = new Set(labelOptions.value.map((l) => l.name));
-    const offeredPeople = new Set(assigneeOptions.value.map((a) => a.login));
-    const add = (have: string[], want: string[], offered: Set<string>) => [
-      ...have,
-      ...want.filter((x) => offered.has(x) && !have.includes(x)),
-    ];
-    labels.value = add(labels.value, templateWants.labels, offeredLabels);
-    assignees.value = add(assignees.value, templateWants.assignees, offeredPeople);
+    const grant = (have: Ref<string[]>, key: "labels" | "assignees", offered: Set<string>) => {
+      const now = templatePending[key].filter((x) => offered.has(x));
+      if (!now.length) return;
+      templatePending[key] = templatePending[key].filter((x) => !offered.has(x));
+      const fresh = now.filter((x) => !have.value.includes(x));
+      templateAdded[key] = [...templateAdded[key], ...fresh];
+      have.value = [...have.value, ...fresh];
+    };
+    grant(labels, "labels", new Set(labelOptions.value.map((l) => l.name)));
+    grant(assignees, "assignees", new Set(assigneeOptions.value.map((a) => a.login)));
   }
   watch([labelOptions, assigneeOptions], () => {
-    if (templateWants.labels.length || templateWants.assignees.length) grantTemplateWants();
+    if (templatePending.labels.length || templatePending.assignees.length) grantTemplateWants();
   });
 
   function applyTemplate(id: string | null) {
@@ -517,10 +532,11 @@ export function useCreateIssue(deps: {
     templateId.value = chosen ? chosen.id : null;
     title.value = chosen?.title ?? "";
     body.value = chosen?.body ?? "";
-    // The previous template's labels and people go; those picked by hand stay.
-    labels.value = labels.value.filter((l) => !templateWants.labels.includes(l));
-    assignees.value = assignees.value.filter((a) => !templateWants.assignees.includes(a));
-    templateWants = { labels: chosen?.labels ?? [], assignees: chosen?.assignees ?? [] };
+    // What the previous template added goes; what was picked by hand stays.
+    labels.value = labels.value.filter((l) => !templateAdded.labels.includes(l));
+    assignees.value = assignees.value.filter((a) => !templateAdded.assignees.includes(a));
+    forgetTemplatePicks();
+    templatePending = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
     // Only what the target offers (GitHub refuses unknown labels and people),
     // now or once its pickers arrive.
     grantTemplateWants();
@@ -558,7 +574,7 @@ export function useCreateIssue(deps: {
     templateSet.value = null;
     templatesLoading.value = false;
     templateId.value = null;
-    templateWants = { labels: [], assignees: [] };
+    forgetTemplatePicks();
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = DEFAULT_SECRETS_OPTIONS;
@@ -818,8 +834,10 @@ export function useCreateIssue(deps: {
     // Labels, people and milestones belong to one repository.
     clearPickers();
     loadPickers(next);
-    // The text a template filled stays; the choice was about the other target.
+    // The text a template filled stays; the choice, and the labels and people
+    // it wanted, were about the other target.
     templateId.value = null;
+    forgetTemplatePicks();
     loadTemplates(next);
   }
 

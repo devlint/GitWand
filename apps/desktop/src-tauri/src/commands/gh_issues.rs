@@ -715,7 +715,9 @@ type IsPublic<'a> = &'a (dyn Fn(&str) -> Result<bool, String> + Sync);
 /// A GitHub error that means "not there" (REST: `(404)`, gh: `HTTP 404`), and
 /// not a failure that merely mentions 404 (a repository named `error-404`).
 pub(crate) fn is_not_found(e: &str) -> bool {
-    e.contains("(404)") || e.contains("HTTP 404")
+    // Anchored on the status, as `checks_unavailable` does: a path echoed in
+    // gh's message (`crash (404).md`) is not a 404.
+    e.starts_with("GitHub API error (404)") || e.contains("(HTTP 404)")
 }
 
 /// `path` with each segment percent-encoded: a file named `bug report.md` or
@@ -754,11 +756,54 @@ fn small_enough(v: &serde_json::Value) -> bool {
         .is_some_and(|s| s <= MAX_TEMPLATE_BYTES)
 }
 
+fn is_config_path(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    matches!(name.as_str(), "config.yml" | "config.yaml")
+}
+
+/// Whether `files` holds a template (not only `config.yml`).
+fn has_template(files: &[TemplateFile]) -> bool {
+    files.iter().any(|f| !is_config_path(&f.path))
+}
+
+/// Read `paths` of `nwo`, at most 6 at a time on their own threads (network
+/// waits, so not rayon's CPU pool); a file that cannot be read is skipped.
+fn read_files(nwo: &str, paths: &[String], get: ContentsGet) -> Vec<TemplateFile> {
+    let mut files = Vec::new();
+    for chunk in paths.chunks(6) {
+        let read: Vec<Option<TemplateFile>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|path| {
+                    scope.spawn(move || {
+                        let content = get(nwo, &encode_path(path))
+                            .ok()
+                            .flatten()
+                            .as_ref()
+                            .and_then(decode_content)?;
+                        Some(TemplateFile {
+                            path: path.clone(),
+                            content,
+                        })
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().ok().flatten())
+                .collect()
+        });
+        files.extend(read.into_iter().flatten());
+    }
+    files
+}
+
 /// The template files of one repository: the directory's `.md`/`.yml`/`.yaml`
-/// (20 at most, by name, plus `config.yml`), else a single-template file. A
-/// file that cannot be read is skipped; the directory listing failing fails.
+/// (20 at most, by name) and its `config.yml`; without a template there, a
+/// single-template file (the directory's `config.yml` kept). A file that
+/// cannot be read is skipped; the directory listing failing fails.
 fn templates_in(nwo: &str, get: ContentsGet) -> Result<Vec<TemplateFile>, String> {
-    use rayon::prelude::*;
+    let mut found = Vec::new();
     if let Some(serde_json::Value::Array(items)) = get(nwo, TEMPLATE_DIR)? {
         let mut named: Vec<(String, String)> = items
             .iter()
@@ -775,87 +820,75 @@ fn templates_in(nwo: &str, get: ContentsGet) -> Result<Vec<TemplateFile>, String
             })
             .collect();
         named.sort();
-        let is_config = |n: &str| {
-            matches!(
-                n.to_ascii_lowercase().as_str(),
-                "config.yml" | "config.yaml"
-            )
-        };
         let mut kept: Vec<(String, String)> = named
             .iter()
-            .filter(|(n, _)| is_config(n))
+            .filter(|(_, p)| is_config_path(p))
             .cloned()
             .collect();
         kept.extend(
             named
                 .iter()
-                .filter(|(n, _)| !is_config(n))
+                .filter(|(_, p)| !is_config_path(p))
                 .take(MAX_TEMPLATES)
                 .cloned(),
         );
         kept.sort();
-        // In parallel (up to 21 requests, each a `gh` spawn without a token),
-        // in name order.
-        let files: Vec<TemplateFile> = kept
-            .par_iter()
-            .map(|(_, path)| {
-                let content = get(nwo, &encode_path(path))
-                    .ok()
-                    .flatten()
-                    .as_ref()
-                    .and_then(decode_content)?;
-                Some(TemplateFile {
-                    path: path.clone(),
-                    content,
-                })
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .flatten()
-            .collect();
-        if !files.is_empty() {
-            return Ok(files);
+        let paths: Vec<String> = kept.into_iter().map(|(_, p)| p).collect();
+        found = read_files(nwo, &paths, get);
+        if has_template(&found) {
+            return Ok(found);
         }
     }
     for path in SINGLE_TEMPLATES {
         if let Some(v) = get(nwo, path)? {
             if let Some(content) = small_enough(&v).then(|| decode_content(&v)).flatten() {
-                return Ok(vec![TemplateFile {
+                found.push(TemplateFile {
                     path: path.to_string(),
                     content,
-                }]);
+                });
+                return Ok(found);
             }
         }
     }
-    Ok(Vec::new())
+    Ok(found)
 }
 
 /// The templates of `nwo`, else of its owner's public `.github` repository
-/// (GitHub's default community health files); none is an empty list.
+/// (GitHub's default community health files, `nwo`'s own `config.yml`
+/// winning over theirs); none is an empty list.
 pub(crate) fn template_files(
     nwo: &str,
     is_public: IsPublic,
     get: ContentsGet,
 ) -> Result<IssueTemplateFiles, String> {
     let own = templates_in(nwo, get)?;
-    if !own.is_empty() {
-        return Ok(IssueTemplateFiles {
-            source: nwo.to_string(),
-            files: own,
-        });
-    }
-    if let Some(owner) = nwo.split('/').next() {
-        let org = format!("{owner}/.github");
-        if !org.eq_ignore_ascii_case(nwo) && is_public(&org)? {
-            let files = templates_in(&org, get)?;
-            if !files.is_empty() {
-                return Ok(IssueTemplateFiles { source: org, files });
+    if !has_template(&own) {
+        if let Some(owner) = nwo.split('/').next() {
+            let org = format!("{owner}/.github");
+            if !org.eq_ignore_ascii_case(nwo) && is_public(&org)? {
+                let theirs = templates_in(&org, get)?;
+                if has_template(&theirs) {
+                    let own_config: Vec<TemplateFile> = own
+                        .iter()
+                        .filter(|f| is_config_path(&f.path))
+                        .cloned()
+                        .collect();
+                    let mut files = if own_config.is_empty() {
+                        theirs
+                    } else {
+                        let mut f = own_config;
+                        f.extend(theirs.into_iter().filter(|f| !is_config_path(&f.path)));
+                        f
+                    };
+                    files.sort_by(|a, b| a.path.cmp(&b.path));
+                    return Ok(IssueTemplateFiles { source: org, files });
+                }
             }
         }
     }
     Ok(IssueTemplateFiles {
         source: nwo.to_string(),
-        files: Vec::new(),
+        files: own,
     })
 }
 
@@ -1077,6 +1110,39 @@ mod tests {
         assert!(!is_not_found(
             "gh api GET repos/acme/error-404-page/contents/x: network down"
         ));
+        assert!(!is_not_found(
+            "gh api GET repos/o/r/contents/crash (404).md: HTTP 502"
+        ));
+    }
+
+    #[test]
+    fn a_template_folder_with_only_config_still_tries_the_single_template_file() {
+        let got = template_files(
+            "me/app",
+            &PUBLIC,
+            &fake(vec![
+                (
+                    "me/app",
+                    ".github/ISSUE_TEMPLATE",
+                    json!([entry("config.yml", 10)]),
+                ),
+                (
+                    "me/app",
+                    ".github/ISSUE_TEMPLATE/config.yml",
+                    file("blank_issues_enabled: false"),
+                ),
+                ("me/app", ".github/ISSUE_TEMPLATE.md", file("legacy")),
+            ]),
+        )
+        .unwrap();
+        let paths: Vec<&str> = got.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                ".github/ISSUE_TEMPLATE/config.yml",
+                ".github/ISSUE_TEMPLATE.md"
+            ]
+        );
     }
 
     #[test]
