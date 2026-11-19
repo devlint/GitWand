@@ -102,14 +102,10 @@ describe("insertRef", () => {
 });
 
 describe("appendRef", () => {
-  it("adds the reference as its own paragraph, sets when empty, never duplicates", () => {
+  it("adds the reference as its own paragraph, or sets it when empty", () => {
     expect(appendRef("body", "#4")).toBe("body\n\n#4");
     expect(appendRef("body\n\n", "#4")).toBe("body\n\n#4");
     expect(appendRef("", "#4")).toBe("#4");
-    expect(appendRef("see #4 here", "#4")).toBe("see #4 here");
-    expect(appendRef("", "#4", "Fix #4")).toBe("");
-    expect(appendRef("see #42", "#4")).toBe("see #42\n\n#4");
-    expect(appendRef("up/app#4", "#4")).toBe("up/app#4\n\n#4");
   });
   it("never breaks a closing fence or a list item", () => {
     expect(appendRef("```\nx\n```", "#4")).toBe("```\nx\n```\n\n#4");
@@ -121,6 +117,10 @@ describe("appendRef", () => {
   it("goes before GitWand's commit signature, which stays last", () => {
     expect(appendRef("\u{1FA84} Commit via GitWand", "#4")).toBe("#4\n\n\u{1FA84} Commit via GitWand");
     expect(appendRef("body\n\n\u{1FA84} Commit via GitWand", "#4")).toBe("body\n\n#4\n\n\u{1FA84} Commit via GitWand");
+  });
+  it("goes before a signature followed by trailers in the same paragraph", () => {
+    expect(appendRef("body\n\n\u{1FA84} Commit via GitWand\nSigned-off-by: A <a@x.com>", "#5"))
+      .toBe("body\n\n#5\n\n\u{1FA84} Commit via GitWand\nSigned-off-by: A <a@x.com>");
   });
   it("goes before a trailer block, which must stay last", () => {
     expect(appendRef("body\n\nSigned-off-by: A <a@x.com>", "#4")).toBe("body\n\n#4\n\nSigned-off-by: A <a@x.com>");
@@ -151,6 +151,13 @@ describe("addCreatedIssueToCommit", () => {
     expect(addCreatedIssueToCommit(ISSUE7, ctx({ description: "see me/app#7" }))).toEqual({ status: "alreadyCited" });
     expect(addCreatedIssueToCommit(ISSUE7, ctx({ description: "see https://github.com/me/app/issues/7" }))).toEqual({ status: "alreadyCited" });
   });
+  it("already cited regardless of case, and as a bare #N when the push repository is unknown", () => {
+    expect(addCreatedIssueToCommit({ ...ISSUE7, url: "https://github.com/Me/App/issues/7", repo: "Me/App" }, ctx({ description: "see me/app#7" })))
+      .toEqual({ status: "alreadyCited" });
+    expect(addCreatedIssueToCommit(ISSUE7, ctx({ pushRepo: null, description: "Fixes #7" }))).toEqual({ status: "alreadyCited" });
+  });
+  it("hasRef-style checks still tell #7 from #70", () =>
+    expect(addCreatedIssueToCommit(ISSUE7, ctx({ description: "see #70" }))).toEqual({ status: "added", description: "see #70\n\n#7" }));
   it("says so when already referenced", () =>
     expect(addCreatedIssueToCommit(ISSUE7, ctx({ summary: "Fix #7" }))).toEqual({ status: "alreadyCited" }));
 });

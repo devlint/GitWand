@@ -228,7 +228,7 @@ const zhCN: Locale = {
       unavailable: "无法获取 issue",
       empty: "没有匹配的未关闭 issue",
       emptyNumber: "#{0} 不在最近的未关闭 issue 中，将按原样保留",
-      hint: "↵ #N · ⇧↵ Fixes #N",
+      hint: "↑↓ 选择 · ↵ #N · ⇧↵ Fixes #N · Esc 关闭",
     },
     tabChanges: "更改",
     tabBranches: "分支",

@@ -224,7 +224,7 @@ const es: Locale = {
       unavailable: "Issues no disponibles",
       empty: "Ninguna issue abierta coincide",
       emptyNumber: "#{0} no está entre las issues abiertas recientes; se queda como está",
-      hint: "↵ #N · ⇧↵ Fixes #N",
+      hint: "↑↓ elegir · ↵ #N · ⇧↵ Fixes #N · Esc cerrar",
     },
     tabChanges: "Cambios",
     tabBranches: "Ramas",

@@ -218,7 +218,7 @@ const fr: Locale = {
       unavailable: "Issues indisponibles",
       empty: "Aucune issue ouverte ne correspond",
       emptyNumber: "#{0} ne fait pas partie des issues ouvertes récentes ; il reste tel quel",
-      hint: "↵ #N · ⇧↵ Fixes #N",
+      hint: "↑↓ choisir · ↵ #N · ⇧↵ Fixes #N · Échap fermer",
     },
     tabChanges: "Changements",
     tabBranches: "Branches",

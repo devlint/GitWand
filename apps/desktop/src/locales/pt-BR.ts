@@ -225,7 +225,7 @@ const ptBR: Locale = {
       unavailable: "Issues indisponíveis",
       empty: "Nenhuma issue aberta corresponde",
       emptyNumber: "#{0} não está entre as issues abertas recentes; fica como digitado",
-      hint: "↵ #N · ⇧↵ Fixes #N",
+      hint: "↑↓ escolher · ↵ #N · ⇧↵ Fixes #N · Esc fechar",
     },
     tabChanges: "Alterações",
     tabBranches: "Branches",

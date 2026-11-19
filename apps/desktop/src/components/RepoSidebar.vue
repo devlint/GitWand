@@ -446,12 +446,16 @@ async function loadRemoteInfo() {
   remoteInfoAt = Date.now();
   let info: RemoteInfo | null = null;
   try { info = await gitRemoteInfo(cwd); }
-  catch {
-    // A transient failure keeps what this folder's remote was known to be.
-    if (remoteInfoCwd.value === cwd) return;
+  catch (e) {
+    // A transient failure keeps what this folder's remote was known to be;
+    // a remote that is gone ("No remote found") is forgotten.
+    if (remoteInfoCwd.value === cwd && !/no remote/i.test(String(e))) return;
     info = null;
   }
   if (cwd !== props.cwd) return;
+  // The same remote again: keep the object, so nothing watching it re-runs.
+  const was = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
+  if (was && info && was.url === info.url && was.provider === info.provider && was.owner === info.owner && was.repo === info.repo) return;
   remoteInfo.value = info;
   remoteInfoCwd.value = cwd;
 }
@@ -906,14 +910,20 @@ function onSummaryKeydown(e: KeyboardEvent) {
 
 function onDescriptionKeydown(e: KeyboardEvent) {
   if (handleIssueKeydown(descriptionIssues, e, e.target as HTMLTextAreaElement, writeDescription)) return;
-  onCommitKeydown(e);
+  // Only the commit shortcut: `/` templates belong to the summary.
+  commitOnShortcut(e);
 }
 
-function onCommitKeydown(e: KeyboardEvent) {
+/** Cmd/Ctrl+Enter commits, from either commit field. */
+function commitOnShortcut(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
     e.preventDefault();
     if (props.canCommit) emit("commit", buildTrailers());
   }
+}
+
+function onCommitKeydown(e: KeyboardEvent) {
+  commitOnShortcut(e);
   onSummaryKeydownForTemplate(e);
 }
 

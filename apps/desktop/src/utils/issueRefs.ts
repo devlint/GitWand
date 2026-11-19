@@ -7,6 +7,7 @@
  */
 import type { Issue } from "./backend";
 import { COMMIT_SIGNATURE } from "./commitSignature";
+import { escapeRegExp } from "./escapeRegExp";
 
 /** The suggestion list never shows more rows than this. */
 export const MAX_ISSUE_ROWS = 8;
@@ -98,13 +99,9 @@ export function insertRef(
   return { text: text.slice(0, start) + spaced + rest, caret: start + inserted.length + skip };
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /** Whether `ref` appears in `text` as a whole reference (`#4` is not in `#42` or `up/app#4`). */
 export function hasRef(text: string, ref: string): boolean {
-  return new RegExp(`(^|[^\\w/.-])${escapeRegExp(ref)}(?!\\w)`).test(text);
+  return new RegExp(`(^|[^\\w/.-])${escapeRegExp(ref)}(?!\\w)`, "i").test(text);
 }
 
 /** A trailer line (`Signed-off-by: A <a@x>`): git only reads them in the last paragraph. */
@@ -114,18 +111,22 @@ const TRAILER = /^[A-Za-z][\w-]*: \S/;
 const KNOWN_TRAILER = /^(Signed-off-by|Co-authored-by|Reviewed-by|Acked-by|Tested-by|Reported-by|Suggested-by|Helped-by|Cc|Change-Id):/i;
 
 /**
- * The description citing `ref`, unchanged when the message already does. The
- * reference is a paragraph of its own (a closing fence, a list item or a
- * trailer is never extended), placed before a closing trailer block.
+ * The description with `ref` as a paragraph of its own (a closing fence, a
+ * list item or a trailer is never extended), placed before a closing block:
+ * GitWand's signature and/or trailers. Whether it is already cited is the
+ * caller's check (`addCreatedIssueToCommit`).
  */
-export function appendRef(description: string, ref: string, summary = ""): string {
-  if (hasRef(summary, ref) || hasRef(description, ref)) return description;
+export function appendRef(description: string, ref: string): string {
   const trimmed = description.replace(/\s+$/, "");
   if (!trimmed) return ref;
   const paragraphs = trimmed.split(/\n{2,}/);
   const last = paragraphs[paragraphs.length - 1];
   const lines = last.split("\n");
-  const closing = last === COMMIT_SIGNATURE || (lines.every((line) => TRAILER.test(line)) && lines.some((line) => KNOWN_TRAILER.test(line)));
+  const signed = lines[0] === COMMIT_SIGNATURE;
+  const trailers = signed ? lines.slice(1) : lines;
+  const closing =
+    (signed && trailers.length === 0) ||
+    (trailers.length > 0 && trailers.every((line) => TRAILER.test(line)) && (signed || trailers.some((line) => KNOWN_TRAILER.test(line))));
   if (closing) {
     return [...paragraphs.slice(0, -1), ref, last].join("\n\n");
   }
@@ -145,8 +146,10 @@ export function addCreatedIssueToCommit(
   if (!ctx.createdIn || ctx.createdIn !== ctx.activeCwd) return { status: "otherRepo" };
   const repo = repoSlugFromUrl(issue.url) ?? issue.repo;
   const ref = issueRef(issue.number, repo, ctx.pushRepo);
-  // Already cited in any form: `#N`, `owner/repo#N` or the issue's URL.
-  const forms = [ref, repo ? `${repo}#${issue.number}` : null, issue.url || null].filter((f): f is string => !!f);
+  // Already cited in any form: `#N`, `owner/repo#N` or the issue's URL; a bare
+  // `#N` counts unless it is known to name the pushed repository's issue.
+  const bare = !ctx.pushRepo || ref === `#${issue.number}` ? `#${issue.number}` : null;
+  const forms = [ref, bare, repo ? `${repo}#${issue.number}` : null, issue.url || null].filter((f): f is string => !!f);
   if (forms.some((f) => hasRef(ctx.summary, f) || hasRef(ctx.description, f))) return { status: "alreadyCited" };
-  return { status: "added", description: appendRef(ctx.description, ref, ctx.summary) };
+  return { status: "added", description: appendRef(ctx.description, ref) };
 }

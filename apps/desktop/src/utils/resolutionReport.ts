@@ -13,6 +13,7 @@
  */
 import type { ConflictHunk, HunkResolution } from "@gitwand/core";
 import { codeBlock, codeSpan, cutUtf16, issueTitle, type IssuePrefill } from "./issuePrefill";
+import { escapeRegExp } from "./escapeRegExp";
 
 /** Which proposal panel the report comes from. */
 export type ProposalKind = "engine" | "ai" | "token";
@@ -172,8 +173,7 @@ function scrubberFor(path: string): Scrub {
   const stem = name.split(".")[0] ?? "";
   const stems = stem.length > 2 && !GENERIC_FOLDERS.has(stem.toLowerCase()) ? [stem] : [];
   const secrets = [...new Set([path, name, ...folders, ...stems])].filter((x) => x.length > 1).sort((a, b) => b.length - a.length);
-  const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = secrets.length ? new RegExp(`(?<![\\w-])(?:${secrets.map(escape).join("|")})(?![\\w-])`, "gi") : null;
+  const pattern = secrets.length ? new RegExp(`(?<![\\w-])(?:${secrets.map(escapeRegExp).join("|")})(?![\\w-])`, "gi") : null;
   const scrub: Scrub = (text) => {
     // A glob may hold parentheses: drop up to the line's last one (and the
     // whole rest of the line when it has none). Saying too little is safe.
