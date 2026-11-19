@@ -679,10 +679,284 @@ pub(crate) async fn gh_list_assignees(
     .map_err(|e| e.to_string())?
 }
 
+// ─── Issue templates (#301, part 5) ─────────────────────────
+
+/// One template file of a target, as read: the frontend parses it.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub(crate) struct TemplateFile {
+    pub(crate) path: String,
+    pub(crate) content: String,
+}
+
+/// A target's template files and the repository they were read from (the
+/// target itself, or its owner's `.github` repository).
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub(crate) struct IssueTemplateFiles {
+    pub(crate) source: String,
+    pub(crate) files: Vec<TemplateFile>,
+}
+
+const TEMPLATE_DIR: &str = ".github/ISSUE_TEMPLATE";
+/// GitHub's single-template locations, tried when the directory has none.
+const SINGLE_TEMPLATES: [&str; 3] = [
+    ".github/ISSUE_TEMPLATE.md",
+    "ISSUE_TEMPLATE.md",
+    "docs/ISSUE_TEMPLATE.md",
+];
+const MAX_TEMPLATES: usize = 20;
+const MAX_TEMPLATE_BYTES: u64 = 65_536;
+
+/// `GET repos/{nwo}/contents/{path}`: `Ok(None)` when it is not there.
+type ContentsGet<'a> = &'a dyn Fn(&str, &str) -> Result<Option<serde_json::Value>, String>;
+
+/// A contents API file's text (its base64 is wrapped by GitHub).
+fn decode_content(v: &serde_json::Value) -> Option<String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let b64: String = v
+        .get("content")?
+        .as_str()?
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    String::from_utf8(STANDARD.decode(b64).ok()?).ok()
+}
+
+fn small_enough(v: &serde_json::Value) -> bool {
+    v.get("size")
+        .and_then(|s| s.as_u64())
+        .is_some_and(|s| s <= MAX_TEMPLATE_BYTES)
+}
+
+/// The template files of one repository: the directory's `.md`/`.yml`/`.yaml`
+/// (20 at most, by name, plus `config.yml`), else a single-template file.
+fn templates_in(nwo: &str, get: ContentsGet) -> Result<Vec<TemplateFile>, String> {
+    if let Some(serde_json::Value::Array(items)) = get(nwo, TEMPLATE_DIR)? {
+        let mut named: Vec<(String, String)> = items
+            .iter()
+            .filter(|i| i.get("type").and_then(|t| t.as_str()) == Some("file"))
+            .filter(|i| small_enough(i))
+            .filter_map(|i| {
+                let name = i.get("name")?.as_str()?.to_string();
+                let path = i.get("path")?.as_str()?.to_string();
+                let lower = name.to_ascii_lowercase();
+                [".md", ".yml", ".yaml"]
+                    .iter()
+                    .any(|ext| lower.ends_with(ext))
+                    .then_some((name, path))
+            })
+            .collect();
+        named.sort();
+        let is_config = |n: &str| {
+            matches!(
+                n.to_ascii_lowercase().as_str(),
+                "config.yml" | "config.yaml"
+            )
+        };
+        let mut kept: Vec<(String, String)> = named
+            .iter()
+            .filter(|(n, _)| is_config(n))
+            .cloned()
+            .collect();
+        kept.extend(
+            named
+                .iter()
+                .filter(|(n, _)| !is_config(n))
+                .take(MAX_TEMPLATES)
+                .cloned(),
+        );
+        kept.sort();
+        let mut files = Vec::new();
+        for (_, path) in kept {
+            if let Some(content) = get(nwo, &path)?.as_ref().and_then(decode_content) {
+                files.push(TemplateFile { path, content });
+            }
+        }
+        if !files.is_empty() {
+            return Ok(files);
+        }
+    }
+    for path in SINGLE_TEMPLATES {
+        if let Some(v) = get(nwo, path)? {
+            if let Some(content) = small_enough(&v).then(|| decode_content(&v)).flatten() {
+                return Ok(vec![TemplateFile {
+                    path: path.to_string(),
+                    content,
+                }]);
+            }
+        }
+    }
+    Ok(Vec::new())
+}
+
+/// The templates of `nwo`, else of its owner's `.github` repository (GitHub's
+/// default community health files); none is an empty list, not an error.
+pub(crate) fn template_files(nwo: &str, get: ContentsGet) -> Result<IssueTemplateFiles, String> {
+    let own = templates_in(nwo, get)?;
+    if !own.is_empty() {
+        return Ok(IssueTemplateFiles {
+            source: nwo.to_string(),
+            files: own,
+        });
+    }
+    if let Some(owner) = nwo.split('/').next() {
+        let org = format!("{owner}/.github");
+        if !org.eq_ignore_ascii_case(nwo) {
+            let files = templates_in(&org, get)?;
+            if !files.is_empty() {
+                return Ok(IssueTemplateFiles { source: org, files });
+            }
+        }
+    }
+    Ok(IssueTemplateFiles {
+        source: nwo.to_string(),
+        files: Vec::new(),
+    })
+}
+
+/// The issue templates of a target (#301): what its blank form offers.
+#[tauri::command]
+pub(crate) async fn gh_issue_templates(
+    cwd: String,
+    repo: String,
+) -> Result<IssueTemplateFiles, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = issue_token();
+        let token = token.as_deref();
+        let r = resolve_issue_target(&cwd, &repo, false, token)?;
+        let get = |nwo: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
+            let on = r.sibling(nwo.to_string());
+            match api_get(&cwd, token, &on, &format!("repos/{nwo}/contents/{path}")) {
+                Ok(v) => Ok(Some(v)),
+                Err(e) if e.contains("404") || e.contains("Not Found") => Ok(None),
+                Err(e) => Err(e),
+            }
+        };
+        template_files(&r.nwo, &get)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A fake contents API: `(nwo, path)` → JSON, absent → 404.
+    fn fake(
+        entries: Vec<(&str, &str, serde_json::Value)>,
+    ) -> impl Fn(&str, &str) -> Result<Option<serde_json::Value>, String> {
+        let map: HashMap<(String, String), serde_json::Value> = entries
+            .into_iter()
+            .map(|(r, p, v)| ((r.to_string(), p.to_string()), v))
+            .collect();
+        move |nwo: &str, path: &str| Ok(map.get(&(nwo.to_string(), path.to_string())).cloned())
+    }
+
+    fn file(content: &str) -> serde_json::Value {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        // GitHub wraps the base64 at 60 columns.
+        let b64 = STANDARD.encode(content);
+        let wrapped: Vec<String> = b64
+            .as_bytes()
+            .chunks(60)
+            .map(|c| String::from_utf8_lossy(c).into_owned())
+            .collect();
+        json!({ "encoding": "base64", "content": wrapped.join("\n"), "size": content.len() })
+    }
+
+    fn entry(name: &str, size: usize) -> serde_json::Value {
+        json!({ "name": name, "path": format!(".github/ISSUE_TEMPLATE/{name}"), "type": "file", "size": size })
+    }
+
+    #[test]
+    fn templates_are_read_from_the_template_directory_sorted_and_capped() {
+        let mut dir: Vec<serde_json::Value> = (0..22)
+            .rev()
+            .map(|i| entry(&format!("t{i:02}.md"), 10))
+            .collect();
+        dir.push(entry("config.yml", 10));
+        dir.push(entry("notes.txt", 10));
+        let mut entries = vec![("me/app", ".github/ISSUE_TEMPLATE", json!(dir))];
+        let names: Vec<String> = (0..22)
+            .map(|i| format!(".github/ISSUE_TEMPLATE/t{i:02}.md"))
+            .collect();
+        for n in &names {
+            entries.push(("me/app", n.as_str(), file("body")));
+        }
+        entries.push((
+            "me/app",
+            ".github/ISSUE_TEMPLATE/config.yml",
+            file("blank_issues_enabled: false"),
+        ));
+        let got = template_files("me/app", &fake(entries)).unwrap();
+        assert_eq!(got.source, "me/app");
+        let paths: Vec<&str> = got.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths.len(), 21);
+        assert_eq!(paths[0], ".github/ISSUE_TEMPLATE/config.yml");
+        assert_eq!(paths[1], ".github/ISSUE_TEMPLATE/t00.md");
+        assert_eq!(paths[20], ".github/ISSUE_TEMPLATE/t19.md");
+        assert!(!paths.iter().any(|p| p.ends_with(".txt")));
+        assert_eq!(got.files[1].content, "body");
+    }
+
+    #[test]
+    fn a_file_over_64_kib_is_skipped() {
+        let dir = json!([entry("big.md", 65_537), entry("ok.yml", 10)]);
+        let got = template_files(
+            "me/app",
+            &fake(vec![
+                ("me/app", ".github/ISSUE_TEMPLATE", dir),
+                ("me/app", ".github/ISSUE_TEMPLATE/ok.yml", file("name: ok")),
+            ]),
+        )
+        .unwrap();
+        let paths: Vec<&str> = got.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec![".github/ISSUE_TEMPLATE/ok.yml"]);
+    }
+
+    #[test]
+    fn falls_back_to_the_single_template_files_then_the_owner_dot_github_repo() {
+        let single = template_files(
+            "me/app",
+            &fake(vec![("me/app", "docs/ISSUE_TEMPLATE.md", file("legacy"))]),
+        )
+        .unwrap();
+        assert_eq!(single.source, "me/app");
+        assert_eq!(single.files[0].path, "docs/ISSUE_TEMPLATE.md");
+        let org = template_files(
+            "me/app",
+            &fake(vec![
+                (
+                    "me/.github",
+                    ".github/ISSUE_TEMPLATE",
+                    json!([entry("bug.yml", 10)]),
+                ),
+                (
+                    "me/.github",
+                    ".github/ISSUE_TEMPLATE/bug.yml",
+                    file("name: Bug"),
+                ),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(org.source, "me/.github");
+        assert_eq!(org.files[0].content, "name: Bug");
+    }
+
+    #[test]
+    fn nothing_anywhere_is_an_empty_list() {
+        let got = template_files("me/app", &fake(vec![])).unwrap();
+        assert!(got.files.is_empty());
+    }
+
+    #[test]
+    fn a_non_404_error_fails_the_read() {
+        let failing = |_: &str, _: &str| -> Result<Option<serde_json::Value>, String> {
+            Err("GitHub API error (502): Bad gateway".into())
+        };
+        assert!(template_files("me/app", &failing).is_err());
+    }
 
     #[test]
     fn a_refused_token_falls_back_to_gh() {
