@@ -2697,6 +2697,7 @@ const zhCN: Locale = {
 
   createIssue: {
     template: {
+      loading: "正在查找此仓库的 issue 模板…",
       label: "模板",
       blank: "空白 issue",
       expectsTemplate: "此仓库希望 issue 从模板开始。",

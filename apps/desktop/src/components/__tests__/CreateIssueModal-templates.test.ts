@@ -2,10 +2,10 @@
 /**
  * CreateIssueModal — the "Template" row of a blank form (#301, part 5).
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { createApp, nextTick, ref, type App } from "vue";
 import CreateIssueModal from "../CreateIssueModal.vue";
-import { CREATE_ISSUE_KEY, useCreateIssue } from "../../composables/useCreateIssue";
+import { CREATE_ISSUE_KEY, useCreateIssue, clearTemplateCache } from "../../composables/useCreateIssue";
 import type { ForgeProvider } from "../../composables/forge/types";
 
 vi.mock("../../composables/useI18n", () => ({
@@ -17,10 +17,11 @@ const BUG = "---\nname: Bug\nabout: It broke\ntitle: '[Bug] '\n---\n## Steps\n";
 const CONFIG = "blank_issues_enabled: false\ncontact_links:\n  - name: Discussions\n    url: https://github.com/me/app/discussions\n    about: Ask here\n";
 
 let app: App | null = null;
+beforeEach(() => clearTemplateCache());
 afterEach(() => { app?.unmount(); app = null; document.body.innerHTML = ""; });
 const flush = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); await nextTick(); };
 
-async function mount(files: { path: string; content: string }[], opts: { confirm?: boolean; prefill?: boolean } = {}) {
+async function mount(files: { path: string; content: string }[] | (() => Promise<{ path: string; content: string }[]>), opts: { confirm?: boolean; prefill?: boolean } = {}) {
   const provider = {
     name: "github",
     issueAvailable: vi.fn(async () => true),
@@ -31,7 +32,7 @@ async function mount(files: { path: string; content: string }[], opts: { confirm
     createIssue: vi.fn(),
   } as unknown as ForgeProvider;
   const askConfirm = vi.fn(async () => opts.confirm ?? true);
-  const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: async () => files });
+  const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: async () => (typeof files === "function" ? files() : files) });
   const host = document.createElement("div");
   document.body.appendChild(host);
   app = createApp(CreateIssueModal);
@@ -80,6 +81,11 @@ describe("CreateIssueModal — templates", () => {
     expect(document.body.textContent).toContain("createIssue.template.expectsTemplate");
     const link = document.querySelector<HTMLAnchorElement>('[data-testid="ci-contact-link"]');
     expect(link?.textContent).toContain("Discussions");
+  });
+
+  it("says templates are loading meanwhile", async () => {
+    await mount(() => new Promise(() => {}));
+    expect(document.body.textContent).toContain("createIssue.template.loading");
   });
 
   it("no row without templates, nor in a prefilled form", async () => {

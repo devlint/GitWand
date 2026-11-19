@@ -5613,7 +5613,13 @@ async function handleRequest(req, res) {
           if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
           return resp.json();
         };
-        return jsonResponse(req, res, await devTemplateFiles(target.repo, get));
+        const isPublic = async (nwo) => {
+          const resp = await githubFetch(`/repos/${nwo}`, token);
+          if (resp.status === 404) return false;
+          if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+          return (await resp.json())?.private === false;
+        };
+        return jsonResponse(req, res, await devTemplateFiles(target.repo, isPublic, get));
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);
       }

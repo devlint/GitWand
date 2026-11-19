@@ -128,8 +128,10 @@ async function onSwitch(e: Event) {
 }
 
 /** The target's templates (a blank form only). */
-const templates = computed(() => (form.blankForm.value ? form.templateSet.value?.templates ?? [] : []));
-const contactLinks = computed(() => (form.blankForm.value ? form.templateSet.value?.contactLinks ?? [] : []));
+/** A blank form's own: never a report's (a template would replace it). */
+const offersTemplates = computed(() => form.blankForm.value && !form.report.value);
+const templates = computed(() => (offersTemplates.value ? form.templateSet.value?.templates ?? [] : []));
+const contactLinks = computed(() => (offersTemplates.value ? form.templateSet.value?.contactLinks ?? [] : []));
 const blankAllowed = computed(() => form.templateSet.value?.blankAllowed ?? true);
 
 /** A template chosen: confirm first when the title or description was edited. */
@@ -257,6 +259,9 @@ function onMilestone(e: Event) {
           </label>
         </fieldset>
 
+        <p v-if="offersTemplates && form.templatesLoading.value && !form.templateSet.value" class="ci-status">
+          {{ t("createIssue.template.loading") }}
+        </p>
         <div v-if="templates.length || contactLinks.length" class="ci-group" data-testid="ci-templates">
           <label v-if="templates.length" class="ci-label" for="ci-template">{{ t("createIssue.template.label") }}</label>
           <select

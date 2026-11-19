@@ -2727,6 +2727,7 @@ const en = {
 
   createIssue: {
     template: {
+      loading: "Looking for this repository's issue templates…",
       label: "Template",
       blank: "Blank issue",
       expectsTemplate: "This repository expects issues to start from a template.",

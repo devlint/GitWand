@@ -185,6 +185,14 @@ export interface CreateIssueApi {
   applyTemplate(id: string | null): void;
 }
 
+/** How long a target's templates are kept (each read is up to 20 requests). */
+const TEMPLATE_CACHE_MS = 5 * 60_000;
+const templateCache = new Map<string, { at: number; set: IssueTemplateSet }>();
+/** Forget the cached templates (tests). */
+export function clearTemplateCache(): void {
+  templateCache.clear();
+}
+
 /** GitWand's own repository, where resolver reports go (mirrors Rust `GITWAND_REPO`). */
 export const GITWAND_REPO = "devlint/GitWand";
 
@@ -455,10 +463,20 @@ export function useCreateIssue(deps: {
     p.listAssignees?.(cwd, target).then((v) => { if (current()) assigneeOptions.value = v; }, () => {});
   }
 
-  /** The target's templates, for a blank form; a late answer for another target is dropped. */
+  /**
+   * The target's templates, for a blank form; kept a few minutes per target
+   * (each read is up to 20 requests). A late answer for another target is
+   * dropped.
+   */
   function loadTemplates(target: string) {
     const cwd = formCwd;
     if (!blankForm.value || !cwd) return;
+    const key = `${cwd}\u0000${target}`;
+    const cached = templateCache.get(key);
+    if (cached && Date.now() - cached.at < TEMPLATE_CACHE_MS) {
+      templateSet.value = cached.set;
+      return;
+    }
     const gen = generation;
     const current = () => gen === generation && repo.value === target;
     templateSet.value = null;
@@ -466,11 +484,32 @@ export function useCreateIssue(deps: {
     readTemplates(cwd, target)
       .then((files) => loadTemplateSet(files))
       .then(
-        (set) => { if (current()) templateSet.value = set; },
+        (set) => {
+          templateCache.set(key, { at: Date.now(), set });
+          if (current()) templateSet.value = set;
+        },
         () => {}, // No templates is a blank form, never an error.
       )
       .finally(() => { if (current()) templatesLoading.value = false; });
   }
+
+  /** What the applied template asked for, offered or not yet (the pickers load meanwhile). */
+  let templateWants: { labels: string[]; assignees: string[] } = { labels: [], assignees: [] };
+
+  /** Add what the template wants that the target now offers (the pickers arrive late). */
+  function grantTemplateWants() {
+    const offeredLabels = new Set(labelOptions.value.map((l) => l.name));
+    const offeredPeople = new Set(assigneeOptions.value.map((a) => a.login));
+    const add = (have: string[], want: string[], offered: Set<string>) => [
+      ...have,
+      ...want.filter((x) => offered.has(x) && !have.includes(x)),
+    ];
+    labels.value = add(labels.value, templateWants.labels, offeredLabels);
+    assignees.value = add(assignees.value, templateWants.assignees, offeredPeople);
+  }
+  watch([labelOptions, assigneeOptions], () => {
+    if (templateWants.labels.length || templateWants.assignees.length) grantTemplateWants();
+  });
 
   function applyTemplate(id: string | null) {
     const chosen = id === null ? null : templateSet.value?.templates.find((x) => x.id === id) ?? null;
@@ -478,11 +517,13 @@ export function useCreateIssue(deps: {
     templateId.value = chosen ? chosen.id : null;
     title.value = chosen?.title ?? "";
     body.value = chosen?.body ?? "";
-    // Only what the target offers: GitHub refuses unknown labels and people.
-    const offeredLabels = new Set(labelOptions.value.map((l) => l.name));
-    const offeredPeople = new Set(assigneeOptions.value.map((a) => a.login));
-    labels.value = (chosen?.labels ?? []).filter((l) => offeredLabels.has(l));
-    assignees.value = (chosen?.assignees ?? []).filter((a) => offeredPeople.has(a));
+    // The previous template's labels and people go; those picked by hand stay.
+    labels.value = labels.value.filter((l) => !templateWants.labels.includes(l));
+    assignees.value = assignees.value.filter((a) => !templateWants.assignees.includes(a));
+    templateWants = { labels: chosen?.labels ?? [], assignees: chosen?.assignees ?? [] };
+    // Only what the target offers (GitHub refuses unknown labels and people),
+    // now or once its pickers arrive.
+    grantTemplateWants();
     // The template's text is the new starting point: editing it is what asks.
     initial.value = { title: title.value, body: body.value };
   }
@@ -517,6 +558,7 @@ export function useCreateIssue(deps: {
     templateSet.value = null;
     templatesLoading.value = false;
     templateId.value = null;
+    templateWants = { labels: [], assignees: [] };
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = DEFAULT_SECRETS_OPTIONS;
@@ -527,13 +569,14 @@ export function useCreateIssue(deps: {
 
   async function open(
     prefill?: IssuePrefill | ((originHtmlUrl: string | null) => Promise<IssuePrefill>),
+    opts: { templates?: boolean } = {},
   ): Promise<boolean> {
     // Already open (⌘⇧I again, the palette): never wipe what is being typed,
     // nor drop the answer of a create in flight.
     if (isOpen.value) return false;
     reset();
     // Templates are for a blank form; a commit's, lines' or report's keeps its own.
-    blankForm.value = prefill === undefined;
+    blankForm.value = prefill === undefined && opts.templates !== false;
     const gen = generation;
     const openGen = openGeneration;
     formCwd = deps.cwd.value;
@@ -719,7 +762,8 @@ export function useCreateIssue(deps: {
     if (!reportAvailable.value || !makeRoom()) return;
     // False when the form was closed (or reopened) while its targets loaded:
     // the report must not attach to whatever form is on screen now.
-    if (!(await open())) return;
+    // A report is not a blank form: no templates (one would replace it).
+    if (!(await open(undefined, { templates: false }))) return;
     const openGen = openGeneration;
     report.value = r;
     // The repository's targets could not be read: a report can still go to

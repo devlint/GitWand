@@ -53,7 +53,7 @@ function baseName(path: string): string {
 
 /** Text inside an HTML comment, which must never close it early. */
 function comment(text: string): string {
-  return `<!-- ${text.trim().replace(/-->/g, "-- >")} -->`;
+  return `<!-- ${text.trim().replace(/--!?>/g, "-- >")} -->`;
 }
 
 /** An issue form's `body`, as the Markdown GitHub would file from it. */
@@ -63,7 +63,10 @@ export function flattenForm(body: unknown[]): string {
     if (!isObj(item)) continue;
     const a = isObj(item.attributes) ? item.attributes : {};
     const required = isObj(item.validations) && item.validations.required === true;
-    const heading = `### ${str(a.label).trim()}${required ? " *" : ""}`;
+    const label = str(a.label).trim();
+    // A field with no label gets no heading (never a bare `### `).
+    const heading = label ? `### ${label}${required ? " *" : ""}` : "";
+    const section = (content: string) => [heading, content].filter(Boolean).join("\n\n");
     switch (item.type) {
       case "markdown": {
         const value = str(a.value).trim();
@@ -75,20 +78,23 @@ export function flattenForm(body: unknown[]): string {
         const value = str(a.value);
         const render = item.type === "textarea" ? str(a.render).trim() : "";
         const placeholder = str(a.placeholder).trim();
-        const content = value.trim() ? value.replace(/\s+$/, "") : render ? `\`\`\`${render}\n\n\`\`\`` : placeholder ? comment(placeholder) : "";
-        sections.push(content ? `${heading}\n\n${content}` : heading);
+        const text = value.replace(/\s+$/, "");
+        // A rendered field is fenced, its value included, as GitHub files it.
+        const content = render ? `\`\`\`${render}\n${text ? `${text}\n` : "\n"}\`\`\`` : text.trim() ? text : placeholder ? comment(placeholder) : "";
+        if (heading || content) sections.push(section(content));
         break;
       }
       case "dropdown": {
         const options = Array.isArray(a.options) ? a.options.map(str).filter(Boolean) : [];
         const chosen = typeof a.default === "number" ? options[a.default] : undefined;
         const content = chosen ?? (options.length ? comment(`one of: ${options.join(", ")}`) : "");
-        sections.push(content ? `${heading}\n\n${content}` : heading);
+        if (heading || content) sections.push(section(content));
         break;
       }
       case "checkboxes": {
         const options = Array.isArray(a.options) ? a.options.map((o) => (isObj(o) ? str(o.label) : str(o))).filter(Boolean) : [];
-        sections.push(options.length ? `${heading}\n\n${options.map((o) => `- [ ] ${o}`).join("\n")}` : heading);
+        const content = options.map((o) => `- [ ] ${o}`).join("\n");
+        if (heading || content) sections.push(section(content));
         break;
       }
     }
@@ -96,13 +102,15 @@ export function flattenForm(body: unknown[]): string {
   return sections.length ? `${sections.join("\n\n")}\n` : "";
 }
 
-const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+/** A front matter, possibly empty (`---\n---`). */
+const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 
-function markdownTemplate(path: string, content: string, parseYaml: ParseYaml): IssueTemplate | null {
+function markdownTemplate(path: string, raw: string, parseYaml: ParseYaml): IssueTemplate | null {
+  const content = raw.replace(/^\uFEFF/, ""); // a BOM before the front matter
   const m = FRONT_MATTER.exec(content);
   let meta: Obj = {};
   if (m) {
-    const parsed = parseYaml(m[1]);
+    const parsed = m[1] === undefined ? null : parseYaml(m[1]);
     if (parsed !== null && parsed !== undefined && !isObj(parsed)) return null;
     meta = parsed ?? {};
   }

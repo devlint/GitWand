@@ -1,15 +1,18 @@
 /**
  * useCreateIssue — issue templates (#301, part 5).
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ref } from "vue";
-import { useCreateIssue } from "../useCreateIssue";
+import { useCreateIssue, clearTemplateCache } from "../useCreateIssue";
+import type { ConflictHunk } from "@gitwand/core";
 import type { ForgeProvider } from "../forge/types";
 
 const ORIGIN = { repo: "me/app", htmlUrl: "https://github.com/me/app", hasIssues: true, isOrigin: true, canTriage: true };
 const PARENT = { repo: "up/app", htmlUrl: "https://github.com/up/app", hasIssues: true, isOrigin: false, canTriage: true };
 const flush = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); };
 const BUG = "---\nname: Bug\nabout: It broke\ntitle: '[Bug] '\nlabels: bug, nope\nassignees: alice, ghost\n---\n## Steps\n";
+
+beforeEach(() => clearTemplateCache());
 
 function setup(files: Record<string, { path: string; content: string }[] | (() => Promise<{ path: string; content: string }[]>)> = {}) {
   const provider = {
@@ -18,15 +21,27 @@ function setup(files: Record<string, { path: string; content: string }[] | (() =
     issueTargets: vi.fn(async () => ({ targets: [ORIGIN, PARENT], defaultRepo: "me/app" })),
     listLabels: vi.fn(async () => [{ name: "bug", color: "f00", description: null }]),
     listMilestones: vi.fn(async () => []),
-    listAssignees: vi.fn(async () => [{ login: "alice", name: null, avatarUrl: null }]),
+    listAssignees: vi.fn(async () => [{ login: "alice", name: null, avatarUrl: null }, { login: "bob", name: null, avatarUrl: null }]),
     createIssue: vi.fn(),
   } as unknown as ForgeProvider;
   const issueTemplates = vi.fn(async (_cwd: string, repo: string) => {
     const f = files[repo] ?? [];
     return typeof f === "function" ? f() : f;
   });
-  const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates });
-  return { form, issueTemplates };
+  const form = useCreateIssue({
+    cwd: ref("/repo"),
+    provider: ref(provider),
+    onCreated: vi.fn(),
+    issueTemplates,
+    report: {
+      createGitwandIssue: vi.fn(),
+      gitwandWritable: async () => true,
+      env: () => ({ version: "1", platform: "macOS" }),
+      secretsOptions: async () => ({ extraPatterns: [], entropyThreshold: 4 }),
+      scanDebounceMs: 0,
+    },
+  });
+  return { form, issueTemplates, provider };
 }
 
 describe("useCreateIssue — issue templates", () => {
@@ -92,5 +107,58 @@ describe("useCreateIssue — issue templates", () => {
     await flush();
     expect(form.templateSet.value).toBeNull();
     expect(form.error.value).toBeNull();
+  });
+});
+
+describe("useCreateIssue — templates, review follow-ups", () => {
+  it("a resolution report never offers templates", async () => {
+    const { form, issueTemplates } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.openFromResolution({
+      kind: "engine",
+      path: "a.ts",
+      hunk: { baseLines: ["a"], oursLines: ["b"], theirsLines: ["c"], startLine: 1, type: "non_overlapping", confidence: { score: 90, label: "high", dimensions: {}, boosters: [], penalties: [] }, explanation: "e", trace: { steps: [], selected: "non_overlapping", summary: "s", hasBase: true } } as unknown as ConflictHunk,
+      resolvedLines: ["bc"],
+    });
+    await flush();
+    expect(form.blankForm.value).toBe(false);
+    expect(issueTemplates).not.toHaveBeenCalled();
+  });
+
+  it("hand-picked labels and assignees stay; a template adds its own and takes them back", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.open();
+    await flush();
+    form.labels.value = ["ui"];
+    form.assignees.value = ["bob"];
+    form.applyTemplate("a.md");
+    expect(form.labels.value).toEqual(["ui", "bug"]);
+    expect(form.assignees.value).toEqual(["bob", "alice"]);
+    form.applyTemplate(null);
+    expect(form.labels.value).toEqual(["ui"]);
+    expect(form.assignees.value).toEqual(["bob"]);
+  });
+
+  it("a template picked before the pickers loaded gets its labels once they arrive", async () => {
+    let labelsArrive!: (v: unknown) => void;
+    const { form, provider } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    (provider.listLabels as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((r) => { labelsArrive = r; }));
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    expect(form.labels.value).toEqual([]);
+    labelsArrive([{ name: "bug", color: "f00", description: null }]);
+    await flush();
+    expect(form.labels.value).toEqual(["bug"]);
+  });
+
+  it("templates are kept a few minutes per target: a second blank form reads none", async () => {
+    const { form, issueTemplates } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.open();
+    await flush();
+    form.close();
+    await form.open();
+    await flush();
+    expect(issueTemplates).toHaveBeenCalledTimes(1);
+    expect(form.templateSet.value?.templates).toHaveLength(1);
   });
 });

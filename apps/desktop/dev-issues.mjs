@@ -139,11 +139,16 @@ const MAX_TEMPLATE_BYTES = 65_536;
 function decodeContent(v) {
   if (typeof v?.content !== "string") return null;
   try {
-    return Buffer.from(v.content.replace(/\s+/g, ""), "base64").toString("utf8");
+    // Fatal: a file that is not UTF-8 is skipped, as Rust's from_utf8 does.
+    return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(v.content.replace(/\s+/g, ""), "base64"));
   } catch {
     return null;
   }
 }
+
+/** Each segment percent-encoded as Rust's `encode_path` (unreserved kept). */
+const encodePath = (path) =>
+  path.split("/").map((seg) => [...Buffer.from(seg, "utf8")].map((b) => (/[A-Za-z0-9\-._~]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, "0")}`)).join("")).join("/");
 const smallEnough = (v) => typeof v?.size === "number" && v.size <= MAX_TEMPLATE_BYTES;
 const isConfig = (n) => ["config.yml", "config.yaml"].includes(n.toLowerCase());
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -158,11 +163,12 @@ async function templatesIn(nwo, get) {
       .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
     const kept = [...named.filter(([n]) => isConfig(n)), ...named.filter(([n]) => !isConfig(n)).slice(0, MAX_TEMPLATES)]
       .sort((a, b) => cmp(a[0], b[0]) || cmp(a[1], b[1]));
-    const files = [];
-    for (const [, path] of kept) {
-      const content = decodeContent(await get(nwo, path));
-      if (content !== null) files.push({ path, content });
-    }
+    // In parallel; a file that cannot be read is skipped.
+    const read = await Promise.all(kept.map(async ([, path]) => {
+      const content = decodeContent(await get(nwo, encodePath(path)).catch(() => null));
+      return content === null ? null : { path, content };
+    }));
+    const files = read.filter(Boolean);
     if (files.length) return files;
   }
   for (const path of SINGLE_TEMPLATES) {
@@ -178,14 +184,16 @@ async function templatesIn(nwo, get) {
 /**
  * A target's issue template files, as `gh_issue_templates` reads them: the
  * template directory, else a single-template file, else the same in the
- * owner's `.github` repository. `get(nwo, path)` resolves `null` on a 404.
+ * owner's public `.github` repository. `get(nwo, path)` resolves `null` on a
+ * 404; `isPublic(nwo)` whether a repository is public.
  */
-export async function devTemplateFiles(nwo, get) {
+export async function devTemplateFiles(nwo, isPublic, get) {
   const own = await templatesIn(nwo, get);
   if (own.length) return { source: nwo, files: own };
   const owner = nwo.split("/")[0];
   const org = `${owner}/.github`;
-  if (org.toLowerCase() !== nwo.toLowerCase()) {
+  // GitHub only uses a public `.github` repository.
+  if (org.toLowerCase() !== nwo.toLowerCase() && (await isPublic(org))) {
     const files = await templatesIn(org, get);
     if (files.length) return { source: org, files };
   }

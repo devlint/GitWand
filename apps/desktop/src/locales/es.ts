@@ -2687,6 +2687,7 @@ const es: Locale = {
 
   createIssue: {
     template: {
+      loading: "Buscando las plantillas de issue de este repositorio…",
       label: "Plantilla",
       blank: "Issue en blanco",
       expectsTemplate: "Este repositorio espera que las issues partan de una plantilla.",

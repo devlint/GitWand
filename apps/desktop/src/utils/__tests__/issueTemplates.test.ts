@@ -17,6 +17,14 @@ describe("parseTemplateSet — Markdown templates", () => {
     ]);
   });
 
+  it("a leading BOM or an empty front matter is still a front matter", () => {
+    const set = parseTemplateSet([
+      { path: dir("a.md"), content: "\uFEFF---\nname: A\n---\nbody A" },
+      { path: dir("b.md"), content: "---\n---\nbody B" },
+    ], parse);
+    expect(set.templates.map((t) => [t.name, t.body])).toEqual([["A", "body A"], ["b", "body B"]]);
+  });
+
   it("a template without front matter is named after its file", () => {
     const set = parseTemplateSet([{ path: "docs/ISSUE_TEMPLATE.md", content: "Describe it.\n" }], parse);
     expect(set.templates[0]).toMatchObject({ name: "ISSUE_TEMPLATE", about: "", title: "", labels: [], assignees: [], body: "Describe it.\n" });
@@ -44,6 +52,14 @@ describe("flattenForm", () => {
       "### Version\n\n3.13\n\n" +
       "### Logs\n\n```shell\n\n```\n",
     );
+  });
+
+  it("never closes a comment early, fences a rendered value, and skips an empty label's heading", () => {
+    expect(flattenForm([
+      { type: "markdown", attributes: { value: "a --> b --!> c" } },
+      { type: "textarea", attributes: { label: "Logs", render: "shell", value: "ls -la" } },
+      { type: "input", attributes: { label: "", value: "x" } },
+    ])).toBe("<!-- a -- > b -- > c -->\n\n### Logs\n\n```shell\nls -la\n```\n\nx\n");
   });
 
   it("dropdowns give their default or the choices; checkboxes a task list", () => {

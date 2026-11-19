@@ -706,8 +706,35 @@ const SINGLE_TEMPLATES: [&str; 3] = [
 const MAX_TEMPLATES: usize = 20;
 const MAX_TEMPLATE_BYTES: u64 = 65_536;
 
-/// `GET repos/{nwo}/contents/{path}`: `Ok(None)` when it is not there.
-type ContentsGet<'a> = &'a dyn Fn(&str, &str) -> Result<Option<serde_json::Value>, String>;
+/// `GET repos/{nwo}/contents/{path}` (`path` percent-encoded): `Ok(None)`
+/// when it is not there. `Sync`: the files are read in parallel.
+type ContentsGet<'a> = &'a (dyn Fn(&str, &str) -> Result<Option<serde_json::Value>, String> + Sync);
+/// Whether a repository is public (GitHub only uses a public `.github` one).
+type IsPublic<'a> = &'a (dyn Fn(&str) -> Result<bool, String> + Sync);
+
+/// A GitHub error that means "not there" (REST: `(404)`, gh: `HTTP 404`), and
+/// not a failure that merely mentions 404 (a repository named `error-404`).
+pub(crate) fn is_not_found(e: &str) -> bool {
+    e.contains("(404)") || e.contains("HTTP 404")
+}
+
+/// `path` with each segment percent-encoded: a file named `bug report.md` or
+/// `a[b].yml` is a valid URL (curl refuses spaces and treats `[]` as a glob).
+fn encode_path(path: &str) -> String {
+    path.split('/')
+        .map(|seg| {
+            seg.bytes()
+                .map(|b| match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                        (b as char).to_string()
+                    }
+                    _ => format!("%{b:02X}"),
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
 
 /// A contents API file's text (its base64 is wrapped by GitHub).
 fn decode_content(v: &serde_json::Value) -> Option<String> {
@@ -728,8 +755,10 @@ fn small_enough(v: &serde_json::Value) -> bool {
 }
 
 /// The template files of one repository: the directory's `.md`/`.yml`/`.yaml`
-/// (20 at most, by name, plus `config.yml`), else a single-template file.
+/// (20 at most, by name, plus `config.yml`), else a single-template file. A
+/// file that cannot be read is skipped; the directory listing failing fails.
 fn templates_in(nwo: &str, get: ContentsGet) -> Result<Vec<TemplateFile>, String> {
+    use rayon::prelude::*;
     if let Some(serde_json::Value::Array(items)) = get(nwo, TEMPLATE_DIR)? {
         let mut named: Vec<(String, String)> = items
             .iter()
@@ -765,12 +794,25 @@ fn templates_in(nwo: &str, get: ContentsGet) -> Result<Vec<TemplateFile>, String
                 .cloned(),
         );
         kept.sort();
-        let mut files = Vec::new();
-        for (_, path) in kept {
-            if let Some(content) = get(nwo, &path)?.as_ref().and_then(decode_content) {
-                files.push(TemplateFile { path, content });
-            }
-        }
+        // In parallel (up to 21 requests, each a `gh` spawn without a token),
+        // in name order.
+        let files: Vec<TemplateFile> = kept
+            .par_iter()
+            .map(|(_, path)| {
+                let content = get(nwo, &encode_path(path))
+                    .ok()
+                    .flatten()
+                    .as_ref()
+                    .and_then(decode_content)?;
+                Some(TemplateFile {
+                    path: path.clone(),
+                    content,
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
+            .collect();
         if !files.is_empty() {
             return Ok(files);
         }
@@ -788,9 +830,13 @@ fn templates_in(nwo: &str, get: ContentsGet) -> Result<Vec<TemplateFile>, String
     Ok(Vec::new())
 }
 
-/// The templates of `nwo`, else of its owner's `.github` repository (GitHub's
-/// default community health files); none is an empty list, not an error.
-pub(crate) fn template_files(nwo: &str, get: ContentsGet) -> Result<IssueTemplateFiles, String> {
+/// The templates of `nwo`, else of its owner's public `.github` repository
+/// (GitHub's default community health files); none is an empty list.
+pub(crate) fn template_files(
+    nwo: &str,
+    is_public: IsPublic,
+    get: ContentsGet,
+) -> Result<IssueTemplateFiles, String> {
     let own = templates_in(nwo, get)?;
     if !own.is_empty() {
         return Ok(IssueTemplateFiles {
@@ -800,7 +846,7 @@ pub(crate) fn template_files(nwo: &str, get: ContentsGet) -> Result<IssueTemplat
     }
     if let Some(owner) = nwo.split('/').next() {
         let org = format!("{owner}/.github");
-        if !org.eq_ignore_ascii_case(nwo) {
+        if !org.eq_ignore_ascii_case(nwo) && is_public(&org)? {
             let files = templates_in(&org, get)?;
             if !files.is_empty() {
                 return Ok(IssueTemplateFiles { source: org, files });
@@ -827,11 +873,19 @@ pub(crate) async fn gh_issue_templates(
             let on = r.sibling(nwo.to_string());
             match api_get(&cwd, token, &on, &format!("repos/{nwo}/contents/{path}")) {
                 Ok(v) => Ok(Some(v)),
-                Err(e) if e.contains("404") || e.contains("Not Found") => Ok(None),
+                Err(e) if is_not_found(&e) => Ok(None),
                 Err(e) => Err(e),
             }
         };
-        template_files(&r.nwo, &get)
+        let is_public = |nwo: &str| -> Result<bool, String> {
+            let on = r.sibling(nwo.to_string());
+            match api_get(&cwd, token, &on, &format!("repos/{nwo}")) {
+                Ok(v) => Ok(v.get("private").and_then(|p| p.as_bool()) == Some(false)),
+                Err(e) if is_not_found(&e) => Ok(false),
+                Err(e) => Err(e),
+            }
+        };
+        template_files(&r.nwo, &is_public, &get)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -852,6 +906,9 @@ mod tests {
             .collect();
         move |nwo: &str, path: &str| Ok(map.get(&(nwo.to_string(), path.to_string())).cloned())
     }
+
+    /// Every owner `.github` repository is public.
+    const PUBLIC: fn(&str) -> Result<bool, String> = |_| Ok(true);
 
     fn file(content: &str) -> serde_json::Value {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -889,7 +946,7 @@ mod tests {
             ".github/ISSUE_TEMPLATE/config.yml",
             file("blank_issues_enabled: false"),
         ));
-        let got = template_files("me/app", &fake(entries)).unwrap();
+        let got = template_files("me/app", &PUBLIC, &fake(entries)).unwrap();
         assert_eq!(got.source, "me/app");
         let paths: Vec<&str> = got.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths.len(), 21);
@@ -905,6 +962,7 @@ mod tests {
         let dir = json!([entry("big.md", 65_537), entry("ok.yml", 10)]);
         let got = template_files(
             "me/app",
+            &PUBLIC,
             &fake(vec![
                 ("me/app", ".github/ISSUE_TEMPLATE", dir),
                 ("me/app", ".github/ISSUE_TEMPLATE/ok.yml", file("name: ok")),
@@ -919,6 +977,7 @@ mod tests {
     fn falls_back_to_the_single_template_files_then_the_owner_dot_github_repo() {
         let single = template_files(
             "me/app",
+            &PUBLIC,
             &fake(vec![("me/app", "docs/ISSUE_TEMPLATE.md", file("legacy"))]),
         )
         .unwrap();
@@ -926,6 +985,7 @@ mod tests {
         assert_eq!(single.files[0].path, "docs/ISSUE_TEMPLATE.md");
         let org = template_files(
             "me/app",
+            &PUBLIC,
             &fake(vec![
                 (
                     "me/.github",
@@ -945,8 +1005,83 @@ mod tests {
     }
 
     #[test]
+    fn a_file_name_with_a_space_or_brackets_is_percent_encoded() {
+        let dir = json!([entry("bug report.md", 10), entry("a[b].yml", 10)]);
+        let got = template_files(
+            "me/app",
+            &PUBLIC,
+            &fake(vec![
+                ("me/app", ".github/ISSUE_TEMPLATE", dir),
+                (
+                    "me/app",
+                    ".github/ISSUE_TEMPLATE/bug%20report.md",
+                    file("a"),
+                ),
+                ("me/app", ".github/ISSUE_TEMPLATE/a%5Bb%5D.yml", file("b")),
+            ]),
+        )
+        .unwrap();
+        let paths: Vec<&str> = got.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                ".github/ISSUE_TEMPLATE/a[b].yml",
+                ".github/ISSUE_TEMPLATE/bug report.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn one_file_that_fails_is_skipped_the_others_kept() {
+        let dir = json!([entry("a.md", 10), entry("b.md", 10)]);
+        let get = |nwo: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
+            match path {
+                ".github/ISSUE_TEMPLATE" => Ok(Some(dir.clone())),
+                ".github/ISSUE_TEMPLATE/a.md" => Err("curl: (28) timed out".into()),
+                _ if nwo == "me/app" => Ok(Some(file("b"))),
+                _ => Ok(None),
+            }
+        };
+        let got = template_files("me/app", &PUBLIC, &get).unwrap();
+        assert_eq!(got.files.len(), 1);
+        assert_eq!(got.files[0].path, ".github/ISSUE_TEMPLATE/b.md");
+    }
+
+    #[test]
+    fn a_private_owner_dot_github_repository_is_not_used() {
+        let private = |_: &str| -> Result<bool, String> { Ok(false) };
+        let got = template_files(
+            "me/app",
+            &private,
+            &fake(vec![
+                (
+                    "me/.github",
+                    ".github/ISSUE_TEMPLATE",
+                    json!([entry("bug.yml", 10)]),
+                ),
+                (
+                    "me/.github",
+                    ".github/ISSUE_TEMPLATE/bug.yml",
+                    file("name: Bug"),
+                ),
+            ]),
+        )
+        .unwrap();
+        assert!(got.files.is_empty());
+    }
+
+    #[test]
+    fn only_a_real_404_counts_as_absent() {
+        assert!(is_not_found("GitHub API error (404): Not Found"));
+        assert!(is_not_found("gh: Not Found (HTTP 404)"));
+        assert!(!is_not_found(
+            "gh api GET repos/acme/error-404-page/contents/x: network down"
+        ));
+    }
+
+    #[test]
     fn nothing_anywhere_is_an_empty_list() {
-        let got = template_files("me/app", &fake(vec![])).unwrap();
+        let got = template_files("me/app", &PUBLIC, &fake(vec![])).unwrap();
         assert!(got.files.is_empty());
     }
 
@@ -955,7 +1090,7 @@ mod tests {
         let failing = |_: &str, _: &str| -> Result<Option<serde_json::Value>, String> {
             Err("GitHub API error (502): Bad gateway".into())
         };
-        assert!(template_files("me/app", &failing).is_err());
+        assert!(template_files("me/app", &PUBLIC, &failing).is_err());
     }
 
     #[test]

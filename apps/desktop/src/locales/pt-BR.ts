@@ -2687,6 +2687,7 @@ const ptBR: Locale = {
 
   createIssue: {
     template: {
+      loading: "Procurando os modelos de issue deste repositório…",
       label: "Modelo",
       blank: "Issue em branco",
       expectsTemplate: "Este repositório espera que as issues partam de um modelo.",

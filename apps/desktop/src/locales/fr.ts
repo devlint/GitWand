@@ -2696,6 +2696,7 @@ const fr: Locale = {
 
   createIssue: {
     template: {
+      loading: "Recherche des modèles d'issue de ce dépôt…",
       label: "Modèle",
       blank: "Issue vierge",
       expectsTemplate: "Ce dépôt attend des issues qui partent d'un modèle.",
