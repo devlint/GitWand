@@ -139,6 +139,11 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
   const file = (t: string) => ({ encoding: "base64", content: b64(t), size: t.length });
   const entry = (name: string, size = 10) => ({ name, path: `.github/ISSUE_TEMPLATE/${name}`, type: "file", size });
   const PUBLIC = async () => true;
+  /** A single-template file `name` in `dir` ("" = root): its folder listing and contents. */
+  const single = (nwo: string, dir: string, name: string, content: string, size = content.length) => {
+    const path = dir ? `${dir}/${name}` : name;
+    return { [`${nwo}:${dir}`]: [{ name, path, type: "file", size }], [`${nwo}:${path}`]: file(content) };
+  };
   const fake = (m: Record<string, unknown>) => async (nwo: string, path: string) => (m[`${nwo}:${path}`] ?? null);
 
   it("reads the directory, sorted and capped, skipping other files", async () => {
@@ -162,8 +167,8 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
   });
 
   it("falls back to a single-template file, then the owner's .github repository", async () => {
-    const single = await devTemplateFiles("me/app", PUBLIC, fake({ "me/app:docs/ISSUE_TEMPLATE.md": file("legacy") }));
-    expect(single.files[0].path).toBe("docs/ISSUE_TEMPLATE.md");
+    const one = await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "legacy")));
+    expect(one.files[0].path).toBe("docs/ISSUE_TEMPLATE.md");
     const org = await devTemplateFiles("me/app", PUBLIC, fake({
       "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
       "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
@@ -197,7 +202,8 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
 
   it("a failing single-template probe is skipped, not fatal", async () => {
     const got = await devTemplateFiles("me/app", PUBLIC, async (_: string, path: string) => {
-      if (path === ".github/ISSUE_TEMPLATE.md") throw new Error("502");
+      if (path === ".github") throw new Error("502");
+      if (path === "docs") return [{ name: "ISSUE_TEMPLATE.md", path: "docs/ISSUE_TEMPLATE.md", type: "file", size: 4 }];
       if (path === "docs/ISSUE_TEMPLATE.md") return file("docs");
       return null;
     });
@@ -216,9 +222,21 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(got.files.map((f: { content: string }) => f.content)).toEqual(["w", "m"]);
   });
 
-  it("a lowercase single-template file is found", async () => {
-    const got = await devTemplateFiles("me/app", PUBLIC, fake({ "me/app:.github/issue_template.md": file("lower") }));
-    expect(got.files[0].path).toBe(".github/issue_template.md");
+  it("a single-template file is found in any case, also at the root", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", ".github", "Issue_Template.md", "mixed")));
+    expect(got.files[0].path).toBe(".github/Issue_Template.md");
+    const root = await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", "", "issue_template.md", "r")));
+    expect(root.files[0].path).toBe("issue_template.md");
+  });
+
+  it("an unreadable single template still rules out the owner", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, fake({
+      "me/app:.github": [{ name: "ISSUE_TEMPLATE.md", path: ".github/ISSUE_TEMPLATE.md", type: "file", size: 70_000 }],
+      "me/.github:.github/ISSUE_TEMPLATE": [entry("bug.yml")],
+      "me/.github:.github/ISSUE_TEMPLATE/bug.yml": file("name: Bug"),
+    }));
+    expect(got.source).toBe("me/app");
+    expect(got.files).toEqual([]);
   });
 
   it("a failing owner .github keeps what the repository has, marked incomplete", async () => {
@@ -237,7 +255,7 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
       return file("b");
     });
     expect(got.complete).toBe(false);
-    expect((await devTemplateFiles("me/app", PUBLIC, fake({ "me/app:docs/ISSUE_TEMPLATE.md": file("x") }))).complete).toBe(true);
+    expect((await devTemplateFiles("me/app", PUBLIC, fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "x")))).complete).toBe(true);
   });
 
   it("nothing anywhere is an empty list", async () => {

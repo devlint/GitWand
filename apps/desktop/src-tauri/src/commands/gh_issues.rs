@@ -699,16 +699,10 @@ pub(crate) struct IssueTemplateFiles {
 }
 
 const TEMPLATE_DIR: &str = ".github/ISSUE_TEMPLATE";
-/// GitHub's single-template locations, tried when the directory has none (the
-/// file name in either case, as GitHub matches it).
-const SINGLE_TEMPLATES: [&str; 6] = [
-    ".github/ISSUE_TEMPLATE.md",
-    ".github/issue_template.md",
-    "ISSUE_TEMPLATE.md",
-    "issue_template.md",
-    "docs/ISSUE_TEMPLATE.md",
-    "docs/issue_template.md",
-];
+/// The folders holding GitHub's single-template file (`ISSUE_TEMPLATE.md`,
+/// its name in any case), tried when there is no template folder: `.github`,
+/// the root (""), `docs`.
+const SINGLE_TEMPLATE_DIRS: [&str; 3] = [".github", "", "docs"];
 const MAX_TEMPLATES: usize = 20;
 const MAX_TEMPLATE_BYTES: u64 = 65_536;
 
@@ -793,14 +787,15 @@ fn read_files(nwo: &str, paths: &[String], get: ContentsGet) -> (Vec<TemplateFil
     (files, complete)
 }
 
-/// The first single-template file of `nwo`, probed in parallel (each probe a
-/// request, often a `gh` spawn), in `SINGLE_TEMPLATES` order. A probe that
-/// fails is skipped; the second value says whether every one answered.
-fn single_template(nwo: &str, get: ContentsGet) -> (Option<TemplateFile>, bool) {
-    let answers: Vec<Result<Option<serde_json::Value>, String>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = SINGLE_TEMPLATES
+/// The single-template file of `nwo`, found by listing its three folders in
+/// parallel (three requests, any letter case, as GitHub matches the name).
+/// Returns the file when readable, whether every listing answered, and
+/// whether one exists at all (an unreadable one still is the repository's).
+fn single_template(nwo: &str, get: ContentsGet) -> (Option<TemplateFile>, bool, bool) {
+    let listings: Vec<Result<Option<serde_json::Value>, String>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = SINGLE_TEMPLATE_DIRS
             .iter()
-            .map(|path| scope.spawn(move || get(nwo, path)))
+            .map(|dir| scope.spawn(move || get(nwo, dir)))
             .collect();
         handles
             .into_iter()
@@ -810,19 +805,40 @@ fn single_template(nwo: &str, get: ContentsGet) -> (Option<TemplateFile>, bool) 
             })
             .collect()
     });
-    let complete = answers.iter().all(|a| a.is_ok());
-    for (path, answer) in SINGLE_TEMPLATES.iter().zip(answers) {
-        if let Ok(Some(v)) = answer {
-            if let Some(content) = small_enough(&v).then(|| decode_content(&v)).flatten() {
-                let file = TemplateFile {
+    let mut complete = listings.iter().all(|l| l.is_ok());
+    for listing in listings.into_iter().flatten().flatten() {
+        let Some(found) = listing.as_array().and_then(|items| {
+            items.iter().find(|i| {
+                i.get("type").and_then(|t| t.as_str()) == Some("file")
+                    && i.get("name")
+                        .and_then(|n| n.as_str())
+                        .is_some_and(|n| n.eq_ignore_ascii_case("issue_template.md"))
+            })
+        }) else {
+            continue;
+        };
+        let Some(path) = found.get("path").and_then(|p| p.as_str()) else {
+            continue;
+        };
+        if !small_enough(found) {
+            return (None, complete, true);
+        }
+        return match get(nwo, &encode_path(path)) {
+            Ok(Some(v)) => {
+                let file = decode_content(&v).map(|content| TemplateFile {
                     path: path.to_string(),
                     content,
-                };
-                return (Some(file), complete);
+                });
+                (file, complete, true)
             }
-        }
+            Ok(None) => (None, complete, true),
+            Err(_) => {
+                complete = false;
+                (None, complete, true)
+            }
+        };
     }
-    (None, complete)
+    (None, complete, false)
 }
 
 /// One repository's templates: the files, whether every one was read, and
@@ -887,9 +903,9 @@ fn templates_in(nwo: &str, get: ContentsGet) -> Result<RepoTemplates, String> {
             });
         }
     }
-    let (single, complete) = single_template(nwo, get);
+    let (single, complete, present) = single_template(nwo, get);
     Ok(RepoTemplates {
-        present: single.is_some(),
+        present,
         files: single.into_iter().collect(),
         complete,
     })
@@ -955,7 +971,13 @@ pub(crate) async fn gh_issue_templates(
         let r = resolve_issue_target(&cwd, &repo, false, token)?;
         let get = |nwo: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
             let on = r.sibling(nwo.to_string());
-            match api_get(&cwd, token, &on, &format!("repos/{nwo}/contents/{path}")) {
+            // The root's listing is `contents` itself.
+            let url = if path.is_empty() {
+                format!("repos/{nwo}/contents")
+            } else {
+                format!("repos/{nwo}/contents/{path}")
+            };
+            match api_get(&cwd, token, &on, &url) {
                 Ok(v) => Ok(Some(v)),
                 Err(e) if is_not_found(&e) => Ok(None),
                 Err(e) => Err(e),
@@ -1004,6 +1026,30 @@ mod tests {
             .map(|c| String::from_utf8_lossy(c).into_owned())
             .collect();
         json!({ "encoding": "base64", "content": wrapped.join("\n"), "size": content.len() })
+    }
+
+    /// A single-template file `name` in `dir` ("" = root): its folder listing
+    /// and its contents.
+    fn single(
+        nwo: &'static str,
+        dir: &'static str,
+        name: &str,
+        content: &str,
+    ) -> Vec<(&'static str, &'static str, serde_json::Value)> {
+        let path = if dir.is_empty() {
+            name.to_string()
+        } else {
+            format!("{dir}/{name}")
+        };
+        let leaked: &'static str = Box::leak(path.clone().into_boxed_str());
+        vec![
+            (
+                nwo,
+                dir,
+                json!([{ "name": name, "path": path, "type": "file", "size": content.len() }]),
+            ),
+            (nwo, leaked, file(content)),
+        ]
     }
 
     fn entry(name: &str, size: usize) -> serde_json::Value {
@@ -1062,7 +1108,7 @@ mod tests {
         let single = template_files(
             "me/app",
             &PUBLIC,
-            &fake(vec![("me/app", "docs/ISSUE_TEMPLATE.md", file("legacy"))]),
+            &fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "legacy")),
         )
         .unwrap();
         assert_eq!(single.source, "me/app");
@@ -1222,7 +1268,10 @@ mod tests {
     fn a_failing_single_template_probe_is_skipped_not_fatal() {
         let get = |_: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
             match path {
-                ".github/ISSUE_TEMPLATE.md" => Err("GitHub API error (502): Bad gateway".into()),
+                ".github" => Err("GitHub API error (502): Bad gateway".into()),
+                "docs" => Ok(Some(
+                    json!([{ "name": "ISSUE_TEMPLATE.md", "path": "docs/ISSUE_TEMPLATE.md", "type": "file", "size": 4 }]),
+                )),
                 "docs/ISSUE_TEMPLATE.md" => Ok(Some(file("docs"))),
                 _ => Ok(None),
             }
@@ -1233,14 +1282,46 @@ mod tests {
     }
 
     #[test]
-    fn a_lowercase_single_template_file_is_found() {
+    fn a_single_template_file_is_found_in_any_case() {
         let got = template_files(
             "me/app",
             &PUBLIC,
-            &fake(vec![("me/app", ".github/issue_template.md", file("lower"))]),
+            &fake(single("me/app", ".github", "Issue_Template.md", "mixed")),
         )
         .unwrap();
-        assert_eq!(got.files[0].path, ".github/issue_template.md");
+        assert_eq!(got.files[0].path, ".github/Issue_Template.md");
+        let root = template_files(
+            "me/app",
+            &PUBLIC,
+            &fake(single("me/app", "", "issue_template.md", "r")),
+        )
+        .unwrap();
+        assert_eq!(root.files[0].path, "issue_template.md");
+    }
+
+    #[test]
+    fn an_unreadable_single_template_still_rules_out_the_owner() {
+        // GitHub uses the repository's own file, too big for us to read.
+        let entries = vec![
+            (
+                "me/app",
+                ".github",
+                json!([{ "name": "ISSUE_TEMPLATE.md", "path": ".github/ISSUE_TEMPLATE.md", "type": "file", "size": 70_000 }]),
+            ),
+            (
+                "me/.github",
+                ".github/ISSUE_TEMPLATE",
+                json!([entry("bug.yml", 10)]),
+            ),
+            (
+                "me/.github",
+                ".github/ISSUE_TEMPLATE/bug.yml",
+                file("name: Bug"),
+            ),
+        ];
+        let got = template_files("me/app", &PUBLIC, &fake(entries)).unwrap();
+        assert_eq!(got.source, "me/app");
+        assert!(got.files.is_empty());
     }
 
     #[test]
@@ -1273,7 +1354,7 @@ mod tests {
         let all = template_files(
             "me/app",
             &PUBLIC,
-            &fake(vec![("me/app", "docs/ISSUE_TEMPLATE.md", file("x"))]),
+            &fake(single("me/app", "docs", "ISSUE_TEMPLATE.md", "x")),
         )
         .unwrap();
         assert!(all.complete);

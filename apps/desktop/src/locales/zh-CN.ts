@@ -2697,6 +2697,7 @@ const zhCN: Locale = {
 
   createIssue: {
     template: {
+      fromOwner: "由 {0} 共享的模板",
       clearTitle: "从空白 issue 开始？",
       loading: "正在查找此仓库的 issue 模板…",
       label: "模板",

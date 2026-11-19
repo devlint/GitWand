@@ -2687,6 +2687,7 @@ const ptBR: Locale = {
 
   createIssue: {
     template: {
+      fromOwner: "Modelos compartilhados por {0}",
       clearTitle: "Começar de uma issue em branco?",
       loading: "Procurando os modelos de issue deste repositório…",
       label: "Modelo",

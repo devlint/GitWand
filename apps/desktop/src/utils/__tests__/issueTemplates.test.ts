@@ -67,6 +67,10 @@ describe("flattenForm", () => {
     ])).toBe("<!-- a -- > b -- > c -->\n\n### Logs\n\n```shell\nls -la\n```\n\nx\n");
   });
 
+  it("a dropdown's default counts the options as written", () => {
+    expect(flattenForm([{ type: "dropdown", attributes: { label: "OS", options: [true, "Linux", "macOS"], default: 1 } }])).toBe("### OS\n\nLinux\n");
+  });
+
   it("dropdowns give their default or the choices; checkboxes a task list", () => {
     expect(flattenForm([
       { type: "dropdown", attributes: { label: "OS", options: ["macOS", "Linux"], default: 1 } },

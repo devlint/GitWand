@@ -26,7 +26,7 @@ function setup(files: Record<string, { path: string; content: string }[] | (() =
   } as unknown as ForgeProvider;
   const issueTemplates = vi.fn(async (_cwd: string, repo: string) => {
     const f = files[repo] ?? [];
-    return { files: typeof f === "function" ? await f() : f, complete: !incomplete.has(repo) };
+    return { files: typeof f === "function" ? await f() : f, complete: !incomplete.has(repo), source: repo === "me/app" ? "me/.github" : repo };
   });
   const form = useCreateIssue({
     cwd: ref("/repo"),
@@ -179,15 +179,15 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     expect(form.assignees.value).toEqual(["alice"]);
   });
 
-  it("switching target forgets what the template wanted", async () => {
+  it("switching target offers the template's labels and people again, where the new target has them", async () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
     await form.open();
     await flush();
     form.applyTemplate("a.md");
     form.setRepo("up/app");
     await flush();
-    expect(form.labels.value).toEqual([]);
-    expect(form.assignees.value).toEqual([]);
+    expect(form.labels.value).toEqual(["bug"]);
+    expect(form.assignees.value).toEqual(["alice"]);
   });
 
   it("a label picked by hand before the template stays when the template goes", async () => {
@@ -217,6 +217,35 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     form.applyTemplate("a.md");
     // `dirty` is what makeRoom() and the close confirmation go by.
     expect(form.dirty.value).toBe(false);
+  });
+
+  it("a template's own labels never make the form dirty; picks by hand do", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    expect(form.labels.value).toEqual(["bug"]);
+    expect(form.dirty.value).toBe(false);
+    form.assignees.value = [...form.assignees.value, "bob"];
+    expect(form.dirty.value).toBe(true);
+  });
+
+  it("a label picked by hand is kept by a template switch, so it is not an edit to confirm", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.open();
+    await flush();
+    form.labels.value = ["ui"];
+    expect(form.templateEdited.value).toBe(false);
+    form.applyTemplate("a.md");
+    form.labels.value = form.labels.value.filter((l) => l !== "bug");
+    expect(form.templateEdited.value).toBe(true);
+  });
+
+  it("says where the templates come from", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }] });
+    await form.open();
+    await flush();
+    expect(form.templateSource.value).toBe("me/.github");
   });
 
   it("the previous form's template picks do not count as edits in the next", async () => {

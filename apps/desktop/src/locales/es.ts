@@ -2687,6 +2687,7 @@ const es: Locale = {
 
   createIssue: {
     template: {
+      fromOwner: "Plantillas compartidas por {0}",
       clearTitle: "¿Empezar desde una issue en blanco?",
       loading: "Buscando las plantillas de issue de este repositorio…",
       label: "Plantilla",

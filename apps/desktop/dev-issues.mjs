@@ -132,11 +132,8 @@ export function devCreateFailure(status, json) {
 
 // ─── Issue templates (#301, part 5) — mirrors gh_issue_templates ───────────
 const TEMPLATE_DIR = ".github/ISSUE_TEMPLATE";
-const SINGLE_TEMPLATES = [
-  ".github/ISSUE_TEMPLATE.md", ".github/issue_template.md",
-  "ISSUE_TEMPLATE.md", "issue_template.md",
-  "docs/ISSUE_TEMPLATE.md", "docs/issue_template.md",
-];
+/** Folders of the single-template file (`ISSUE_TEMPLATE.md`, any case): `.github`, the root (""), `docs`. */
+const SINGLE_TEMPLATE_DIRS = [".github", "", "docs"];
 const MAX_TEMPLATES = 20;
 const MAX_TEMPLATE_BYTES = 65_536;
 
@@ -160,18 +157,28 @@ const cmp = (a, b) => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf
 
 const isConfigPath = (path) => isConfig(path.split("/").pop() ?? path);
 
-/** `[file | null, complete]`: the first single-template file, probed in parallel; a failing probe is skipped. */
+/**
+ * `[file | null, complete, present]`, as Rust's `single_template`: the three
+ * folders listed in parallel, the name matched in any case; an unreadable
+ * file is still present (the repository's own).
+ */
 async function singleTemplate(nwo, get) {
-  const answers = await Promise.all(SINGLE_TEMPLATES.map((path) => get(nwo, path).then((v) => ({ v }), (e) => ({ e }))));
-  const complete = answers.every((a) => !a.e);
-  for (let i = 0; i < SINGLE_TEMPLATES.length; i++) {
-    const v = answers[i].v;
-    if (v && smallEnough(v)) {
-      const content = decodeContent(v);
-      if (content !== null) return [{ path: SINGLE_TEMPLATES[i], content }, complete];
+  const listings = await Promise.all(SINGLE_TEMPLATE_DIRS.map((dir) => get(nwo, dir).then((v) => ({ v }), (e) => ({ e }))));
+  let complete = listings.every((l) => !l.e);
+  for (const { v } of listings) {
+    if (!Array.isArray(v)) continue;
+    const found = v.find((i) => i?.type === "file" && typeof i.name === "string" && i.name.toLowerCase() === "issue_template.md");
+    if (!found || typeof found.path !== "string") continue;
+    if (!smallEnough(found)) return [null, complete, true];
+    try {
+      const content = decodeContent(await get(nwo, encodePath(found.path)));
+      return [content === null ? null : { path: found.path, content }, complete, true];
+    } catch {
+      complete = false;
+      return [null, complete, true];
     }
   }
-  return [null, complete];
+  return [null, complete, false];
 }
 
 /**
@@ -204,8 +211,8 @@ async function templatesIn(nwo, get) {
       return { files, complete, present: true };
     }
   }
-  const [single, complete] = await singleTemplate(nwo, get);
-  return { files: single ? [single] : [], complete, present: single !== null };
+  const [single, complete, present] = await singleTemplate(nwo, get);
+  return { files: single ? [single] : [], complete, present };
 }
 
 /**

@@ -5607,14 +5607,16 @@ async function handleRequest(req, res) {
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
         const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
         if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
+        // Each read bounded at 30 s, as Rust's.
+        const bounded = () => ({ signal: AbortSignal.timeout(30_000) });
         const get = async (nwo, path) => {
-          const resp = await githubFetch(`/repos/${nwo}/contents/${path}`, token);
+          const resp = await githubFetch(path ? `/repos/${nwo}/contents/${path}` : `/repos/${nwo}/contents`, token, undefined, bounded());
           if (resp.status === 404) return null;
           if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
           return resp.json();
         };
         const isPublic = async (nwo) => {
-          const resp = await githubFetch(`/repos/${nwo}`, token);
+          const resp = await githubFetch(`/repos/${nwo}`, token, undefined, bounded());
           if (resp.status === 404) return false;
           if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
           return (await resp.json())?.private === false;

@@ -22,18 +22,18 @@ beforeEach(() => clearTemplateCache());
 afterEach(() => { app?.unmount(); app = null; document.body.innerHTML = ""; });
 const flush = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); await nextTick(); };
 
-async function mount(files: { path: string; content: string }[] | (() => Promise<{ path: string; content: string }[]>), opts: { confirm?: boolean; prefill?: boolean } = {}) {
+async function mount(files: { path: string; content: string }[] | (() => Promise<{ path: string; content: string }[]>), opts: { confirm?: boolean; prefill?: boolean; labels?: string[]; source?: string } = {}) {
   const provider = {
     name: "github",
     issueAvailable: vi.fn(async () => true),
     issueTargets: vi.fn(async () => ({ targets: [ORIGIN, PARENT], defaultRepo: "me/app" })),
-    listLabels: vi.fn(async () => []),
+    listLabels: vi.fn(async () => (opts.labels ?? []).map((name) => ({ name, color: "f00", description: null }))),
     listMilestones: vi.fn(async () => []),
     listAssignees: vi.fn(async () => []),
     createIssue: vi.fn(),
   } as unknown as ForgeProvider;
   const askConfirm = vi.fn(async () => opts.confirm ?? true);
-  const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: async () => ({ files: typeof files === "function" ? await files() : files, complete: true }) });
+  const form = useCreateIssue({ cwd: ref("/repo"), provider: ref(provider), onCreated: vi.fn(), issueTemplates: async (_c: string, repo: string) => ({ files: typeof files === "function" ? await files() : files, complete: true, source: opts.source ?? repo }) });
   const host = document.createElement("div");
   document.body.appendChild(host);
   app = createApp(CreateIssueModal);
@@ -112,14 +112,26 @@ describe("CreateIssueModal — templates", () => {
     expect(form.body.value).toBe("");
   });
 
-  it("labels changed by hand after a template count: switching templates asks", async () => {
-    const two = [{ path: "a.md", content: BUG }, { path: "b.md", content: "---\nname: Other\n---\nx" }];
-    const { form, askConfirm } = await mount(two);
+  it("a template label removed by hand counts: switching templates asks", async () => {
+    const two = [{ path: "a.md", content: "---\nname: Bug\nlabels: bug\n---\nb" }, { path: "b.md", content: "---\nname: Other\n---\nx" }];
+    const { form, askConfirm } = await mount(two, { labels: ["bug"] });
     await choose("a.md");
-    form.labels.value = [...form.labels.value, "ui"];
+    expect(form.labels.value).toEqual(["bug"]);
+    form.labels.value = [];
     await flush();
     await choose("b.md");
     expect(askConfirm).toHaveBeenCalled();
+  });
+
+  it("names the owner's repository when the templates come from it", async () => {
+    await mount([{ path: "a.md", content: BUG }], { source: "me/.github" });
+    expect(document.body.textContent).toContain("createIssue.template.fromOwner:me/.github");
+  });
+
+  it("lists two contact links to the same address", async () => {
+    const cfg = "contact_links:\n  - name: Docs\n    url: https://x.dev/help\n    about: a\n  - name: FAQ\n    url: https://x.dev/help\n    about: b\n";
+    await mount([{ path: "a.md", content: BUG }, { path: ".github/ISSUE_TEMPLATE/config.yml", content: cfg }]);
+    expect(document.querySelectorAll('[data-testid="ci-contact-link"]')).toHaveLength(2);
   });
 
   it("says the repository expects a template, and lists its contact links", async () => {

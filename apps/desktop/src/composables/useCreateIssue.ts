@@ -185,11 +185,13 @@ export interface CreateIssueApi {
   applyTemplate(id: string | null): void;
   /** Title, description, labels or people changed since the template filled them. */
   templateEdited: ComputedRef<boolean>;
+  /** The repository the templates come from (the owner's `.github` one, maybe). */
+  templateSource: Ref<string | null>;
 }
 
 /** How long a target's templates are kept (each read is up to 20 requests). */
 const TEMPLATE_CACHE_MS = 5 * 60_000;
-const templateCache = new Map<string, { at: number; set: IssueTemplateSet }>();
+const templateCache = new Map<string, { at: number; set: IssueTemplateSet; source: string }>();
 /** Forget the cached templates (tests). */
 export function clearTemplateCache(): void {
   templateCache.clear();
@@ -297,7 +299,7 @@ export function useCreateIssue(deps: {
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
   report?: ReportDeps;
   /** A target's raw template files (tests replace the GitHub read). */
-  issueTemplates?: (cwd: string, repo: string) => Promise<Pick<IssueTemplateFiles, "files" | "complete">>;
+  issueTemplates?: (cwd: string, repo: string) => Promise<IssueTemplateFiles>;
 }): CreateIssueApi {
   const readTemplates = deps.issueTemplates ?? ghIssueTemplates;
   const rdeps = deps.report ?? {};
@@ -325,6 +327,8 @@ export function useCreateIssue(deps: {
   const templateSet = ref<IssueTemplateSet | null>(null);
   const templatesLoading = ref(false);
   const templateId = ref<string | null>(null);
+  /** The repository the templates were read from (the owner's `.github` one, maybe). */
+  const templateSource = ref<string | null>(null);
   const assigneeOptions = ref<ReviewerCandidate[]>([]);
   const milestoneOptions = ref<RepoMilestone[]>([]);
   const submitting = ref(false);
@@ -376,8 +380,9 @@ export function useCreateIssue(deps: {
       answer.value.trim() !== "" ||
       title.value !== initial.value.title ||
       body.value !== initial.value.body ||
-      labels.value.length > 0 ||
-      assignees.value.length > 0 ||
+      // A template's own labels and people are not the user's work; those
+      // picked by hand, or the template's removed by hand, are.
+      picksEditedByHand() ||
       milestone.value !== null,
   );
   const canSubmit = computed(
@@ -477,21 +482,26 @@ export function useCreateIssue(deps: {
     const cached = templateCache.get(key);
     if (cached && Date.now() - cached.at < TEMPLATE_CACHE_MS) {
       templateSet.value = cached.set;
+      templateSource.value = cached.source;
       templatesLoading.value = false; // another target's read may still be in flight
       return;
     }
     const gen = generation;
     const current = () => gen === generation && repo.value === target;
     templateSet.value = null;
+    templateSource.value = null;
     templatesLoading.value = true;
     readTemplates(cwd, target)
-      .then(async (read) => ({ set: await loadTemplateSet(read.files), complete: read.complete }))
+      .then(async (read) => ({ set: await loadTemplateSet(read.files), complete: read.complete, source: read.source }))
       .then(
-        ({ set, complete }) => {
+        ({ set, complete, source }) => {
           // A set missing a file that failed is shown, not kept: the next
           // form tries again.
-          if (complete) templateCache.set(key, { at: Date.now(), set });
-          if (current()) templateSet.value = set;
+          if (complete) templateCache.set(key, { at: Date.now(), set, source });
+          if (current()) {
+            templateSet.value = set;
+            templateSource.value = source;
+          }
         },
         () => {}, // No templates is a blank form, never an error.
       )
@@ -499,29 +509,43 @@ export function useCreateIssue(deps: {
   }
 
   /**
-   * The applied template's labels and people: `pending` waits for the target
-   * to offer them (its pickers load meanwhile), each granted once — one the
-   * user then removes stays removed; `added` is what the template put there
-   * itself, all it takes back (one picked by hand before stays).
+   * The applied template's labels and people. `wants` is all it names (kept
+   * across a target switch, to offer them again there); `pending` waits for
+   * the target to offer them (its pickers load meanwhile), each granted once
+   * (one the user then removes stays removed); `added` is what the template
+   * put there itself, all it takes back (one picked by hand before stays).
    */
-  let templatePending = { labels: [] as string[], assignees: [] as string[] };
-  let templateAdded = { labels: [] as string[], assignees: [] as string[] };
+  type Picks = { labels: string[]; assignees: string[] };
+  const noPicks = (): Picks => ({ labels: [], assignees: [] });
+  let templateWants: Picks = noPicks();
+  let templatePending: Picks = noPicks();
+  const templateAdded = ref<Picks>(noPicks());
 
   function forgetTemplatePicks() {
-    templatePending = { labels: [], assignees: [] };
-    templateAdded = { labels: [], assignees: [] };
+    templateWants = noPicks();
+    templatePending = noPicks();
+    templateAdded.value = noPicks();
   }
 
-  /** The labels and people as the template left them (grants included). */
-  const templatePicks = ref({ labels: [] as string[], assignees: [] as string[] });
-  const snapshotPicks = () => { templatePicks.value = { labels: [...labels.value], assignees: [...assignees.value] }; };
-  const samePicks = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
-  const templateEdited = computed(
-    () =>
-      bodyEdited.value ||
-      !samePicks(labels.value, templatePicks.value.labels) ||
-      !samePicks(assignees.value, templatePicks.value.assignees),
-  );
+  /** Picks the user made by hand, or a template's they removed by hand. */
+  function picksEditedByHand(): boolean {
+    const added = templateAdded.value;
+    const byHand = labels.value.some((l) => !added.labels.includes(l)) || assignees.value.some((a) => !added.assignees.includes(a));
+    return byHand || templatePicksRemoved();
+  }
+
+  /** A label or person the template added that the user removed. */
+  function templatePicksRemoved(): boolean {
+    const added = templateAdded.value;
+    return added.labels.some((l) => !labels.value.includes(l)) || added.assignees.some((a) => !assignees.value.includes(a));
+  }
+
+  /**
+   * What another template would replace: the title and description, and the
+   * template's labels or people removed by hand. Those picked by hand stay
+   * across a switch, so they are no edit to confirm.
+   */
+  const templateEdited = computed(() => bodyEdited.value || templatePicksRemoved());
 
   /** Grant what the template wants and the target now offers, each once. */
   function grantTemplateWants() {
@@ -532,10 +556,8 @@ export function useCreateIssue(deps: {
       if (!now.length) return;
       templatePending[key] = templatePending[key].filter((x) => !offered.has(x.toLowerCase()));
       const fresh = now.filter((x) => !have.value.includes(x));
-      templateAdded[key] = [...templateAdded[key], ...fresh];
+      templateAdded.value = { ...templateAdded.value, [key]: [...templateAdded.value[key], ...fresh] };
       have.value = [...have.value, ...fresh];
-      // A late grant is the template's doing, not an edit.
-      templatePicks.value = { ...templatePicks.value, [key]: [...templatePicks.value[key], ...fresh] };
     };
     grant(labels, "labels", labelOptions.value.map((l) => l.name));
     grant(assignees, "assignees", assigneeOptions.value.map((a) => a.login));
@@ -551,11 +573,12 @@ export function useCreateIssue(deps: {
     title.value = chosen?.title ?? "";
     body.value = chosen?.body ?? "";
     // What the previous template added goes; what was picked by hand stays.
-    labels.value = labels.value.filter((l) => !templateAdded.labels.includes(l));
-    assignees.value = assignees.value.filter((a) => !templateAdded.assignees.includes(a));
+    const added = templateAdded.value;
+    labels.value = labels.value.filter((l) => !added.labels.includes(l));
+    assignees.value = assignees.value.filter((a) => !added.assignees.includes(a));
     forgetTemplatePicks();
-    templatePending = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
-    snapshotPicks();
+    templateWants = { labels: [...(chosen?.labels ?? [])], assignees: [...(chosen?.assignees ?? [])] };
+    templatePending = { labels: [...templateWants.labels], assignees: [...templateWants.assignees] };
     // Only what the target offers (GitHub refuses unknown labels and people),
     // now or once its pickers arrive.
     grantTemplateWants();
@@ -594,7 +617,7 @@ export function useCreateIssue(deps: {
     templatesLoading.value = false;
     templateId.value = null;
     forgetTemplatePicks();
-    templatePicks.value = { labels: [], assignees: [] };
+    templateSource.value = null;
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = DEFAULT_SECRETS_OPTIONS;
@@ -859,7 +882,10 @@ export function useCreateIssue(deps: {
     // were about the other target.
     if (templateId.value !== null) initial.value = { title: "", body: "" };
     templateId.value = null;
-    forgetTemplatePicks();
+    // The template's labels and people are offered again on the new target
+    // (clearPickers dropped them): granted where it has them.
+    templatePending = { labels: [...templateWants.labels], assignees: [...templateWants.assignees] };
+    templateAdded.value = noPicks();
     loadTemplates(next);
   }
 
@@ -966,5 +992,6 @@ export function useCreateIssue(deps: {
     templateId,
     applyTemplate,
     templateEdited,
+    templateSource,
   };
 }
