@@ -107,6 +107,22 @@ describe("useIssueSuggest", () => {
     expect(s.keydown(key("Enter"), "#lo")).toEqual({ text: "#42 ", caret: 4 });
   });
 
+  it("a refresh that reorders the rows keeps the chosen issue, or drops the choice", async () => {
+    const cache = createIssueCache();
+    let t = 0;
+    const loadIssues = vi.fn().mockResolvedValueOnce(ISSUES).mockResolvedValueOnce([issue(99, "Login new", "2026-11-20T00:00:00Z"), ...ISSUES]);
+    const s = useIssueSuggest({ cwd: () => "/r", loadIssues, pushRepo: () => "me/app", cache, now: () => t });
+    s.update("#Lo", 3);
+    await flush();
+    s.keydown(key("ArrowDown"), "#Lo");
+    s.keydown(key("ArrowDown"), "#Lo"); // #42 (row 1)
+    t += ISSUE_CACHE_TTL_MS + 1;
+    invalidateIssues(cache, { cwd: "/r" });
+    await flush();
+    expect(s.rows.value.map((i) => i.number)).toEqual([99, 57, 42]);
+    expect(s.keydown(key("Enter"), "#Lo")).toEqual({ text: "#42 ", caret: 4 });
+  });
+
   it("a first ArrowUp highlights the bottom row", async () => {
     const { s } = setup();
     s.update("#lo", 3);

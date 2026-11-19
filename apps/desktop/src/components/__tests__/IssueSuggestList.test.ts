@@ -17,7 +17,7 @@ const ISSUE = (n: number, title: string): Issue => ({
 let app: App | null = null;
 afterEach(() => { app?.unmount(); app = null; document.body.innerHTML = ""; });
 
-async function mount(props: { status: SuggestStatus; rows: Issue[]; active: number; listId?: string; query?: string }, onPick = vi.fn()) {
+async function mount(props: { status: SuggestStatus; rows: Issue[]; active: number; listId?: string; query?: string; browsable?: boolean }, onPick = vi.fn()) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   app = createApp({ render: () => h(IssueSuggestList, { ...props, onPick }) });
@@ -45,6 +45,14 @@ describe("IssueSuggestList", () => {
   it("a number missing from the recent issues stays as typed, and says so", async () => {
     await mount({ status: "ready", rows: [], active: 0, query: "57" });
     expect(document.body.textContent).toContain("sidebar.issueSuggest.emptyNumber");
+  });
+
+  it("the hint names the keys only while the rows can be browsed", async () => {
+    await mount({ status: "ready", rows: [ISSUE(42, "a")], active: -1, browsable: false });
+    expect(document.querySelector(".isl-hint")?.textContent).toContain("sidebar.issueSuggest.hintType");
+    app!.unmount(); document.body.innerHTML = "";
+    await mount({ status: "ready", rows: [ISSUE(42, "a")], active: -1, browsable: true });
+    expect(document.querySelector(".isl-hint")?.textContent).toBe("sidebar.issueSuggest.hint");
   });
 
   it("says loading, unavailable, or no match", async () => {

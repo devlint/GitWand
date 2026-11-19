@@ -524,8 +524,10 @@ const createIssue = useCreateIssue({
       invalidate: (target) => invalidateIssues(sharedIssueCache, target),
       notify: (title) => showDetailToast(title, null, 4000),
     });
+    // With "Add to commit", the notice stays until dismissed (a toast shown
+    // meanwhile parks it), so the action is never lost to another notice.
     showDetailToast(
-      toast.title, null, 8000, toast.link,
+      toast.title, null, toast.action ? 0 : 8000, toast.link,
       toast.action ? { label: toast.action.label, run: () => { void toast.action!.run(); } } : undefined,
     );
   },

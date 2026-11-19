@@ -6,8 +6,10 @@ import type { RemoteInfo } from "../../utils/backend";
 
 const listIssues = vi.fn(async () => []);
 const forges: Record<string, object> = { github: { listIssues }, azure: {} };
+const connected = new Set(["github"]);
 vi.mock("../forge/useForge", () => ({
-  forgeFromRemoteInfo: vi.fn((info: { provider: string }) => forges[info.provider] ?? { listIssues }),
+  forgeFromRemoteInfo: vi.fn((info: { provider: string }) => ({ name: info.provider, ...(forges[info.provider] ?? { listIssues }) })),
+  isForgeConnected: (f: string) => connected.has(f),
 }));
 
 import { issueListerFor } from "../issueLister";
@@ -19,6 +21,11 @@ describe("issueListerFor", () => {
   it("no list for a remote of no known forge (never falls back to GitHub)", () =>
     expect(issueListerFor(info("unknown"), "/r")).toBeNull());
   it("no list for a forge that cannot list issues", () => expect(issueListerFor(info("azure"), "/r")).toBeNull());
+  it("no list for a forge with no account connected in GitWand", () => {
+    expect(issueListerFor(info("gitlab"), "/r")).toBeNull();
+    connected.add("gitlab");
+    expect(issueListerFor(info("gitlab"), "/r")).not.toBeNull();
+  });
   it("lists through the forge otherwise, 100 at most", async () => {
     await issueListerFor(info("github"), "/r");
     expect(listIssues).toHaveBeenCalledWith("/r", { limit: 100 });

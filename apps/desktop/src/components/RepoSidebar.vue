@@ -438,10 +438,13 @@ const remoteInfo = ref<RemoteInfo | null>(null);
 /** The repository `remoteInfo` was read for (it lags a tab switch). */
 const remoteInfoCwd = ref<string | null>(null);
 
-/** When the remote was last read (a commit field's focus re-reads it at most every 30 s). */
+/** When the remote was last read (an opening `#` list re-reads it at most every 5 min). */
 let remoteInfoAt = 0;
+/** The latest read: an older one landing after it is dropped. */
+let remoteInfoSeq = 0;
 async function loadRemoteInfo() {
   const cwd = props.cwd;
+  const seq = ++remoteInfoSeq;
   if (!cwd) { remoteInfo.value = null; remoteInfoCwd.value = null; return; }
   remoteInfoAt = Date.now();
   let info: RemoteInfo | null = null;
@@ -452,7 +455,7 @@ async function loadRemoteInfo() {
     if (remoteInfoCwd.value === cwd && !/no remote/i.test(String(e))) return;
     info = null;
   }
-  if (cwd !== props.cwd) return;
+  if (cwd !== props.cwd || seq !== remoteInfoSeq) return;
   // The same remote again: keep the object, so nothing watching it re-runs.
   const was = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
   if (was && info && was.url === info.url && was.provider === info.provider && was.owner === info.owner && was.repo === info.repo) return;
@@ -491,10 +494,15 @@ watch([remoteInfoCwd, remoteInfo], () => {
   if (el && el === summaryEl.value) retryIssueSuggest(summaryIssues, summaryEl.value);
   else if (el && el === descriptionEl.value) retryIssueSuggest(descriptionIssues, descriptionEl.value);
 });
-/** Re-read the remote when a commit field gets focus (`git remote set-url` since), at most every 30 s. */
-function onCommitFieldFocus() {
-  if (Date.now() - remoteInfoAt > 30_000) void loadRemoteInfo();
-}
+// A `git remote set-url` since the folder opened: re-read the remote when a
+// list opens, at most every 5 min (for an unknown host, the backend also
+// probes the forge CLIs, so not on every focus).
+watch(
+  () => summaryIssues.open.value || descriptionIssues.open.value,
+  (opened) => {
+    if (opened && Date.now() - remoteInfoAt > 300_000) void loadRemoteInfo();
+  },
+);
 // A value set by code (cleared after a commit, an AI message…) closes the list.
 watch(() => props.commitSummary, (v) => summaryIssues.sync(v ?? ""));
 watch(() => props.commitDescription, (v) => descriptionIssues.sync(v ?? ""));
@@ -1643,6 +1651,7 @@ function formatActivityDate(dateStr: string): string {
           :active="summaryIssues.armed.value ? summaryIssues.active.value : -1"
           list-id="commit-summary-issues"
           :query="summaryIssues.query.value"
+          :browsable="summaryIssues.browsable.value"
           @pick="(i, fixes) => pickIssueRow(summaryIssues, i, fixes, summaryEl, writeSummary)"
         />
         <input
@@ -1659,7 +1668,6 @@ function formatActivityDate(dateStr: string): string {
           @keydown="onSummaryKeydown"
           @keyup="onIssueCaretKeyup(summaryIssues, $event)"
           @click="followIssueCaret(summaryIssues, $event.target as HTMLInputElement)"
-          @focus="onCommitFieldFocus"
           @blur="templateSlashOpen = false; summaryIssues.close()"
           :placeholder="t('sidebar.summaryPlaceholder')"
         />
@@ -1724,6 +1732,7 @@ function formatActivityDate(dateStr: string): string {
           :active="descriptionIssues.armed.value ? descriptionIssues.active.value : -1"
           list-id="commit-description-issues"
           :query="descriptionIssues.query.value"
+          :browsable="descriptionIssues.browsable.value"
           @pick="(i, fixes) => pickIssueRow(descriptionIssues, i, fixes, descriptionEl, writeDescription)"
         />
         <textarea
@@ -1738,7 +1747,6 @@ function formatActivityDate(dateStr: string): string {
           @keydown="onDescriptionKeydown"
           @keyup="onIssueCaretKeyup(descriptionIssues, $event)"
           @click="followIssueCaret(descriptionIssues, $event.target as HTMLTextAreaElement)"
-          @focus="onCommitFieldFocus"
           @blur="descriptionIssues.close()"
           :placeholder="t('sidebar.descriptionPlaceholder')"
           rows="4"

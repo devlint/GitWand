@@ -86,6 +86,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   rows: ComputedRef<Issue[]>;
   active: Ref<number>;
   armed: ComputedRef<boolean>;
+  browsable: ComputedRef<boolean>;
   query: Ref<string>;
   update(text: string, caret: number): void;
   refresh(text: string, caret: number): void;
@@ -109,6 +110,8 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   let lastText = "";
   /** An arrow chose a row (`armed` explains when Enter and Tab pick). */
   const navigated = ref(false);
+  /** The issue the arrows chose, followed when a refresh reorders the rows. */
+  let chosen: number | null = null;
 
   const entry = (): Entry | undefined => {
     void version.value;
@@ -172,6 +175,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     query.value = "";
     active.value = 0;
     navigated.value = false;
+    chosen = null;
   }
 
   function update(text: string, at: number) {
@@ -187,6 +191,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     if (!open.value || token.query !== query.value) {
       active.value = 0;
       navigated.value = false;
+      chosen = null;
     }
     start = token.start;
     end = token.end;
@@ -225,6 +230,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
       if (!navigated.value) active.value = e.key === "ArrowDown" ? 0 : n - 1;
       else active.value = (active.value + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
       navigated.value = true;
+      chosen = rows.value[active.value]?.number ?? null;
       return "handled";
     }
     if (!armed.value) return null;
@@ -232,6 +238,22 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     if (e.key === "Enter" || e.key === "Tab") return pick(Math.min(active.value, n - 1), e.key === "Enter" && e.shiftKey, text);
     return null;
   }
+
+  // A refresh landing after the arrows chose an issue: keep that issue
+  // highlighted where it now is, or drop the choice if it is gone.
+  watch(rows, (now) => {
+    // An empty list is a refetch in progress, not an answer: wait for it.
+    if (!navigated.value || chosen === null || now.length === 0) return;
+    const at = now.findIndex((i) => i.number === chosen);
+    if (at >= 0) active.value = at;
+    else {
+      navigated.value = false;
+      active.value = 0;
+    }
+  });
+
+  /** The arrows can browse the rows (a title search with matches). */
+  const browsable = computed(() => query.value !== "" && !/^\d+$/.test(query.value) && rows.value.length > 0);
 
   // An entry dropped while the list shows it (an invalidation, an eviction)
   // is fetched again, rather than "Loading…" with nothing in flight.
@@ -255,7 +277,7 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     if (open.value && text !== lastText) close();
   }
 
-  return { open, status, rows, active, armed, query, update, refresh, retry, keydown, pick, close, sync };
+  return { open, status, rows, active, armed, browsable, query, update, refresh, retry, keydown, pick, close, sync };
 }
 
 export type IssueSuggest = ReturnType<typeof useIssueSuggest>;

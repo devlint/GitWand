@@ -98,6 +98,10 @@ describe("insertRef", () => {
     expect(insertRef("Fixes # the bug", 6, 7, "#12", false)).toEqual({ text: "Fixes #12 the bug", caret: 10 });
     expect(insertRef("see #12\nmore", 4, 7, "#42", false)).toEqual({ text: "see #42\nmore", caret: 7 });
   });
+  it("adds no space before punctuation", () => {
+    expect(insertRef("fix(#): login", 4, 5, "#12", false)).toEqual({ text: "fix(#12): login", caret: 7 });
+    expect(insertRef("see #, and", 4, 5, "#12", false)).toEqual({ text: "see #12, and", caret: 7 });
+  });
   it("Fixes form", () => expect(insertRef("#4", 0, 2, "#42", true)).toEqual({ text: "Fixes #42 ", caret: 10 }));
 });
 

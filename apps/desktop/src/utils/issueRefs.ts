@@ -81,9 +81,9 @@ export function issueRef(number: number, issueRepo: string | null, pushRepo: str
 }
 
 /**
- * Replace `text[start, end)` (the whole `#token`) with the reference, followed
- * by a space unless whitespace already is. The caret goes after that space,
- * but stays on the line when a newline follows.
+ * Replace `text[start, end)` (the whole `#token`) with the reference. A space
+ * follows it only before a word or at the end (`fix(#12):`, `#12,` get none).
+ * The caret goes past a following space, but stays on the line otherwise.
  */
 export function insertRef(
   text: string,
@@ -94,8 +94,9 @@ export function insertRef(
 ): { text: string; caret: number } {
   const inserted = `${fixes ? "Fixes " : ""}${ref}`;
   const rest = text.slice(end);
-  const spaced = /^\s/.test(rest) ? inserted : `${inserted} `;
-  const skip = /^[\n\r]/.test(rest) ? 0 : 1;
+  const addSpace = rest === "" || /^[\p{L}\p{N}_]/u.test(rest);
+  const spaced = addSpace ? `${inserted} ` : inserted;
+  const skip = addSpace || /^[ \t]/.test(rest) ? 1 : 0;
   return { text: text.slice(0, start) + spaced + rest, caret: start + inserted.length + skip };
 }
 

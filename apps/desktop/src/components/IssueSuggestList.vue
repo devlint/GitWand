@@ -7,7 +7,7 @@ import type { Issue } from "../utils/backend";
 import type { SuggestStatus } from "../composables/useIssueSuggest";
 import { useI18n } from "../composables/useI18n";
 
-const props = defineProps<{ status: SuggestStatus; rows: Issue[]; active: number; listId?: string; query?: string }>();
+const props = defineProps<{ status: SuggestStatus; rows: Issue[]; active: number; listId?: string; query?: string; browsable?: boolean }>();
 const emit = defineEmits<{ pick: [index: number, fixes: boolean] }>();
 const { t } = useI18n();
 </script>
@@ -32,7 +32,8 @@ const { t } = useI18n();
     <!-- Only the most recent open issues are fetched: a number not among them stays as typed. -->
     <p v-else-if="rows.length === 0 && /^\d+$/.test(props.query ?? '')" class="isl-note">{{ t("sidebar.issueSuggest.emptyNumber", props.query ?? "") }}</p>
     <p v-else-if="rows.length === 0" class="isl-note">{{ t("sidebar.issueSuggest.empty") }}</p>
-    <p class="isl-hint mono">{{ t("sidebar.issueSuggest.hint") }}</p>
+    <!-- The keys only work on a title search: before one, say how to start it. -->
+    <p class="isl-hint mono">{{ t(props.browsable ? "sidebar.issueSuggest.hint" : "sidebar.issueSuggest.hintType") }}</p>
   </div>
 </template>
 
