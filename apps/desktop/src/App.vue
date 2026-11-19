@@ -90,7 +90,7 @@ import { useIssuePanel, ISSUE_PANEL_KEY } from "./composables/useIssuePanel";
 import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
 import { remoteSlug } from "./utils/issueRefs";
-import { COMMIT_SIGNATURE } from "./utils/commitSignature";
+import { COMMIT_SIGNATURE, withoutSignature } from "./utils/commitSignature";
 import { createdIssueToast } from "./composables/createdIssueToast";
 import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
@@ -368,11 +368,13 @@ const commitReviewNav = useCommitReviewNav({
  * dismissed; a toast shown meanwhile parks it, and it comes back once that
  * one is gone.
  */
-function showDetailToast(title: string, detail: string | null, ms = 3000, link?: ToastLink, action?: ToastAction) {
-  if (stickyToast) parkedToasts.push(stickyToast);
+function showDetailToast(title: string, detail: string | null, ms = 3000, link?: ToastLink, action?: ToastAction, key?: string) {
+  // A newer notice of the same kind replaces a parked one rather than piling up.
+  if (key) for (let i = parkedToasts.length - 1; i >= 0; i--) if (parkedToasts[i].key === key) parkedToasts.splice(i, 1);
+  if (stickyToast && !(key && stickyToast.key === key)) parkedToasts.push(stickyToast);
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   if (dismissTimer != null) { window.clearTimeout(dismissTimer); dismissTimer = null; }
-  stickyToast = ms === 0 ? { title, detail, link, action } : null;
+  stickyToast = ms === 0 ? { title, detail, link, action, key } : null;
   successToastLeaving.value = false;
   successToast.value = title;
   successToastDetail.value = detail || null;
@@ -529,6 +531,7 @@ const createIssue = useCreateIssue({
     showDetailToast(
       toast.title, null, toast.action ? 0 : 8000, toast.link,
       toast.action ? { label: toast.action.label, run: () => { void toast.action!.run(); } } : undefined,
+      "created-issue",
     );
   },
   report: {
@@ -830,7 +833,7 @@ let successTimer: number | null = null;
 // The fade-out of a dismissed toast, cancelled when a new one replaces it.
 let dismissTimer: number | null = null;
 // The sticky toast on screen, and the ones covered since, shown again in turn.
-type ParkedToast = { title: string; detail: string | null; link?: ToastLink; action?: ToastAction };
+type ParkedToast = { title: string; detail: string | null; link?: ToastLink; action?: ToastAction; key?: string };
 let stickyToast: ParkedToast | null = null;
 const parkedToasts: ParkedToast[] = [];
 
@@ -849,7 +852,7 @@ function dismissToast() {
     successTimer = null;
     dismissTimer = null;
     const parked = parkedToasts.pop();
-    if (parked) showDetailToast(parked.title, parked.detail, 0, parked.link, parked.action);
+    if (parked) showDetailToast(parked.title, parked.detail, 0, parked.link, parked.action, parked.key);
   }, 200);
 }
 
@@ -4137,9 +4140,8 @@ function onCommitSignatureChange(enabled: boolean) {
       commitDescription.value = COMMIT_SIGNATURE;
     }
   } else {
-    if (commitDescription.value === COMMIT_SIGNATURE) {
-      commitDescription.value = "";
-    }
+    // Alone, or closing a description (after "Add to commit", #301).
+    commitDescription.value = withoutSignature(commitDescription.value);
   }
 }
 

@@ -15,13 +15,13 @@ export const MAX_ISSUE_ROWS = 8;
 /** A `#` opens the list at the start of the text or after one of these. */
 const OPENS_AFTER = /[\s(]/;
 
+/** A character that continues a `#token`. */
+const TOKEN_CHAR = /[\p{L}\p{N}_-]/u;
+
 /**
  * The `#query` the caret is in, or null. The `#` must start the text or follow
  * whitespace or `(`; the query runs from it to the caret with no whitespace.
  */
-/** A character that continues a `#token`. */
-const TOKEN_CHAR = /[\p{L}\p{N}_-]/u;
-
 export function hashTokenAt(text: string, caret: number): { start: number; query: string; end: number } | null {
   if (caret < 1 || caret > text.length) return null;
   const before = text.slice(0, caret);
@@ -48,7 +48,8 @@ export function filterIssues(issues: Issue[], query: string, max = MAX_ISSUE_ROW
   const exact = (i: Issue) => (digits && String(i.number) === q ? 0 : 1);
   return issues
     .filter(match)
-    .sort((a, b) => exact(a) - exact(b) || (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : b.number - a.number))
+    // By the instant, not the string: forges mix offsets (`+01:00`, `Z`).
+    .sort((a, b) => exact(a) - exact(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.number - a.number)
     .slice(0, max);
 }
 
@@ -120,17 +121,18 @@ const KNOWN_TRAILER = /^(Signed-off-by|Co-authored-by|Reviewed-by|Acked-by|Teste
 export function appendRef(description: string, ref: string): string {
   const trimmed = description.replace(/\s+$/, "");
   if (!trimmed) return ref;
-  const paragraphs = trimmed.split(/\n{2,}/);
-  const last = paragraphs[paragraphs.length - 1];
+  // The last paragraph starts after the last blank line (one holding only
+  // spaces counts, as for git); everything before it is left as it is.
+  let lastStart = 0;
+  for (const m of trimmed.matchAll(/\n[ \t]*\n\s*/g)) lastStart = (m.index ?? 0) + m[0].length;
+  const last = trimmed.slice(lastStart);
   const lines = last.split("\n");
   const signed = lines[0] === COMMIT_SIGNATURE;
   const trailers = signed ? lines.slice(1) : lines;
   const closing =
     (signed && trailers.length === 0) ||
     (trailers.length > 0 && trailers.every((line) => TRAILER.test(line)) && (signed || trailers.some((line) => KNOWN_TRAILER.test(line))));
-  if (closing) {
-    return [...paragraphs.slice(0, -1), ref, last].join("\n\n");
-  }
+  if (closing) return `${trimmed.slice(0, lastStart)}${ref}\n\n${last}`;
   return `${trimmed}\n\n${ref}`;
 }
 

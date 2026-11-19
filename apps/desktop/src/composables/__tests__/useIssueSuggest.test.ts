@@ -38,7 +38,7 @@ describe("useIssueSuggest", () => {
 
   it("shows loading, then rows filtered by the query", async () => {
     const { s } = setup();
-    s.update("fix #", 5);
+    s.update("fix #l", 6);
     expect(s.open.value).toBe(true);
     expect(s.status.value).toBe("loading");
     await flush();
@@ -50,30 +50,30 @@ describe("useIssueSuggest", () => {
 
   it("fetches once, then again after 60 s", async () => {
     const { s, loadIssues, advance } = setup();
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     s.close();
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     expect(loadIssues).toHaveBeenCalledTimes(1);
     advance(ISSUE_CACHE_TTL_MS + 1);
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     expect(loadIssues).toHaveBeenCalledTimes(2);
   });
 
   it("shows error and keeps the text on failure", async () => {
     const { s } = setup({ loadIssues: vi.fn(async () => { throw new Error("offline"); }) });
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     expect(s.status.value).toBe("error");
     expect(s.rows.value).toEqual([]);
-    expect(s.keydown(key("Enter"), "#")).toBeNull();
+    expect(s.keydown(key("Enter"), "#l")).toBeNull();
   });
 
   it("no list when the forge cannot list issues", () => {
     const { s } = setup({ loadIssues: vi.fn(() => null) });
-    s.update("#", 1);
+    s.update("#l", 2);
     expect(s.open.value).toBe(false);
   });
 
@@ -141,10 +141,10 @@ describe("useIssueSuggest", () => {
   it("a closed list forgets a missed #: retry later does not open it", () => {
     let known = false;
     const { s } = setup({ loadIssues: vi.fn(() => (known ? Promise.resolve(ISSUES) : null)) });
-    s.update("#", 1);
+    s.update("#l", 2);
     s.close();
     known = true;
-    s.retry("#", 1);
+    s.retry("#l", 2);
     expect(s.open.value).toBe(false);
   });
 
@@ -160,33 +160,45 @@ describe("useIssueSuggest", () => {
     expect(s.status.value).toBe("ready");
   });
 
+  it("an entry dropped while open whose forge can no longer list closes the list", async () => {
+    const cache = createIssueCache();
+    let can = true;
+    const s = useIssueSuggest({ cwd: () => "/r", loadIssues: () => (can ? Promise.resolve(ISSUES) : null), pushRepo: () => "me/app", cache });
+    s.update("#l", 2);
+    await flush();
+    can = false;
+    invalidateIssues(cache, { cwd: "/r" });
+    await flush();
+    expect(s.open.value).toBe(false);
+  });
+
   it("Escape closes and is handled, even with no row", () => {
     const { s } = setup();
-    s.update("#", 1);
-    expect(s.keydown(key("Escape"), "#")).toBe("handled");
+    s.update("#l", 2);
+    expect(s.keydown(key("Escape"), "#l")).toBe("handled");
     expect(s.open.value).toBe(false);
-    expect(s.keydown(key("Escape"), "#")).toBeNull();
+    expect(s.keydown(key("Escape"), "#l")).toBeNull();
   });
 
   it("ignores Enter while composing (IME)", async () => {
     const { s } = setup();
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
-    expect(s.keydown(key("Enter", { isComposing: true }), "#")).toBeNull();
+    expect(s.keydown(key("Enter", { isComposing: true }), "#l")).toBeNull();
     expect(s.open.value).toBe(true);
   });
 
   it("Enter with no row falls through", () => {
     const { s } = setup();
-    s.update("#", 1);
+    s.update("#l", 2);
     expect(s.status.value).toBe("loading");
-    expect(s.keydown(key("Enter"), "#")).toBeNull();
+    expect(s.keydown(key("Enter"), "#l")).toBeNull();
   });
 
   it("drops a late answer for another repository", async () => {
     let resolve!: (v: Issue[]) => void;
     const { s, setCwd } = setup({ loadIssues: vi.fn(() => new Promise<Issue[]>((r) => { resolve = r; })) });
-    s.update("#", 1);
+    s.update("#l", 2);
     setCwd("/other");
     resolve(ISSUES);
     await flush();
@@ -211,25 +223,25 @@ describe("useIssueSuggest", () => {
 
   it("a key with Cmd, Ctrl or Alt never picks", async () => {
     const { s } = setup();
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
-    expect(s.keydown(key("Enter", { metaKey: true }), "#")).toBeNull();
-    expect(s.keydown(key("Enter", { ctrlKey: true }), "#")).toBeNull();
-    expect(s.keydown(key("ArrowDown", { altKey: true }), "#")).toBeNull();
+    expect(s.keydown(key("Enter", { metaKey: true }), "#l")).toBeNull();
+    expect(s.keydown(key("Enter", { ctrlKey: true }), "#l")).toBeNull();
+    expect(s.keydown(key("ArrowDown", { altKey: true }), "#l")).toBeNull();
     expect(s.open.value).toBe(true);
   });
 
   it("ignores the Enter that ends a WebKit composition (keyCode 229)", async () => {
     const { s } = setup();
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
-    expect(s.keydown(key("Enter", { keyCode: 229 } as Partial<KeyboardEvent>), "#")).toBeNull();
+    expect(s.keydown(key("Enter", { keyCode: 229 } as Partial<KeyboardEvent>), "#l")).toBeNull();
     expect(s.open.value).toBe(true);
   });
 
   it("serves the cached rows while refreshing after 60 s", async () => {
     const { s, loadIssues, advance } = setup();
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     s.close();
     advance(ISSUE_CACHE_TTL_MS + 1);
@@ -243,11 +255,11 @@ describe("useIssueSuggest", () => {
   it("retries at once after an error", async () => {
     const loadIssues = vi.fn().mockRejectedValueOnce(new Error("signed out")).mockResolvedValue(ISSUES);
     const { s } = setup({ loadIssues });
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     expect(s.status.value).toBe("error");
     s.close();
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     expect(loadIssues).toHaveBeenCalledTimes(2);
     expect(s.status.value).toBe("ready");
@@ -256,7 +268,7 @@ describe("useIssueSuggest", () => {
   it("after an error, typing in the open list does not fetch again", async () => {
     const loadIssues = vi.fn(async () => { throw new Error("offline"); });
     const { s } = setup({ loadIssues });
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     s.update("#1", 2);
     s.update("#12", 3);
@@ -269,11 +281,11 @@ describe("useIssueSuggest", () => {
     const cache = createIssueCache();
     const loadIssues = vi.fn(async () => ISSUES);
     const s = useIssueSuggest({ cwd: () => "/r", loadIssues, pushRepo: () => null, cache });
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     s.close();
     invalidateIssues(cache, { cwd: "/r" });
-    s.update("#", 1);
+    s.update("#l", 2);
     expect(loadIssues).toHaveBeenCalledTimes(2);
   });
 
@@ -283,7 +295,7 @@ describe("useIssueSuggest", () => {
     const s = useIssueSuggest({ cwd: () => cwd, loadIssues: async () => ISSUES, pushRepo: () => null, cache });
     for (let i = 0; i <= ISSUE_CACHE_MAX_REPOS; i++) {
       cwd = `/r${i}`;
-      s.update("#", 1);
+      s.update("#l", 2);
       await flush();
       s.close();
     }
@@ -303,13 +315,12 @@ describe("useIssueSuggest", () => {
     expect(s.keydown(key("Enter"), "Tested on #lo")).not.toBeNull();
   });
 
-  it("a bare # leaves the arrows to the text (a Markdown heading)", async () => {
-    const { s } = setup();
-    s.update("#", 1);
-    await flush();
-    expect(s.rows.value.length).toBeGreaterThan(0);
-    expect(s.keydown(key("ArrowUp"), "#")).toBeNull();
-    expect(s.keydown(key("ArrowDown"), "#")).toBeNull();
+  it("a bare # (a Markdown heading) opens nothing and fetches nothing", () => {
+    const { s, loadIssues } = setup();
+    s.update("# Context", 1);
+    expect(s.open.value).toBe(false);
+    expect(loadIssues).not.toHaveBeenCalled();
+    expect(s.keydown(key("ArrowDown"), "# Context")).toBeNull();
   });
 
   it("picking with the caret inside a token replaces the whole token", async () => {
@@ -338,12 +349,12 @@ describe("useIssueSuggest", () => {
     let known = false;
     const loadIssues = vi.fn((_c: string) => (known ? Promise.resolve(ISSUES) : null));
     const { s } = setup({ loadIssues });
-    s.retry("#", 1);
+    s.retry("#l", 2);
     expect(s.open.value).toBe(false);
-    s.update("#", 1);
+    s.update("#l", 2);
     expect(s.open.value).toBe(false);
     known = true;
-    s.retry("#", 1);
+    s.retry("#l", 2);
     expect(s.open.value).toBe(true);
   });
 
@@ -369,11 +380,11 @@ describe("useIssueSuggest", () => {
   it("a failed refresh keeps the issues it would have replaced", async () => {
     const loadIssues = vi.fn().mockResolvedValueOnce(ISSUES).mockRejectedValue(new Error("offline"));
     const { s, advance } = setup({ loadIssues });
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     s.close();
     advance(ISSUE_CACHE_TTL_MS + 1);
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     expect(s.status.value).toBe("ready");
     expect(s.rows.value).toHaveLength(2);
@@ -382,11 +393,11 @@ describe("useIssueSuggest", () => {
   it("a remote that changed since the fetch is fetched again", async () => {
     let push: string | null = "me/app";
     const { s, loadIssues } = setup({ pushRepo: () => push });
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
     s.close();
     push = "me/other";
-    s.update("#", 1);
+    s.update("#l", 2);
     expect(loadIssues).toHaveBeenCalledTimes(2);
   });
 
@@ -395,9 +406,9 @@ describe("useIssueSuggest", () => {
     let cwd = "/main";
     const loadIssues = vi.fn(async () => ISSUES);
     const s = useIssueSuggest({ cwd: () => cwd, loadIssues, pushRepo: () => "me/app", cache });
-    s.update("#", 1); await flush(); s.close();
+    s.update("#l", 2); await flush(); s.close();
     cwd = "/wt";
-    s.update("#", 1); await flush(); s.close();
+    s.update("#l", 2); await flush(); s.close();
     invalidateIssues(cache, { cwd: "/main", repo: "me/app" });
     expect(cache.map.size).toBe(0);
   });
@@ -410,12 +421,12 @@ describe("useIssueSuggest", () => {
     expect(s.keydown(key("Tab", { shiftKey: true }), "#lo")).toBeNull();
   });
 
-  it("Enter and Tab on a bare # are not taken: no issue was chosen", async () => {
+  it("Enter and Tab are not taken before an arrow chose a row", async () => {
     const { s } = setup();
-    s.update("#", 1);
+    s.update("#l", 2);
     await flush();
-    expect(s.keydown(key("Tab"), "#")).toBeNull();
-    expect(s.keydown(key("Enter"), "#")).toBeNull();
+    expect(s.keydown(key("Tab"), "#l")).toBeNull();
+    expect(s.keydown(key("Enter"), "#l")).toBeNull();
   });
 
   it("drops an answer that started before an invalidation", async () => {
@@ -423,23 +434,23 @@ describe("useIssueSuggest", () => {
     let resolve!: (v: I[]) => void;
     const loadIssues = vi.fn(() => new Promise<I[]>((r) => { resolve = r; }));
     const s = useIssueSuggest({ cwd: () => "/r", loadIssues, pushRepo: () => null, cache });
-    s.update("#", 1);
+    s.update("#l", 2);
     invalidateIssues(cache, { cwd: "/r" });
     resolve(ISSUES);
     await flush();
     expect(cache.map.get("/r")?.status).not.toBe("ready");
     s.close();
-    s.update("#", 1);
+    s.update("#l", 2);
     expect(loadIssues).toHaveBeenCalledTimes(2);
   });
 
   it("a fetch that never settles is retried after 60 s", async () => {
     const loadIssues = vi.fn(() => new Promise<I[]>(() => {}));
     const { s, advance } = setup({ loadIssues });
-    s.update("#", 1);
+    s.update("#l", 2);
     s.close();
     advance(ISSUE_CACHE_TTL_MS + 1);
-    s.update("#", 1);
+    s.update("#l", 2);
     expect(loadIssues).toHaveBeenCalledTimes(2);
   });
 
@@ -447,7 +458,7 @@ describe("useIssueSuggest", () => {
     const cache = createIssueCache();
     let cwd = "/r0";
     const s = useIssueSuggest({ cwd: () => cwd, loadIssues: async () => ISSUES, pushRepo: () => null, cache });
-    const visit = async (c: string) => { cwd = c; s.update("#", 1); await flush(); s.close(); };
+    const visit = async (c: string) => { cwd = c; s.update("#l", 2); await flush(); s.close(); };
     for (let i = 0; i < ISSUE_CACHE_MAX_REPOS; i++) await visit(`/r${i}`);
     await visit("/r0");
     await visit("/new");
@@ -461,17 +472,17 @@ describe("useIssueSuggest", () => {
     const deps = { cwd: () => "/r", loadIssues, pushRepo: () => "me/app", cache };
     const a = useIssueSuggest(deps);
     const b = useIssueSuggest(deps);
-    a.update("#", 1);
+    a.update("#l", 2);
     await flush();
-    b.update("#", 1);
+    b.update("#l", 2);
     expect(loadIssues).toHaveBeenCalledTimes(1);
     expect(b.rows.value).toHaveLength(2);
   });
 
   it("sync closes the list when the text changed without an input event", () => {
     const { s } = setup();
-    s.update("fix #", 5);
-    s.sync("fix #");
+    s.update("fix #l", 6);
+    s.sync("fix #l");
     expect(s.open.value).toBe(true);
     s.sync("");
     expect(s.open.value).toBe(false);

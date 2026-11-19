@@ -54,7 +54,7 @@ describe("handleIssueKeydown", () => {
   });
 
   it("Escape closes the list without reaching a window Escape listener", async () => {
-    const { el, s } = await field("input", "#");
+    const { el, s } = await field("input", "#l");
     const seen = vi.fn();
     window.addEventListener("keydown", seen);
     const e = press(el, "Escape");
@@ -65,7 +65,7 @@ describe("handleIssueKeydown", () => {
   });
 
   it("Cmd+Enter is left alone while the list is open", async () => {
-    const { el, written, s } = await field("input", "#");
+    const { el, written, s } = await field("input", "#l");
     const e = press(el, "Enter", { metaKey: true });
     expect(e.defaultPrevented).toBe(false);
     expect(written).toEqual([]);

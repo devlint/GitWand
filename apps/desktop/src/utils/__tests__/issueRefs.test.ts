@@ -48,6 +48,10 @@ describe("filterIssues", () => {
     const list = [issue(120, "a", "2026-11-12T00:00:00Z"), issue(12, "b", "2026-11-01T00:00:00Z"), issue(121, "c", "2026-11-11T00:00:00Z")];
     expect(filterIssues(list, "12").map((i) => i.number)).toEqual([12, 120, 121]);
   });
+  it("orders by the actual time, whatever the timezone offset", () => {
+    const list = [issue(1, "x", "2026-11-10T10:00:00+01:00"), issue(2, "x", "2026-11-10T09:30:00Z")];
+    expect(filterIssues(list, "x").map((i) => i.number)).toEqual([2, 1]);
+  });
   it("text matches the title, case-insensitively, most recently updated first", () =>
     expect(filterIssues(issues, "LOG").map((i) => i.number)).toEqual([57, 42]));
   it("an empty query lists the most recently updated first", () =>
@@ -125,6 +129,13 @@ describe("appendRef", () => {
   it("goes before a signature followed by trailers in the same paragraph", () => {
     expect(appendRef("body\n\n\u{1FA84} Commit via GitWand\nSigned-off-by: A <a@x.com>", "#5"))
       .toBe("body\n\n#5\n\n\u{1FA84} Commit via GitWand\nSigned-off-by: A <a@x.com>");
+  });
+  it("inserts without touching the rest of the description", () => {
+    expect(appendRef("```\na\n\n\nb\n```\n\n\u{1FA84} Commit via GitWand", "#7"))
+      .toBe("```\na\n\n\nb\n```\n\n#7\n\n\u{1FA84} Commit via GitWand");
+  });
+  it("a blank line holding spaces still separates the trailer block", () => {
+    expect(appendRef("body\n  \nSigned-off-by: A <a@x>", "#7")).toBe("body\n  \n#7\n\nSigned-off-by: A <a@x>");
   });
   it("goes before a trailer block, which must stay last", () => {
     expect(appendRef("body\n\nSigned-off-by: A <a@x.com>", "#4")).toBe("body\n\n#4\n\nSigned-off-by: A <a@x.com>");

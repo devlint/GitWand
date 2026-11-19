@@ -182,7 +182,9 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
     const token = hashTokenAt(text, at);
     const cwd = deps.cwd();
     missed = false;
-    if (!token || !cwd) return close();
+    // A bare `#` (a Markdown heading, a `# comment`) opens nothing and fetches
+    // nothing: the list starts with the first character after it.
+    if (!token || !cwd || token.query === "") return close();
     if (!ensureLoaded(cwd, !open.value)) {
       close();
       missed = true; // after close(), which forgets it
@@ -259,7 +261,8 @@ export function useIssueSuggest(deps: IssueSuggestDeps): {
   // is fetched again, rather than "Loading…" with nothing in flight.
   watch(version, () => {
     const cwd = deps.cwd();
-    if (open.value && cwd && !cache.has(cwd)) ensureLoaded(cwd, true);
+    // The forge can no longer list (account disconnected, remote changed): close.
+    if (open.value && cwd && !cache.has(cwd) && !ensureLoaded(cwd, true)) close();
   });
 
   /** A caret move (click, arrows): follows an open list, never opens one. */

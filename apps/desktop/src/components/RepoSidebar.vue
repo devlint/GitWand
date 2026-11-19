@@ -469,7 +469,13 @@ watch(() => props.cwd, loadRemoteInfo);
 const issueDeps = {
   cwd: () => props.cwd || null,
   /** null (no list) until the remote is known, or when its forge cannot list issues. */
-  loadIssues: (cwd: string) => issueListerFor(remoteInfoCwd.value === cwd ? remoteInfo.value : null, cwd),
+  loadIssues: (cwd: string) => {
+    const info = remoteInfoCwd.value === cwd ? remoteInfo.value : null;
+    // No remote known (none at open, `git remote add` since, a failed read):
+    // read it again, at most every 10 s; its arrival retries the `#`.
+    if (!info && Date.now() - remoteInfoAt > 10_000) void loadRemoteInfo();
+    return issueListerFor(info, cwd);
+  },
   pushRepo: (cwd: string) => remoteSlug(remoteInfoCwd.value === cwd ? remoteInfo.value : null),
   // Both fields, and every mount of this panel, share one fetch per repository.
   cache: sharedIssueCache,
