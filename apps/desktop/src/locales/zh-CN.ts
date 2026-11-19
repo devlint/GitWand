@@ -2696,6 +2696,13 @@ const zhCN: Locale = {
   },
 
   createIssue: {
+    template: {
+      label: "模板",
+      blank: "空白 issue",
+      expectsTemplate: "此仓库希望 issue 从模板开始。",
+      contact: "其他渠道：",
+      replaceTitle: "使用此模板？",
+    },
     tooLong: "文本长度为 {0} 个字符；GitHub 最多接受 {1} 个。",
     fromSelection: "从这些行创建 Issue",
     selectionHint: "点击行号以选中该行用于 Issue；Shift+点击以扩展选区",

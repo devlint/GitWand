@@ -2686,6 +2686,13 @@ const es: Locale = {
   },
 
   createIssue: {
+    template: {
+      label: "Plantilla",
+      blank: "Issue en blanco",
+      expectsTemplate: "Este repositorio espera que las issues partan de una plantilla.",
+      contact: "En otro lugar:",
+      replaceTitle: "¿Usar esta plantilla?",
+    },
     tooLong: "El texto tiene {0} caracteres; GitHub acepta como máximo {1}.",
     fromSelection: "Crear issue desde estas líneas",
     selectionHint: "Haz clic en un número de línea para seleccionarla para un issue; Mayús+clic para ampliar",

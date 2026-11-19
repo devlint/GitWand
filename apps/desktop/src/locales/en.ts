@@ -2726,6 +2726,13 @@ const en = {
   },
 
   createIssue: {
+    template: {
+      label: "Template",
+      blank: "Blank issue",
+      expectsTemplate: "This repository expects issues to start from a template.",
+      contact: "Elsewhere:",
+      replaceTitle: "Use this template?",
+    },
     tooLong: "The text is {0} characters long; GitHub accepts at most {1}.",
     fromSelection: "Create issue from these lines",
     selectionHint: "Click a line number to select it for an issue; Shift+click to extend",

@@ -2686,6 +2686,13 @@ const ptBR: Locale = {
   },
 
   createIssue: {
+    template: {
+      label: "Modelo",
+      blank: "Issue em branco",
+      expectsTemplate: "Este repositório espera que as issues partam de um modelo.",
+      contact: "Em outro lugar:",
+      replaceTitle: "Usar este modelo?",
+    },
     tooLong: "O texto tem {0} caracteres; o GitHub aceita no máximo {1}.",
     fromSelection: "Criar issue a partir destas linhas",
     selectionHint: "Clique no número de uma linha para selecioná-la para uma issue; Shift+clique para estender",

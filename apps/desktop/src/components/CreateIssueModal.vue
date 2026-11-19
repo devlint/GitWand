@@ -127,6 +127,30 @@ async function onSwitch(e: Event) {
   form.setGitwand(wanted);
 }
 
+/** The target's templates (a blank form only). */
+const templates = computed(() => (form.blankForm.value ? form.templateSet.value?.templates ?? [] : []));
+const contactLinks = computed(() => (form.blankForm.value ? form.templateSet.value?.contactLinks ?? [] : []));
+const blankAllowed = computed(() => form.templateSet.value?.blankAllowed ?? true);
+
+/** A template chosen: confirm first when the title or description was edited. */
+async function onTemplate(e: Event) {
+  const select = e.target as HTMLSelectElement;
+  const wanted = select.value || null;
+  // The state decides what the select shows (a cancelled choice leaves it as it was).
+  select.value = form.templateId.value ?? "";
+  if (wanted === form.templateId.value) return;
+  if (form.bodyEdited.value) {
+    const asked = form.openId.value;
+    const ok = await askConfirm({
+      title: t("createIssue.template.replaceTitle"),
+      message: t("createIssue.report.replaceEdits"),
+      confirmLabel: t("createIssue.report.replace"),
+    });
+    if (!ok || !form.isOpen.value || form.openId.value !== asked) return;
+  }
+  form.applyTemplate(wanted);
+}
+
 /** The target's issue list, to see whether a timed-out create went through. */
 function openIssuesPage() {
   if (form.toGitwand.value) {
@@ -232,6 +256,34 @@ function onMilestone(e: Event) {
             <span v-if="!target.hasIssues" class="ci-target-off">{{ t("createIssue.issuesOff") }}</span>
           </label>
         </fieldset>
+
+        <div v-if="templates.length || contactLinks.length" class="ci-group" data-testid="ci-templates">
+          <label v-if="templates.length" class="ci-label" for="ci-template">{{ t("createIssue.template.label") }}</label>
+          <select
+            v-if="templates.length"
+            id="ci-template"
+            data-testid="ci-template"
+            class="ci-input"
+            :value="form.templateId.value ?? ''"
+            :disabled="form.submitting.value"
+            @change="onTemplate"
+          >
+            <option value="">{{ t("createIssue.template.blank") }}</option>
+            <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id" :title="tpl.about">{{ tpl.name }}</option>
+          </select>
+          <p v-if="templates.length && !blankAllowed" class="ci-status">{{ t("createIssue.template.expectsTemplate") }}</p>
+          <ul v-if="contactLinks.length" class="ci-contacts">
+            <li v-for="l in contactLinks" :key="l.url">
+              <span class="ci-status">{{ t("createIssue.template.contact") }}</span>
+              <a
+                :href="l.url"
+                data-testid="ci-contact-link"
+                @click.prevent="openExternalUrl(l.url)"
+              >{{ l.name }}</a>
+              <span v-if="l.about" class="ci-status"> — {{ l.about }}</span>
+            </li>
+          </ul>
+        </div>
 
         <label class="ci-label" for="ci-title">{{ t("createIssue.titleLabel") }}</label>
         <input
@@ -528,6 +580,15 @@ function onMilestone(e: Event) {
 .ci-status {
   margin: 0;
   color: var(--color-text-muted);
+}
+.ci-contacts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-sm, 12px);
 }
 .ci-detail {
   font-family: var(--font-mono, ui-monospace, monospace);

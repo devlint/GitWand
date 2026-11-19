@@ -7,7 +7,8 @@
 
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
-import { gitExec, ghCreateGitwandIssue, ghGitwandWritable } from "../utils/backend";
+import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, ghIssueTemplates, type TemplateFile } from "../utils/backend";
+import { loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
 import type { SecretFinding, SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
 import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
@@ -173,6 +174,15 @@ export interface CreateIssueApi {
   /** Retarget the report; regenerates title and description (the caller
    *  confirms first when `bodyEdited`). */
   setGitwand(on: boolean): void;
+  /** The form was opened blank (no commit, lines or report): it offers templates. */
+  blankForm: Ref<boolean>;
+  /** The target's issue templates, null until read (or when the read failed). */
+  templateSet: Ref<IssueTemplateSet | null>;
+  templatesLoading: Ref<boolean>;
+  /** The template applied, null for "Blank issue". */
+  templateId: Ref<string | null>;
+  /** Fill the form from a template (null: blank). The caller confirms first when `bodyEdited`. */
+  applyTemplate(id: string | null): void;
 }
 
 /** GitWand's own repository, where resolver reports go (mirrors Rust `GITWAND_REPO`). */
@@ -276,7 +286,10 @@ export function useCreateIssue(deps: {
   /** Whether `origin` has the commit (tests replace the git check). */
   commitOnOrigin?: (cwd: string, sha: string) => Promise<boolean>;
   report?: ReportDeps;
+  /** A target's raw template files (tests replace the GitHub read). */
+  issueTemplates?: (cwd: string, repo: string) => Promise<TemplateFile[]>;
 }): CreateIssueApi {
+  const readTemplates = deps.issueTemplates ?? ((cwd: string, r: string) => ghIssueTemplates(cwd, r).then((x) => x.files));
   const rdeps = deps.report ?? {};
   const createGitwandIssue = rdeps.createGitwandIssue ?? ghCreateGitwandIssue;
   const checkGitwandWritable = rdeps.gitwandWritable ?? ghGitwandWritable;
@@ -298,6 +311,10 @@ export function useCreateIssue(deps: {
   const assignees = ref<string[]>([]);
   const milestone = ref<number | null>(null);
   const labelOptions = ref<RepoLabel[]>([]);
+  const blankForm = ref(false);
+  const templateSet = ref<IssueTemplateSet | null>(null);
+  const templatesLoading = ref(false);
+  const templateId = ref<string | null>(null);
   const assigneeOptions = ref<ReviewerCandidate[]>([]);
   const milestoneOptions = ref<RepoMilestone[]>([]);
   const submitting = ref(false);
@@ -438,6 +455,38 @@ export function useCreateIssue(deps: {
     p.listAssignees?.(cwd, target).then((v) => { if (current()) assigneeOptions.value = v; }, () => {});
   }
 
+  /** The target's templates, for a blank form; a late answer for another target is dropped. */
+  function loadTemplates(target: string) {
+    const cwd = formCwd;
+    if (!blankForm.value || !cwd) return;
+    const gen = generation;
+    const current = () => gen === generation && repo.value === target;
+    templateSet.value = null;
+    templatesLoading.value = true;
+    readTemplates(cwd, target)
+      .then((files) => loadTemplateSet(files))
+      .then(
+        (set) => { if (current()) templateSet.value = set; },
+        () => {}, // No templates is a blank form, never an error.
+      )
+      .finally(() => { if (current()) templatesLoading.value = false; });
+  }
+
+  function applyTemplate(id: string | null) {
+    const chosen = id === null ? null : templateSet.value?.templates.find((x) => x.id === id) ?? null;
+    if (id !== null && !chosen) return;
+    templateId.value = chosen ? chosen.id : null;
+    title.value = chosen?.title ?? "";
+    body.value = chosen?.body ?? "";
+    // Only what the target offers: GitHub refuses unknown labels and people.
+    const offeredLabels = new Set(labelOptions.value.map((l) => l.name));
+    const offeredPeople = new Set(assigneeOptions.value.map((a) => a.login));
+    labels.value = (chosen?.labels ?? []).filter((l) => offeredLabels.has(l));
+    assignees.value = (chosen?.assignees ?? []).filter((a) => offeredPeople.has(a));
+    // The template's text is the new starting point: editing it is what asks.
+    initial.value = { title: title.value, body: body.value };
+  }
+
   function reset() {
     generation++;
     openGeneration++;
@@ -464,6 +513,10 @@ export function useCreateIssue(deps: {
     findings.value = { blocking: [], warnings: [] };
     scanPending.value = false;
     repoTarget = null;
+    blankForm.value = false;
+    templateSet.value = null;
+    templatesLoading.value = false;
+    templateId.value = null;
     // The previous repository's extra patterns must not stand in for this
     // one's while its `.gitwandrc` is read.
     secretsOpts = DEFAULT_SECRETS_OPTIONS;
@@ -479,6 +532,8 @@ export function useCreateIssue(deps: {
     // nor drop the answer of a create in flight.
     if (isOpen.value) return false;
     reset();
+    // Templates are for a blank form; a commit's, lines' or report's keeps its own.
+    blankForm.value = prefill === undefined;
     const gen = generation;
     const openGen = openGeneration;
     formCwd = deps.cwd.value;
@@ -492,7 +547,10 @@ export function useCreateIssue(deps: {
       targets.value = t.targets;
       // The backend decides the default (the same rule for every caller).
       repo.value = t.defaultRepo;
-      if (repo.value) loadPickers(repo.value);
+      if (repo.value) {
+        loadPickers(repo.value);
+        loadTemplates(repo.value);
+      }
     }
     // The form is on screen; the prefill (a commit's, after its git check)
     // lands when ready, unless the user has started typing meanwhile.
@@ -716,6 +774,9 @@ export function useCreateIssue(deps: {
     // Labels, people and milestones belong to one repository.
     clearPickers();
     loadPickers(next);
+    // The text a template filled stays; the choice was about the other target.
+    templateId.value = null;
+    loadTemplates(next);
   }
 
   function retryAnyway() {
@@ -815,5 +876,10 @@ export function useCreateIssue(deps: {
     openFromResolution,
     openId,
     setGitwand,
+    blankForm,
+    templateSet,
+    templatesLoading,
+    templateId,
+    applyTemplate,
   };
 }

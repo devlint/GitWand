@@ -2695,6 +2695,13 @@ const fr: Locale = {
   },
 
   createIssue: {
+    template: {
+      label: "Modèle",
+      blank: "Issue vierge",
+      expectsTemplate: "Ce dépôt attend des issues qui partent d'un modèle.",
+      contact: "Ailleurs :",
+      replaceTitle: "Utiliser ce modèle ?",
+    },
     tooLong: "Le texte fait {0} caractères ; GitHub en accepte au plus {1}.",
     fromSelection: "Créer une issue depuis ces lignes",
     selectionHint: "Cliquez sur un numéro de ligne pour la sélectionner pour une issue ; Maj+clic pour étendre",
