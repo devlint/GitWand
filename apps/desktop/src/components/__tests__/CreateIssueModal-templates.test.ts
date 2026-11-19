@@ -96,7 +96,11 @@ describe("CreateIssueModal — templates", () => {
     form.body.value = "edited";
     await flush();
     await choose("");
-    expect(askConfirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: "createIssue.template.clearTitle" }));
+    expect(askConfirm).toHaveBeenLastCalledWith({
+      title: "createIssue.template.clearTitle",
+      message: "createIssue.template.clearMessage",
+      confirmLabel: "createIssue.template.clear",
+    });
   });
 
   it("after a target switch, Blank issue still clears the old target's template, asking first", async () => {
@@ -110,15 +114,14 @@ describe("CreateIssueModal — templates", () => {
     expect(form.body.value).toBe("");
   });
 
-  it("a template label removed by hand counts: switching templates asks", async () => {
+  it("a template label removed by hand does not ask (nothing would be replaced)", async () => {
     const two = [{ path: "a.md", content: "---\nname: Bug\nlabels: bug\n---\nb" }, { path: "b.md", content: "---\nname: Other\n---\nx" }];
     const { form, askConfirm } = await mount(two, { labels: ["bug"] });
     await choose("a.md");
-    expect(form.labels.value).toEqual(["bug"]);
     form.labels.value = [];
     await flush();
     await choose("b.md");
-    expect(askConfirm).toHaveBeenCalled();
+    expect(askConfirm).not.toHaveBeenCalled();
   });
 
   it("names the owner's repository when the templates come from it", async () => {

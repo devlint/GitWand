@@ -141,11 +141,19 @@ async function onTemplate(e: Event) {
   // The state decides what the select shows (a cancelled choice leaves it as it was).
   select.value = form.templateId.value ?? (form.templateLeftover.value ? "__other" : "");
   await form.chooseTemplate(wanted, (kind) =>
-    askConfirm({
-      title: t(kind === "clear" ? "createIssue.template.clearTitle" : "createIssue.template.replaceTitle"),
-      message: t("createIssue.report.replaceEdits"),
-      confirmLabel: t("createIssue.report.replace"),
-    }),
+    askConfirm(
+      kind === "clear"
+        ? {
+            title: t("createIssue.template.clearTitle"),
+            message: t("createIssue.template.clearMessage"),
+            confirmLabel: t("createIssue.template.clear"),
+          }
+        : {
+            title: t("createIssue.template.replaceTitle"),
+            message: t("createIssue.template.replaceMessage"),
+            confirmLabel: t("createIssue.template.use"),
+          },
+    ),
   );
 }
 

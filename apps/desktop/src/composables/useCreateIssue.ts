@@ -8,7 +8,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type InjectionKey, type Ref } from "vue";
 import type { ForgeProvider } from "./forge/types";
 import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, ghIssueTemplates, type IssueTemplateFiles } from "../utils/backend";
-import { loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
+import { isSingleTemplateFile, loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
 import type { SecretFinding, SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
 import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
@@ -509,6 +509,7 @@ export function useCreateIssue(deps: {
     else if (cached) {
       templateSet.value = cached.set;
       templateSource.value = cached.source;
+      prefillSingleTemplate();
       templatesLoading.value = false; // another target's read may still be in flight
       return;
     }
@@ -527,6 +528,7 @@ export function useCreateIssue(deps: {
           if (current()) {
             templateSet.value = set;
             templateSource.value = source;
+            prefillSingleTemplate();
           }
         },
         () => {}, // No templates is a blank form, never an error.
@@ -568,7 +570,9 @@ export function useCreateIssue(deps: {
    * template's labels or people removed by hand. Those picked by hand stay
    * across a switch, so they are no edit to confirm.
    */
-  const templateEdited = computed(() => bodyEdited.value || templatePicksRemoved());
+  // A template's label removed by hand is not lost by another template (it
+  // would not come back): it is no edit to confirm, though closing asks.
+  const templateEdited = computed(() => bodyEdited.value);
 
   /** Grant what the template wants and the target now offers, each once. */
   function grantTemplateWants() {
@@ -588,6 +592,17 @@ export function useCreateIssue(deps: {
   watch([labelOptions, assigneeOptions], () => {
     if (templatePending.labels.length || templatePending.assignees.length) grantTemplateWants();
   });
+
+  /**
+   * GitHub prefills a new issue with a repository's single-template file
+   * (`ISSUE_TEMPLATE.md`): so does a blank form still untouched.
+   */
+  function prefillSingleTemplate() {
+    const only = templateSet.value?.templates;
+    if (!only || only.length !== 1 || !isSingleTemplateFile(only[0].id)) return;
+    if (templateId.value !== null || templateLeftover.value || dirty.value) return;
+    applyTemplate(only[0].id);
+  }
 
   /** The owner's `.github` repository, when the templates come from it. */
   const templateFromOwner = computed(() => {
@@ -935,7 +950,9 @@ export function useCreateIssue(deps: {
     // were about the other target.
     if (templateId.value !== null && from) {
       // Remembered, to restore on the way back if the text is untouched.
-      leftoverFrom = { repo: from, id: templateId.value, title: title.value, body: body.value, picks: appliedPicks };
+      // The template's own text (`initial`): the way back restores it only
+      // if the text still is that, untouched.
+      leftoverFrom = { repo: from, id: templateId.value, title: initial.value.title, body: initial.value.body, picks: appliedPicks };
       initial.value = { title: "", body: "" };
       // The select then says so ("from the other repository"), and "Blank
       // issue" can clear it.

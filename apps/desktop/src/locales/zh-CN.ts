@@ -2697,6 +2697,10 @@ const zhCN: Locale = {
 
   createIssue: {
     template: {
+      clearMessage: "标题和描述将被清空。",
+      clear: "清空",
+      replaceMessage: "标题和描述将被替换为模板的内容。",
+      use: "使用模板",
       fromOther: "（来自另一个仓库的模板）",
       fromOwner: "由 {0} 共享的模板",
       clearTitle: "从空白 issue 开始？",

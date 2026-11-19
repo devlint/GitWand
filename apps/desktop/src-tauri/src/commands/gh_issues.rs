@@ -537,6 +537,26 @@ pub(crate) fn api_get_pages(
     })
 }
 
+/// `GET {path}` on `repo`'s host through the ETag cache (an unchanged answer
+/// costs a 304, not the rate limit), then `gh api`, as `api_get_pages` does.
+fn api_get_etag(
+    cwd: &str,
+    token: Option<&str>,
+    repo: &GhRepo,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    let cached = |tok: &str| rest_api_json_cached(path, tok);
+    let attempt = if gh_origin_repo(cwd).is_some_and(|o| same_repo(&o, repo)) {
+        with_rest_using(cwd, token, cached)
+    } else {
+        with_rest_other_repo_using(cwd, &repo.nwo, token, cached)
+    };
+    match attempt {
+        Some(r) => r,
+        None => gh_api_on(cwd, repo, "GET", path, None, Duration::from_secs(30)),
+    }
+}
+
 /// Up to `max_pages` pages of 100 at `path`, over REST only, through the ETag
 /// cache (a 304 costs no rate limit).
 pub(crate) fn rest_pages(
@@ -788,13 +808,14 @@ fn read_files(nwo: &str, paths: &[String], get: ContentsGet) -> (Vec<TemplateFil
     (files, complete)
 }
 
-/// The single-template file of `nwo`, found by listing its three folders in
-/// parallel (three requests, any letter case, as GitHub matches the name).
-/// Returns the file when readable, whether every listing answered, and
-/// whether one exists at all (an unreadable one still is the repository's).
-fn single_template(nwo: &str, get: ContentsGet) -> (Option<TemplateFile>, bool, bool) {
-    let listings: Vec<Result<Option<serde_json::Value>, String>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = SINGLE_TEMPLATE_DIRS
+/// `get(nwo, dir)` for each of `dirs` at once, answers in `dirs` order.
+fn list_dirs(
+    nwo: &str,
+    dirs: &[&str],
+    get: ContentsGet,
+) -> Vec<Result<Option<serde_json::Value>, String>> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = dirs
             .iter()
             .map(|dir| scope.spawn(move || get(nwo, dir)))
             .collect();
@@ -805,7 +826,15 @@ fn single_template(nwo: &str, get: ContentsGet) -> (Option<TemplateFile>, bool, 
                     .unwrap_or_else(|_| Err("template read panicked".into()))
             })
             .collect()
-    });
+    })
+}
+
+/// The single-template file of `nwo`, found by listing its three folders in
+/// parallel (three requests, any letter case, as GitHub matches the name).
+/// Returns the file when readable, whether every listing answered, and
+/// whether one exists at all (an unreadable one still is the repository's).
+fn single_template(nwo: &str, get: ContentsGet) -> (Option<TemplateFile>, bool, bool) {
+    let listings = list_dirs(nwo, &SINGLE_TEMPLATE_DIRS, get);
     let mut complete = listings.iter().all(|l| l.is_ok());
     for listing in listings.into_iter().flatten().flatten() {
         let Some(found) = listing.as_array().and_then(|items| {
@@ -859,19 +888,7 @@ struct RepoTemplates {
 fn templates_in(nwo: &str, dirs: &[&str], get: ContentsGet) -> Result<RepoTemplates, String> {
     // Several folders (an owner's `.github` repository) are listed at once;
     // the first, in order, that holds a template-like file is the answer.
-    let listings: Vec<Result<Option<serde_json::Value>, String>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = dirs
-            .iter()
-            .map(|dir| scope.spawn(move || get(nwo, dir)))
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| {
-                h.join()
-                    .unwrap_or_else(|_| Err("template read panicked".into()))
-            })
-            .collect()
-    });
+    let listings = list_dirs(nwo, dirs, get);
     for listing in listings {
         let Some(serde_json::Value::Array(items)) = listing? else {
             continue;
@@ -1028,7 +1045,7 @@ pub(crate) async fn gh_issue_templates(
             } else {
                 format!("repos/{nwo}/contents/{path}")
             };
-            match api_get(&cwd, token, &on, &url) {
+            match api_get_etag(&cwd, token, &on, &url) {
                 Ok(v) => Ok(Some(v)),
                 Err(e) if is_not_found(&e) => Ok(None),
                 Err(e) => Err(e),
@@ -1038,6 +1055,10 @@ pub(crate) async fn gh_issue_templates(
         // that owner: its answers are kept 5 minutes (each repository without
         // templates falls back to it).
         let get = |nwo: &str, path: &str| -> Result<Option<serde_json::Value>, String> {
+            // The target itself (an issue on `acme/.github`) is read fresh.
+            if nwo.eq_ignore_ascii_case(&r.nwo) {
+                return get_uncached(nwo, path);
+            }
             owner_read(&r.sibling(nwo.to_string()).selector(), path, || {
                 get_uncached(nwo, path)
             })

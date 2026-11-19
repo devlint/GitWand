@@ -2727,6 +2727,10 @@ const en = {
 
   createIssue: {
     template: {
+      clearMessage: "Your title and description will be emptied.",
+      clear: "Clear",
+      replaceMessage: "Your title and description will be replaced by the template's.",
+      use: "Use template",
       fromOther: "(from the other repository's template)",
       fromOwner: "Templates shared by {0}",
       clearTitle: "Start from a blank issue?",

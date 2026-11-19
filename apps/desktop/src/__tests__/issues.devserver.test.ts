@@ -285,6 +285,17 @@ describe("devTemplateFiles (#301): the same rules as gh_issue_templates", () => 
     expect(got.files[0].path).toBe(".github/ISSUE_TEMPLATE/a.yml");
   });
 
+  it("an owner folder failing after one holding templates does not matter, as in Rust", async () => {
+    const got = await devTemplateFiles("me/app", PUBLIC, async (nwo: string, path: string) => {
+      if (nwo === "me/.github" && path === ".github/ISSUE_TEMPLATE") return [entry("bug.yml")];
+      if (nwo === "me/.github" && path === ".github/ISSUE_TEMPLATE/bug.yml") return file("name: Bug");
+      if (nwo === "me/.github" && path === "docs/ISSUE_TEMPLATE") throw new Error("502");
+      return null;
+    });
+    expect(got.source).toBe("me/.github");
+    expect(got.files).toHaveLength(1);
+  });
+
   it("nothing anywhere is an empty list", async () => {
     expect((await devTemplateFiles("me/app", PUBLIC, fake({}))).files).toEqual([]);
   });

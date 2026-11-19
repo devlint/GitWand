@@ -2696,6 +2696,10 @@ const fr: Locale = {
 
   createIssue: {
     template: {
+      clearMessage: "Le titre et la description seront vidés.",
+      clear: "Vider",
+      replaceMessage: "Le titre et la description seront remplacés par ceux du modèle.",
+      use: "Utiliser le modèle",
       fromOther: "(modèle de l'autre dépôt)",
       fromOwner: "Modèles partagés par {0}",
       clearTitle: "Repartir d'une issue vierge ?",

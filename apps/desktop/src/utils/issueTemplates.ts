@@ -109,9 +109,11 @@ export function flattenForm(body: unknown[]): string {
 /** A front matter, possibly empty (`---\n---`). */
 const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 
-/** A file in the template folder (not a single-template file elsewhere). */
 /** In a template folder: `.github/ISSUE_TEMPLATE/`, or an owner `.github` repository's root or `docs` one. */
 const inTemplateFolder = (path: string) => /(^|\/)ISSUE_TEMPLATE\//i.test(path);
+
+/** GitHub's single-template file (`ISSUE_TEMPLATE.md`): it prefills the form rather than being chosen. */
+export const isSingleTemplateFile = (path: string) => /^(\.github\/|docs\/)?issue_template\.md$/i.test(path);
 
 function markdownTemplate(path: string, raw: string, parseYaml: ParseYaml): IssueTemplate | null {
   const content = raw.replace(/^\uFEFF/, ""); // a BOM before the front matter

@@ -2687,6 +2687,10 @@ const ptBR: Locale = {
 
   createIssue: {
     template: {
+      clearMessage: "O título e a descrição serão esvaziados.",
+      clear: "Esvaziar",
+      replaceMessage: "O título e a descrição serão substituídos pelos do modelo.",
+      use: "Usar o modelo",
       fromOther: "(modelo do outro repositório)",
       fromOwner: "Modelos compartilhados por {0}",
       clearTitle: "Começar de uma issue em branco?",

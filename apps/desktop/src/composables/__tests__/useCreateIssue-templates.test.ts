@@ -216,6 +216,38 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     expect(form.labels.value).toEqual(["bug"]);
   });
 
+  it("switching back with the template's text edited keeps it as the user's", async () => {
+    const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
+    await form.open();
+    await flush();
+    form.applyTemplate("a.md");
+    form.body.value = "rewritten";
+    form.setRepo("up/app");
+    await flush();
+    form.setRepo("me/app");
+    await flush();
+    expect(form.templateId.value).toBeNull();
+    expect(form.bodyEdited.value).toBe(true);
+  });
+
+  it("a single-template file prefills the blank form, as on GitHub", async () => {
+    const { form } = setup({ "me/app": [{ path: ".github/ISSUE_TEMPLATE.md", content: "## Steps\n" }] });
+    await form.open();
+    await flush();
+    expect(form.templateId.value).toBe(".github/ISSUE_TEMPLATE.md");
+    expect(form.body.value).toBe("## Steps\n");
+  });
+
+  it("a single-template file never overwrites what was typed meanwhile", async () => {
+    let arrive!: (v: { path: string; content: string }[]) => void;
+    const { form } = setup({ "me/app": () => new Promise((r) => { arrive = r; }) });
+    await form.open();
+    form.body.value = "mine";
+    arrive([{ path: ".github/ISSUE_TEMPLATE.md", content: "## Steps\n" }]);
+    await flush();
+    expect(form.body.value).toBe("mine");
+  });
+
   it("chooseTemplate drops an answer given after the target changed", async () => {
     const { form } = setup({ "me/app": [{ path: "a.md", content: BUG }], "up/app": [] });
     await form.open();
@@ -325,7 +357,9 @@ describe("useCreateIssue — templates, first pass follow-ups", () => {
     expect(form.templateEdited.value).toBe(false);
     form.applyTemplate("a.md");
     form.labels.value = form.labels.value.filter((l) => l !== "bug");
-    expect(form.templateEdited.value).toBe(true);
+    // Another template would not bring it back: nothing is lost, nothing to confirm.
+    expect(form.templateEdited.value).toBe(false);
+    expect(form.dirty.value).toBe(true);
   });
 
   it("says where the templates come from", async () => {

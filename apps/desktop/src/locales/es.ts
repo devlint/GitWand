@@ -2687,6 +2687,10 @@ const es: Locale = {
 
   createIssue: {
     template: {
+      clearMessage: "El título y la descripción se vaciarán.",
+      clear: "Vaciar",
+      replaceMessage: "El título y la descripción se sustituirán por los de la plantilla.",
+      use: "Usar la plantilla",
       fromOther: "(plantilla del otro repositorio)",
       fromOwner: "Plantillas compartidas por {0}",
       clearTitle: "¿Empezar desde una issue en blanco?",

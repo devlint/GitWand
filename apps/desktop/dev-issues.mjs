@@ -153,11 +153,10 @@ function decodeContent(v) {
 const encodePath = (path) =>
   path.split("/").map((seg) => [...Buffer.from(seg, "utf8")].map((b) => (/[A-Za-z0-9\-._~]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, "0")}`)).join("")).join("/");
 const smallEnough = (v) => typeof v?.size === "number" && v.size <= MAX_TEMPLATE_BYTES;
-const isConfig = (n) => ["config.yml", "config.yaml"].includes(n.toLowerCase());
 // By UTF-8 bytes, as Rust sorts strings (JS `<` compares UTF-16 units).
 const cmp = (a, b) => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
-const isConfigPath = (path) => isConfig(path.split("/").pop() ?? path);
+const isConfigPath = (path) => ["config.yml", "config.yaml"].includes((path.split("/").pop() ?? path).toLowerCase());
 
 /**
  * `[file | null, complete, present]`, as Rust's `single_template`: the three
@@ -194,8 +193,10 @@ async function singleTemplate(nwo, get) {
 async function templatesIn(nwo, dirs, get) {
   // Several folders (an owner's .github repository) are listed at once; the
   // first, in order, holding a template-like file is the answer.
-  const listings = await Promise.all(dirs.map((dir) => get(nwo, dir)));
-  for (const items of listings) {
+  const listings = await Promise.all(dirs.map((dir) => get(nwo, dir).then((v) => ({ v }), (e) => ({ e }))));
+  // In order, as Rust: a failure only counts before the folder that answers.
+  for (const { v: items, e } of listings) {
+    if (e) throw e;
     if (!Array.isArray(items)) continue;
     const listed = items.filter((i) => i?.type === "file" && typeof i.name === "string" && /\.(md|ya?ml)$/i.test(i.name));
     if (!listed.length) continue;
