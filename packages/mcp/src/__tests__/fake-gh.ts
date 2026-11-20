@@ -1,7 +1,8 @@
 /**
- * A fake `gh` for the gitwand_create_issue tests (#301): an executable that
- * records each call (argv, stdin) in `calls.jsonl` next to it and answers
- * from `answers.json` — keyed by `api` or `issue create`. Tests put its
+ * A fake `gh` (and `ssh`) for the gitwand_create_issue tests (#301): an
+ * executable that records each call (tool, argv, stdin) in `calls.jsonl` next
+ * to it and answers from `answers.json` — keyed by `api`, `issue create` or
+ * `ssh`. Tests put its
  * directory first on PATH. Node runs it (its absolute path in the shebang),
  * so it needs nothing else on PATH.
  */
@@ -13,9 +14,14 @@ export interface FakeAnswer {
   stdout?: string;
   stderr?: string;
   code?: number;
+  /** Wait this long before answering (a slow network). */
+  sleepMs?: number;
+  /** Kill itself with this signal instead of answering. */
+  signal?: string;
 }
 
 export interface FakeCall {
+  tool: "gh" | "ssh";
   argv: string[];
   stdin: string | null;
 }
@@ -24,15 +30,21 @@ const SCRIPT = `
 const fs = require("node:fs");
 const path = require("node:path");
 const dir = __dirname;
+const tool = path.basename(process.argv[1]);
 const argv = process.argv.slice(2);
-const key = argv[0] === "api" ? "api" : argv.slice(0, 2).join(" ");
+const key = tool === "ssh" ? "ssh" : argv[0] === "api" ? "api" : argv.slice(0, 2).join(" ");
 const stdin = argv.includes("--body-file") ? fs.readFileSync(0, "utf8") : null;
-fs.appendFileSync(path.join(dir, "calls.jsonl"), JSON.stringify({ argv, stdin }) + "\\n");
+fs.appendFileSync(path.join(dir, "calls.jsonl"), JSON.stringify({ tool, argv, stdin }) + "\\n");
 const answers = JSON.parse(fs.readFileSync(path.join(dir, "answers.json"), "utf8"));
-const a = answers[key] || { stderr: "fake gh: no answer for " + key, code: 1 };
-if (a.stdout) process.stdout.write(a.stdout);
-if (a.stderr) process.stderr.write(a.stderr);
-process.exit(a.code || 0);
+const a = answers[key] || { stderr: "fake " + tool + ": no answer for " + key, code: 1 };
+const answer = () => {
+  if (a.signal) process.kill(process.pid, a.signal);
+  if (a.stdout) process.stdout.write(a.stdout);
+  if (a.stderr) process.stderr.write(a.stderr);
+  process.exit(a.code || 0);
+};
+if (a.sleepMs) setTimeout(answer, a.sleepMs);
+else answer();
 `;
 
 export class FakeGh {
@@ -43,8 +55,11 @@ export class FakeGh {
     this.dir = mkdtempSync(join(tmpdir(), "gitwand-fake-gh-"));
     // `.cjs` body behind a tiny launcher: `gh` itself has no extension.
     writeFileSync(join(this.dir, "gh.cjs"), SCRIPT);
-    writeFileSync(join(this.dir, "gh"), `#!${process.execPath}\nrequire(${JSON.stringify(join(this.dir, "gh.cjs"))});\n`);
-    chmodSync(join(this.dir, "gh"), 0o755);
+    // `ssh` too (for `ssh -G` alias lookups), answering under the key "ssh".
+    for (const name of ["gh", "ssh"]) {
+      writeFileSync(join(this.dir, name), `#!${process.execPath}\nrequire(${JSON.stringify(join(this.dir, "gh.cjs"))});\n`);
+      chmodSync(join(this.dir, name), 0o755);
+    }
     this.answer(answers);
     this.savedPath = process.env.PATH;
     process.env.PATH = `${this.dir}:${process.env.PATH ?? ""}`;

@@ -168,7 +168,7 @@ It does **not** validate what it writes: no residual-marker or syntax check. For
 
 File a GitHub issue on the repository the agent works in. **It previews by default:** without `dry_run: false` nothing is created, and the tool returns the target repository, the title, body, labels and assignees it would send, and what the secrets scan found. The agent is told to show you that preview and to create only once you agree.
 
-The issue goes to `origin`, or to its fork parent when issues are turned off (or the repository archived) on `origin`, as in the desktop app. It goes through the GitHub CLI (`gh`): signed in with `gh auth login`, or with `GH_TOKEN`/`GITHUB_TOKEN` in the server's environment; a GitHub Enterprise `origin` uses `gh`'s login for that host. Title and body are scanned first with the repository's `.gitwandrc` `secrets` settings: a known secret pattern refuses the issue, even with `dry_run: false`; a high-entropy string only warns.
+The issue goes to `origin`, or to its fork parent when issues are turned off (or the repository archived) on `origin`, as in the desktop app. It goes through the GitHub CLI (`gh`): signed in with `gh auth login`, or with `GH_TOKEN`/`GITHUB_TOKEN` in the server's environment; a GitHub Enterprise `origin` uses `gh`'s login for that host, and an SSH alias from `~/.ssh/config` is resolved to the host it connects to. Title and body are scanned first with the repository's `.gitwandrc` `secrets` settings: a known secret pattern refuses the issue, even with `dry_run: false`; a high-entropy string only warns.
 
 **Parameters:**
 
@@ -182,7 +182,7 @@ The issue goes to `origin`, or to its fork parent when issues are turned off (or
 | `repo` | string | No | `owner/repo`: `origin`'s repository or its fork parent |
 | `dry_run` | boolean | No | Default `true` (preview). `false` creates the issue |
 
-**Returns:** the preview, or `{ created, repo, number, url }`. Errors are `{ error, message }` with a stable code: `gh_missing`, `no_origin`, `repo_not_allowed`, `issues_disabled`, `secrets_found`, `create_failed`…
+**Returns:** the preview, or `{ created, repo, number, url }`. Errors are `{ error, message }` with a stable code: `gh_missing`, `no_origin`, `repo_not_allowed`, `issues_disabled`, `secrets_found`, `create_failed`, and `create_uncertain` when `gh` was cut off while creating (the issue may exist: check before trying again)…
 
 ## Resources
 

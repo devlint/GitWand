@@ -15,9 +15,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parseGitwandrc, scanReportBody, type ReportScan, type SecretFinding, type SecretPattern } from "@gitwand/core";
+import { scanReportBody, type ReportScan, type SecretFinding } from "@gitwand/core";
+import { gitTry, readGitwandrc } from "../repo-config.js";
 
 // ─── Remote URL ──────────────────────────────────────────────
 
@@ -25,16 +24,18 @@ export interface RemoteRepo {
   host: string;
   owner: string;
   repo: string;
+  /** Reached over SSH (`host` may then be an alias from ~/.ssh/config). */
+  ssh: boolean;
 }
 
 const SEGMENT = /^[A-Za-z0-9._-]+$/;
 
-function ownerRepo(host: string, path: string): RemoteRepo | null {
+function ownerRepo(host: string, path: string, ssh: boolean): RemoteRepo | null {
   const parts = path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "").split("/");
   if (parts.length !== 2) return null;
   const [owner, repo] = parts;
   if (!host || !SEGMENT.test(owner) || !SEGMENT.test(repo) || repo === "." || repo === "..") return null;
-  return { host: host.toLowerCase(), owner, repo };
+  return { host: host.toLowerCase(), owner, repo, ssh };
 }
 
 /**
@@ -46,17 +47,20 @@ export function parseRemoteUrl(url: string): RemoteRepo | null {
   const u = url.trim();
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) {
     let parsed: URL;
+    let path: string;
     try {
       parsed = new URL(u);
+      path = decodeURIComponent(parsed.pathname);
     } catch {
+      // Not a URL, or a malformed %-escape in its path.
       return null;
     }
     if (!["https:", "http:", "ssh:", "git:"].includes(parsed.protocol)) return null;
-    return ownerRepo(parsed.hostname, decodeURIComponent(parsed.pathname));
+    return ownerRepo(parsed.hostname, path, parsed.protocol === "ssh:");
   }
   // scp-like: [user@]host:path — a host has no slash, the path does not start with one.
   const m = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/.exec(u);
-  return m ? ownerRepo(m[1], m[2]) : null;
+  return m ? ownerRepo(m[1], m[2], true) : null;
 }
 
 // ─── Targets ─────────────────────────────────────────────────
@@ -126,6 +130,9 @@ const GH_ENV_ALLOW = [
   "no_proxy",
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
+  // gh's keyring on Linux (Secret Service) is reached over the session bus.
+  "DBUS_SESSION_BUS_ADDRESS",
+  "XDG_RUNTIME_DIR",
 ];
 
 /**
@@ -145,31 +152,80 @@ export function ghEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-const GH_TIMEOUT_MS = 30_000;
+/**
+ * How long `gh` and `ssh -G` may take. A create gets longer than a read, as
+ * in the desktop: a POST cut short may still have filed the issue. Mutable
+ * for tests only.
+ */
+export const createIssueTimeouts = { readMs: 30_000, createMs: 60_000, sshMs: 5_000 };
 
-export type GhResult = { ok: true; stdout: string } | { ok: false; missing: boolean; stderr: string };
+export type GhResult =
+  | { ok: true; stdout: string }
+  /**
+   * `missing`: gh is not installed. `interrupted`: gh did not finish (timed
+   * out or stopped by a signal) — what it was doing may have happened.
+   */
+  | { ok: false; missing: boolean; interrupted: boolean; stderr: string };
 
-/** `gh args…` in `cwd`, `input` on stdin; never throws. */
-export function runGh(args: string[], cwd: string, input?: string): GhResult {
+/** `gh args…` in `cwd`, `input` on stdin, killed after `timeoutMs`; never throws. */
+export function runGh(args: string[], cwd: string, input: string | undefined, timeoutMs: number): GhResult {
   try {
     const stdout = execFileSync("gh", args, {
       cwd,
       env: ghEnv(),
       input: input ?? "",
       encoding: "utf-8",
-      timeout: GH_TIMEOUT_MS,
+      timeout: timeoutMs,
       maxBuffer: 16 * 1024 * 1024,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
     return { ok: true, stdout };
   } catch (err) {
-    const e = err as NodeJS.ErrnoException & { stderr?: string | Buffer; signal?: string };
-    if (e.code === "ENOENT") return { ok: false, missing: true, stderr: "" };
-    if (e.signal === "SIGTERM") return { ok: false, missing: false, stderr: `gh did not answer within ${GH_TIMEOUT_MS / 1000} s` };
+    const e = err as NodeJS.ErrnoException & { stderr?: string | Buffer; signal?: string | null };
+    if (e.code === "ENOENT") return { ok: false, missing: true, interrupted: false, stderr: "" };
+    // execFileSync's timeout: the child is killed and the error is ETIMEDOUT.
+    if (e.code === "ETIMEDOUT") {
+      return { ok: false, missing: false, interrupted: true, stderr: `gh did not answer within ${timeoutMs / 1000} s` };
+    }
+    if (e.signal) return { ok: false, missing: false, interrupted: true, stderr: `gh was stopped by ${e.signal}` };
     const stderr = (typeof e.stderr === "string" ? e.stderr : e.stderr?.toString("utf-8") ?? "").trim();
-    return { ok: false, missing: false, stderr: stderr || e.message };
+    return { ok: false, missing: false, interrupted: false, stderr: stderr || e.message };
   }
+}
+
+/** What `ssh` may see: enough to find and read its config, no token. */
+const SSH_ENV_ALLOW = ["PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SystemRoot", "windir", "TMPDIR", "TEMP", "TMP"];
+
+/**
+ * The host `ssh` connects to for `host` (`ssh -G` reads ~/.ssh/config
+ * without connecting), so an alias such as `github-work` becomes the host gh
+ * knows; `ssh.github.com` (SSH over 443) is github.com, as gh reads it. The
+ * host itself when ssh is missing, fails or times out — the desktop's
+ * `ssh_resolved_host`.
+ */
+export function sshResolvedHost(host: string): string {
+  let resolved = host;
+  // A plain host name only: never something ssh would read as an option.
+  if (/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(host)) {
+    const env: NodeJS.ProcessEnv = {};
+    for (const k of SSH_ENV_ALLOW) if (process.env[k] !== undefined) env[k] = process.env[k];
+    try {
+      const out = execFileSync("ssh", ["-G", host], {
+        env,
+        encoding: "utf-8",
+        timeout: createIssueTimeouts.sshMs,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      });
+      const line = out.split("\n").find((l) => l.startsWith("hostname "));
+      const name = line?.slice("hostname ".length).trim().toLowerCase();
+      if (name) resolved = name;
+    } catch {
+      // Keep the host as written.
+    }
+  }
+  return resolved === "ssh.github.com" ? "github.com" : resolved;
 }
 
 // ─── The tool ────────────────────────────────────────────────
@@ -237,14 +293,6 @@ const fail = (error: string, message: string): ToolResult => ({
   isError: true,
 });
 
-function git(cwd: string, args: string[]): string | null {
-  try {
-    return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
-  } catch {
-    return null;
-  }
-}
-
 /** A list argument: absent → [], else non-empty strings without commas (gh splits on them). */
 function list(v: unknown, name: string): string[] | ToolResult {
   if (v === undefined) return [];
@@ -254,42 +302,34 @@ function list(v: unknown, name: string): string[] | ToolResult {
   return v.map((x: string) => x.trim());
 }
 
-/** The repository's `.gitwandrc` secrets settings, as the scan takes them. */
-function secretsOptions(root: string) {
-  const opts = { extraPatterns: [] as SecretPattern[], ignore: [] as string[], entropyThreshold: DEFAULT_ENTROPY_THRESHOLD };
-  for (const filename of [".gitwandrc", ".gitwandrc.json"]) {
-    let content: string;
-    try {
-      content = readFileSync(join(root, filename), "utf-8");
-    } catch {
-      continue;
-    }
-    const parsed = parseGitwandrc(content);
-    if (parsed === null) continue;
-    return {
-      extraPatterns: parsed.secrets?.patterns ?? [],
-      ignore: parsed.secrets?.ignore ?? [],
-      entropyThreshold: parsed.secrets?.entropyThreshold ?? DEFAULT_ENTROPY_THRESHOLD,
-    };
-  }
-  return opts;
-}
-
 /**
- * Title and body scanned as one text, the title on line 0: body lines keep
- * their own numbers.
+ * Title and body scanned each on its own, as the desktop form does: a finding
+ * names the field (`title` / `body`) and that field's own line. Always on,
+ * with the repository's `.gitwandrc` secrets settings.
  */
 function scanIssue(root: string, title: string, body: string): ReportScan {
-  const scan = scanReportBody(body === "" ? title : `${title}\n${body}`, { ...secretsOptions(root), blockAt: "medium" });
-  const shift = (f: SecretFinding) => ({ ...f, file: f.line === 1 ? "title" : "body", line: f.line - 1 });
-  return { blocking: scan.blocking.map(shift), warnings: scan.warnings.map(shift) };
+  const rc = readGitwandrc(root)?.secrets;
+  const opts = {
+    extraPatterns: rc?.patterns ?? [],
+    ignore: rc?.ignore ?? [],
+    entropyThreshold: rc?.entropyThreshold ?? DEFAULT_ENTROPY_THRESHOLD,
+    blockAt: "medium" as const,
+  };
+  const out: ReportScan = { blocking: [], warnings: [] };
+  for (const [file, text] of [["title", title], ["body", body]] as const) {
+    const r = scanReportBody(text, opts);
+    const tag = (f: SecretFinding) => ({ ...f, file });
+    out.blocking.push(...r.blocking.map(tag));
+    out.warnings.push(...r.warnings.map(tag));
+  }
+  return out;
 }
 
 export async function handleCreateIssue(cwd: string, args: Record<string, unknown>): Promise<ToolResult> {
   // 1. Arguments — nothing runs on a malformed call.
   const title = typeof args.title === "string" ? args.title.trim() : "";
-  if (!title || title.length > MAX_TITLE) {
-    return fail("invalid_title", `\`title\` is required and must be at most ${MAX_TITLE} characters.`);
+  if (!title || title.length > MAX_TITLE || /[\r\n]/.test(title)) {
+    return fail("invalid_title", `\`title\` is required: one line of at most ${MAX_TITLE} characters.`);
   }
   if (args.body !== undefined && typeof args.body !== "string") return fail("invalid_body", "`body` must be a string.");
   const body = (args.body as string | undefined) ?? "";
@@ -305,15 +345,16 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   const dryRun = args.dry_run !== false;
 
   // 2. The origin remote.
-  const root = git(cwd, ["rev-parse", "--show-toplevel"]);
+  const root = gitTry(cwd, ["rev-parse", "--show-toplevel"]);
   if (!root) return fail("not_a_repo", `Not a Git repository: ${cwd}`);
-  const url = git(root, ["remote", "get-url", "origin"]);
+  const url = gitTry(root, ["remote", "get-url", "origin"]);
   if (!url) return fail("no_origin", "This repository has no `origin` remote to file an issue on.");
   const remote = parseRemoteUrl(url);
   if (!remote) return fail("unsupported_remote", "The `origin` remote is not a `host/owner/repo` URL.");
+  const host = remote.ssh ? sshResolvedHost(remote.host) : remote.host;
 
   // 3. Its issue targets, as GitHub describes them.
-  const api = runGh(["api", "--hostname", remote.host, `repos/${remote.owner}/${remote.repo}`], root);
+  const api = runGh(["api", "--hostname", host, `repos/${remote.owner}/${remote.repo}`], root, undefined, createIssueTimeouts.readMs);
   if (!api.ok) {
     if (api.missing) return fail("gh_missing", "The GitHub CLI (`gh`) is not installed or not on PATH: https://cli.github.com");
     return fail("target_lookup_failed", `gh could not read ${remote.owner}/${remote.repo}: ${api.stderr}`);
@@ -365,22 +406,28 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   if (!canCreate) {
     return fail(
       "secrets_found",
-      `Not created: ${secrets.blocking.map((f) => `${f.patternId} (${f.file}${f.file === "body" ? ` line ${f.line}` : ""})`).join(", ")}. Remove the secrets and try again.`,
+      `Not created: ${secrets.blocking.map((f) => `${f.patternId} (${f.file} line ${f.line})`).join(", ")}. Remove the secrets and try again.`,
     );
   }
 
   // 5. Create.
   const create = [
     "issue", "create",
-    "--repo", `${remote.host}/${chosen.repo}`,
+    "--repo", `${host}/${chosen.repo}`,
     "--title", title,
     "--body-file", "-",
     ...labels.flatMap((l) => ["--label", l]),
     ...assignees.flatMap((a) => ["--assignee", a]),
   ];
-  const made = runGh(create, root, body);
+  const made = runGh(create, root, body, createIssueTimeouts.createMs);
   if (!made.ok) {
     if (made.missing) return fail("gh_missing", "The GitHub CLI (`gh`) is not installed or not on PATH: https://cli.github.com");
+    if (made.interrupted) {
+      return fail(
+        "create_uncertain",
+        `${made.stderr}. The issue may have been created: check https://${host}/${chosen.repo}/issues before trying again.`,
+      );
+    }
     return fail("create_failed", `gh could not create the issue on ${chosen.repo}: ${made.stderr}`);
   }
   // gh prints the new issue's URL last.

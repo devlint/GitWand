@@ -7,29 +7,37 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseRemoteUrl, targetsFrom, ghEnv } from "../tools/create_issue.js";
+import { parseRemoteUrl, targetsFrom, ghEnv, createIssueTimeouts } from "../tools/create_issue.js";
 import { handleToolCall, registerTools } from "../tools/index.js";
 import { FakeGh, repoJson, type FakeAnswer } from "./fake-gh.js";
 
 describe("parseRemoteUrl", () => {
   const want = { host: "github.com", owner: "me", repo: "proj" };
   it.each([
-    "https://github.com/me/proj.git",
-    "https://github.com/me/proj",
-    "https://github.com/me/proj/",
-    "https://user@github.com/me/proj",
-    "git@github.com:me/proj.git",
-    "ssh://git@github.com:22/me/proj.git",
-    "ssh://git@github.com/me/proj",
-  ])("reads %s", (url) => {
-    expect(parseRemoteUrl(url)).toEqual(want);
+    ["https://github.com/me/proj.git", false],
+    ["https://github.com/me/proj", false],
+    ["https://github.com/me/proj/", false],
+    ["https://user@github.com/me/proj", false],
+    ["git@github.com:me/proj.git", true],
+    ["ssh://git@github.com:22/me/proj.git", true],
+    ["ssh://git@github.com/me/proj", true],
+  ])("reads %s", (url, ssh) => {
+    expect(parseRemoteUrl(url)).toEqual({ ...want, ssh });
   });
 
   it("keeps an enterprise host", () => {
-    expect(parseRemoteUrl("git@ghe.corp:team/app.git")).toEqual({ host: "ghe.corp", owner: "team", repo: "app" });
+    expect(parseRemoteUrl("git@ghe.corp:team/app.git")).toEqual({ host: "ghe.corp", owner: "team", repo: "app", ssh: true });
   });
 
-  it.each(["/local/path", "../other", "file:///tmp/r.git", "https://github.com/onlyowner", "https://github.com/a/b/c", ""])(
+  it.each([
+    "/local/path",
+    "../other",
+    "file:///tmp/r.git",
+    "https://github.com/onlyowner",
+    "https://github.com/a/b/c",
+    "https://github.com/o/r%E0.git",
+    "",
+  ])(
     "refuses %s",
     (url) => {
       expect(parseRemoteUrl(url)).toBeNull();
@@ -84,7 +92,12 @@ describe("ghEnv", () => {
     process.env.OPENAI_API_KEY = "nope";
     process.env.GH_REPO = "evil/repo";
     process.env.GH_HOST = "evil.host";
+    process.env.DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/user/1000/bus";
+    process.env.XDG_RUNTIME_DIR = "/run/user/1000";
     const env = ghEnv();
+    // gh's keyring (Secret Service on Linux) is reached over the session bus.
+    expect(env.DBUS_SESSION_BUS_ADDRESS).toBe("unix:path=/run/user/1000/bus");
+    expect(env.XDG_RUNTIME_DIR).toBe("/run/user/1000");
     expect(env.GH_TOKEN).toBe("t1");
     expect(env.GITHUB_TOKEN).toBe("t2");
     expect(env.PATH).toBe(process.env.PATH);
@@ -102,7 +115,9 @@ describe("ghEnv", () => {
 
 const dirs: string[] = [];
 let gh: FakeGh | null = null;
+const timeouts = { ...createIssueTimeouts };
 afterEach(() => {
+  Object.assign(createIssueTimeouts, timeouts);
   gh?.dispose();
   gh = null;
   while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
@@ -128,7 +143,8 @@ async function call(cwd: string, args: Record<string, unknown>) {
   return { isError: res.isError === true, out: JSON.parse(res.content[0].text) };
 }
 
-const creates = (g: FakeGh) => g.calls().filter((c) => c.argv[0] === "issue");
+const creates = (g: FakeGh) => g.calls().filter((c) => c.tool === "gh" && c.argv[0] === "issue");
+const apis = (g: FakeGh) => g.calls().filter((c) => c.tool === "gh" && c.argv[0] === "api");
 const token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8";
 
 describe("gitwand_create_issue", () => {
@@ -156,7 +172,7 @@ describe("gitwand_create_issue", () => {
     });
     expect(out.next).toMatch(/dry_run: false/);
     expect(creates(g)).toHaveLength(0);
-    expect(g.calls()[0].argv).toEqual(["api", "--hostname", "github.com", "repos/me/proj"]);
+    expect(g.calls().map((c) => c.argv)).toEqual([["api", "--hostname", "github.com", "repos/me/proj"]]);
   });
 
   it("creates with dry_run: false, the body on stdin", async () => {
@@ -210,7 +226,7 @@ describe("gitwand_create_issue", () => {
     const preview = await call(cwd, { title: `leak ${token}`, body: "ok" });
     expect(preview.out.canCreate).toBe(false);
     expect(preview.out.secrets.blocking).toHaveLength(1);
-    expect(preview.out.secrets.blocking[0].line).toBe(0);
+    expect(preview.out.secrets.blocking[0]).toMatchObject({ file: "title", line: 1 });
     expect(JSON.stringify(preview.out.secrets)).not.toContain(token);
     const sent = await call(cwd, { title: `leak ${token}`, body: "ok", dry_run: false });
     expect(sent.isError).toBe(true);
@@ -221,7 +237,7 @@ describe("gitwand_create_issue", () => {
   it("a body secret keeps its line number", async () => {
     fake();
     const { out } = await call(makeRepo(), { title: "T", body: `a\nkey = "${token}"` });
-    expect(out.secrets.blocking[0].line).toBe(2);
+    expect(out.secrets.blocking[0]).toMatchObject({ file: "body", line: 2 });
   });
 
   it("uses the repository's .gitwandrc patterns", async () => {
@@ -238,6 +254,8 @@ describe("gitwand_create_issue", () => {
   it.each([
     [{ title: "   " }, "invalid_title"],
     [{ title: "x".repeat(257) }, "invalid_title"],
+    [{ title: "Crash\nmore" }, "invalid_title"],
+    [{ title: "Crash\r" + "more" }, "invalid_title"],
     [{ title: "T", body: "x".repeat(65_537) }, "invalid_body"],
     [{ title: "T", labels: ["a,b"] }, "invalid_list"],
     [{ title: "T", labels: [""] }, "invalid_list"],
@@ -306,7 +324,64 @@ describe("gitwand_create_issue", () => {
     const g = fake(repoJson("me/proj"), { stdout: "https://ghe.corp/me/proj/issues/3\n" });
     const { out } = await call(makeRepo("git@ghe.corp:me/proj.git"), { title: "T", dry_run: false });
     expect(out).toMatchObject({ created: true, number: 3 });
-    expect(g.calls()[0].argv).toEqual(["api", "--hostname", "ghe.corp", "repos/me/proj"]);
+    expect(apis(g)[0].argv).toEqual(["api", "--hostname", "ghe.corp", "repos/me/proj"]);
     expect(creates(g)[0].argv.slice(0, 4)).toEqual(["issue", "create", "--repo", "ghe.corp/me/proj"]);
+  });
+
+  it("an SSH alias goes to the host ssh connects to", async () => {
+    const g = fake();
+    g.answer({
+      api: { stdout: JSON.stringify(repoJson("me/proj")) },
+      ssh: { stdout: "user git\nhostname github.com\nport 22\n" },
+    });
+    const { out } = await call(makeRepo("git@github-work:me/proj.git"), { title: "T" });
+    expect(out.repo).toBe("me/proj");
+    expect(g.calls().find((c) => c.tool === "ssh")!.argv).toEqual(["-G", "github-work"]);
+    expect(apis(g)[0].argv).toEqual(["api", "--hostname", "github.com", "repos/me/proj"]);
+  });
+
+  it("ssh.github.com is github.com", async () => {
+    const g = fake();
+    g.answer({
+      api: { stdout: JSON.stringify(repoJson("me/proj")) },
+      ssh: { stdout: "hostname ssh.github.com\nport 443\n" },
+    });
+    await call(makeRepo("ssh://git@ssh.github.com:443/me/proj.git"), { title: "T" });
+    expect(apis(g)[0].argv).toContain("github.com");
+  });
+
+  it("an https origin asks ssh nothing", async () => {
+    const g = fake();
+    await call(makeRepo(), { title: "T" });
+    expect(g.calls().some((c) => c.tool === "ssh")).toBe(false);
+  });
+
+  it("a slow read is reported as such", async () => {
+    createIssueTimeouts.readMs = 300;
+    gh = new FakeGh({ api: { stdout: JSON.stringify(repoJson("me/proj")), sleepMs: 3000 } });
+    const r = await call(makeRepo(), { title: "T" });
+    expect(r.out.error).toBe("target_lookup_failed");
+    expect(r.out.message).toMatch(/did not answer/);
+  });
+
+  it("a create that times out may have created the issue", async () => {
+    createIssueTimeouts.createMs = 300;
+    fake(repoJson("me/proj"), { stdout: ISSUE_URL, sleepMs: 3000 });
+    const r = await call(makeRepo(), { title: "T", dry_run: false });
+    expect(r.isError).toBe(true);
+    expect(r.out.error).toBe("create_uncertain");
+    expect(r.out.message).toContain("https://github.com/me/proj/issues");
+  });
+
+  it("a create stopped by a signal may have created the issue too, and says why", async () => {
+    fake(repoJson("me/proj"), { signal: "SIGTERM" });
+    const r = await call(makeRepo(), { title: "T", dry_run: false });
+    expect(r.out.error).toBe("create_uncertain");
+    expect(r.out.message).toMatch(/SIGTERM/);
+    expect(r.out.message).not.toMatch(/did not answer/);
+  });
+
+  it("the default timeouts: 30 s to read, 60 s to create", () => {
+    expect(timeouts).toEqual({ readMs: 30_000, createMs: 60_000, sshMs: 5_000 });
   });
 });

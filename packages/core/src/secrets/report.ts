@@ -34,9 +34,8 @@ function piecesOf(text: string): string[] {
       cut = PIECE_CHARS;
       while (cut < rest.length && TOKEN_CHAR.test(rest[cut])) cut++;
     }
-    const at = cut;
-    out.push(rest.slice(0, at));
-    rest = rest.slice(at);
+    out.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
   }
   out.push(rest);
   return out;
