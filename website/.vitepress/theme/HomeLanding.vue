@@ -53,7 +53,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.13.2'
+const LATEST = '3.13.3'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -129,7 +129,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Natif (sans Electron)",
     mcRow4: "Serveur MCP pour agents",
     agentsCta: "Découvrir IA & agents →",
-    heroAnnounce: "Nouveau dans la v3.13 — un onglet CI qui suit la CI en direct, et sait sur quel commit elle a tourné",
+    heroAnnounce: "Nouveau dans la v3.13 — créez des issues GitHub sans quitter GitWand",
     heroPoint1: "8 patterns déterministes — zéro pari sur ton code",
     heroPoint2: "100 % local — ton code ne quitte jamais ta machine",
     heroPoint3: "Un seul moteur — Desktop, CLI, VS Code & agents IA",
@@ -229,7 +229,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Native (no Electron)",
     mcRow4: "MCP server for agents",
     agentsCta: "Explore AI & agents →",
-    heroAnnounce: "New in v3.13 — a CI tab that follows a running CI, and knows which commit it ran on",
+    heroAnnounce: "New in v3.13 — create GitHub issues without leaving GitWand",
     heroPoint1: "8 deterministic patterns — zero gambling with your code",
     heroPoint2: "100% local — your code never leaves your machine",
     heroPoint3: "One engine — Desktop, CLI, VS Code & AI agents",
@@ -329,7 +329,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sin Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA y agentes →",
-    heroAnnounce: "Nuevo en la v3.13 — una pestaña CI que sigue la CI en directo y sabe en qué commit se ejecutó",
+    heroAnnounce: "Nuevo en la v3.13 — crea issues de GitHub sin salir de GitWand",
     heroPoint1: "8 patrones deterministas — cero apuestas con tu código",
     heroPoint2: "100 % local — tu código nunca sale de tu máquina",
     heroPoint3: "Un solo motor — Desktop, CLI, VS Code y agentes de IA",
@@ -429,7 +429,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sem Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA e agentes →",
-    heroAnnounce: "Novidade na v3.13 — uma aba de CI que acompanha a CI ao vivo e sabe em qual commit ela rodou",
+    heroAnnounce: "Novidade na v3.13 — crie issues do GitHub sem sair do GitWand",
     heroPoint1: "8 padrões deterministas — zero aposta com seu código",
     heroPoint2: "100 % local — seu código nunca sai da sua máquina",
     heroPoint3: "Um único motor — Desktop, CLI, VS Code e agentes de IA",
@@ -529,7 +529,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "原生（无 Electron）",
     mcRow4: "面向代理的 MCP 服务器",
     agentsCta: "探索 AI 与代理 →",
-    heroAnnounce: "v3.13 新功能 — CI 标签页实时跟踪运行中的 CI，并知道它运行在哪个提交上",
+    heroAnnounce: "v3.13 新功能 — 无需离开 GitWand 即可创建 GitHub issue",
     heroPoint1: "8 种确定性模式 — 绝不拿你的代码赌运气",
     heroPoint2: "100% 本地运行 — 代码永不离开你的机器",
     heroPoint3: "一个引擎 — 桌面端、CLI、VS Code 与 AI 代理",
@@ -615,7 +615,7 @@ const t = computed(() => i18n[locale.value])
 // `t` sert les sections historiques, `nt` les nouvelles.
 const NC: Record<Locale, any> = {
   en: {
-    badge: 'v3.13 — a CI tab that follows a running CI, and knows which commit it ran on',
+    badge: 'v3.13 — create GitHub issues without leaving GitWand, from a commit, lines or a bad resolution',
     h1a: 'The merge ends', h1b: 'without you', h1c: '.',
     sub: 'Eight deterministic patterns classify every hunk, settle the ones that carried no decision, and hand you back only what deserves your attention. Native, local, MIT.',
     cta: 'Download GitWand',
@@ -667,7 +667,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   fr: {
-    badge: 'v3.13 — un onglet CI qui suit la CI en direct, et sait sur quel commit elle a tourné',
+    badge: 'v3.13 — créez des issues GitHub sans quitter GitWand, depuis un commit, des lignes ou une mauvaise résolution',
     h1a: 'Le merge se termine', h1b: 'sans toi', h1c: '.',
     sub: 'Huit patterns déterministes classent chaque hunk, règlent ceux qui ne demandaient aucune décision, et te laissent uniquement ce qui vaut ton attention. Natif, local, MIT.',
     cta: 'Télécharger GitWand',
@@ -719,7 +719,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   es: {
-    badge: 'v3.13 — una pestaña CI que sigue la CI en directo y sabe en qué commit se ejecutó',
+    badge: 'v3.13 — crea issues de GitHub sin salir de GitWand, desde un commit, unas líneas o una mala resolución',
     h1a: 'El merge termina', h1b: 'sin ti', h1c: '.',
     sub: 'Ocho patrones deterministas clasifican cada hunk, resuelven los que no exigían ninguna decisión y te devuelven solo lo que merece tu atención. Nativo, local, MIT.',
     cta: 'Descargar GitWand',
@@ -771,7 +771,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'pt-BR': {
-    badge: 'v3.13 — uma aba de CI que acompanha a CI ao vivo e sabe em qual commit ela rodou',
+    badge: 'v3.13 — crie issues do GitHub sem sair do GitWand, a partir de um commit, de linhas ou de uma resolução ruim',
     h1a: 'O merge termina', h1b: 'sem você', h1c: '.',
     sub: 'Oito padrões determinísticos classificam cada hunk, resolvem os que não exigiam decisão nenhuma e devolvem só o que merece a sua atenção. Nativo, local, MIT.',
     cta: 'Baixar o GitWand',
@@ -823,7 +823,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'zh-CN': {
-    badge: 'v3.13 — CI 标签页实时跟踪运行中的 CI，并知道它运行在哪个提交上',
+    badge: 'v3.13 — 无需离开 GitWand 即可创建 GitHub issue，可基于提交、代码行或错误的解决结果',
     h1a: '合并结束时', h1b: '不必再找你', h1c: '。',
     sub: '八种确定性模式为每个 hunk 分类，自动处理那些本就无需决策的部分，只把值得你关注的留给你。原生、本地、MIT。',
     cta: '下载 GitWand',

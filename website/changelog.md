@@ -5,6 +5,28 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.13.3 — November 2026
+
+### File GitHub issues without leaving GitWand
+
+A "New issue" window now opens over whatever you are looking at, from the toolbar, the ⌘K palette or ⌘⇧I (Ctrl+Alt+I on Windows and Linux). It takes a title, a Markdown description with a preview, and the labels, assignees and milestone the repository offers. A blank form also offers the repository's issue templates, Markdown ones as they are and issue forms flattened into the Markdown GitHub would file. The issue goes to `origin`. On a fork, you choose between the fork and its parent, and a repository with issues turned off is shown but cannot be picked. If the request fails after it was sent, the form says the issue may already exist and lets you check on GitHub before sending it again. Requested by Pannboo (#301).
+
+The form also opens with context already in it. Right-click a commit in the Git Tree to file an issue about it. In a commit's diff, click a line number and Shift+click another to select lines, and the issue gets a GitHub permalink and the lines themselves. In a pull request, the same Shift+click turns a comment into a multi-line comment. In the merge editor, a *Report* button on each proposal sends a bad resolution with the conflict, GitWand's result and its reasoning. It can also go to GitWand's own repository as a bug report, describing the file only by its kind, after a secrets scan and a box you tick to say the code can be public.
+
+Once the issue exists, it is one keystroke from your next commit. Typing `#` in the commit message lists the repository's open issues, on GitHub and on GitLab, Gitea or Bitbucket with an account connected, and the notice shown after creating an issue adds its reference to the commit description.
+
+### A Git advent calendar
+
+From 1 to 24 December, one little-known git command a day, with the problem it solves, a snippet you can run and, for most days, a tip on doing it in GitWand. Open today's door with `gitwand advent` in the terminal, or on [gitwand.app/advent](/advent/). Doors stay locked until their day, Paris time, and from 25 December they are all open. The Dashboard shows the day's command during the same weeks.
+
+### Fixes
+
+Screenshots attached on GitHub now show in pull request descriptions and comments without clicking "Show images", private repositories included, where GitWand fetches the signed URLs GitHub hands to a signed-in browser. Reported by Pannboo (#302). Large AI prompts are no longer sent empty with an older curl, such as Ubuntu 22.04's 7.81: a body above 48 KiB now goes through a temporary file only you can read.
+
+### For agents using the MCP server
+
+`gitwand_create_issue` lets an agent file a GitHub issue on the repository it works in, through the GitHub CLI. It previews by default, showing the target, the title, the labels and what the secrets scan found. It creates the issue only when called again with `dry_run: false` and that preview's id, so only what was previewed is sent, once. A client that supports elicitation also asks you to confirm. A known secret pattern anywhere in the issue refuses it.
+
 ## v3.13.2 — November 2026
 
 ### Pull requests stay on your repository

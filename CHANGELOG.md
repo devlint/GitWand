@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.3] - 2026-11-20
+
 ### Added
 
 - **A Git advent calendar: `gitwand advent` and gitwand.app/advent.** 24 doors, one little-known git command a day from 1 to 24 December, each with the problem it solves, a runnable snippet, an explanation and, for most doors, a GitWand tip. `gitwand advent` opens today's door and `gitwand advent 5` door 5 (`--json` for machine output); future doors stay locked until their day, Paris time. On the site, doors are opened from a grid, each day has its own page at `/advent/<day>` with a share image, and from 25 December every door is open and each day page shows its door's content. The home page announces it with a card under the hero: a countdown to the first door from 25 November, then a link to today's door and the `gitwand advent` command from 1 to 25 December; the hero badge and an "Advent 🎄" nav link point to the calendar over the same December dates. In the desktop app, a card at the top of the Dashboard shows today's command and opens its door on gitwand.app, from 1 to 25 December; it can be hidden until the next day.
@@ -1760,7 +1762,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.13.2...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.13.3...HEAD
+[3.13.3]: https://github.com/devlint/GitWand/compare/v3.13.2...v3.13.3
 [3.13.2]: https://github.com/devlint/GitWand/compare/v3.13.1...v3.13.2
 [3.13.1]: https://github.com/devlint/GitWand/compare/v3.13.0...v3.13.1
 [3.13.0]: https://github.com/devlint/GitWand/compare/v3.12.5...v3.13.0
