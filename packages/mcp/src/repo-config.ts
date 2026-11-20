@@ -10,13 +10,51 @@ import { join } from "node:path";
 import { parseGitwandrc, type GitWandrcConfig } from "@gitwand/core";
 import { run } from "./spawn.js";
 
+/** What git may see of this process's environment, beyond its own `GIT_*` settings. */
+const GIT_ENV_ALLOW = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "SystemRoot",
+  "windir",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "LC_ALL",
+  "XDG_CONFIG_HOME",
+];
+
+/**
+ * The environment git runs with (AGENTS.md: only what the child needs): the
+ * allow-list above and git's own `GIT_*` variables (`GIT_DIR`,
+ * `GIT_CONFIG_GLOBAL`…), but none that names a secret — no forge or AI token
+ * reaches it.
+ */
+export function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    // `GIT_CONFIG_COUNT` / `_KEY_n` / `_VALUE_n` are git's own config: kept.
+    const gits = k.startsWith("GIT_") && !/TOKEN|PASSWORD|SECRET|API_KEY/i.test(k);
+    if (GIT_ENV_ALLOW.includes(k) || gits) env[k] = v;
+  }
+  return env;
+}
+
 /**
  * `git args…` in `cwd` (array args, no shell): trimmed stdout — possibly
  * empty — or null on failure.
  */
 export function gitOutput(cwd: string, args: string[]): string | null {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
+    return execFileSync("git", args, { cwd, env: gitEnv(), encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
   } catch {
     return null;
   }
@@ -32,7 +70,7 @@ export function gitTry(cwd: string, args: string[]): string | null {
  * the tools wait on (`run`): null after `timeoutMs` too.
  */
 export async function gitTryAsync(cwd: string, args: string[], timeoutMs = 30_000): Promise<string | null> {
-  const r = await run("git", args, { cwd, env: process.env, timeoutMs });
+  const r = await run("git", args, { cwd, env: gitEnv(), timeoutMs });
   return r.code === 0 && !r.timedOut && !r.capped ? r.stdout.trim() || null : null;
 }
 
@@ -41,6 +79,7 @@ export function gitBlob(cwd: string, rev: string, file: string): string | null {
   try {
     return execFileSync("git", ["show", `${rev}:${file}`], {
       cwd,
+      env: gitEnv(),
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,

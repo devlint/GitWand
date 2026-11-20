@@ -53,11 +53,13 @@ describe("issueTargetsFrom", () => {
     expect(issueTargetsFrom(repo("a/b", { perms: { push: true } })).targets[0].canTriage).toBe(true);
   });
 
-  it("a parent read on its own replaces the embedded copy; an unusable one does not", () => {
+  it("a parent read on its own replaces the embedded copy, as Rust's: even an unusable one", () => {
     const o = repo("me/proj", { parent: repo("up/proj", { perms: null }) });
     expect(issueTargetsFrom(o).targets[1].canTriage).toBe(false);
     expect(issueTargetsFrom(o, repo("up/proj")).targets[1].canTriage).toBe(true);
-    expect(issueTargetsFrom(o, { message: "Not Found" }).targets[1].repo).toBe("up/proj");
+    // Rust: `api_get(parent).ok().or_else(embedded)` — a read that answered is used as it is.
+    expect(issueTargetsFrom(o, { message: "Not Found" }).targets).toHaveLength(1);
+    expect(issueTargetsFrom(o, undefined).targets).toHaveLength(2);
   });
 
   it("nothing usable → no target", () => {

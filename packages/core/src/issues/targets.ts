@@ -39,7 +39,8 @@ function target(v: unknown, isOrigin: boolean): IssueTarget | null {
 /**
  * `origin` (a repository JSON) → its targets. For a fork, `parent` is the
  * parent read on its own (the copy embedded in a fork's answer may lack the
- * viewer's `permissions`); without a usable one, the embedded copy.
+ * viewer's `permissions`), used as it is; `undefined` (the read failed) falls
+ * back to the embedded copy — Rust's `.ok().or_else(embedded)`.
  */
 export function issueTargetsFrom(origin: unknown, parent?: unknown): IssueTargets {
   const o = target(origin, true);
@@ -47,7 +48,7 @@ export function issueTargetsFrom(origin: unknown, parent?: unknown): IssueTarget
   const targets = [o];
   const j = origin as Record<string, unknown>;
   if (j.fork === true) {
-    const p = target(parent, false) ?? target(j.parent, false);
+    const p = target(parent !== undefined ? parent : j.parent, false);
     if (p) targets.push(p);
   }
   return { targets, defaultRepo: targets.find((t) => t.hasIssues)?.repo ?? null };

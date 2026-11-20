@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseRemoteUrl, ghEnv, createIssueTimeouts, resetCreateIssueCaches, runGh, scanWorkerStarts } from "../tools/create_issue.js";
-import { gitTryAsync } from "../repo-config.js";
+import { gitTryAsync, gitEnv } from "../repo-config.js";
 import { handleToolCall, registerTools } from "../tools/index.js";
 import { FakeGh, repoJson, type FakeAnswer } from "./fake-gh.js";
 
@@ -270,6 +270,10 @@ describe("gitwand_create_issue", () => {
     [{ title: "x".repeat(257) }, "invalid_title"],
     [{ title: "Crash\nmore" }, "invalid_title"],
     [{ title: "Bug\u0000x" }, "invalid_title"],
+    [{ title: "Bug\u2028x" }, "invalid_title"],
+    [{ title: "Bug \u202eexe.txt" }, "invalid_title"],
+    [{ title: "Bug\u0085x" }, "invalid_title"],
+    [{ title: "T", labels: ["bug\u2066"] }, "invalid_list"],
     [{ title: "T", labels: ["bu\u0000g"] }, "invalid_list"],
     [{ title: "T", assignees: ["me\tyou"] }, "invalid_list"],
     [{ title: "😀".repeat(257) }, "invalid_title"],
@@ -858,6 +862,49 @@ describe("gitwand_create_issue", () => {
     // Each asked at once: none waits for the others' overruns.
     expect(Date.now() - t).toBeLessThan(400 * 2 + 300);
   });
+
+  it("cancelling during the POST stops gh, and the issue may exist", async () => {
+    const g = fake(repoJson("me/proj"), { stdout: issueJson(), sleepMs: 5_000 });
+    const cwd = makeRepo();
+    const p = await call(cwd, { title: "T" });
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 300);
+    const t = Date.now();
+    const r = await call(cwd, { title: "T", dry_run: false, preview_id: p.out.previewId }, undefined, ac.signal);
+    expect(Date.now() - t).toBeLessThan(3_000);
+    expect(r.out.error).toBe("create_uncertain");
+    expect(creates(g)).toHaveLength(1);
+    expect((await call(cwd, { title: "T", dry_run: false, preview_id: p.out.previewId })).out.error).toBe("preview_used");
+  });
+
+  it("a preview made under one gh account does not create under another", async () => {
+    fake();
+    const cwd = makeRepo();
+    const saved = process.env.GH_TOKEN;
+    try {
+      process.env.GH_TOKEN = "account-a";
+      const p = await call(cwd, { title: "T" });
+      process.env.GH_TOKEN = "account-b";
+      expect((await call(cwd, { title: "T", dry_run: false, preview_id: p.out.previewId })).out.error).toBe("preview_required");
+    } finally {
+      if (saved === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = saved;
+    }
+  });
+
+  it("a parent read that answers nothing usable is an unread parent", async () => {
+    const g = fake();
+    const fork = repoJson("me/proj", { hasIssues: false, parent: repoJson("up/proj", { triage: null }) });
+    g.answer({ api: { stdout: JSON.stringify(fork) }, "api repos/up/proj": { stdout: JSON.stringify({ message: "odd" }) } });
+    expect((await call(makeRepo(), { title: "T", labels: ["bug"] })).out.error).toBe("target_lookup_failed");
+  });
+
+  it("labels and assignees are scanned too", async () => {
+    fake();
+    const { out } = await call(makeRepo(), { title: "T", labels: ["ok", token] });
+    expect(out.canCreate).toBe(false);
+    expect(out.secrets.blocking).toMatchObject([{ file: "labels", line: 2, patternId: "github_pat_classic" }]);
+  });
 });
 
 
@@ -880,5 +927,32 @@ describe("gitTryAsync", () => {
     const t = Date.now();
     expect(await gitTryAsync(cwd, ["--version"], 300)).toBeNull();
     expect(Date.now() - t).toBeLessThan(2_500);
+  });
+});
+
+describe("gitEnv", () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it("gives git what it needs, no token", () => {
+    process.env.GH_TOKEN = "t";
+    process.env.ANTHROPIC_API_KEY = "k";
+    process.env.GIT_DIR = "/x/.git";
+    process.env.GIT_CONFIG_GLOBAL = "/x/gitconfig";
+    process.env.GIT_HTTP_PASSWORD = "p";
+    process.env.GIT_CONFIG_COUNT = "1";
+    process.env.GIT_CONFIG_KEY_0 = "core.pager";
+    process.env.GIT_CONFIG_VALUE_0 = "cat";
+    const env = gitEnv();
+    expect([env.GIT_CONFIG_COUNT, env.GIT_CONFIG_KEY_0, env.GIT_CONFIG_VALUE_0]).toEqual(["1", "core.pager", "cat"]);
+    expect(env.PATH).toBe(process.env.PATH);
+    expect(env.HOME).toBe(process.env.HOME);
+    expect(env.GIT_DIR).toBe("/x/.git");
+    expect(env.GIT_CONFIG_GLOBAL).toBe("/x/gitconfig");
+    expect(env.GH_TOKEN).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.GIT_HTTP_PASSWORD).toBeUndefined();
   });
 });

@@ -17,6 +17,8 @@ export interface RunOptions {
   killGraceMs?: number;
   /** stdout + stderr beyond this stop the child. Default 16 MiB. */
   maxOutputBytes?: number;
+  /** Aborting it stops the child (the tool call was cancelled). */
+  signal?: AbortSignal;
 }
 
 export interface Ran {
@@ -26,6 +28,8 @@ export interface Ran {
   timedOut: boolean;
   /** Stopped for writing more than `maxOutputBytes`. */
   capped: boolean;
+  /** Stopped because `signal` was aborted. */
+  aborted: boolean;
   code: number | null;
   signal: NodeJS.Signals | null;
   stdout: string;
@@ -41,17 +45,20 @@ export function run(cmd: string, args: string[], opts: RunOptions): Promise<Ran>
     let size = 0;
     let timedOut = false;
     let capped = false;
+    let aborted = false;
     let settled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
     const done = (r: { missing: boolean; code: number | null; signal: NodeJS.Signals | null; note?: string }) => {
       if (settled) return;
       settled = true;
       timers.forEach(clearTimeout);
+      opts.signal?.removeEventListener("abort", onAbort);
       if (r.note) err.push(Buffer.from(r.note));
       resolve({
         missing: r.missing,
         timedOut,
         capped,
+        aborted,
         code: r.code,
         signal: r.signal,
         stdout: Buffer.concat(out).toString("utf-8"),
@@ -68,8 +75,11 @@ export function run(cmd: string, args: string[], opts: RunOptions): Promise<Ran>
       return;
     }
 
-    /** SIGTERM, SIGKILL if it lingers, and stop waiting if even that does not end it. */
+    /** SIGTERM, SIGKILL if it lingers, and stop waiting if even that does not end it — once. */
+    let stopping = false;
     const stop = () => {
+      if (stopping) return;
+      stopping = true;
       child.kill("SIGTERM");
       timers.push(
         setTimeout(() => {
@@ -84,6 +94,12 @@ export function run(cmd: string, args: string[], opts: RunOptions): Promise<Ran>
         stop();
       }, opts.timeoutMs),
     );
+    function onAbort() {
+      aborted = true;
+      stop();
+    }
+    if (opts.signal?.aborted) onAbort();
+    else opts.signal?.addEventListener("abort", onAbort, { once: true });
     const collect = (into: Buffer[]) => (chunk: Buffer) => {
       if (capped) return;
       size += chunk.length;

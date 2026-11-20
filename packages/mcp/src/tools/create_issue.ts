@@ -3,8 +3,8 @@
  * repository the agent works in, as the desktop app does.
  *
  * - Target: `origin`, or its fork parent when `origin` takes no issues
- *   (disabled or archived) — the desktop's rule (`targets_from` in
- *   `commands/gh_issues.rs`, `devIssueTargetsFrom` in `dev-issues.mjs`).
+ *   (disabled or archived) — core's `issueTargetsFrom`, the mirror of Rust's
+ *   `targets_from` (`commands/gh_issues.rs`).
  *   Read from `git remote get-url origin` and `gh api repos/{o}/{r}`, never
  *   from `gh repo view` alone, which may pick `upstream` (#298).
  * - Preview by default: nothing is created without `dry_run: false`.
@@ -79,8 +79,6 @@ export function parseRemoteUrl(url: string): RemoteRepo | null {
   const m = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/.exec(u);
   return m ? ownerRepo(m[1], m[2], true) : null;
 }
-
-// ─── Targets: core's `issueTargetsFrom` (shared with the desktop dev-server) ──
 
 // ─── Running gh ──────────────────────────────────────────────
 
@@ -172,7 +170,13 @@ export type GhResult =
   | { ok: false; missing: boolean; interrupted: boolean; stderr: string };
 
 /** `gh args…` in `cwd`, `input` on stdin, stopped after `timeoutMs`; never rejects. */
-export async function runGh(args: string[], cwd: string, input: string | undefined, timeoutMs: number): Promise<GhResult> {
+export async function runGh(
+  args: string[],
+  cwd: string,
+  input: string | undefined,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<GhResult> {
   const r = await run("gh", args, {
     cwd,
     env: ghEnv(),
@@ -180,9 +184,11 @@ export async function runGh(args: string[], cwd: string, input: string | undefin
     timeoutMs,
     killGraceMs: createIssueTimeouts.killGraceMs,
     maxOutputBytes: createIssueTimeouts.maxOutputBytes,
+    signal,
   });
   const stopped = (why: string) => ({ ok: false as const, missing: false, interrupted: true, stderr: why });
   if (r.missing) return { ok: false, missing: true, interrupted: false, stderr: "" };
+  if (r.aborted) return stopped("the tool call was cancelled while gh was running");
   if (r.timedOut) return stopped(`gh did not answer within ${timeoutMs / 1000} s`);
   if (r.capped) return stopped(`gh wrote more than ${createIssueTimeouts.maxOutputBytes} bytes and was stopped`);
   if (r.signal) return stopped(`gh was stopped by ${r.signal}`);
@@ -458,8 +464,14 @@ async function scanTexts(texts: string[], opts: ScanOptions, deadline?: number):
   if (!opts.extraPatterns.length) return texts.map((t) => scanReportBody(t, opts));
   const s = getScanner();
   if (!s) return null;
-  if (!(await s.ready)) {
-    dropScanner(s);
+  // A scan already timed (queued behind one that overran) waits for a new
+  // worker only as long as it has left.
+  const ready =
+    deadline === undefined
+      ? await s.ready
+      : await Promise.race([s.ready, new Promise<false>((r) => setTimeout(() => r(false), Math.max(0, deadline - Date.now())))]);
+  if (!ready) {
+    if (deadline === undefined || Date.now() < deadline) dropScanner(s);
     return null;
   }
   const due = deadline ?? Date.now() + createIssueTimeouts.scanMs;
@@ -544,8 +556,12 @@ const fail = (error: string, message: string): ToolResult => ({
   isError: true,
 });
 
-/** Control characters (NUL, tab, newlines…): never in a title, label or login. */
-const CONTROL = /[\u0000-\u001f\u007f]/;
+/**
+ * Never in a title, label or login: control characters (C0, DEL, C1 — NUL,
+ * tab, newlines, NEL), the line and paragraph separators, and the bidi
+ * controls that make text read differently from what it is.
+ */
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 
 /** A list argument: absent → [], else non-empty names without control characters. */
 function list(v: unknown, name: string): string[] | ToolResult {
@@ -563,7 +579,7 @@ function list(v: unknown, name: string): string[] | ToolResult {
  * not its `secrets.ignore`: a repository (a clone, a fork) must not be able to
  * allow-list a value out of what blocks a public issue.
  */
-async function scanIssue(root: string, title: string, body: string): Promise<ReportScan | null> {
+async function scanIssue(root: string, title: string, body: string, labels: string[], assignees: string[]): Promise<ReportScan | null> {
   const rc = (await readGitwandrcAsync(root))?.secrets;
   const opts: ScanOptions = {
     extraPatterns: rc?.patterns ?? [],
@@ -571,11 +587,18 @@ async function scanIssue(root: string, title: string, body: string): Promise<Rep
     entropyThreshold: rc?.entropyThreshold ?? DEFAULT_ENTROPY_THRESHOLD,
     blockAt: "medium",
   };
-  const results = await scanTexts([title, body], opts);
+  // Every field that becomes public: labels and logins one per line.
+  const fields: Array<[string, string]> = [
+    ["title", title],
+    ["body", body],
+    ["labels", labels.join("\n")],
+    ["assignees", assignees.join("\n")],
+  ];
+  const results = await scanTexts(fields.map(([, t]) => t), opts);
   if (!results) return null;
   const out: ReportScan = { blocking: [], warnings: [] };
   results.forEach((r, i) => {
-    const tag = (f: SecretFinding) => ({ ...f, file: i === 0 ? "title" : "body" });
+    const tag = (f: SecretFinding) => ({ ...f, file: fields[i][0] });
     out.blocking.push(...r.blocking.map(tag));
     out.warnings.push(...r.warnings.map(tag));
   });
@@ -611,8 +634,12 @@ async function readTargets(root: string, host: string, remote: RemoteRepo, accou
   let parentUnread: string | null = null;
   if (j.fork === true && typeof j.parent?.full_name === "string") {
     const p = await get(j.parent.full_name);
-    parent = p.ok ? parseJson(p.stdout) ?? undefined : undefined;
-    if (!parent) parentUnread = p.ok ? "no answer" : p.stderr;
+    const read = p.ok ? parseJson(p.stdout) : null;
+    // An answer that is not a repository is no better than none: the
+    // embedded copy stands in, its rights unknown.
+    const usable = read && typeof read === "object" && typeof (read as { full_name?: unknown }).full_name === "string";
+    parent = usable ? read : undefined;
+    if (!usable) parentUnread = p.ok ? "gh gave no repository" : p.stderr;
   }
   const { targets } = issueTargetsFrom(json, parent);
   if (!targets.length) return { error: fail("target_lookup_failed", `gh gave no repository for ${remote.owner}/${remote.repo}.`) };
@@ -747,7 +774,7 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   if (!Array.isArray(logins)) return logins;
 
   // 4. Secrets.
-  const secrets = await scanIssue(root, title, body);
+  const secrets = await scanIssue(root, title, body, labels, logins);
   if (!secrets) {
     return fail(
       "scan_failed",
@@ -756,7 +783,8 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   }
   const canCreate = secrets.blocking.length === 0;
   // What a create must match: this preview's issue, where it goes.
-  const issue = [root, host, chosen.repo, title, body, labels, logins];
+  // The gh account too: a preview made as one account does not create as another.
+  const issue = [account, root, host, chosen.repo, title, body, labels, logins];
 
   if (dryRun) {
     return ok({
@@ -807,7 +835,8 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   }
   if (answer === false) return release(fail("declined", "The user declined: nothing was created."));
   // The client gave up on this call (while the user read, say): its agent
-  // already saw it fail, so nothing is filed behind its back.
+  // already saw it fail, so nothing is filed behind its back. Past this
+  // point a cancel stops gh, but the POST may already have reached GitHub.
   if (ctx.signal?.aborted) return release(fail("cancelled", "The tool call was cancelled: nothing was created."));
 
   // 5. Create: the whole issue as JSON on stdin (the REST payload the desktop
@@ -820,6 +849,8 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
     root,
     JSON.stringify(payload),
     createIssueTimeouts.createMs,
+    // Cancelled mid-POST: gh is stopped, and the issue may exist (create_uncertain).
+    ctx.signal,
   );
   if (!made.ok) {
     if (made.missing) return release(ghMissing());
