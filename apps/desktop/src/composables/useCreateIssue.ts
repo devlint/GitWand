@@ -9,7 +9,7 @@ import { computed, onUnmounted, ref, shallowRef, watch, type ComputedRef, type I
 import type { ForgeProvider } from "./forge/types";
 import { gitExec, ghCreateGitwandIssue, ghGitwandWritable, type IssueTemplateFiles } from "../utils/backend";
 import { loadTemplateSet, type IssueTemplateSet } from "../utils/issueTemplates";
-import type { SecretFinding, SecretPattern } from "@gitwand/core";
+import { DEFAULT_ENTROPY_THRESHOLD, type SecretFinding, type SecretPattern } from "@gitwand/core";
 import { platformName } from "../utils/platform";
 import { gitwandReportPrefill, repoReportPrefill, withAnswer, type ResolutionReport } from "../utils/resolutionReport";
 import { scanReportBody, type ReportScan } from "../utils/reportGuard";
@@ -240,7 +240,7 @@ function defaultEnv(): { version: string; platform: string } {
  *  scanner config, in tests): the built-in patterns, entropy at 4.0. */
 const DEFAULT_SECRETS_OPTIONS: Readonly<{ extraPatterns: SecretPattern[]; entropyThreshold: number; ignore?: string[] }> = {
   extraPatterns: [],
-  entropyThreshold: 4.0,
+  entropyThreshold: DEFAULT_ENTROPY_THRESHOLD,
 };
 
 async function defaultSecretsOptions(_cwd: string | null) {

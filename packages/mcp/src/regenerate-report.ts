@@ -27,26 +27,16 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { join, resolve as resolvePath } from "node:path";
+import { gitTry, readGitwandrc } from "./repo-config.js";
 import {
   findEcosystem,
   buildRegenerationPlan,
-  parseGitwandrc,
   type MergeResult,
   type RegenerationContext,
   type RegenerationPlan,
   type RepoConventions,
 } from "@gitwand/core";
-
-function gitTry(cwd: string, args: string[]): string | null {
-  try {
-    const out = execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    return out || null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * `.git/gitwand/conventions.json` for the repo at `cwd`, tolerant — never
@@ -80,36 +70,14 @@ export function loadGitwandrcMinConfidenceScore(cwd: string): number | undefined
   const root = gitTry(cwd, ["rev-parse", "--show-toplevel"]);
   if (!root) return undefined;
 
-  for (const filename of [".gitwandrc", ".gitwandrc.json"]) {
-    let content: string;
-    try {
-      content = readFileSync(join(root, filename), "utf-8");
-    } catch {
-      continue;
-    }
-    const parsed = parseGitwandrc(content);
-    if (parsed === null) continue;
-    return parsed.minConfidenceScore;
-  }
-  return undefined;
+  return readGitwandrc(root)?.minConfidenceScore;
 }
 
 export function loadGitwandrcResolveGeneratedFiles(cwd: string): boolean | undefined {
   const root = gitTry(cwd, ["rev-parse", "--show-toplevel"]);
   if (!root) return undefined;
 
-  for (const filename of [".gitwandrc", ".gitwandrc.json"]) {
-    let content: string;
-    try {
-      content = readFileSync(join(root, filename), "utf-8");
-    } catch {
-      continue;
-    }
-    const parsed = parseGitwandrc(content);
-    if (parsed === null) continue;
-    return parsed.resolveGeneratedFiles;
-  }
-  return undefined;
+  return readGitwandrc(root)?.resolveGeneratedFiles;
 }
 
 export interface RegenerationReportEntry {

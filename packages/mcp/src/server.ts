@@ -21,6 +21,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { registerTools, handleToolCall } from "./tools/index.js";
+import { elicitConfirm } from "./confirm.js";
 import { registerResources, handleResourceRead } from "./resources/index.js";
 
 // ─── Parse CLI args ────────────────────────────────────────
@@ -53,8 +54,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: registerTools(),
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
-  return handleToolCall(request.params.name, request.params.arguments ?? {}, cwd);
+server.setRequestHandler(CallToolRequestSchema, async (request: any, extra: { signal: AbortSignal }) => {
+  // A create can ask the user directly (MCP elicitation), within this call:
+  // cancelling the call withdraws the question.
+  return handleToolCall(request.params.name, request.params.arguments ?? {}, cwd, {
+    confirm: elicitConfirm(server, extra.signal),
+    signal: extra.signal,
+  });
 });
 
 // ─── Resources ─────────────────────────────────────────────

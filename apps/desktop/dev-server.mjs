@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
-import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
+import { devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -1300,7 +1300,13 @@ async function devIssueTargetsRead(nwo, token) {
       if (parent) origin.parent = parent;
     }
   }
-  return devIssueTargetsFrom(origin);
+  // `targets_from`, from core (shared with the MCP tool). Checked here, not
+  // in DEV_CORE_HELPERS: an older dist must not take the diff routes down too.
+  const core = await loadDevCore();
+  if (typeof core.issueTargetsFrom !== "function") {
+    throw new Error("@gitwand/core is out of date (missing issueTargetsFrom): run `pnpm --filter @gitwand/core build`, then restart the dev-server");
+  }
+  return core.issueTargetsFrom(origin);
 }
 
 /** Up to `maxPages` pages of 100 of the array at `path` (`query` ends with `&`). */

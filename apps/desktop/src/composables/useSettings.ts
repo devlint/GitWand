@@ -10,6 +10,7 @@
  */
 
 import { ref, toRaw } from "vue";
+import { DEFAULT_ENTROPY_THRESHOLD } from "@gitwand/core";
 import { detectLocale, isSupportedLocale } from "../locales";
 import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
@@ -585,7 +586,7 @@ export const defaultAppSettings: AppSettings = {
   filesPrevMode:                     "floating",
   filesHideOnNav:                    true,
   secretsScannerEnabled:             true,
-  secretsEntropyThreshold:           4.0,
+  secretsEntropyThreshold:           DEFAULT_ENTROPY_THRESHOLD,
   commitReviewEnabled:               false,
   commitReviewAutoReReview:          true,
   snapshotsEnabled:                  true,

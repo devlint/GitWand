@@ -203,6 +203,14 @@ export type { ThresholdSummary } from "./stats/threshold.js";
 // v3.5.0 — Secrets scanner (pure, mirrored in Rust — see secrets/scanner.ts)
 export { scanSecrets, shannonEntropy, redact, isIgnored, DEFAULT_IGNORE_GLOBS } from "./secrets/scanner.js";
 export { BUILT_IN_PATTERNS } from "./secrets/patterns.js";
+// #301 — the secrets scan of an issue's text (desktop issue form, MCP tool)
+export { scanReportBody, DEFAULT_ENTROPY_THRESHOLD } from "./secrets/report.js";
+export type { ReportScan } from "./secrets/report.js";
+// #301 — where a repository's issues can go (origin, or its fork parent)
+export { issueTargetsFrom } from "./issues/targets.js";
+export type { IssueTarget, IssueTargets } from "./issues/targets.js";
+export { parseRemoteUrl } from "./issues/remote.js";
+export type { RemoteRepo } from "./issues/remote.js";
 export type {
   SecretSeverity,
   SecretPattern,

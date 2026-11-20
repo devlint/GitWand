@@ -349,6 +349,7 @@ claude mcp add gitwand -- npx -y @gitwand/mcp
 | `gitwand_apply_resolution` | Apply a custom (LLM-provided) resolution to a specific complex hunk |
 | `gitwand_resolve_hunk` | Ask the connected agent to propose a resolution for one pending hunk (ours/theirs/base + trace returned) |
 | `gitwand_resolve_hunk_llm` | Validate an LLM-proposed resolution through the post-merge gate, then apply it to disk |
+| `gitwand_create_issue` | Preview (default) or file a GitHub issue on `origin` or its fork parent through `gh`, after a secrets scan |
 
 ### Resources
 

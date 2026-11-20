@@ -9,14 +9,18 @@
  * gitwand_resolve_hunk          → ask the connected agent to propose a resolution
  *                                 (inversion of `--llm-fallback`: the agent IS the LLM)
  * gitwand_resolve_hunk_llm      → validate + apply an LLM-proposed resolution
+ * gitwand_create_issue          → preview (default) or file a GitHub issue on
+ *                                 origin or its fork parent, after a secrets scan
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import { resolve, summarizeTiers, validateMergedContent, type MergeResult, type ConflictType, type GitWandOptions } from "@gitwand/core";
 import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
+import { createIssueToolDefinition, handleCreateIssue, type ToolContext } from "./create_issue.js";
 import { detectMergeContext } from "../merge-context.js";
+import { conflictedFiles, gitBlob, gitEnv, gitOutput } from "../repo-config.js";
 import {
   buildRegenerationReport,
   loadGitwandrcResolveGeneratedFiles,
@@ -228,24 +232,15 @@ export function registerTools() {
         required: ["file", "line", "resolution"],
       },
     },
+    // #301 — file a GitHub issue (preview by default)
+    createIssueToolDefinition,
   ];
 }
 
 // ─── Helpers ───────────────────────────────────────────────
 
 function getConflictedFiles(cwd: string): string[] {
-  try {
-    const output = execSync("git diff --name-only --diff-filter=U", {
-      cwd,
-      encoding: "utf-8",
-    });
-    return output
-      .trim()
-      .split("\n")
-      .filter((f) => f.length > 0);
-  } catch {
-    return [];
-  }
+  return conflictedFiles(cwd);
 }
 
 // ─── Conflict Predictor helpers (rebase / cherry-pick) ─────
@@ -262,21 +257,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 
-/** Run git, returning trimmed stdout, or null on non-zero exit / spawn error. */
-function gitTry(cwd: string, args: string[]): string | null {
-  try {
-    // execFileSync passes args as a discrete array — no shell interpolation.
-    const out = execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-    return out.trim();
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Run `git merge-file` and return the merged content INCLUDING conflict markers.
  *
- * Unlike gitTry, this must NOT discard output on a non-zero exit: `git merge-file`
+ * Unlike gitOutput, this must NOT discard output on a non-zero exit: `git merge-file`
  * exits with a code equal to the number of conflicts (>0 means there ARE
  * conflicts — exactly the case the predictor cares about), and the conflict-marked
  * content is still written to stdout. Returns the content as-is (no trim, to
@@ -287,8 +271,11 @@ function gitMergeFile(cwd: string, args: string[]): string | null {
   try {
     const out = execFileSync("git", ["merge-file", ...args], {
       cwd,
+      env: gitEnv(),
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+      maxBuffer: 64 * 1024 * 1024,
     });
     return out; // clean merge, exit 0
   } catch (e: unknown) {
@@ -304,19 +291,19 @@ function gitMergeFile(cwd: string, args: string[]): string | null {
 
 /** Resolve a ref to a commit SHA, or null if unknown/invalid. */
 function revParse(cwd: string, rev: string): string | null {
-  return gitTry(cwd, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
+  return gitOutput(cwd, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
 }
 
 /** Files changed between two revs (name-only). */
 function changedFiles(cwd: string, base: string, rev: string): string[] {
-  const out = gitTry(cwd, ["diff", "--name-only", base, rev]);
+  const out = gitOutput(cwd, ["diff", "--name-only", base, rev]);
   if (!out) return [];
   return out.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
 }
 
 /** Read a file's blob at a given rev, or null if absent at that rev. */
 function showBlob(cwd: string, rev: string, file: string): string | null {
-  return gitTry(cwd, ["show", `${rev}:${file}`]);
+  return gitBlob(cwd, rev, file);
 }
 
 interface SimulatedFile {
@@ -365,8 +352,8 @@ function simulate3way(cwd: string, ancestor: string, ours: string, theirs: strin
       writeFileSync(pTheirs, theirsBlob, "utf-8");
 
       // git merge-file -p --diff3 <ours> <base> <theirs> → markered content on stdout.
-      // Must use gitMergeFile, not gitTry: merge-file exits non-zero on conflict
-      // (the very case we want), and gitTry would discard the conflict content.
+      // Must use gitMergeFile, not gitOutput: merge-file exits non-zero on conflict
+      // (the very case we want), and gitOutput would discard the conflict content.
       const merged = gitMergeFile(cwd, ["-p", "--diff3", pOurs, pBase, pTheirs]);
       out.push({ file, content: merged ?? "", addDelete: false });
     }
@@ -473,6 +460,7 @@ export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
   defaultCwd: string,
+  ctx: ToolContext = {},
 ) {
   const cwd = (args.cwd as string) || defaultCwd;
 
@@ -491,6 +479,8 @@ export async function handleToolCall(
       return handleResolveHunk(args);
     case "gitwand_resolve_hunk_llm":
       return toolResolvHunkLlm(cwd, args);
+    case "gitwand_create_issue":
+      return handleCreateIssue(cwd, args, ctx);
     default:
       return { content: [{ type: "text" as const, text: `Unknown tool: ${name}` }], isError: true };
   }
@@ -906,14 +896,14 @@ async function toolPreviewRebase(cwd: string, args: Record<string, unknown>) {
   if (!headSha) {
     return { content: [{ type: "text" as const, text: "Cannot resolve HEAD (empty repository?)." }], isError: true };
   }
-  const mergeBase = gitTry(cwd, ["merge-base", headSha, onto]);
+  const mergeBase = gitOutput(cwd, ["merge-base", headSha, onto]);
   if (!mergeBase) {
     return { content: [{ type: "text" as const, text: `No common ancestor between HEAD and ${onto}.` }], isError: true };
   }
 
   // Replay commits oldest-first: per-commit 3-way preview.
   // Orientation per commit: ours = onto (target base), theirs = commit (replayed).
-  const commitsRaw = gitTry(cwd, ["rev-list", "--reverse", `${mergeBase}..${headSha}`]);
+  const commitsRaw = gitOutput(cwd, ["rev-list", "--reverse", `${mergeBase}..${headSha}`]);
   const commits = commitsRaw ? commitsRaw.split("\n").filter((c) => c.trim()) : [];
   const allSims: SimulatedFile[] = [];
   for (const c of commits) {
