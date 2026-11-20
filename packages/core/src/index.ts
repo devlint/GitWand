@@ -209,6 +209,8 @@ export type { ReportScan } from "./secrets/report.js";
 // #301 — where a repository's issues can go (origin, or its fork parent)
 export { issueTargetsFrom } from "./issues/targets.js";
 export type { IssueTarget, IssueTargets } from "./issues/targets.js";
+export { parseRemoteUrl } from "./issues/remote.js";
+export type { RemoteRepo } from "./issues/remote.js";
 export type {
   SecretSeverity,
   SecretPattern,

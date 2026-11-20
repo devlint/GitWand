@@ -2,58 +2,18 @@
  * gitwand_create_issue (#301, part 6): helpers, then the tool through
  * handleToolCall on a real temp git repo with a fake `gh` on PATH.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseRemoteUrl, ghEnv, createIssueTimeouts, resetCreateIssueCaches, runGh, scanWorkerStarts } from "../tools/create_issue.js";
+import { ghEnv, createIssueTimeouts, resetCreateIssueCaches, runGh, scanWorkerStarts, setScanCoreForTests } from "../tools/create_issue.js";
 import { gitTryAsync, gitEnv } from "../repo-config.js";
 import { handleToolCall, registerTools } from "../tools/index.js";
 import { FakeGh, repoJson, type FakeAnswer } from "./fake-gh.js";
 
-describe("parseRemoteUrl", () => {
-  const want = { host: "github.com", owner: "me", repo: "proj" };
-  it.each([
-    ["https://github.com/me/proj.git", false],
-    ["https://github.com/me/proj", false],
-    ["https://github.com/me/proj/", false],
-    ["https://user@github.com/me/proj", false],
-    ["git@github.com:me/proj.git", true],
-    ["ssh://git@github.com:22/me/proj.git", true],
-    ["ssh://git@github.com/me/proj", true],
-  ])("reads %s", (url, ssh) => {
-    expect(parseRemoteUrl(url)).toEqual({ ...want, ssh });
-  });
-
-  it("keeps an https port (the API is served there), not an ssh one", () => {
-    expect(parseRemoteUrl("https://ghe.corp:8443/team/app.git")).toMatchObject({ host: "ghe.corp:8443" });
-    expect(parseRemoteUrl("ssh://git@ghe.corp:2222/team/app.git")).toMatchObject({ host: "ghe.corp" });
-  });
-
-  it("keeps an enterprise host", () => {
-    expect(parseRemoteUrl("git@ghe.corp:team/app.git")).toEqual({ host: "ghe.corp", owner: "team", repo: "app", ssh: true });
-  });
-
-  it.each([
-    "/local/path",
-    "../other",
-    "file:///tmp/r.git",
-    "https://github.com/onlyowner",
-    "https://github.com/a/b/c",
-    "https://github.com/o/r%E0.git",
-    "https://github.com/me/proj?x=1#y/z",
-    "",
-  ])(
-    "refuses %s",
-    (url) => {
-      expect(parseRemoteUrl(url)).toBeNull();
-    },
-  );
-});
-
-// The target rule (origin, or its fork parent) is core's `issueTargetsFrom`,
-// tested in packages/core; the tool's use of it is tested below.
+// Remote URLs (core's `parseRemoteUrl`) and the target rule (core's
+// `issueTargetsFrom`) are tested in packages/core; their use is tested below.
 
 describe("ghEnv", () => {
   const saved = { ...process.env };
@@ -68,6 +28,7 @@ describe("ghEnv", () => {
     process.env.OPENAI_API_KEY = "nope";
     process.env.GH_REPO = "evil/repo";
     process.env.GH_HOST = "evil.host";
+    process.env.GH_ENTERPRISE_TOKEN = "ent";
     process.env.DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/user/1000/bus";
     process.env.XDG_RUNTIME_DIR = "/run/user/1000";
     const env = ghEnv();
@@ -81,6 +42,10 @@ describe("ghEnv", () => {
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.GH_REPO).toBeUndefined();
     expect(env.GH_HOST).toBeUndefined();
+    // An enterprise token only for the host GH_HOST names.
+    expect(env.GH_ENTERPRISE_TOKEN).toBeUndefined();
+    expect(ghEnv("evil.host").GH_ENTERPRISE_TOKEN).toBe("ent");
+    expect(ghEnv("other.host").GH_ENTERPRISE_TOKEN).toBeUndefined();
     expect(env.GH_PROMPT_DISABLED).toBe("1");
     expect(env.GH_NO_UPDATE_NOTIFIER).toBe("1");
     expect(env.NO_COLOR).toBe("1");
@@ -92,7 +57,37 @@ describe("ghEnv", () => {
 const dirs: string[] = [];
 let gh: FakeGh | null = null;
 const timeouts = { ...createIssueTimeouts };
+const GH_VARS = ["GH_CONFIG_DIR", "GH_HOST", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"];
+const savedGh: Record<string, string | undefined> = {};
+let ghConfig = "";
+
+/** gh's hosts file: the hosts gh is signed in to (github.com and ghe.corp by default). */
+function hostsYml(hosts: Record<string, { user: string; token: string }>) {
+  writeFileSync(
+    join(ghConfig, "hosts.yml"),
+    Object.entries(hosts)
+      .map(([h, a]) => `${h}:\n    user: ${a.user}\n    oauth_token: ${a.token}\n    git_protocol: https\n`)
+      .join(""),
+  );
+}
+
+beforeEach(() => {
+  for (const k of GH_VARS) {
+    savedGh[k] = process.env[k];
+    delete process.env[k];
+  }
+  ghConfig = mkdtempSync(join(tmpdir(), "gitwand-gh-config-"));
+  process.env.GH_CONFIG_DIR = ghConfig;
+  hostsYml({ "github.com": { user: "octo", token: "t1" }, "ghe.corp": { user: "octo-corp", token: "t2" } });
+});
+
 afterEach(() => {
+  for (const k of GH_VARS) {
+    if (savedGh[k] === undefined) delete process.env[k];
+    else process.env[k] = savedGh[k];
+  }
+  rmSync(ghConfig, { recursive: true, force: true });
+  setScanCoreForTests(null);
   Object.assign(createIssueTimeouts, timeouts);
   resetCreateIssueCaches();
   gh?.dispose();
@@ -427,11 +422,12 @@ describe("gitwand_create_issue", () => {
   });
 
   it("a non-GitHub origin is refused before gh is asked about it", async () => {
-    const g = new FakeGh({ "auth status": { stderr: "You are not logged into any accounts on gitlab.com", code: 1 } });
+    const g = new FakeGh({ "auth status": { stdout: "" } });
     gh = g;
     const r = await call(makeRepo("git@gitlab.com:team/app.git"), { title: "T" });
     expect(r.out.error).toBe("not_github");
-    expect(g.calls().filter((c) => c.tool === "gh").map((c) => c.argv)).toEqual([["auth", "status", "--hostname", "gitlab.com"]]);
+    // gh is never pointed at a host it has no sign-in for.
+    expect(g.calls().filter((c) => c.tool === "gh")).toHaveLength(0);
   });
 
   it("github.com needs no sign-in check", async () => {
@@ -732,10 +728,6 @@ describe("gitwand_create_issue", () => {
     expect(apis(g)[0].argv).toContain("github.com");
   });
 
-  it("a git:// port is the git daemon's, not the host's", () => {
-    expect(parseRemoteUrl("git://ghe.corp:9418/team/app.git")).toMatchObject({ host: "ghe.corp" });
-  });
-
   it("a connection that never opened is a plain failure: nothing was sent", async () => {
     fake(repoJson("me/proj"), { stderr: 'Post "https://api.github.com/repos/me/proj/issues": net/http: TLS handshake timeout', code: 1 });
     const cwd = makeRepo();
@@ -926,6 +918,72 @@ describe("gitwand_create_issue", () => {
     fake();
     expect((await create(makeRepo(), { title: "T" }, async () => true)).out.confirmedBy).toBe("user");
     expect((await create(makeRepo(), { title: "T" }, async () => undefined)).out.confirmedBy).toBe("agent");
+  });
+
+  it("an enterprise token never goes to a host gh is not signed in to", async () => {
+    process.env.GH_ENTERPRISE_TOKEN = "ghe-secret";
+    const g = fake();
+    const r = await call(makeRepo("https://attacker.example/o/r.git"), { title: "T" });
+    expect(r.out.error).toBe("not_github");
+    expect(g.calls()).toHaveLength(0);
+  });
+
+  it("GH_HOST names an enterprise host gh may use its token for", async () => {
+    process.env.GH_HOST = "ghe.env";
+    process.env.GH_ENTERPRISE_TOKEN = "ghe-secret";
+    const g = fake();
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "auth status": { stdout: "" } });
+    expect((await call(makeRepo("https://ghe.env/me/proj.git"), { title: "T" })).isError).toBe(false);
+    expect(apis(g)[0].argv).toContain("ghe.env");
+  });
+
+  it("a token refresh keeps the preview; another user does not", async () => {
+    fake();
+    const cwd = makeRepo();
+    const p1 = await call(cwd, { title: "T" });
+    hostsYml({ "github.com": { user: "octo", token: "refreshed" }, "ghe.corp": { user: "octo-corp", token: "t2" } });
+    expect((await call(cwd, { title: "T", dry_run: false, preview_id: p1.out.previewId })).out.created).toBe(true);
+    const p2 = await call(cwd, { title: "U" });
+    hostsYml({ "github.com": { user: "someone-else", token: "t9" }, "ghe.corp": { user: "octo-corp", token: "t2" } });
+    expect((await call(cwd, { title: "U", dry_run: false, preview_id: p2.out.previewId })).out.error).toBe("preview_required");
+  });
+
+  it("a cancelled call does not wait for the secrets scan", async () => {
+    createIssueTimeouts.scanMs = 20_000;
+    fake();
+    const cwd = makeRepo();
+    writeFileSync(
+      join(cwd, ".gitwandrc"),
+      JSON.stringify({ secrets: { patterns: [{ id: "bad", regex: "(a+)+$", severity: "high", description: "x" }] } }),
+    );
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 500);
+    const t = Date.now();
+    const r = await call(cwd, { title: "T", body: "a".repeat(40) + "!" }, undefined, ac.signal);
+    expect(r.out.error).toBe("cancelled");
+    expect(Date.now() - t).toBeLessThan(3_000);
+  });
+
+  it("@me in any case is the signed-in login", async () => {
+    fake();
+    expect((await call(makeRepo(), { title: "T", assignees: ["@Me"] })).out.assignees).toEqual(["octo"]);
+  });
+
+  it.each([["Ap\u200bproved"], ["x\u2060y"], ["B\ufeffOM"]])("refuses an invisible character: %j", async (title) => {
+    fake();
+    expect((await call(makeRepo(), { title })).out.error).toBe("invalid_title");
+    expect((await call(makeRepo(), { title: "T", labels: [title] })).out.error).toBe("invalid_list");
+  });
+
+  it("a scanner that cannot start says so, not that a pattern hangs", async () => {
+    setScanCoreForTests("file:///nonexistent/gitwand-core.js");
+    fake();
+    const cwd = makeRepo();
+    writeFileSync(
+      join(cwd, ".gitwandrc"),
+      JSON.stringify({ secrets: { patterns: [{ id: "corp", regex: "CORP-[0-9]{6}", severity: "high", description: "x" }] } }),
+    );
+    expect((await call(cwd, { title: "T" })).out.error).toBe("scan_unavailable");
   });
 });
 

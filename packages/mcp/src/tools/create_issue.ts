@@ -15,13 +15,15 @@
  */
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import {
   DEFAULT_ENTROPY_THRESHOLD,
   issueTargetsFrom,
+  parseRemoteUrl,
+  type RemoteRepo,
   scanReportBody,
   type IssueTarget,
   type ReportScan,
@@ -30,56 +32,6 @@ import {
 import { gitTryAsync, readGitwandrcAsync } from "../repo-config.js";
 import { run } from "../spawn.js";
 import { childEnv } from "../child-env.js";
-
-// ─── Remote URL ──────────────────────────────────────────────
-
-export interface RemoteRepo {
-  host: string;
-  owner: string;
-  repo: string;
-  /** Reached over SSH (`host` may then be an alias from ~/.ssh/config). */
-  ssh: boolean;
-}
-
-const SEGMENT = /^[A-Za-z0-9._-]+$/;
-
-function ownerRepo(host: string, path: string, ssh: boolean): RemoteRepo | null {
-  const parts = path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "").split("/");
-  if (parts.length !== 2) return null;
-  const [owner, repo] = parts;
-  if (!host || !SEGMENT.test(owner) || !SEGMENT.test(repo) || repo === "." || repo === "..") return null;
-  return { host: host.toLowerCase(), owner, repo, ssh };
-}
-
-/**
- * `{host, owner, repo}` of a remote URL — `https://host/o/r(.git)`,
- * `ssh://[user@]host[:port]/o/r(.git)`, `[user@]host:o/r(.git)` — or null for
- * a local path, a `file://` URL or a path that is not `owner/repo`.
- */
-export function parseRemoteUrl(url: string): RemoteRepo | null {
-  const u = url.trim();
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) {
-    let parsed: URL;
-    let path: string;
-    try {
-      parsed = new URL(u);
-      path = decodeURIComponent(parsed.pathname);
-    } catch {
-      // Not a URL, or a malformed %-escape in its path.
-      return null;
-    }
-    if (!["https:", "http:", "ssh:", "git:"].includes(parsed.protocol)) return null;
-    if (parsed.search || parsed.hash) return null;
-    const ssh = parsed.protocol === "ssh:";
-    // Over http(s) the port is the web/API server's (gh names such a host
-    // `host:port`); over ssh or git:// it is only that daemon's.
-    const web = parsed.protocol === "https:" || parsed.protocol === "http:";
-    return ownerRepo(web ? parsed.host : parsed.hostname, path, ssh);
-  }
-  // scp-like: [user@]host:path — a host has no slash, the path does not start with one.
-  const m = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/.exec(u);
-  return m ? ownerRepo(m[1], m[2], true) : null;
-}
 
 // ─── Running gh ──────────────────────────────────────────────
 
@@ -92,8 +44,6 @@ const GH_ENV_EXTRA = [
   "GH_CONFIG_DIR",
   "GH_TOKEN",
   "GITHUB_TOKEN",
-  "GH_ENTERPRISE_TOKEN",
-  "GITHUB_ENTERPRISE_TOKEN",
   "HTTPS_PROXY",
   "HTTP_PROXY",
   "NO_PROXY",
@@ -110,8 +60,12 @@ const GH_ENV_EXTRA = [
  * update notice, no colour. `GH_HOST`/`GH_REPO` never pass: the target is
  * always named on the command line.
  */
-export function ghEnv(): NodeJS.ProcessEnv {
-  const env = childEnv(GH_ENV_EXTRA);
+export function ghEnv(host?: string): NodeJS.ProcessEnv {
+  // gh sends an enterprise token to any host that is not github.com: only to
+  // the one the user named in GH_HOST, never to a host an origin URL chose.
+  const named = process.env.GH_HOST?.toLowerCase();
+  const enterprise = host && named && host.toLowerCase() === named ? ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"] : [];
+  const env = childEnv([...GH_ENV_EXTRA, ...enterprise]);
   env.GH_PROMPT_DISABLED = "1";
   env.GH_NO_UPDATE_NOTIFIER = "1";
   env.NO_COLOR = "1";
@@ -156,9 +110,10 @@ export async function runGh(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<GhResult> {
+  const at = args.indexOf("--hostname");
   const r = await run("gh", args, {
     cwd,
-    env: ghEnv(),
+    env: ghEnv(at >= 0 ? args[at + 1] : undefined),
     input,
     timeoutMs,
     killGraceMs: createIssueTimeouts.killGraceMs,
@@ -232,6 +187,16 @@ const AUTH_REFUSED = /HTTP 401|Bad credentials|gh auth login|not logged in|authe
  */
 async function isGithubHost(cwd: string, host: string, signal?: AbortSignal): Promise<true | ToolResult> {
   if (host === "github.com") return true;
+  // Only a host gh is signed in to (its hosts file) or the one GH_HOST names:
+  // gh is never pointed at a host an origin URL alone chose (its env tokens
+  // would go there).
+  const named = process.env.GH_HOST?.toLowerCase() === host;
+  if (!named && !(await ghHosts()).has(host)) {
+    return fail(
+      "not_github",
+      `The \`origin\` remote is on ${host}, which is not github.com nor a GitHub Enterprise host gh is signed in to (\`gh auth login --hostname ${host}\` if it is one).`,
+    );
+  }
   const at = signedInHosts.get(host);
   if (at !== undefined && Date.now() - at < createIssueTimeouts.signedInTtlMs) return true;
   const r = await runGh(["auth", "status", "--hostname", host], cwd, undefined, createIssueTimeouts.readMs, signal);
@@ -253,20 +218,47 @@ async function isGithubHost(cwd: string, host: string, signal?: AbortSignal): Pr
   return fail("gh_auth_failed", `gh could not check its sign-in to ${host}: ${r.stderr}`);
 }
 
+/** gh's config directory, where `hosts.yml` lists the hosts it is signed in to. */
+function ghConfigDir(): string {
+  const env = process.env;
+  return (
+    env.GH_CONFIG_DIR ||
+    (env.XDG_CONFIG_HOME ? join(env.XDG_CONFIG_HOME, "gh") : env.APPDATA ? join(env.APPDATA, "GitHub CLI") : join(homedir(), ".config", "gh"))
+  );
+}
+
 /**
- * Which gh account answers: its token variables and its hosts file (`gh auth
- * switch`, a login, a logout rewrite it). Cached answers that depend on the
- * viewer (rights, `@me`) are kept per account.
+ * The hosts gh is signed in to, and the user on each (`user:` under each
+ * top-level host key of `hosts.yml`) — read, never its tokens.
+ */
+async function ghHosts(): Promise<Map<string, string>> {
+  const hosts = new Map<string, string>();
+  const text = await readFile(join(ghConfigDir(), "hosts.yml"), "utf-8").catch(() => "");
+  let current: string | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    const top = /^([^\s#][^:]*):\s*$/.exec(line);
+    if (top) {
+      current = top[1].trim().toLowerCase();
+      hosts.set(current, "");
+      continue;
+    }
+    const user = /^\s+user:\s*(\S+)\s*$/.exec(line);
+    if (current && user && !hosts.get(current)) hosts.set(current, user[1]);
+  }
+  return hosts;
+}
+
+/**
+ * Which gh account answers: its token variables and the user signed in on
+ * each host — not the tokens in gh's hosts file, which a refresh rewrites
+ * for the same account. Cached answers that depend on the viewer (rights,
+ * `@me`) and previews are kept per account.
  */
 async function accountKey(): Promise<string> {
   const env = process.env;
-  const dir =
-    env.GH_CONFIG_DIR ||
-    (env.XDG_CONFIG_HOME ? join(env.XDG_CONFIG_HOME, "gh") : env.APPDATA ? join(env.APPDATA, "GitHub CLI") : join(homedir(), ".config", "gh"));
-  // No hosts file: tokens only.
-  const mtime = await stat(join(dir, "hosts.yml")).then((st) => st.mtimeMs, () => 0);
-  const tokens = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"].map((k) => env[k] ?? "").join("\u0000");
-  return createHash("sha256").update(`${tokens}\u0000${mtime}`).digest("hex");
+  const users = [...(await ghHosts())].sort().map(([h, u]) => `${h}=${u}`).join(",");
+  const tokens = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_HOST"].map((k) => env[k] ?? "").join("\u0000");
+  return createHash("sha256").update(`${tokens}\u0000${users}`).digest("hex");
 }
 
 /** A target read stays good this long: a preview then its create read it once. */
@@ -360,6 +352,15 @@ parentPort.postMessage({ ready: true });
 /** Its start-up (loading core) has its own, longer limit. */
 const SCAN_WORKER_STARTUP_MS = 20_000;
 
+/** Where the worker loads core from; a test may point it elsewhere. */
+let scanCoreOverride: string | null = null;
+
+/** Tests only: load the scan worker's core from `url` (null: the real one). */
+export function setScanCoreForTests(url: string | null): void {
+  scanCoreOverride = url;
+  if (scanner) dropScanner(scanner);
+}
+
 interface Scanner {
   worker: Worker;
   ready: Promise<boolean>;
@@ -381,11 +382,33 @@ function dropScanner(s: Scanner): void {
   void s.worker.terminate();
 }
 
+/**
+ * `p`, or `fallback` once `ms` have passed or `signal` aborts — whichever
+ * first; the timer and the listener are removed either way.
+ */
+function within<T>(p: Promise<T>, ms: number, fallback: T, signal?: AbortSignal): Promise<T> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v: T) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(v);
+    };
+    const onAbort = () => finish(fallback);
+    const timer = setTimeout(() => finish(fallback), Math.max(0, ms));
+    if (signal?.aborted) finish(fallback);
+    else signal?.addEventListener("abort", onAbort, { once: true });
+    p.then(finish, () => finish(fallback));
+  });
+}
+
 function getScanner(): Scanner | null {
   if (scanner) return scanner;
   let worker: Worker;
   try {
-    worker = new Worker(SCAN_WORKER, { workerData: { core: import.meta.resolve("@gitwand/core") } });
+    worker = new Worker(SCAN_WORKER, { workerData: { core: scanCoreOverride ?? import.meta.resolve("@gitwand/core") } });
   } catch {
     return null;
   }
@@ -395,17 +418,14 @@ function getScanner(): Scanner | null {
   const s: Scanner = {
     worker,
     queue: Promise.resolve(),
-    ready: new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), SCAN_WORKER_STARTUP_MS);
-      worker.once("message", (m: { ready?: boolean }) => {
-        clearTimeout(timer);
-        resolve(m.ready === true);
-      });
-      worker.once("error", () => {
-        clearTimeout(timer);
-        resolve(false);
-      });
-    }),
+    ready: within(
+      new Promise<boolean>((resolve) => {
+        worker.once("message", (m: { ready?: boolean }) => resolve(m.ready === true));
+        worker.once("error", () => resolve(false));
+      }),
+      SCAN_WORKER_STARTUP_MS,
+      false,
+    ),
   };
   worker.on("exit", () => {
     if (scanner === s) scanner = null;
@@ -414,55 +434,68 @@ function getScanner(): Scanner | null {
   return s;
 }
 
-function scanInWorker(s: Scanner, texts: string[], opts: ScanOptions, timeoutMs: number): Promise<ReportScan[] | null> {
+function scanInWorker(s: Scanner, texts: string[], opts: ScanOptions, timeoutMs: number, signal?: AbortSignal): Promise<ReportScan[] | null> {
   const id = ++scanIds;
-  return new Promise((resolve) => {
-    // Listeners removed once answered: the worker outlives many scans.
-    const finish = (v: ReportScan[] | null) => {
-      clearTimeout(timer);
+  const answer = new Promise<ReportScan[] | null>((resolve) => {
+    const onMessage = (m: { id?: number; results?: ReportScan[] }) => {
+      if (m.id !== id) return;
       s.worker.off("message", onMessage);
       s.worker.off("exit", onExit);
-      resolve(v);
+      resolve(m.results ?? null);
     };
-    const timer = setTimeout(() => {
-      dropScanner(s);
-      finish(null);
-    }, timeoutMs);
-    const onMessage = (m: { id?: number; results?: ReportScan[] }) => {
-      if (m.id === id) finish(m.results ?? null);
+    // Listeners removed once answered: the worker outlives many scans.
+    const onExit = () => {
+      s.worker.off("message", onMessage);
+      resolve(null);
     };
-    const onExit = () => finish(null);
     s.worker.on("message", onMessage);
     s.worker.on("exit", onExit);
     s.worker.postMessage({ id, texts, opts });
   });
+  const TIMED_OUT = Symbol("timed out");
+  return within<ReportScan[] | null | typeof TIMED_OUT>(answer, timeoutMs, TIMED_OUT, signal).then((r) => {
+    // Overran (or abandoned mid-scan): the worker may be stuck in it.
+    if (r === TIMED_OUT) {
+      dropScanner(s);
+      return null;
+    }
+    return r;
+  });
 }
+
+/** A scan's outcome: the findings, or why there are none. */
+type ScanOutcome = ReportScan[] | "timeout" | "unavailable" | "cancelled";
 
 /**
  * `deadline`: `scanMs` from when the scan is asked, once a worker is up —
  * time spent queued behind other scans counts, so a queue of overrunning
  * scans cannot hold a call longer than its own limit.
  */
-async function scanTexts(texts: string[], opts: ScanOptions, deadline?: number): Promise<ReportScan[] | null> {
+async function scanTexts(texts: string[], opts: ScanOptions, signal?: AbortSignal, deadline?: number): Promise<ScanOutcome> {
   if (!opts.extraPatterns.length) return texts.map((t) => scanReportBody(t, opts));
   const s = getScanner();
-  if (!s) return null;
+  if (!s) return "unavailable";
   // A scan already timed (queued behind one that overran) waits for a new
-  // worker only as long as it has left.
-  const ready =
-    deadline === undefined
-      ? await s.ready
-      : await Promise.race([s.ready, new Promise<false>((r) => setTimeout(() => r(false), Math.max(0, deadline - Date.now())))]);
-  if (!ready) {
-    if (deadline === undefined || Date.now() < deadline) dropScanner(s);
-    return null;
+  // worker only as long as it has left; a cancelled call does not wait.
+  const wait = deadline === undefined ? SCAN_WORKER_STARTUP_MS : deadline - Date.now();
+  const ready = await within<boolean | "waited">(s.ready, wait, "waited", signal);
+  if (signal?.aborted) return "cancelled";
+  // This scan's own time ran out while the worker started: a timeout, not a broken worker.
+  if (ready === "waited" && deadline !== undefined) return "timeout";
+  if (ready !== true) {
+    dropScanner(s);
+    return "unavailable";
   }
   const due = deadline ?? Date.now() + createIssueTimeouts.scanMs;
-  const run = s.queue.then(() => {
+  const run = s.queue.then(async (): Promise<ScanOutcome> => {
+    if (signal?.aborted) return "cancelled";
     const left = due - Date.now();
-    if (left <= 0) return null;
+    if (left <= 0) return "timeout";
     // Queued behind one that overran: that worker is gone, this one goes to a new one.
-    return scanner === s ? scanInWorker(s, texts, opts, left) : scanTexts(texts, opts, due);
+    if (scanner !== s) return scanTexts(texts, opts, signal, due);
+    const r = await scanInWorker(s, texts, opts, left, signal);
+    if (signal?.aborted) return "cancelled";
+    return r ?? "timeout";
   });
   s.queue = run.catch(() => undefined);
   return run;
@@ -541,10 +574,11 @@ const fail = (error: string, message: string): ToolResult => ({
 
 /**
  * Never in a title, label or login: control characters (C0, DEL, C1 — NUL,
- * tab, newlines, NEL), the line and paragraph separators, and the bidi
- * controls that make text read differently from what it is.
+ * tab, newlines, NEL), the line and paragraph separators, the bidi controls
+ * and the invisible ones (zero-width space/joiners, word joiner, BOM) that
+ * make text read differently from what it is.
  */
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
 
 /** A list argument: absent → [], else non-empty names without control characters. */
 function list(v: unknown, name: string): string[] | ToolResult {
@@ -562,7 +596,14 @@ function list(v: unknown, name: string): string[] | ToolResult {
  * not its `secrets.ignore`: a repository (a clone, a fork) must not be able to
  * allow-list a value out of what blocks a public issue.
  */
-async function scanIssue(root: string, title: string, body: string, labels: string[], assignees: string[]): Promise<ReportScan | null> {
+async function scanIssue(
+  root: string,
+  title: string,
+  body: string,
+  labels: string[],
+  assignees: string[],
+  signal?: AbortSignal,
+): Promise<ReportScan | Exclude<ScanOutcome, ReportScan[]>> {
   const rc = (await readGitwandrcAsync(root))?.secrets;
   const opts: ScanOptions = {
     extraPatterns: rc?.patterns ?? [],
@@ -577,8 +618,8 @@ async function scanIssue(root: string, title: string, body: string, labels: stri
     ["labels", labels.join("\n")],
     ["assignees", assignees.join("\n")],
   ];
-  const results = await scanTexts(fields.map(([, t]) => t), opts);
-  if (!results) return null;
+  const results = await scanTexts(fields.map(([, t]) => t), opts, signal);
+  if (!Array.isArray(results)) return results;
   const out: ReportScan = { blocking: [], warnings: [] };
   results.forEach((r, i) => {
     const tag = (f: SecretFinding) => ({ ...f, file: fields[i][0] });
@@ -659,7 +700,8 @@ async function resolveAssignees(
     const seen = new Set<string>();
     return xs.filter((x) => !seen.has(x.toLowerCase()) && (seen.add(x.toLowerCase()), true));
   };
-  if (!assignees.includes("@me")) return unique(assignees);
+  const isMe = (a: string) => a.toLowerCase() === "@me";
+  if (!assignees.some(isMe)) return unique(assignees);
   const key = `${account}/${host}`;
   let login = logins.get(key);
   if (!login) {
@@ -674,7 +716,7 @@ async function resolveAssignees(
     login = j.login;
     logins.set(key, login);
   }
-  return unique(assignees.map((a) => (a === "@me" ? login! : a)));
+  return unique(assignees.map((a) => (isMe(a) ? login! : a)));
 }
 
 const cancelled = () => fail("cancelled", "The tool call was cancelled: nothing was created.");
@@ -782,12 +824,18 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   if (!Array.isArray(logins)) return logins;
 
   // 4. Secrets.
-  const secrets = await scanIssue(root, title, body, labels, logins);
-  if (signal?.aborted) return cancelled();
-  if (!secrets) {
+  const secrets = await scanIssue(root, title, body, labels, logins, signal);
+  if (signal?.aborted || secrets === "cancelled") return cancelled();
+  if (secrets === "unavailable") {
+    return fail(
+      "scan_unavailable",
+      "The secrets scan with the repository's `.gitwandrc` patterns could not start (its worker could not load @gitwand/core): nothing was created.",
+    );
+  }
+  if (secrets === "timeout") {
     return fail(
       "scan_failed",
-      "The secrets scan did not finish (one of the repository's `.gitwandrc` secrets patterns may never end): nothing was created.",
+      "The secrets scan did not finish in time (one of the repository's `.gitwandrc` secrets patterns may never end): nothing was created.",
     );
   }
   const canCreate = secrets.blocking.length === 0;

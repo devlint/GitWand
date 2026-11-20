@@ -38,6 +38,9 @@
   "publishConfig": {
     "access": "public"
   },
+  "engines": {
+    "node": ">=20.6.0"
+  },
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
