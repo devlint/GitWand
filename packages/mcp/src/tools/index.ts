@@ -9,6 +9,8 @@
  * gitwand_resolve_hunk          → ask the connected agent to propose a resolution
  *                                 (inversion of `--llm-fallback`: the agent IS the LLM)
  * gitwand_resolve_hunk_llm      → validate + apply an LLM-proposed resolution
+ * gitwand_create_issue          → preview (default) or file a GitHub issue on
+ *                                 origin or its fork parent, after a secrets scan
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -16,6 +18,7 @@ import { execSync, execFileSync } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import { resolve, summarizeTiers, validateMergedContent, type MergeResult, type ConflictType, type GitWandOptions } from "@gitwand/core";
 import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
+import { createIssueToolDefinition, handleCreateIssue } from "./create_issue.js";
 import { detectMergeContext } from "../merge-context.js";
 import {
   buildRegenerationReport,
@@ -228,6 +231,8 @@ export function registerTools() {
         required: ["file", "line", "resolution"],
       },
     },
+    // #301 — file a GitHub issue (preview by default)
+    createIssueToolDefinition,
   ];
 }
 
@@ -491,6 +496,8 @@ export async function handleToolCall(
       return handleResolveHunk(args);
     case "gitwand_resolve_hunk_llm":
       return toolResolvHunkLlm(cwd, args);
+    case "gitwand_create_issue":
+      return handleCreateIssue(cwd, args);
     default:
       return { content: [{ type: "text" as const, text: `Unknown tool: ${name}` }], isError: true };
   }
