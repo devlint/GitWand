@@ -62,6 +62,7 @@ import { useWorkspaceScope } from "./useWorkspaceScope";
 import { useSettings } from "./useSettings";
 import { useUndoToast } from "./useUndoToast";
 import { commitIdentityFor } from "./useIdentity";
+import { COMMIT_SIGNATURE } from "../utils/commitSignature";
 
 export type ViewMode =
   | "dashboard"
@@ -288,7 +289,6 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   });
 
   // Commit editor state
-  const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
   const commitSummary = ref("");
 
   function getCommitSignatureDefault(): string {
@@ -329,6 +329,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // Commit diff state (for history view)
   const selectedCommitHash = ref<string | null>(null);
   const commitDiffs = ref<GitDiff[]>([]);
+  /** The commit `commitDiffs` belong to: while a newly selected commit
+   *  loads, the previous one's are still shown (#301 files lines by it). */
+  const commitDiffsHash = ref<string | null>(null);
+  /** The one way to set the commit diffs: the diffs and the commit they
+   *  belong to move together, and only for the commit still selected. */
+  function setCommitDiffs(hash: string | null, diffs: GitDiff[]) {
+    if (hash !== null && selectedCommitHash.value !== hash) return;
+    commitDiffs.value = diffs;
+    commitDiffsHash.value = hash;
+  }
 
   /**
    * Search-palette invalidation on active-repo change.
@@ -605,7 +615,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
     // Reset previous repo state
     selectedCommitHash.value = null;
-    commitDiffs.value = [];
+    setCommitDiffs(null, []);
     log.value = [];
     branches.value = []; // ← reset so the palette doesn't show stale branches from the previous repo
     selectedFilePath.value = null;
@@ -640,7 +650,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     diff.value = null;
     log.value = [];
     selectedCommitHash.value = null;
-    commitDiffs.value = [];
+    setCommitDiffs(null, []);
     branches.value = [];
     worktrees.value = [];
     error.value = null;
@@ -942,10 +952,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       }
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
-        commitDiffs.value = await getGitShow(
-          folderPath.value,
-          selectedCommitHash.value,
-        );
+        const hash = selectedCommitHash.value;
+        setCommitDiffs(hash, await getGitShow(folderPath.value, hash));
       }
     } catch (err: any) {
       error.value = `git log: ${err?.message ?? err}`;
@@ -1058,10 +1066,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           // No untracked part in this stash.
         }
       }
-      if (selectedCommitHash.value !== hash) return;
-      commitDiffs.value = diffs;
+      setCommitDiffs(hash, diffs);
     } catch (err: any) {
-      commitDiffs.value = [];
+      // A commit the user has since left must not wipe the one shown now.
+      if (selectedCommitHash.value !== hash) return;
+      setCommitDiffs(hash, []);
       error.value = `git show: ${err?.message ?? err}`;
     }
   }
@@ -1839,6 +1848,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     worktreeBranches,
     selectedCommitHash,
     commitDiffs,
+    commitDiffsHash,
     // Computed
     hasRepo,
     branchDisplay,

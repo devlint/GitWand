@@ -10,26 +10,21 @@
  * Write paths stay Tauri-only and throw in browser mode.
  */
 
-import { isTauri, tauriInvoke, DEV_SERVER } from "./backend-core";
+import { isTauri, tauriInvoke, devGet } from "./backend-core";
 import type { PullRequest, PullRequestDetail, CICheck, CICheckRaw, PrReviewComment, PrReview, ReviewerCandidate, PrEdit } from "./backend-pr";
 import { mapCICheck } from "./backend-pr";
 import type { Issue } from "./backend";
 
-async function devGet<T>(route: string, params: Record<string, string>): Promise<T> {
-  const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`${DEV_SERVER}/api/${route}?${qs}`, { method: "GET" });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`dev-server ${route} failed: ${detail}`);
-  }
-  return (await res.json()) as T;
+/** Gitea dev routes through the shared dev GET helper. */
+function devGetGitea<T>(route: string, params: Record<string, string>): Promise<T> {
+  return devGet<T>(`/api/${route}`, params, `dev-server ${route}`);
 }
 
 // ─── Reads (Tauri + dev:web) ────────────────────────────────────────────────
 
 export async function giteaCurrentUser(cwd: string): Promise<string> {
   if (isTauri()) return tauriInvoke<string>("gitea_current_user", { cwd });
-  return devGet<string>("gitea-current-user", { cwd });
+  return devGetGitea<string>("gitea-current-user", { cwd });
 }
 
 export async function giteaListPrs(
@@ -39,7 +34,7 @@ export async function giteaListPrs(
   offset = 0,
 ): Promise<PullRequest[]> {
   if (isTauri()) return tauriInvoke<PullRequest[]>("gitea_list_prs", { cwd, state, limit, offset });
-  return devGet<PullRequest[]>("gitea-list-prs", {
+  return devGetGitea<PullRequest[]>("gitea-list-prs", {
     cwd,
     state,
     limit: String(limit),
@@ -49,34 +44,34 @@ export async function giteaListPrs(
 
 export async function giteaPrCount(cwd: string, state = "open"): Promise<number> {
   if (isTauri()) return tauriInvoke<number>("gitea_pr_count", { cwd, state });
-  return devGet<number>("gitea-pr-count", { cwd, state });
+  return devGetGitea<number>("gitea-pr-count", { cwd, state });
 }
 
 export async function giteaGetPr(cwd: string, index: number): Promise<PullRequestDetail> {
   if (isTauri()) return tauriInvoke<PullRequestDetail>("gitea_get_pr", { cwd, index });
-  return devGet<PullRequestDetail>("gitea-get-pr", { cwd, index: String(index) });
+  return devGetGitea<PullRequestDetail>("gitea-get-pr", { cwd, index: String(index) });
 }
 
 export async function giteaPrDiff(cwd: string, index: number): Promise<string> {
   if (isTauri()) return tauriInvoke<string>("gitea_pr_diff", { cwd, index });
-  return devGet<string>("gitea-pr-diff", { cwd, index: String(index) });
+  return devGetGitea<string>("gitea-pr-diff", { cwd, index: String(index) });
 }
 
 export async function giteaPrStatus(cwd: string, index: number): Promise<CICheck[]> {
   const raw = isTauri()
     ? await tauriInvoke<CICheckRaw[]>("gitea_pr_status", { cwd, index })
-    : await devGet<CICheckRaw[]>("gitea-pr-status", { cwd, index: String(index) });
+    : await devGetGitea<CICheckRaw[]>("gitea-pr-status", { cwd, index: String(index) });
   return raw.map(mapCICheck);
 }
 
 export async function giteaPrComments(cwd: string, index: number): Promise<PrReviewComment[]> {
   if (isTauri()) return tauriInvoke<PrReviewComment[]>("gitea_pr_comments", { cwd, index });
-  return devGet<PrReviewComment[]>("gitea-pr-comments", { cwd, index: String(index) });
+  return devGetGitea<PrReviewComment[]>("gitea-pr-comments", { cwd, index: String(index) });
 }
 
 export async function giteaListIssues(cwd: string, limit = 30): Promise<Issue[]> {
   if (isTauri()) return tauriInvoke<Issue[]>("gitea_list_issues", { cwd, limit });
-  return devGet<Issue[]>("gitea-list-issues", { cwd, limit: String(limit) });
+  return devGetGitea<Issue[]>("gitea-list-issues", { cwd, limit: String(limit) });
 }
 
 // ─── Reads (Tauri only) ─────────────────────────────────────────────────────

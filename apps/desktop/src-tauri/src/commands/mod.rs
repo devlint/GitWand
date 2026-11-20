@@ -6,6 +6,7 @@ pub(crate) mod credentials;
 pub(crate) mod curl_util;
 pub(crate) mod files;
 pub(crate) mod gh;
+pub(crate) mod gh_issues;
 pub(crate) mod gitea;
 pub(crate) mod github_api;
 pub(crate) mod gitlab;

@@ -22,7 +22,7 @@
 
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
 import { dispatchTerminalEvent, type TerminalEvent } from "./terminalEvents";
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devPtyStream, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
+import { isTauri, tauriInvoke, devFetch, devGet, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devPtyStream, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
 export { isTauri };
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
@@ -3395,6 +3395,35 @@ export async function ghIssueDetail(cwd: string, number: number): Promise<IssueD
   return raw as IssueDetail;
 }
 
+/** Result of `ghPrAttachmentUrls`. */
+export interface PrAttachmentUrls {
+  /**
+   * The PR's repository is private: only then are the signed URLs needed.
+   * Null when it could not be read.
+   */
+  private: boolean | null;
+  urls: string[];
+  /**
+   * Every body list was read. When not, an attachment missing from `urls` may
+   * be in a list that failed, rather than one GitHub did not sign.
+   */
+  complete: boolean;
+}
+
+/**
+ * Signed, short-lived URLs of the files uploaded to PR `number`'s description,
+ * comments and reviews — what a private repository serves its attachments
+ * under (#302). Indexed by `indexSignedAttachments`.
+ */
+export async function ghPrAttachmentUrls(cwd: string, number: number): Promise<PrAttachmentUrls> {
+  if (isTauri()) return tauriInvoke<PrAttachmentUrls>("gh_pr_attachment_urls", { cwd, number });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-pr-attachment-urls?cwd=${encodeURIComponent(cwd)}&number=${number}`);
+  if (!res.ok) throw new Error(`gh PR attachment URLs failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as PrAttachmentUrls;
+}
+
 /** List the conversation comments on an issue. */
 export async function ghIssueComments(cwd: string, number: number): Promise<IssueComment[]> {
   if (isTauri()) return tauriInvoke<IssueComment[]>("gh_issue_comments", { cwd, number });
@@ -4554,3 +4583,126 @@ export * from './backend-bitbucket';
 export * from './backend-gitea';
 export * from './backend-ai';
 
+
+// ─── Issue creation (#301) ──────────────────────────────────────────────────
+
+import type { ReviewerCandidate } from "./backend-pr";
+
+/** A repository an issue can be filed on: `origin`, or a fork's parent. */
+export interface IssueTarget {
+  /** `owner/repo`. */
+  repo: string;
+  htmlUrl: string;
+  hasIssues: boolean;
+  isOrigin: boolean;
+  /** The user may set labels, assignees and a milestone (GitHub drops them otherwise). */
+  canTriage: boolean;
+}
+
+/** Result of `ghIssueTargets`: empty `targets` when `origin` is not GitHub. */
+export interface IssueTargets {
+  targets: IssueTarget[];
+  /** The first target with issues turned on, `null` when none has. */
+  defaultRepo: string | null;
+}
+
+export interface CreateIssueInput {
+  repo: string;
+  title: string;
+  body: string;
+  labels: string[];
+  assignees: string[];
+  /** Milestone number, not title. */
+  milestone: number | null;
+}
+
+export interface CreatedIssue {
+  number: number;
+  url: string;
+}
+
+export interface RepoLabel {
+  name: string;
+  color: string;
+  description: string | null;
+}
+
+export interface RepoMilestone {
+  number: number;
+  title: string;
+  dueOn: string | null;
+}
+
+/** Whether `origin` is a GitHub repository — local, no request (shows the entry points). */
+export async function ghIssueAvailable(cwd: string): Promise<boolean> {
+  if (isTauri()) return tauriInvoke<boolean>("gh_issue_available", { cwd });
+  return devGet<boolean>("/api/gh-issue-available", { cwd }, "gh issue available");
+}
+
+/** Where an issue can be filed, read fresh (the form opening). */
+export async function ghIssueTargets(cwd: string): Promise<IssueTargets> {
+  if (isTauri()) return tauriInvoke<IssueTargets>("gh_issue_targets", { cwd }, IPC_TIMEOUT.NETWORK);
+  return devGet<IssueTargets>("/api/gh-issue-targets", { cwd }, "gh issue targets");
+}
+
+export async function ghCreateIssue(cwd: string, input: CreateIssueInput): Promise<CreatedIssue> {
+  // NETWORK, not the 30 s default: the backend may take longer (the `gh`
+  // path allows 60 s), and a frontend timeout while the POST still lands
+  // would invite a second, duplicate issue.
+  if (isTauri()) return tauriInvoke<CreatedIssue>("gh_create_issue", { cwd, input }, IPC_TIMEOUT.NETWORK);
+  return devPost<CreatedIssue>("/api/gh-create-issue", { cwd, input }, "gh create issue");
+}
+
+/** A resolver report on GitWand's own repository (#301): github.com, whatever the current repository. */
+export async function ghCreateGitwandIssue(input: { title: string; body: string }): Promise<CreatedIssue> {
+  // NETWORK, as for `ghCreateIssue`: a frontend timeout while the POST still
+  // lands would invite a duplicate.
+  if (isTauri()) return tauriInvoke<CreatedIssue>("gh_create_gitwand_issue", { input }, IPC_TIMEOUT.NETWORK);
+  return devPost<CreatedIssue>("/api/gh-create-gitwand-issue", { input }, "gh create gitwand issue");
+}
+
+/** Whether a report can be written to GitWand's repository (a token, or `gh` on github.com). */
+export async function ghGitwandWritable(): Promise<boolean> {
+  if (isTauri()) return tauriInvoke<boolean>("gh_gitwand_writable", {});
+  return devGet<boolean>("/api/gh-gitwand-writable", {}, "gh gitwand writable");
+}
+
+export async function ghListLabels(cwd: string, repo: string): Promise<RepoLabel[]> {
+  if (isTauri()) return tauriInvoke<RepoLabel[]>("gh_list_labels", { cwd, repo }, IPC_TIMEOUT.NETWORK);
+  return devGet<RepoLabel[]>("/api/gh-list-labels", { cwd, repo }, "gh list labels");
+}
+
+/** One issue template file of a target, raw (parsed in `utils/issueTemplates`). */
+export interface TemplateFile {
+  path: string;
+  content: string;
+  /** GitHub's single-template file (`ISSUE_TEMPLATE.md`): it prefills the form. */
+  single: boolean;
+}
+
+/** A target's issue template files, and the repository they came from (#301). */
+export interface IssueTemplateFiles {
+  source: string;
+  files: TemplateFile[];
+  /** Every listed file was read (an incomplete set is not cached). */
+  complete: boolean;
+}
+
+export async function ghIssueTemplates(cwd: string, repo: string): Promise<IssueTemplateFiles> {
+  if (isTauri()) return tauriInvoke<IssueTemplateFiles>("gh_issue_templates", { cwd, repo }, IPC_TIMEOUT.NETWORK);
+  return devGet<IssueTemplateFiles>("/api/gh-issue-templates", { cwd, repo }, "gh issue templates");
+}
+
+export async function ghListMilestones(cwd: string, repo: string): Promise<RepoMilestone[]> {
+  if (isTauri()) return tauriInvoke<RepoMilestone[]>("gh_list_milestones", { cwd, repo }, IPC_TIMEOUT.NETWORK);
+  return devGet<RepoMilestone[]>("/api/gh-list-milestones", { cwd, repo }, "gh list milestones");
+}
+
+/** Same shape as `ghListReviewerCandidates` (`avatar_url` → `avatarUrl`). */
+export async function ghListAssignees(cwd: string, repo: string): Promise<ReviewerCandidate[]> {
+  type Raw = { login: string; name?: string | null; avatar_url?: string | null };
+  const raw = isTauri()
+    ? await tauriInvoke<Raw[]>("gh_list_assignees", { cwd, repo }, IPC_TIMEOUT.NETWORK)
+    : await devGet<Raw[]>("/api/gh-list-assignees", { cwd, repo }, "gh list assignees");
+  return raw.map((u) => ({ login: u.login, name: u.name ?? null, avatarUrl: u.avatar_url ?? null }));
+}

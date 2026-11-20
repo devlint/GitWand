@@ -411,6 +411,12 @@ export interface ConflictHunk {
    * Quand true, `baseAvailability` est fixé à 100 (même traitement que diff3).
    */
   zdiff3?: boolean;
+  /**
+   * #301 — Le résolveur de format qui a produit la résolution de ce hunk
+   * (`json`, `lockfile-npm`…), absent quand aucun n'est intervenu. Gardé ici
+   * plutôt que seulement dans le texte de l'explication, pour les rapports.
+   */
+  formatResolver?: string;
 }
 
 /** Résultat de la résolution d'un seul hunk */

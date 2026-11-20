@@ -1,0 +1,113 @@
+/**
+ * @file secrets/report.ts
+ *
+ * The secrets scan of an issue's text (#301). With `blockAt: "medium"` a
+ * known secret pattern (severity high or medium) blocks; entropy alone
+ * (severity low: lockfile integrity hashes, minified code) only warns. With
+ * `blockAt: "never"` nothing blocks. The scan is always on, whatever the
+ * repository's config, and ignores no path: the built-in ignore list would
+ * skip lockfiles.
+ *
+ * Each caller picks `blockAt` and says why where it calls: the desktop issue
+ * form (`utils/reportGuard.ts` re-exports this) blocks reports to GitWand's
+ * public repository only; the MCP `gitwand_create_issue` tool always blocks.
+ * Pure: no Node module.
+ */
+import { scanSecrets } from "./scanner.js";
+import type { SecretFinding, SecretPattern } from "./types.js";
+
+/**
+ * The default `secrets.entropyThreshold` (bits per character) when the
+ * repository's `.gitwandrc` sets none — the desktop setting's, the CLI's and
+ * the MCP tool's.
+ */
+export const DEFAULT_ENTROPY_THRESHOLD = 4.0;
+
+/** The core scanner's finding cap (`MAX_FINDINGS` in secrets/scanner.ts). */
+const SCAN_CAP = 500;
+/** Lines per scan: a line rarely holds more than a few tokens, so a slice
+ *  stays far under SCAN_CAP. */
+const SLICE_LINES = 50;
+
+/** `text` in pieces of about PIECE_CHARS, cut outside tokens (never inside one). */
+function piecesOf(text: string): string[] {
+  const out: string[] = [];
+  let rest = text;
+  while (rest.length > PIECE_CHARS) {
+    // The last character before the limit that cannot be part of a token
+    // (the scanner's token class), so no token is cut in two.
+    let cut = PIECE_CHARS;
+    while (cut > 0 && TOKEN_CHAR.test(rest[cut - 1])) cut--;
+    // A single token longer than a piece: cut after it instead, whole.
+    if (cut === 0) {
+      cut = PIECE_CHARS;
+      while (cut < rest.length && TOKEN_CHAR.test(rest[cut])) cut++;
+    }
+    out.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  out.push(rest);
+  return out;
+}
+
+/** A character the scanner's entropy tokens are made of (ENTROPY_TOKEN_RE). */
+const TOKEN_CHAR = /[A-Za-z0-9+/=_-]/;
+
+/** Piece length for one enormous line: at most ~100 tokens of 20+ characters. */
+const PIECE_CHARS = 2_000;
+
+export interface ReportScan {
+  /** Findings that keep the report from being sent. */
+  blocking: SecretFinding[];
+  /** Findings shown as a warning only. */
+  warnings: SecretFinding[];
+}
+
+export function scanReportBody(
+  body: string,
+  opts: {
+    extraPatterns: SecretPattern[];
+    entropyThreshold: number;
+    blockAt: "medium" | "never";
+    /** `.gitwandrc` `secrets.ignore`: only its `/regex/` value entries apply. */
+    ignore?: string[];
+  },
+): ReportScan {
+  // The scanner keeps its first SCAN_CAP findings: a lockfile's hundreds of
+  // entropy hits would hide a real secret, or the true count, past the cut.
+  // Scanned in slices small enough never to reach it (one finding per token).
+  const lines = body.split("\n");
+  // A value the repository allow-lists (a fake test key) is not a secret; a
+  // path glob is not about this text and could match the report's own name.
+  const ignore = (opts.ignore ?? []).filter((x) => x.length > 2 && x.startsWith("/") && x.endsWith("/"));
+  const config = { enabled: true, extraPatterns: opts.extraPatterns, ignore, entropyThreshold: opts.entropyThreshold };
+  const all: SecretFinding[] = [];
+  for (let start = 0; start < lines.length; start += SLICE_LINES) {
+    const addedLines = lines.slice(start, start + SLICE_LINES).map((text, i) => ({ line: start + i + 1, text }));
+    const found = scanSecrets([{ path: "issue-body.md", addedLines }], config);
+    if (found.length < SCAN_CAP) {
+      all.push(...found);
+      continue;
+    }
+    // One line alone filled the cap (minified code): the slice line by line,
+    // its patterns found without entropy so none is cut.
+    for (const l of addedLines) {
+      all.push(...scanSecrets([{ path: "issue-body.md", addedLines: [l] }], { ...config, entropyThreshold: 0 }));
+      // Its entropy tokens in pieces cut at spaces, each far under the cap.
+      for (const piece of piecesOf(l.text)) {
+        all.push(
+          ...scanSecrets([{ path: "issue-body.md", addedLines: [{ line: l.line, text: piece }] }], config).filter(
+            (f) => f.patternId === "high_entropy",
+          ),
+        );
+      }
+    }
+  }
+  const patterns = all.filter((f) => f.patternId !== "high_entropy");
+  const entropy = all.filter((f) => f.patternId === "high_entropy");
+  const blocks = (f: SecretFinding) => opts.blockAt === "medium" && f.severity !== "low";
+  return {
+    blocking: patterns.filter(blocks),
+    warnings: [...patterns.filter((f) => !blocks(f)), ...entropy].sort((a, b) => a.line - b.line),
+  };
+}

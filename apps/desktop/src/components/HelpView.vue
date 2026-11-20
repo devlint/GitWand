@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { IS_MAC } from "../utils/platform";
 /**
  * HelpView — full-screen in-app help panel.
  *
@@ -13,6 +14,7 @@
  */
 import { computed, ref } from "vue";
 import { useI18n } from "../composables/useI18n";
+import { newIssueShortcutLabel } from "../composables/useCreateIssue";
 import ModalCloseButton from "./ModalCloseButton.vue";
 import type { LocaleKey } from "../locales";
 
@@ -43,10 +45,13 @@ const sections: { id: SectionId; navKey: LocaleKey; titleKey: LocaleKey; introKe
 
 const activeMeta = computed(() => sections.find((s) => s.id === activeSection.value)!);
 
-const shortcuts: { action: LocaleKey; keys: string[] }[] = [
+/** `keyKeys`: keys named in words (a mouse click), translated after `keys`. */
+const shortcuts: { action: LocaleKey; keys: string[]; keyKeys?: LocaleKey[] }[] = [
   { action: "help.keyboardShortcuts.openRepo",    keys: ["⌘O"] },
   { action: "help.keyboardShortcuts.settings",    keys: ["⌘,"] },
   { action: "help.keyboardShortcuts.commandPalette", keys: ["⌘K"] },
+  { action: "help.keyboardShortcuts.newIssue", keys: [newIssueShortcutLabel(IS_MAC)] },
+  { action: "help.keyboardShortcuts.extendLineSelection", keys: ["⇧"], keyKeys: ["help.keyboardShortcuts.click"] },
   { action: "help.keyboardShortcuts.fetch",       keys: ["⌘⇧F"] },
   { action: "help.keyboardShortcuts.push",        keys: ["⌘P"] },
   { action: "help.keyboardShortcuts.newBranch",   keys: ["⌘⇧B"] },
@@ -184,6 +189,7 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
                   <td>{{ t(shortcut.action) }}</td>
                   <td class="help-shortcuts__keys">
                     <kbd v-for="key in shortcut.keys" :key="key">{{ key }}</kbd>
+                    <kbd v-for="key in shortcut.keyKeys ?? []" :key="key">{{ t(key) }}</kbd>
                   </td>
                 </tr>
               </tbody>

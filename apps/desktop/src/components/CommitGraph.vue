@@ -32,6 +32,8 @@ const props = defineProps<{
    * Optional — no dimming when absent or empty.
    */
   forkPointSha?: string;
+  /** The repository can take a new GitHub issue (#301): offer it in the menu. */
+  canCreateIssue?: boolean;
   repoStats?: { staged: number; unstaged: number; untracked: number; conflicted: number; added: number; modified: number; deleted: number; renamed: number };
   branches?: GitBranch[];
   worktreeBranches?: Set<string>;
@@ -72,6 +74,7 @@ type CommitEvent =
   | "cherry-pick-commit"
   | "cherry-pick-commit-wip"
   | "view-on-forge"
+  | "create-issue"
   | "delete-tag"
   | "merge-into-current"
   | "rebase-onto-current"
@@ -97,6 +100,8 @@ const emit = defineEmits<{
   "cherry-pick-commit": [entry: GitLogEntry];
   "cherry-pick-commit-wip": [entry: GitLogEntry];
   "view-on-forge": [entry: GitLogEntry];
+  /** "Create issue from commit" (#301). */
+  "create-issue": [entry: GitLogEntry];
   "delete-branch": [name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string];
   "delete-worktree": [branch: string];
   "merge-delete-worktree": [branch: string];
@@ -2351,6 +2356,18 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           <path d="M14 2L8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
         </svg>
         <span>{{ t('commitCtx.viewOnForge') }}</span>
+      </li>
+      <li
+        v-if="canCreateIssue"
+        class="commit-ctx-menu-item"
+        role="menuitem"
+        @click="onCtxEmit('create-issue')"
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/>
+          <circle cx="8" cy="8" r="1.3" fill="currentColor"/>
+        </svg>
+        <span>{{ t('commitCtx.createIssue') }}</span>
       </li>
       </template>
     </ul>

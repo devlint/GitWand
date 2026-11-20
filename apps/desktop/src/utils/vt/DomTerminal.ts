@@ -11,6 +11,7 @@
  * The public surface mirrors the slice of xterm.js `TerminalPanel` used, so the
  * panel stays renderer-agnostic.
  */
+import { IS_MAC } from "../platform";
 import {
   VtEmulator, Line, DEFAULT_COLOR, TRUECOLOR,
   BOLD, DIM, ITALIC, UNDERLINE, INVERSE, HIDDEN, STRIKE,
@@ -18,6 +19,7 @@ import {
 import { keyToSequence } from "./keys";
 import nerdSymbolsUrl from "../../assets/fonts/SymbolsNerdFontMono-Regular.woff2?url";
 import { escapeHtml } from "../escapeHtml";
+import { escapeRegExp } from "../escapeRegExp";
 
 export interface DomTerminalOptions {
   fontSize?: number;
@@ -70,7 +72,7 @@ function colorCss(c: number): string {
 }
 
 /** Shared with TerminalPanel so its shortcut hints match the key handling here. */
-export const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+export { IS_MAC };
 const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
 const WORD_RE = /[\p{L}\p{N}_\-./~:@%+#?=&]/u;
 
@@ -615,7 +617,7 @@ export class DomTerminal {
     const total = this.emu.totalLines;
     let re: RegExp;
     try {
-      const src = opts.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const src = opts.regex ? query : escapeRegExp(query);
       re = new RegExp(src, opts.caseSensitive ? "g" : "gi");
     } catch {
       return false;

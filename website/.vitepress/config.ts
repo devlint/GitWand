@@ -361,6 +361,7 @@ export default defineConfig({
           text: 'Blog',
           items: [
             { text: 'All articles', link: '/blog/' },
+            { text: 'Parallel AI agents with worktrees', link: '/blog/parallel-ai-agents-git-worktrees' },
             { text: 'Lockfile conflicts, per ecosystem', link: '/blog/lockfile-conflicts-by-ecosystem' },
             { text: 'AI agents and conflicts: the rules', link: '/blog/ai-agent-conflict-rules' },
             { text: 'Git worktrees, step by step (v3.13)', link: '/blog/worktrees-step-by-step' },

@@ -2,7 +2,7 @@
   "schemaVersion": "1.0",
   "serverInfo": {
     "name": "GitWand MCP Server",
-    "version": "3.13.1",
+    "version": "3.13.2",
     "description": "Smart Git conflict resolution for AI agents — auto-resolves trivial merge conflicts and guides AI through complex ones with a full DecisionTrace.",
     "homepage": "https://gitwand.app/guide/mcp",
     "license": "MIT",
@@ -48,6 +48,10 @@
       {
         "name": "gitwand_resolve_hunk_llm",
         "description": "v2.5 — Validate and apply an LLM-proposed resolution for a complex hunk. Checks for residual markers, syntax errors, and a configurable score threshold before writing. Returns full audit trail."
+      },
+      {
+        "name": "gitwand_create_issue",
+        "description": "Preview (default) or file a GitHub issue on the repository's origin, or its fork parent when origin takes no issues, through the gh CLI. Creates only with dry_run: false; a known secret pattern in the title, body, labels or assignees refuses it."
       }
     ],
     "resources": [

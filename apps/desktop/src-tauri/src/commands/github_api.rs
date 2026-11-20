@@ -36,7 +36,9 @@
 //! harden via `curl --config -` stdin piping in a follow-up). The token is
 //! never logged or included in error messages.
 
-use super::curl_util::{bearer_config, curl_with_headers, curl_with_status};
+use super::curl_util::{
+    bearer_config, curl_with_headers, curl_with_status, curl_with_status_bounded, RequestOpts,
+};
 use crate::git::{git_cmd, hidden_cmd};
 use crate::types::*;
 use rayon::prelude::*;
@@ -136,11 +138,16 @@ fn mark_restricted(cwd: &str) {
 /// 403)`). Not a rate limit (GitHub answers those with 403 too) and not an
 /// organization's OAuth app restriction, which `with_rest` retries through gh.
 pub(crate) fn checks_unavailable(err: &str) -> bool {
-    let code = ["403", "404"].iter().any(|c| {
-        err.starts_with(&format!("GitHub API error ({})", c))
-            || err.contains(&format!("(HTTP {})", c))
-    });
+    let code = [403, 404].iter().any(|&c| api_error_has_status(err, c));
     code && !err.to_lowercase().contains("rate limit") && !is_oauth_restricted(err)
+}
+
+/// Whether a GitHub error carries HTTP status `code`, in the REST format
+/// (`GitHub API error (404): …`) or gh's (`… (HTTP 404)`); anchored on the
+/// status, so a path echoed in the message (`crash (404).md`) does not count.
+pub(crate) fn api_error_has_status(err: &str, code: u16) -> bool {
+    err.starts_with(&format!("GitHub API error ({code})"))
+        || err.contains(&format!("(HTTP {code})"))
 }
 
 /// True for GitHub's 403 "organization has enabled OAuth App access
@@ -172,7 +179,11 @@ pub(crate) fn oauth_restricted_message(err: &str) -> String {
 
 /// The GitWand token to use for `cwd`, unless its organization refused it.
 fn token_for_repo(cwd: &str, settings_token: Option<String>) -> Option<String> {
-    if is_marked_restricted(cwd) {
+    // Checked only when there is a token: an `origin` on a GitHub Enterprise
+    // host goes to `gh`, which is signed in there — the Settings sign-in only
+    // covers github.com.
+    if settings_token.is_none() || is_marked_restricted(cwd) || super::gh::origin_is_enterprise(cwd)
+    {
         None
     } else {
         settings_token
@@ -186,18 +197,25 @@ pub(crate) fn rest_token_for(cwd: &str) -> Option<String> {
 }
 
 /// Testable core of [`with_rest`]: `token` is the Settings token and
-/// `gh_signed_in` says whether the `gh` CLI can take over.
+/// `gh_signed_in` says whether the `gh` CLI can take over. A refusal is
+/// remembered under `key`: `cwd` itself for its `origin`, another key for a
+/// call about another repository (a fork's parent), whose organization says
+/// nothing about the checkout's own.
 fn rest_attempt<T>(
     cwd: &str,
+    key: &str,
     token: Option<String>,
     gh_signed_in: impl FnOnce() -> bool,
     call: impl FnOnce(&str) -> Result<T, String>,
 ) -> Option<Result<T, String>> {
+    if key != cwd && is_marked_restricted(key) {
+        return None;
+    }
     let tok = token_for_repo(cwd, token)?;
     match call(&tok) {
         Err(e) if is_oauth_restricted(&e) => {
             if gh_signed_in() {
-                mark_restricted(cwd);
+                mark_restricted(key);
                 None
             } else {
                 Some(Err(oauth_restricted_message(&e)))
@@ -230,6 +248,26 @@ pub(crate) fn with_rest_using<T>(
 ) -> Option<Result<T, String>> {
     rest_attempt(
         cwd,
+        cwd,
+        token.map(String::from),
+        || super::gh::gh_auth_token().is_some(),
+        call,
+    )
+}
+
+/// [`with_rest_using`] for a call about `nwo`, another repository than `cwd`'s
+/// `origin` (a fork's parent): an OAuth App refusal from its organization is
+/// remembered for `nwo` (later calls about it go straight to `gh`) without
+/// marking `cwd` restricted.
+pub(crate) fn with_rest_other_repo_using<T>(
+    cwd: &str,
+    nwo: &str,
+    token: Option<&str>,
+    call: impl FnOnce(&str) -> Result<T, String>,
+) -> Option<Result<T, String>> {
+    rest_attempt(
+        cwd,
+        &format!("repo:{}", nwo),
         token.map(String::from),
         || super::gh::gh_auth_token().is_some(),
         call,
@@ -240,45 +278,61 @@ pub(crate) fn with_rest_using<T>(
 
 /// Parse `(owner, repo)` from `git remote get-url origin` in `cwd`.
 ///
-/// Handles HTTPS and SSH GitHub remote URL formats.
+/// Same parser as the `gh` path (`gh::gh_repo_from_remote_url`), so both
+/// read `origin` alike (HTTPS, SSH with any user, SSH aliases, ports). This
+/// REST path only talks to api.github.com: an `origin` on another host is an
+/// error, not a call to github.com for a same-named repo.
 fn owner_repo(cwd: &str) -> Result<(String, String), String> {
-    let output = hidden_cmd("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("git remote get-url: {}", e))?;
-    if !output.status.success() {
-        return Err("No 'origin' remote found in this repo.".to_string());
-    }
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-    let path = if url.starts_with("git@") || url.contains("@github.com:") {
-        // git@github.com:owner/repo.git → owner/repo
-        url.split_once(':')
-            .map(|x| x.1)
-            .unwrap_or("")
-            .trim_end_matches(".git")
-            .to_string()
-    } else {
-        // https://github.com/owner/repo.git → owner/repo
-        url.trim_end_matches('/')
-            .trim_end_matches(".git")
-            .split_once("github.com/")
-            .map(|x| x.1)
-            .unwrap_or("")
-            .to_string()
+    // Cached with `token_for_repo`'s own lookup (`gh_origin_repo`).
+    let repo = match super::gh::gh_origin_repo(cwd) {
+        Some(r) => r,
+        None => {
+            let output = hidden_cmd("git")
+                .args(["remote", "get-url", "origin"])
+                .current_dir(cwd)
+                .output()
+                .map_err(|e| format!("git remote get-url: {}", e))?;
+            if !output.status.success() {
+                return Err("No 'origin' remote found in this repo.".to_string());
+            }
+            let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return Err(format!(
+                "Could not parse GitHub owner/repo from remote URL: {}",
+                redact_url_userinfo(&url)
+            ));
+        }
     };
-
-    let mut parts = path.splitn(2, '/');
-    let owner = parts.next().unwrap_or("").to_string();
-    let repo = parts.next().unwrap_or("").to_string();
-    if owner.is_empty() || repo.is_empty() {
+    // `with_rest` sends Enterprise origins to `gh` (`token_for_repo`), but the
+    // review-comment commands, which only speak REST, still get here with the
+    // `gh` token (`with_review_token`).
+    if let Some(host) = repo.enterprise_host() {
         return Err(format!(
-            "Could not parse GitHub owner/repo from remote URL: {}",
-            url
+            "origin is on {}: GitWand's GitHub REST requests only reach github.com",
+            host
         ));
     }
-    Ok((owner, repo))
+    let (owner, name) = repo
+        .nwo
+        .split_once('/')
+        .ok_or_else(|| "Could not parse GitHub owner/repo from origin".to_string())?;
+    Ok((owner.to_string(), name.to_string()))
+}
+
+/// `url` without the `user[:password]@` of a `scheme://` URL, which can carry
+/// a token (`https://oauth2:glpat-…@host/…`): safe to show in an error.
+fn redact_url_userinfo(url: &str) -> String {
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+            let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+            if path.is_empty() && !rest.contains('/') {
+                format!("{}://{}", scheme, host)
+            } else {
+                format!("{}://{}/{}", scheme, host, path)
+            }
+        }
+        None => url.to_string(),
+    }
 }
 
 /// Current branch name (`git rev-parse --abbrev-ref HEAD`).
@@ -319,12 +373,43 @@ fn curl_raw(
 
 /// Map an HTTP ≥ 400 response to a user-facing error, preferring GitHub's
 /// `message` field over the bare status code.
-fn map_api_error(status: i32, body: &str) -> String {
-    let msg = serde_json::from_str::<serde_json::Value>(body.trim())
-        .ok()
+pub(crate) fn map_api_error(status: i32, body: &str) -> String {
+    let v = serde_json::from_str::<serde_json::Value>(body.trim()).ok();
+    let msg = v
+        .as_ref()
         .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from))
         .unwrap_or_else(|| format!("HTTP {}", status));
-    format!("GitHub API error ({}): {}", status, msg)
+    // A 422 says which field it refused in `errors[]` ("Validation Failed"
+    // alone does not tell an invalid assignee from an unknown milestone).
+    let details: Vec<String> = v
+        .as_ref()
+        .and_then(|v| v.get("errors"))
+        .and_then(|e| e.as_array())
+        .map(|errs| {
+            errs.iter()
+                .filter_map(|e| {
+                    let s = |k: &str| e.get(k).and_then(|x| x.as_str()).filter(|x| !x.is_empty());
+                    s("message")
+                        .map(String::from)
+                        .or_else(|| match (s("field"), s("code")) {
+                            (Some(f), Some(c)) => Some(format!("{}: {}", f, c)),
+                            (None, Some(c)) => Some(c.to_string()),
+                            _ => None,
+                        })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if details.is_empty() {
+        format!("GitHub API error ({}): {}", status, msg)
+    } else {
+        format!(
+            "GitHub API error ({}): {} ({})",
+            status,
+            msg,
+            details.join("; ")
+        )
+    }
 }
 
 /// Parse a (possibly empty) JSON response body. An empty body maps to `Null` so
@@ -421,13 +506,65 @@ fn etag_key(url: &str, token: &str) -> String {
     format!("{:016x} {}", h.finish(), url)
 }
 
+/// `method {API_BASE}/{path}` with `token`, for callers outside this module
+/// (`path` without a leading slash, e.g. `repos/o/r/labels`).
+pub(crate) fn rest_api_json(
+    method: &str,
+    path: &str,
+    token: &str,
+    body_json: Option<&str>,
+    max_time_secs: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}/{}", API_BASE, path);
+    let (status, body) = curl_with_status_bounded(
+        method,
+        &url,
+        Some(&bearer_config(token)),
+        body_json,
+        &["User-Agent: GitWand", "X-GitHub-Api-Version: 2022-11-28"],
+        "application/vnd.github+json",
+        RequestOpts {
+            max_time_secs,
+            // A renamed or transferred repository answers a read with a 301
+            // to its new name, which the `gh` path follows too. A write is
+            // never re-sent to another address.
+            follow_redirects: method == "GET",
+            ..RequestOpts::default()
+        },
+    )?;
+    if status >= 400 {
+        return Err(map_api_error(status, &body));
+    }
+    parse_json_body(&body)
+}
+
+/// [`api_json_cached`] for callers outside this module (`path` without a
+/// leading slash).
+pub(crate) fn rest_api_json_cached(path: &str, token: &str) -> Result<serde_json::Value, String> {
+    api_json_cached(&format!("{}/{}", API_BASE, path), token, None)
+}
+
+/// `rest_api_json_cached` bounded at `secs` (curl `--max-time`): a read the
+/// form waits on must not hang on a stalled transfer.
+pub(crate) fn rest_api_json_cached_within(
+    path: &str,
+    token: &str,
+    secs: u32,
+) -> Result<serde_json::Value, String> {
+    api_json_cached(&format!("{}/{}", API_BASE, path), token, Some(secs))
+}
+
 /// GET a GitHub JSON endpoint with ETag-based conditional requests.
 ///
 /// Sends `If-None-Match` when a cached ETag exists; a `304` serves the cached
 /// body without spending rate-limit quota. A `200` refreshes the cache from the
 /// response `ETag`. Falls back to a plain fetch when no ETag is returned.
-fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> {
-    let (status, body) = get_cached_raw(url, token)?;
+fn api_json_cached(
+    url: &str,
+    token: &str,
+    max_time_secs: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let (status, body) = get_cached_raw(url, token, max_time_secs)?;
     if status >= 400 {
         return Err(map_api_error(status, &body));
     }
@@ -438,7 +575,11 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
 /// against the rate limit and answers `(200, cached body)`. Other answers come
 /// back as they are; a 2xx with an ETag is cached. The live CI tab polls
 /// through this, so a long matrix doesn't drain the hourly budget.
-fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
+fn get_cached_raw(
+    url: &str,
+    token: &str,
+    max_time_secs: Option<u32>,
+) -> Result<(i32, String), String> {
     let cache = ETAG_CACHE.get_or_init(|| Mutex::new(EtagCache::new(ETAG_CACHE_MAX)));
     let key = etag_key(url, token);
     let cached = cache.lock().unwrap().get(&key);
@@ -459,6 +600,7 @@ fn get_cached_raw(url: &str, token: &str) -> Result<(i32, String), String> {
         None,
         &headers,
         "application/vnd.github+json",
+        max_time_secs,
     )?;
 
     if status == 304 {
@@ -703,6 +845,7 @@ pub(crate) fn rest_list_prs(
             API_BASE, base, api_state, per_page
         ),
         token,
+        None,
     )?
     .as_array()
     .cloned()
@@ -818,6 +961,7 @@ pub(crate) fn rest_pr_freshness_signal(
             API_BASE, base
         ),
         token,
+        None,
     )?
     .as_array()
     .cloned()
@@ -851,7 +995,7 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
         "{}/repos/{}/commits/{}/check-runs?per_page=100",
         API_BASE, repo, sha
     );
-    let v = match api_json_cached(&url, token) {
+    let v = match api_json_cached(&url, token, None) {
         Ok(v) => v,
         Err(_) => return String::new(),
     };
@@ -874,7 +1018,7 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
 /// Best effort — returns `None` on any error so the row keeps its current values.
 fn rest_pr_detail_enrich(repo: &str, number: i64, token: &str) -> Option<(i64, i64, String)> {
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
-    let v = api_json_cached(&url, token).ok()?;
+    let v = api_json_cached(&url, token, None).ok()?;
     let state = js(&v, "mergeable_state").to_uppercase();
     let merge_state = if state.is_empty() || state == "UNKNOWN" {
         String::new()
@@ -949,6 +1093,7 @@ fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_jso
     let (st, body) = get_cached_raw(
         &format!("{}/repos/{}/pulls/{}", API_BASE, origin, number),
         token,
+        None,
     )?;
     if st < 400 {
         let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
@@ -1079,7 +1224,7 @@ pub(crate) fn rest_pr_checks(cwd: &str, number: i64, token: &str) -> Result<Vec<
     // failed fetch, and the CI tab must be able to tell the two apart (it
     // keeps a running list on screen through a failure, but not through "none").
     // A token that may not read checks (403/404) just has none to show.
-    let v = match api_json_cached(&url, token) {
+    let v = match api_json_cached(&url, token, None) {
         Ok(v) => v,
         Err(e) if checks_unavailable(&e) => return Ok(Vec::new()),
         Err(e) => return Err(e),
@@ -1119,54 +1264,6 @@ pub(crate) fn rest_pr_files(cwd: &str, number: i64, token: &str) -> Result<Vec<S
         })
         .unwrap_or_default();
     Ok(files)
-}
-
-/// List candidate reviewers for the repo via the REST `/assignees` endpoint,
-/// using a Settings-managed OAuth token (no `gh` CLI required).
-///
-/// Fetches up to 3 pages of 100 (same ceiling as the CLI path). The assignees
-/// list carries `login` and `avatar_url` but not the display `name` (that needs
-/// a per-user lookup), so `name` is left null — matching the CLI path.
-pub(crate) fn rest_reviewer_candidates(
-    cwd: &str,
-    token: &str,
-) -> Result<Vec<ReviewerCandidate>, String> {
-    let (owner, repo) = owner_repo(cwd)?;
-    let mut all: Vec<ReviewerCandidate> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for page in 1..=3 {
-        let url = format!(
-            "{}/repos/{}/{}/assignees?per_page=100&page={}",
-            API_BASE, owner, repo, page
-        );
-        let v = api_json("GET", &url, token, None)?;
-        let arr = match v.as_array() {
-            Some(a) if !a.is_empty() => a,
-            _ => break,
-        };
-        let count = arr.len();
-        for u in arr {
-            let login = js(u, "login");
-            if login.is_empty() || !seen.insert(login.clone()) {
-                continue;
-            }
-            let name = u.get("name").and_then(|n| n.as_str()).map(String::from);
-            let avatar_url = u
-                .get("avatar_url")
-                .and_then(|a| a.as_str())
-                .map(String::from);
-            all.push(ReviewerCandidate {
-                login,
-                name,
-                avatar_url,
-            });
-        }
-        if count < 100 {
-            break;
-        }
-    }
-    all.sort_by_key(|a| a.login.to_lowercase());
-    Ok(all)
 }
 
 /// List branch names (heads) for the repo via the REST API (tokenless path).
@@ -2428,10 +2525,283 @@ pub(crate) async fn github_token_present() -> Result<bool, String> {
     Ok(settings_github_token().is_some())
 }
 
+// ─── Signed URLs of uploaded attachments (#302) ─────────────────────────────
+
+/// Media type that makes GitHub add a rendered `body_html` to the issue,
+/// comment and review objects it returns.
+pub(crate) const HTML_ACCEPT: &str = "application/vnd.github.html+json";
+
+/// Where `body_html` points the files uploaded through GitHub's editor
+/// (`github.com/user-attachments/assets/<uuid>` in the markdown): short-lived
+/// URLs signed with a `jwt` query parameter, which load without credentials —
+/// the only way to show an attachment of a private repository, whose
+/// markdown URL answers 404 to anyone but a signed-in browser.
+const SIGNED_ATTACHMENT_PREFIX: &str = "https://private-user-images.githubusercontent.com/";
+
+/// The API paths whose `body_html` covers every markdown body of PR `number`
+/// in `nwo`: its description, conversation comments, inline review comments
+/// and review summaries. Same page size as the comment lists GitWand shows.
+pub(crate) fn pr_attachment_html_paths(nwo: &str, number: i64) -> [String; 4] {
+    [
+        format!("repos/{}/issues/{}", nwo, number),
+        format!("repos/{}/issues/{}/comments?per_page=100", nwo, number),
+        format!("repos/{}/pulls/{}/comments?per_page=100", nwo, number),
+        format!("repos/{}/pulls/{}/reviews?per_page=100", nwo, number),
+    ]
+}
+
+/// The `body_html` of `v` — one object, or each element of an array.
+pub(crate) fn body_htmls(v: &serde_json::Value) -> Vec<String> {
+    let one = |x: &serde_json::Value| {
+        x.get("body_html")
+            .and_then(|h| h.as_str())
+            .map(String::from)
+    };
+    match v {
+        serde_json::Value::Array(items) => items.iter().filter_map(one).collect(),
+        other => one(other).into_iter().collect(),
+    }
+}
+
+/// Decode the character references an attribute value may hold: `&amp;`,
+/// `&quot;`, `&#39;`, `&lt;`, `&gt;` and numeric ones (`&#61;`, `&#x3D;`).
+/// Anything else is kept as written.
+fn decode_html_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let Some(end) = rest.find(';').filter(|&e| e <= 10) else {
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        };
+        let name = &rest[1..end];
+        let ch = match name {
+            "amp" => Some('&'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            _ => name
+                .strip_prefix("#x")
+                .or_else(|| name.strip_prefix("#X"))
+                .and_then(|h| u32::from_str_radix(h, 16).ok())
+                .or_else(|| name.strip_prefix('#').and_then(|d| d.parse().ok()))
+                .and_then(char::from_u32),
+        };
+        match ch {
+            Some(c) => {
+                out.push(c);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The signed attachment URLs in the `src` attributes of `htmls`, entity-decoded
+/// and deduplicated, in order of appearance.
+pub(crate) fn signed_attachment_urls<'a>(htmls: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for html in htmls {
+        let mut rest = html;
+        while let Some(i) = rest.find("src=\"") {
+            // The attribute itself, not `data-canonical-src="`: preceded by whitespace.
+            let attr = rest[..i].ends_with(|c: char| c.is_ascii_whitespace());
+            rest = &rest[i + 5..];
+            let Some(end) = rest.find('"') else { break };
+            let raw = &rest[..end];
+            rest = &rest[end..];
+            if !attr || !raw.starts_with(SIGNED_ATTACHMENT_PREFIX) {
+                continue;
+            }
+            let url = decode_html_entities(raw);
+            if !out.contains(&url) {
+                out.push(url);
+            }
+        }
+    }
+    out
+}
+
+/// The signed URLs in the `body_html` lists fetched from
+/// [`pr_attachment_html_paths`]. Best effort: an endpoint that failed (a
+/// token not allowed to read reviews, a transient error) does not cost the
+/// URLs the others returned; only when every one failed is the first error
+/// returned. The flag says whether every one succeeded.
+pub(crate) fn signed_urls_from_fetches(
+    fetches: Vec<Result<Vec<String>, String>>,
+) -> Result<(Vec<String>, bool), String> {
+    let mut first_err = None;
+    let mut htmls = Vec::new();
+    let mut any_ok = false;
+    for f in fetches {
+        match f {
+            Ok(h) => {
+                any_ok = true;
+                htmls.extend(h);
+            }
+            Err(e) => {
+                first_err.get_or_insert(e);
+            }
+        }
+    }
+    match first_err {
+        Some(e) if !any_ok => Err(e),
+        _ => Ok((
+            signed_attachment_urls(htmls.iter().map(String::as_str)),
+            first_err.is_none(),
+        )),
+    }
+}
+
+/// What [`gh_pr_attachment_urls`](super::gh::gh_pr_attachment_urls) returns.
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub(crate) struct PrAttachmentUrls {
+    /// Whether the PR's repository is private: only then does the webview
+    /// need the signed URLs (a public repository serves the originals, which
+    /// never expire, though GitHub signs its attachments in `body_html` too).
+    /// `None` when it could not be read: the URLs are still returned.
+    pub private: Option<bool>,
+    pub urls: Vec<String>,
+    /// Every body list was read. When not, an attachment missing from `urls`
+    /// may just be in a list that failed — not one GitHub did not sign.
+    pub complete: bool,
+}
+
+impl PrAttachmentUrls {
+    pub(crate) fn from_fetches(
+        private: Option<bool>,
+        fetches: Vec<Result<Vec<String>, String>>,
+    ) -> Result<Self, String> {
+        let (urls, complete) = signed_urls_from_fetches(fetches)?;
+        Ok(PrAttachmentUrls {
+            private,
+            urls,
+            complete,
+        })
+    }
+}
+
+/// Signed URLs of the attachments in PR `number`'s bodies (REST).
+pub(crate) fn rest_pr_attachment_urls(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<PrAttachmentUrls, String> {
+    let (repo, pr) = get_pr_json(cwd, number, token)?;
+    let private = pr.pointer("/base/repo/private").and_then(|v| v.as_bool());
+    let fetches = pr_attachment_html_paths(&repo, number)
+        .par_iter()
+        .map(|path| {
+            let url = format!("{}/{}", API_BASE, path);
+            let (status, body) = curl_raw("GET", &url, Some(token), None, HTML_ACCEPT)?;
+            if status >= 400 {
+                return Err(map_api_error(status, &body));
+            }
+            Ok(body_htmls(&parse_json_body(&body)?))
+        })
+        .collect();
+    PrAttachmentUrls::from_fetches(private, fetches)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn api_error_keeps_validation_details() {
+        let body = r#"{"message":"Validation Failed","errors":[{"resource":"Issue","field":"assignees","code":"invalid"},{"message":"milestone not found"}]}"#;
+        assert_eq!(
+            map_api_error(422, body),
+            "GitHub API error (422): Validation Failed (assignees: invalid; milestone not found)"
+        );
+    }
+
+    #[test]
+    fn api_error_without_details_is_unchanged() {
+        assert_eq!(
+            map_api_error(404, r#"{"message":"Not Found"}"#),
+            "GitHub API error (404): Not Found"
+        );
+    }
+
     use super::*;
     use serde_json::json;
+
+    // ─── Signed attachment URLs (#302) ───────────────────────────────────────
+
+    #[test]
+    fn collects_signed_attachment_urls_from_body_html() {
+        let a = "https://private-user-images.githubusercontent.com/1/2-aaaa.png?jwt=x.y.z";
+        let b = "https://private-user-images.githubusercontent.com/1/3-bbbb.gif?jwt=p&amp;q=1";
+        let html1 = format!(
+            r#"<p><a href="{a}"><img alt="x" src="{a}" style="max-width: 100%;"></a></p><img src="https://camo.githubusercontent.com/abc">"#
+        );
+        let html2 = format!(
+            r#"<img src="{a}"><img data-canonical-src="https://private-user-images.githubusercontent.com/9/9-zzzz.png" src="{b}">"#
+        );
+        assert_eq!(
+            signed_attachment_urls([html1.as_str(), html2.as_str()]),
+            vec![
+                a.to_string(),
+                "https://private-user-images.githubusercontent.com/1/3-bbbb.gif?jwt=p&q=1"
+                    .to_string()
+            ]
+        );
+        assert!(signed_attachment_urls(["<img src=\"unterminated"]).is_empty());
+        assert_eq!(
+            signed_attachment_urls([
+                "<img\tsrc=\"https://private-user-images.githubusercontent.com/x\">"
+            ]),
+            vec!["https://private-user-images.githubusercontent.com/x".to_string()]
+        );
+    }
+
+    #[test]
+    fn decodes_the_character_references_of_an_attribute() {
+        assert_eq!(
+            decode_html_entities("a&amp;b&#x3D;c&#61;d&quot;&#39;&lt;&gt;"),
+            "a&b=c=d\"'<>"
+        );
+        assert_eq!(decode_html_entities("x&unknown;y & z&"), "x&unknown;y & z&");
+    }
+
+    #[test]
+    fn one_failed_endpoint_does_not_cost_the_others_urls() {
+        let a = "https://private-user-images.githubusercontent.com/1/2-aaaa.png?jwt=x";
+        let ok = Ok(vec![format!(r#"<img src="{a}">"#)]);
+        assert_eq!(
+            signed_urls_from_fetches(vec![Err("403".into()), ok]),
+            Ok((vec![a.to_string()], false))
+        );
+        assert_eq!(
+            signed_urls_from_fetches(vec![Err("403".into()), Err("502".into())]),
+            Err("403".to_string())
+        );
+        assert_eq!(
+            signed_urls_from_fetches(vec![Ok(vec![])]),
+            Ok((vec![], true))
+        );
+    }
+
+    #[test]
+    fn reads_body_html_from_an_object_or_an_array() {
+        assert_eq!(
+            body_htmls(&json!({ "body_html": "<p>a</p>" })),
+            vec!["<p>a</p>"]
+        );
+        assert_eq!(
+            body_htmls(&json!([{ "body_html": "1" }, { "body": "no html" }, { "body_html": "2" }])),
+            vec!["1", "2"]
+        );
+        assert!(body_htmls(&serde_json::Value::Null).is_empty());
+    }
 
     // ─── OAuth App access restrictions (org-level 403) ───────────────────────
 
@@ -2458,9 +2828,60 @@ mod tests {
     }
 
     #[test]
+    fn a_parent_refusal_is_remembered_for_that_repository_only() {
+        let cwd = "/tmp/gitwand-test-parent-memo";
+        let key = "repo:org/parent-memo";
+        let calls = std::cell::Cell::new(0);
+        let first: Option<Result<(), String>> = rest_attempt(
+            cwd,
+            key,
+            Some("tok".into()),
+            || true,
+            |_| {
+                calls.set(calls.get() + 1);
+                Err(RESTRICTED.to_string())
+            },
+        );
+        assert!(first.is_none());
+        let second: Option<Result<(), String>> = rest_attempt(
+            cwd,
+            key,
+            Some("tok".into()),
+            || true,
+            |_| {
+                calls.set(calls.get() + 1);
+                Ok(())
+            },
+        );
+        assert!(
+            second.is_none(),
+            "the refused repository goes straight to gh"
+        );
+        assert_eq!(calls.get(), 1);
+        assert!(!is_marked_restricted(cwd), "the checkout keeps its token");
+    }
+
+    #[test]
+    fn a_restricted_call_on_another_repo_does_not_mark_this_checkout() {
+        // A fork's parent in an org that restricts OAuth apps: fall back to
+        // `gh` for that call, but keep the GitWand token for the fork itself.
+        let cwd = "/tmp/gitwand-test-restricted-parent";
+        let out: Option<Result<(), String>> = rest_attempt(
+            cwd,
+            "repo:org/parent-a",
+            Some("tok".into()),
+            || true,
+            |_| Err(RESTRICTED.to_string()),
+        );
+        assert!(out.is_none());
+        assert!(!is_marked_restricted(cwd));
+    }
+
+    #[test]
     fn a_restricted_call_falls_back_to_gh_and_marks_the_repo() {
         let cwd = "/tmp/gitwand-test-restricted-a";
         let out: Option<Result<(), String>> = rest_attempt(
+            cwd,
             cwd,
             Some("tok".into()),
             || true,
@@ -2481,6 +2902,7 @@ mod tests {
         let cwd = "/tmp/gitwand-test-restricted-b";
         let out: Option<Result<(), String>> = rest_attempt(
             cwd,
+            cwd,
             Some("tok".into()),
             || false,
             |_| Err(RESTRICTED.to_string()),
@@ -2499,9 +2921,10 @@ mod tests {
     fn other_results_pass_through_untouched() {
         let cwd = "/tmp/gitwand-test-restricted-c";
         let ok: Option<Result<i32, String>> =
-            rest_attempt(cwd, Some("tok".into()), || true, |_| Ok(7));
+            rest_attempt(cwd, cwd, Some("tok".into()), || true, |_| Ok(7));
         assert_eq!(ok, Some(Ok(7)));
         let err: Option<Result<i32, String>> = rest_attempt(
+            cwd,
             cwd,
             Some("tok".into()),
             || true,
@@ -2512,7 +2935,7 @@ mod tests {
             Some(Err("GitHub API error (404): Not Found".to_string()))
         );
         assert!(!is_marked_restricted(cwd));
-        let none: Option<Result<i32, String>> = rest_attempt(cwd, None, || true, |_| Ok(1));
+        let none: Option<Result<i32, String>> = rest_attempt(cwd, cwd, None, || true, |_| Ok(1));
         assert_eq!(none, None, "no GitWand token: the gh path runs");
     }
 
@@ -2733,7 +3156,24 @@ mod tests {
 
 #[cfg(test)]
 mod checks_unavailable_tests {
-    use super::checks_unavailable;
+    use super::{api_error_has_status, checks_unavailable};
+
+    #[test]
+    fn an_api_error_status_is_read_from_both_formats() {
+        assert!(api_error_has_status(
+            "GitHub API error (404): Not Found",
+            404
+        ));
+        assert!(api_error_has_status("gh: Not Found (HTTP 404)", 404));
+        assert!(!api_error_has_status(
+            "gh api GET repos/o/r/contents/crash (404).md: HTTP 502",
+            404
+        ));
+        assert!(!api_error_has_status(
+            "GitHub API error (403): Forbidden",
+            404
+        ));
+    }
 
     #[test]
     fn forbidden_or_not_found_means_no_checks_to_show() {
@@ -2800,5 +3240,26 @@ mod etag_cache_tests {
         c.insert("a".into(), "2".into(), "A2".into());
         assert!(c.get("b").is_some());
         assert_eq!(c.get("a"), Some(("2".into(), "A2".into())));
+    }
+}
+
+#[cfg(test)]
+mod redact_url_tests {
+    use super::redact_url_userinfo;
+
+    #[test]
+    fn a_remote_url_shows_without_its_credentials() {
+        assert_eq!(
+            redact_url_userinfo("https://oauth2:glpat-SECRET@gitlab.example/team/app.git"),
+            "https://gitlab.example/team/app.git"
+        );
+        assert_eq!(
+            redact_url_userinfo("https://github.com/me/app.git"),
+            "https://github.com/me/app.git"
+        );
+        assert_eq!(
+            redact_url_userinfo("git@host:me/app.git"),
+            "git@host:me/app.git"
+        );
     }
 }

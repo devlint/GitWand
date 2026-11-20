@@ -118,4 +118,17 @@ describe("usePrPanel — lazy diff parse wiring", () => {
     const again = p.prDiffFiles.value.find((f) => f.path === "b.ts");
     expect(again?.hunks).toBe(hunksRef);
   });
+
+  it("links the diff's lines at the head it was loaded for, and not once the head moved", async () => {
+    vi.mocked(ghPrDiff).mockResolvedValue(THREE_FILE_DIFF);
+    const cwd = ref("/repo");
+    const p = usePrPanel(cwd);
+    (p as any).selectedPr.value = { number: 1 } as any;
+    (p as any).prDetail.value = { number: 1, headSha: "aaa" } as any;
+    await (p as any).loadDiff();
+    expect(p.permalinkHeadSha.value).toBe("aaa");
+    // A push: the detail moves on, the diff on screen is still the old one.
+    (p as any).prDetail.value = { number: 1, headSha: "bbb" } as any;
+    expect(p.permalinkHeadSha.value).toBeNull();
+  });
 });

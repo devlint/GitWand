@@ -92,7 +92,7 @@ Use the same `command` + `args` pattern. Refer to your client's MCP documentatio
 
 ## Tools
 
-The MCP server exposes 5 tools:
+The MCP server exposes the tools below. The LLM resolution pair (`gitwand_resolve_hunk`, `gitwand_resolve_hunk_llm`) is described in [the collaboration loop](#the-collaboration-loop).
 
 ### `gitwand_status`
 
@@ -163,6 +163,45 @@ It does **not** validate what it writes: no residual-marker or syntax check. For
 | `content` | string | **Yes** | Resolved content to replace the conflict block |
 
 **Returns:** Confirmation + remaining conflict count in the file.
+
+### `gitwand_create_issue`
+
+File a GitHub issue on the repository the agent works in. **It previews by default:** without `dry_run: false` nothing is created, and the tool returns the target repository, the title, labels and assignees it would send, the body's length (the body goes exactly as the agent passed it), and what the secrets scan found. The agent is told to show you that preview and to create only once you agree; a create must carry the preview's `previewId`, so it can only send what was previewed, once. When your MCP client supports elicitation, GitWand also asks you directly to confirm the issue before creating it; without it, showing you the preview is up to the agent.
+
+The issue goes to `origin`, or to its fork parent when issues are turned off (or the repository archived) on `origin`, as in the desktop app. It goes through the GitHub CLI (`gh api`, the whole issue as JSON on stdin, so nothing of it appears on a command line): signed in with `gh auth login`, or with `GH_TOKEN`/`GITHUB_TOKEN` in the server's environment; a GitHub Enterprise `origin` must be a host `gh` is signed in to (`gh auth login --hostname …`, or the host `GH_HOST` names — an enterprise token is only ever sent there), and an SSH alias from `~/.ssh/config` is resolved to the host it connects to. Title, body, labels and assignees are scanned first with the repository's `.gitwandrc` `secrets` settings: a known secret pattern refuses the issue, even with `dry_run: false`, and `secrets.ignore` does not apply (a cloned repository cannot allow-list a value out of a public issue); a high-entropy string only warns.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `cwd` | string | No | Working directory |
+| `title` | string | **Yes** | Issue title (1–256 characters) |
+| `body` | string | No | Markdown body (at most 65,536 characters) |
+| `labels` | string[] | No | Labels (GitHub creates a missing one only for someone who can push there); need triage rights on the target |
+| `assignees` | string[] | No | Logins to assign (`@me` for yourself); need triage rights on the target |
+| `repo` | string | No | `owner/repo`: `origin`'s repository or its fork parent |
+| `dry_run` | boolean | No | Default `true` (preview). `false` creates the issue |
+| `preview_id` | string | With `dry_run: false` | The `previewId` of a preview of this very issue: a create without it, or with other arguments, is refused |
+
+**Returns:** the preview (with the `host` and `repo` it goes to), or `{ created, confirmedBy, host, repo, number, url }`: `confirmedBy` is `user` when GitWand asked you through the client, `agent` when the client cannot ask and the agent's preview stood for your yes.
+
+**Errors** are `{ error, message }` with a stable code:
+
+| Code | When |
+|------|------|
+| `invalid_title`, `invalid_body`, `invalid_list`, `invalid_dry_run` | An argument is malformed (nothing ran) |
+| `not_a_repo`, `no_origin`, `unsupported_remote` | `cwd` is not a repository, has no `origin`, or `origin` is not a `host/owner/repo` URL |
+| `gh_missing`, `gh_auth_failed` | `gh` is not installed, or its sign-in was refused |
+| `not_github` | `origin` is on another forge, or on a host `gh` is not signed in to |
+| `target_lookup_failed` | `gh` could not read the repository (or your rights on the fork parent) |
+| `repo_not_allowed`, `issues_disabled`, `no_issue_target` | `repo` is not `origin` or its parent, takes no issues, or none does |
+| `cannot_triage` | Labels or assignees without triage rights on the target |
+| `secrets_found` | A known secret pattern is in the issue |
+| `scan_failed`, `scan_unavailable` | The scan with the repository's own patterns overran, or could not start |
+| `preview_required`, `preview_used`, `preview_expired` | No matching preview, its one create is used, or it is over an hour old |
+| `declined`, `confirm_failed`, `cancelled` | You said no, you could not be asked, or the call was cancelled: nothing was created |
+| `create_failed` | GitHub refused it, or the connection never opened: nothing was created |
+| `create_uncertain` | The create failed in a way that may still have filed it (a 5xx, a connection lost mid-way, an error `gh` never gave before): check before trying again |
 
 ## Resources
 

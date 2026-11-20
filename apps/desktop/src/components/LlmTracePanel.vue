@@ -45,6 +45,8 @@ const props = defineProps<{
    * Reject stays available so the user can still back out to manual.
    */
   accepted?: boolean;
+  /** Show "Report" (the issue form is available, #301). */
+  canReport?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -52,6 +54,8 @@ const emit = defineEmits<{
   accept: [hunkId: string | number];
   /** User wants to redo this hunk manually — parent downgrades to `complex`. */
   reject: [hunkId: string | number];
+  /** Report this resolution as wrong (#301). */
+  report: [hunkId: string | number];
 }>();
 
 // ─── Derived values ────────────────────────────────────
@@ -279,6 +283,17 @@ function onReject() {
         @click="onReject"
       >
         {{ t('mergeEditor.llmResolution.reject') }}
+      </button>
+      <button
+        v-if="canReport"
+        type="button"
+        class="llm-trace__btn llm-trace__btn--secondary"
+        data-action="report"
+        :data-hunk-id="String(hunkId)"
+        :title="t('createIssue.report.buttonTitle')"
+        @click="emit('report', hunkId)"
+      >
+        {{ t('createIssue.report.button') }}
       </button>
     </div>
   </section>

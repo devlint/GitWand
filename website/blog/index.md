@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/parallel-ai-agents-git-worktrees" class="blog-card">
+    <div class="blog-meta">November 17, 2026 · 11 min read</div>
+    <h2 class="blog-title">Running several AI agents in parallel with git worktree, without them stepping on each other</h2>
+    <p class="blog-excerpt">A worktree gives each agent its own files, <code>HEAD</code> and index, but branches, <strong>the stash</strong>, config and hooks stay shared. The traps that only appear with several agents at once (dependencies, ports and containers, concurrent pushes, cleanup), then the part that decides whether the day was worth it: a pairwise <code>git merge-tree</code> check to find which agent branches collide, <code>gitwand preview</code> to see how much of each collision is real work, and a merge order that follows from it. Plus what GitWand does not do yet.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/lockfile-conflicts-by-ecosystem" class="blog-card">
     <div class="blog-meta">November 12, 2026 · 11 min read</div>
     <h2 class="blog-title">Lockfile conflicts: package-lock, pnpm-lock, yarn.lock, composer.lock, Cargo.lock — the right move for each</h2>

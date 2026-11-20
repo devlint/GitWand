@@ -14,6 +14,7 @@
  * `resolve` depuis `../resolver.js`.
  */
 
+import { retractForInvariant, retractForParseTree, withoutFormatResolver } from "./retract.js";
 import type {
   ClassifyInput,
   ConfidenceScore,
@@ -35,7 +36,7 @@ import {
 import { parseConflictMarkers, toConflictHunk } from "../parser.js";
 
 import { EMPTY_VALIDATION, validateMergedContent } from "./validation.js";
-import { checkParseTreeValid, applyPostMergeRiskPenalty } from "./validate-parse-tree.js";
+import { checkParseTreeValid } from "./validate-parse-tree.js";
 import { runStrictValidation } from "./validate-strict.js";
 import { isGeneratedFile, reclassifyIfGenerated } from "./generated-detection.js";
 import { findEcosystem } from "../regenerate/registry.js";
@@ -99,6 +100,7 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
   return {
     ...hunk,
     type: "format_semantic",
+    formatResolver: resolverUsed,
     confidence,
     explanation: `Hunk resolved semantically by the "${resolverUsed}" resolver (merged by the format's structure, not by lines).`,
     trace: {
@@ -151,7 +153,7 @@ function reclassifyFormatConflict(hunk: ConflictHunk, resolverUsed: string, reas
  * et elle doit être visible dans la trace au lieu d'un bypass silencieux.
  */
 function boostFormatValidated(hunk: ConflictHunk, resolverUsed: string): ConflictHunk {
-  if (CONFIDENCE_ORDER[hunk.confidence.label] >= CONFIDENCE_ORDER.high) return hunk;
+  if (CONFIDENCE_ORDER[hunk.confidence.label] >= CONFIDENCE_ORDER.high) return { ...hunk, formatResolver: resolverUsed };
   const confidence: ConfidenceScore = {
     score: Math.max(hunk.confidence.score, 75),
     label: "high",
@@ -162,7 +164,7 @@ function boostFormatValidated(hunk: ConflictHunk, resolverUsed: string): Conflic
     ],
     penalties: hunk.confidence.penalties,
   };
-  return { ...hunk, confidence };
+  return { ...hunk, confidence, formatResolver: resolverUsed };
 }
 
 /**
@@ -260,7 +262,8 @@ function resolveHunk(
       // prefer-safety) l'excluent donc aussi, comme pour le résolveur imports.
       if (effective.type === "format_semantic" && !fmtCfg.allowNonOverlapping) {
         return {
-          hunk: effective,
+          // Not applied: no resolver produced this hunk's resolution.
+          hunk: withoutFormatResolver(effective),
           lines: null,
           reason: `Semantic merge (${dispatch.resolverUsed}) disabled by the "${fmtPolicy}" policy — it combines content from both sides.`,
         };
@@ -278,7 +281,7 @@ function resolveHunk(
             ? `below the minConfidenceScore of ${fmtGate.required}`
             : `insufficient (minimum required: ${fmtGate.required}, policy: ${fmtPolicy})`;
         return {
-          hunk: effective,
+          hunk: withoutFormatResolver(effective),
           lines: null,
           reason: `Confidence ${effective.confidence.label} (score: ${effective.confidence.score}) is ${because} to apply the format-aware resolution.`,
         };
@@ -479,22 +482,12 @@ export function resolve(
   // Une résolution qui casse un invariant n'est pas appliquée, quel que soit
   // le pattern qui l'a produite.
   if (mergedContent !== null && validation.invariantErrors && validation.invariantErrors.length > 0) {
-    const why = validation.invariantErrors.join(" ");
-    const retractedResolutions = resolutions.map((r) =>
-      r.autoResolved
-        ? {
-            ...r,
-            autoResolved: false,
-            resolvedLines: null,
-            resolutionReason: `Retracted: the merged content violates a format invariant. ${why}`,
-          }
-        : r,
-    );
+    const retracted = retractForInvariant(hunks, resolutions, validation.invariantErrors.join(" "));
     return {
       filePath,
       mergedContent: null,
-      hunks,
-      resolutions: retractedResolutions,
+      hunks: retracted.hunks,
+      resolutions: retracted.resolutions,
       stats: { ...stats, autoResolved: 0, remaining: stats.totalConflicts },
       validation: { ...validation, isValid: false },
     };
@@ -612,12 +605,12 @@ export async function resolveAsync(
     // Parse-tree invalide → rétraction de toutes les résolutions automatiques.
     // On ne peut pas savoir quel hunk a cassé la syntaxe sans une analyse fine,
     // donc on est conservatif : tout remettre en conflits manuels.
-    const retractedResolutions = result.resolutions.map((r) =>
-      r.autoResolved ? applyPostMergeRiskPenalty(r) : r,
-    );
+    const retracted = retractForParseTree(result.hunks, result.resolutions);
+    const retractedResolutions = retracted.resolutions;
 
     return {
       ...result,
+      hunks: retracted.hunks,
       // mergedContent = null indique aux consommateurs que des conflits subsistent.
       // Le contenu original (avec marqueurs) est conservé dans conflictedContent
       // par l'appelant — ici on expose uniquement la MergeResult enrichie.

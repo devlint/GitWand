@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted, nextTick } from "vue";
+import { ref, computed, watch, onUnmounted, nextTick, inject } from "vue";
 import type { GitDiff, GitLogEntry, DiffLine, FolderDiffNode } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { avatarStyle } from "../composables/useAvatar";
@@ -8,11 +8,18 @@ import type { DiffMode } from "../utils/diffMode";
 import { detectLanguage, highlightLine } from "../utils/highlight";
 import { safeHtml } from "../composables/useSafeHtml";
 import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
+import { CREATE_ISSUE_KEY, useSelectionPublisher } from "../composables/useCreateIssue";
+import { useLineRange, preventShiftSelect } from "../composables/useLineRange";
+import { parseRowGroup, rowGroup, rowsInColumn, type RowSide } from "../utils/diffRange";
+import type { DiffSelection } from "../utils/issuePrefill";
 
 const { t } = useI18n();
 
 const props = defineProps<{
   diffs: GitDiff[];
+  /** The commit `diffs` belong to (the previous one's stay while a newly
+   *  selected commit loads). */
+  diffsHash?: string | null;
   commitHash: string | null;
   commitInfo: GitLogEntry | null;
   diffMode: DiffMode;
@@ -36,6 +43,36 @@ interface SbsPair {
 function hl(content: string, filePath: string): string {
   const lang = detectLanguage(filePath);
   return highlightLine(content, lang);
+}
+
+/**
+ * Side-by-side pairs of a hunk, with their final (sanitised) HTML, computed
+ * once per hunk: a re-render (a line selected, a file expanded) must not
+ * redo the word diffs, the highlighting and the sanitising of every line.
+ */
+const pairCache = new WeakMap<DiffLine[], SbsPair[]>();
+function pairsOf(lines: DiffLine[], path: string): SbsPair[] {
+  let pairs = pairCache.get(lines);
+  if (!pairs) {
+    pairs = pairLines(lines).map((p) => ({
+      ...p,
+      leftHtml: safeHtml(p.leftHtml ?? (p.left ? hl(p.left.content, path) : "")),
+      rightHtml: safeHtml(p.rightHtml ?? (p.right ? hl(p.right.content, path) : "")),
+    }));
+    pairCache.set(lines, pairs);
+  }
+  return pairs;
+}
+
+/** A line's highlighted, sanitised HTML, computed once per line. */
+const lineHtmlCache = new WeakMap<DiffLine, string>();
+function lineHtml(line: DiffLine, path: string): string {
+  let html = lineHtmlCache.get(line);
+  if (html === undefined) {
+    html = safeHtml(hl(line.content, path));
+    lineHtmlCache.set(line, html);
+  }
+  return html;
 }
 
 function pairLines(lines: DiffLine[]): SbsPair[] {
@@ -169,6 +206,8 @@ function toggleFile(idx: number) {
   const s = new Set(expandedFiles.value);
   if (s.has(idx)) {
     s.delete(idx);
+    // Hidden lines are not a selection ⌘⇧I should file.
+    if (lineRange.range.value && parseRowGroup(lineRange.range.value.group).fileIdx === idx) lineRange.clear();
   } else {
     s.add(idx);
   }
@@ -189,10 +228,19 @@ function isFileTruncated(idx: number): boolean {
   return fileTotalLines(idx) > MAX_LINES_PER_FILE;
 }
 
+/** Truncated hunks per file, kept so their line arrays (the render caches'
+ *  keys) stay the same objects from one render to the next. */
+const truncatedCache = new WeakMap<GitDiff, GitDiff["hunks"]>();
+
 /** Get hunks with truncation applied */
 function truncatedHunks(idx: number) {
   const diff = props.diffs[idx];
-  if (!isFileTruncated(idx)) return diff.hunks;
+  const cached = truncatedCache.get(diff);
+  if (cached) return cached;
+  if (!isFileTruncated(idx)) {
+    truncatedCache.set(diff, diff.hunks);
+    return diff.hunks;
+  }
 
   const result: typeof diff.hunks = [];
   let remaining = MAX_LINES_PER_FILE;
@@ -207,8 +255,90 @@ function truncatedHunks(idx: number) {
       remaining = 0;
     }
   }
+  truncatedCache.set(diff, result);
   return result;
 }
+
+// ─── Line selection → GitHub issue (#301) ───────────────
+// Click a line number to select it, Shift+click another in the same hunk to
+// extend; the selection is what "Create issue" (and ⌘⇧I) files.
+const createIssue = inject(CREATE_ISSUE_KEY, null);
+// Without the commit's details (not in the loaded log) there is nothing to
+// file the lines against.
+// Nor while another commit's diff is still on screen (the selected commit's
+// is loading): its lines would be filed under the wrong commit.
+const diffsAreThisCommits = computed(() => props.diffsHash === undefined || props.diffsHash === props.commitHash);
+const canSelectLines = computed(() => !!createIssue?.available.value && !!props.commitInfo && diffsAreThisCommits.value);
+
+/** `row`: inline rows; `old` / `new`: one column of the side-by-side pairs. */
+type SelSide = RowSide;
+
+const lineRange = useLineRange({
+  dismiss: { keep: ".cdv-line-no, .cdv-issue-btn", scrollEl: () => contentEl.value },
+});
+
+function onLineNoClick(e: MouseEvent, fileIdx: number, hunkIdx: number, idx: number, side: SelSide) {
+  if (canSelectLines.value) lineRange.pick(rowGroup(fileIdx, hunkIdx, side), idx, e.shiftKey);
+}
+
+// Issues no longer possible here (another origin, signed out): nothing to
+// file the highlighted lines with.
+watch(canSelectLines, (can) => {
+  if (!can) lineRange.clear();
+});
+
+function isSelected(fileIdx: number, hunkIdx: number, idx: number, side: SelSide): boolean {
+  return lineRange.isIn(rowGroup(fileIdx, hunkIdx, side), idx);
+}
+
+/** The selected range's file, hunk and column. */
+const selectedAt = computed(() => {
+  const r = lineRange.range.value;
+  return r ? { ...parseRowGroup(r.group), lo: r.lo, hi: r.hi, pick: r } : null;
+});
+
+function isHunkSelected(fileIdx: number, hunkIdx: number): boolean {
+  return selectedAt.value?.fileIdx === fileIdx && selectedAt.value?.hunkIdx === hunkIdx;
+}
+
+const selection = computed<DiffSelection | null>(() => {
+  const s = selectedAt.value;
+  const info = props.commitInfo;
+  const diff = s ? props.diffs[s.fileIdx] : undefined;
+  const hunk = s && diff ? truncatedHunks(s.fileIdx)[s.hunkIdx] : undefined;
+  if (!s || !info || !diff || !hunk) return null;
+  const lines =
+    s.side === "row" ? hunk.lines.slice(s.lo, s.hi + 1) : rowsInColumn(pairsOf(hunk.lines, diff.path), s.side, s.lo, s.hi);
+  if (lines.length === 0) return null;
+  return {
+    path: diff.path,
+    ...(diff.oldPath ? { oldPath: diff.oldPath } : {}),
+    // Picked in one column: link that version, whatever the lines' types.
+    ...(s.side !== "row" ? { side: s.side } : {}),
+    lines,
+    source: { kind: "commit", hash: info.hash, hashFull: info.hashFull, parent: info.parents[0] ?? null },
+    // Filed: the next ⌘⇧I is about something else, not these lines again —
+    // unless other lines were picked since (they stay).
+    onOpened: () => {
+      if (lineRange.range.value === s.pick) lineRange.clear();
+    },
+  };
+});
+
+// Published for ⌘⇧I while issues can be created (#301).
+useSelectionPublisher(createIssue, () => selection.value, () => lineRange.range.value);
+
+function fileIssue() {
+  const sel = selection.value;
+  if (sel && createIssue) void createIssue.openFromSelection(sel);
+}
+
+/** The line numbers' tooltip, computed once rather than per cell. */
+const pickTitle = computed(() => (canSelectLines.value ? t("createIssue.selectionHint") : undefined));
+
+// Another commit, or another layout: row indices mean other lines. The same
+// commit's diffs reloaded (a refresh) keep them.
+watch(() => [props.commitHash, props.diffsHash, props.diffMode], lineRange.clear);
 
 // Reset expansion and rendered count when diffs change (subsequent prop updates)
 watch(
@@ -431,7 +561,15 @@ function onContentScroll(e: Event) {
               :key="hunkIdx"
               class="cdv-hunk"
             >
-              <div class="cdv-hunk-header mono">{{ hunk.header }}</div>
+              <div class="cdv-hunk-header mono">
+                <span>{{ hunk.header }}</span>
+                <button
+                  v-if="selection && isHunkSelected(fileIdx - 1, hunkIdx)"
+                  type="button"
+                  class="cdv-issue-btn"
+                  @click="fileIssue"
+                >{{ t('createIssue.fromSelection') }}</button>
+              </div>
 
               <!-- INLINE mode -->
               <table v-if="diffMode === 'inline'" class="cdv-table">
@@ -440,15 +578,27 @@ function onContentScroll(e: Event) {
                     v-for="(line, lineIdx) in hunk.lines"
                     :key="lineIdx"
                     class="cdv-line"
-                    :class="`cdv-line--${line.type}`"
+                    :class="[`cdv-line--${line.type}`, { 'cdv-line--selected': isSelected(fileIdx - 1, hunkIdx, lineIdx, 'row') }]"
                   >
-                    <td class="cdv-line-no mono">{{ line.oldLineNo ?? '' }}</td>
-                    <td class="cdv-line-no mono">{{ line.newLineNo ?? '' }}</td>
+                    <td
+                      class="cdv-line-no mono"
+                      :class="{ 'cdv-line-no--pick': canSelectLines }"
+                      :title="pickTitle"
+                      @mousedown="canSelectLines && preventShiftSelect($event)"
+                      @click="onLineNoClick($event, fileIdx - 1, hunkIdx, lineIdx, 'row')"
+                    >{{ line.oldLineNo ?? '' }}</td>
+                    <td
+                      class="cdv-line-no mono"
+                      :class="{ 'cdv-line-no--pick': canSelectLines }"
+                      :title="pickTitle"
+                      @mousedown="canSelectLines && preventShiftSelect($event)"
+                      @click="onLineNoClick($event, fileIdx - 1, hunkIdx, lineIdx, 'row')"
+                    >{{ line.newLineNo ?? '' }}</td>
                     <td class="cdv-line-marker mono">
                       {{ line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' ' }}
                     </td>
                     <td class="cdv-line-content mono">
-                      <span v-html="safeHtml(hl(line.content, diffs[fileIdx - 1].path)) || '\u00a0'"></span>
+                      <span v-html="lineHtml(line, diffs[fileIdx - 1].path) || '\u00a0'"></span>
                     </td>
                   </tr>
                 </tbody>
@@ -458,28 +608,40 @@ function onContentScroll(e: Event) {
               <table v-else class="cdv-table cdv-table--sbs">
                 <tbody>
                   <tr
-                    v-for="(pair, pairIdx) in pairLines(hunk.lines)"
+                    v-for="(pair, pairIdx) in pairsOf(hunk.lines, diffs[fileIdx - 1].path)"
                     :key="pairIdx"
                     class="cdv-line"
                   >
-                    <td class="cdv-line-no mono" :class="pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty'">
+                    <td
+                      class="cdv-line-no mono"
+                      :class="[pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty', { 'cdv-line-no--pick': canSelectLines && pair.left, 'cdv-cell--selected': isSelected(fileIdx - 1, hunkIdx, pairIdx, 'old') }]"
+                      :title="pair.left ? pickTitle : undefined"
+                      @mousedown="canSelectLines && preventShiftSelect($event)"
+                      @click="pair.left && onLineNoClick($event, fileIdx - 1, hunkIdx, pairIdx, 'old')"
+                    >
                       {{ pair.left?.oldLineNo ?? '' }}
                     </td>
                     <td class="cdv-line-marker mono" :class="pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty'">
                       {{ pair.left?.type === 'delete' ? '-' : pair.left?.type === 'context' ? ' ' : '' }}
                     </td>
                     <td class="cdv-line-content mono cdv-sbs-content" :class="pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty'">
-                      <span v-html="safeHtml(pair.leftHtml ?? (pair.left ? hl(pair.left.content, diffs[fileIdx - 1].path) : '')) || '\u00a0'"></span>
+                      <span v-html="pair.leftHtml || '\u00a0'"></span>
                     </td>
                     <td class="cdv-sbs-gutter"></td>
-                    <td class="cdv-line-no mono" :class="pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty'">
+                    <td
+                      class="cdv-line-no mono"
+                      :class="[pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty', { 'cdv-line-no--pick': canSelectLines && pair.right, 'cdv-cell--selected': isSelected(fileIdx - 1, hunkIdx, pairIdx, 'new') }]"
+                      :title="pair.right ? pickTitle : undefined"
+                      @mousedown="canSelectLines && preventShiftSelect($event)"
+                      @click="pair.right && onLineNoClick($event, fileIdx - 1, hunkIdx, pairIdx, 'new')"
+                    >
                       {{ pair.right?.newLineNo ?? '' }}
                     </td>
                     <td class="cdv-line-marker mono" :class="pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty'">
                       {{ pair.right?.type === 'add' ? '+' : pair.right?.type === 'context' ? ' ' : '' }}
                     </td>
                     <td class="cdv-line-content mono cdv-sbs-content" :class="pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty'">
-                      <span v-html="safeHtml(pair.rightHtml ?? (pair.right ? hl(pair.right.content, diffs[fileIdx - 1].path) : '')) || '\u00a0'"></span>
+                      <span v-html="pair.rightHtml || '\u00a0'"></span>
                     </td>
                   </tr>
                 </tbody>
@@ -744,12 +906,48 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-hunk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 4px 16px;
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
   background: var(--color-bg-tertiary);
   border-bottom: 1px solid var(--color-border);
 }
+
+/* Line selection for an issue (#301) */
+/* Number cells are dimmed with opacity, which would let the row's add/delete
+   tint through the highlight: dim the text instead while picked. */
+.cdv-line--selected > .cdv-line-no,
+.cdv-cell--selected.cdv-line-no {
+  opacity: 1;
+  color: var(--color-text-muted);
+}
+.cdv-line-no--pick { cursor: pointer; }
+.cdv-line-no--pick:hover { color: var(--color-accent); }
+/* Opaque, so picked lines read as one block whatever their kind (added,
+   deleted, context); the +/− markers still tell them apart. */
+.cdv-line--selected > td,
+.cdv-cell--selected {
+  box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--color-accent) 16%, var(--color-bg-secondary));
+}
+.cdv-issue-btn {
+  flex-shrink: 0;
+  /* Taller than the header's text: pulled in so it doesn't grow the header
+     (and shift the rows below) when it appears. */
+  margin-block: -3px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: var(--color-accent-text, #fff);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.cdv-issue-btn:hover { background: var(--color-accent-hover); }
 
 .cdv-table {
   width: 100%;

@@ -95,21 +95,17 @@ fn gh_list_prs_inner(
     let off = offset.unwrap_or(0).max(0);
     let total = (page + off).to_string();
 
-    // For forks, `gh pr list` without --repo targets the fork itself (0 PRs).
-    // Resolve the upstream parent so the list matches the OAuth/REST path.
-    let target_repo = gh_fork_upstream(&cwd);
-
+    // Name the repo explicitly: left to itself, `gh` would list a fork's own
+    // PRs (none) or an unrelated `upstream` remote's (#298). The base repo
+    // matches what the OAuth/REST path lists.
     // GH_TOKEN propagation is handled centrally by `hidden_cmd` (cf. git/cmd.rs).
-    let mut cmd = hidden_cmd("gh");
+    let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args([
         "pr", "list",
         "--state", st,
         "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,labels,assignees,mergeStateStatus,statusCheckRollup,autoMergeRequest",
         "--limit", &total,
     ]);
-    if let Some(ref nwo) = target_repo {
-        cmd.args(["--repo", nwo]);
-    }
     cmd.current_dir(&cwd);
     let output = output_with_timeout(cmd, GH_TIMEOUT)
         .map_err(|e| format!("Failed to run gh pr list (is GitHub CLI installed?): {}", e))?;
@@ -199,46 +195,9 @@ fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
         _ => "[OPEN]",
     };
 
-    // Resolve owner/name once via `gh repo view`. `nameWithOwner` is the
-    // canonical "org/repo" slug — splittable by '/' without ambiguity.
-    // v2.17: include isFork and parent to correctly count PRs in the base repo
-    // (the target repo that `gh pr list` would use by default).
-    let view = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "nameWithOwner,isFork,parent"])
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("gh repo view (for pr count): {}", e))?;
-    if !view.status.success() {
-        return Err(format!(
-            "gh repo view failed: {}",
-            String::from_utf8_lossy(&view.stderr)
-        ));
-    }
-
-    let v: serde_json::Value = serde_json::from_slice(&view.stdout).map_err(|e| e.to_string())?;
-    let is_fork = v.get("isFork").and_then(|b| b.as_bool()).unwrap_or(false);
-    let nwo = if is_fork {
-        v.get("parent")
-            .and_then(|p| {
-                let owner = p
-                    .get("owner")
-                    .and_then(|o| o.get("login"))
-                    .and_then(|s| s.as_str())?;
-                let name = p.get("name").and_then(|s| s.as_str())?;
-                Some(format!("{}/{}", owner, name))
-            })
-            .or_else(|| {
-                v.get("nameWithOwner")
-                    .and_then(|s| s.as_str())
-                    .map(|s| s.to_string())
-            })
-            .unwrap_or_default()
-    } else {
-        v.get("nameWithOwner")
-            .and_then(|s| s.as_str())
-            .unwrap_or("")
-            .to_string()
-    };
+    // The base repo — the fork parent for a fork, else `origin` — which is
+    // the repo `gh_list_prs` lists (#298).
+    let nwo = gh_base_nwo(&cwd)?;
 
     let (owner, name) = match nwo.split_once('/') {
         Some((o, n)) if !o.is_empty() && !n.is_empty() => (o.to_string(), n.to_string()),
@@ -250,13 +209,15 @@ fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
         "query($owner:String!,$name:String!) {{ repository(owner:$owner,name:$name) {{ pullRequests(states:{}) {{ totalCount }} }} }}",
         states_expr
     );
-    let out = hidden_cmd("gh")
+    let out = gh_api_cmd(&cwd)
         .args([
             "api",
             "graphql",
-            "-F",
+            // `-f`: raw strings (`-F` would send `2048` as an integer and
+            // read an `@…` value from a file).
+            "-f",
             &format!("owner={}", owner),
-            "-F",
+            "-f",
             &format!("name={}", name),
             "-f",
             &format!("query={}", query),
@@ -304,8 +265,8 @@ fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
 /// chantier).
 ///
 /// Implementation: `gh api graphql` with the `pullRequests.totalCount` edge
-/// after resolving `owner/name` via `gh repo view --json nameWithOwner`.
-/// Both calls are cheap (<200 ms) and avoid expanding the PR objects.
+/// on the base repo (`gh_base_nwo`, whose fork lookup is cached). Both calls
+/// are cheap (<200 ms) and avoid expanding the PR objects.
 ///
 /// `state` accepts "open" (default), "closed", "merged" or "all". `all`
 /// maps to GraphQL `[OPEN, CLOSED, MERGED]`.
@@ -339,8 +300,7 @@ fn gh_pr_freshness_signal_inner(cwd: String) -> Result<Option<PrFreshnessSignal>
     // No sort flag is used by the main gh_list_prs_inner list fetch (its
     // order doesn't matter there) — this probe needs updated-desc
     // specifically, via a `-S` search-query sort, requested only here.
-    let target_repo = gh_fork_upstream(&cwd);
-    let mut cmd = hidden_cmd("gh");
+    let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args([
         "pr",
         "list",
@@ -353,9 +313,6 @@ fn gh_pr_freshness_signal_inner(cwd: String) -> Result<Option<PrFreshnessSignal>
         "-S",
         "sort:updated-desc",
     ]);
-    if let Some(ref nwo) = target_repo {
-        cmd.args(["--repo", nwo]);
-    }
     let output = cmd
         .current_dir(&cwd)
         .output()
@@ -423,13 +380,37 @@ fn gh_create_pr_inner(
         body,
     ];
 
-    // Cross-fork target: `gh pr create --repo owner/repo` opens the PR against
-    // that repo, using the current fork branch as head automatically.
-    if let Some(repo) = base_repo {
-        if !repo.trim().is_empty() {
-            args.push("--repo".to_string());
-            args.push(repo.trim().to_string());
+    // Target repo: the caller-supplied one (cross-fork), else `origin` — as on
+    // the REST path (`rest_create_pr`). Always named: left to itself, `gh`
+    // would pick an `upstream` remote over `origin`, even an unrelated one
+    // (#298). The head is left to `gh`, which reads it from the branch's push
+    // tracking and qualifies it with the owner when that differs.
+    let origin = gh_origin_repo(&cwd);
+    let requested = base_repo
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .map(str::to_string);
+    // A requested `owner/repo` is on origin's host; `host/owner/repo` names
+    // its own. Without a usable origin, `--repo` as before, the host left to `gh`.
+    let mut repo_flag = None;
+    let target = match (requested, origin.as_ref()) {
+        (Some(r), Some(o)) => match r.split('/').count() {
+            2 => Some(o.sibling(r)),
+            _ => {
+                repo_flag = Some(r);
+                None
+            }
+        },
+        (Some(r), None) => {
+            repo_flag = Some(r);
+            None
         }
+        (None, o) => o.cloned(),
+    };
+    if let Some(r) = repo_flag {
+        args.push("--repo".to_string());
+        args.push(r);
     }
 
     if !base.is_empty() {
@@ -456,7 +437,7 @@ fn gh_create_pr_inner(
     }
 
     // Note: gh pr create doesn't support --json, but returns the URL.
-    let output = hidden_cmd("gh")
+    let output = gh_cmd(target.as_ref())
         .args(&args)
         .current_dir(&cwd)
         .output()
@@ -544,97 +525,57 @@ pub(crate) async fn gh_create_pr(
 }
 
 fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
-    // Settings-managed OAuth token present → tokenless REST path (no `gh` needed).
-    if let Some(r) =
-        github_api::with_rest(&cwd, |tok| github_api::rest_reviewer_candidates(&cwd, tok))
-    {
-        return r;
+    // Users with push access — the set GitHub allows as reviewers. With the
+    // Settings token: `origin`'s, over REST. Without: `gh repo view` names the
+    // repository, which follows `gh repo set-default` (a fork set to its
+    // parent lists the parent's maintainers), as before.
+    if let Some(origin) = gh_origin_repo(&cwd) {
+        let token = github_api::settings_github_token();
+        let path = format!("repos/{}/assignees", origin.nwo);
+        if let Some(r) = github_api::with_rest_using(&cwd, token.as_deref(), |tok| {
+            super::gh_issues::rest_pages(&path, tok, 3)
+        }) {
+            return r.map(|items| super::gh_issues::assignees_from(&items));
+        }
     }
-    // Discover owner/repo from the current repo.
-    let view = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "owner,name"])
-        .current_dir(&cwd)
+    gh_reviewer_candidates_via_view(&cwd)
+}
+
+/// Reviewer candidates over `gh`: `gh repo view` names the repository (it
+/// follows `gh repo set-default`).
+fn gh_reviewer_candidates_via_view(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
+    let view = gh_repo_view_cmd(cwd, "nameWithOwner")
         .output()
         .map_err(|e| format!("Failed to inspect repo: {}", e))?;
     if !view.status.success() {
         return Err(format!(
             "gh repo view failed: {}",
-            String::from_utf8_lossy(&view.stderr)
+            String::from_utf8_lossy(&view.stderr).trim()
         ));
     }
-    #[derive(serde::Deserialize)]
-    struct OwnerLogin {
-        login: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct RepoView {
-        owner: OwnerLogin,
-        name: String,
-    }
-    let repo: RepoView = serde_json::from_slice(&view.stdout)
-        .map_err(|e| format!("Failed to parse repo view: {}", e))?;
-    let endpoint = format!("/repos/{}/{}/assignees", repo.owner.login, repo.name);
-
-    // Fetch up to ~300 candidates (3 pages of 100). Plenty for typical repos.
-    let output = hidden_cmd("gh")
-        .args([
-            "api",
-            "--paginate",
-            "-H",
-            "Accept: application/vnd.github+json",
-            &endpoint,
-            "--jq",
-            "[.[] | {login: .login, name: .name, avatar_url: .avatar_url}]",
-        ])
-        .current_dir(&cwd)
+    let nwo = serde_json::from_slice::<serde_json::Value>(&view.stdout)
+        .ok()
+        .and_then(|v| v.get("nameWithOwner")?.as_str().map(String::from))
+        .ok_or("gh repo view returned no repository")?;
+    let output = gh_api_cmd(cwd)
+        .args(["api", "--paginate", &format!("repos/{}/assignees", nwo)])
+        .current_dir(cwd)
         .output()
         .map_err(|e| format!("Failed to list reviewer candidates: {}", e))?;
     if !output.status.success() {
         return Err(format!(
             "gh api assignees failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-
-    // --paginate concatenates JSON arrays page-by-page (one per line).
-    // Parse each non-empty line as a JSON array and flatten.
+    // --paginate concatenates one JSON array per page.
     let raw = String::from_utf8_lossy(&output.stdout);
-    let mut all: Vec<ReviewerCandidate> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for chunk in raw.split('\n') {
-        let trimmed = chunk.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        // gh might return either a single array per chunk (--jq with array wrapper)
-        // or NDJSON of arrays. Try to parse as Value and walk.
-        let value: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if let Some(arr) = value.as_array() {
-            for item in arr {
-                let login = item.get("login").and_then(|v| v.as_str()).unwrap_or("");
-                if login.is_empty() || !seen.insert(login.to_string()) {
-                    continue;
-                }
-                all.push(ReviewerCandidate {
-                    login: login.to_string(),
-                    name: item
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    avatar_url: item
-                        .get("avatar_url")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                });
-            }
-        }
-    }
-    // Sort alphabetically by login for stable UX.
-    all.sort_by_key(|a| a.login.to_lowercase());
-    Ok(all)
+    let items: Vec<serde_json::Value> = serde_json::Deserializer::from_str(&raw)
+        .into_iter::<serde_json::Value>()
+        .filter_map(Result::ok)
+        .flat_map(|v| v.as_array().cloned().unwrap_or_default())
+        .collect();
+    Ok(super::gh_issues::assignees_from(&items))
 }
 
 /// List candidate reviewers for the current repo using `gh` CLI.
@@ -656,9 +597,7 @@ fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {
         return r;
     }
     // Discover owner/repo from the current repo.
-    let view = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "owner,name"])
-        .current_dir(&cwd)
+    let view = gh_repo_view_cmd(&cwd, "owner,name")
         .output()
         .map_err(|e| format!("Failed to inspect repo: {}", e))?;
     if !view.status.success() {
@@ -680,7 +619,7 @@ fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {
         .map_err(|e| format!("Failed to parse repo view: {}", e))?;
     let endpoint = format!("/repos/{}/{}/branches", repo.owner.login, repo.name);
 
-    let output = hidden_cmd("gh")
+    let output = gh_api_cmd(&cwd)
         .args([
             "api",
             "--paginate",
@@ -746,8 +685,9 @@ fn gh_checkout_pr_inner(cwd: String, number: i64) -> Result<(), String> {
     if github_api::rest_token_for(&cwd).is_some() {
         return github_api::rest_checkout_pr(&cwd, number);
     }
-    let output = hidden_cmd("gh")
-        .args(["pr", "checkout", &number.to_string()])
+    let mut cmd = gh_base_cmd(&cwd)?;
+    cmd.args(["pr", "checkout", &number.to_string()]);
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to checkout PR: {}", e))?;
@@ -780,14 +720,9 @@ fn gh_merge_pr_inner(cwd: String, number: i64, method: String) -> Result<(), Str
         _ => "--merge",
     };
 
-    let output = hidden_cmd("gh")
-        .args([
-            "pr",
-            "merge",
-            &number.to_string(),
-            merge_flag,
-            "--delete-branch",
-        ])
+    let num = number.to_string();
+    let mut cmd = gh_merge_cmd(&cwd, &["pr", "merge", &num, merge_flag, "--delete-branch"])?;
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to merge PR: {}", e))?;
@@ -819,15 +754,14 @@ fn gh_enable_auto_merge_inner(cwd: String, number: i64, method: String) -> Resul
         "rebase" => "--rebase",
         _ => "--merge",
     };
-    let output = hidden_cmd("gh")
-        .args([
-            "pr",
-            "merge",
-            &number.to_string(),
-            "--auto",
-            merge_flag,
-            "--delete-branch",
-        ])
+    // Through `gh_merge_cmd`: a PR that is already mergeable is merged at
+    // once, and then gets the same `--delete-branch` local cleanup.
+    let num = number.to_string();
+    let mut cmd = gh_merge_cmd(
+        &cwd,
+        &["pr", "merge", &num, "--auto", merge_flag, "--delete-branch"],
+    )?;
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to enable auto-merge: {}", e))?;
@@ -863,8 +797,9 @@ fn gh_disable_auto_merge_inner(cwd: String, number: i64) -> Result<(), String> {
     }) {
         return r;
     }
-    let output = hidden_cmd("gh")
-        .args(["pr", "merge", &number.to_string(), "--disable-auto"])
+    let mut cmd = gh_base_cmd(&cwd)?;
+    cmd.args(["pr", "merge", &number.to_string(), "--disable-auto"]);
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to disable auto-merge: {}", e))?;
@@ -890,15 +825,11 @@ fn gh_pr_ready_inner(cwd: String, number: i64) -> Result<(), String> {
     {
         return r;
     }
-    // On a fork the PR number comes from the upstream's list, so name the repo
-    // explicitly (as `gh_pr_edit_inner` does) rather than rely on gh's default.
-    let mut args = vec!["pr".to_string(), "ready".to_string(), number.to_string()];
-    if let Some(upstream) = gh_fork_upstream(&cwd) {
-        args.push("--repo".to_string());
-        args.push(upstream);
-    }
-    let output = hidden_cmd("gh")
-        .args(&args)
+    // The PR number comes from the base repo's list, so name that repo
+    // explicitly rather than rely on gh's remote-name default (#298).
+    let mut cmd = gh_base_cmd(&cwd)?;
+    cmd.args(["pr", "ready", &number.to_string()]);
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run gh pr ready: {}", e))?;
@@ -935,7 +866,7 @@ fn gh_pr_edit_inner(
         return r;
     }
     // `-f` sends each value as a raw string — no `@file` expansion, unlike `-F`.
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/pulls/{}", nwo, number);
     gh_api_write(&cwd, "PATCH", &path, &fields)?;
     Ok(())
@@ -965,7 +896,7 @@ fn gh_dismiss_review_inner(
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!(
         "repos/{}/pulls/{}/reviews/{}/dismissals",
         nwo, number, review_id
@@ -1115,9 +1046,9 @@ fn gh_request_reviewers_inner(cwd: String, number: i64, logins: Vec<String>) -> 
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/pulls/{}/requested_reviewers", nwo, number);
-    let mut cmd = hidden_cmd("gh");
+    let mut cmd = gh_api_cmd(&cwd);
     cmd.args(["api", "-X", "POST", &path]);
     for login in &logins {
         cmd.args(["-f", &format!("reviewers[]={}", login)]);
@@ -1153,16 +1084,12 @@ fn gh_pr_detail_inner(cwd: String, number: i64) -> Result<PullRequestDetail, Str
     {
         return r;
     }
-    let upstream = gh_fork_upstream(&cwd);
     let num = number.to_string();
-    let mut cmd = hidden_cmd("gh");
+    let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args([
         "pr", "view", &num,
         "--json", "number,title,body,state,author,headRefName,headRefOid,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,labels,reviews,mergeable,statusCheckRollup,autoMergeRequest",
     ]);
-    if let Some(ref nwo) = upstream {
-        cmd.args(["--repo", nwo]);
-    }
     let output = cmd
         .current_dir(&cwd)
         .output()
@@ -1209,11 +1136,14 @@ fn gh_issue_detail_inner(cwd: String, number: i64) -> Result<IssueDetail, String
         return r;
     }
     let num = number.to_string();
-    let output = hidden_cmd("gh")
-        .args([
-            "issue", "view", &num,
-            "--json", "number,title,body,state,author,assignees,labels,url,createdAt,updatedAt,milestone,comments",
-        ])
+    // The base repo: a fork's issues are its parent's (forks usually have
+    // issues disabled), as `gh` picked for a GitWand-made fork before #298.
+    let mut cmd = gh_base_cmd(&cwd)?;
+    cmd.args([
+        "issue", "view", &num,
+        "--json", "number,title,body,state,author,assignees,labels,url,createdAt,updatedAt,milestone,comments",
+    ]);
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("gh issue view: {}", e))?;
@@ -1256,9 +1186,9 @@ fn gh_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::V
     }) {
         return r;
     }
-    let nwo = gh_current_nwo(&cwd).ok_or_else(|| "Could not resolve owner/repo".to_string())?;
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/issues/{}/comments?per_page=100", nwo, number);
-    let output = hidden_cmd("gh")
+    let output = gh_api_cmd(&cwd)
         .args(["api", &path])
         .current_dir(&cwd)
         .output()
@@ -1295,10 +1225,10 @@ fn gh_issue_add_comment_inner(
     }) {
         return r;
     }
-    let nwo = gh_current_nwo(&cwd).ok_or_else(|| "Could not resolve owner/repo".to_string())?;
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/issues/{}/comments", nwo, number);
     let field = format!("body={}", body);
-    let output = hidden_cmd("gh")
+    let output = gh_api_cmd(&cwd)
         .args(["api", &path, "-X", "POST", "-f", &field])
         .current_dir(&cwd)
         .output()
@@ -1335,8 +1265,9 @@ fn gh_issue_set_state_inner(cwd: String, number: i64, state: String) -> Result<(
     let num = number.to_string();
     // "closed" → `gh issue close`, anything else → `gh issue reopen`.
     let sub = if state == "closed" { "close" } else { "reopen" };
-    let output = hidden_cmd("gh")
-        .args(["issue", sub, &num])
+    let mut cmd = gh_base_cmd(&cwd)?;
+    cmd.args(["issue", sub, &num]);
+    let output = cmd
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("gh issue {}: {}", sub, e))?;
@@ -1362,38 +1293,544 @@ pub(crate) async fn gh_issue_set_state(
         .map_err(|e| e.to_string())?
 }
 
+fn gh_pr_attachment_urls_inner(
+    cwd: String,
+    number: i64,
+) -> Result<github_api::PrAttachmentUrls, String> {
+    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+        github_api::rest_pr_attachment_urls(&cwd, number, tok)
+    }) {
+        return r;
+    }
+    use rayon::prelude::*;
+    let nwo = gh_base_nwo(&cwd)?;
+    let (repo, fetches) = rayon::join(
+        // The PR's base repository, as the REST path reads it (`get_pr_json`).
+        || gh_api_json(&cwd, &format!("repos/{}/pulls/{}", nwo, number)),
+        || {
+            github_api::pr_attachment_html_paths(&nwo, number)
+                .par_iter()
+                .map(|path| {
+                    gh_api_json_accept(&cwd, path, Some(github_api::HTML_ACCEPT))
+                        .map(|v| github_api::body_htmls(&v))
+                })
+                .collect()
+        },
+    );
+    // Best effort, like the URLs: a repository that cannot be read (SSO,
+    // a transient error) does not cost the URLs fetched.
+    let private = repo
+        .ok()
+        .and_then(|pr| pr.pointer("/base/repo/private").and_then(|v| v.as_bool()));
+    github_api::PrAttachmentUrls::from_fetches(private, fetches)
+}
+
+/// Signed, short-lived URLs of the files uploaded to PR `number`'s
+/// description, comments and reviews (#302), and whether its repository is
+/// private. GitHub only hands them out in `body_html`; for a private
+/// repository the frontend swaps them in for the `user-attachments` URLs of
+/// the markdown, which it does not serve to the webview.
+#[tauri::command]
+pub(crate) async fn gh_pr_attachment_urls(
+    cwd: String,
+    number: i64,
+) -> Result<github_api::PrAttachmentUrls, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_pr_attachment_urls_inner(cwd, number))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ─── Private sync helpers ────────────────────────────────────────────────────
 
-/// When `cwd` is a GitHub fork, returns the upstream parent `owner/repo` slug.
-/// Returns `None` for regular (non-fork) repos or on any failure — callers
-/// fall back to `gh`'s default repo inference, which is correct for non-forks.
-fn gh_fork_upstream(cwd: &str) -> Option<String> {
-    let out = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "isFork,parent"])
-        .current_dir(cwd)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    if !v.get("isFork").and_then(|b| b.as_bool()).unwrap_or(false) {
+// ─── Repository targeting (#298) ─────────────────────────────────────────────
+//
+// Without `gh repo set-default`, `gh` picks the repo it acts on by remote
+// *name*: `upstream` > `github` > `origin`. A clone with an unrelated
+// `upstream` remote therefore had its PR list, PR creation and every other
+// `gh` call aimed at that other repo. The REST path has always read `origin`
+// (`github_api::owner_repo`); these helpers make the `gh` path do the same.
+//
+// The repo is named through `GH_REPO` (`gh_cmd`), which every `gh`
+// subcommand honors, `gh api`'s `{owner}/{repo}` placeholders included — not
+// through `--repo`: `gh pr merge` skips deleting the local branch (and leaves
+// the checkout on it) whenever `--repo` is given, `GH_REPO` does not.
+// `gh api repos/{nwo}/…` paths name it in the path as well.
+//
+// Only when `origin` is missing or unparseable do callers still leave the
+// choice to `gh` — the behavior every repo had before.
+
+/// A GitHub repository as `gh` addresses it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GhRepo {
+    /// `"host/"` for a GitHub Enterprise host, empty for github.com.
+    host_prefix: String,
+    /// `owner/repo`, the form REST paths (`gh api repos/{nwo}/…`) take.
+    pub(crate) nwo: String,
+}
+
+impl GhRepo {
+    /// The `[HOST/]OWNER/REPO` form `GH_REPO`, `--repo` and `gh repo view` take.
+    pub(crate) fn selector(&self) -> String {
+        format!("{}{}", self.host_prefix, self.nwo)
+    }
+
+    /// The Enterprise host, `None` for github.com.
+    pub(crate) fn enterprise_host(&self) -> Option<&str> {
+        let host = self.host_prefix.trim_end_matches('/');
+        (!host.is_empty()).then_some(host)
+    }
+
+    /// The host, github.com included: what `GH_HOST` is set to.
+    fn host(&self) -> &str {
+        self.enterprise_host().unwrap_or("github.com")
+    }
+
+    /// A repository from its parts, for tests outside this module.
+    #[cfg(test)]
+    pub(crate) fn for_test(host_prefix: &str, nwo: &str) -> GhRepo {
+        GhRepo {
+            host_prefix: host_prefix.to_string(),
+            nwo: nwo.to_string(),
+        }
+    }
+
+    /// A repository on github.com, whatever the working directory's remote
+    /// (GitWand's own repository, for resolver reports, #301).
+    pub(crate) fn github_com(nwo: &str) -> GhRepo {
+        GhRepo {
+            host_prefix: String::new(),
+            nwo: nwo.to_string(),
+        }
+    }
+
+    /// Another repository on the same host (a fork's parent).
+    pub(crate) fn sibling(&self, nwo: String) -> GhRepo {
+        GhRepo {
+            host_prefix: self.host_prefix.clone(),
+            nwo,
+        }
+    }
+}
+
+fn is_github_com(host: &str) -> bool {
+    host == "github.com" || host.ends_with(".github.com")
+}
+
+/// `(host, path, is_ssh)` of a git remote URL: `scheme://[user@]host[:port]/path`
+/// or scp-style `[user@]host:path` (SSH, whatever the user: `git@`,
+/// `alice@`, an EMU `org-123@`, or none). `None` for a local path.
+fn split_remote_url(url: &str) -> Option<(String, String, bool)> {
+    if let Some((scheme, rest)) = url.split_once("://") {
+        let (authority, path) = rest.split_once('/')?;
+        let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+        let host = host_port.split(':').next().unwrap_or("");
+        let is_ssh = scheme.to_ascii_lowercase().contains("ssh");
+        return Some((host.to_lowercase(), path.to_string(), is_ssh));
+    }
+    let (before, path) = url.split_once(':')?;
+    if before.is_empty() || before.contains('/') || before.contains('\\') {
         return None;
     }
-    v.get("parent").and_then(|p| {
-        let owner = p
-            .get("owner")
-            .and_then(|o| o.get("login"))
-            .and_then(|s| s.as_str())?;
-        let name = p.get("name").and_then(|s| s.as_str())?;
-        Some(format!("{}/{}", owner, name))
+    let host = before.rsplit_once('@').map_or(before, |(_, h)| h);
+    Some((host.to_lowercase(), path.to_string(), true))
+}
+
+/// Parse a git remote URL into the repo `gh` should address, the way `gh`
+/// reads remotes: the host of an SSH URL is what `ssh` connects to
+/// (`resolve_ssh_host`, an alias in `~/.ssh/config` standing for its
+/// `HostName`), and a remote counts only when that host is github.com or a
+/// host `gh` is signed in to (`is_gh_host`) — anything else (GitLab, a plain
+/// git server) is not a GitHub remote: `None`. github.com stays implicit in
+/// the selector; an Enterprise host is kept (`github.acme.corp/team/app`).
+fn gh_repo_from_url_with(
+    url: &str,
+    resolve_ssh_host: impl Fn(&str) -> Option<String>,
+    is_gh_host: impl Fn(&str) -> bool,
+) -> Option<GhRepo> {
+    let (host, path, is_ssh) = split_remote_url(url.trim())?;
+    let path = path
+        .trim_start_matches('/')
+        .trim_end_matches('/')
+        .trim_end_matches(".git");
+    let (owner, repo) = path.split_once('/')?;
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') || host.is_empty() {
+        return None;
+    }
+    let host = if is_ssh && !is_github_com(&host) {
+        resolve_ssh_host(&host)
+            .map(|h| h.to_lowercase())
+            .unwrap_or(host)
+    } else {
+        host
+    };
+    let host_prefix = if is_github_com(&host) {
+        String::new()
+    } else if is_gh_host(&host) {
+        format!("{}/", host)
+    } else {
+        return None;
+    };
+    Some(GhRepo {
+        host_prefix,
+        nwo: format!("{}/{}", owner, repo),
     })
 }
 
-/// Resolve the current repo's `owner/repo` via `gh repo view`. Used as the
-/// fallback for non-fork repos instead of the literal placeholder string
-/// `"{owner}/{repo}"`: that string only "works" because `gh api` happens to
-/// expand `{owner}`/`{repo}` templates from the cwd, which is fragile and
-/// reads like unfinished code. Returns `None` on any failure.
-fn gh_current_nwo(cwd: &str) -> Option<String> {
+/// How long a negative `ssh -G` / `gh auth status` answer is reused. A
+/// positive one is kept for the session; a negative one may be a timeout, an
+/// offline start or a `gh auth login` still to come, so it is asked again.
+const HOST_NEGATIVE_TTL: Duration = Duration::from_secs(60);
+
+type HostAnswerCache = HashMap<String, (Option<String>, Instant)>;
+
+fn host_answer_cache() -> &'static Mutex<HostAnswerCache> {
+    static CACHE: OnceLock<Mutex<HostAnswerCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cached_host_answer(key: String, compute: impl FnOnce() -> Option<String>) -> Option<String> {
+    let hit = host_answer_cache()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&key).cloned());
+    if let Some((answer, at)) = hit {
+        if answer.is_some() || at.elapsed() < HOST_NEGATIVE_TTL {
+            return answer;
+        }
+    }
+    let answer = compute();
+    if let Ok(mut m) = host_answer_cache().lock() {
+        m.insert(key, (answer.clone(), Instant::now()));
+    }
+    answer
+}
+
+/// A host name safe to pass as an argument (no option, no shell metachar).
+fn is_plain_host(host: &str) -> bool {
+    !host.starts_with('-')
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
+/// Upper bound for the local `ssh -G` / `gh auth status` probes.
+const GH_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `HostName` that `ssh` connects to for `host` (`ssh -G` reads the config
+/// without connecting; for a host it has no entry for, it echoes the name).
+/// `None` when `ssh` is missing, fails or times out.
+fn ssh_resolved_host(host: &str) -> Option<String> {
+    if !is_plain_host(host) {
+        return None;
+    }
+    cached_host_answer(format!("ssh:{}", host), || {
+        let mut cmd = hidden_cmd("ssh");
+        // Only what `ssh` needs to find and read its config: no forge token
+        // (which `hidden_cmd` passes on) reaches it, nor a `Match exec`
+        // command it runs.
+        let path = cmd
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("PATH"))
+            .and_then(|(_, v)| v.map(|v| v.to_os_string()))
+            .or_else(|| std::env::var_os("PATH"));
+        cmd.env_clear();
+        if let Some(path) = path {
+            cmd.env("PATH", path);
+        }
+        for var in [
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "USERPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "SystemRoot",
+            "windir",
+            "TMPDIR",
+            "TEMP",
+            "TMP",
+        ] {
+            if let Some(v) = std::env::var_os(var) {
+                cmd.env(var, v);
+            }
+        }
+        cmd.args(["-G", host]);
+        let out = output_with_timeout(cmd, GH_PROBE_TIMEOUT)
+            .ok()
+            .filter(|o| o.status.success())?;
+        String::from_utf8_lossy(&out.stdout).lines().find_map(|l| {
+            l.strip_prefix("hostname ")
+                .map(|h| h.trim().to_string())
+                .filter(|h| !h.is_empty())
+        })
+    })
+}
+
+/// Whether `gh` is signed in to `host` right now, without the session cache
+/// (GitWand's resolver reports ask it each time their form opens, #301).
+pub(crate) fn gh_signed_in_now(host: &str) -> bool {
+    if !is_plain_host(host) {
+        return false;
+    }
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["auth", "status", "--hostname", host]);
+    output_with_timeout(cmd, GH_PROBE_TIMEOUT).is_ok_and(|o| o.status.success())
+}
+
+/// Whether `gh` is signed in to `host` (an Enterprise host; github.com is
+/// always a GitHub host). Cached for the session.
+fn gh_signed_in_to(host: &str) -> bool {
+    if !is_plain_host(host) {
+        return false;
+    }
+    cached_host_answer(format!("gh:{}", host), || {
+        let mut cmd = hidden_cmd("gh");
+        cmd.args(["auth", "status", "--hostname", host]);
+        output_with_timeout(cmd, GH_PROBE_TIMEOUT)
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|_| String::new())
+    })
+    .is_some()
+}
+
+/// Parse a git remote URL into the repo `gh` should address (see
+/// `gh_repo_from_url_with`). Also the parser of `github_api::owner_repo`, so
+/// the REST and `gh` paths read `origin` the same way.
+pub(crate) fn gh_repo_from_remote_url(url: &str) -> Option<GhRepo> {
+    gh_repo_from_url_with(url, ssh_resolved_host, gh_signed_in_to)
+}
+
+/// How long `gh_origin_repo` reuses its answer for a repo: one PR command
+/// resolves `origin` several times (token routing, the request path, the
+/// host), the Launchpad does it for every repo each minute, and `origin`
+/// practically never changes.
+const GH_ORIGIN_TTL: Duration = Duration::from_secs(30);
+
+/// The repo `origin` points at, or `None` when `origin` is missing or not a
+/// GitHub remote.
+pub(crate) fn gh_origin_repo(cwd: &str) -> Option<GhRepo> {
+    type OriginCache = HashMap<String, (Option<GhRepo>, Instant)>;
+    static CACHE: OnceLock<Mutex<OriginCache>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((repo, at)) = cache.lock().ok().and_then(|m| m.get(cwd).cloned()) {
+        if at.elapsed() < GH_ORIGIN_TTL {
+            return repo;
+        }
+    }
+    let repo = hidden_cmd("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|out| gh_repo_from_remote_url(&String::from_utf8_lossy(&out.stdout)));
+    if let Ok(mut m) = cache.lock() {
+        m.insert(cwd.to_string(), (repo.clone(), Instant::now()));
+    }
+    repo
+}
+
+/// Whether `origin` is on a GitHub Enterprise host — which the Settings
+/// sign-in (github.com only) does not cover.
+pub(crate) fn origin_is_enterprise(cwd: &str) -> bool {
+    gh_origin_repo(cwd).is_some_and(|r| r.enterprise_host().is_some())
+}
+
+/// Whether one of `cwd`'s remotes points at `repo`. Read from `git remote -v`,
+/// which applies `url.*.insteadOf` rewrites as `git remote get-url` and `gh`
+/// do (raw `remote.*.url` config does not).
+fn gh_repo_is_a_remote(cwd: &str, repo: &GhRepo) -> bool {
+    let Ok(out) = hidden_cmd("git")
+        .args(["remote", "-v"])
+        .current_dir(cwd)
+        .output()
+    else {
+        return false;
+    };
+    let want = repo.selector();
+    let needle = repo.nwo.to_ascii_lowercase();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // `<name>\t<url> (fetch|push)`. Only URLs naming the repo are parsed (each
+    // once), so other forges' remotes cost no `ssh -G` / `gh auth status`.
+    let mut urls: Vec<&str> = stdout
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter_map(|(_, rest)| rest.rsplit_once(' '))
+        .map(|(url, _)| url)
+        .filter(|url| url.to_ascii_lowercase().contains(&needle))
+        .collect();
+    urls.dedup();
+    urls.into_iter().any(|url| {
+        gh_repo_from_remote_url(url).is_some_and(|r| r.selector().eq_ignore_ascii_case(&want))
+    })
+}
+
+/// `owner/name` of the `parent` in a `gh repo view --json isFork,parent`
+/// response, when the repo is a fork.
+fn fork_parent_nwo(v: &serde_json::Value) -> Option<String> {
+    if !v.get("isFork").and_then(|b| b.as_bool()).unwrap_or(false) {
+        return None;
+    }
+    let p = v.get("parent")?;
+    let owner = p
+        .get("owner")
+        .and_then(|o| o.get("login"))
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())?;
+    let name = p
+        .get("name")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())?;
+    Some(format!("{}/{}", owner, name))
+}
+
+/// `gh repo view` of `origin` (or of `gh`'s own pick when there is no usable
+/// `origin`), with the given `--json` fields. Not yet run.
+fn gh_repo_view_cmd(cwd: &str, fields: &str) -> std::process::Command {
+    let origin = gh_origin_repo(cwd);
+    let mut cmd = gh_host_cmd(origin.as_ref());
+    cmd.args(["repo", "view"]);
+    if let Some(o) = origin {
+        cmd.arg(o.selector());
+    }
+    cmd.args(["--json", fields]).current_dir(cwd);
+    cmd
+}
+
+/// How long a fork lookup is reused. A repo's fork parent practically never
+/// changes; the cache is what keeps the half-dozen `gh` calls behind one PR
+/// detail (and the Launchpad's poll) from each paying a `gh repo view`.
+const GH_FORK_PARENT_TTL: Duration = Duration::from_secs(600);
+
+/// One `origin`'s fork lookup: the parent (`None`: not a fork) and its fetch
+/// time, `None` until answered. Its own lock, held across the lookup, makes
+/// concurrent callers for the same `origin` wait for one `gh repo view`
+/// instead of each running their own; the lookup is bounded by `GH_TIMEOUT`.
+type ForkParentSlot = std::sync::Arc<Mutex<Option<(Option<String>, Instant)>>>;
+
+fn gh_fork_parent_slot(key: &str) -> ForkParentSlot {
+    static MAP: OnceLock<Mutex<HashMap<String, ForkParentSlot>>> = OnceLock::new();
+    let mut map = match MAP.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+        Ok(m) => m,
+        Err(p) => p.into_inner(),
+    };
+    map.entry(key.to_string()).or_default().clone()
+}
+
+/// Fork parent of `origin`, `Ok(None)` when it is not a fork. Only answers
+/// are cached; a failed lookup is an error, retried on the next call.
+fn gh_fork_parent(cwd: &str, origin: &GhRepo) -> Result<Option<String>, String> {
+    let key = origin.selector();
+    let slot = gh_fork_parent_slot(&key);
+    let mut entry = match slot.lock() {
+        Ok(e) => e,
+        Err(p) => p.into_inner(),
+    };
+    if let Some((parent, at)) = entry.as_ref() {
+        if at.elapsed() < GH_FORK_PARENT_TTL {
+            return Ok(parent.clone());
+        }
+    }
+    let mut cmd = gh_host_cmd(Some(origin));
+    cmd.args(["repo", "view", &key, "--json", "isFork,parent"])
+        .current_dir(cwd);
+    let out = output_with_timeout(cmd, GH_TIMEOUT).map_err(|e| {
+        format!(
+            "Failed to run gh repo view (is GitHub CLI installed?): {}",
+            e
+        )
+    })?;
+    if !out.status.success() {
+        return Err(format!(
+            "gh repo view {} failed: {}",
+            key,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .map_err(|e| format!("Failed to parse gh repo view output: {}", e))?;
+    let parent = fork_parent_nwo(&v);
+    *entry = Some((parent.clone(), Instant::now()));
+    Ok(parent)
+}
+
+/// The repo PRs are listed from and act on: the fork parent when `origin` is
+/// a fork, else `origin` itself — what `github_api`'s REST path uses.
+///
+/// `Ok(None)` without a usable `origin`: the caller lets `gh` choose, as
+/// before #298. A failed fork lookup is an error rather than a guess: a PR
+/// number from the parent's list, sent to the fork (or the reverse), would
+/// merge or mark ready a different pull request.
+pub(crate) fn gh_base_repo(cwd: &str) -> Result<Option<GhRepo>, String> {
+    let Some(origin) = gh_origin_repo(cwd) else {
+        return Ok(None);
+    };
+    Ok(Some(match gh_fork_parent(cwd, &origin)? {
+        Some(nwo) => origin.sibling(nwo),
+        None => origin,
+    }))
+}
+
+/// A `gh` command for `repo`'s host: `GH_HOST` set (github.com included, so
+/// a `GH_HOST` in the user's environment cannot redirect a github.com repo).
+/// What `gh api` needs — it reads its host from `GH_HOST`, not `GH_REPO`; the
+/// repo itself is in the request path.
+fn gh_host_cmd(repo: Option<&GhRepo>) -> std::process::Command {
+    let mut cmd = hidden_cmd("gh");
+    if let Some(r) = repo {
+        cmd.env("GH_HOST", r.host());
+    }
+    cmd
+}
+
+/// A `gh` command aimed at `repo` through `GH_REPO` (see the section comment
+/// for why not `--repo`) and at its host; `None` leaves the choice to `gh`.
+pub(crate) fn gh_cmd(repo: Option<&GhRepo>) -> std::process::Command {
+    let mut cmd = gh_host_cmd(repo);
+    if let Some(r) = repo {
+        cmd.env("GH_REPO", r.selector());
+    }
+    cmd
+}
+
+/// A `gh` command aimed at the base repo (`gh_base_repo`): every PR command.
+pub(crate) fn gh_base_cmd(cwd: &str) -> Result<std::process::Command, String> {
+    Ok(gh_cmd(gh_base_repo(cwd)?.as_ref()))
+}
+
+/// A `gh api` command for `cwd`'s host (see `gh_host_cmd`). Commands that
+/// make several calls resolve the repo once and use `gh_host_cmd` instead.
+fn gh_api_cmd(cwd: &str) -> std::process::Command {
+    gh_host_cmd(gh_origin_repo(cwd).as_ref())
+}
+
+/// The `gh pr merge` command for the base repo. `GH_REPO` keeps `gh`'s local
+/// cleanup (`--delete-branch` deletes the local branch and, when it is checked
+/// out, switches to the base branch), but that switch needs a remote for the
+/// base repo, looked up after the merge: without one, `gh` exits with an error
+/// although the pull request is merged. For a base repo that is not a remote
+/// (a fork cloned with only `origin`), `--repo` instead, which skips the local
+/// cleanup. `args` are the `pr merge …` arguments; `--repo` goes after them.
+fn gh_merge_cmd(cwd: &str, args: &[&str]) -> Result<std::process::Command, String> {
+    let base = gh_base_repo(cwd)?;
+    match base.as_ref() {
+        Some(b) if !gh_repo_is_a_remote(cwd, b) => {
+            let mut cmd = gh_host_cmd(Some(b));
+            cmd.args(args).args(["--repo", &b.selector()]);
+            Ok(cmd)
+        }
+        _ => {
+            let mut cmd = gh_cmd(base.as_ref());
+            cmd.args(args);
+            Ok(cmd)
+        }
+    }
+}
+
+/// `owner/repo` that `gh` itself would pick, for the no-`origin` fallback of
+/// the `gh api repos/{nwo}/…` paths below. `None` on any failure.
+fn gh_inferred_nwo(cwd: &str) -> Option<String> {
     let out = hidden_cmd("gh")
         .args([
             "repo",
@@ -1408,11 +1845,31 @@ fn gh_current_nwo(cwd: &str) -> Option<String> {
         .ok()
         .filter(|o| o.status.success())?;
     let nwo = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if nwo.is_empty() {
-        None
-    } else {
-        Some(nwo)
+    (!nwo.is_empty()).then_some(nwo)
+}
+
+const UNRESOLVED_REPO: &str = "Could not resolve the GitHub owner/repo of this repository";
+
+/// The base repo (see `gh_base_repo`) and the `owner/repo` for its
+/// `gh api repos/{nwo}/…` paths — `gh`'s own pick when there is no usable
+/// `origin`. For commands that make several calls: resolve once, then
+/// `gh_cmd(repo)` / `gh_host_cmd(repo)` for each.
+fn gh_base_target(cwd: &str) -> Result<(Option<GhRepo>, String), String> {
+    match gh_base_repo(cwd)? {
+        Some(r) => {
+            let nwo = r.nwo.clone();
+            Ok((Some(r), nwo))
+        }
+        None => gh_inferred_nwo(cwd)
+            .map(|nwo| (None, nwo))
+            .ok_or_else(|| UNRESOLVED_REPO.to_string()),
     }
+}
+
+/// `owner/repo` for a `gh api repos/{nwo}/…` path that addresses a PR: the
+/// base repo (see `gh_base_repo`).
+fn gh_base_nwo(cwd: &str) -> Result<String, String> {
+    gh_base_target(cwd).map(|(_, nwo)| nwo)
 }
 
 /// Resolve whether the current viewer can merge this PR, and whether the base
@@ -1441,7 +1898,7 @@ fn gh_viewer_can_merge_and_auto_merge_support(
     let Some(nwo) = github_nwo_from_pr_url(pr_url) else {
         return (None, fail_closed());
     };
-    let output = hidden_cmd("gh")
+    let output = gh_api_cmd(cwd)
         .args(["api", &format!("repos/{}", nwo)])
         .current_dir(cwd)
         .output();
@@ -1473,11 +1930,13 @@ fn gh_viewer_can_merge_and_auto_merge_support(
 /// Extract `owner/repo` from a GitHub PR url such as
 /// `https://github.com/owner/repo/pull/123`.
 fn github_nwo_from_pr_url(url: &str) -> Option<String> {
-    let rest = url.split("github.com/").nth(1)?;
-    let mut parts = rest.split('/');
+    // `https://<host>/owner/repo/pull/N`, github.com or an Enterprise host
+    // (whose `gh api` host comes from `origin`, see `gh_api_cmd`).
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let mut parts = rest.split('/').skip(1);
     let owner = parts.next().filter(|s| !s.is_empty())?;
     let repo = parts.next().filter(|s| !s.is_empty())?;
-    Some(format!("{}/{}", owner, repo))
+    (parts.next() == Some("pull")).then(|| format!("{}/{}", owner, repo))
 }
 
 fn gh_pr_diff_inner(cwd: String, number: i64) -> Result<String, String> {
@@ -1485,13 +1944,9 @@ fn gh_pr_diff_inner(cwd: String, number: i64) -> Result<String, String> {
     {
         return r;
     }
-    let upstream = gh_fork_upstream(&cwd);
     let num = number.to_string();
-    let mut cmd = hidden_cmd("gh");
+    let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args(["pr", "diff", &num]);
-    if let Some(ref nwo) = upstream {
-        cmd.args(["--repo", nwo]);
-    }
     let output = cmd
         .current_dir(&cwd)
         .output()
@@ -1522,12 +1977,10 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
         return r;
     }
     // Resolve the canonical repo NWO (upstream for forks, own for regular repos).
-    let nwo = gh_fork_upstream(&cwd)
-        .or_else(|| gh_current_nwo(&cwd))
-        .unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let (base, nwo) = gh_base_target(&cwd)?;
 
     // Step 1 — head commit SHA for this PR.
-    let pr_out = hidden_cmd("gh")
+    let pr_out = gh_host_cmd(base.as_ref())
         .args([
             "api",
             &format!("repos/{}/pulls/{}", nwo, number),
@@ -1553,7 +2006,7 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
     }
 
     // Step 2 — check-runs for that commit.
-    let runs_out = hidden_cmd("gh")
+    let runs_out = gh_host_cmd(base.as_ref())
         .args([
             "api",
             &format!("repos/{}/commits/{}/check-runs?per_page=100", nwo, sha),
@@ -1625,9 +2078,7 @@ fn gh_pr_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Valu
     {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd)
-        .or_else(|| gh_current_nwo(&cwd))
-        .unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let json = gh_api_json(
         &cwd,
         &format!("repos/{}/pulls/{}/comments?per_page=100", nwo, number),
@@ -1653,9 +2104,7 @@ fn gh_pr_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd)
-        .or_else(|| gh_current_nwo(&cwd))
-        .unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let json = gh_api_json(
         &cwd,
         &format!("repos/{}/issues/{}/comments?per_page=100", nwo, number),
@@ -1681,9 +2130,7 @@ fn gh_pr_reviews_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Value
     {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd)
-        .or_else(|| gh_current_nwo(&cwd))
-        .unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let json = gh_api_json(
         &cwd,
         &format!("repos/{}/pulls/{}/reviews?per_page=100", nwo, number),
@@ -1706,23 +2153,93 @@ pub(crate) async fn gh_pr_reviews(
 /// Run `gh api <path>` in `cwd` and parse stdout as JSON. Shared by the
 /// comment-list fallbacks when no token is configured.
 fn gh_api_json(cwd: &str, path: &str) -> Result<serde_json::Value, String> {
-    let output = hidden_cmd("gh")
-        .args(["api", path])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("gh api: {}", e))?;
+    gh_api_json_accept(cwd, path, None)
+}
+
+/// The error of a failed `gh api` call. `gh` prints GitHub's JSON answer on
+/// stdout and only "Validation Failed (HTTP 422)" on stderr: when stdout holds
+/// the answer, it is worded like the REST path's (`map_api_error`), field
+/// details included.
+fn gh_api_failure(what: &str, stderr: &str, stdout: &str) -> String {
+    let answer = serde_json::from_str::<serde_json::Value>(stdout.trim()).ok();
+    let status = stderr
+        .rsplit_once("(HTTP ")
+        .and_then(|(_, rest)| rest.split(')').next())
+        .and_then(|n| n.trim().parse::<i32>().ok());
+    match (answer.filter(|a| a.get("message").is_some()), status) {
+        (Some(_), Some(code)) => github_api::map_api_error(code, stdout),
+        _ => format!("{}: {}", what, stderr.trim()),
+    }
+}
+
+/// A finished `gh api` call: its stderr as the error on failure, else stdout
+/// parsed as JSON — `empty` when there is none (a 204, an empty list).
+fn gh_api_parse(
+    output: std::process::Output,
+    what: &str,
+    empty: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     if !output.status.success() {
-        return Err(format!(
-            "gh api failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+        return Err(gh_api_failure(
+            what,
+            &String::from_utf8_lossy(&output.stderr),
+            &String::from_utf8_lossy(&output.stdout),
         ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
-        return Ok(serde_json::Value::Array(Vec::new()));
+        return Ok(empty);
     }
-    serde_json::from_str(trimmed).map_err(|e| format!("parse gh api response: {}", e))
+    serde_json::from_str(trimmed).map_err(|e| format!("parse {} response: {}", what, e))
+}
+
+/// [`gh_api_json`] with an `Accept` media type (e.g. [`github_api::HTML_ACCEPT`]).
+fn gh_api_json_accept(
+    cwd: &str,
+    path: &str,
+    accept: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let mut cmd = gh_api_cmd(cwd);
+    cmd.arg("api");
+    if let Some(a) = accept {
+        cmd.args(["-H", &format!("Accept: {}", a)]);
+    }
+    let output = cmd
+        .arg(path)
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("gh api: {}", e))?;
+    gh_api_parse(
+        output,
+        "gh api failed",
+        serde_json::Value::Array(Vec::new()),
+    )
+}
+
+/// `gh api -X {method} {path}` on `repo`'s host, `stdin` sent as the request
+/// body (`--input -`) when given — never in argv, where any local user can read
+/// it. The answer parsed as JSON (`Null` when empty).
+pub(crate) fn gh_api_on(
+    cwd: &str,
+    repo: &GhRepo,
+    method: &str,
+    path: &str,
+    stdin: Option<String>,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    let mut cmd = gh_host_cmd(Some(repo));
+    cmd.args(["api", "-X", method, path]).current_dir(cwd);
+    if stdin.is_some() {
+        cmd.args(["--input", "-"]);
+    }
+    let output = crate::git::output_with_timeout_input(cmd, timeout, stdin)
+        .map_err(|e| format!("gh api: {}", e))?;
+    gh_api_parse(
+        output,
+        &format!("gh api {} {}", method, path),
+        serde_json::Value::Null,
+    )
 }
 
 /// Run a mutating `gh api` call (`POST`/`DELETE`) with optional `-f key=value` fields.
@@ -1733,7 +2250,7 @@ fn gh_api_write(
     path: &str,
     fields: &[(&str, &str)],
 ) -> Result<serde_json::Value, String> {
-    let mut cmd = hidden_cmd("gh");
+    let mut cmd = gh_api_cmd(cwd);
     cmd.args(["api", "-X", method, path]);
     for (k, v) in fields {
         cmd.args(["-f", &format!("{}={}", k, v)]);
@@ -1742,19 +2259,11 @@ fn gh_api_write(
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("gh api write: {}", e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh api {}: {}",
-            method,
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() {
-        return Ok(serde_json::Value::Null);
-    }
-    serde_json::from_str(trimmed).map_err(|e| format!("parse gh api write response: {}", e))
+    gh_api_parse(
+        output,
+        &format!("gh api {}", method),
+        serde_json::Value::Null,
+    )
 }
 
 fn reactions_api_path(nwo: &str, target_type: &str, target_id: i64) -> String {
@@ -1811,7 +2320,7 @@ fn gh_list_reactions_inner(
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = reactions_api_path(&nwo, &target_type, target_id);
     let json = gh_api_json(&cwd, &path)?;
     Ok(json
@@ -1849,7 +2358,7 @@ fn gh_add_reaction_inner(
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = reactions_api_path(&nwo, &target_type, target_id);
     gh_api_write(&cwd, "POST", &path, &[("content", &content)])
 }
@@ -1882,7 +2391,7 @@ fn gh_delete_reaction_inner(
     }) {
         return r;
     }
-    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let nwo = gh_base_nwo(&cwd)?;
     let path = format!(
         "{}/{}",
         reactions_api_path(&nwo, &target_type, target_id),
@@ -1912,9 +2421,18 @@ fn gh_fork_info_inner(cwd: String) -> Result<ForkInfo, String> {
     if let Some(r) = github_api::with_rest(&cwd, |tok| github_api::rest_fork_info(&cwd, tok)) {
         return r;
     }
-    let output = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "isFork,parent,nameWithOwner"])
-        .current_dir(&cwd)
+    // `origin` and its cached fork lookup (`gh_fork_parent`), shared with the
+    // PR commands.
+    if let Some(origin) = gh_origin_repo(&cwd) {
+        let parent = gh_fork_parent(&cwd, &origin)?;
+        return Ok(ForkInfo {
+            is_fork: parent.is_some(),
+            origin: origin.nwo,
+            parent: parent.unwrap_or_default(),
+        });
+    }
+    // No usable `origin`: ask `gh` about the repo it picks itself.
+    let output = gh_repo_view_cmd(&cwd, "isFork,parent,nameWithOwner")
         .output()
         .map_err(|e| format!("gh repo view (fork info): {}", e))?;
     if !output.status.success() {
@@ -1924,27 +2442,15 @@ fn gh_fork_info_inner(cwd: String) -> Result<ForkInfo, String> {
         ));
     }
     let v: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-    let origin = v
-        .get("nameWithOwner")
-        .and_then(|s| s.as_str())
-        .unwrap_or("")
-        .to_string();
-    let is_fork = v.get("isFork").and_then(|b| b.as_bool()).unwrap_or(false);
-    let parent = v
-        .get("parent")
-        .and_then(|p| {
-            let owner = p
-                .get("owner")
-                .and_then(|o| o.get("login"))
-                .and_then(|s| s.as_str())?;
-            let name = p.get("name").and_then(|s| s.as_str())?;
-            Some(format!("{}/{}", owner, name))
-        })
-        .unwrap_or_default();
+    let parent = fork_parent_nwo(&v);
     Ok(ForkInfo {
-        is_fork,
-        origin,
-        parent,
+        is_fork: parent.is_some(),
+        origin: v
+            .get("nameWithOwner")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string(),
+        parent: parent.unwrap_or_default(),
     })
 }
 
@@ -1961,15 +2467,34 @@ pub(crate) async fn gh_fork_info(cwd: String) -> Result<ForkInfo, String> {
 ///
 /// Flow:
 ///   1. `gh pr view --json headRefOid` → head commit SHA
-///   2. `gh api repos/{owner}/{repo}/commits/{sha}/check-runs` → runs with
-///      `output.annotations_count` (gh resolves `{owner}/{repo}` from cwd)
+///   2. `gh api repos/{nwo}/commits/{sha}/check-runs` → runs with
+///      `output.annotations_count`, `{nwo}` being the base repo (`gh_base_repo`)
 ///   3. For each run with annotations: `gh api .../check-runs/{id}/annotations`
 ///
-/// Non-fatal everywhere: a repo without checks/annotations returns `[]`.
+/// A repo without checks/annotations returns `[]`; only a failed lookup of
+/// the base repo is an error.
+///
+/// Offloaded with `spawn_blocking` like its siblings: it was a sync command,
+/// so its `gh` round trips ran on the main thread.
 #[tauri::command]
-pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnnotation>, String> {
+pub(crate) async fn gh_check_annotations(
+    cwd: String,
+    number: i64,
+) -> Result<Vec<CIAnnotation>, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_check_annotations_inner(cwd, number))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn gh_check_annotations_inner(cwd: String, number: i64) -> Result<Vec<CIAnnotation>, String> {
+    // The base repo, resolved once and named on every call (#298). A failed
+    // fork lookup is an error, as in the sibling commands (the panel treats
+    // it as "no annotations").
+    let (base, nwo) = gh_base_target(&cwd)?;
+    let mut cmd = gh_cmd(base.as_ref());
+
     // 1. Head SHA of the PR.
-    let output = hidden_cmd("gh")
+    let output = cmd
         .args(["pr", "view", &number.to_string(), "--json", "headRefOid"])
         .current_dir(&cwd)
         .output()
@@ -1984,13 +2509,10 @@ pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnn
     };
 
     // 2. Check-runs for that commit (id + annotations_count).
-    let output = hidden_cmd("gh")
+    let output = gh_host_cmd(base.as_ref())
         .args([
             "api",
-            &format!(
-                "repos/{{owner}}/{{repo}}/commits/{}/check-runs?per_page=100",
-                sha
-            ),
+            &format!("repos/{}/commits/{}/check-runs?per_page=100", nwo, sha),
         ])
         .current_dir(&cwd)
         .output()
@@ -2032,12 +2554,12 @@ pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnn
             .unwrap_or("")
             .to_string();
 
-        let output = hidden_cmd("gh")
+        let output = gh_host_cmd(base.as_ref())
             .args([
                 "api",
                 &format!(
-                    "repos/{{owner}}/{{repo}}/check-runs/{}/annotations?per_page=100",
-                    run_id
+                    "repos/{}/check-runs/{}/annotations?per_page=100",
+                    nwo, run_id
                 ),
             ])
             .current_dir(&cwd)
@@ -2098,7 +2620,8 @@ fn gh_list_issues_inner(
     }
 
     // Fallback: shell `gh issue list` (mirrors workspace_issues_all gh path).
-    let mut cmd = hidden_cmd("gh");
+    // The base repo, as for `gh_issue_detail`.
+    let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args([
         "issue",
         "list",
@@ -2319,5 +2842,358 @@ mod gh_auto_merge_tests {
         // that could.
         let v: serde_json::Value = serde_json::from_str(r#"{}"#).unwrap();
         assert!(!gh_auto_merge_support(&v).supported);
+    }
+}
+
+#[cfg(test)]
+mod repo_targeting_tests {
+    use super::*;
+
+    /// Parse with an `ssh -G` that knows `aliases` (`None` = no `ssh`; an
+    /// unknown host is echoed back, as `ssh -G` does) and a `gh` signed in to
+    /// `gh_hosts`.
+    fn parse_with(
+        url: &str,
+        aliases: Option<&[(&str, &str)]>,
+        gh_hosts: &[&str],
+    ) -> Option<(String, String)> {
+        gh_repo_from_url_with(
+            url,
+            |host| {
+                aliases.map(|a| {
+                    a.iter()
+                        .find(|(k, _)| *k == host)
+                        .map_or(host.to_string(), |(_, v)| v.to_string())
+                })
+            },
+            |host| gh_hosts.contains(&host),
+        )
+        .map(|r| (r.selector(), r.nwo))
+    }
+
+    fn parse(url: &str) -> Option<(String, String)> {
+        parse_with(url, Some(&[]), &[])
+    }
+
+    fn gh_repo(url: &str, gh_hosts: &[&str]) -> GhRepo {
+        gh_repo_from_url_with(url, |_| None, |h| gh_hosts.contains(&h)).unwrap()
+    }
+
+    fn pair(sel: &str, nwo: &str) -> Option<(String, String)> {
+        Some((sel.to_string(), nwo.to_string()))
+    }
+
+    #[test]
+    fn github_com_remotes_need_no_host() {
+        for url in [
+            "https://github.com/me/project.git",
+            "https://github.com/me/project",
+            "https://github.com/me/project/",
+            "https://user@github.com/me/project.git",
+            "git@github.com:me/project.git",
+            "alice@github.com:me/project.git",
+            "org-123@github.com:me/project.git",
+            "github.com:me/project.git",
+            "ssh://git@github.com/me/project.git",
+            "ssh://git@ssh.github.com:443/me/project.git",
+            "git+ssh://git@github.com/me/project.git",
+            "https://github.com/me/project.git\n",
+        ] {
+            assert_eq!(parse(url), pair("me/project", "me/project"), "{url}");
+        }
+    }
+
+    #[test]
+    fn an_ssh_alias_is_resolved_like_gh_does() {
+        let cfg: &[(&str, &str)] = &[
+            ("github.com-work", "github.com"),
+            ("gh-perso", "github.com"),
+            ("work", "github.acme.corp"),
+        ];
+        let hosts = &["github.acme.corp"];
+        assert_eq!(
+            parse_with("git@github.com-work:me/project.git", Some(cfg), hosts),
+            pair("me/project", "me/project")
+        );
+        assert_eq!(
+            parse_with("git@gh-perso:me/project.git", Some(cfg), hosts),
+            pair("me/project", "me/project")
+        );
+        // An alias for an Enterprise host keeps that host.
+        assert_eq!(
+            parse_with("git@work:team/app.git", Some(cfg), hosts),
+            pair("github.acme.corp/team/app", "team/app")
+        );
+        assert_eq!(
+            parse_with("ssh://git@work:2222/team/app.git", Some(cfg), hosts),
+            pair("github.acme.corp/team/app", "team/app")
+        );
+    }
+
+    /// A host that is neither github.com nor one `gh` is signed in to is not
+    /// a GitHub remote: `gh` would not use it either.
+    #[test]
+    fn a_host_gh_does_not_know_is_not_a_github_remote() {
+        // An alias `ssh` has no entry for (echoed back) or cannot be asked about.
+        assert_eq!(parse("git@github.com-work:me/project.git"), None);
+        assert_eq!(parse_with("git@gh-perso:me/project.git", None, &[]), None);
+        // A plain git server, GitLab.
+        assert_eq!(parse("git@gitserver:team/app.git"), None);
+        assert_eq!(parse("https://gitlab.com/team/app.git"), None);
+        assert_eq!(parse("git@github.company.com:team/app.git"), None);
+    }
+
+    #[test]
+    fn an_enterprise_host_is_named_in_the_selector_only() {
+        let hosts = &[
+            "github.acme.corp",
+            "acme.ghe.com",
+            "github.company.com",
+            "ghe",
+        ];
+        for (url, sel) in [
+            (
+                "https://github.acme.corp/team/app.git",
+                "github.acme.corp/team/app",
+            ),
+            ("git@acme.ghe.com:team/app.git", "acme.ghe.com/team/app"),
+            // Names that merely contain "github.com" are Enterprise hosts too.
+            (
+                "git@github.company.com:team/app.git",
+                "github.company.com/team/app",
+            ),
+            ("https://ghe/team/app.git", "ghe/team/app"),
+            ("https://user@ghe/team/app.git", "ghe/team/app"),
+        ] {
+            assert_eq!(
+                parse_with(url, Some(&[]), hosts),
+                pair(sel, "team/app"),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unparseable_remote_resolves_to_nothing() {
+        assert_eq!(parse(""), None);
+        assert_eq!(parse("/srv/git/project.git"), None);
+        assert_eq!(parse("./relative:odd/path"), None);
+        assert_eq!(parse("C:\\repos\\project"), None);
+        assert_eq!(parse("file:///srv/git/me/project.git"), None);
+        assert_eq!(parse("https://github.com/only-owner"), None);
+    }
+
+    #[test]
+    fn a_fork_parent_is_read_only_for_a_fork() {
+        let fork = serde_json::json!({
+            "isFork": true,
+            "parent": { "owner": { "login": "up" }, "name": "project" }
+        });
+        assert_eq!(fork_parent_nwo(&fork), Some("up/project".to_string()));
+        let not_fork = serde_json::json!({ "isFork": false, "parent": null });
+        assert_eq!(fork_parent_nwo(&not_fork), None);
+        let broken = serde_json::json!({ "isFork": true, "parent": null });
+        assert_eq!(fork_parent_nwo(&broken), None);
+    }
+
+    #[test]
+    fn a_sibling_keeps_the_host() {
+        let origin = gh_repo("https://github.acme.corp/me/app.git", &["github.acme.corp"]);
+        let parent = origin.sibling("team/app".to_string());
+        assert_eq!(parent.selector(), "github.acme.corp/team/app");
+        assert_eq!(parent.enterprise_host(), Some("github.acme.corp"));
+    }
+
+    fn env_of(cmd: &std::process::Command, key: &str) -> Option<String> {
+        cmd.get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new(key))
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().to_string()))
+    }
+
+    #[test]
+    fn gh_cmd_names_the_repo_and_host_through_the_environment_not_a_flag() {
+        let ghe = gh_repo("https://github.acme.corp/me/app.git", &["github.acme.corp"]);
+        let cmd = gh_cmd(Some(&ghe));
+        assert_eq!(
+            env_of(&cmd, "GH_REPO").as_deref(),
+            Some("github.acme.corp/me/app")
+        );
+        assert_eq!(env_of(&cmd, "GH_HOST").as_deref(), Some("github.acme.corp"));
+        // `gh pr merge` skips its local cleanup whenever --repo is given.
+        assert_eq!(cmd.get_args().count(), 0);
+
+        // github.com is named too, so a `GH_HOST` in the user's environment
+        // cannot redirect a github.com repo.
+        let dotcom = gh_repo("git@github.com:me/app.git", &[]);
+        let cmd = gh_cmd(Some(&dotcom));
+        assert_eq!(env_of(&cmd, "GH_REPO").as_deref(), Some("me/app"));
+        assert_eq!(env_of(&cmd, "GH_HOST").as_deref(), Some("github.com"));
+        assert_eq!(env_of(&gh_host_cmd(Some(&dotcom)), "GH_REPO"), None);
+        assert_eq!(env_of(&gh_cmd(None), "GH_REPO"), None);
+        assert_eq!(env_of(&gh_cmd(None), "GH_HOST"), None);
+    }
+
+    #[test]
+    fn a_cached_fork_answer_needs_no_gh_call() {
+        let origin = gh_repo("git@github.com:cache-test/fork.git", &[]);
+        *gh_fork_parent_slot(&origin.selector()).lock().unwrap() =
+            Some((Some("cache-test/parent".to_string()), Instant::now()));
+        // A cwd where any `gh` spawn would fail: the answer must come from the cache.
+        assert_eq!(
+            gh_fork_parent("/nonexistent-gitwand-298", &origin),
+            Ok(Some("cache-test/parent".to_string()))
+        );
+    }
+
+    /// A throwaway repo with the given remotes; removed on drop.
+    struct TempRepo(std::path::PathBuf);
+
+    impl TempRepo {
+        fn new(tag: &str, remotes: &[(&str, &str)]) -> TempRepo {
+            let dir = std::env::temp_dir().join(format!("gw-298-{}-{}", tag, std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo(dir);
+            repo.git(&["init", "-q"]);
+            for (name, url) in remotes {
+                repo.git(&["remote", "add", name, url]);
+            }
+            repo
+        }
+        fn git(&self, args: &[&str]) {
+            let ok = hidden_cmd("git")
+                .args(args)
+                .current_dir(&self.0)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {:?}", args);
+        }
+        fn cwd(&self) -> String {
+            self.0.to_string_lossy().to_string()
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// #298: an unrelated `upstream` remote must not pull the target away
+    /// from `origin` (`gh` alone would pick `upstream` first).
+    #[test]
+    fn origin_wins_over_an_upstream_remote() {
+        let repo = TempRepo::new(
+            "origin",
+            &[
+                ("upstream", "https://github.com/other/unrelated.git"),
+                ("origin", "git@github.com:me/project.git"),
+            ],
+        );
+        assert_eq!(
+            gh_origin_repo(&repo.cwd()).map(|r| r.selector()),
+            Some("me/project".to_string())
+        );
+    }
+
+    #[test]
+    fn a_pr_url_gives_its_repo_on_any_host() {
+        assert_eq!(
+            github_nwo_from_pr_url("https://github.com/up/project/pull/12"),
+            Some("up/project".to_string())
+        );
+        assert_eq!(
+            github_nwo_from_pr_url("https://github.acme.corp/team/app/pull/5"),
+            Some("team/app".to_string())
+        );
+        assert_eq!(
+            github_nwo_from_pr_url("https://github.com/up/project"),
+            None
+        );
+        assert_eq!(github_nwo_from_pr_url(""), None);
+    }
+
+    #[test]
+    fn a_positive_host_answer_is_kept_and_a_negative_one_asked_again() {
+        let kept = "test:kept-298".to_string();
+        assert_eq!(
+            cached_host_answer(kept.clone(), || Some("a".into())),
+            Some("a".into())
+        );
+        assert_eq!(
+            cached_host_answer(kept, || Some("b".into())),
+            Some("a".into())
+        );
+
+        let fresh_miss = "test:miss-298".to_string();
+        assert_eq!(cached_host_answer(fresh_miss.clone(), || None), None);
+        // Within the negative TTL the miss is reused…
+        assert_eq!(cached_host_answer(fresh_miss, || Some("late".into())), None);
+        // …and once it is older, asked again.
+        let stale_miss = "test:stale-298".to_string();
+        let old = Instant::now()
+            .checked_sub(HOST_NEGATIVE_TTL + Duration::from_secs(1))
+            .unwrap();
+        host_answer_cache()
+            .lock()
+            .unwrap()
+            .insert(stale_miss.clone(), (None, old));
+        assert_eq!(
+            cached_host_answer(stale_miss, || Some("now".into())),
+            Some("now".into())
+        );
+    }
+
+    #[test]
+    fn a_remote_is_read_after_its_insteadof_rewrite() {
+        let repo = TempRepo::new("insteadof", &[]);
+        repo.git(&["config", "url.https://github.com/.insteadOf", "gh:"]);
+        repo.git(&["remote", "add", "origin", "gh:me/project"]);
+        let me = gh_repo("https://github.com/me/project", &[]);
+        assert!(gh_repo_is_a_remote(&repo.cwd(), &me));
+    }
+
+    #[test]
+    fn a_base_repo_is_a_remote_only_when_one_points_at_it() {
+        let repo = TempRepo::new(
+            "remote",
+            &[
+                ("origin", "git@github.com:me/fork.git"),
+                ("upstream", "https://github.com/Up/Project.git"),
+            ],
+        );
+        let cwd = repo.cwd();
+        let as_repo = |nwo: &str| gh_repo(&format!("https://github.com/{nwo}"), &[]);
+        assert!(gh_repo_is_a_remote(&cwd, &as_repo("up/project")));
+        assert!(gh_repo_is_a_remote(&cwd, &as_repo("me/fork")));
+        assert!(!gh_repo_is_a_remote(&cwd, &as_repo("someone/else")));
+    }
+}
+
+#[cfg(test)]
+mod gh_api_failure_tests {
+    use super::gh_api_failure;
+
+    #[test]
+    fn gh_api_failure_keeps_githubs_validation_details() {
+        let stdout =
+            r#"{"message":"Validation Failed","errors":[{"field":"assignees","code":"invalid"}]}"#;
+        assert_eq!(
+            gh_api_failure(
+                "gh api POST repos/o/r/issues",
+                "gh: Validation Failed (HTTP 422)\n",
+                stdout
+            ),
+            "GitHub API error (422): Validation Failed (assignees: invalid)"
+        );
+    }
+
+    #[test]
+    fn gh_api_failure_without_a_json_answer_keeps_stderr() {
+        assert_eq!(
+            gh_api_failure("gh api GET x", "error connecting to api.github.com\n", ""),
+            "gh api GET x: error connecting to api.github.com"
+        );
     }
 }

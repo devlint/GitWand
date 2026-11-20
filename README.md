@@ -21,7 +21,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-8B5CF6">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-100%25-3178C6">
-  <img alt="Version" src="https://img.shields.io/badge/version-3.13.1-22c55e">
+  <img alt="Version" src="https://img.shields.io/badge/version-3.13.2-22c55e">
 </p>
 <p align="center">
   <a href="https://github.com/sponsors/devlint">
@@ -349,6 +349,7 @@ claude mcp add gitwand -- npx -y @gitwand/mcp
 | `gitwand_apply_resolution` | Apply a custom (LLM-provided) resolution to a specific complex hunk |
 | `gitwand_resolve_hunk` | Ask the connected agent to propose a resolution for one pending hunk (ours/theirs/base + trace returned) |
 | `gitwand_resolve_hunk_llm` | Validate an LLM-proposed resolution through the post-merge gate, then apply it to disk |
+| `gitwand_create_issue` | Preview (default) or file a GitHub issue on `origin` or its fork parent through `gh`, after a secrets scan |
 
 ### Resources
 

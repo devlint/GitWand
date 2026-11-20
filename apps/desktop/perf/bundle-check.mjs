@@ -102,7 +102,13 @@ const BUDGETS = {
   // eagerly through `AppHeader.vue` → `BranchSelector.vue` (always-mounted
   // header). A v3.11 change added exactly that again and was made dynamic
   // before merge.
-  main_max_kb: 950,
+  //
+  // Raised to 960 for #301 part 4 (issue references in the commit message):
+  // the `#` suggestion logic runs on keystrokes in the always-mounted commit
+  // panel (RepoSidebar), so it is eager by nature; its list component and the
+  // created-issue notice were made lazy, which left main at 951 KB. 960 still
+  // catches the engine leak above (1085 KB) with ~125 KB to spare.
+  main_max_kb: 960,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { IS_MAC } from "./utils/platform";
 import { ref, computed, watch, onMounted, onUnmounted, provide, defineAsyncComponent, nextTick } from "vue";
 
 // ─── Eager imports — main views & shared building blocks ─────────────────────
@@ -36,6 +37,7 @@ const CommitGraph = defineAsyncComponent(() => import("./components/CommitGraph.
 const PrDetailView = defineAsyncComponent(() => import("./components/PrDetailView.vue"));
 const IssueDetailView = defineAsyncComponent(() => import("./components/IssueDetailView.vue"));
 const PrCreateView = defineAsyncComponent(() => import("./components/PrCreateView.vue"));
+const CreateIssueModal = defineAsyncComponent(() => import("./components/CreateIssueModal.vue"));
 const DashboardView = defineAsyncComponent(() => import("./components/DashboardView.vue"));
 const SettingsPanel = defineAsyncComponent(() => import("./components/SettingsPanel.vue"));
 const HelpView = defineAsyncComponent(() => import("./components/HelpView.vue"));
@@ -87,6 +89,9 @@ import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import { useIssuePanel, ISSUE_PANEL_KEY } from "./composables/useIssuePanel";
 import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
+import { repoRemotes } from "./composables/useRepoRemote";
+import { COMMIT_SIGNATURE, withoutSignature } from "./utils/commitSignature";
+import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
 import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
@@ -191,7 +196,9 @@ let pendingCommitReviewTrailers = "";
 const { isOffline: navIsOffline } = useNetworkStatus();
 const { isOnline: probedOnline, probeConnectivity } = useConnectivity();
 const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
-import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment } from "./utils/backend";
+import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment, type GitLogEntry as IssueCommitEntry } from "./utils/backend";
+import { useCreateIssue, CREATE_ISSUE_KEY, isNewIssueShortcut, newIssueShortcutLabel } from "./composables/useCreateIssue";
+import { githubProvider } from "./composables/forge/useForge";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
@@ -310,6 +317,7 @@ const {
   isMerging,
   selectedCommitHash,
   commitDiffs,
+  commitDiffsHash,
   selectCommit,
   loadBranches,
   createBranch,
@@ -359,14 +367,22 @@ const commitReviewNav = useCommitReviewNav({
  * dismissed; a toast shown meanwhile parks it, and it comes back once that
  * one is gone.
  */
-function showDetailToast(title: string, detail: string | null, ms = 3000) {
-  if (stickyToast) parkedToasts.push(stickyToast);
+/** A notice's link, action button and kind (a newer one of a kind replaces a parked one). */
+type ToastExtras = { link?: ToastLink; action?: ToastAction; key?: string };
+
+function showDetailToast(title: string, detail: string | null, ms = 3000, extras: ToastExtras = {}) {
+  const { link, action, key } = extras;
+  // A newer notice of the same kind replaces a parked one rather than piling up.
+  if (key) for (let i = parkedToasts.length - 1; i >= 0; i--) if (parkedToasts[i].key === key) parkedToasts.splice(i, 1);
+  if (stickyToast && !(key && stickyToast.key === key)) parkedToasts.push(stickyToast);
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   if (dismissTimer != null) { window.clearTimeout(dismissTimer); dismissTimer = null; }
-  stickyToast = ms === 0 ? { title, detail } : null;
+  stickyToast = ms === 0 ? { title, detail, link, action, key } : null;
   successToastLeaving.value = false;
   successToast.value = title;
   successToastDetail.value = detail || null;
+  successToastLink.value = link ?? null;
+  successToastAction.value = action ?? null;
   if (ms > 0) successTimer = window.setTimeout(dismissToast, ms);
 }
 
@@ -487,6 +503,8 @@ const prPanel = usePrPanel(prCwd, {
   // loadLog) so the two collapse to a single refresh if they race.
   onVisibilityResume: () => {
     commitReview.resume();
+    // A `gh auth login` done meanwhile can make reports possible (#301).
+    void createIssue.refreshAvailability();
     watcherRefreshQueue.schedule("worktree-index", async () => {
       await repoRefresh();
       if (viewMode.value === "history" || showGitTree.value) await loadLog();
@@ -494,6 +512,60 @@ const prPanel = usePrPanel(prCwd, {
   },
 });
 provide(PR_PANEL_KEY, prPanel);
+
+// ─── New GitHub issue (#301) ─────────────────────────────
+// GitHub only: the backend answers with no target when `origin` is not a
+// GitHub repository, which is what hides every entry point.
+const createIssue = useCreateIssue({
+  cwd: computed(() => repoFolderPath.value ?? null),
+  provider: ref(githubProvider),
+  onCreated: async (issue, ctx) => {
+    // Loaded once an issue exists, not in the main chunk.
+    const { createdIssueToast } = await import("./composables/createdIssueToast");
+    const toast = createdIssueToast(issue, ctx, {
+      t,
+      activeCwd: () => repoFolderPath.value ?? "",
+      message: () => ({ summary: commitSummary.value, description: commitDescription.value }),
+      setDescription: (d) => { commitDescription.value = d; },
+      // The same store as the commit panel's `#` list, read fresh.
+      readPushRepo: (cwd) => repoRemotes.load(cwd).then(() => repoRemotes.slug(cwd)),
+      invalidate: (target) => invalidateIssues(sharedIssueCache, target),
+      notify: (title) => showDetailToast(title, null, 4000),
+    });
+    // With "Add to commit", the notice stays until dismissed (a toast shown
+    // meanwhile parks it), so the action is never lost to another notice.
+    const action = toast.action;
+    showDetailToast(toast.title, null, action ? 0 : 8000, {
+      link: toast.link,
+      action: action ? { label: action.label, run: () => { void action.run(); } } : undefined,
+      key: "created-issue",
+    });
+  },
+  report: {
+    // A resolver report is scanned like a commit: the repository's
+    // .gitwandrc patterns, and its or the app's entropy threshold.
+    secretsOptions: async (cwd) => {
+      if (!cwd) return { extraPatterns: [], entropyThreshold: settings.value.secretsEntropyThreshold };
+      const cfg = await secretsScanner.resolveConfig(cwd, settings.value);
+      return { extraPatterns: cfg.extraPatterns, entropyThreshold: cfg.entropyThreshold, ignore: cfg.ignore };
+    },
+  },
+});
+provide(CREATE_ISSUE_KEY, createIssue);
+watch(repoFolderPath, () => {
+  // The previous repository's answer must not show the entry points here.
+  createIssue.forgetAvailability();
+  // An open form keeps the repository it was opened for: close it only when
+  // nothing would be lost (no typed text, no create in flight).
+  if (createIssue.isOpen.value && !createIssue.dirty.value && !createIssue.submitting.value) createIssue.close();
+  void createIssue.refreshAvailability();
+}, { immediate: true });
+
+
+function openNewIssue() {
+  if (createIssue.available.value) void createIssue.open();
+}
+
 const issuePanel = useIssuePanel(prCwd);
 provide(ISSUE_PANEL_KEY, issuePanel);
 
@@ -757,13 +829,20 @@ async function onMergeSuccessDeleteBranch(branch: string, alsoRemote: boolean) {
 const successToast = ref<string | null>(null);
 const successToastDetail = ref<string | null>(null);
 const successToastLeaving = ref(false);
+/** An optional link the toast offers (e.g. "Open" a just-created issue, #301). */
+type ToastLink = { label: string; url: string };
+const successToastLink = ref<ToastLink | null>(null);
+/** An optional action button (e.g. "Add to commit" for a created issue, #301). */
+type ToastAction = { label: string; run: () => void };
+const successToastAction = ref<ToastAction | null>(null);
 const memorizeToast = ref<{ path: string; strategy: ResolutionStrategy } | null>(null);
 let successTimer: number | null = null;
 // The fade-out of a dismissed toast, cancelled when a new one replaces it.
 let dismissTimer: number | null = null;
 // The sticky toast on screen, and the ones covered since, shown again in turn.
-let stickyToast: { title: string; detail: string | null } | null = null;
-const parkedToasts: { title: string; detail: string | null }[] = [];
+type ParkedToast = { title: string; detail: string | null; link?: ToastLink; action?: ToastAction; key?: string };
+let stickyToast: ParkedToast | null = null;
+const parkedToasts: ParkedToast[] = [];
 
 function dismissToast() {
   if (dismissTimer != null) return; // already fading out (double click)
@@ -774,11 +853,13 @@ function dismissToast() {
   dismissTimer = window.setTimeout(() => {
     successToast.value = null;
     successToastDetail.value = null;
+    successToastLink.value = null;
+    successToastAction.value = null;
     successToastLeaving.value = false;
     successTimer = null;
     dismissTimer = null;
     const parked = parkedToasts.pop();
-    if (parked) showDetailToast(parked.title, parked.detail, 0);
+    if (parked) showDetailToast(parked.title, parked.detail, 0, parked);
   }, 200);
 }
 
@@ -2137,6 +2218,8 @@ const paletteActions = computed<PaletteAction[]>(() => {
   // Universal: always available
   out.push({ id: "new-tab", label: t("header.paletteNewTab") });
 
+  if (createIssue.available.value) out.push({ id: "new-issue", label: t("createIssue.paletteLabel"), hint: newIssueShortcutLabel(IS_MAC) });
+
   // Theme toggle — label reflects the target mode (what you'll flip TO).
   out.push({
     id: "toggle-theme",
@@ -2168,6 +2251,7 @@ function onPaletteAction(id: string) {
     case "open-worktrees": showWorktrees.value = true; break;
     case "open-rebase": showRebase.value = true; break;
     case "toggle-theme": toggleTheme(); break;
+    case "new-issue": openNewIssue(); break;
     case "wip-stash": handleWipStash(); break;
     case "wip-discard-all": handleWipDiscardAll(); break;
   }
@@ -3953,19 +4037,25 @@ function onGlobalKeydown(e: KeyboardEvent) {
     return;
   }
   if (e.key !== "Escape") return;
+  // Each closes one thing and marks the key handled, so a diff's line
+  // selection (#301) stays when Escape was meant for this.
   if (showCommandLog.value) {
+    e.preventDefault();
     showCommandLog.value = false;
     return;
   }
   if (showHelp.value) {
+    e.preventDefault();
     showHelp.value = false;
     return;
   }
   if (pendingSwitchBranch.value) {
+    e.preventDefault();
     cancelSwitchStash();
     return;
   }
   if (showStash.value) {
+    e.preventDefault();
     showStash.value = false;
     return;
   }
@@ -4051,16 +4141,14 @@ function onTabSizeChange(size: number) {
   applyCodeStyles();
 }
 
-const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
 function onCommitSignatureChange(enabled: boolean) {
   if (enabled) {
     if (!commitDescription.value) {
       commitDescription.value = COMMIT_SIGNATURE;
     }
   } else {
-    if (commitDescription.value === COMMIT_SIGNATURE) {
-      commitDescription.value = "";
-    }
+    // Alone, or closing a description (after "Add to commit", #301).
+    commitDescription.value = withoutSignature(commitDescription.value);
   }
 }
 
@@ -4129,6 +4217,19 @@ function onKeyDown(e: KeyboardEvent) {
   if (commitReviewAction) {
     e.preventDefault();
     commitReviewNav.dispatch(commitReviewAction);
+    return;
+  }
+  if (
+    createIssue.available.value &&
+    isNewIssueShortcut(e, IS_MAC) &&
+    // Not over another dialog (Settings, a confirm…).
+    !document.querySelector('[aria-modal="true"]')
+  ) {
+    // ⌘⇧I (Ctrl+Alt+I off macOS) — new GitHub issue (#301), about the lines
+    // selected in a diff when there are some (the toolbar and the palette
+    // open a blank one: their click would clear a commit-diff selection).
+    e.preventDefault();
+    void createIssue.openFromShortcut();
     return;
   }
   if (mod && e.key === "t") {
@@ -4758,6 +4859,7 @@ onUnmounted(() => {
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
       :submodule-update-count="submoduleUpdateCount"
       :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true" @open-release-notes="showReleaseNotes = true"
+      :can-create-issue="createIssue.available.value" @open-new-issue="openNewIssue"
       @open-time-machine="showTimeMachine = true" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
@@ -4815,7 +4917,7 @@ onUnmounted(() => {
               <aside v-if="showSidebar" class="view__rail">
                 <RepoSidebar pane="history" v-bind="repoSidebarProps" v-on="repoSidebarListeners" />
               </aside>
-              <CommitDiffViewer class="view__content" :diffs="commitDiffs" :commit-hash="selectedCommitHash"
+              <CommitDiffViewer class="view__content" :diffs="commitDiffs" :diffs-hash="commitDiffsHash" :commit-hash="selectedCommitHash"
                 :commit-info="repoLog.find(e => e.hashFull === selectedCommitHash) ?? null" :diff-mode="diffMode"
                 :scroll-to-file-idx="scrollToFileIdx" @update:diff-mode="onDiffModeChange"
                 @update:visible-file-idx="historyVisibleFileIdx = $event" />
@@ -4909,7 +5011,7 @@ onUnmounted(() => {
                     </svg>
                   </button>
                   <CommitDiffViewer class="graph-diff"
-                    :diffs="commitDiffs" :commit-hash="selectedCommitHash"
+                    :diffs="commitDiffs" :diffs-hash="commitDiffsHash" :commit-hash="selectedCommitHash"
                     :commit-info="repoLog.find(e => e.hashFull === selectedCommitHash) ?? null" :diff-mode="diffMode"
                     :scroll-to-file-idx="graphScrollIdx" @update:diff-mode="onDiffModeChange"
                     @update:visible-file-idx="graphFileIdx = $event" />
@@ -4942,6 +5044,7 @@ onUnmounted(() => {
                   @cherry-pick-commit="handleCherryPickCommit"
                   @cherry-pick-commit-wip="handleCherryPickCommitAsWip"
                   @view-on-forge="handleViewOnForge"
+                  :can-create-issue="createIssue.available.value" @create-issue="(entry: IssueCommitEntry) => createIssue.openFromCommit(entry)"
                   @delete-branch="handleDeleteBranchRequest"
                   @delete-worktree="handleTreeDeleteWorktree"
                   @merge-delete-worktree="handleTreeMergeDeleteWorktree"
@@ -5068,12 +5171,16 @@ onUnmounted(() => {
          until the user opens the split flow. -->
     <SplitCommitModal v-if="splitCommit.open.value" @split-completed="handleSplitCompleted" @close="handleSplitClose" />
 
+    <CreateIssueModal v-if="createIssue.isOpen.value" />
+
     <!-- Success toast -->
     <div v-if="successToast" class="toast" :class="{ 'toast--leaving': successToastLeaving }" role="status">
       <div class="toast-body">
         <div class="toast-title">{{ successToast }}</div>
         <div class="toast-detail" v-if="successToastDetail">{{ successToastDetail }}</div>
       </div>
+      <button v-if="successToastLink" class="toast-dismiss" @click="openExternalUrl(successToastLink.url)">{{ successToastLink.label }}</button>
+      <button v-if="successToastAction" class="toast-dismiss" @click="successToastAction.run(); dismissToast()">{{ successToastAction.label }}</button>
       <button class="toast-dismiss" @click="dismissToast">OK</button>
     </div>
 

@@ -96,7 +96,49 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
     cliPathOnly:
       "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
   },
+  gh_pr_attachment_urls: {
+    route: "/api/gh-pr-attachment-urls",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured, so the two run different code.",
+  },
+  gh_issue_available: { route: "/api/gh-issue-available" },
+  gh_issue_targets: {
+    route: "/api/gh-issue-targets",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured, so the two run different code.",
+  },
+  gh_create_issue: {
+    route: "/api/gh-create-issue",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command sends the same JSON through `gh api --input -` when no Settings token is configured.",
+  },
+  gh_create_gitwand_issue: {
+    route: "/api/gh-create-gitwand-issue",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token, and posts to `GITWAND_DEV_REPORT_REPO` when set (QA on a test fork); the Rust command uses the Settings token, else `gh api` on github.com, always on devlint/GitWand.",
+  },
+  gh_gitwand_writable: {
+    route: "/api/gh-gitwand-writable",
+    cliPathOnly:
+      "The dev-server answers from the `gh` token's presence; the Rust command checks the Settings token, else `gh auth status --hostname github.com`.",
+  },
+  gh_list_labels: {
+    route: "/api/gh-list-labels",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured.",
+  },
+  gh_list_milestones: {
+    route: "/api/gh-list-milestones",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured.",
+  },
+  gh_list_assignees: {
+    route: "/api/gh-list-assignees",
+    cliPathOnly:
+      "The dev-server always calls the REST API with the `gh` token; the Rust command shells out to `gh api` when no Settings token is configured.",
+  },
   gh_list_issues: { route: "/api/gh-list-issues" },
+  gh_issue_templates: { route: "/api/gh-issue-templates" },
   gh_list_prs: { route: "/api/gh-list-prs" },
   gh_merge_pr: {
     route: "/api/gh-merge-pr",

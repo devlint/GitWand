@@ -1,0 +1,623 @@
+<script setup lang="ts">
+import { IS_MAC } from "../utils/platform";
+/**
+ * "New issue" (#301) — a modal over whatever the user was looking at, so the
+ * commit or the diff stays on screen behind it. All state lives in
+ * `useCreateIssue` (provided by App.vue); this component renders it.
+ */
+import { computed, inject, nextTick, ref, watch } from "vue";
+import BaseModal from "./BaseModal.vue";
+import RemoteImagesNotice from "./RemoteImagesNotice.vue";
+import { CREATE_ISSUE_KEY, GITWAND_REPO, ISSUE_BODY_MAX } from "../composables/useCreateIssue";
+import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../composables/useSafeHtml";
+import { useI18n } from "../composables/useI18n";
+import { ISSUE_TITLE_MAX } from "../utils/issuePrefill";
+import { ANSWER_MAX } from "../utils/resolutionReport";
+import { openExternalUrl } from "../utils/backend";
+
+const { t } = useI18n();
+const form = inject(CREATE_ISSUE_KEY)!;
+type AskConfirm = (o: { title: string; message: string; confirmLabel?: string; danger?: boolean }) => Promise<boolean>;
+// The app's in-app confirm (App.vue provides it); native confirm() only as a fallback.
+const askConfirm = inject<AskConfirm>("askConfirm", async (o) => window.confirm(o.message));
+
+const tab = ref<"write" | "preview">("write");
+const submitKeys = IS_MAC ? "⌘Enter" : "Ctrl+Enter";
+const imagesShown = ref(false);
+const titleInput = ref<HTMLInputElement | null>(null);
+
+const showForm = computed(() => !form.loading.value && !form.targetsFailed.value && !!form.repo.value);
+
+// Focus the title once the form is on screen (targets are read first).
+watch(showForm, async (shown) => {
+  if (!shown) return;
+  await nextTick();
+  titleInput.value?.focus();
+}, { immediate: true });
+
+// Rendered only while the Preview tab is shown: no markdown + sanitiser pass
+// on every keystroke of a long body.
+const preview = computed(() => {
+  if (tab.value !== "preview") return "";
+  // A report sends the answer on top of the description: preview that.
+  const src = form.finalBody.value;
+  if (!src.trim()) return `<p class="ci-preview-empty">${t("createIssue.previewEmpty")}</p>`;
+  return safeHtml(renderMarkdown(src, { allowRemoteImages: imagesShown.value }), {
+    allowRemoteImages: imagesShown.value,
+  });
+});
+const imagesBlocked = computed(() => hasBlockedRemoteImages(preview.value));
+
+function toggle(list: string[], value: string): string[] {
+  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+}
+
+async function onCancel() {
+  if (form.submitting.value) return;
+  if (form.dirty.value) {
+    const discard = await askConfirm({
+      title: t("createIssue.discardTitle"),
+      message: t("createIssue.discardConfirm"),
+      confirmLabel: t("createIssue.discard"),
+      danger: true,
+    });
+    // A create may have started while the question was open (⌘Enter):
+    // closing now would drop its answer and the notice that it was created.
+    if (!discard || form.submitting.value) return;
+  }
+  form.close();
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  // App shortcuts stay outside the form: ⌘Z here undoes typing, not the last
+  // git operation; ⌘⇧I does not reopen the form.
+  e.stopPropagation();
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void form.submit();
+  }
+}
+
+// ─── Report mode (#301 part 3) ───────────────────────────
+const switchDisabled = computed(
+  () =>
+    form.gitwandLocked.value ||
+    (form.gitwandWritable.value !== true && !form.toGitwand.value) ||
+    form.submitting.value ||
+    form.outcomeUnknown.value,
+);
+
+// A lockfile can raise hundreds of entropy warnings: show a few, count the
+// rest. A known pattern is always shown, never folded into that count.
+const WARNINGS_SHOWN = 5;
+const isEntropy = (f: { patternId: string }) => f.patternId === "high_entropy";
+const shownWarnings = computed(() => {
+  const w = form.findings.value.warnings;
+  return [...w.filter((f) => !isEntropy(f)), ...w.filter(isEntropy).slice(0, WARNINGS_SHOWN)];
+});
+const hiddenWarnings = computed(() =>
+  Math.max(0, form.findings.value.warnings.filter(isEntropy).length - WARNINGS_SHOWN),
+);
+
+/** A finding, named by the field it is in (and the line, in the description). */
+function findingText(f: { file: string; line: number; patternId: string }, blocking: boolean): string {
+  if (f.file === "title") return t(blocking ? "createIssue.report.secretBlockingTitle" : "createIssue.report.secretWarningTitle", f.patternId);
+  if (f.file === "answer") return t(blocking ? "createIssue.report.secretBlockingAnswer" : "createIssue.report.secretWarningAnswer", f.patternId);
+  return t(blocking ? "createIssue.report.secretBlocking" : "createIssue.report.secretWarning", f.line, f.patternId);
+}
+
+/** The switch: regenerates title and description, after asking when either was edited. */
+async function onSwitch(e: Event) {
+  const box = e.target as HTMLInputElement;
+  const wanted = box.checked;
+  // The state decides what the box shows (a cancelled switch leaves it as it was).
+  box.checked = form.toGitwand.value;
+  if (form.bodyEdited.value) {
+    const asked = form.openId.value;
+    const ok = await askConfirm({
+      title: t("createIssue.report.replaceTitle"),
+      message: t("createIssue.report.replaceEdits"),
+      confirmLabel: t("createIssue.report.replace"),
+    });
+    // Another report (or none) may be on screen by now: the answer was about
+    // the one the question was asked for.
+    if (!ok || !form.isOpen.value || form.openId.value !== asked) return;
+  }
+  form.setGitwand(wanted);
+}
+
+/** A blank form's own (`blankForm` is false for a commit, lines or a report). */
+const offersTemplates = computed(() => form.blankForm.value);
+const templates = computed(() => (offersTemplates.value ? form.templateSet.value?.templates ?? [] : []));
+const contactLinks = computed(() => (offersTemplates.value ? form.templateSet.value?.contactLinks ?? [] : []));
+const blankAllowed = computed(() => form.templateSet.value?.blankAllowed ?? true);
+
+/** A template chosen: the form decides; the component only asks the question. */
+async function onTemplate(e: Event) {
+  const select = e.target as HTMLSelectElement;
+  if (select.value === "__other") return;
+  const wanted = select.value || null;
+  // The state decides what the select shows (a cancelled choice leaves it as it was).
+  select.value = form.templateId.value ?? (form.templateLeftover.value ? "__other" : "");
+  await form.chooseTemplate(wanted, (kind) =>
+    askConfirm(
+      kind === "clear"
+        ? {
+            title: t("createIssue.template.clearTitle"),
+            message: t("createIssue.template.clearMessage"),
+            confirmLabel: t("createIssue.template.clear"),
+          }
+        : {
+            title: t("createIssue.template.replaceTitle"),
+            message: t("createIssue.template.replaceMessage"),
+            confirmLabel: t("createIssue.template.use"),
+          },
+    ),
+  );
+}
+
+/** The target's issue list, to see whether a timed-out create went through. */
+function openIssuesPage() {
+  if (form.toGitwand.value) {
+    void openExternalUrl(`https://github.com/${GITWAND_REPO}/issues`);
+    return;
+  }
+  const target = form.targets.value.find((x) => x.repo === form.repo.value);
+  if (target?.htmlUrl) void openExternalUrl(`${target.htmlUrl}/issues`);
+}
+
+function onMilestone(e: Event) {
+  const v = (e.target as HTMLSelectElement).value;
+  form.milestone.value = v === "" ? null : Number(v);
+}
+</script>
+
+<template>
+  <BaseModal
+    :title="t('createIssue.title')"
+    :subtitle="form.repo.value ?? ''"
+    size="lg"
+    :auto-focus="false"
+    @close="onCancel"
+  >
+    <div class="ci" @keydown="onKeydown">
+      <p v-if="form.loading.value" class="ci-status">{{ t("createIssue.loading") }}</p>
+      <template v-else-if="form.targetsFailed.value">
+        <p class="ci-status ci-status--error" role="alert">{{ t("createIssue.targetsFailed") }}</p>
+        <p v-if="form.targetsError.value" class="ci-status ci-detail">{{ form.targetsError.value }}</p>
+      </template>
+      <p v-else-if="!form.repo.value" class="ci-status" role="alert">
+        {{ t("createIssue.noTarget") }}
+      </p>
+
+      <template v-if="showForm">
+        <template v-if="form.report.value">
+          <label class="ci-switch" :title="t('createIssue.report.toGitwandHint')">
+            <input
+              type="checkbox"
+              data-testid="ci-gitwand"
+              :checked="form.toGitwand.value"
+              :disabled="switchDisabled"
+              @change="onSwitch"
+            />
+            {{ t("createIssue.report.toGitwand") }}
+          </label>
+          <p v-if="form.gitwandLocked.value" class="ci-status">{{ t("createIssue.report.repoUnavailable") }}</p>
+          <p v-if="form.gitwandLocked.value && form.targetsError.value" class="ci-status ci-detail">
+            {{ form.targetsError.value }}
+          </p>
+          <p
+            v-if="form.gitwandWritable.value === false"
+            class="ci-status"
+            :class="{ 'ci-status--error': form.toGitwand.value }"
+          >
+            {{ t("createIssue.report.gitwandUnavailable") }}
+          </p>
+          <div v-if="form.toGitwand.value" class="ci-public" role="note">
+            <p>{{ t("createIssue.report.publicWarning", GITWAND_REPO) }}</p>
+            <label class="ci-confirm">
+              <input
+                v-model="form.confirmedPublic.value"
+                type="checkbox"
+                data-testid="ci-confirm-public"
+                :disabled="form.submitting.value"
+              />
+              {{ t("createIssue.report.confirmPublic") }}
+            </label>
+          </div>
+          <label class="ci-label" for="ci-answer">{{ t("createIssue.report.answerLabel") }}</label>
+          <textarea
+            id="ci-answer"
+            v-model="form.answer.value"
+            data-testid="ci-answer"
+            class="ci-textarea ci-answer"
+            :maxlength="ANSWER_MAX"
+            rows="2"
+            :placeholder="t('createIssue.report.answerPlaceholder')"
+            :disabled="form.submitting.value"
+          />
+        </template>
+
+        <fieldset v-if="form.targets.value.length > 1 && !form.toGitwand.value" class="ci-targets">
+          <legend class="ci-label">{{ t("createIssue.target") }}</legend>
+          <label
+            v-for="target in form.targets.value"
+            :key="target.repo"
+            class="ci-target"
+            :class="{ 'ci-target--off': !target.hasIssues }"
+          >
+            <input
+              type="radio"
+              name="ci-target"
+              :value="target.repo"
+              :checked="form.repo.value === target.repo"
+              :disabled="!target.hasIssues || form.submitting.value || form.outcomeUnknown.value"
+              @change="form.setRepo(target.repo)"
+            />
+            <span class="ci-target-repo">{{ target.repo }}</span>
+            <span class="ci-target-kind">
+              {{ target.isOrigin ? t("createIssue.targetOrigin") : t("createIssue.targetParent") }}
+            </span>
+            <span v-if="!target.hasIssues" class="ci-target-off">{{ t("createIssue.issuesOff") }}</span>
+          </label>
+        </fieldset>
+
+        <p v-if="offersTemplates && form.templatesLoading.value && !form.templateSet.value" class="ci-status">
+          {{ t("createIssue.template.loading") }}
+        </p>
+        <div v-if="templates.length || contactLinks.length" class="ci-group" data-testid="ci-templates">
+          <label v-if="templates.length" class="ci-label" for="ci-template">{{ t("createIssue.template.label") }}</label>
+          <select
+            v-if="templates.length"
+            id="ci-template"
+            data-testid="ci-template"
+            class="ci-input"
+            :value="form.templateId.value ?? (form.templateLeftover.value ? '__other' : '')"
+            :disabled="form.submitting.value"
+            @change="onTemplate"
+          >
+            <option v-if="form.templateLeftover.value" value="__other" disabled>{{ t("createIssue.template.fromOther") }}</option>
+            <option value="">{{ t("createIssue.template.blank") }}</option>
+            <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id" :title="tpl.about">{{ tpl.name }}</option>
+          </select>
+          <p v-if="templates.length && !blankAllowed" class="ci-status">{{ t("createIssue.template.expectsTemplate") }}</p>
+          <p v-if="templates.length && form.templateFromOwner.value" class="ci-status">
+            {{ t("createIssue.template.fromOwner", form.templateFromOwner.value) }}
+          </p>
+          <p v-if="form.templatePicksUnset.value.length" class="ci-status" data-testid="ci-template-unset">
+            {{ t("createIssue.template.needsTriage", form.templatePicksUnset.value.join(", ")) }}
+          </p>
+          <ul v-if="contactLinks.length" class="ci-contacts">
+            <li v-for="(l, i) in contactLinks" :key="`${i}:${l.url}`">
+              <!-- The space survives the template's whitespace condensing. -->
+              <span class="ci-status">{{ `${t("createIssue.template.contact")} ` }}</span>
+              <a
+                :href="l.url"
+                data-testid="ci-contact-link"
+                @click.prevent="openExternalUrl(l.url)"
+              >{{ l.name }}</a>
+              <span v-if="l.about" class="ci-status"> — {{ l.about }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <label class="ci-label" for="ci-title">{{ t("createIssue.titleLabel") }}</label>
+        <input
+          id="ci-title"
+          ref="titleInput"
+          v-model="form.title.value"
+          class="ci-input"
+          type="text"
+          :maxlength="ISSUE_TITLE_MAX"
+          :placeholder="t('createIssue.titlePlaceholder')"
+          :disabled="form.submitting.value"
+        />
+
+        <div class="ci-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            class="ci-tab"
+            :class="{ 'ci-tab--active': tab === 'write' }"
+            :aria-selected="tab === 'write'"
+            @click="tab = 'write'"
+          >{{ t("createIssue.tabWrite") }}</button>
+          <button
+            type="button"
+            role="tab"
+            class="ci-tab"
+            :class="{ 'ci-tab--active': tab === 'preview' }"
+            :aria-selected="tab === 'preview'"
+            @click="tab = 'preview'"
+          >{{ t("createIssue.tabPreview") }}</button>
+        </div>
+        <textarea
+          v-show="tab === 'write'"
+          v-model="form.body.value"
+          class="ci-textarea"
+          rows="10"
+          :aria-label="t('createIssue.bodyLabel')"
+          :placeholder="t('createIssue.bodyPlaceholder')"
+          :disabled="form.submitting.value"
+        />
+        <RemoteImagesNotice v-if="tab === 'preview' && imagesBlocked" @allow="imagesShown = true" />
+        <div v-if="tab === 'preview'" class="ci-preview" data-testid="ci-preview" v-html="preview" />
+
+        <div v-if="form.labelOptions.value.length" class="ci-group">
+          <span class="ci-label">{{ t("createIssue.labels") }}</span>
+          <div class="ci-chips">
+            <button
+              v-for="label in form.labelOptions.value"
+              :key="label.name"
+              type="button"
+              class="ci-chip"
+              :aria-pressed="form.labels.value.includes(label.name)"
+              :disabled="form.submitting.value"
+              :title="label.description ?? ''"
+              @click="form.labels.value = toggle(form.labels.value, label.name)"
+            >
+              <span class="ci-chip-dot" :style="{ background: `#${label.color || '888'}` }" aria-hidden="true" />
+              {{ label.name }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="form.assigneeOptions.value.length" class="ci-group">
+          <span class="ci-label">{{ t("createIssue.assignees") }}</span>
+          <div class="ci-chips">
+            <button
+              v-for="user in form.assigneeOptions.value"
+              :key="user.login"
+              type="button"
+              class="ci-chip"
+              :aria-pressed="form.assignees.value.includes(user.login)"
+              :disabled="form.submitting.value"
+              @click="form.assignees.value = toggle(form.assignees.value, user.login)"
+            >@{{ user.login }}</button>
+          </div>
+        </div>
+
+        <div v-if="form.milestoneOptions.value.length" class="ci-group">
+          <label class="ci-label" for="ci-milestone">{{ t("createIssue.milestone") }}</label>
+          <select
+            id="ci-milestone"
+            class="ci-select"
+            :value="form.milestone.value ?? ''"
+            :disabled="form.submitting.value"
+            @change="onMilestone"
+          >
+            <option value="">{{ t("createIssue.noMilestone") }}</option>
+            <option v-for="m in form.milestoneOptions.value" :key="m.number" :value="m.number">{{ m.title }}</option>
+          </select>
+        </div>
+
+        <div
+          v-if="form.report.value && (form.findings.value.blocking.length || form.findings.value.warnings.length)"
+          class="ci-secrets"
+          :class="{ 'ci-secrets--blocking': form.findings.value.blocking.length > 0 }"
+          data-testid="ci-secrets"
+          role="alert"
+        >
+          <p v-for="(f, i) in form.findings.value.blocking" :key="`b${i}`">{{ findingText(f, true) }}</p>
+          <p v-for="(f, i) in shownWarnings" :key="`w${i}`" class="ci-secret-warning">{{ findingText(f, false) }}</p>
+          <p v-if="hiddenWarnings > 0">{{ t("createIssue.report.secretWarningMore", hiddenWarnings) }}</p>
+        </div>
+
+        <p v-if="form.tooLong.value" class="ci-status ci-status--error" role="alert">
+          {{ t("createIssue.tooLong", form.finalBody.value.length, ISSUE_BODY_MAX) }}
+        </p>
+
+        <div v-if="form.outcomeUnknown.value" class="ci-unknown" role="alert">
+          <p class="ci-status ci-status--error">{{ t("createIssue.maybeCreated") }}</p>
+          <div class="ci-unknown-actions">
+            <button type="button" class="bm-btn bm-btn--ghost" @click="openIssuesPage">{{ t("createIssue.checkOnGitHub") }}</button>
+            <button type="button" class="bm-btn bm-btn--ghost" @click="form.retryAnyway()">{{ t("createIssue.createAnyway") }}</button>
+          </div>
+        </div>
+        <p v-else-if="form.error.value" class="ci-status ci-status--error" role="alert">{{ form.error.value }}</p>
+      </template>
+    </div>
+
+    <template #footer>
+      <button type="button" class="bm-btn bm-btn--ghost" :disabled="form.submitting.value" @click="onCancel">
+        {{ t("createIssue.cancel") }}
+      </button>
+      <button
+        v-if="showForm"
+        type="button"
+        class="bm-btn bm-btn--primary"
+        :disabled="!form.canSubmit.value"
+        :title="t('createIssue.submitHint', submitKeys)"
+        @click="form.submit()"
+      >
+        {{ form.submitting.value ? t("createIssue.creating") : t("createIssue.create") }}
+      </button>
+    </template>
+  </BaseModal>
+</template>
+
+<style scoped>
+.ci-switch,
+.ci-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+.ci-public {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft, transparent);
+  font-size: var(--text-sm);
+}
+.ci-public p {
+  margin: 0;
+}
+.ci-answer {
+  min-height: 0;
+}
+.ci-secrets {
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.ci-secrets--blocking {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+.ci-secrets p {
+  margin: 2px 0;
+}
+.ci {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 10px);
+}
+.ci-label {
+  font-size: var(--font-size-sm, 12px);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.ci-input,
+.ci-textarea,
+.ci-select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+}
+.ci-textarea {
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm, 12px);
+}
+.ci-tabs {
+  display: flex;
+  gap: 4px;
+}
+.ci-tab {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.ci-tab--active {
+  border-color: var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.ci-preview {
+  min-height: 120px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+/* A long code line scrolls inside its block instead of widening the modal. */
+.ci-preview :deep(pre) {
+  overflow-x: auto;
+}
+.ci-preview :deep(ul),
+.ci-preview :deep(ol) {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+.ci-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ci-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.ci-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-sm, 12px);
+  cursor: pointer;
+}
+.ci-chip[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft, var(--color-bg-secondary));
+}
+.ci-chip-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.ci-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+.ci-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.ci-target--off {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ci-target-repo {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.ci-target-kind,
+.ci-target-off {
+  font-size: var(--font-size-sm, 12px);
+  color: var(--color-text-muted);
+}
+.ci-status {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+.ci-contacts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-sm, 12px);
+}
+.ci-detail {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm, 12px);
+  overflow-wrap: anywhere;
+}
+.ci-unknown-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.ci-status--error {
+  color: var(--color-danger, #d73a4a);
+}
+</style>

@@ -1,0 +1,340 @@
+/**
+ * resolutionReport — the bodies of a "bad resolution" report (#301): for the
+ * repository being worked on, or for GitWand's own repository (no path, no
+ * repository name, ever).
+ */
+import { describe, it, expect } from "vitest";
+import type { ConflictHunk } from "@gitwand/core";
+import {
+  fileKind,
+  repoReportPrefill,
+  gitwandReportPrefill,
+  REPORT_BODY_MAX,
+  ANSWER_MAX,
+  withAnswer,
+  reportFor,
+  acceptedLabel,
+  type ResolutionReport,
+} from "../resolutionReport";
+
+function hunk(over: Partial<ConflictHunk> = {}): ConflictHunk {
+  return {
+    baseLines: ["const a = 1;"],
+    oursLines: ["const a = 2;"],
+    theirsLines: ["const a = 3;"],
+    startLine: 10,
+    type: "non_overlapping",
+    confidence: { score: 90, label: "high", dimensions: {}, boosters: [], penalties: [] },
+    explanation: "Both sides changed different lines.",
+    trace: { steps: [], selected: "non_overlapping", summary: "non_overlapping matched", hasBase: true },
+    ...over,
+  } as ConflictHunk;
+}
+
+const report = (over: Partial<ResolutionReport> = {}): ResolutionReport => ({
+  kind: "engine",
+  path: "src/x.ts",
+  hunk: hunk(),
+  resolvedLines: ["const a = 23;"],
+  ...over,
+});
+
+const env = { version: "3.13.2", platform: "macOS" };
+
+describe("fileKind", () => {
+  it("gives the extension, or a known name, never the raw name", () => {
+    expect(fileKind("src/a/b.test.ts")).toBe(".ts");
+    expect(fileKind("Cargo.lock")).toBe("Cargo.lock");
+    expect(fileKind("deploy/Dockerfile")).toBe("Dockerfile");
+    expect(fileKind("config/.env.production")).toBe(".env");
+    expect(fileKind("yarn.lock")).toBe("yarn.lock");
+    expect(fileKind("pnpm-lock.yaml")).toBe("pnpm-lock.yaml");
+    expect(fileKind("LICENSE")).toBe("no extension");
+    // An extension of the project's own invention says who it is.
+    expect(fileKind("config.acmecorp")).toBe("other extension");
+    expect(fileKind("a/b.vue")).toBe(".vue");
+    expect(fileKind("a/b.yml")).toBe(".yml");
+    expect(fileKind("acme-secret-billing")).toBe("no extension");
+    expect(fileKind("clients\\acme.bank\\Makefile-x")).toBe("no extension");
+    expect(fileKind("src\\acme\\x.ts")).toBe(".ts");
+  });
+});
+
+describe("repoReportPrefill", () => {
+  it("names the file and carries the versions, the result and the reasoning", () => {
+    const p = repoReportPrefill(report());
+    expect(p.title).toBe("Bad merge resolution in `src/x.ts`");
+    expect(p.body).toContain("`src/x.ts`");
+    // A line of the conflicted file, which no longer exists once written.
+    expect(p.body).toContain("started at line 10 of the conflicted file");
+    for (const s of ["ours", "theirs", "base", "const a = 2;", "const a = 3;", "const a = 1;"]) expect(p.body).toContain(s);
+    expect(p.body).toContain("### GitWand's result");
+    expect(p.body).toContain("const a = 23;");
+    expect(p.body).toContain("Both sides changed different lines.");
+    expect(p.body).toContain("`non_overlapping`");
+    expect(p.body).toContain("confidence 90 (high)");
+  });
+
+  it("shows a known but empty base as empty, unlike a missing one", () => {
+    const r = report({ hunk: hunk({ baseLines: [] }) });
+    const body = repoReportPrefill(r).body;
+    expect(body).toContain("**base**");
+    expect(body).toContain("_(empty)_");
+  });
+
+  it("prints no base block for a conflict without one", () => {
+    const r = report({ hunk: hunk({ baseLines: [], trace: { steps: [], selected: "non_overlapping", summary: "s", hasBase: false } }) });
+    expect(repoReportPrefill(r).body).not.toMatch(/\*\*base\*\*/);
+  });
+});
+
+describe("gitwandReportPrefill", () => {
+  it("describes the file by its kind and never by its path or name", () => {
+    const p = gitwandReportPrefill(report({ path: "secret-project/billing/x.ts" }), env);
+    expect(p.title).toBe("Resolver: bad `non_overlapping` resolution (`.ts`)");
+    expect(p.body).toContain("GitWand 3.13.2");
+    expect(p.body).toContain("macOS");
+    expect(p.body).toContain("`.ts`");
+    expect(p.body).not.toContain("secret-project");
+    expect(p.body).not.toContain("billing");
+    expect(p.body).not.toContain("x.ts");
+  });
+
+  it("scrubs a .gitwandrc glob and the file's own path or name out of engine text", () => {
+    const h = hunk({
+      type: "generated_file",
+      explanation: "Generated file (user pattern: clients/acme-bank/**) — taken from theirs.",
+      trace: { steps: [], selected: "generated_file", summary: "Generated (user pattern: clients/acme-bank/**) in clients/acme-bank/api.ts", hasBase: true },
+    });
+    const p = gitwandReportPrefill(report({ path: "clients/acme-bank/api.ts", hunk: h }), env);
+    expect(p.body).not.toContain("acme-bank");
+    expect(p.body).not.toContain("api.ts");
+    expect(p.body).toContain("user pattern");
+  });
+
+  it("scrubs a glob with parentheses, and the path's folders, out of engine text", () => {
+    const h = hunk({
+      type: "generated_file",
+      explanation: "Generated file (user pattern: clients/(acme)/gen/**) — taken from theirs.",
+      trace: { steps: [], selected: "generated_file", summary: "Moved from acme-bank/billing-svc", hasBase: true },
+    });
+    const p = gitwandReportPrefill(report({ path: "acme-bank/billing-svc/api.ts", hunk: h }), env);
+    expect(p.body).not.toContain("acme");
+    expect(p.body).not.toContain("gen/**");
+    expect(p.body).not.toContain("billing-svc");
+  });
+
+  it("scrubs the file's stem too", () => {
+    const h = hunk({ explanation: "Kept the acme-billing import", trace: { steps: [], selected: "non_overlapping", summary: "s", hasBase: true } });
+    const body = gitwandReportPrefill(report({ path: "src/acme-billing.config.ts", hunk: h }), env).body;
+    expect(body).not.toContain("acme-billing");
+  });
+
+  it("names the format resolver when one handled the hunk", () => {
+    const p = gitwandReportPrefill(report({ path: "package.json", hunk: hunk({ formatResolver: "json" }) }), env);
+    expect(p.body).toContain("resolver: `json`");
+  });
+
+  it("carries an AI proposal's model, validation and history, never its prompt hash", () => {
+    const h = hunk({
+      type: "llm_proposed",
+      trace: {
+        steps: [],
+        selected: "llm_proposed",
+        summary: "s",
+        hasBase: true,
+        llmTrace: {
+          calledAt: "2026-11-18T10:00:00Z",
+          model: "claude-sonnet-4-6",
+          latencyMs: 1200,
+          promptHash: "deadbeefcafe",
+          rawResponseTruncated: "…",
+          validationScore: 82,
+          accepted: true,
+          history: { status: "included", reasons: [], commitCount: 4, estTokens: 900 },
+        },
+      } as ConflictHunk["trace"],
+    });
+    const p = gitwandReportPrefill(report({ kind: "ai", hunk: h }), env);
+    expect(p.body).toContain("claude-sonnet-4-6");
+    expect(p.body).toContain("validation 82");
+    expect(p.body).toContain("history: 4 commits");
+    expect(p.body).not.toContain("deadbeefcafe");
+  });
+
+  it("reports an AI proposal that failed validation, with its answer and no result", () => {
+    const h = hunk({
+      type: "llm_proposed",
+      trace: {
+        steps: [], selected: "llm_proposed", summary: "s", hasBase: true,
+        llmTrace: { calledAt: "", model: "m", latencyMs: 1, promptHash: "h", rawResponseTruncated: "const a = 9;", validationScore: 12, accepted: false },
+      } as ConflictHunk["trace"],
+    });
+    const body = repoReportPrefill(report({ kind: "ai", hunk: h, resolvedLines: null })).body;
+    expect(body).toContain("No result: the AI proposal failed validation");
+    expect(body).toContain("const a = 9;");
+  });
+
+  it("leaves the AI's raw answer out of a public report", () => {
+    const h = hunk({
+      type: "llm_proposed",
+      trace: {
+        steps: [], selected: "llm_proposed", summary: "s", hasBase: true,
+        llmTrace: { calledAt: "", model: "m", latencyMs: 1, promptHash: "h", rawResponseTruncated: "Merged feature/acme-billing into main", validationScore: 10, accepted: false },
+      } as ConflictHunk["trace"],
+    });
+    const pub = gitwandReportPrefill(report({ kind: "ai", path: "x.ts", hunk: h, resolvedLines: null }), env).body;
+    expect(pub).not.toContain("acme");
+    expect(pub).toContain("failed validation (score 10)");
+    expect(pub).toContain("not included in a public report");
+    // The repository's own report keeps it.
+    expect(repoReportPrefill(report({ kind: "ai", path: "x.ts", hunk: h, resolvedLines: null })).body).toContain("feature/acme-billing");
+  });
+
+
+  it("keeps the engine's reasoning inert in a public report, and drops private hosts", () => {
+    const h = hunk({
+      explanation: "Kept @acme/team#12's change",
+      trace: { steps: [], selected: "non_overlapping", summary: "LLM endpoint error: connect ECONNREFUSED llm.internal.acme.corp:11434", hasBase: true },
+    });
+    const body = gitwandReportPrefill(report({ hunk: h }), env).body;
+    const why = body.slice(body.indexOf("### Why"));
+    expect(why).toMatch(/```text\n[\s\S]*@acme\/team#12[\s\S]*```/);
+    expect(body).not.toContain("llm.internal.acme.corp");
+  });
+
+  it("says an AI fallback gave no answer when it has none, rather than a failed validation", () => {
+    const h = hunk({
+      type: "llm_proposed",
+      trace: {
+        steps: [], selected: "llm_proposed", summary: "s", hasBase: true,
+        llmTrace: { calledAt: "", model: "m", latencyMs: 0, promptHash: "", rawResponseTruncated: "", validationScore: 0, accepted: false },
+      } as ConflictHunk["trace"],
+    });
+    const body = repoReportPrefill(report({ kind: "ai", hunk: h, resolvedLines: null })).body;
+    expect(body).toContain("No result: the AI fallback gave no answer");
+    expect(body).not.toContain("failed validation");
+  });
+
+  it("names a public model family, never a private deployment", () => {
+    const withModel = (model: string) =>
+      hunk({
+        type: "llm_proposed",
+        trace: {
+          steps: [], selected: "llm_proposed", summary: "s", hasBase: true,
+          llmTrace: { calledAt: "", model, latencyMs: 1, promptHash: "h", rawResponseTruncated: "", validationScore: 80, accepted: true },
+        } as ConflictHunk["trace"],
+      });
+    expect(gitwandReportPrefill(report({ kind: "ai", hunk: withModel("claude-sonnet-4-6") }), env).body).toContain("claude-sonnet-4-6");
+    const priv = gitwandReportPrefill(report({ kind: "ai", hunk: withModel("acme-payments-gpt4") }), env).body;
+    expect(priv).not.toContain("acme");
+    expect(priv).toContain("a custom model");
+    for (const ok of ["gpt-4o-mini", "qwen2.5-coder:32b", "llama3.1:70b-instruct", "claude-3-5-sonnet-20240620"]) {
+      expect(gitwandReportPrefill(report({ kind: "ai", hunk: withModel(ok) }), env).body, ok).toContain(ok);
+    }
+    for (const bad of ["gpt-4o-acmecorp-internal", "llama3-acme-legal"]) {
+      const body = gitwandReportPrefill(report({ kind: "ai", hunk: withModel(bad) }), env).body;
+      expect(body, bad).not.toContain("acme");
+      expect(body, bad).toContain("a custom model");
+    }
+  });
+
+  it("scrubs folder names whatever their case, short ones too, but not generic words", () => {
+    const h = hunk({
+      explanation: 'Resolved by the "json" resolver for acme and IBM',
+      trace: { steps: [], selected: "non_overlapping", summary: "s", hasBase: true },
+    });
+    const body = gitwandReportPrefill(report({ path: "clients/ibm/Acme/json/x.ts", hunk: h }), env).body;
+    expect(body).not.toMatch(/acme/i);
+    expect(body).not.toMatch(/\bibm\b/i);
+    expect(body).toContain('"json" resolver');
+  });
+
+  it("carries a token-level merge's pass counts", () => {
+    const h = hunk({
+      type: "token_level_merge",
+      trace: {
+        steps: [],
+        selected: "token_level_merge",
+        summary: "s",
+        hasBase: true,
+        tokenMergeTrace: { mergedLines: ["x"], pass1Count: 3, pass2Count: 1, lineDetails: [] },
+      } as ConflictHunk["trace"],
+    });
+    expect(gitwandReportPrefill(report({ kind: "token", hunk: h }), env).body).toContain("pass 1: 3 lines, pass 2: 1 line");
+  });
+
+});
+
+describe("budget", () => {
+  it("stays under REPORT_BODY_MAX and says what was cut", () => {
+    const big = Array.from({ length: 5000 }, (_, i) => `line ${i} `.padEnd(40, "x"));
+    for (const build of [
+      (r: ResolutionReport) => repoReportPrefill(r),
+      (r: ResolutionReport) => gitwandReportPrefill(r, env),
+    ]) {
+      const p = build(report({ hunk: hunk({ oursLines: big, theirsLines: big, baseLines: big }), resolvedLines: big }));
+      expect(p.body.length).toBeLessThanOrEqual(REPORT_BODY_MAX);
+      expect(p.body).toContain("(cut to its first");
+    }
+  });
+});
+
+describe("withAnswer", () => {
+  it("puts the answer on top, set apart from the report, and nothing when it is blank", () => {
+    expect(withAnswer("keep both", "BODY")).toBe("### What it should have been\n\nkeep both\n\n---\n\nBODY");
+    expect(withAnswer("  ", "BODY")).toBe("BODY");
+  });
+
+  it("makes the answer inert for a public report: no @mention, no #N link", () => {
+    expect(withAnswer("keep @alice's change from #12", "BODY", true)).toBe(
+      "### What it should have been\n\n```text\nkeep @alice's change from #12\n```\n\n---\n\nBODY",
+    );
+  });
+
+  it("a full answer on a full report stays under GitHub's 65,536 characters", () => {
+    const big = Array.from({ length: 5000 }, (_, i) => `line ${i} `.padEnd(40, "x"));
+    const body = repoReportPrefill(report({ hunk: hunk({ oursLines: big, theirsLines: big, baseLines: big }), resolvedLines: big })).body;
+    expect(withAnswer("a".repeat(ANSWER_MAX), body).length).toBeLessThan(65_536);
+  });
+});
+
+describe("budget — one enormous line", () => {
+  it("cuts inside the block and keeps every fence closed and the reasoning", () => {
+    const huge = ["x".repeat(80_000)];
+    const p = repoReportPrefill(report({ hunk: hunk({ oursLines: huge, theirsLines: ["b"], baseLines: ["a"] }), resolvedLines: huge }));
+    expect(p.body.length).toBeLessThanOrEqual(REPORT_BODY_MAX);
+    expect(p.body).toContain("### Why");
+    const fences = p.body.split("\n").filter((l) => /^```/.test(l));
+    expect(fences.length % 2).toBe(0);
+    expect(p.body).toContain("characters)_");
+  });
+});
+
+describe("reportFor", () => {
+  const res = (lines: string[] | null) => ({ hunk: hunk(), resolvedLines: lines, autoResolved: !!lines, resolutionReason: "" });
+
+  it("takes the engine's (or the AI's) resolved lines", () => {
+    expect(reportFor("engine", "a.ts", hunk(), res(["R"]))).toMatchObject({ kind: "engine", path: "a.ts", resolvedLines: ["R"] });
+  });
+
+  it("takes a token-level merge's own merged lines", () => {
+    const h = hunk({ trace: { steps: [], selected: "token_level_merge", summary: "", hasBase: true, tokenMergeTrace: { mergedLines: ["M"], pass1Count: 1, pass2Count: 0, lineDetails: [] } } as ConflictHunk["trace"] });
+    expect(reportFor("token", "a.ts", h, res(null))?.resolvedLines).toEqual(["M"]);
+  });
+
+  it("reports an AI proposal without a result only when it has a trace", () => {
+    const withTrace = hunk({ trace: { steps: [], selected: "llm_proposed", summary: "", hasBase: true, llmTrace: {} } as unknown as ConflictHunk["trace"] });
+    expect(reportFor("ai", "a.ts", withTrace, res(null))?.resolvedLines).toBeNull();
+    expect(reportFor("ai", "a.ts", hunk(), res(null))).toBeNull();
+    expect(reportFor("engine", "a.ts", hunk(), res(null))).toBeNull();
+  });
+});
+
+describe("acceptedLabel", () => {
+  it("names a copy by its type and the first line written, cut at 40 characters", () => {
+    expect(acceptedLabel(report({ resolvedLines: ["", "  const a = 23;"] }))).toEqual(["non_overlapping", "const a = 23;"]);
+    expect(acceptedLabel(report({ resolvedLines: ["x".repeat(50)] }))[1]).toBe("x".repeat(40) + "…");
+  });
+});
+

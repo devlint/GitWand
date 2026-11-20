@@ -18,6 +18,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
+import { devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -1072,6 +1073,9 @@ function devCoalesceRepoPaths(batch) {
   };
 }
 
+/** `/api/gh-gitwand-writable`'s last answer and when (#301). */
+let devGitwandWritable = null;
+
 /**
  * Get a GitHub OAuth token — tries in order:
  *  1. GH_TOKEN / GITHUB_TOKEN env vars
@@ -1096,9 +1100,54 @@ function getGithubToken() {
   return null;
 }
 
+/** `HostName` that `ssh` connects to for `host` (`ssh -G` reads the config
+ *  without connecting); null when `ssh` can't be asked. A positive answer is
+ *  kept, a negative one asked again after a minute. `ssh` gets only what it
+ *  needs to read its config, no token. Mirrors `ssh_resolved_host` in
+ *  `commands/gh.rs`. */
+const sshHostCache = new Map();
+const SSH_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SystemRoot", "windir", "TMPDIR", "TEMP", "TMP"];
+function sshResolvedHost(host) {
+  if (!/^[A-Za-z0-9._-]+$/.test(host) || host.startsWith("-")) return null;
+  const hit = sshHostCache.get(host);
+  if (hit && (hit.resolved || Date.now() - hit.at < 60_000)) return hit.resolved;
+  const env = Object.fromEntries(SSH_ENV_KEYS.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
+  const r = spawnSync("ssh", ["-G", host], { encoding: "utf-8", env, timeout: 5000 });
+  const line = r.status === 0 ? (r.stdout || "").split("\n").find((l) => l.startsWith("hostname ")) : null;
+  const resolved = line ? line.slice("hostname ".length).trim() || null : null;
+  sshHostCache.set(host, { resolved, at: Date.now() });
+  return resolved;
+}
+
+const isGithubCom = (host) => host === "github.com" || host.endsWith(".github.com");
+
+/** `owner/repo` from a github.com remote URL, or null. Same reading as
+ *  `gh_repo_from_remote_url` in `commands/gh.rs` (scp-style with any user or
+ *  none, ports skipped, an SSH host resolved through `ssh -G`), restricted to
+ *  github.com: the dev-server's REST routes only talk to api.github.com, so a
+ *  GitHub Enterprise origin gives null here and `gh` picks the repo itself. */
+function githubNwoFromUrl(rawUrl) {
+  const url = rawUrl.trim();
+  let host, path;
+  const scheme = url.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:]+)(?::\d+)?\/(.*)$/i);
+  if (scheme) {
+    [, host, path] = scheme;
+  } else {
+    const scp = url.match(/^(?:[^@\s/\\]+@)?([^:/\\\s]+):(.*)$/);
+    if (!scp) return null;
+    [, host, path] = scp;
+  }
+  host = host.toLowerCase();
+  const isSsh = scheme ? /ssh/i.test(url.slice(0, url.indexOf("://"))) : true;
+  if (isSsh && !isGithubCom(host)) host = sshResolvedHost(host)?.toLowerCase() ?? host;
+  if (!isGithubCom(host)) return null;
+  const m = path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "").match(/^([^/]+)\/([^/]+)$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
 /**
- * Return "owner/repo" from the git remote origin URL in `cwd`.
- * Handles both https://github.com/owner/repo.git and git@github.com:owner/repo.git
+ * Return "owner/repo" from the git remote origin URL in `cwd` (see
+ * `githubNwoFromUrl`), or null when origin is not a github.com remote.
  */
 function getRepoNwo(cwd) {
   // Strategy 1: read .git/config directly — no binary needed
@@ -1106,17 +1155,57 @@ function getRepoNwo(cwd) {
     const gitConfig = readFileSync(join(cwd, ".git", "config"), "utf-8");
     const m = gitConfig.match(/\[remote\s+"origin"\][\s\S]*?url\s*=\s*(.+)/);
     if (m) {
-      const url = m[1].trim();
-      const rm = url.match(/github\.com[:/](.+?)\/(.+?)(?:\.git)?$/);
-      if (rm) return `${rm[1]}/${rm[2]}`;
+      const nwo = githubNwoFromUrl(m[1]);
+      if (nwo) return nwo;
     }
   } catch { /* ignore */ }
   // Strategy 2: git binary fallback
   const r = spawnSync(GIT, ["remote", "get-url", "origin"], { cwd, encoding: "utf-8" });
   if (r.status !== 0) return null;
-  const url = r.stdout.trim();
-  const m = url.match(/github\.com[:/](.+?)\/(.+?)(?:\.git)?$/);
-  return m ? `${m[1]}/${m[2]}` : null;
+  return githubNwoFromUrl(r.stdout);
+}
+
+/** The repo a `gh` command about PR `number` must target in the dev-server:
+ *  where that number comes from. The dev-server lists `origin`'s pull requests
+ *  (/api/gh-list-prs) and its per-PR routes resolve them with `resolvePrNwo`
+ *  (origin, then the fork parent when the PR is not on origin), so the `gh`
+ *  routes do the same. (The Tauri build lists the fork parent's for a fork:
+ *  `gh_base_repo` in `commands/gh.rs`, consistently with its own list.)
+ *  Without a token, origin. null without a github.com origin: `gh` chooses. */
+async function ghPrNwo(cwd, number) {
+  const token = getGithubToken();
+  return token ? resolvePrNwo(cwd, number, token) : getRepoNwo(cwd);
+}
+
+/** `GH_REPO` (and `GH_HOST`, so a user's `GH_HOST` cannot redirect it) for a
+ *  github.com repo — `gh_cmd` in `commands/gh.rs`. `GH_REPO` rather than
+ *  `--repo`: `gh pr merge` skips deleting the local branch whenever `--repo` is
+ *  given. Left to itself, `gh` picks an `upstream` remote over `origin`, even
+ *  an unrelated one (#298). */
+function ghRepoEnv(nwo) {
+  return nwo ? { ...process.env, GH_REPO: nwo, GH_HOST: "github.com" } : process.env;
+}
+
+async function ghPrEnv(cwd, number) {
+  return ghRepoEnv(await ghPrNwo(cwd, number));
+}
+
+/** `{ args, env }` for `gh pr merge …` — `gh_merge_cmd` in `commands/gh.rs`.
+ *  `GH_REPO` keeps gh's local cleanup, but that cleanup needs a remote for
+ *  the target repo (looked up after the merge, so its absence fails an already
+ *  merged PR); for a target that is not a remote, `--repo`, which skips it.
+ *  Remotes are read from `git remote -v`, which applies `insteadOf`. */
+async function ghMergeSpawn(cwd, number, args) {
+  const nwo = await ghPrNwo(cwd, number);
+  if (!nwo) return { args, env: process.env };
+  const r = spawnSync(GIT, ["remote", "-v"], { cwd, encoding: "utf-8" });
+  const isRemote = (r.stdout || "").split("\n").some((line) => {
+    const url = line.split("\t")[1]?.replace(/ \((fetch|push)\)$/, "");
+    return url && githubNwoFromUrl(url)?.toLowerCase() === nwo.toLowerCase();
+  });
+  return isRemote
+    ? { args, env: ghRepoEnv(nwo) }
+    : { args: [...args, "--repo", nwo], env: { ...process.env, GH_HOST: "github.com" } };
 }
 
 /** Cache of resolved PR repo nwo, keyed by `<origin>#<number>`. The repo a PR
@@ -1165,14 +1254,73 @@ async function resolvePrNwo(cwd, number, token) {
 }
 
 /** Fetch from GitHub REST API with auth. `accept` overrides the default JSON accept header. */
-async function githubFetch(path, token, accept = "application/vnd.github+json") {
+async function githubFetch(path, token, accept = "application/vnd.github+json", init = {}) {
   return fetch(`https://api.github.com${path}`, {
+    ...init,
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: accept,
       "X-GitHub-Api-Version": "2022-11-28",
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
     },
   });
+}
+
+// ─── Issue creation (#301) — mirrors `commands/gh_issues.rs` ────────────────
+
+/** Issue targets per `cwd` + origin, for 5 minutes, as `issue_targets_inner`. */
+const devIssueTargetsCache = new Map();
+
+/**
+ * Same rules as `targets_from`: origin, then its parent when it is a fork.
+ * `fresh` (the form opening) reads GitHub; the picker and create routes take
+ * the cached answer, as the Rust commands do.
+ */
+async function devIssueTargets(cwd, token, fresh = false) {
+  const nwo = getRepoNwo(cwd);
+  if (!nwo) return { targets: [], defaultRepo: null };
+  const key = `${cwd}\u0000${nwo}`;
+  const hit = devIssueTargetsCache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.targets;
+  const targets = await devIssueTargetsRead(nwo, token);
+  devIssueTargetsCache.set(key, { targets, at: Date.now() });
+  return targets;
+}
+
+async function devIssueTargetsRead(nwo, token) {
+  const resp = await githubFetch(`/repos/${nwo}`, token);
+  if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+  const origin = await resp.json();
+  // As in Rust: the embedded parent may lack the viewer's permissions.
+  if (origin.fork === true && origin.parent?.full_name) {
+    // As in Rust, a failed parent read keeps the copy embedded in origin's answer.
+    const p = await githubFetch(`/repos/${origin.parent.full_name}`, token).catch(() => null);
+    if (p?.ok) {
+      const parent = await p.json().catch(() => null);
+      if (parent) origin.parent = parent;
+    }
+  }
+  // `targets_from`, from core (shared with the MCP tool). Checked here, not
+  // in DEV_CORE_HELPERS: an older dist must not take the diff routes down too.
+  const core = await loadDevCore();
+  if (typeof core.issueTargetsFrom !== "function") {
+    throw new Error("@gitwand/core is out of date (missing issueTargetsFrom): run `pnpm --filter @gitwand/core build`, then restart the dev-server");
+  }
+  return core.issueTargetsFrom(origin);
+}
+
+/** Up to `maxPages` pages of 100 of the array at `path` (`query` ends with `&`). */
+async function devGithubPages(path, query, token, maxPages) {
+  const all = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const resp = await githubFetch(`${path}?${query}per_page=100&page=${page}`, token);
+    if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+    const arr = await resp.json();
+    if (!Array.isArray(arr)) break;
+    all.push(...arr);
+    if (arr.length < 100) break;
+  }
+  return all;
 }
 
 /** Run a GitHub GraphQL operation; returns `data`, throws on the first `errors[]` entry. */
@@ -5335,6 +5483,157 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/gh-issue-available?cwd=<path> — mirrors `gh_issue_available`:
+    // a local check (origin is a GitHub remote), no request.
+    if (url.pathname === "/api/gh-issue-available" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      return jsonResponse(req, res, getRepoNwo(resolve(cwd)) !== null);
+    }
+
+    // GET /api/gh-issue-targets?cwd=<path> — mirrors `gh_issue_targets`.
+    if (url.pathname === "/api/gh-issue-targets" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        return jsonResponse(req, res, await devIssueTargets(resolve(cwd), token, true));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-create-issue { cwd, input } — mirrors `gh_create_issue`.
+    if (url.pathname === "/api/gh-create-issue" && req.method === "POST") {
+      const { cwd, input } = await readBody(req);
+      if (!cwd || !input) return jsonResponse(req, res, { error: "Missing cwd or input" }, 400);
+      // Checked before any call, as in Rust: a blank title costs no request.
+      const built = devIssuePayload(input);
+      if (built.error) return jsonResponse(req, res, { error: built.error }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), input.repo);
+        if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
+        let resp;
+        try {
+          resp = await githubFetch(`/repos/${target.repo}/issues`, token, undefined, {
+            method: "POST",
+            body: JSON.stringify(built.payload),
+          });
+        } catch (err) {
+          // The request may have left before the failure: as in Rust, say so.
+          return jsonResponse(req, res, { error: MAY_HAVE_BEEN_CREATED + err.message }, 502);
+        }
+        const created = await resp.json().catch(() => ({}));
+        if (!resp.ok) return jsonResponse(req, res, { error: devCreateFailure(resp.status, created) }, resp.status);
+        return jsonResponse(req, res, { number: created.number, url: created.html_url || "" });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-gitwand-writable — mirrors `gh_gitwand_writable`: the
+    // dev-server writes with the `gh` token, so a token is enough.
+    if (url.pathname === "/api/gh-gitwand-writable" && req.method === "GET") {
+      // getGithubToken() spawns `gh auth token` synchronously: reused for
+      // 30 s, as the Rust side does, so tab switches don't block the server.
+      const now = Date.now();
+      if (!devGitwandWritable || now - devGitwandWritable.at > 30_000) {
+        devGitwandWritable = { ok: !!getGithubToken(), at: now };
+      }
+      return jsonResponse(req, res, devGitwandWritable.ok);
+    }
+
+    // POST /api/gh-create-gitwand-issue { input } — mirrors
+    // `gh_create_gitwand_issue` (#301), on GITWAND_DEV_REPORT_REPO when set.
+    if (url.pathname === "/api/gh-create-gitwand-issue" && req.method === "POST") {
+      const { input } = await readBody(req);
+      const built = devGitwandReport(input, process.env);
+      if (built.error) return jsonResponse(req, res, { error: built.error }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        let resp;
+        try {
+          resp = await githubFetch(`/repos/${built.repo}/issues`, token, undefined, {
+            method: "POST",
+            body: JSON.stringify(built.payload),
+          });
+        } catch (err) {
+          return jsonResponse(req, res, { error: MAY_HAVE_BEEN_CREATED + err.message }, 502);
+        }
+        const created = await resp.json().catch(() => ({}));
+        if (!resp.ok) return jsonResponse(req, res, { error: devCreateFailure(resp.status, created) }, resp.status);
+        return jsonResponse(req, res, { number: created.number, url: created.html_url || "" });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-list-{labels,milestones,assignees}?cwd=<path>&repo=<owner/repo>
+    // — mirror `gh_list_labels` / `gh_list_milestones` / `gh_list_assignees`.
+    // (The condition below names each route literally: commandRegistry.test
+    // reads the served routes from `url.pathname === "…"` comparisons.)
+    if (
+      (url.pathname === "/api/gh-list-labels" ||
+        url.pathname === "/api/gh-list-milestones" ||
+        url.pathname === "/api/gh-list-assignees") &&
+      req.method === "GET"
+    ) {
+      const issuePicker = {
+        "/api/gh-list-labels": { suffix: "labels", query: "", pages: 3, map: devLabelsFrom },
+        "/api/gh-list-milestones": { suffix: "milestones", query: "state=open&", pages: 1, map: devMilestonesFrom },
+        "/api/gh-list-assignees": { suffix: "assignees", query: "", pages: 3, map: devAssigneesFrom },
+      }[url.pathname];
+      const cwd = url.searchParams.get("cwd");
+      const repo = url.searchParams.get("repo");
+      if (!cwd || !repo) return jsonResponse(req, res, { error: "Missing cwd or repo" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
+        if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
+        const items = await devGithubPages(`/repos/${target.repo}/${issuePicker.suffix}`, issuePicker.query, token, issuePicker.pages);
+        return jsonResponse(req, res, issuePicker.map(items));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-issue-templates?cwd=<path>&repo=<owner/repo> — mirrors
+    // `gh_issue_templates` (#301): the target's template files. github.com
+    // only, like every issue route of this server (Rust reads Enterprise).
+    if (url.pathname === "/api/gh-issue-templates" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const repo = url.searchParams.get("repo");
+      if (!cwd || !repo) return jsonResponse(req, res, { error: "Missing cwd or repo" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const target = devResolveIssueTarget(await devIssueTargets(resolve(cwd), token), repo);
+        if (target.error) return jsonResponse(req, res, { error: target.error }, 400);
+        // Each read bounded at 30 s, as Rust's.
+        const bounded = () => ({ signal: AbortSignal.timeout(30_000) });
+        const get = async (nwo, path) => {
+          const resp = await githubFetch(path ? `/repos/${nwo}/contents/${path}` : `/repos/${nwo}/contents`, token, undefined, bounded());
+          if (resp.status === 404) return null;
+          if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+          return resp.json();
+        };
+        const isPublic = async (nwo) => {
+          const resp = await githubFetch(`/repos/${nwo}`, token, undefined, bounded());
+          if (resp.status === 404) return false;
+          if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+          return (await resp.json())?.private === false;
+        };
+        return jsonResponse(req, res, await devTemplateFiles(target.repo, isPublic, get));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
     // GET /api/gh-reviewer-candidates?cwd=<path>
     // Lists assignees (users with push access) for autocomplete.
     if (url.pathname === "/api/gh-reviewer-candidates" && req.method === "GET") {
@@ -5345,27 +5644,10 @@ async function handleRequest(req, res) {
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
         const nwo = getRepoNwo(resolve(cwd));
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        // Paginate up to 3 pages of 100 = 300 candidates.
-        const all = [];
-        const seen = new Set();
-        for (let page = 1; page <= 3; page++) {
-          const resp = await githubFetch(`/repos/${nwo}/assignees?per_page=100&page=${page}`, token);
-          if (!resp.ok) break;
-          const raw = await resp.json();
-          if (!Array.isArray(raw) || raw.length === 0) break;
-          for (const u of raw) {
-            if (!u.login || seen.has(u.login)) continue;
-            seen.add(u.login);
-            all.push({
-              login: u.login,
-              name: u.name ?? null,
-              avatar_url: u.avatar_url ?? null,
-            });
-          }
-          if (raw.length < 100) break;
-        }
-        all.sort((a, b) => a.login.toLowerCase().localeCompare(b.login.toLowerCase()));
-        return jsonResponse(req, res, all);
+        // Up to 3 pages of 100, read like the Rust `api_get_pages` (an error
+        // page fails the call instead of returning partial data).
+        const items = await devGithubPages(`/repos/${nwo}/assignees`, "", token, 3);
+        return jsonResponse(req, res, devAssigneesFrom(items));
       } catch (err) {
         console.error("[gh-reviewer-candidates]", err.message);
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
@@ -5595,6 +5877,73 @@ async function handleRequest(req, res) {
         })));
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-pr-attachment-urls?cwd=<path>&number=<n>
+    // Signed URLs of the PR's uploaded files, from `body_html` (#302) —
+    // mirrors `gh_pr_attachment_urls` / `signed_attachment_urls` in Rust.
+    if (url.pathname === "/api/gh-pr-attachment-urls" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+      // The Rust command takes an i64: refuse here what it cannot receive.
+      if (!/^\d+$/.test(number)) return jsonResponse(req, res, { error: "Invalid number" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = await resolvePrNwo(resolve(cwd), number, token);
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const paths = [
+          `/repos/${nwo}/issues/${number}`,
+          `/repos/${nwo}/issues/${number}/comments?per_page=100`,
+          `/repos/${nwo}/pulls/${number}/comments?per_page=100`,
+          `/repos/${nwo}/pulls/${number}/reviews?per_page=100`,
+        ];
+        // Best effort, like `signed_urls_from_fetches`: one failed endpoint
+        // does not cost the others' URLs; all failing is the error.
+        const htmls = [];
+        let firstError = null;
+        let anyOk = false;
+        // Visibility alongside the bodies, best effort (null when unreadable),
+        // read from the PR's base repository as the Rust command does.
+        const [repoResult, ...fetches] = await Promise.allSettled([
+          githubFetch(`/repos/${nwo}/pulls/${number}`, token).then((r) => (r.ok ? r.json() : null)),
+          ...paths.map(async (p) => {
+            const resp = await githubFetch(p, token, "application/vnd.github.html+json");
+            if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
+            return resp.json();
+          }),
+        ]);
+        const priv = repoResult.status === "fulfilled" ? repoResult.value?.base?.repo?.private : undefined;
+        const isPrivate = typeof priv === "boolean" ? priv : null;
+        for (const f of fetches) {
+          if (f.status === "rejected") {
+            firstError ??= f.reason?.message ?? String(f.reason);
+            continue;
+          }
+          anyOk = true;
+          const v = f.value;
+          for (const item of Array.isArray(v) ? v : [v]) if (typeof item?.body_html === "string") htmls.push(item.body_html);
+        }
+        if (!anyOk) return jsonResponse(req, res, { error: firstError }, 500);
+        const urls = [];
+        for (const html of htmls) {
+          for (const m of html.matchAll(/\ssrc="([^"]*)"/g)) {
+            if (!m[1].startsWith("https://private-user-images.githubusercontent.com/")) continue;
+            // Same references as `decode_html_entities` in Rust.
+            const u = m[1].replace(/&(#x[0-9a-f]+|#[0-9]+|amp|quot|apos|lt|gt);/gi, (all, n) => {
+              const named = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">" }[n.toLowerCase()];
+              if (named) return named;
+              const code = n[1] === "x" || n[1] === "X" ? parseInt(n.slice(2), 16) : parseInt(n.slice(1), 10);
+              return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : all;
+            });
+            if (!urls.includes(u)) urls.push(u);
+          }
+        }
+        return jsonResponse(req, res, { private: isPrivate, urls, complete: firstError === null });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
       }
     }
 
@@ -6835,8 +7184,10 @@ async function handleRequest(req, res) {
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
-        const r = spawnSync(GH, ["pr", "merge", String(number), mergeFlag, "--delete-branch"], {
+        const spawn = await ghMergeSpawn(resolve(cwd), number, ["pr", "merge", String(number), mergeFlag, "--delete-branch"]);
+        const r = spawnSync(GH, spawn.args, {
           cwd: resolve(cwd),
+          env: spawn.env,
           encoding: "utf-8",
         });
         if (r.status !== 0) {
@@ -6857,11 +7208,10 @@ async function handleRequest(req, res) {
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
-        const r = spawnSync(
-          GH,
-          ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch"],
-          { cwd: resolve(cwd), encoding: "utf-8" },
-        );
+        // Through ghMergeSpawn: an already-mergeable PR is merged at once and
+        // then gets the same --delete-branch local cleanup.
+        const spawn = await ghMergeSpawn(resolve(cwd), number, ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch"]);
+        const r = spawnSync(GH, spawn.args, { cwd: resolve(cwd), env: spawn.env, encoding: "utf-8" });
         if (r.status !== 0) {
           const detail = spawnFailureDetail(r, "gh pr merge --auto failed");
           return jsonResponse(req, res, { error: detail }, 500);
@@ -6879,6 +7229,7 @@ async function handleRequest(req, res) {
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
         const r = spawnSync(GH, ["pr", "merge", String(number), "--disable-auto"], {
           cwd: resolve(cwd),
+          env: await ghPrEnv(resolve(cwd), number),
           encoding: "utf-8",
         });
         if (r.status !== 0) {
@@ -8847,7 +9198,7 @@ async function handleRequest(req, res) {
         const raw = execFileSync(
           GH,
           ["pr", "view", prNumber, "--json", "files", "--jq", "[.files[].path]"],
-          { cwd: repoPath, encoding: "utf-8" }
+          { cwd: repoPath, env: await ghPrEnv(repoPath, prNumber), encoding: "utf-8" }
         );
         return jsonResponse(req, res, JSON.parse(raw.trim() || "[]"));
       } catch (err) {
@@ -9504,6 +9855,15 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    GET  /api/gh-pr-count?cwd=<path>&state=<state>`);
   console.log(`    GET  /api/gh-pr-freshness?cwd=<path>`);
   console.log(`    POST /api/gh-create-pr  { cwd, title, body, base?, draft?, reviewers? }`);
+  console.log(`    GET  /api/gh-issue-available?cwd=<path>`);
+  console.log(`    GET  /api/gh-issue-targets?cwd=<path>`);
+  console.log(`    POST /api/gh-create-issue  { cwd, input }`);
+  console.log(`    GET  /api/gh-gitwand-writable`);
+  console.log(`    POST /api/gh-create-gitwand-issue  { input }`);
+  console.log(`    GET  /api/gh-list-labels?cwd=<path>&repo=<owner/repo>`);
+  console.log(`    GET  /api/gh-issue-templates?cwd=<path>&repo=<owner/repo>`);
+  console.log(`    GET  /api/gh-list-milestones?cwd=<path>&repo=<owner/repo>`);
+  console.log(`    GET  /api/gh-list-assignees?cwd=<path>&repo=<owner/repo>`);
   console.log(`    GET  /api/gh-reviewer-candidates?cwd=<path>`);
   console.log(`    GET  /api/gh-pr-detail?cwd=<path>&number=<n>`);
   console.log(`    GET  /api/gh-pr-diff?cwd=<path>&number=<n>`);

@@ -14,6 +14,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../useSafeHtml";
 import { useSettings } from "../useSettings";
+import { commentsWithheldImages } from "../useRemoteImages";
 
 afterEach(() => {
   useSettings().settings.value.allowRemoteImages = false;
@@ -283,5 +284,66 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
     expect(renderMarkdown(null)).toBe("");
     expect(renderMarkdown(undefined)).toBe("");
     expect(renderMarkdown("")).toBe("");
+  });
+});
+
+describe("GitHub attachments (#302)", () => {
+  const asset = "https://github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016";
+
+  const gh = { githubAttachments: true };
+
+  it("loads a file uploaded to GitHub without consent when rendering a GitHub PR", () => {
+    const out = renderMarkdown(`![shot](${asset}) ![t](https://tracker.example/p.png)`, gh);
+    expect(out).toContain(`src="${asset}"`);
+    expect(out).not.toContain(`src="https://tracker.example`);
+    expect(hasBlockedRemoteImages(out)).toBe(true);
+  });
+
+  it("withholds it like any remote image elsewhere (README, other forges)", () => {
+    expect(hasBlockedRemoteImages(renderMarkdown(`![shot](${asset})`))).toBe(true);
+    // A resolver alone does not grant the exemption.
+    expect(hasBlockedRemoteImages(renderMarkdown(`![shot](${asset})`, { resolveImage: () => null }))).toBe(true);
+  });
+
+  it("still withholds look-alike hosts and other github.com paths", () => {
+    for (const src of [
+      "https://github.com.evil.example/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016",
+      "https://github.com/someone/repo/raw/main/p.png",
+      "http://github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016",
+      "https://user@github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016",
+    ]) {
+      expect(hasBlockedRemoteImages(renderMarkdown(`![x](${src})`, gh))).toBe(true);
+    }
+  });
+
+  it("swaps in the URL given by resolveImage", () => {
+    const signed = "https://private-user-images.githubusercontent.com/1/2-e56beadb-c31a-4dee-bcd2-973dae719016.png?jwt=a.b.c";
+    const out = renderMarkdown(`<img alt="x" src="${asset}">`, {
+      githubAttachments: true,
+      resolveImage: (src) => (src === asset ? signed : null),
+    });
+    expect(out).toContain(`src="${signed}"`);
+    expect(hasBlockedRemoteImages(out)).toBe(false);
+  });
+
+  it("vets the resolved URL like any other", () => {
+    const out = renderMarkdown(`![x](${asset})`, { resolveImage: () => "https://tracker.example/p.png" });
+    expect(hasBlockedRemoteImages(out)).toBe(true);
+    const js = renderMarkdown(`![x](${asset})`, { resolveImage: () => "javascript:alert(1)" });
+    expect(js).not.toContain("javascript:");
+  });
+
+  it("drops the resolver once the call returns", () => {
+    renderMarkdown(`![x](${asset})`, { resolveImage: () => "https://tracker.example/p.png" });
+    expect(renderMarkdown(`![x](${asset})`, gh)).toContain(`src="${asset}"`);
+    expect(hasBlockedRemoteImages(renderMarkdown(`![x](${asset})`))).toBe(true);
+  });
+});
+
+describe("commentsWithheldImages — GitHub attachments (#302)", () => {
+  it("does not count them as withheld on a GitHub PR, does elsewhere", () => {
+    const comments = [{ body: "![x](https://github.com/user-attachments/assets/e56beadb-c31a-4dee-bcd2-973dae719016)" }];
+    expect(commentsWithheldImages(comments, false, true)).toBe(false);
+    expect(commentsWithheldImages(comments, false, false)).toBe(true);
   });
 });
