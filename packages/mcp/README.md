@@ -74,16 +74,18 @@ follow-up) into a GitHub issue on the repository it works in:
    the title, labels and assignees it would send (the body goes exactly as
    given) and what the secrets scan found.
 2. It shows that preview to you.
-3. Once you agree, it calls again with `dry_run: false`; the tool returns the
-   issue's number and URL.
+3. Once you agree, it calls again with the same arguments, `dry_run: false`
+   and the preview's `preview_id`; the tool returns the issue's number and
+   URL. A create without a matching preview is refused.
 
 The issue goes to `origin`, or to its fork parent when issues are off (or the
 repository archived) on `origin`; `repo` can pick between those two, never
 another. It goes through the GitHub CLI (`gh`), signed in or given
 `GH_TOKEN`/`GITHUB_TOKEN`, so GitHub Enterprise works through `gh`'s own
 host login. Before anything is sent, title and body are scanned with the
-repository's `.gitwandrc` secrets settings: a known secret pattern refuses the
-issue, a high-entropy string only warns.
+repository's `.gitwandrc` secrets patterns: a known secret pattern refuses the
+issue (the repository's `secrets.ignore` cannot lift that), a high-entropy
+string only warns.
 
 ### `gitwand_resolve_hunk` — inversion of `--llm-fallback`
 

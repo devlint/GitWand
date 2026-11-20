@@ -15,8 +15,10 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
 import { DEFAULT_ENTROPY_THRESHOLD, scanReportBody, type ReportScan, type SecretFinding } from "@gitwand/core";
-import { gitTry, readGitwandrc } from "../repo-config.js";
+import { gitTryAsync, readGitwandrcAsync } from "../repo-config.js";
 
 // ─── Remote URL ──────────────────────────────────────────────
 
@@ -56,7 +58,11 @@ export function parseRemoteUrl(url: string): RemoteRepo | null {
       return null;
     }
     if (!["https:", "http:", "ssh:", "git:"].includes(parsed.protocol)) return null;
-    return ownerRepo(parsed.hostname, path, parsed.protocol === "ssh:");
+    if (parsed.search || parsed.hash) return null;
+    const ssh = parsed.protocol === "ssh:";
+    // Over https the port is the web/API server's (gh names such a host
+    // `host:port`); over ssh it is only the ssh daemon's.
+    return ownerRepo(ssh ? parsed.hostname : parsed.host, path, ssh);
   }
   // scp-like: [user@]host:path — a host has no slash, the path does not start with one.
   const m = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/.exec(u);
@@ -197,7 +203,14 @@ function run(cmd: string, args: string[], opts: { cwd?: string; env: NodeJS.Proc
       clearTimeout(timer);
       resolve({ ...r, timedOut, stdout: Buffer.concat(out).toString("utf-8"), stderr: Buffer.concat(err).toString("utf-8") });
     };
-    const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    } catch (e) {
+      // An argument spawn refuses outright (a NUL byte): not run at all.
+      resolve({ missing: false, timedOut: false, code: null, signal: null, stdout: "", stderr: (e as Error).message });
+      return;
+    }
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
@@ -207,13 +220,22 @@ function run(cmd: string, args: string[], opts: { cwd?: string; env: NodeJS.Proc
       if (size > MAX_OUTPUT) child.kill("SIGTERM");
       else into.push(chunk);
     };
-    child.stdout.on("data", collect(out));
-    child.stderr.on("data", collect(err));
-    child.on("error", (e: NodeJS.ErrnoException) => done({ missing: e.code === "ENOENT", code: null, signal: null }));
+    child.stdout!.on("data", collect(out));
+    child.stderr!.on("data", collect(err));
+    child.on("error", (e: NodeJS.ErrnoException) => {
+      // spawn says ENOENT for a missing working directory too.
+      if (e.code === "ENOENT" && opts.cwd && !existsSync(opts.cwd)) {
+        err.push(Buffer.from(`The directory ${opts.cwd} no longer exists.`));
+        done({ missing: false, code: null, signal: null });
+      } else {
+        if (e.code !== "ENOENT") err.push(Buffer.from(e.message));
+        done({ missing: e.code === "ENOENT", code: null, signal: null });
+      }
+    });
     child.on("close", (code, signal) => done({ missing: false, code, signal }));
     // A child that exits before reading stdin must not crash the server.
-    child.stdin.on("error", () => {});
-    child.stdin.end(opts.input ?? "");
+    child.stdin!.on("error", () => {});
+    child.stdin!.end(opts.input ?? "");
   });
 }
 
@@ -223,7 +245,9 @@ export async function runGh(args: string[], cwd: string, input: string | undefin
   if (r.missing) return { ok: false, missing: true, interrupted: false, stderr: "" };
   if (r.timedOut) return { ok: false, missing: false, interrupted: true, stderr: `gh did not answer within ${timeoutMs / 1000} s` };
   if (r.signal) return { ok: false, missing: false, interrupted: true, stderr: `gh was stopped by ${r.signal}` };
-  if (r.code !== 0) return { ok: false, missing: false, interrupted: false, stderr: r.stderr.trim() || `gh exited with code ${r.code}` };
+  if (r.code !== 0) {
+    return { ok: false, missing: false, interrupted: false, stderr: r.stderr.trim() || `gh exited with code ${r.code ?? "?"}` };
+  }
   return { ok: true, stdout: r.stdout };
 }
 
@@ -253,10 +277,12 @@ export async function sshResolvedHost(host: string): Promise<string> {
       const line = r.stdout.split("\n").find((l) => l.startsWith("hostname "));
       const name = line?.slice("hostname ".length).trim().toLowerCase();
       if (name) resolved = name;
-      sshHosts.set(host, resolved === "ssh.github.com" ? "github.com" : resolved);
     }
   }
-  return resolved === "ssh.github.com" ? "github.com" : resolved;
+  if (resolved === "ssh.github.com") resolved = "github.com";
+  // A failed lookup too: asking again would only wait again.
+  sshHosts.set(host, resolved);
+  return resolved;
 }
 
 /** Hosts gh is signed in to (github.com needs no check: a token or sign-in is checked by the call itself). */
@@ -267,23 +293,48 @@ const signedInHosts = new Set<string>();
  * signed in to (GitHub Enterprise) — the desktop's rule. Any other host
  * (gitlab.com, bitbucket.org…) is not GitHub.
  */
-async function isGithubHost(cwd: string, host: string): Promise<boolean | "gh_missing"> {
+async function isGithubHost(cwd: string, host: string): Promise<true | ToolResult> {
   if (host === "github.com" || signedInHosts.has(host)) return true;
   const r = await runGh(["auth", "status", "--hostname", host], cwd, undefined, createIssueTimeouts.readMs);
-  if (!r.ok && r.missing) return "gh_missing";
-  if (r.ok) signedInHosts.add(host);
-  return r.ok;
+  if (r.ok) {
+    signedInHosts.add(host);
+    return true;
+  }
+  if (r.missing) return ghMissing();
+  // gh knows no account there: not a GitHub it can reach.
+  if (/not logged in|no accounts|not authenticated/i.test(r.stderr)) {
+    return fail(
+      "not_github",
+      `The \`origin\` remote is on ${host}, which is not github.com nor a GitHub Enterprise host gh is signed in to (\`gh auth login --hostname ${host}\` if it is one).`,
+    );
+  }
+  // Signed in, but the check failed (an expired token, the network): say so.
+  return fail("gh_auth_failed", `gh could not check its sign-in to ${host}: ${r.stderr}`);
 }
 
 /** A target read stays good this long: a preview then its create read it once. */
 const TARGETS_TTL_MS = 60_000;
 const targetsCache = new Map<string, { at: number; targets: IssueTarget[] }>();
 
-/** Clears what the tool remembers between calls (tests). */
-export function resetCreateIssueCaches(): void {
-  sshHosts.clear();
-  signedInHosts.clear();
+/** Clears what the tool remembers between calls (tests); `keepHosts` keeps the host lookups. */
+export function resetCreateIssueCaches(opts: { keepHosts?: boolean } = {}): void {
+  if (!opts.keepHosts) {
+    sshHosts.clear();
+    signedInHosts.clear();
+  }
   targetsCache.clear();
+}
+
+/** Signs previews: a create must carry the id of a preview of the very same issue. */
+const PREVIEW_KEY = randomBytes(32);
+
+function previewId(issue: unknown): string {
+  return createHmac("sha256", PREVIEW_KEY).update(JSON.stringify(issue)).digest("hex");
+}
+
+function samePreview(given: unknown, issue: unknown): boolean {
+  if (typeof given !== "string" || !/^[0-9a-f]{64}$/.test(given)) return false;
+  return timingSafeEqual(Buffer.from(given, "hex"), Buffer.from(previewId(issue), "hex"));
 }
 
 /**
@@ -306,7 +357,8 @@ export const createIssueToolDefinition = {
     "File a GitHub issue on the repository in `cwd`, through the `gh` CLI (its login, or GH_TOKEN/GITHUB_TOKEN). " +
     "PREVIEWS BY DEFAULT: without `dry_run: false` nothing is created, and the tool returns the target repository, the title, " +
     "labels and assignees it would send, the body's length (the body is sent exactly as given), and what the secrets scan " +
-    "found. Show the user that preview with the body you passed, and call again with `dry_run: false` only once they agree. " +
+    "found, and a `previewId`. Show the user that preview with the body you passed; only once they agree, call again with the same " +
+    "arguments plus `dry_run: false` and that `preview_id` (a create without it, or with changed arguments, is refused). " +
     "If a create returns `create_uncertain`, the issue may exist: check before calling again. " +
     "Target: the `origin` remote's repository, or its fork parent when issues are disabled (or the repository archived) on " +
     "`origin`; an explicit `repo` must be one of those two. " +
@@ -345,6 +397,10 @@ export const createIssueToolDefinition = {
         type: "boolean",
         description: "Default: true — preview only. Pass false to create the issue, after the user has seen the preview.",
       },
+      preview_id: {
+        type: "string",
+        description: "Required with dry_run: false: the `previewId` of a preview of this very issue (same title, body, labels, assignees and target).",
+      },
     },
     required: ["title"],
   },
@@ -358,11 +414,14 @@ const fail = (error: string, message: string): ToolResult => ({
   isError: true,
 });
 
-/** A list argument: absent → [], else non-empty strings without commas (gh splits on them). */
+/** Control characters (NUL, tab, newlines…): never in a title, label or login. */
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** A list argument: absent → [], else non-empty names without commas (gh splits on them) or control characters. */
 function list(v: unknown, name: string): string[] | ToolResult {
   if (v === undefined) return [];
-  if (!Array.isArray(v) || !v.every((x) => typeof x === "string" && x.trim() !== "" && !x.includes(","))) {
-    return fail("invalid_list", `\`${name}\` must be a list of non-empty names without commas.`);
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string" && x.trim() !== "" && !x.includes(",") && !CONTROL.test(x))) {
+    return fail("invalid_list", `\`${name}\` must be a list of non-empty names, without commas or control characters.`);
   }
   return v.map((x: string) => x.trim());
 }
@@ -370,13 +429,15 @@ function list(v: unknown, name: string): string[] | ToolResult {
 /**
  * Title and body scanned each on its own, as the desktop form does: a finding
  * names the field (`title` / `body`) and that field's own line. Always on,
- * with the repository's `.gitwandrc` secrets settings.
+ * with the repository's `.gitwandrc` extra patterns and entropy threshold —
+ * not its `secrets.ignore`: a repository (a clone, a fork) must not be able to
+ * allow-list a value out of what blocks a public issue.
  */
-function scanIssue(root: string, title: string, body: string): ReportScan {
-  const rc = readGitwandrc(root)?.secrets;
+async function scanIssue(root: string, title: string, body: string): Promise<ReportScan> {
+  const rc = (await readGitwandrcAsync(root))?.secrets;
   const opts = {
     extraPatterns: rc?.patterns ?? [],
-    ignore: rc?.ignore ?? [],
+    ignore: [],
     entropyThreshold: rc?.entropyThreshold ?? DEFAULT_ENTROPY_THRESHOLD,
     blockAt: "medium" as const,
   };
@@ -420,7 +481,7 @@ const chars = (s: string) => [...s].length;
 export async function handleCreateIssue(cwd: string, args: Record<string, unknown>): Promise<ToolResult> {
   // 1. Arguments — nothing runs on a malformed call.
   const title = typeof args.title === "string" ? args.title.trim() : "";
-  if (!title || chars(title) > MAX_TITLE || /[\r\n]/.test(title)) {
+  if (!title || chars(title) > MAX_TITLE || CONTROL.test(title)) {
     return fail("invalid_title", `\`title\` is required: one line of at most ${MAX_TITLE} characters.`);
   }
   if (args.body !== undefined && typeof args.body !== "string") return fail("invalid_body", "`body` must be a string.");
@@ -438,21 +499,15 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   const dryRun = args.dry_run !== false;
 
   // 2. The origin remote.
-  const root = gitTry(cwd, ["rev-parse", "--show-toplevel"]);
+  const root = await gitTryAsync(cwd, ["rev-parse", "--show-toplevel"]);
   if (!root) return fail("not_a_repo", `Not a Git repository: ${cwd}`);
-  const url = gitTry(root, ["remote", "get-url", "origin"]);
+  const url = await gitTryAsync(root, ["remote", "get-url", "origin"]);
   if (!url) return fail("no_origin", "This repository has no `origin` remote to file an issue on.");
   const remote = parseRemoteUrl(url);
   if (!remote) return fail("unsupported_remote", "The `origin` remote is not a `host/owner/repo` URL.");
   const host = remote.ssh ? await sshResolvedHost(remote.host) : remote.host;
   const github = await isGithubHost(root, host);
-  if (github === "gh_missing") return ghMissing();
-  if (!github) {
-    return fail(
-      "not_github",
-      `The \`origin\` remote is on ${host}, which is not github.com nor a GitHub Enterprise host gh is signed in to (\`gh auth login --hostname ${host}\` if it is one).`,
-    );
-  }
+  if (github !== true) return github;
 
   // 3. Its issue targets, as GitHub describes them.
   const targets = await readTargets(root, host, remote);
@@ -474,8 +529,10 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   }
 
   // 4. Secrets.
-  const secrets = scanIssue(root, title, body);
+  const secrets = await scanIssue(root, title, body);
   const canCreate = secrets.blocking.length === 0;
+  // What a create must match: this preview's issue, where it goes.
+  const issue = [root, host, chosen.repo, title, body, labels, assignees];
 
   if (dryRun) {
     return ok({
@@ -489,8 +546,9 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
       assignees,
       secrets,
       canCreate,
+      ...(canCreate ? { previewId: previewId(issue) } : {}),
       next: canCreate
-        ? "Nothing was created. Show this preview to the user; call again with dry_run: false once they agree."
+        ? "Nothing was created. Show this preview to the user; once they agree, call again with the same arguments, dry_run: false and preview_id."
         : "Nothing was created, and this issue cannot be: remove the secrets listed in `secrets.blocking` first.",
     });
   }
@@ -498,6 +556,12 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
     return fail(
       "secrets_found",
       `Not created: ${secrets.blocking.map((f) => `${f.patternId} (${f.file} line ${f.line})`).join(", ")}. Remove the secrets and try again.`,
+    );
+  }
+  if (!samePreview(args.preview_id, issue)) {
+    return fail(
+      "preview_required",
+      "Not created: call first without dry_run to get a preview, show it to the user, then pass its `preview_id` with the same title, body, labels, assignees and target.",
     );
   }
 

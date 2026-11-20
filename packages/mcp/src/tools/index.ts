@@ -20,7 +20,7 @@ import { resolve, summarizeTiers, validateMergedContent, type MergeResult, type 
 import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
 import { createIssueToolDefinition, handleCreateIssue } from "./create_issue.js";
 import { detectMergeContext } from "../merge-context.js";
-import { gitOutput } from "../repo-config.js";
+import { gitBlob, gitOutput } from "../repo-config.js";
 import {
   buildRegenerationReport,
   loadGitwandrcResolveGeneratedFiles,
@@ -271,7 +271,7 @@ import { join as joinPath } from "node:path";
 /**
  * Run `git merge-file` and return the merged content INCLUDING conflict markers.
  *
- * Unlike gitTry, this must NOT discard output on a non-zero exit: `git merge-file`
+ * Unlike gitOutput, this must NOT discard output on a non-zero exit: `git merge-file`
  * exits with a code equal to the number of conflicts (>0 means there ARE
  * conflicts — exactly the case the predictor cares about), and the conflict-marked
  * content is still written to stdout. Returns the content as-is (no trim, to
@@ -311,7 +311,7 @@ function changedFiles(cwd: string, base: string, rev: string): string[] {
 
 /** Read a file's blob at a given rev, or null if absent at that rev. */
 function showBlob(cwd: string, rev: string, file: string): string | null {
-  return gitOutput(cwd, ["show", `${rev}:${file}`]);
+  return gitBlob(cwd, rev, file);
 }
 
 interface SimulatedFile {
@@ -360,8 +360,8 @@ function simulate3way(cwd: string, ancestor: string, ours: string, theirs: strin
       writeFileSync(pTheirs, theirsBlob, "utf-8");
 
       // git merge-file -p --diff3 <ours> <base> <theirs> → markered content on stdout.
-      // Must use gitMergeFile, not gitTry: merge-file exits non-zero on conflict
-      // (the very case we want), and gitTry would discard the conflict content.
+      // Must use gitMergeFile, not gitOutput: merge-file exits non-zero on conflict
+      // (the very case we want), and gitOutput would discard the conflict content.
       const merged = gitMergeFile(cwd, ["-p", "--diff3", pOurs, pBase, pTheirs]);
       out.push({ file, content: merged ?? "", addDelete: false });
     }

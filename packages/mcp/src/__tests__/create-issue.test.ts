@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseRemoteUrl, targetsFrom, ghEnv, createIssueTimeouts, resetCreateIssueCaches } from "../tools/create_issue.js";
+import { parseRemoteUrl, targetsFrom, ghEnv, createIssueTimeouts, resetCreateIssueCaches, runGh } from "../tools/create_issue.js";
 import { handleToolCall, registerTools } from "../tools/index.js";
 import { FakeGh, repoJson, type FakeAnswer } from "./fake-gh.js";
 
@@ -25,6 +25,11 @@ describe("parseRemoteUrl", () => {
     expect(parseRemoteUrl(url)).toEqual({ ...want, ssh });
   });
 
+  it("keeps an https port (the API is served there), not an ssh one", () => {
+    expect(parseRemoteUrl("https://ghe.corp:8443/team/app.git")).toMatchObject({ host: "ghe.corp:8443" });
+    expect(parseRemoteUrl("ssh://git@ghe.corp:2222/team/app.git")).toMatchObject({ host: "ghe.corp" });
+  });
+
   it("keeps an enterprise host", () => {
     expect(parseRemoteUrl("git@ghe.corp:team/app.git")).toEqual({ host: "ghe.corp", owner: "team", repo: "app", ssh: true });
   });
@@ -36,6 +41,7 @@ describe("parseRemoteUrl", () => {
     "https://github.com/onlyowner",
     "https://github.com/a/b/c",
     "https://github.com/o/r%E0.git",
+    "https://github.com/me/proj?x=1#y/z",
     "",
   ])(
     "refuses %s",
@@ -144,6 +150,13 @@ async function call(cwd: string, args: Record<string, unknown>) {
   return { isError: res.isError === true, out: JSON.parse(res.content[0].text) };
 }
 
+/** A preview, then the create it allows (its `previewId`). */
+async function create(cwd: string, args: Record<string, unknown>) {
+  const preview = await call(cwd, args);
+  if (preview.isError) return preview;
+  return call(cwd, { ...args, dry_run: false, preview_id: preview.out.previewId });
+}
+
 const creates = (g: FakeGh) => g.calls().filter((c) => c.tool === "gh" && c.argv[0] === "issue");
 const apis = (g: FakeGh) => g.calls().filter((c) => c.tool === "gh" && c.argv[0] === "api");
 const token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8";
@@ -153,6 +166,7 @@ describe("gitwand_create_issue", () => {
     const tool = registerTools().find((t) => t.name === "gitwand_create_issue")!;
     expect(tool).toBeDefined();
     expect((tool.inputSchema as any).required).toEqual(["title"]);
+    expect((tool.inputSchema as any).properties.preview_id.type).toBe("string");
     expect(tool.description).toMatch(/dry_run: false/);
   });
 
@@ -174,18 +188,18 @@ describe("gitwand_create_issue", () => {
     expect(out.next).toMatch(/dry_run: false/);
     // The body is the agent's own text: not echoed back.
     expect(out.body).toBeUndefined();
+    expect(out.previewId).toMatch(/^[0-9a-f]{64}$/);
     expect(creates(g)).toHaveLength(0);
     expect(g.calls().map((c) => c.argv)).toEqual([["api", "--hostname", "github.com", "repos/me/proj"]]);
   });
 
   it("creates with dry_run: false, the body on stdin", async () => {
     const g = fake();
-    const { isError, out } = await call(makeRepo(), {
+    const { isError, out } = await create(makeRepo(), {
       title: "T",
       body: "line 1\nline 2",
       labels: ["bug"],
       assignees: ["@me"],
-      dry_run: false,
     });
     expect(isError).toBe(false);
     expect(out).toEqual({ created: true, repo: "me/proj", number: 12, url: ISSUE_URL });
@@ -258,6 +272,9 @@ describe("gitwand_create_issue", () => {
     [{ title: "   " }, "invalid_title"],
     [{ title: "x".repeat(257) }, "invalid_title"],
     [{ title: "Crash\nmore" }, "invalid_title"],
+    [{ title: "Bug\u0000x" }, "invalid_title"],
+    [{ title: "T", labels: ["bu\u0000g"] }, "invalid_list"],
+    [{ title: "T", assignees: ["me\tyou"] }, "invalid_list"],
     [{ title: "😀".repeat(257) }, "invalid_title"],
     [{ title: "Crash\r" + "more" }, "invalid_title"],
     [{ title: "T", body: "x".repeat(65_537) }, "invalid_body"],
@@ -318,7 +335,7 @@ describe("gitwand_create_issue", () => {
 
   it("create failing → create_failed with gh's words", async () => {
     fake(repoJson("me/proj"), { stderr: "could not add label: 'nope' not found", code: 1 });
-    const r = await call(makeRepo(), { title: "T", labels: ["nope"], dry_run: false });
+    const r = await create(makeRepo(), { title: "T", labels: ["nope"] });
     expect(r.isError).toBe(true);
     expect(r.out.error).toBe("create_failed");
     expect(r.out.message).toContain("could not add label");
@@ -331,7 +348,7 @@ describe("gitwand_create_issue", () => {
       "issue create": { stdout: "https://ghe.corp/me/proj/issues/3\n" },
       "auth status": { stdout: "" },
     });
-    const { out } = await call(makeRepo("git@ghe.corp:me/proj.git"), { title: "T", dry_run: false });
+    const { out } = await create(makeRepo("git@ghe.corp:me/proj.git"), { title: "T" });
     expect(out).toMatchObject({ created: true, number: 3 });
     expect(apis(g)[0].argv).toEqual(["api", "--hostname", "ghe.corp", "repos/me/proj"]);
     expect(creates(g)[0].argv.slice(0, 4)).toEqual(["issue", "create", "--repo", "ghe.corp/me/proj"]);
@@ -376,7 +393,7 @@ describe("gitwand_create_issue", () => {
   it("a create that times out may have created the issue", async () => {
     createIssueTimeouts.createMs = 300;
     fake(repoJson("me/proj"), { stdout: ISSUE_URL, sleepMs: 3000 });
-    const r = await call(makeRepo(), { title: "T", dry_run: false });
+    const r = await create(makeRepo(), { title: "T" });
     expect(r.isError).toBe(true);
     expect(r.out.error).toBe("create_uncertain");
     expect(r.out.message).toContain("https://github.com/me/proj/issues");
@@ -384,7 +401,7 @@ describe("gitwand_create_issue", () => {
 
   it("a create stopped by a signal may have created the issue too, and says why", async () => {
     fake(repoJson("me/proj"), { signal: "SIGTERM" });
-    const r = await call(makeRepo(), { title: "T", dry_run: false });
+    const r = await create(makeRepo(), { title: "T" });
     expect(r.out.error).toBe("create_uncertain");
     expect(r.out.message).toMatch(/SIGTERM/);
     expect(r.out.message).not.toMatch(/did not answer/);
@@ -419,7 +436,7 @@ describe("gitwand_create_issue", () => {
     "read tcp 10.0.0.2:51000->140.82.112.6:443: read: connection reset by peer",
   ])("a create cut off by the network may have created the issue: %s", async (stderr) => {
     fake(repoJson("me/proj"), { stderr, code: 1 });
-    const r = await call(makeRepo(), { title: "T", dry_run: false });
+    const r = await create(makeRepo(), { title: "T" });
     expect(r.out.error).toBe("create_uncertain");
     expect(r.out.message).toContain(stderr);
   });
@@ -429,7 +446,7 @@ describe("gitwand_create_issue", () => {
     let ticks = 0;
     const timer = setInterval(() => ticks++, 20);
     try {
-      await call(makeRepo(), { title: "T", dry_run: false });
+      await create(makeRepo(), { title: "T" });
     } finally {
       clearInterval(timer);
     }
@@ -445,7 +462,7 @@ describe("gitwand_create_issue", () => {
     });
     const cwd = makeRepo("git@github-work:me/proj.git");
     await call(cwd, { title: "T" });
-    await call(cwd, { title: "T", dry_run: false });
+    await create(cwd, { title: "T" });
     expect(g.calls().filter((c) => c.tool === "ssh")).toHaveLength(1);
     expect(apis(g)).toHaveLength(1);
   });
@@ -457,5 +474,79 @@ describe("gitwand_create_issue", () => {
     await call(cwd, { title: "T" });
     g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) } });
     expect((await call(cwd, { title: "T" })).out.repo).toBe("me/proj");
+  });
+
+  it("a create needs the preview of the same issue", async () => {
+    const g = fake();
+    const cwd = makeRepo();
+    const none = await call(cwd, { title: "T", dry_run: false });
+    expect(none.isError).toBe(true);
+    expect(none.out.error).toBe("preview_required");
+    const preview = await call(cwd, { title: "T", body: "shown" });
+    for (const changed of [{ body: "other" }, { labels: ["bug"] }, { title: "T2" }, { repo: "me/proj", body: "shown", assignees: ["x"] }]) {
+      const r = await call(cwd, { title: "T", body: "shown", ...changed, dry_run: false, preview_id: preview.out.previewId });
+      expect(r.out.error).toBe("preview_required");
+    }
+    expect((await call(cwd, { title: "T", body: "shown", dry_run: false, preview_id: "f".repeat(64) })).out.error).toBe("preview_required");
+    expect(creates(g)).toHaveLength(0);
+    const ok = await call(cwd, { title: "T", body: "shown", dry_run: false, preview_id: preview.out.previewId });
+    expect(ok.out.created).toBe(true);
+  });
+
+  it("a blocked preview gives no previewId", async () => {
+    fake();
+    const { out } = await call(makeRepo(), { title: "T", body: token });
+    expect(out.canCreate).toBe(false);
+    expect(out.previewId).toBeUndefined();
+  });
+
+  it("the repository's .gitwandrc cannot allow-list a secret out of the blocking scan", async () => {
+    fake();
+    const cwd = makeRepo();
+    writeFileSync(join(cwd, ".gitwandrc"), JSON.stringify({ secrets: { ignore: ["/ghp_[A-Za-z0-9]+/"] } }));
+    const { out } = await call(cwd, { title: "T", body: token });
+    expect(out.canCreate).toBe(false);
+    expect(out.secrets.blocking.map((f: any) => f.patternId)).toEqual(["github_pat_classic"]);
+  });
+
+  it("an enterprise host gh cannot check is not called another forge", async () => {
+    gh = new FakeGh({ "auth status": { stderr: "X Failed to log in to ghe.corp using token (GH_ENTERPRISE_TOKEN)\n  - The token in GH_ENTERPRISE_TOKEN is invalid.", code: 1 } });
+    const r = await call(makeRepo("https://ghe.corp/me/proj.git"), { title: "T" });
+    expect(r.out.error).toBe("gh_auth_failed");
+    expect(r.out.message).toContain("token in GH_ENTERPRISE_TOKEN is invalid");
+  });
+
+  it("a failed ssh lookup is remembered too", async () => {
+    const g = fake();
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "auth status": { stdout: "" }, ssh: { code: 255 } });
+    const cwd = makeRepo("git@ghe.corp:me/proj.git");
+    await call(cwd, { title: "T" });
+    resetCreateIssueCaches({ keepHosts: true });
+    await call(cwd, { title: "T" });
+    expect(g.calls().filter((c) => c.tool === "ssh")).toHaveLength(1);
+  });
+
+  it("a slow git does not block the server either", async () => {
+    fake();
+    const cwd = makeRepo();
+    // Two git calls (rev-parse, remote get-url) of 400 ms each.
+    gh!.slowGit(400);
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 20);
+    try {
+      await call(cwd, { title: "T" });
+    } finally {
+      clearInterval(timer);
+    }
+    expect(ticks).toBeGreaterThan(25);
+  });
+});
+
+describe("runGh", () => {
+  it("a directory that is gone is not gh missing", async () => {
+    gh = new FakeGh({});
+    const r = await runGh(["--version"], join(tmpdir(), "gitwand-gone-" + Date.now()), undefined, 5_000);
+    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ missing: false });
   });
 });

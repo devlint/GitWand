@@ -8,6 +8,7 @@
  */
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 
 export interface FakeAnswer {
@@ -63,6 +64,16 @@ export class FakeGh {
     this.answer(answers);
     this.savedPath = process.env.PATH;
     process.env.PATH = `${this.dir}:${process.env.PATH ?? ""}`;
+  }
+
+  /** A `git` first on PATH that waits `ms` before running the real one. */
+  slowGit(ms: number): void {
+    const real = execFileSync("git", ["--exec-path"], { encoding: "utf-8" }).trim() + "/git";
+    writeFileSync(
+      join(this.dir, "git"),
+      `#!${process.execPath}\nconst { spawnSync } = require("node:child_process");\nconst t = Date.now(); while (Date.now() - t < ${ms});\nconst r = spawnSync(${JSON.stringify(real)}, process.argv.slice(2), { stdio: "inherit" });\nprocess.exit(r.status ?? 1);\n`,
+    );
+    chmodSync(join(this.dir, "git"), 0o755);
   }
 
   answer(answers: Record<string, FakeAnswer>): void {

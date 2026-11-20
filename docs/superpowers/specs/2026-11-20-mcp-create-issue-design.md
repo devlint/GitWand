@@ -56,6 +56,7 @@ without the user seeing it first.
 | `assignees` | string[]? | Logins; `@me` allowed (gh). No comma. |
 | `repo` | string? | `owner/repo`; must be `origin` or its fork parent (case-insensitive). |
 | `dry_run` | boolean? | **Default true.** |
+| `preview_id` | string? | Required to create: the preview's HMAC of (root, host, target, title, body, labels, assignees), per-process key. Added in review. |
 
 ### Target
 
@@ -73,9 +74,11 @@ without the user seeing it first.
 - `scanReportBody` moves from `apps/desktop/src/utils/reportGuard.ts` to
   `@gitwand/core` (pure, browser-safe); the desktop file re-exports it.
   (My call: one implementation, not a copy.)
-- Title and body are scanned (title as line 0 of the text). Always on, with
-  the repository's `.gitwandrc` `secrets.patterns`, `secrets.ignore`
-  (`/regex/` entries only) and `secrets.entropyThreshold` (default 4.0).
+- Title and body are scanned each on its own (findings name the field and
+  its own line). Always on, with the repository's `.gitwandrc`
+  `secrets.patterns` and `secrets.entropyThreshold` (default 4.0, core's
+  `DEFAULT_ENTROPY_THRESHOLD`); not `secrets.ignore`, which a cloned
+  repository could use to allow-list a value (review pass 3).
 - `blockAt: "medium"`: a known pattern of severity high/medium blocks;
   entropy only warns. A blocked text is refused even with `dry_run: false`;
   the preview lists the findings (redacted excerpts only).
