@@ -9,27 +9,15 @@
  * re-dériver l'inversion ours/theirs du rebase.
  */
 
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MergeContext } from "@gitwand/core";
+import { gitTry } from "./repo-config.js";
 
-function gitDir(cwd: string): string | null {
-  try {
-    return execFileSync("git", ["rev-parse", "--absolute-git-dir"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  } catch {
-    return null;
-  }
-}
+// The package's shared git helper (restricted env, large output, no window).
+const gitDir = (cwd: string): string | null => gitTry(cwd, ["rev-parse", "--absolute-git-dir"]);
 
-function revName(cwd: string, args: string[]): string | undefined {
-  try {
-    const out = execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    return out || undefined;
-  } catch {
-    return undefined;
-  }
-}
+const revName = (cwd: string, args: string[]): string | undefined => gitTry(cwd, args) ?? undefined;
 
 function readRefFile(path: string): string | undefined {
   try {

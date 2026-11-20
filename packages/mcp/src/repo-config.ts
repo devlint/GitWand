@@ -36,6 +36,11 @@ export function gitOutput(cwd: string, args: string[]): string | null {
   }
 }
 
+/** Files with unresolved conflicts (`git diff --name-only --diff-filter=U`), or none. */
+export function conflictedFiles(cwd: string): string[] {
+  return (gitOutput(cwd, ["diff", "--name-only", "--diff-filter=U"]) ?? "").split("\n").filter((f) => f.length > 0);
+}
+
 /** `gitOutput`, with no output counted as none: a value or null. */
 export function gitTry(cwd: string, args: string[]): string | null {
   return gitOutput(cwd, args) || null;

@@ -183,7 +183,7 @@ describe("gitwand_create_issue", () => {
       assignees: ["@me", "hubot"],
     });
     expect(isError).toBe(false);
-    expect(out).toEqual({ created: true, confirmedBy: "agent", repo: "me/proj", number: 12, url: ISSUE_URL });
+    expect(out).toEqual({ created: true, confirmedBy: "agent", host: "github.com", repo: "me/proj", number: 12, url: ISSUE_URL });
     const [c] = creates(g);
     expect(c.argv).toEqual(["api", "--hostname", "github.com", "-X", "POST", "repos/me/proj/issues", "--input", "-"]);
     // `@me` is the signed-in login; a label may hold a comma.
@@ -413,6 +413,7 @@ describe("gitwand_create_issue", () => {
       sshFailureTtlMs: 60_000,
       signedInTtlMs: 300_000,
       previewTtlMs: 3_600_000,
+      sshOkTtlMs: 300_000,
     });
   });
 
@@ -977,6 +978,53 @@ describe("gitwand_create_issue", () => {
 
   it("a scanner that cannot start says so, not that a pattern hangs", async () => {
     setScanCoreForTests("file:///nonexistent/gitwand-core.js");
+    fake();
+    const cwd = makeRepo();
+    writeFileSync(
+      join(cwd, ".gitwandrc"),
+      JSON.stringify({ secrets: { patterns: [{ id: "corp", regex: "CORP-[0-9]{6}", severity: "high", description: "x" }] } }),
+    );
+    expect((await call(cwd, { title: "T" })).out.error).toBe("scan_unavailable");
+  });
+
+  it("the preview and the question name the host too", async () => {
+    const g = fake();
+    g.answer({
+      api: { stdout: JSON.stringify(repoJson("acme/app")) },
+      "api POST": { stdout: issueJson(3, "https://ghe.corp/acme/app/issues/3") },
+      "auth status": { stdout: "" },
+      ssh: { stdout: "hostname ghe.corp\n" },
+    });
+    const cwd = makeRepo("git@work:acme/app.git");
+    expect((await call(cwd, { title: "T" })).out).toMatchObject({ host: "ghe.corp", repo: "acme/app" });
+    const asked: string[] = [];
+    await create(cwd, { title: "T" }, async (m) => (asked.push(m), true));
+    expect(asked[0]).toContain("ghe.corp/acme/app");
+  });
+
+  it("a resolved ssh alias is asked again after a while", async () => {
+    createIssueTimeouts.sshOkTtlMs = 0;
+    const g = fake();
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, ssh: { stdout: "hostname github.com\n" } });
+    const cwd = makeRepo("git@github-work:me/proj.git");
+    await call(cwd, { title: "T" });
+    await call(cwd, { title: "T" });
+    expect(g.calls().filter((c) => c.tool === "ssh")).toHaveLength(2);
+  });
+
+  it("a host signed in with its port is known", async () => {
+    hostsYml({ "github.com": { user: "octo", token: "t1" }, "ghe.example.com:8443": { user: "o", token: "t" } });
+    const g = fake();
+    g.answer({ api: { stdout: JSON.stringify(repoJson("o/r")) }, "auth status": { stdout: "" } });
+    const r = await call(makeRepo("https://ghe.example.com:8443/o/r.git"), { title: "T" });
+    expect(r.out).toMatchObject({ host: "ghe.example.com:8443", repo: "o/r" });
+  });
+
+  it("a scan worker that dies is unavailable, not a slow pattern", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gitwand-crash-core-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "core.mjs"), "export function scanReportBody() { process.exit(3); }\n");
+    setScanCoreForTests(new URL(`file://${join(dir, "core.mjs")}`).href);
     fake();
     const cwd = makeRepo();
     writeFileSync(

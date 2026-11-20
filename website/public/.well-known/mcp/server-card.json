@@ -51,7 +51,7 @@
       },
       {
         "name": "gitwand_create_issue",
-        "description": "Preview (default) or file a GitHub issue on the repository's origin, or its fork parent when origin takes no issues, through the gh CLI. Creates only with dry_run: false; a known secret pattern in the title or body refuses it."
+        "description": "Preview (default) or file a GitHub issue on the repository's origin, or its fork parent when origin takes no issues, through the gh CLI. Creates only with dry_run: false; a known secret pattern in the title, body, labels or assignees refuses it."
       }
     ],
     "resources": [

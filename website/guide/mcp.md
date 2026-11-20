@@ -183,7 +183,25 @@ The issue goes to `origin`, or to its fork parent when issues are turned off (or
 | `dry_run` | boolean | No | Default `true` (preview). `false` creates the issue |
 | `preview_id` | string | With `dry_run: false` | The `previewId` of a preview of this very issue: a create without it, or with other arguments, is refused |
 
-**Returns:** the preview, or `{ created, confirmedBy, repo, number, url }`: `confirmedBy` is `user` when GitWand asked you through the client, `agent` when the client cannot ask and the agent's preview stood for your yes. Errors are `{ error, message }` with a stable code: `gh_missing`, `no_origin`, `not_github` (an `origin` on another forge), `gh_auth_failed`, `preview_required`, `preview_used`, `preview_expired` (a preview is good for an hour), `declined`, `confirm_failed`, `cancelled`, `cannot_triage` (labels or assignees without triage rights on the target), `scan_failed`, `scan_unavailable`, `repo_not_allowed`, `issues_disabled`, `secrets_found`, `create_failed`, and `create_uncertain` whenever the create failed in a way that may still have filed it (a 5xx, a connection lost or timed out mid-way, an error gh never gave before: check before trying again)…
+**Returns:** the preview (with the `host` and `repo` it goes to), or `{ created, confirmedBy, host, repo, number, url }`: `confirmedBy` is `user` when GitWand asked you through the client, `agent` when the client cannot ask and the agent's preview stood for your yes.
+
+**Errors** are `{ error, message }` with a stable code:
+
+| Code | When |
+|------|------|
+| `invalid_title`, `invalid_body`, `invalid_list`, `invalid_dry_run` | An argument is malformed (nothing ran) |
+| `not_a_repo`, `no_origin`, `unsupported_remote` | `cwd` is not a repository, has no `origin`, or `origin` is not a `host/owner/repo` URL |
+| `gh_missing`, `gh_auth_failed` | `gh` is not installed, or its sign-in was refused |
+| `not_github` | `origin` is on another forge, or on a host `gh` is not signed in to |
+| `target_lookup_failed` | `gh` could not read the repository (or your rights on the fork parent) |
+| `repo_not_allowed`, `issues_disabled`, `no_issue_target` | `repo` is not `origin` or its parent, takes no issues, or none does |
+| `cannot_triage` | Labels or assignees without triage rights on the target |
+| `secrets_found` | A known secret pattern is in the issue |
+| `scan_failed`, `scan_unavailable` | The scan with the repository's own patterns overran, or could not start |
+| `preview_required`, `preview_used`, `preview_expired` | No matching preview, its one create is used, or it is over an hour old |
+| `declined`, `confirm_failed`, `cancelled` | You said no, you could not be asked, or the call was cancelled: nothing was created |
+| `create_failed` | GitHub refused it, or the connection never opened: nothing was created |
+| `create_uncertain` | The create failed in a way that may still have filed it (a 5xx, a connection lost mid-way, an error `gh` never gave before): check before trying again |
 
 ## Resources
 

@@ -60,7 +60,7 @@ Eight tools are exposed:
 | `gitwand_apply_resolution` | Apply an agent-provided resolution to a specific complex hunk, without validating it (an empty string removes the block) |
 | `gitwand_resolve_hunk` | Ask the connected agent (the caller) to propose a resolution for one hunk — inversion of the CLI `--llm-fallback` |
 | `gitwand_resolve_hunk_llm` | Validate + apply an LLM-proposed resolution (residual-markers check, JSON/YAML/TOML syntax, score threshold; an empty string removes the block) |
-| `gitwand_create_issue` | File a GitHub issue on `origin` (or its fork parent when `origin` takes no issues) through `gh`. Previews by default; creates only with `dry_run: false`; a known secret pattern in the title or body refuses it |
+| `gitwand_create_issue` | File a GitHub issue on `origin` (or its fork parent when `origin` takes no issues) through `gh`. Previews by default; creates only with `dry_run: false`; a known secret pattern in the title, body, labels or assignees refuses it |
 
 Plus three resources (`gitwand://repo/conflicts`, `gitwand://repo/policy`, `gitwand://hunk/{file}/{line}`) for ambient context.
 

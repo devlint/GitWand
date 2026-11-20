@@ -85,8 +85,10 @@ export const createIssueTimeouts = {
   maxOutputBytes: 16 * 1024 * 1024,
   /** The secrets scan when the repository adds its own patterns (they run in a worker). */
   scanMs: 5_000,
-  /** A failed `ssh -G` is asked again after this; a successful one is kept. */
+  /** A failed `ssh -G` is asked again after this… */
   sshFailureTtlMs: 60_000,
+  /** …and a successful one after this (~/.ssh/config may change under a running server). */
+  sshOkTtlMs: 5 * 60_000,
   /** A GitHub Enterprise sign-in is checked again after this. */
   signedInTtlMs: 5 * 60_000,
   /** A preview allows its create for this long. */
@@ -132,7 +134,7 @@ export async function runGh(
   return { ok: true, stdout: r.stdout };
 }
 
-/** Per host: a resolved name for the server's life, a failed lookup for `sshFailureTtlMs`. */
+/** Per host: a resolved name for `sshOkTtlMs`, a failed lookup for `sshFailureTtlMs`. */
 const sshHosts = new Map<string, { host: string; ok: boolean; at: number }>();
 
 /**
@@ -144,7 +146,7 @@ const sshHosts = new Map<string, { host: string; ok: boolean; at: number }>();
  */
 export async function sshResolvedHost(host: string, signal?: AbortSignal): Promise<string> {
   const known = sshHosts.get(host);
-  if (known && (known.ok || Date.now() - known.at < createIssueTimeouts.sshFailureTtlMs)) return known.host;
+  if (known && Date.now() - known.at < (known.ok ? createIssueTimeouts.sshOkTtlMs : createIssueTimeouts.sshFailureTtlMs)) return known.host;
   let resolved = host;
   let ok = false;
   // A plain host name only: never something ssh would read as an option.
@@ -185,13 +187,13 @@ const AUTH_REFUSED = /HTTP 401|Bad credentials|gh auth login|not logged in|authe
  * signed in to (GitHub Enterprise) — the desktop's rule. Any other host
  * (gitlab.com, bitbucket.org…) is not GitHub.
  */
-async function isGithubHost(cwd: string, host: string, signal?: AbortSignal): Promise<true | ToolResult> {
+async function isGithubHost(cwd: string, host: string, hosts: Map<string, string>, signal?: AbortSignal): Promise<true | ToolResult> {
   if (host === "github.com") return true;
   // Only a host gh is signed in to (its hosts file) or the one GH_HOST names:
   // gh is never pointed at a host an origin URL alone chose (its env tokens
   // would go there).
   const named = process.env.GH_HOST?.toLowerCase() === host;
-  if (!named && !(await ghHosts()).has(host)) {
+  if (!named && !hosts.has(host)) {
     return fail(
       "not_github",
       `The \`origin\` remote is on ${host}, which is not github.com nor a GitHub Enterprise host gh is signed in to (\`gh auth login --hostname ${host}\` if it is one).`,
@@ -236,7 +238,8 @@ async function ghHosts(): Promise<Map<string, string>> {
   const text = await readFile(join(ghConfigDir(), "hosts.yml"), "utf-8").catch(() => "");
   let current: string | null = null;
   for (const line of text.split(/\r?\n/)) {
-    const top = /^([^\s#][^:]*):\s*$/.exec(line);
+    // A top-level key: the host, a port included (`ghe.example.com:8443:`).
+    const top = /^([^\s#].*):\s*$/.exec(line);
     if (top) {
       current = top[1].trim().toLowerCase();
       hosts.set(current, "");
@@ -254,9 +257,9 @@ async function ghHosts(): Promise<Map<string, string>> {
  * for the same account. Cached answers that depend on the viewer (rights,
  * `@me`) and previews are kept per account.
  */
-async function accountKey(): Promise<string> {
+function accountKey(hosts: Map<string, string>): string {
   const env = process.env;
-  const users = [...(await ghHosts())].sort().map(([h, u]) => `${h}=${u}`).join(",");
+  const users = [...hosts].sort().map(([h, u]) => `${h}=${u}`).join(",");
   const tokens = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_HOST"].map((k) => env[k] ?? "").join("\u0000");
   return createHash("sha256").update(`${tokens}\u0000${users}`).digest("hex");
 }
@@ -434,31 +437,34 @@ function getScanner(): Scanner | null {
   return s;
 }
 
-function scanInWorker(s: Scanner, texts: string[], opts: ScanOptions, timeoutMs: number, signal?: AbortSignal): Promise<ReportScan[] | null> {
+/** A worker's answer: findings, "exited" (it died mid-scan), or "timeout" (it overran or the call was cancelled). */
+function scanInWorker(
+  s: Scanner,
+  texts: string[],
+  opts: ScanOptions,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<ReportScan[] | "exited" | "timeout"> {
   const id = ++scanIds;
-  const answer = new Promise<ReportScan[] | null>((resolve) => {
+  const answer = new Promise<ReportScan[] | "exited">((resolve) => {
     const onMessage = (m: { id?: number; results?: ReportScan[] }) => {
       if (m.id !== id) return;
       s.worker.off("message", onMessage);
       s.worker.off("exit", onExit);
-      resolve(m.results ?? null);
+      resolve(m.results ?? "exited");
     };
     // Listeners removed once answered: the worker outlives many scans.
     const onExit = () => {
       s.worker.off("message", onMessage);
-      resolve(null);
+      resolve("exited");
     };
     s.worker.on("message", onMessage);
     s.worker.on("exit", onExit);
     s.worker.postMessage({ id, texts, opts });
   });
-  const TIMED_OUT = Symbol("timed out");
-  return within<ReportScan[] | null | typeof TIMED_OUT>(answer, timeoutMs, TIMED_OUT, signal).then((r) => {
+  return within<ReportScan[] | "exited" | "timeout">(answer, timeoutMs, "timeout", signal).then((r) => {
     // Overran (or abandoned mid-scan): the worker may be stuck in it.
-    if (r === TIMED_OUT) {
-      dropScanner(s);
-      return null;
-    }
+    if (r === "timeout") dropScanner(s);
     return r;
   });
 }
@@ -487,7 +493,7 @@ async function scanTexts(texts: string[], opts: ScanOptions, signal?: AbortSigna
     return "unavailable";
   }
   const due = deadline ?? Date.now() + createIssueTimeouts.scanMs;
-  const run = s.queue.then(async (): Promise<ScanOutcome> => {
+  const scanRun = s.queue.then(async (): Promise<ScanOutcome> => {
     if (signal?.aborted) return "cancelled";
     const left = due - Date.now();
     if (left <= 0) return "timeout";
@@ -495,10 +501,11 @@ async function scanTexts(texts: string[], opts: ScanOptions, signal?: AbortSigna
     if (scanner !== s) return scanTexts(texts, opts, signal, due);
     const r = await scanInWorker(s, texts, opts, left, signal);
     if (signal?.aborted) return "cancelled";
-    return r ?? "timeout";
+    // A worker that died is a broken scanner, not a slow pattern.
+    return r === "exited" ? "unavailable" : r;
   });
-  s.queue = run.catch(() => undefined);
-  return run;
+  s.queue = scanRun.catch(() => undefined);
+  return scanRun;
 }
 
 // ─── The tool ────────────────────────────────────────────────
@@ -744,8 +751,8 @@ export interface ToolContext {
 }
 
 /** The question the user answers before a create, with everything that will be sent. */
-function confirmMessage(repo: string, title: string, body: string, labels: string[], assignees: string[]): string {
-  const lines = [`File this issue on ${repo}?`, "", `Title: ${title}`];
+function confirmMessage(where: string, title: string, body: string, labels: string[], assignees: string[]): string {
+  const lines = [`File this issue on ${where}?`, "", `Title: ${title}`];
   if (labels.length) lines.push(`Labels: ${labels.join(", ")}`);
   if (assignees.length) lines.push(`Assignees: ${assignees.join(", ")}`);
   lines.push("", body || "(no description)");
@@ -786,11 +793,13 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   const signal = ctx.signal;
   const host = remote.ssh ? await sshResolvedHost(remote.host, signal) : remote.host;
   if (signal?.aborted) return cancelled();
-  const github = await isGithubHost(root, host, signal);
+  // gh's hosts file, read once for this call: which hosts, and which account.
+  const ghHostUsers = await ghHosts();
+  const github = await isGithubHost(root, host, ghHostUsers, signal);
   if (github !== true) return github;
 
   // 3. Its issue targets, as GitHub describes them.
-  const account = await accountKey();
+  const account = accountKey(ghHostUsers);
   const read = await readTargets(root, host, remote, account, signal);
   if ("error" in read) return read.error;
   const { targets, parentUnread } = read;
@@ -820,11 +829,11 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
       `You cannot set labels or assignees on ${chosen.repo} (no triage rights there): call again without \`labels\` and \`assignees\`.`,
     );
   }
-  const logins = await resolveAssignees(root, host, assignees, account, signal);
-  if (!Array.isArray(logins)) return logins;
+  const sendAssignees = await resolveAssignees(root, host, assignees, account, signal);
+  if (!Array.isArray(sendAssignees)) return sendAssignees;
 
   // 4. Secrets.
-  const secrets = await scanIssue(root, title, body, labels, logins, signal);
+  const secrets = await scanIssue(root, title, body, labels, sendAssignees, signal);
   if (signal?.aborted || secrets === "cancelled") return cancelled();
   if (secrets === "unavailable") {
     return fail(
@@ -841,18 +850,20 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   const canCreate = secrets.blocking.length === 0;
   // What a create must match: this preview's issue, where it goes.
   // The gh account too: a preview made as one account does not create as another.
-  const issue = [account, root, host, chosen.repo, title, body, labels, logins];
+  const issue = [account, root, host, chosen.repo, title, body, labels, sendAssignees];
 
   if (dryRun) {
     return ok({
       dryRun: true,
+      // The host too: the same owner/repo can exist on github.com and on an enterprise host.
+      host,
       repo: chosen.repo,
       isOrigin: chosen.isOrigin,
       title,
       // The body is the caller's own text, sent verbatim: its size, not a copy.
       bodyChars,
       labels,
-      assignees: logins,
+      assignees: sendAssignees,
       secrets,
       canCreate,
       ...(canCreate ? { previewId: previewId(issue), previewExpiresInSeconds: Math.round(createIssueTimeouts.previewTtlMs / 1000) } : {}),
@@ -886,7 +897,7 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   // When the client can ask, the user confirms here, not only through the agent.
   let answer: boolean | undefined;
   try {
-    answer = await ctx.confirm?.(confirmMessage(chosen.repo, title, body, labels, logins));
+    answer = await ctx.confirm?.(confirmMessage(`${host}/${chosen.repo}`, title, body, labels, sendAssignees));
   } catch (e) {
     return release(fail("confirm_failed", `The user could not be asked to confirm (${(e as Error).message}): nothing was created.`));
   }
@@ -900,7 +911,7 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   // sends), so none of it — a title holding a token, say — is on a command line.
   const payload: Record<string, unknown> = { title, body };
   if (labels.length) payload.labels = labels;
-  if (logins.length) payload.assignees = logins;
+  if (sendAssignees.length) payload.assignees = sendAssignees;
   const made = await runGh(
     ["api", "--hostname", host, "-X", "POST", `repos/${chosen.repo}/issues`, "--input", "-"],
     root,
@@ -925,6 +936,7 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
     // "user" when the client asked the user (MCP elicitation); "agent" when
     // it cannot ask, and only the agent's preview stood for the user's yes.
     confirmedBy: answer === true ? "user" : "agent",
+    host,
     repo: chosen.repo,
     number: typeof created?.number === "number" ? created.number : null,
     url: typeof created?.html_url === "string" ? created.html_url : null,

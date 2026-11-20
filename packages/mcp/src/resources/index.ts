@@ -7,7 +7,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { conflictedFiles } from "../repo-config.js";
 import { resolve as resolvePath, join } from "node:path";
 import { resolve } from "@gitwand/core";
 
@@ -35,18 +35,7 @@ export function registerResources() {
 // ─── Resource handlers ─────────────────────────────────────
 
 function getConflictedFiles(cwd: string): string[] {
-  try {
-    const output = execSync("git diff --name-only --diff-filter=U", {
-      cwd,
-      encoding: "utf-8",
-    });
-    return output
-      .trim()
-      .split("\n")
-      .filter((f) => f.length > 0);
-  } catch {
-    return [];
-  }
+  return conflictedFiles(cwd);
 }
 
 export async function handleResourceRead(uri: string, cwd: string) {

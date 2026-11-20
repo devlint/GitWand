@@ -14,13 +14,13 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import { resolve, summarizeTiers, validateMergedContent, type MergeResult, type ConflictType, type GitWandOptions } from "@gitwand/core";
 import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
 import { createIssueToolDefinition, handleCreateIssue, type ToolContext } from "./create_issue.js";
 import { detectMergeContext } from "../merge-context.js";
-import { gitBlob, gitOutput } from "../repo-config.js";
+import { conflictedFiles, gitBlob, gitEnv, gitOutput } from "../repo-config.js";
 import {
   buildRegenerationReport,
   loadGitwandrcResolveGeneratedFiles,
@@ -240,18 +240,7 @@ export function registerTools() {
 // ─── Helpers ───────────────────────────────────────────────
 
 function getConflictedFiles(cwd: string): string[] {
-  try {
-    const output = execSync("git diff --name-only --diff-filter=U", {
-      cwd,
-      encoding: "utf-8",
-    });
-    return output
-      .trim()
-      .split("\n")
-      .filter((f) => f.length > 0);
-  } catch {
-    return [];
-  }
+  return conflictedFiles(cwd);
 }
 
 // ─── Conflict Predictor helpers (rebase / cherry-pick) ─────
@@ -282,8 +271,11 @@ function gitMergeFile(cwd: string, args: string[]): string | null {
   try {
     const out = execFileSync("git", ["merge-file", ...args], {
       cwd,
+      env: gitEnv(),
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+      maxBuffer: 64 * 1024 * 1024,
     });
     return out; // clean merge, exit 0
   } catch (e: unknown) {
