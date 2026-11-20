@@ -5,7 +5,9 @@
 
 export const ADVENT_YEAR = 2026;
 export const DOOR_COUNT = 24;
-export const ADVENT_URL = "https://gitwand.app/advent";
+/** The website's origin: `readMore` paths are relative to it. */
+export const SITE_URL = "https://gitwand.app";
+export const ADVENT_URL = `${SITE_URL}/advent`;
 
 export type CalendarState =
   | { phase: "not-started" }

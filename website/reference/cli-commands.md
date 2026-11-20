@@ -286,7 +286,7 @@ Each call prints one JSON document; its `status` says which shape it is.
 }
 ```
 
-`tip` and `readMore` (a site path) appear only on doors that have one; the sample door has no `readMore`.
+`tip` and `readMore` (a full `https://gitwand.app/…` URL) appear only on doors that have one; the sample door has no `readMore`.
 
 ### Exit Codes
 

@@ -9,6 +9,7 @@ import {
   ADVENT_YEAR,
   DOORS,
   DOOR_COUNT,
+  SITE_URL,
   calendarState,
   isUnlocked,
   opensOn,
@@ -109,7 +110,8 @@ export function runAdvent(
   const door = DOORS[day - 1];
   return out(0, "stdout", renderDoor(door, { palette: p, width: ctx.width }), {
     status: "door",
-    door,
+    // A site path means nothing outside the site: give scripts the full URL.
+    door: door.readMore === undefined ? door : { ...door, readMore: `${SITE_URL}${door.readMore}` },
   });
 }
 

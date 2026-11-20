@@ -112,6 +112,13 @@ describe("runAdvent --json", () => {
     expect(r.output).not.toContain("\x1b");
   });
 
+  it("gives readMore as an absolute gitwand.app URL", () => {
+    const { body } = json(["24"], at(`${ADVENT_YEAR}-12-24`));
+    expect(DOORS[23].readMore).toBe("/fix/git-rerere");
+    expect(body.door.readMore).toBe("https://gitwand.app/fix/git-rerere");
+    expect(body.door).toEqual({ ...DOORS[23], readMore: "https://gitwand.app/fix/git-rerere" });
+  });
+
   it("treats --json=true like --json", () => {
     const r = run([], dec12, { json: "true" });
     expect(JSON.parse(r.output)).toEqual({ status: "door", door: DOORS[11] });
