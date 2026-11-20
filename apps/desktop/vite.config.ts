@@ -28,6 +28,9 @@ export default defineConfig({
       // Production builds go through the same alias, so no separate
       // `pnpm --filter @gitwand/core build` step is required.
       "@gitwand/core": resolve(__dirname, "../../packages/core/src/index.ts"),
+      // Git Advent Calendar content, shared with the CLI and the website
+      // (an import-free module in packages/cli, bundled from source).
+      "@gitwand/advent": resolve(__dirname, "../../packages/cli/src/advent/index.ts"),
       // Force web-tree-sitter to resolve to the version installed in apps/desktop
       // (0.26.x). packages/core pins an older ~0.20.x version, but copy-grammars.mjs
       // copies the WASM runtime from the 0.26.x build. Bundling mismatched JS (0.20.x)

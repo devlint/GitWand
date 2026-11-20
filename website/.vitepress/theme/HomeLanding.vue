@@ -1,7 +1,31 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { AUTO_PATTERN_COUNT } from './patterns'
 import { data as blogPosts } from './blog.data'
+import { adventBadge, adventHomeCard, resolveNow, ADVENT_INDEX_PATH, type AdventHomeCard } from './advent/advent-state'
+import AdventSnow from './advent/AdventSnow.vue'
+
+// Advent calendar badge: client-only so the server HTML keeps the normal badge.
+const advent = ref<{ text: string; href: string } | null>(null)
+const adventCard = ref<AdventHomeCard | null>(null)
+onMounted(() => {
+  const now = resolveNow(location.search, new Date())
+  advent.value = adventBadge(now)
+  adventCard.value = adventHomeCard(now)
+})
+
+// Advent card: the CLI command, copyable like the install command.
+const ADVENT_CMD = 'gitwand advent'
+const adventCopied = ref(false)
+async function copyAdvent() {
+  try {
+    await navigator.clipboard.writeText(ADVENT_CMD)
+    adventCopied.value = true
+    setTimeout(() => { adventCopied.value = false }, 1800)
+  } catch {
+    /* clipboard unavailable: the text can still be selected */
+  }
+}
 
 // Newest article, read from website/blog/*.md at build time (see blog.data.ts).
 const latestPost = blogPosts[0]
@@ -963,9 +987,11 @@ function cellClass(v: CompareValue | undefined): string {
 // ── Apparition au défilement (thème Nocturne) ────────────────────────────────
 // Posé ici plutôt que dans le template : aucune section n'a à porter l'attribut,
 // et le rendu SSR reste identique.
-onMounted(() => {
+onMounted(async () => {
   if (typeof window === 'undefined' || !('IntersectionObserver' in window)) return
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  // Client-only blocks (the advent card) render on the next tick: wait for them.
+  await nextTick()
   const targets = Array.from(
     document.querySelectorAll('.gw-landing .nc-wrap > *, .gw-landing .nc-bento > *, .gw-landing .nc-trio > *'),
   )
@@ -999,9 +1025,9 @@ onMounted(() => {
 
       <div class="nc-wrap nc-hero__body">
         <div class="nc-hero__top">
-          <a class="nc-pill" href="/changelog">
+          <a class="nc-pill" :href="advent?.href ?? '/changelog'">
             <span class="nc-pill__dot"></span>
-            {{ nt.badge }}
+            {{ advent?.text ?? nt.badge }}
             <span class="nc-pill__arrow">→</span>
           </a>
 
@@ -1040,6 +1066,36 @@ onMounted(() => {
           <div class="nc-figure"><div class="nc-figure__n">{{ nt.s2n }}</div><div class="nc-figure__l">{{ nt.s2l }}</div></div>
           <div class="nc-figure"><div class="nc-figure__n">{{ nt.s3n }}</div><div class="nc-figure__l">{{ nt.s3l }}</div></div>
         </div>
+      </div>
+
+      <!-- Calendrier de l'Avent (1–25 décembre, côté client) -->
+      <div v-if="adventCard" class="nc-wrap nc-hero__advent">
+        <section class="nc-advent" aria-labelledby="nc-advent-title">
+          <AdventSnow />
+          <div class="nc-advent__text">
+            <span class="nc-eyebrow nc-eyebrow--sm">Git Advent Calendar 🎄</span>
+            <h2 id="nc-advent-title" class="nc-advent__title">24 little-known git commands, one a day until Christmas.</h2>
+            <p class="nc-advent__body">Each door solves a real problem, with a GitWand tip. Open it on the site, or right in your terminal.</p>
+          </div>
+          <div v-if="adventCard.kind === 'teaser'" class="nc-advent__teaser">
+            <span class="nc-advent__teaser-label">The first door opens in</span>
+            <span class="nc-advent__count">
+              <span class="nc-advent__count-n">{{ adventCard.daysLeft }}</span>
+              {{ adventCard.daysLeft === 1 ? 'day' : 'days' }}
+            </span>
+            <span class="nc-advent__note">December 1, Paris time</span>
+            <a class="nc-btn nc-btn--ghost" :href="ADVENT_INDEX_PATH">Peek at the calendar →</a>
+          </div>
+          <div v-else class="nc-advent__actions">
+            <a class="nc-btn nc-btn--primary" :href="ADVENT_INDEX_PATH">{{ adventCard.cta }}</a>
+            <button class="nc-cmd" type="button" @click="copyAdvent" :aria-label="`Copy ${ADVENT_CMD}`">
+              <span class="nc-cmd__prompt">$</span>
+              <code>{{ ADVENT_CMD }}</code>
+              <span class="nc-cmd__hint">{{ adventCopied ? 'Copied' : 'Copy' }}</span>
+            </button>
+            <p class="nc-advent__note">No CLI yet? <code>npx @gitwand/cli advent</code></p>
+          </div>
+        </section>
       </div>
 
       <!-- Capture inclinée : la fenêtre « sort » du fond, puis se fond dedans -->
@@ -2104,6 +2160,87 @@ onMounted(() => {
   background: transparent;
 }
 .nc-btn--ghost:hover { border-color: var(--nc-accent-500); color: var(--nc-accent-200); }
+
+.nc-hero__advent { padding-top: 40px; }
+.nc-advent {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 32px;
+  align-items: center;
+  padding: 28px;
+  /* Rotating border: an opaque fill on the padding box over a turning conic gradient. */
+  border: 2px solid transparent;
+  border-radius: var(--nc-radius-lg);
+  background:
+    linear-gradient(var(--nc-surface), var(--nc-surface)) padding-box,
+    conic-gradient(
+      from var(--nc-advent-angle),
+      var(--nc-neutral-800) 0deg,
+      var(--nc-neutral-800) 180deg,
+      var(--nc-accent) 260deg,
+      var(--nc-accent-300) 320deg,
+      #fff 335deg,
+      var(--nc-accent) 350deg,
+      var(--nc-neutral-800) 360deg
+    ) border-box;
+  box-shadow: var(--nc-glow-soft);
+  animation: nc-advent-spin 6s linear infinite;
+}
+@property --nc-advent-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes nc-advent-spin {
+  to { --nc-advent-angle: 360deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nc-advent { animation: none; }
+}
+.nc-advent__text,
+.nc-advent__actions { position: relative; }
+.nc-advent__text { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.nc-advent__title {
+  margin: 0;
+  font-size: clamp(22px, 2.4vw, 28px);
+  line-height: 1.15;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.02em;
+  color: var(--nc-accent-100);
+}
+.nc-advent__body { margin: 0; font-size: 15.5px; line-height: 1.55; color: var(--nc-neutral-300); max-width: 48ch; }
+.nc-advent__actions { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; }
+.nc-advent__teaser { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.nc-advent__teaser-label {
+  font-family: var(--nc-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--nc-neutral-400);
+}
+.nc-advent__count {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 20px;
+  color: var(--nc-neutral-300);
+}
+.nc-advent__count-n {
+  font-size: clamp(48px, 5vw, 64px);
+  line-height: 1;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.03em;
+  color: var(--nc-accent-100);
+  font-variant-numeric: tabular-nums;
+}
+.nc-advent__teaser .nc-btn--ghost { margin-top: 6px; }
+.nc-advent__note { margin: 0; font-size: 13px; color: var(--nc-neutral-400); }
+.nc-advent__note code { font-family: var(--nc-font-mono); color: var(--nc-neutral-300); background: none; padding: 0; }
+@media (max-width: 760px) {
+  .nc-advent { grid-template-columns: 1fr; gap: 20px; padding: 22px; }
+}
 
 /* ── Hero ── */
 .nc-hero { position: relative; overflow: hidden; }
