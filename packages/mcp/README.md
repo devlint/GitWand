@@ -71,7 +71,8 @@ follow-up) into a GitHub issue on the repository it works in:
 
 1. It calls `gitwand_create_issue` with a `title` (and `body`, `labels`,
    `assignees`). Nothing is created: the tool returns the target repository,
-   the text it would send and what the secrets scan found.
+   the title, labels and assignees it would send (the body goes exactly as
+   given) and what the secrets scan found.
 2. It shows that preview to you.
 3. Once you agree, it calls again with `dry_run: false`; the tool returns the
    issue's number and URL.

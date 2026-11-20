@@ -14,8 +14,8 @@
  *   array args and only the environment it needs.
  */
 
-import { execFileSync } from "node:child_process";
-import { scanReportBody, type ReportScan, type SecretFinding } from "@gitwand/core";
+import { spawn } from "node:child_process";
+import { DEFAULT_ENTROPY_THRESHOLD, scanReportBody, type ReportScan, type SecretFinding } from "@gitwand/core";
 import { gitTry, readGitwandrc } from "../repo-config.js";
 
 // ─── Remote URL ──────────────────────────────────────────────
@@ -167,35 +167,71 @@ export type GhResult =
    */
   | { ok: false; missing: boolean; interrupted: boolean; stderr: string };
 
-/** `gh args…` in `cwd`, `input` on stdin, killed after `timeoutMs`; never throws. */
-export function runGh(args: string[], cwd: string, input: string | undefined, timeoutMs: number): GhResult {
-  try {
-    const stdout = execFileSync("gh", args, {
-      cwd,
-      env: ghEnv(),
-      input: input ?? "",
-      encoding: "utf-8",
-      timeout: timeoutMs,
-      maxBuffer: 16 * 1024 * 1024,
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    return { ok: true, stdout };
-  } catch (err) {
-    const e = err as NodeJS.ErrnoException & { stderr?: string | Buffer; signal?: string | null };
-    if (e.code === "ENOENT") return { ok: false, missing: true, interrupted: false, stderr: "" };
-    // execFileSync's timeout: the child is killed and the error is ETIMEDOUT.
-    if (e.code === "ETIMEDOUT") {
-      return { ok: false, missing: false, interrupted: true, stderr: `gh did not answer within ${timeoutMs / 1000} s` };
-    }
-    if (e.signal) return { ok: false, missing: false, interrupted: true, stderr: `gh was stopped by ${e.signal}` };
-    const stderr = (typeof e.stderr === "string" ? e.stderr : e.stderr?.toString("utf-8") ?? "").trim();
-    return { ok: false, missing: false, interrupted: false, stderr: stderr || e.message };
-  }
+const MAX_OUTPUT = 16 * 1024 * 1024;
+
+interface Ran {
+  /** The program could not be started (ENOENT: not installed). */
+  missing: boolean;
+  timedOut: boolean;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * `cmd args…` without blocking the server's event loop (the MCP server
+ * answers other requests meanwhile): `input` on stdin, killed after
+ * `timeoutMs`, output capped. Never rejects.
+ */
+function run(cmd: string, args: string[], opts: { cwd?: string; env: NodeJS.ProcessEnv; input?: string; timeoutMs: number }): Promise<Ran> {
+  return new Promise((resolve) => {
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let size = 0;
+    let timedOut = false;
+    let settled = false;
+    const done = (r: Omit<Ran, "stdout" | "stderr" | "timedOut">) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ...r, timedOut, stdout: Buffer.concat(out).toString("utf-8"), stderr: Buffer.concat(err).toString("utf-8") });
+    };
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, opts.timeoutMs);
+    const collect = (into: Buffer[]) => (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_OUTPUT) child.kill("SIGTERM");
+      else into.push(chunk);
+    };
+    child.stdout.on("data", collect(out));
+    child.stderr.on("data", collect(err));
+    child.on("error", (e: NodeJS.ErrnoException) => done({ missing: e.code === "ENOENT", code: null, signal: null }));
+    child.on("close", (code, signal) => done({ missing: false, code, signal }));
+    // A child that exits before reading stdin must not crash the server.
+    child.stdin.on("error", () => {});
+    child.stdin.end(opts.input ?? "");
+  });
+}
+
+/** `gh args…` in `cwd`, `input` on stdin, killed after `timeoutMs`; never rejects. */
+export async function runGh(args: string[], cwd: string, input: string | undefined, timeoutMs: number): Promise<GhResult> {
+  const r = await run("gh", args, { cwd, env: ghEnv(), input, timeoutMs });
+  if (r.missing) return { ok: false, missing: true, interrupted: false, stderr: "" };
+  if (r.timedOut) return { ok: false, missing: false, interrupted: true, stderr: `gh did not answer within ${timeoutMs / 1000} s` };
+  if (r.signal) return { ok: false, missing: false, interrupted: true, stderr: `gh was stopped by ${r.signal}` };
+  if (r.code !== 0) return { ok: false, missing: false, interrupted: false, stderr: r.stderr.trim() || `gh exited with code ${r.code}` };
+  return { ok: true, stdout: r.stdout };
 }
 
 /** What `ssh` may see: enough to find and read its config, no token. */
 const SSH_ENV_ALLOW = ["PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SystemRoot", "windir", "TMPDIR", "TEMP", "TMP"];
+
+/** Per host, for the server's life: ~/.ssh/config rarely changes under it. */
+const sshHosts = new Map<string, string>();
 
 /**
  * The host `ssh` connects to for `host` (`ssh -G` reads ~/.ssh/config
@@ -204,45 +240,74 @@ const SSH_ENV_ALLOW = ["PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "HOMEDR
  * host itself when ssh is missing, fails or times out — the desktop's
  * `ssh_resolved_host`.
  */
-export function sshResolvedHost(host: string): string {
+export async function sshResolvedHost(host: string): Promise<string> {
+  const known = sshHosts.get(host);
+  if (known) return known;
   let resolved = host;
   // A plain host name only: never something ssh would read as an option.
   if (/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(host)) {
     const env: NodeJS.ProcessEnv = {};
     for (const k of SSH_ENV_ALLOW) if (process.env[k] !== undefined) env[k] = process.env[k];
-    try {
-      const out = execFileSync("ssh", ["-G", host], {
-        env,
-        encoding: "utf-8",
-        timeout: createIssueTimeouts.sshMs,
-        stdio: ["ignore", "pipe", "ignore"],
-        windowsHide: true,
-      });
-      const line = out.split("\n").find((l) => l.startsWith("hostname "));
+    const r = await run("ssh", ["-G", host], { env, timeoutMs: createIssueTimeouts.sshMs });
+    if (!r.missing && !r.timedOut && r.code === 0) {
+      const line = r.stdout.split("\n").find((l) => l.startsWith("hostname "));
       const name = line?.slice("hostname ".length).trim().toLowerCase();
       if (name) resolved = name;
-    } catch {
-      // Keep the host as written.
+      sshHosts.set(host, resolved === "ssh.github.com" ? "github.com" : resolved);
     }
   }
   return resolved === "ssh.github.com" ? "github.com" : resolved;
 }
 
+/** Hosts gh is signed in to (github.com needs no check: a token or sign-in is checked by the call itself). */
+const signedInHosts = new Set<string>();
+
+/**
+ * Whether `host` is a GitHub `gh` can reach: github.com, or a host gh is
+ * signed in to (GitHub Enterprise) — the desktop's rule. Any other host
+ * (gitlab.com, bitbucket.org…) is not GitHub.
+ */
+async function isGithubHost(cwd: string, host: string): Promise<boolean | "gh_missing"> {
+  if (host === "github.com" || signedInHosts.has(host)) return true;
+  const r = await runGh(["auth", "status", "--hostname", host], cwd, undefined, createIssueTimeouts.readMs);
+  if (!r.ok && r.missing) return "gh_missing";
+  if (r.ok) signedInHosts.add(host);
+  return r.ok;
+}
+
+/** A target read stays good this long: a preview then its create read it once. */
+const TARGETS_TTL_MS = 60_000;
+const targetsCache = new Map<string, { at: number; targets: IssueTarget[] }>();
+
+/** Clears what the tool remembers between calls (tests). */
+export function resetCreateIssueCaches(): void {
+  sshHosts.clear();
+  signedInHosts.clear();
+  targetsCache.clear();
+}
+
+/**
+ * gh's words after a failed create that may still have reached GitHub: a 5xx,
+ * or the connection lost (EOF, reset, timeout) — the desktop's
+ * `MAY_HAVE_BEEN_CREATED` cases. A refusal (4xx, unknown label or user)
+ * means nothing was filed.
+ */
+const MAYBE_SENT = /HTTP 5\d\d|unexpected EOF|connection reset|broken pipe|i\/o timeout|timeout awaiting|TLS handshake|stream error|GOAWAY|http2:/i;
+
 // ─── The tool ────────────────────────────────────────────────
 
-/** GitHub's limits: a title of 256 characters, a body of 65,536. */
+/** GitHub's limits: a title of 256 characters, a body of 65,536 (code points, not UTF-16 units). */
 const MAX_TITLE = 256;
 const MAX_BODY = 65_536;
-/** `.gitwandrc` `secrets.entropyThreshold` default (the desktop's and the CLI's). */
-const DEFAULT_ENTROPY_THRESHOLD = 4.0;
 
 export const createIssueToolDefinition = {
   name: "gitwand_create_issue",
   description:
     "File a GitHub issue on the repository in `cwd`, through the `gh` CLI (its login, or GH_TOKEN/GITHUB_TOKEN). " +
     "PREVIEWS BY DEFAULT: without `dry_run: false` nothing is created, and the tool returns the target repository, the title, " +
-    "body, labels and assignees it would send, and what the secrets scan found. Show that preview to the user, and call again " +
-    "with `dry_run: false` only once they agree. " +
+    "labels and assignees it would send, the body's length (the body is sent exactly as given), and what the secrets scan " +
+    "found. Show the user that preview with the body you passed, and call again with `dry_run: false` only once they agree. " +
+    "If a create returns `create_uncertain`, the issue may exist: check before calling again. " +
     "Target: the `origin` remote's repository, or its fork parent when issues are disabled (or the repository archived) on " +
     "`origin`; an explicit `repo` must be one of those two. " +
     "Title and body are scanned for secrets first: a known secret pattern (high or medium severity) refuses the issue, even " +
@@ -325,15 +390,43 @@ function scanIssue(root: string, title: string, body: string): ReportScan {
   return out;
 }
 
+/** origin's issue targets, read once a minute at most; a failure is not remembered. */
+async function readTargets(root: string, host: string, remote: RemoteRepo): Promise<IssueTarget[] | { error: ToolResult }> {
+  const key = `${host}/${remote.owner}/${remote.repo}`.toLowerCase();
+  const hit = targetsCache.get(key);
+  if (hit && Date.now() - hit.at < TARGETS_TTL_MS) return hit.targets;
+  const api = await runGh(["api", "--hostname", host, `repos/${remote.owner}/${remote.repo}`], root, undefined, createIssueTimeouts.readMs);
+  if (!api.ok) {
+    if (api.missing) return { error: ghMissing() };
+    return { error: fail("target_lookup_failed", `gh could not read ${remote.owner}/${remote.repo}: ${api.stderr}`) };
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(api.stdout);
+  } catch {
+    json = null;
+  }
+  const targets = targetsFrom(json);
+  if (!targets.length) return { error: fail("target_lookup_failed", `gh gave no repository for ${remote.owner}/${remote.repo}.`) };
+  targetsCache.set(key, { at: Date.now(), targets });
+  return targets;
+}
+
+const ghMissing = () => fail("gh_missing", "The GitHub CLI (`gh`) is not installed or not on PATH: https://cli.github.com");
+
+/** Characters as GitHub counts them: code points (an emoji is one). */
+const chars = (s: string) => [...s].length;
+
 export async function handleCreateIssue(cwd: string, args: Record<string, unknown>): Promise<ToolResult> {
   // 1. Arguments — nothing runs on a malformed call.
   const title = typeof args.title === "string" ? args.title.trim() : "";
-  if (!title || title.length > MAX_TITLE || /[\r\n]/.test(title)) {
+  if (!title || chars(title) > MAX_TITLE || /[\r\n]/.test(title)) {
     return fail("invalid_title", `\`title\` is required: one line of at most ${MAX_TITLE} characters.`);
   }
   if (args.body !== undefined && typeof args.body !== "string") return fail("invalid_body", "`body` must be a string.");
   const body = (args.body as string | undefined) ?? "";
-  if (body.length > MAX_BODY) return fail("invalid_body", `\`body\` is ${body.length} characters; GitHub takes at most ${MAX_BODY}.`);
+  const bodyChars = chars(body);
+  if (bodyChars > MAX_BODY) return fail("invalid_body", `\`body\` is ${bodyChars} characters; GitHub takes at most ${MAX_BODY}.`);
   const labels = list(args.labels, "labels");
   if (!Array.isArray(labels)) return labels;
   const assignees = list(args.assignees, "assignees");
@@ -351,22 +444,19 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   if (!url) return fail("no_origin", "This repository has no `origin` remote to file an issue on.");
   const remote = parseRemoteUrl(url);
   if (!remote) return fail("unsupported_remote", "The `origin` remote is not a `host/owner/repo` URL.");
-  const host = remote.ssh ? sshResolvedHost(remote.host) : remote.host;
+  const host = remote.ssh ? await sshResolvedHost(remote.host) : remote.host;
+  const github = await isGithubHost(root, host);
+  if (github === "gh_missing") return ghMissing();
+  if (!github) {
+    return fail(
+      "not_github",
+      `The \`origin\` remote is on ${host}, which is not github.com nor a GitHub Enterprise host gh is signed in to (\`gh auth login --hostname ${host}\` if it is one).`,
+    );
+  }
 
   // 3. Its issue targets, as GitHub describes them.
-  const api = runGh(["api", "--hostname", host, `repos/${remote.owner}/${remote.repo}`], root, undefined, createIssueTimeouts.readMs);
-  if (!api.ok) {
-    if (api.missing) return fail("gh_missing", "The GitHub CLI (`gh`) is not installed or not on PATH: https://cli.github.com");
-    return fail("target_lookup_failed", `gh could not read ${remote.owner}/${remote.repo}: ${api.stderr}`);
-  }
-  let json: unknown;
-  try {
-    json = JSON.parse(api.stdout);
-  } catch {
-    json = null;
-  }
-  const targets = targetsFrom(json);
-  if (!targets.length) return fail("target_lookup_failed", `gh gave no repository for ${remote.owner}/${remote.repo}.`);
+  const targets = await readTargets(root, host, remote);
+  if ("error" in targets) return targets.error;
 
   let chosen: IssueTarget | undefined;
   if (typeof args.repo === "string") {
@@ -393,7 +483,8 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
       repo: chosen.repo,
       isOrigin: chosen.isOrigin,
       title,
-      body,
+      // The body is the caller's own text, sent verbatim: its size, not a copy.
+      bodyChars,
       labels,
       assignees,
       secrets,
@@ -419,10 +510,10 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
     ...labels.flatMap((l) => ["--label", l]),
     ...assignees.flatMap((a) => ["--assignee", a]),
   ];
-  const made = runGh(create, root, body, createIssueTimeouts.createMs);
+  const made = await runGh(create, root, body, createIssueTimeouts.createMs);
   if (!made.ok) {
-    if (made.missing) return fail("gh_missing", "The GitHub CLI (`gh`) is not installed or not on PATH: https://cli.github.com");
-    if (made.interrupted) {
+    if (made.missing) return ghMissing();
+    if (made.interrupted || MAYBE_SENT.test(made.stderr)) {
       return fail(
         "create_uncertain",
         `${made.stderr}. The issue may have been created: check https://${host}/${chosen.repo}/issues before trying again.`,

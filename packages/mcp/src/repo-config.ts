@@ -8,14 +8,21 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { parseGitwandrc, type GitWandrcConfig } from "@gitwand/core";
 
-/** `git args…` in `cwd`: trimmed stdout, or null on failure or no output. */
-export function gitTry(cwd: string, args: string[]): string | null {
+/**
+ * `git args…` in `cwd` (array args, no shell): trimmed stdout — possibly
+ * empty, as an empty blob is — or null on failure.
+ */
+export function gitOutput(cwd: string, args: string[]): string | null {
   try {
-    const out = execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
-    return out || null;
+    return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
   } catch {
     return null;
   }
+}
+
+/** `gitOutput`, with no output counted as none: a value or null. */
+export function gitTry(cwd: string, args: string[]): string | null {
+  return gitOutput(cwd, args) || null;
 }
 
 /**

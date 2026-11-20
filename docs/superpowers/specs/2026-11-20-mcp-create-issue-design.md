@@ -82,7 +82,7 @@ without the user seeing it first.
 
 ### Output (JSON in the text content)
 
-- Preview: `{ dryRun: true, repo, isOrigin, title, body, labels,
+- Preview: `{ dryRun: true, repo, isOrigin, title, bodyChars, labels,
   assignees, secrets: { blocking, warnings }, canCreate, next }`.
 - Created: `{ created: true, repo, number, url }`.
 - Errors: `isError: true`, `{ error: <code>, message }`.

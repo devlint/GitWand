@@ -1,18 +1,27 @@
 /**
  * @file secrets/report.ts
  *
- * The secrets scan of a "bad resolution" report's body (#301). On the way to
- * GitWand's public repository a known secret pattern (severity high or
- * medium) blocks the report; entropy alone (severity low: lockfile integrity
- * hashes, minified code) only warns. On the user's own repository nothing
- * blocks. The scan is always on, whatever the repository's config, and
- * ignores no path: the built-in ignore list would skip lockfiles.
+ * The secrets scan of an issue's text (#301). With `blockAt: "medium"` a
+ * known secret pattern (severity high or medium) blocks; entropy alone
+ * (severity low: lockfile integrity hashes, minified code) only warns. With
+ * `blockAt: "never"` nothing blocks. The scan is always on, whatever the
+ * repository's config, and ignores no path: the built-in ignore list would
+ * skip lockfiles.
  *
- * Shared by the desktop issue form (`utils/reportGuard.ts` re-exports it) and
- * the MCP `gitwand_create_issue` tool. Pure: no Node module.
+ * Each caller picks `blockAt` and says why where it calls: the desktop issue
+ * form (`utils/reportGuard.ts` re-exports this) blocks reports to GitWand's
+ * public repository only; the MCP `gitwand_create_issue` tool always blocks.
+ * Pure: no Node module.
  */
 import { scanSecrets } from "./scanner.js";
 import type { SecretFinding, SecretPattern } from "./types.js";
+
+/**
+ * The default `secrets.entropyThreshold` (bits per character) when the
+ * repository's `.gitwandrc` sets none — the desktop setting's, the CLI's and
+ * the MCP tool's.
+ */
+export const DEFAULT_ENTROPY_THRESHOLD = 4.0;
 
 /** The core scanner's finding cap (`MAX_FINDINGS` in secrets/scanner.ts). */
 const SCAN_CAP = 500;

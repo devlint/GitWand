@@ -20,6 +20,7 @@ import { resolve, summarizeTiers, validateMergedContent, type MergeResult, type 
 import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
 import { createIssueToolDefinition, handleCreateIssue } from "./create_issue.js";
 import { detectMergeContext } from "../merge-context.js";
+import { gitOutput } from "../repo-config.js";
 import {
   buildRegenerationReport,
   loadGitwandrcResolveGeneratedFiles,
@@ -267,17 +268,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 
-/** Run git, returning trimmed stdout, or null on non-zero exit / spawn error. */
-function gitTry(cwd: string, args: string[]): string | null {
-  try {
-    // execFileSync passes args as a discrete array — no shell interpolation.
-    const out = execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-    return out.trim();
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Run `git merge-file` and return the merged content INCLUDING conflict markers.
  *
@@ -309,19 +299,19 @@ function gitMergeFile(cwd: string, args: string[]): string | null {
 
 /** Resolve a ref to a commit SHA, or null if unknown/invalid. */
 function revParse(cwd: string, rev: string): string | null {
-  return gitTry(cwd, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
+  return gitOutput(cwd, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
 }
 
 /** Files changed between two revs (name-only). */
 function changedFiles(cwd: string, base: string, rev: string): string[] {
-  const out = gitTry(cwd, ["diff", "--name-only", base, rev]);
+  const out = gitOutput(cwd, ["diff", "--name-only", base, rev]);
   if (!out) return [];
   return out.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
 }
 
 /** Read a file's blob at a given rev, or null if absent at that rev. */
 function showBlob(cwd: string, rev: string, file: string): string | null {
-  return gitTry(cwd, ["show", `${rev}:${file}`]);
+  return gitOutput(cwd, ["show", `${rev}:${file}`]);
 }
 
 interface SimulatedFile {
@@ -913,14 +903,14 @@ async function toolPreviewRebase(cwd: string, args: Record<string, unknown>) {
   if (!headSha) {
     return { content: [{ type: "text" as const, text: "Cannot resolve HEAD (empty repository?)." }], isError: true };
   }
-  const mergeBase = gitTry(cwd, ["merge-base", headSha, onto]);
+  const mergeBase = gitOutput(cwd, ["merge-base", headSha, onto]);
   if (!mergeBase) {
     return { content: [{ type: "text" as const, text: `No common ancestor between HEAD and ${onto}.` }], isError: true };
   }
 
   // Replay commits oldest-first: per-commit 3-way preview.
   // Orientation per commit: ours = onto (target base), theirs = commit (replayed).
-  const commitsRaw = gitTry(cwd, ["rev-list", "--reverse", `${mergeBase}..${headSha}`]);
+  const commitsRaw = gitOutput(cwd, ["rev-list", "--reverse", `${mergeBase}..${headSha}`]);
   const commits = commitsRaw ? commitsRaw.split("\n").filter((c) => c.trim()) : [];
   const allSims: SimulatedFile[] = [];
   for (const c of commits) {

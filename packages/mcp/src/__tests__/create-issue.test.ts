@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseRemoteUrl, targetsFrom, ghEnv, createIssueTimeouts } from "../tools/create_issue.js";
+import { parseRemoteUrl, targetsFrom, ghEnv, createIssueTimeouts, resetCreateIssueCaches } from "../tools/create_issue.js";
 import { handleToolCall, registerTools } from "../tools/index.js";
 import { FakeGh, repoJson, type FakeAnswer } from "./fake-gh.js";
 
@@ -118,6 +118,7 @@ let gh: FakeGh | null = null;
 const timeouts = { ...createIssueTimeouts };
 afterEach(() => {
   Object.assign(createIssueTimeouts, timeouts);
+  resetCreateIssueCaches();
   gh?.dispose();
   gh = null;
   while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
@@ -164,13 +165,15 @@ describe("gitwand_create_issue", () => {
       repo: "me/proj",
       isOrigin: true,
       title: "Crash on save",
-      body: "Steps",
+      bodyChars: 5,
       labels: ["bug"],
       assignees: [],
       canCreate: true,
       secrets: { blocking: [], warnings: [] },
     });
     expect(out.next).toMatch(/dry_run: false/);
+    // The body is the agent's own text: not echoed back.
+    expect(out.body).toBeUndefined();
     expect(creates(g)).toHaveLength(0);
     expect(g.calls().map((c) => c.argv)).toEqual([["api", "--hostname", "github.com", "repos/me/proj"]]);
   });
@@ -255,6 +258,7 @@ describe("gitwand_create_issue", () => {
     [{ title: "   " }, "invalid_title"],
     [{ title: "x".repeat(257) }, "invalid_title"],
     [{ title: "Crash\nmore" }, "invalid_title"],
+    [{ title: "😀".repeat(257) }, "invalid_title"],
     [{ title: "Crash\r" + "more" }, "invalid_title"],
     [{ title: "T", body: "x".repeat(65_537) }, "invalid_body"],
     [{ title: "T", labels: ["a,b"] }, "invalid_list"],
@@ -322,6 +326,11 @@ describe("gitwand_create_issue", () => {
 
   it("an enterprise origin names its host", async () => {
     const g = fake(repoJson("me/proj"), { stdout: "https://ghe.corp/me/proj/issues/3\n" });
+    g.answer({
+      api: { stdout: JSON.stringify(repoJson("me/proj")) },
+      "issue create": { stdout: "https://ghe.corp/me/proj/issues/3\n" },
+      "auth status": { stdout: "" },
+    });
     const { out } = await call(makeRepo("git@ghe.corp:me/proj.git"), { title: "T", dry_run: false });
     expect(out).toMatchObject({ created: true, number: 3 });
     expect(apis(g)[0].argv).toEqual(["api", "--hostname", "ghe.corp", "repos/me/proj"]);
@@ -383,5 +392,70 @@ describe("gitwand_create_issue", () => {
 
   it("the default timeouts: 30 s to read, 60 s to create", () => {
     expect(timeouts).toEqual({ readMs: 30_000, createMs: 60_000, sshMs: 5_000 });
+  });
+
+  it("a title of 256 emoji is 256 characters", async () => {
+    fake();
+    expect((await call(makeRepo(), { title: "😀".repeat(256) })).isError).toBe(false);
+  });
+
+  it("a non-GitHub origin is refused before gh is asked about it", async () => {
+    const g = new FakeGh({ "auth status": { stderr: "You are not logged into any accounts on gitlab.com", code: 1 } });
+    gh = g;
+    const r = await call(makeRepo("git@gitlab.com:team/app.git"), { title: "T" });
+    expect(r.out.error).toBe("not_github");
+    expect(g.calls().filter((c) => c.tool === "gh").map((c) => c.argv)).toEqual([["auth", "status", "--hostname", "gitlab.com"]]);
+  });
+
+  it("github.com needs no sign-in check", async () => {
+    const g = fake();
+    await call(makeRepo(), { title: "T" });
+    expect(g.calls().some((c) => c.argv[0] === "auth")).toBe(false);
+  });
+
+  it.each([
+    'Post "https://api.github.com/graphql": unexpected EOF',
+    "HTTP 502: Bad Gateway (https://api.github.com/graphql)",
+    "read tcp 10.0.0.2:51000->140.82.112.6:443: read: connection reset by peer",
+  ])("a create cut off by the network may have created the issue: %s", async (stderr) => {
+    fake(repoJson("me/proj"), { stderr, code: 1 });
+    const r = await call(makeRepo(), { title: "T", dry_run: false });
+    expect(r.out.error).toBe("create_uncertain");
+    expect(r.out.message).toContain(stderr);
+  });
+
+  it("a slow gh does not block the server", async () => {
+    fake(repoJson("me/proj"), { stdout: ISSUE_URL, sleepMs: 600 });
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 20);
+    try {
+      await call(makeRepo(), { title: "T", dry_run: false });
+    } finally {
+      clearInterval(timer);
+    }
+    expect(ticks).toBeGreaterThan(5);
+  });
+
+  it("a preview then a create read the target once, and ssh once", async () => {
+    const g = fake();
+    g.answer({
+      api: { stdout: JSON.stringify(repoJson("me/proj")) },
+      "issue create": { stdout: ISSUE_URL },
+      ssh: { stdout: "hostname github.com\n" },
+    });
+    const cwd = makeRepo("git@github-work:me/proj.git");
+    await call(cwd, { title: "T" });
+    await call(cwd, { title: "T", dry_run: false });
+    expect(g.calls().filter((c) => c.tool === "ssh")).toHaveLength(1);
+    expect(apis(g)).toHaveLength(1);
+  });
+
+  it("a failed target read is not remembered", async () => {
+    const g = new FakeGh({ api: { stderr: "HTTP 500", code: 1 } });
+    gh = g;
+    const cwd = makeRepo();
+    await call(cwd, { title: "T" });
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) } });
+    expect((await call(cwd, { title: "T" })).out.repo).toBe("me/proj");
   });
 });

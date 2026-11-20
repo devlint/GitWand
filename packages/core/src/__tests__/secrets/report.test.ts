@@ -4,7 +4,8 @@
  * warns (lockfile hashes would otherwise block every lockfile report).
  */
 import { describe, it, expect } from "vitest";
-import { scanReportBody } from "../../secrets/report.js";
+import { scanReportBody, DEFAULT_ENTROPY_THRESHOLD } from "../../secrets/report.js";
+import * as core from "../../index.js";
 
 const opts = { extraPatterns: [], entropyThreshold: 4.0, blockAt: "medium" as const };
 const token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8";
@@ -93,3 +94,9 @@ describe("scanReportBody", () => {
   });
 });
 
+describe("DEFAULT_ENTROPY_THRESHOLD", () => {
+  it("is 4.0 bits per character, exported for every caller", () => {
+    expect(DEFAULT_ENTROPY_THRESHOLD).toBe(4.0);
+    expect(core.DEFAULT_ENTROPY_THRESHOLD).toBe(4.0);
+  });
+});

@@ -22,6 +22,7 @@ import {
   hunkBodyFromHeader,
   noHunkBody,
   parseGitwandrc,
+  DEFAULT_ENTROPY_THRESHOLD,
   parseHunkHeader,
   scanSecrets,
   type HunkBody,
@@ -32,9 +33,6 @@ import {
 
 import { c } from "../ui.js";
 import { findGitRoot } from "../llm-config.js";
-
-/** Matches the desktop default (useSettings.ts `secretsEntropyThreshold`). */
-const DEFAULT_ENTROPY_THRESHOLD = 4.0;
 
 /**
  * Runs `git diff --cached --unified=0 --no-color`, tolerant on failure (returns "" if git is

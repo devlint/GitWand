@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
-import { clampHistoryBudget } from "@gitwand/core";
+import { clampHistoryBudget, DEFAULT_ENTROPY_THRESHOLD } from "@gitwand/core";
 import { mergeLlmFallbackForSave } from "../utils/llmFallbackRc";
 import { useI18n } from "../composables/useI18n";
 import type { LocaleKey } from "../locales/en";
@@ -378,7 +378,7 @@ const defaultSettings: Settings = {
   filesPrevMode: "floating",
   filesHideOnNav: true,
   secretsScannerEnabled: true,
-  secretsEntropyThreshold: 4.0,
+  secretsEntropyThreshold: DEFAULT_ENTROPY_THRESHOLD,
   commitReviewEnabled: false,
   commitReviewAutoReReview: true,
   snapshotsEnabled: true,
