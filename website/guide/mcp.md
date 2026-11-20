@@ -183,7 +183,7 @@ The issue goes to `origin`, or to its fork parent when issues are turned off (or
 | `dry_run` | boolean | No | Default `true` (preview). `false` creates the issue |
 | `preview_id` | string | With `dry_run: false` | The `previewId` of a preview of this very issue: a create without it, or with other arguments, is refused |
 
-**Returns:** the preview, or `{ created, repo, number, url }`. Errors are `{ error, message }` with a stable code: `gh_missing`, `no_origin`, `not_github` (an `origin` on another forge), `gh_auth_failed`, `preview_required`, `preview_used`, `declined`, `confirm_failed`, `cannot_triage` (labels or assignees without triage rights on the target), `scan_failed`, `repo_not_allowed`, `issues_disabled`, `secrets_found`, `create_failed`, and `create_uncertain` when `gh` was cut off while creating (the issue may exist: check before trying again)…
+**Returns:** the preview, or `{ created, repo, number, url }`. Errors are `{ error, message }` with a stable code: `gh_missing`, `no_origin`, `not_github` (an `origin` on another forge), `gh_auth_failed`, `preview_required`, `preview_used`, `preview_expired` (a preview is good for an hour), `declined`, `confirm_failed`, `cancelled`, `cannot_triage` (labels or assignees without triage rights on the target), `scan_failed`, `repo_not_allowed`, `issues_disabled`, `secrets_found`, `create_failed`, and `create_uncertain` whenever the create failed in a way that may still have filed it (a 5xx, a connection lost or timed out mid-way, an error gh never gave before: check before trying again)…
 
 ## Resources
 

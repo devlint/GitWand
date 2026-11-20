@@ -125,8 +125,13 @@ function fake(api: unknown = repoJson("me/proj"), create: FakeAnswer = { stdout:
   return gh;
 }
 
-async function call(cwd: string, args: Record<string, unknown>, confirm?: (message: string) => Promise<boolean | undefined>) {
-  const res: any = await handleToolCall("gitwand_create_issue", args, cwd, confirm ? { confirm } : undefined);
+async function call(
+  cwd: string,
+  args: Record<string, unknown>,
+  confirm?: (message: string) => Promise<boolean | undefined>,
+  signal?: AbortSignal,
+) {
+  const res: any = await handleToolCall("gitwand_create_issue", args, cwd, { confirm, signal });
   return { isError: res.isError === true, out: JSON.parse(res.content[0].text) };
 }
 
@@ -168,7 +173,7 @@ describe("gitwand_create_issue", () => {
     expect(out.next).toMatch(/dry_run: false/);
     // The body is the agent's own text: not echoed back.
     expect(out.body).toBeUndefined();
-    expect(out.previewId).toMatch(/^[0-9a-f]{64}$/);
+    expect(out.previewId).toMatch(/^[0-9a-f]{76}$/);
     expect(creates(g)).toHaveLength(0);
     expect(g.calls().map((c) => c.argv)).toEqual([["api", "--hostname", "github.com", "repos/me/proj"]]);
   });
@@ -236,7 +241,8 @@ describe("gitwand_create_issue", () => {
     expect(preview.out.secrets.blocking).toHaveLength(1);
     expect(preview.out.secrets.blocking[0]).toMatchObject({ file: "title", line: 1 });
     expect(JSON.stringify(preview.out.secrets)).not.toContain(token);
-    const sent = await call(cwd, { title: `leak ${token}`, body: "ok", dry_run: false });
+    // A blocked preview gives no id; whatever id is passed, the secret refuses it.
+    const sent = await call(cwd, { title: `leak ${token}`, body: "ok", dry_run: false, preview_id: "0".repeat(76) });
     expect(sent.isError).toBe(true);
     expect(sent.out.error).toBe("secrets_found");
     expect(creates(g)).toHaveLength(0);
@@ -324,11 +330,11 @@ describe("gitwand_create_issue", () => {
   });
 
   it("create failing → create_failed with gh's words", async () => {
-    fake(repoJson("me/proj"), { stderr: "could not add label: 'nope' not found", code: 1 });
+    fake(repoJson("me/proj"), { stderr: "gh: Validation Failed (HTTP 422)", code: 1 });
     const r = await create(makeRepo(), { title: "T", labels: ["nope"] });
     expect(r.isError).toBe(true);
     expect(r.out.error).toBe("create_failed");
-    expect(r.out.message).toContain("could not add label");
+    expect(r.out.message).toContain("Validation Failed (HTTP 422)");
   });
 
   it("an enterprise origin names its host", async () => {
@@ -407,6 +413,7 @@ describe("gitwand_create_issue", () => {
       scanMs: 5_000,
       sshFailureTtlMs: 60_000,
       signedInTtlMs: 300_000,
+      previewTtlMs: 3_600_000,
     });
   });
 
@@ -486,7 +493,7 @@ describe("gitwand_create_issue", () => {
       const r = await call(cwd, { title: "T", body: "shown", ...changed, dry_run: false, preview_id: preview.out.previewId });
       expect(r.out.error).toBe("preview_required");
     }
-    expect((await call(cwd, { title: "T", body: "shown", dry_run: false, preview_id: "f".repeat(64) })).out.error).toBe("preview_required");
+    expect((await call(cwd, { title: "T", body: "shown", dry_run: false, preview_id: "f".repeat(76) })).out.error).toBe("preview_required");
     expect(creates(g)).toHaveLength(0);
     const ok = await call(cwd, { title: "T", body: "shown", dry_run: false, preview_id: preview.out.previewId });
     expect(ok.out.created).toBe(true);
@@ -580,7 +587,7 @@ describe("gitwand_create_issue", () => {
     const a1 = { title: "T", dry_run: false, preview_id: p1.out.previewId };
     expect((await call(cwd, a1)).out.error).toBe("create_uncertain");
     expect((await call(cwd, a1)).out.error).toBe("preview_used");
-    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "api POST": { stderr: "could not add label", code: 1 } });
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "api POST": { stderr: "gh: Validation Failed (HTTP 422)", code: 1 } });
     const p2 = await call(cwd, { title: "U" });
     const a2 = { title: "U", dry_run: false, preview_id: p2.out.previewId };
     expect((await call(cwd, a2)).out.error).toBe("create_failed");
@@ -776,6 +783,80 @@ describe("gitwand_create_issue", () => {
     );
     expect((await call(cwd, { title: "id CORP-123456" })).out.secrets.blocking[0].patternId).toBe("corp");
     expect(scanWorkerStarts() - before).toBe(2);
+  });
+
+  it.each([
+    ["read tcp 10.0.0.2:51000->140.82.112.6:443: i/o timeout", "create_uncertain"],
+    ["net/http: request canceled (Client.Timeout exceeded while awaiting headers)", "create_uncertain"],
+    ["context deadline exceeded", "create_uncertain"],
+    ["gh: Request Timeout (HTTP 408)", "create_uncertain"],
+    ["something gh never said before", "create_uncertain"],
+    ["gh: Validation Failed (HTTP 422)", "create_failed"],
+    ["gh: Not Found (HTTP 404)", "create_failed"],
+    ['Post "https://api.github.com/repos/me/proj/issues": dial tcp: lookup api.github.com: no such host', "create_failed"],
+    ['Post "https://api.github.com/repos/me/proj/issues": dial tcp 140.82.112.6:443: connect: connection refused', "create_failed"],
+  ])("only a failure that sent nothing is safe to retry: %s", async (stderr, code) => {
+    fake(repoJson("me/proj"), { stderr, code: 1 });
+    expect((await create(makeRepo(), { title: "T" })).out.error).toBe(code);
+  });
+
+  it("a malformed or missing preview_id is refused before anything runs", async () => {
+    const g = fake();
+    const cwd = makeRepo();
+    for (const preview_id of [undefined, "x", "f".repeat(64)]) {
+      expect((await call(cwd, { title: "T", dry_run: false, preview_id })).out.error).toBe("preview_required");
+    }
+    expect(g.calls()).toHaveLength(0);
+  });
+
+  it("a preview expires", async () => {
+    createIssueTimeouts.previewTtlMs = 0;
+    fake();
+    const r = await create(makeRepo(), { title: "T" });
+    expect(r.out.error).toBe("preview_expired");
+  });
+
+  it("a cancelled call creates nothing and frees its preview", async () => {
+    const g = fake();
+    const cwd = makeRepo();
+    const p = await call(cwd, { title: "T" });
+    const args = { title: "T", dry_run: false, preview_id: p.out.previewId };
+    const ac = new AbortController();
+    const r = await call(cwd, args, async () => (ac.abort(), true), ac.signal);
+    expect(r.out.error).toBe("cancelled");
+    expect(creates(g)).toHaveLength(0);
+    expect((await call(cwd, args)).out.created).toBe(true);
+  });
+
+  it("a parent that could not be read is not taken as one without rights, nor remembered", async () => {
+    const g = fake();
+    const fork = repoJson("me/proj", { hasIssues: false, parent: repoJson("up/proj", { triage: null }) });
+    g.answer({ api: { stdout: JSON.stringify(fork) }, "api repos/up/proj": { stderr: "HTTP 502: Bad Gateway", code: 1 } });
+    const cwd = makeRepo();
+    const r = await call(cwd, { title: "T", labels: ["bug"] });
+    expect(r.out.error).toBe("target_lookup_failed");
+    expect(r.out.message).toContain("up/proj");
+    // Without labels the target itself is known well enough.
+    expect((await call(cwd, { title: "T" })).out.repo).toBe("up/proj");
+    g.answer({ api: { stdout: JSON.stringify(fork) }, "api repos/up/proj": { stdout: JSON.stringify(repoJson("up/proj")) } });
+    expect((await call(cwd, { title: "T", labels: ["bug"] })).out).toMatchObject({ repo: "up/proj", labels: ["bug"] });
+  });
+
+  it("queued scans keep to their time limit", async () => {
+    createIssueTimeouts.scanMs = 400;
+    fake();
+    const cwd = makeRepo();
+    writeFileSync(
+      join(cwd, ".gitwandrc"),
+      JSON.stringify({ secrets: { patterns: [{ id: "bad", regex: "(a+)+$", severity: "high", description: "x" }] } }),
+    );
+    // Warm the worker so its start-up is not in the measure.
+    await call(cwd, { title: "warm" });
+    const t = Date.now();
+    const rs = await Promise.all([1, 2, 3].map(() => call(cwd, { title: "T", body: "a".repeat(40) + "!" })));
+    expect(rs.map((r) => r.out.error)).toEqual(["scan_failed", "scan_failed", "scan_failed"]);
+    // Each asked at once: none waits for the others' overruns.
+    expect(Date.now() - t).toBeLessThan(400 * 2 + 300);
   });
 });
 

@@ -266,7 +266,7 @@ function devExtractPercent(line) {
  * build made after startup is picked up on the next request — but a stale
  * dist that loaded fine is cached by Node until the dev-server restarts.
  */
-const DEV_CORE_HELPERS = ["classifyHunkLine", "hunkBodyFromHeader", "noHunkBody", "parseHunkHeader", "scanSecrets", "issueTargetsFrom"];
+const DEV_CORE_HELPERS = ["classifyHunkLine", "hunkBodyFromHeader", "noHunkBody", "parseHunkHeader", "scanSecrets"];
 let devCorePromise = null;
 function loadDevCore() {
   if (devCorePromise) return devCorePromise;
@@ -1300,8 +1300,13 @@ async function devIssueTargetsRead(nwo, token) {
       if (parent) origin.parent = parent;
     }
   }
-  // `targets_from`, from core (shared with the MCP tool).
-  return (await loadDevCore()).issueTargetsFrom(origin);
+  // `targets_from`, from core (shared with the MCP tool). Checked here, not
+  // in DEV_CORE_HELPERS: an older dist must not take the diff routes down too.
+  const core = await loadDevCore();
+  if (typeof core.issueTargetsFrom !== "function") {
+    throw new Error("@gitwand/core is out of date (missing issueTargetsFrom): run `pnpm --filter @gitwand/core build`, then restart the dev-server");
+  }
+  return core.issueTargetsFrom(origin);
 }
 
 /** Up to `maxPages` pages of 100 of the array at `path` (`query` ends with `&`). */

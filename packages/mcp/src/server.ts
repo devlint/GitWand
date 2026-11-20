@@ -21,6 +21,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { registerTools, handleToolCall } from "./tools/index.js";
+import { elicitConfirm } from "./confirm.js";
 import { registerResources, handleResourceRead } from "./resources/index.js";
 
 // ─── Parse CLI args ────────────────────────────────────────
@@ -53,24 +54,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: registerTools(),
 }));
 
-/**
- * Asks the user directly (MCP elicitation) when the client supports it: a
- * create is then confirmed by the user, not only by the agent. Undefined when
- * the client cannot ask.
- */
-async function confirm(message: string): Promise<boolean | undefined> {
-  if (!server.getClientCapabilities()?.elicitation) return undefined;
-  // The user reads the whole issue first: give them time. A failure (or no
-  // answer in time) throws, and the tool reports it as such, not as a no.
-  const r = await server.elicitInput(
-    { message, requestedSchema: { type: "object", properties: {} } },
-    { timeout: 10 * 60_000 },
-  );
-  return r.action === "accept";
-}
-
-server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
-  return handleToolCall(request.params.name, request.params.arguments ?? {}, cwd, { confirm });
+server.setRequestHandler(CallToolRequestSchema, async (request: any, extra: { signal: AbortSignal }) => {
+  // A create can ask the user directly (MCP elicitation), within this call:
+  // cancelling the call withdraws the question.
+  return handleToolCall(request.params.name, request.params.arguments ?? {}, cwd, {
+    confirm: elicitConfirm(server, extra.signal),
+    signal: extra.signal,
+  });
 });
 
 // ─── Resources ─────────────────────────────────────────────
