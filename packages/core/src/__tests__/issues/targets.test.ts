@@ -62,6 +62,12 @@ describe("issueTargetsFrom", () => {
     expect(issueTargetsFrom(o, undefined).targets).toHaveLength(2);
   });
 
+  it("an origin without a name still lists its fork parent, as Rust", () => {
+    const t = issueTargetsFrom({ fork: true, parent: repo("up/proj") });
+    expect(t.targets.map((x) => [x.repo, x.isOrigin])).toEqual([["up/proj", false]]);
+    expect(t.defaultRepo).toBe("up/proj");
+  });
+
   it("nothing usable → no target", () => {
     expect(issueTargetsFrom(null)).toEqual({ targets: [], defaultRepo: null });
     expect(issueTargetsFrom({ message: "Not Found" })).toEqual({ targets: [], defaultRepo: null });

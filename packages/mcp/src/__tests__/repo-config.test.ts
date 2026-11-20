@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { gitBlob } from "../repo-config.js";
+import { gitBlob, gitOutput } from "../repo-config.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -23,5 +23,18 @@ describe("gitBlob", () => {
     expect(gitBlob(cwd, "HEAD", "a.txt")).toBe("  indented\n\n");
     expect(gitBlob(cwd, "HEAD", "empty.txt")).toBe("");
     expect(gitBlob(cwd, "HEAD", "nope.txt")).toBeNull();
+  });
+});
+
+describe("gitOutput", () => {
+  it("reads more than a megabyte", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "gitwand-mcp-big-"));
+    dirs.push(cwd);
+    const git = (...a: string[]) => execFileSync("git", a, { cwd });
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(cwd, "big.txt"), "x".repeat(3 * 1024 * 1024));
+    git("add", ".");
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c");
+    expect(gitOutput(cwd, ["show", "HEAD:big.txt"])?.length).toBe(3 * 1024 * 1024);
   });
 });

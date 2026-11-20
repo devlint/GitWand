@@ -43,10 +43,10 @@ function target(v: unknown, isOrigin: boolean): IssueTarget | null {
  * back to the embedded copy — Rust's `.ok().or_else(embedded)`.
  */
 export function issueTargetsFrom(origin: unknown, parent?: unknown): IssueTargets {
+  // As Rust: an origin without a usable name is left out, its parent is not.
   const o = target(origin, true);
-  if (!o) return { targets: [], defaultRepo: null };
-  const targets = [o];
-  const j = origin as Record<string, unknown>;
+  const targets = o ? [o] : [];
+  const j = (origin && typeof origin === "object" ? origin : {}) as Record<string, unknown>;
   if (j.fork === true) {
     const p = target(parent !== undefined ? parent : j.parent, false);
     if (p) targets.push(p);

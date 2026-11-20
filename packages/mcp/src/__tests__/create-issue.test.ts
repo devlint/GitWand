@@ -188,7 +188,7 @@ describe("gitwand_create_issue", () => {
       assignees: ["@me", "hubot"],
     });
     expect(isError).toBe(false);
-    expect(out).toEqual({ created: true, repo: "me/proj", number: 12, url: ISSUE_URL });
+    expect(out).toEqual({ created: true, confirmedBy: "agent", repo: "me/proj", number: 12, url: ISSUE_URL });
     const [c] = creates(g);
     expect(c.argv).toEqual(["api", "--hostname", "github.com", "-X", "POST", "repos/me/proj/issues", "--input", "-"]);
     // `@me` is the signed-in login; a label may hold a comma.
@@ -904,6 +904,28 @@ describe("gitwand_create_issue", () => {
     const { out } = await call(makeRepo(), { title: "T", labels: ["ok", token] });
     expect(out.canCreate).toBe(false);
     expect(out.secrets.blocking).toMatchObject([{ file: "labels", line: 2, patternId: "github_pat_classic" }]);
+  });
+
+  it("a cancelled call stops at whatever gh is doing", async () => {
+    gh = new FakeGh({ api: { stdout: JSON.stringify(repoJson("me/proj")), sleepMs: 10_000 } });
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 300);
+    const t = Date.now();
+    const r = await call(makeRepo(), { title: "T" }, undefined, ac.signal);
+    expect(r.out.error).toBe("cancelled");
+    expect(Date.now() - t).toBeLessThan(3_000);
+  });
+
+  it("assignees are deduplicated, whatever their case, @me or not", async () => {
+    fake();
+    expect((await call(makeRepo(), { title: "T", assignees: ["alice", "Alice", "bob"] })).out.assignees).toEqual(["alice", "bob"]);
+    expect((await call(makeRepo(), { title: "T", assignees: ["@me", "octo", "OCTO"] })).out.assignees).toEqual(["octo"]);
+  });
+
+  it("says who confirmed the create", async () => {
+    fake();
+    expect((await create(makeRepo(), { title: "T" }, async () => true)).out.confirmedBy).toBe("user");
+    expect((await create(makeRepo(), { title: "T" }, async () => undefined)).out.confirmedBy).toBe("agent");
   });
 });
 

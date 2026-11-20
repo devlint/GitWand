@@ -29,6 +29,7 @@ import {
 } from "@gitwand/core";
 import { gitTryAsync, readGitwandrcAsync } from "../repo-config.js";
 import { run } from "../spawn.js";
+import { childEnv } from "../child-env.js";
 
 // ─── Remote URL ──────────────────────────────────────────────
 
@@ -82,24 +83,8 @@ export function parseRemoteUrl(url: string): RemoteRepo | null {
 
 // ─── Running gh ──────────────────────────────────────────────
 
-/** What `gh` may see of this process's environment (AGENTS.md: only what it needs). */
-const GH_ENV_ALLOW = [
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "USERPROFILE",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "APPDATA",
-  "LOCALAPPDATA",
-  "SystemRoot",
-  "windir",
-  "TMPDIR",
-  "TEMP",
-  "TMP",
-  "LANG",
-  "LC_ALL",
+/** What `gh` may see beyond the shared base list (AGENTS.md: only what it needs). */
+const GH_ENV_EXTRA = [
   "XDG_CONFIG_HOME",
   "XDG_STATE_HOME",
   "XDG_DATA_HOME",
@@ -112,9 +97,6 @@ const GH_ENV_ALLOW = [
   "HTTPS_PROXY",
   "HTTP_PROXY",
   "NO_PROXY",
-  "https_proxy",
-  "http_proxy",
-  "no_proxy",
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
   // gh's keyring on Linux (Secret Service) is reached over the session bus.
@@ -123,16 +105,13 @@ const GH_ENV_ALLOW = [
 ];
 
 /**
- * The environment `gh` runs with: the allow-list above, plus no prompt, no
+ * The environment `gh` runs with: the shared base list and the extras above
+ * (in any case: `https_proxy` too), plus no prompt, no
  * update notice, no colour. `GH_HOST`/`GH_REPO` never pass: the target is
  * always named on the command line.
  */
 export function ghEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const k of GH_ENV_ALLOW) {
-    const v = process.env[k];
-    if (v !== undefined) env[k] = v;
-  }
+  const env = childEnv(GH_ENV_EXTRA);
   env.GH_PROMPT_DISABLED = "1";
   env.GH_NO_UPDATE_NOTIFIER = "1";
   env.NO_COLOR = "1";
@@ -198,9 +177,6 @@ export async function runGh(
   return { ok: true, stdout: r.stdout };
 }
 
-/** What `ssh` may see: enough to find and read its config, no token. */
-const SSH_ENV_ALLOW = ["PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SystemRoot", "windir", "TMPDIR", "TEMP", "TMP"];
-
 /** Per host: a resolved name for the server's life, a failed lookup for `sshFailureTtlMs`. */
 const sshHosts = new Map<string, { host: string; ok: boolean; at: number }>();
 
@@ -211,16 +187,22 @@ const sshHosts = new Map<string, { host: string; ok: boolean; at: number }>();
  * host itself when ssh is missing, fails or times out — the desktop's
  * `ssh_resolved_host`.
  */
-export async function sshResolvedHost(host: string): Promise<string> {
+export async function sshResolvedHost(host: string, signal?: AbortSignal): Promise<string> {
   const known = sshHosts.get(host);
   if (known && (known.ok || Date.now() - known.at < createIssueTimeouts.sshFailureTtlMs)) return known.host;
   let resolved = host;
   let ok = false;
   // A plain host name only: never something ssh would read as an option.
   if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(host)) {
-    const env: NodeJS.ProcessEnv = {};
-    for (const k of SSH_ENV_ALLOW) if (process.env[k] !== undefined) env[k] = process.env[k];
-    const r = await run("ssh", ["-G", host], { env, timeoutMs: createIssueTimeouts.sshMs, killGraceMs: createIssueTimeouts.killGraceMs });
+    // Enough to find and read its config, no token.
+    const r = await run("ssh", ["-G", host], {
+      env: childEnv([]),
+      timeoutMs: createIssueTimeouts.sshMs,
+      killGraceMs: createIssueTimeouts.killGraceMs,
+      signal,
+    });
+    // A cancelled lookup tells nothing about the host: not remembered.
+    if (r.aborted) return host;
     if (!r.missing && !r.timedOut && r.code === 0) {
       const line = r.stdout.split("\n").find((l) => l.startsWith("hostname "));
       const name = line?.slice("hostname ".length).trim().toLowerCase();
@@ -248,11 +230,12 @@ const AUTH_REFUSED = /HTTP 401|Bad credentials|gh auth login|not logged in|authe
  * signed in to (GitHub Enterprise) — the desktop's rule. Any other host
  * (gitlab.com, bitbucket.org…) is not GitHub.
  */
-async function isGithubHost(cwd: string, host: string): Promise<true | ToolResult> {
+async function isGithubHost(cwd: string, host: string, signal?: AbortSignal): Promise<true | ToolResult> {
   if (host === "github.com") return true;
   const at = signedInHosts.get(host);
   if (at !== undefined && Date.now() - at < createIssueTimeouts.signedInTtlMs) return true;
-  const r = await runGh(["auth", "status", "--hostname", host], cwd, undefined, createIssueTimeouts.readMs);
+  const r = await runGh(["auth", "status", "--hostname", host], cwd, undefined, createIssueTimeouts.readMs, signal);
+  if (signal?.aborted) return cancelled();
   if (r.ok) {
     signedInHosts.set(host, Date.now());
     return true;
@@ -612,12 +595,19 @@ interface ReadTargets {
 }
 
 /** origin's issue targets, read once a minute at most; a failure (or a partial read) is not remembered. */
-async function readTargets(root: string, host: string, remote: RemoteRepo, account: string): Promise<ReadTargets | { error: ToolResult }> {
+async function readTargets(
+  root: string,
+  host: string,
+  remote: RemoteRepo,
+  account: string,
+  signal?: AbortSignal,
+): Promise<ReadTargets | { error: ToolResult }> {
   const key = `${account}/${host}/${remote.owner}/${remote.repo}`.toLowerCase();
   const hit = targetsCache.get(key);
   if (hit && Date.now() - hit.at < TARGETS_TTL_MS) return { targets: hit.targets, parentUnread: null };
-  const get = (nwo: string) => runGh(["api", "--hostname", host, `repos/${nwo}`], root, undefined, createIssueTimeouts.readMs);
+  const get = (nwo: string) => runGh(["api", "--hostname", host, `repos/${nwo}`], root, undefined, createIssueTimeouts.readMs, signal);
   const api = await get(`${remote.owner}/${remote.repo}`);
+  if (signal?.aborted) return { error: cancelled() };
   if (!api.ok) {
     if (api.missing) return { error: ghMissing() };
     if (AUTH_REFUSED.test(api.stderr)) {
@@ -634,6 +624,7 @@ async function readTargets(root: string, host: string, remote: RemoteRepo, accou
   let parentUnread: string | null = null;
   if (j.fork === true && typeof j.parent?.full_name === "string") {
     const p = await get(j.parent.full_name);
+    if (signal?.aborted) return { error: cancelled() };
     const read = p.ok ? parseJson(p.stdout) : null;
     // An answer that is not a repository is no better than none: the
     // embedded copy stands in, its rights unknown.
@@ -656,12 +647,24 @@ function parseJson(text: string): unknown {
 }
 
 /** The logins to send: `@me` (as gh takes it) is the signed-in login, asked once per host and account. */
-async function resolveAssignees(root: string, host: string, assignees: string[], account: string): Promise<string[] | ToolResult> {
-  if (!assignees.includes("@me")) return assignees;
+async function resolveAssignees(
+  root: string,
+  host: string,
+  assignees: string[],
+  account: string,
+  signal?: AbortSignal,
+): Promise<string[] | ToolResult> {
+  // Logins are case-insensitive on GitHub: the first spelling of each is kept.
+  const unique = (xs: string[]) => {
+    const seen = new Set<string>();
+    return xs.filter((x) => !seen.has(x.toLowerCase()) && (seen.add(x.toLowerCase()), true));
+  };
+  if (!assignees.includes("@me")) return unique(assignees);
   const key = `${account}/${host}`;
   let login = logins.get(key);
   if (!login) {
-    const r = await runGh(["api", "--hostname", host, "user"], root, undefined, createIssueTimeouts.readMs);
+    const r = await runGh(["api", "--hostname", host, "user"], root, undefined, createIssueTimeouts.readMs, signal);
+    if (signal?.aborted) return cancelled();
     if (!r.ok) {
       if (r.missing) return ghMissing();
       return fail("gh_auth_failed", `gh could not tell who \`@me\` is on ${host}: ${r.stderr}`);
@@ -671,8 +674,10 @@ async function resolveAssignees(root: string, host: string, assignees: string[],
     login = j.login;
     logins.set(key, login);
   }
-  return [...new Set(assignees.map((a) => (a === "@me" ? login! : a)))];
+  return unique(assignees.map((a) => (a === "@me" ? login! : a)));
 }
+
+const cancelled = () => fail("cancelled", "The tool call was cancelled: nothing was created.");
 
 const previewRequired = () =>
   fail(
@@ -735,13 +740,16 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   if (!url) return fail("no_origin", "This repository has no `origin` remote to file an issue on.");
   const remote = parseRemoteUrl(url);
   if (!remote) return fail("unsupported_remote", "The `origin` remote is not a `host/owner/repo` URL.");
-  const host = remote.ssh ? await sshResolvedHost(remote.host) : remote.host;
-  const github = await isGithubHost(root, host);
+  // Every step that waits on a process stops when the client cancels the call.
+  const signal = ctx.signal;
+  const host = remote.ssh ? await sshResolvedHost(remote.host, signal) : remote.host;
+  if (signal?.aborted) return cancelled();
+  const github = await isGithubHost(root, host, signal);
   if (github !== true) return github;
 
   // 3. Its issue targets, as GitHub describes them.
   const account = await accountKey();
-  const read = await readTargets(root, host, remote, account);
+  const read = await readTargets(root, host, remote, account, signal);
   if ("error" in read) return read.error;
   const { targets, parentUnread } = read;
 
@@ -770,11 +778,12 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
       `You cannot set labels or assignees on ${chosen.repo} (no triage rights there): call again without \`labels\` and \`assignees\`.`,
     );
   }
-  const logins = await resolveAssignees(root, host, assignees, account);
+  const logins = await resolveAssignees(root, host, assignees, account, signal);
   if (!Array.isArray(logins)) return logins;
 
   // 4. Secrets.
   const secrets = await scanIssue(root, title, body, labels, logins);
+  if (signal?.aborted) return cancelled();
   if (!secrets) {
     return fail(
       "scan_failed",
@@ -837,7 +846,7 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   // The client gave up on this call (while the user read, say): its agent
   // already saw it fail, so nothing is filed behind its back. Past this
   // point a cancel stops gh, but the POST may already have reached GitHub.
-  if (ctx.signal?.aborted) return release(fail("cancelled", "The tool call was cancelled: nothing was created."));
+  if (signal?.aborted) return release(cancelled());
 
   // 5. Create: the whole issue as JSON on stdin (the REST payload the desktop
   // sends), so none of it — a title holding a token, say — is on a command line.
@@ -850,7 +859,7 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
     JSON.stringify(payload),
     createIssueTimeouts.createMs,
     // Cancelled mid-POST: gh is stopped, and the issue may exist (create_uncertain).
-    ctx.signal,
+    signal,
   );
   if (!made.ok) {
     if (made.missing) return release(ghMissing());
@@ -865,6 +874,9 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   const created = parseJson(made.stdout) as { number?: unknown; html_url?: unknown } | null;
   return ok({
     created: true,
+    // "user" when the client asked the user (MCP elicitation); "agent" when
+    // it cannot ask, and only the agent's preview stood for the user's yes.
+    confirmedBy: answer === true ? "user" : "agent",
     repo: chosen.repo,
     number: typeof created?.number === "number" ? created.number : null,
     url: typeof created?.html_url === "string" ? created.html_url : null,
