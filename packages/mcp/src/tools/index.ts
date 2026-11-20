@@ -18,7 +18,7 @@ import { execSync, execFileSync } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import { resolve, summarizeTiers, validateMergedContent, type MergeResult, type ConflictType, type GitWandOptions } from "@gitwand/core";
 import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
-import { createIssueToolDefinition, handleCreateIssue } from "./create_issue.js";
+import { createIssueToolDefinition, handleCreateIssue, type ToolContext } from "./create_issue.js";
 import { detectMergeContext } from "../merge-context.js";
 import { gitBlob, gitOutput } from "../repo-config.js";
 import {
@@ -468,6 +468,7 @@ export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
   defaultCwd: string,
+  ctx: ToolContext = {},
 ) {
   const cwd = (args.cwd as string) || defaultCwd;
 
@@ -487,7 +488,7 @@ export async function handleToolCall(
     case "gitwand_resolve_hunk_llm":
       return toolResolvHunkLlm(cwd, args);
     case "gitwand_create_issue":
-      return handleCreateIssue(cwd, args);
+      return handleCreateIssue(cwd, args, ctx);
     default:
       return { content: [{ type: "text" as const, text: `Unknown tool: ${name}` }], isError: true };
   }

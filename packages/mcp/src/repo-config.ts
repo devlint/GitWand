@@ -5,9 +5,10 @@
 
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { parseGitwandrc, type GitWandrcConfig } from "@gitwand/core";
+import { run } from "./spawn.js";
 
 /**
  * `git args…` in `cwd` (array args, no shell): trimmed stdout — possibly
@@ -26,13 +27,13 @@ export function gitTry(cwd: string, args: string[]): string | null {
   return gitOutput(cwd, args) || null;
 }
 
-/** `gitTry` without blocking the event loop (for tools that wait on the network too). */
-export function gitTryAsync(cwd: string, args: string[]): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile("git", args, { cwd, encoding: "utf-8", windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
-      resolve(err ? null : stdout.trim() || null);
-    });
-  });
+/**
+ * `gitTry` without blocking the event loop, bounded like every other process
+ * the tools wait on (`run`): null after `timeoutMs` too.
+ */
+export async function gitTryAsync(cwd: string, args: string[], timeoutMs = 30_000): Promise<string | null> {
+  const r = await run("git", args, { cwd, env: process.env, timeoutMs });
+  return r.code === 0 && !r.timedOut && !r.capped ? r.stdout.trim() || null : null;
 }
 
 /** A file's content at `rev`, byte for byte (an empty file is ""), or null when absent. */

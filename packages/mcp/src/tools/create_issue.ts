@@ -14,11 +14,11 @@
  *   array args and only the environment it needs.
  */
 
-import { spawn } from "node:child_process";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync } from "node:fs";
+import { Worker } from "node:worker_threads";
 import { DEFAULT_ENTROPY_THRESHOLD, scanReportBody, type ReportScan, type SecretFinding } from "@gitwand/core";
 import { gitTryAsync, readGitwandrcAsync } from "../repo-config.js";
+import { run } from "../spawn.js";
 
 // ─── Remote URL ──────────────────────────────────────────────
 
@@ -77,24 +77,37 @@ export interface IssueTarget {
   /** Issues enabled and the repository not archived. */
   hasIssues: boolean;
   isOrigin: boolean;
+  /** The viewer may set labels and assignees (triage, push, maintain or admin). */
+  canTriage: boolean;
 }
 
 function target(v: unknown, isOrigin: boolean): IssueTarget | null {
   if (!v || typeof v !== "object") return null;
   const j = v as Record<string, unknown>;
   if (typeof j.full_name !== "string" || !j.full_name) return null;
-  return { repo: j.full_name, hasIssues: j.has_issues === true && j.archived !== true, isOrigin };
+  const perms = (j.permissions && typeof j.permissions === "object" ? j.permissions : {}) as Record<string, unknown>;
+  return {
+    repo: j.full_name,
+    hasIssues: j.has_issues === true && j.archived !== true,
+    isOrigin,
+    canTriage: ["triage", "push", "maintain", "admin"].some((k) => perms[k] === true),
+  };
 }
 
-/** A `GET /repos/{o}/{r}` answer → origin, then its parent when it is a fork. */
-export function targetsFrom(json: unknown): IssueTarget[] {
+/**
+ * A `GET /repos/{o}/{r}` answer → origin, then its parent when it is a fork:
+ * `parent` read on its own when given (the copy embedded in a fork's answer
+ * may lack the viewer's rights), else the embedded one — as the desktop's
+ * `targets_from`.
+ */
+export function targetsFrom(json: unknown, parent?: unknown): IssueTarget[] {
   const origin = target(json, true);
   if (!origin) return [];
   const out = [origin];
   const j = json as Record<string, unknown>;
   if (j.fork === true) {
-    const parent = target(j.parent, false);
-    if (parent) out.push(parent);
+    const p = target(parent, false) ?? target(j.parent, false);
+    if (p) out.push(p);
   }
   return out;
 }
@@ -159,92 +172,48 @@ export function ghEnv(): NodeJS.ProcessEnv {
 }
 
 /**
- * How long `gh` and `ssh -G` may take. A create gets longer than a read, as
- * in the desktop: a POST cut short may still have filed the issue. Mutable
- * for tests only.
+ * The tool's limits. A create gets longer than a read, as in the desktop: a
+ * POST cut short may still have filed the issue. Mutable for tests only.
  */
-export const createIssueTimeouts = { readMs: 30_000, createMs: 60_000, sshMs: 5_000 };
+export const createIssueTimeouts = {
+  readMs: 30_000,
+  createMs: 60_000,
+  sshMs: 5_000,
+  /** SIGTERM → SIGKILL → giving up on a child that will not end. */
+  killGraceMs: 2_000,
+  maxOutputBytes: 16 * 1024 * 1024,
+  /** The secrets scan when the repository adds its own patterns (they run in a worker). */
+  scanMs: 5_000,
+  /** A failed `ssh -G` is asked again after this; a successful one is kept. */
+  sshFailureTtlMs: 60_000,
+  /** A GitHub Enterprise sign-in is checked again after this. */
+  signedInTtlMs: 5 * 60_000,
+};
 
 export type GhResult =
   | { ok: true; stdout: string }
   /**
    * `missing`: gh is not installed. `interrupted`: gh did not finish (timed
-   * out or stopped by a signal) — what it was doing may have happened.
+   * out, stopped by a signal, or stopped for flooding its output) — what it
+   * was doing may have happened.
    */
   | { ok: false; missing: boolean; interrupted: boolean; stderr: string };
 
-const MAX_OUTPUT = 16 * 1024 * 1024;
-
-interface Ran {
-  /** The program could not be started (ENOENT: not installed). */
-  missing: boolean;
-  timedOut: boolean;
-  code: number | null;
-  signal: NodeJS.Signals | null;
-  stdout: string;
-  stderr: string;
-}
-
-/**
- * `cmd args…` without blocking the server's event loop (the MCP server
- * answers other requests meanwhile): `input` on stdin, killed after
- * `timeoutMs`, output capped. Never rejects.
- */
-function run(cmd: string, args: string[], opts: { cwd?: string; env: NodeJS.ProcessEnv; input?: string; timeoutMs: number }): Promise<Ran> {
-  return new Promise((resolve) => {
-    const out: Buffer[] = [];
-    const err: Buffer[] = [];
-    let size = 0;
-    let timedOut = false;
-    let settled = false;
-    const done = (r: Omit<Ran, "stdout" | "stderr" | "timedOut">) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ ...r, timedOut, stdout: Buffer.concat(out).toString("utf-8"), stderr: Buffer.concat(err).toString("utf-8") });
-    };
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-    } catch (e) {
-      // An argument spawn refuses outright (a NUL byte): not run at all.
-      resolve({ missing: false, timedOut: false, code: null, signal: null, stdout: "", stderr: (e as Error).message });
-      return;
-    }
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-    }, opts.timeoutMs);
-    const collect = (into: Buffer[]) => (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_OUTPUT) child.kill("SIGTERM");
-      else into.push(chunk);
-    };
-    child.stdout!.on("data", collect(out));
-    child.stderr!.on("data", collect(err));
-    child.on("error", (e: NodeJS.ErrnoException) => {
-      // spawn says ENOENT for a missing working directory too.
-      if (e.code === "ENOENT" && opts.cwd && !existsSync(opts.cwd)) {
-        err.push(Buffer.from(`The directory ${opts.cwd} no longer exists.`));
-        done({ missing: false, code: null, signal: null });
-      } else {
-        if (e.code !== "ENOENT") err.push(Buffer.from(e.message));
-        done({ missing: e.code === "ENOENT", code: null, signal: null });
-      }
-    });
-    child.on("close", (code, signal) => done({ missing: false, code, signal }));
-    // A child that exits before reading stdin must not crash the server.
-    child.stdin!.on("error", () => {});
-    child.stdin!.end(opts.input ?? "");
-  });
-}
-
-/** `gh args…` in `cwd`, `input` on stdin, killed after `timeoutMs`; never rejects. */
+/** `gh args…` in `cwd`, `input` on stdin, stopped after `timeoutMs`; never rejects. */
 export async function runGh(args: string[], cwd: string, input: string | undefined, timeoutMs: number): Promise<GhResult> {
-  const r = await run("gh", args, { cwd, env: ghEnv(), input, timeoutMs });
+  const r = await run("gh", args, {
+    cwd,
+    env: ghEnv(),
+    input,
+    timeoutMs,
+    killGraceMs: createIssueTimeouts.killGraceMs,
+    maxOutputBytes: createIssueTimeouts.maxOutputBytes,
+  });
+  const stopped = (why: string) => ({ ok: false as const, missing: false, interrupted: true, stderr: why });
   if (r.missing) return { ok: false, missing: true, interrupted: false, stderr: "" };
-  if (r.timedOut) return { ok: false, missing: false, interrupted: true, stderr: `gh did not answer within ${timeoutMs / 1000} s` };
-  if (r.signal) return { ok: false, missing: false, interrupted: true, stderr: `gh was stopped by ${r.signal}` };
+  if (r.timedOut) return stopped(`gh did not answer within ${timeoutMs / 1000} s`);
+  if (r.capped) return stopped(`gh wrote more than ${createIssueTimeouts.maxOutputBytes} bytes and was stopped`);
+  if (r.signal) return stopped(`gh was stopped by ${r.signal}`);
   if (r.code !== 0) {
     return { ok: false, missing: false, interrupted: false, stderr: r.stderr.trim() || `gh exited with code ${r.code ?? "?"}` };
   }
@@ -254,8 +223,8 @@ export async function runGh(args: string[], cwd: string, input: string | undefin
 /** What `ssh` may see: enough to find and read its config, no token. */
 const SSH_ENV_ALLOW = ["PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SystemRoot", "windir", "TMPDIR", "TEMP", "TMP"];
 
-/** Per host, for the server's life: ~/.ssh/config rarely changes under it. */
-const sshHosts = new Map<string, string>();
+/** Per host: a resolved name for the server's life, a failed lookup for `sshFailureTtlMs`. */
+const sshHosts = new Map<string, { host: string; ok: boolean; at: number }>();
 
 /**
  * The host `ssh` connects to for `host` (`ssh -G` reads ~/.ssh/config
@@ -266,27 +235,35 @@ const sshHosts = new Map<string, string>();
  */
 export async function sshResolvedHost(host: string): Promise<string> {
   const known = sshHosts.get(host);
-  if (known) return known;
+  if (known && (known.ok || Date.now() - known.at < createIssueTimeouts.sshFailureTtlMs)) return known.host;
   let resolved = host;
+  let ok = false;
   // A plain host name only: never something ssh would read as an option.
   if (/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(host)) {
     const env: NodeJS.ProcessEnv = {};
     for (const k of SSH_ENV_ALLOW) if (process.env[k] !== undefined) env[k] = process.env[k];
-    const r = await run("ssh", ["-G", host], { env, timeoutMs: createIssueTimeouts.sshMs });
+    const r = await run("ssh", ["-G", host], { env, timeoutMs: createIssueTimeouts.sshMs, killGraceMs: createIssueTimeouts.killGraceMs });
     if (!r.missing && !r.timedOut && r.code === 0) {
       const line = r.stdout.split("\n").find((l) => l.startsWith("hostname "));
       const name = line?.slice("hostname ".length).trim().toLowerCase();
-      if (name) resolved = name;
+      if (name) {
+        resolved = name;
+        ok = true;
+      }
     }
   }
   if (resolved === "ssh.github.com") resolved = "github.com";
-  // A failed lookup too: asking again would only wait again.
-  sshHosts.set(host, resolved);
+  sshHosts.set(host, { host: resolved, ok, at: Date.now() });
   return resolved;
 }
 
-/** Hosts gh is signed in to (github.com needs no check: a token or sign-in is checked by the call itself). */
-const signedInHosts = new Set<string>();
+/** When gh last confirmed a sign-in to a host (github.com is never checked: the call itself is). */
+const signedInHosts = new Map<string, number>();
+
+/** gh's words when it has no usable sign-in. */
+const NOT_SIGNED_IN = /not logged in|no accounts|not authenticated/i;
+/** gh's words when a call was refused for its sign-in (expired or missing token). */
+const AUTH_REFUSED = /HTTP 401|Bad credentials|gh auth login|not logged in|authentication required/i;
 
 /**
  * Whether `host` is a GitHub `gh` can reach: github.com, or a host gh is
@@ -294,15 +271,18 @@ const signedInHosts = new Set<string>();
  * (gitlab.com, bitbucket.org…) is not GitHub.
  */
 async function isGithubHost(cwd: string, host: string): Promise<true | ToolResult> {
-  if (host === "github.com" || signedInHosts.has(host)) return true;
+  if (host === "github.com") return true;
+  const at = signedInHosts.get(host);
+  if (at !== undefined && Date.now() - at < createIssueTimeouts.signedInTtlMs) return true;
   const r = await runGh(["auth", "status", "--hostname", host], cwd, undefined, createIssueTimeouts.readMs);
   if (r.ok) {
-    signedInHosts.add(host);
+    signedInHosts.set(host, Date.now());
     return true;
   }
+  signedInHosts.delete(host);
   if (r.missing) return ghMissing();
   // gh knows no account there: not a GitHub it can reach.
-  if (/not logged in|no accounts|not authenticated/i.test(r.stderr)) {
+  if (NOT_SIGNED_IN.test(r.stderr)) {
     return fail(
       "not_github",
       `The \`origin\` remote is on ${host}, which is not github.com nor a GitHub Enterprise host gh is signed in to (\`gh auth login --hostname ${host}\` if it is one).`,
@@ -316,6 +296,9 @@ async function isGithubHost(cwd: string, host: string): Promise<true | ToolResul
 const TARGETS_TTL_MS = 60_000;
 const targetsCache = new Map<string, { at: number; targets: IssueTarget[] }>();
 
+/** Previews already used by a create (filed, or perhaps filed): one create per preview. */
+const usedPreviews = new Set<string>();
+
 /** Clears what the tool remembers between calls (tests); `keepHosts` keeps the host lookups. */
 export function resetCreateIssueCaches(opts: { keepHosts?: boolean } = {}): void {
   if (!opts.keepHosts) {
@@ -323,6 +306,7 @@ export function resetCreateIssueCaches(opts: { keepHosts?: boolean } = {}): void
     signedInHosts.clear();
   }
   targetsCache.clear();
+  usedPreviews.clear();
 }
 
 /** Signs previews: a create must carry the id of a preview of the very same issue. */
@@ -332,7 +316,7 @@ function previewId(issue: unknown): string {
   return createHmac("sha256", PREVIEW_KEY).update(JSON.stringify(issue)).digest("hex");
 }
 
-function samePreview(given: unknown, issue: unknown): boolean {
+function samePreview(given: unknown, issue: unknown): given is string {
   if (typeof given !== "string" || !/^[0-9a-f]{64}$/.test(given)) return false;
   return timingSafeEqual(Buffer.from(given, "hex"), Buffer.from(previewId(issue), "hex"));
 }
@@ -344,6 +328,53 @@ function samePreview(given: unknown, issue: unknown): boolean {
  * means nothing was filed.
  */
 const MAYBE_SENT = /HTTP 5\d\d|unexpected EOF|connection reset|broken pipe|i\/o timeout|timeout awaiting|TLS handshake|stream error|GOAWAY|http2:/i;
+
+// ─── Secrets scan ────────────────────────────────────────────
+
+type ScanOptions = Parameters<typeof scanReportBody>[1];
+
+/**
+ * The repository's own patterns are code from the repository: a pattern that
+ * backtracks forever must not freeze the server. With any, the scan runs in
+ * a worker stopped after `scanMs`; built-in patterns alone run here.
+ */
+const SCAN_WORKER = new URL(
+  // A data: URL is always an ES module, whatever package the server runs from
+  // (an eval'd worker is CommonJS or ESM depending on the working directory).
+  "data:text/javascript," +
+    encodeURIComponent(`
+import { parentPort, workerData } from "node:worker_threads";
+import(workerData.core).then(
+  (core) => parentPort.postMessage({ results: workerData.texts.map((t) => core.scanReportBody(t, workerData.opts)) }),
+  (e) => parentPort.postMessage({ error: String(e) }),
+);
+`),
+);
+
+function scanTexts(texts: string[], opts: ScanOptions): Promise<ReportScan[] | null> {
+  if (!opts.extraPatterns.length) return Promise.resolve(texts.map((t) => scanReportBody(t, opts)));
+  return new Promise((resolve) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(SCAN_WORKER, { workerData: { core: import.meta.resolve("@gitwand/core"), texts, opts } });
+    } catch {
+      resolve(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void worker.terminate();
+      resolve(null);
+    }, createIssueTimeouts.scanMs);
+    const end = (v: ReportScan[] | null) => {
+      clearTimeout(timer);
+      void worker.terminate();
+      resolve(v);
+    };
+    worker.once("message", (m: { results?: ReportScan[] }) => end(m.results ?? null));
+    worker.once("error", () => end(null));
+    worker.once("exit", () => end(null));
+  });
+}
 
 // ─── The tool ────────────────────────────────────────────────
 
@@ -433,21 +464,22 @@ function list(v: unknown, name: string): string[] | ToolResult {
  * not its `secrets.ignore`: a repository (a clone, a fork) must not be able to
  * allow-list a value out of what blocks a public issue.
  */
-async function scanIssue(root: string, title: string, body: string): Promise<ReportScan> {
+async function scanIssue(root: string, title: string, body: string): Promise<ReportScan | null> {
   const rc = (await readGitwandrcAsync(root))?.secrets;
-  const opts = {
+  const opts: ScanOptions = {
     extraPatterns: rc?.patterns ?? [],
     ignore: [],
     entropyThreshold: rc?.entropyThreshold ?? DEFAULT_ENTROPY_THRESHOLD,
-    blockAt: "medium" as const,
+    blockAt: "medium",
   };
+  const results = await scanTexts([title, body], opts);
+  if (!results) return null;
   const out: ReportScan = { blocking: [], warnings: [] };
-  for (const [file, text] of [["title", title], ["body", body]] as const) {
-    const r = scanReportBody(text, opts);
-    const tag = (f: SecretFinding) => ({ ...f, file });
+  results.forEach((r, i) => {
+    const tag = (f: SecretFinding) => ({ ...f, file: i === 0 ? "title" : "body" });
     out.blocking.push(...r.blocking.map(tag));
     out.warnings.push(...r.warnings.map(tag));
-  }
+  });
   return out;
 }
 
@@ -456,21 +488,37 @@ async function readTargets(root: string, host: string, remote: RemoteRepo): Prom
   const key = `${host}/${remote.owner}/${remote.repo}`.toLowerCase();
   const hit = targetsCache.get(key);
   if (hit && Date.now() - hit.at < TARGETS_TTL_MS) return hit.targets;
-  const api = await runGh(["api", "--hostname", host, `repos/${remote.owner}/${remote.repo}`], root, undefined, createIssueTimeouts.readMs);
+  const get = (nwo: string) => runGh(["api", "--hostname", host, `repos/${nwo}`], root, undefined, createIssueTimeouts.readMs);
+  const api = await get(`${remote.owner}/${remote.repo}`);
   if (!api.ok) {
     if (api.missing) return { error: ghMissing() };
+    if (AUTH_REFUSED.test(api.stderr)) {
+      signedInHosts.delete(host);
+      return { error: fail("gh_auth_failed", `gh is not signed in to ${host}, or its token was refused: ${api.stderr}`) };
+    }
     return { error: fail("target_lookup_failed", `gh could not read ${remote.owner}/${remote.repo}: ${api.stderr}`) };
   }
-  let json: unknown;
-  try {
-    json = JSON.parse(api.stdout);
-  } catch {
-    json = null;
+  const json = parseJson(api.stdout);
+  // A fork's parent read on its own for the viewer's rights there; the
+  // embedded copy when that read fails.
+  const j = (json && typeof json === "object" ? json : {}) as Record<string, any>;
+  let parent: unknown;
+  if (j.fork === true && typeof j.parent?.full_name === "string") {
+    const p = await get(j.parent.full_name);
+    parent = p.ok ? parseJson(p.stdout) ?? undefined : undefined;
   }
-  const targets = targetsFrom(json);
+  const targets = targetsFrom(json, parent);
   if (!targets.length) return { error: fail("target_lookup_failed", `gh gave no repository for ${remote.owner}/${remote.repo}.`) };
   targetsCache.set(key, { at: Date.now(), targets });
   return targets;
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 const ghMissing = () => fail("gh_missing", "The GitHub CLI (`gh`) is not installed or not on PATH: https://cli.github.com");
@@ -478,7 +526,25 @@ const ghMissing = () => fail("gh_missing", "The GitHub CLI (`gh`) is not install
 /** Characters as GitHub counts them: code points (an emoji is one). */
 const chars = (s: string) => [...s].length;
 
-export async function handleCreateIssue(cwd: string, args: Record<string, unknown>): Promise<ToolResult> {
+/** What the server can do for a tool beyond its arguments. */
+export interface ToolContext {
+  /**
+   * Ask the user to confirm `message` (MCP elicitation): true/false for their
+   * answer, undefined when the client cannot ask.
+   */
+  confirm?: (message: string) => Promise<boolean | undefined>;
+}
+
+/** The question the user answers before a create, with everything that will be sent. */
+function confirmMessage(repo: string, title: string, body: string, labels: string[], assignees: string[]): string {
+  const lines = [`File this issue on ${repo}?`, "", `Title: ${title}`];
+  if (labels.length) lines.push(`Labels: ${labels.join(", ")}`);
+  if (assignees.length) lines.push(`Assignees: ${assignees.join(", ")}`);
+  lines.push("", body || "(no description)");
+  return lines.join("\n");
+}
+
+export async function handleCreateIssue(cwd: string, args: Record<string, unknown>, ctx: ToolContext = {}): Promise<ToolResult> {
   // 1. Arguments — nothing runs on a malformed call.
   const title = typeof args.title === "string" ? args.title.trim() : "";
   if (!title || chars(title) > MAX_TITLE || CONTROL.test(title)) {
@@ -528,8 +594,22 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
     }
   }
 
+  // Labels and assignees need triage rights there (GitHub would drop them, or gh fail).
+  if ((labels.length || assignees.length) && !chosen.canTriage) {
+    return fail(
+      "cannot_triage",
+      `You cannot set labels or assignees on ${chosen.repo} (no triage rights there): call again without \`labels\` and \`assignees\`.`,
+    );
+  }
+
   // 4. Secrets.
   const secrets = await scanIssue(root, title, body);
+  if (!secrets) {
+    return fail(
+      "scan_failed",
+      "The secrets scan did not finish (one of the repository's `.gitwandrc` secrets patterns may never end): nothing was created.",
+    );
+  }
   const canCreate = secrets.blocking.length === 0;
   // What a create must match: this preview's issue, where it goes.
   const issue = [root, host, chosen.repo, title, body, labels, assignees];
@@ -558,12 +638,19 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
       `Not created: ${secrets.blocking.map((f) => `${f.patternId} (${f.file} line ${f.line})`).join(", ")}. Remove the secrets and try again.`,
     );
   }
-  if (!samePreview(args.preview_id, issue)) {
+  const id = args.preview_id;
+  if (!samePreview(id, issue)) {
     return fail(
       "preview_required",
       "Not created: call first without dry_run to get a preview, show it to the user, then pass its `preview_id` with the same title, body, labels, assignees and target.",
     );
   }
+  if (usedPreviews.has(id)) {
+    return fail("preview_used", "This preview already led to a create (filed, or perhaps filed): check the repository's issues, and preview again to file another.");
+  }
+  // When the client can ask, the user confirms here, not only through the agent.
+  const answer = await ctx.confirm?.(confirmMessage(chosen.repo, title, body, labels, assignees));
+  if (answer === false) return fail("declined", "The user declined: nothing was created.");
 
   // 5. Create.
   const create = [
@@ -575,6 +662,7 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
     ...assignees.flatMap((a) => ["--assignee", a]),
   ];
   const made = await runGh(create, root, body, createIssueTimeouts.createMs);
+  if (made.ok || made.interrupted || MAYBE_SENT.test(made.stderr)) usedPreviews.add(id);
   if (!made.ok) {
     if (made.missing) return ghMissing();
     if (made.interrupted || MAYBE_SENT.test(made.stderr)) {

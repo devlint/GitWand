@@ -53,8 +53,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: registerTools(),
 }));
 
+/**
+ * Asks the user directly (MCP elicitation) when the client supports it: a
+ * create is then confirmed by the user, not only by the agent. Undefined when
+ * the client cannot ask.
+ */
+async function confirm(message: string): Promise<boolean | undefined> {
+  if (!server.getClientCapabilities()?.elicitation) return undefined;
+  try {
+    const r = await server.elicitInput({ message, requestedSchema: { type: "object", properties: {} } });
+    return r.action === "accept";
+  } catch {
+    // The client advertised elicitation but could not ask: a no, not a yes.
+    return false;
+  }
+}
+
 server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
-  return handleToolCall(request.params.name, request.params.arguments ?? {}, cwd);
+  return handleToolCall(request.params.name, request.params.arguments ?? {}, cwd, { confirm });
 });
 
 // ─── Resources ─────────────────────────────────────────────

@@ -76,7 +76,9 @@ follow-up) into a GitHub issue on the repository it works in:
 2. It shows that preview to you.
 3. Once you agree, it calls again with the same arguments, `dry_run: false`
    and the preview's `preview_id`; the tool returns the issue's number and
-   URL. A create without a matching preview is refused.
+   URL. A create without a matching preview is refused, and a preview allows
+   one create. When the client supports MCP elicitation, GitWand also asks
+   you to confirm the issue itself before creating it.
 
 The issue goes to `origin`, or to its fork parent when issues are off (or the
 repository archived) on `origin`; `repo` can pick between those two, never

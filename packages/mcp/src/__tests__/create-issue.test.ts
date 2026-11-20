@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseRemoteUrl, targetsFrom, ghEnv, createIssueTimeouts, resetCreateIssueCaches, runGh } from "../tools/create_issue.js";
+import { gitTryAsync } from "../repo-config.js";
 import { handleToolCall, registerTools } from "../tools/index.js";
 import { FakeGh, repoJson, type FakeAnswer } from "./fake-gh.js";
 
@@ -53,14 +54,14 @@ describe("parseRemoteUrl", () => {
 
 describe("targetsFrom", () => {
   it("origin alone", () => {
-    expect(targetsFrom(repoJson("me/proj"))).toEqual([{ repo: "me/proj", hasIssues: true, isOrigin: true }]);
+    expect(targetsFrom(repoJson("me/proj"))).toEqual([{ repo: "me/proj", hasIssues: true, isOrigin: true, canTriage: true }]);
   });
 
   it("a fork: origin, then its parent", () => {
     const j = repoJson("me/proj", { hasIssues: false, parent: repoJson("up/proj") });
     expect(targetsFrom(j)).toEqual([
-      { repo: "me/proj", hasIssues: false, isOrigin: true },
-      { repo: "up/proj", hasIssues: true, isOrigin: false },
+      { repo: "me/proj", hasIssues: false, isOrigin: true, canTriage: true },
+      { repo: "up/proj", hasIssues: true, isOrigin: false, canTriage: true },
     ]);
   });
 
@@ -71,12 +72,24 @@ describe("targetsFrom", () => {
 
   it("parent without has_issues counts as without issues", () => {
     const j = repoJson("me/proj", { parent: { full_name: "up/proj" } });
-    expect(targetsFrom(j)[1]).toEqual({ repo: "up/proj", hasIssues: false, isOrigin: false });
+    expect(targetsFrom(j)[1]).toEqual({ repo: "up/proj", hasIssues: false, isOrigin: false, canTriage: false });
   });
 
   it("a parent is ignored when the repository is not a fork", () => {
     const j = { ...repoJson("me/proj"), fork: false, parent: repoJson("up/proj") };
     expect(targetsFrom(j)).toHaveLength(1);
+  });
+
+  it("triage rights: triage, push, maintain or admin; none given is none", () => {
+    expect(targetsFrom(repoJson("me/proj", { triage: false }))[0].canTriage).toBe(false);
+    expect(targetsFrom(repoJson("me/proj", { triage: null }))[0].canTriage).toBe(false);
+    expect(targetsFrom({ ...repoJson("me/proj", { triage: false }), permissions: { push: true } })[0].canTriage).toBe(true);
+  });
+
+  it("a parent read on its own replaces the embedded copy", () => {
+    const j = repoJson("me/proj", { parent: repoJson("up/proj", { triage: null }) });
+    expect(targetsFrom(j)[1].canTriage).toBe(false);
+    expect(targetsFrom(j, repoJson("up/proj"))[1].canTriage).toBe(true);
   });
 
   it("nothing usable → no target", () => {
@@ -141,20 +154,24 @@ function makeRepo(origin: string | null = "https://github.com/me/proj.git"): str
 const ISSUE_URL = "https://github.com/me/proj/issues/12";
 
 function fake(api: unknown = repoJson("me/proj"), create: FakeAnswer = { stdout: ISSUE_URL + "\n" }): FakeGh {
-  gh = new FakeGh({ api: { stdout: JSON.stringify(api) }, "issue create": create });
+  const answers: Record<string, FakeAnswer> = { api: { stdout: JSON.stringify(api) }, "issue create": create };
+  // A fork's parent, read on its own, answers as itself.
+  const parent = (api as any)?.parent;
+  if (parent?.full_name) answers[`api repos/${parent.full_name}`] = { stdout: JSON.stringify(parent) };
+  gh = new FakeGh(answers);
   return gh;
 }
 
-async function call(cwd: string, args: Record<string, unknown>) {
-  const res: any = await handleToolCall("gitwand_create_issue", args, cwd);
+async function call(cwd: string, args: Record<string, unknown>, confirm?: (message: string) => Promise<boolean | undefined>) {
+  const res: any = await handleToolCall("gitwand_create_issue", args, cwd, confirm ? { confirm } : undefined);
   return { isError: res.isError === true, out: JSON.parse(res.content[0].text) };
 }
 
 /** A preview, then the create it allows (its `previewId`). */
-async function create(cwd: string, args: Record<string, unknown>) {
+async function create(cwd: string, args: Record<string, unknown>, confirm?: (message: string) => Promise<boolean | undefined>) {
   const preview = await call(cwd, args);
   if (preview.isError) return preview;
-  return call(cwd, { ...args, dry_run: false, preview_id: preview.out.previewId });
+  return call(cwd, { ...args, dry_run: false, preview_id: preview.out.previewId }, confirm);
 }
 
 const creates = (g: FakeGh) => g.calls().filter((c) => c.tool === "gh" && c.argv[0] === "issue");
@@ -408,7 +425,16 @@ describe("gitwand_create_issue", () => {
   });
 
   it("the default timeouts: 30 s to read, 60 s to create", () => {
-    expect(timeouts).toEqual({ readMs: 30_000, createMs: 60_000, sshMs: 5_000 });
+    expect(timeouts).toEqual({
+      readMs: 30_000,
+      createMs: 60_000,
+      sshMs: 5_000,
+      killGraceMs: 2_000,
+      maxOutputBytes: 16 * 1024 * 1024,
+      scanMs: 5_000,
+      sshFailureTtlMs: 60_000,
+      signedInTtlMs: 300_000,
+    });
   });
 
   it("a title of 256 emoji is 256 characters", async () => {
@@ -540,7 +566,155 @@ describe("gitwand_create_issue", () => {
     }
     expect(ticks).toBeGreaterThan(25);
   });
+
+  it("labels and assignees need triage rights on the target", async () => {
+    const g = fake(repoJson("me/proj", { hasIssues: false, parent: repoJson("up/proj", { triage: null }) }));
+    g.answer({
+      api: { stdout: JSON.stringify(repoJson("me/proj", { hasIssues: false, parent: repoJson("up/proj", { triage: null }) })) },
+      "api repos/up/proj": { stdout: JSON.stringify(repoJson("up/proj", { triage: false })) },
+    });
+    const cwd = makeRepo();
+    const r = await call(cwd, { title: "T", labels: ["bug"] });
+    expect(r.out.error).toBe("cannot_triage");
+    expect(r.out.message).toContain("up/proj");
+    expect((await call(cwd, { title: "T" })).out).toMatchObject({ repo: "up/proj", canCreate: true });
+  });
+
+  it("the parent's rights come from reading it on its own", async () => {
+    const g = fake();
+    g.answer({
+      api: { stdout: JSON.stringify(repoJson("me/proj", { hasIssues: false, parent: repoJson("up/proj", { triage: null }) })) },
+      "api repos/up/proj": { stdout: JSON.stringify(repoJson("up/proj", { triage: true })) },
+    });
+    expect((await call(makeRepo(), { title: "T", labels: ["bug"] })).out).toMatchObject({ repo: "up/proj", labels: ["bug"] });
+  });
+
+  it("a preview allows one create", async () => {
+    const g = fake();
+    const cwd = makeRepo();
+    const preview = await call(cwd, { title: "T" });
+    const args = { title: "T", dry_run: false, preview_id: preview.out.previewId };
+    expect((await call(cwd, args)).out.created).toBe(true);
+    const again = await call(cwd, args);
+    expect(again.out.error).toBe("preview_used");
+    expect(creates(g)).toHaveLength(1);
+  });
+
+  it("an uncertain create uses up its preview too; a refused one does not", async () => {
+    const g = fake(repoJson("me/proj"), { stderr: "HTTP 502: Bad Gateway", code: 1 });
+    const cwd = makeRepo();
+    const p1 = await call(cwd, { title: "T" });
+    const a1 = { title: "T", dry_run: false, preview_id: p1.out.previewId };
+    expect((await call(cwd, a1)).out.error).toBe("create_uncertain");
+    expect((await call(cwd, a1)).out.error).toBe("preview_used");
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "issue create": { stderr: "could not add label", code: 1 } });
+    const p2 = await call(cwd, { title: "U" });
+    const a2 = { title: "U", dry_run: false, preview_id: p2.out.previewId };
+    expect((await call(cwd, a2)).out.error).toBe("create_failed");
+    expect((await call(cwd, a2)).out.error).toBe("create_failed");
+  });
+
+  it("a child that ignores SIGTERM is killed, and the call returns", async () => {
+    createIssueTimeouts.readMs = 300;
+    createIssueTimeouts.killGraceMs = 200;
+    gh = new FakeGh({ api: { stdout: "{}", sleepMs: 20_000, ignoreTerm: true } });
+    const t = Date.now();
+    const r = await call(makeRepo(), { title: "T" });
+    expect(r.out.error).toBe("target_lookup_failed");
+    expect(Date.now() - t).toBeLessThan(5_000);
+  });
+
+  it("a failed ssh lookup is asked again once its time is up", async () => {
+    createIssueTimeouts.sshFailureTtlMs = 0;
+    const g = fake();
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "auth status": { stdout: "" }, ssh: { code: 255 } });
+    const cwd = makeRepo("git@ghe.corp:me/proj.git");
+    await call(cwd, { title: "T" });
+    await call(cwd, { title: "T" });
+    expect(g.calls().filter((c) => c.tool === "ssh")).toHaveLength(2);
+  });
+
+  it("a repository pattern that backtracks forever fails closed without blocking the server", async () => {
+    createIssueTimeouts.scanMs = 500;
+    fake();
+    const cwd = makeRepo();
+    writeFileSync(
+      join(cwd, ".gitwandrc"),
+      JSON.stringify({ secrets: { patterns: [{ id: "bad", regex: "(a+)+$", severity: "high", description: "x" }] } }),
+    );
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 20);
+    let r: Awaited<ReturnType<typeof call>>;
+    try {
+      r = await call(cwd, { title: "T", body: "a".repeat(40) + "!" });
+    } finally {
+      clearInterval(timer);
+    }
+    expect(r!.out.error).toBe("scan_failed");
+    expect(ticks).toBeGreaterThan(10);
+  });
+
+  it("a repository's own patterns still apply through the worker", async () => {
+    fake();
+    const cwd = makeRepo();
+    writeFileSync(
+      join(cwd, ".gitwandrc"),
+      JSON.stringify({ secrets: { patterns: [{ id: "corp", regex: "CORP-[0-9]{6}", severity: "high", description: "x" }] } }),
+    );
+    const { out } = await call(cwd, { title: "id CORP-123456" });
+    expect(out.secrets.blocking).toMatchObject([{ patternId: "corp", file: "title", line: 1 }]);
+  });
+
+  it("an output flood is named as such", async () => {
+    createIssueTimeouts.maxOutputBytes = 1_000;
+    fake(repoJson("me/proj"), { floodBytes: 5_000, sleepMs: 2_000 });
+    const r = await create(makeRepo(), { title: "T" });
+    expect(r.out.error).toBe("create_uncertain");
+    expect(r.out.message).toMatch(/more than 1000 bytes/);
+  });
+
+  it("an enterprise sign-in is checked again after a while", async () => {
+    createIssueTimeouts.signedInTtlMs = 0;
+    const g = fake();
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "auth status": { stdout: "" } });
+    const cwd = makeRepo("https://ghe.corp/me/proj.git");
+    expect((await call(cwd, { title: "T" })).isError).toBe(false);
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "auth status": { stderr: "You are not logged into any accounts on ghe.corp", code: 1 } });
+    expect((await call(cwd, { title: "T" })).out.error).toBe("not_github");
+  });
+
+  it.each(["HTTP 401: Bad credentials (https://api.github.com/repos/me/proj)", "To get started with GitHub CLI, please run:  gh auth login"])(
+    "a sign-in problem on github.com is named: %s",
+    async (stderr) => {
+      gh = new FakeGh({ api: { stderr, code: 1 } });
+      const r = await call(makeRepo(), { title: "T" });
+      expect(r.out.error).toBe("gh_auth_failed");
+      expect(r.out.message).toContain(stderr);
+    },
+  );
+
+  it("the user is asked when the client can ask, and a no files nothing", async () => {
+    const g = fake();
+    const cwd = makeRepo();
+    const asked: string[] = [];
+    const no = await create(cwd, { title: "Crash", body: "steps", labels: ["bug"] }, async (m) => (asked.push(m), false));
+    expect(no.out.error).toBe("declined");
+    expect(creates(g)).toHaveLength(0);
+    expect(asked[0]).toContain("me/proj");
+    expect(asked[0]).toContain("Crash");
+    expect(asked[0]).toContain("steps");
+    expect(asked[0]).toContain("bug");
+    const yes = await create(cwd, { title: "Crash", body: "steps", labels: ["bug"] }, async () => true);
+    expect(yes.out.created).toBe(true);
+  });
+
+  it("a client that cannot ask relies on the preview", async () => {
+    fake();
+    expect((await create(makeRepo(), { title: "T" }, async () => undefined)).out.created).toBe(true);
+  });
 });
+
+
 
 describe("runGh", () => {
   it("a directory that is gone is not gh missing", async () => {
@@ -548,5 +722,17 @@ describe("runGh", () => {
     const r = await runGh(["--version"], join(tmpdir(), "gitwand-gone-" + Date.now()), undefined, 5_000);
     expect(r.ok).toBe(false);
     expect(r).toMatchObject({ missing: false });
+  });
+});
+
+describe("gitTryAsync", () => {
+  it("gives up on a git that does not answer", async () => {
+    gh = new FakeGh({});
+    gh.slowGit(3_000);
+    const cwd = mkdtempSync(join(tmpdir(), "gitwand-mcp-slowgit-"));
+    dirs.push(cwd);
+    const t = Date.now();
+    expect(await gitTryAsync(cwd, ["--version"], 300)).toBeNull();
+    expect(Date.now() - t).toBeLessThan(2_500);
   });
 });

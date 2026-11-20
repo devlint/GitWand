@@ -19,6 +19,10 @@ export interface FakeAnswer {
   sleepMs?: number;
   /** Kill itself with this signal instead of answering. */
   signal?: string;
+  /** Ignore SIGTERM (a child stuck on a keyring prompt). */
+  ignoreTerm?: boolean;
+  /** Write this many bytes of stdout first. */
+  floodBytes?: number;
 }
 
 export interface FakeCall {
@@ -33,11 +37,15 @@ const path = require("node:path");
 const dir = __dirname;
 const tool = path.basename(process.argv[1]);
 const argv = process.argv.slice(2);
-const key = tool === "ssh" ? "ssh" : argv[0] === "api" ? "api" : argv.slice(0, 2).join(" ");
+const key0 = tool === "ssh" ? "ssh" : argv[0] === "api" ? "api" : argv.slice(0, 2).join(" ");
 const stdin = argv.includes("--body-file") ? fs.readFileSync(0, "utf8") : null;
 fs.appendFileSync(path.join(dir, "calls.jsonl"), JSON.stringify({ tool, argv, stdin }) + "\\n");
 const answers = JSON.parse(fs.readFileSync(path.join(dir, "answers.json"), "utf8"));
+// \`api repos/o/r\` answers that repository only; plain \`api\` any.
+const key = key0 === "api" && answers["api " + argv[argv.length - 1]] ? "api " + argv[argv.length - 1] : key0;
 const a = answers[key] || { stderr: "fake " + tool + ": no answer for " + key, code: 1 };
+if (a.ignoreTerm) process.on("SIGTERM", () => {});
+if (a.floodBytes) process.stdout.write("x".repeat(a.floodBytes));
 const answer = () => {
   if (a.signal) process.kill(process.pid, a.signal);
   if (a.stdout) process.stdout.write(a.stdout);
@@ -95,7 +103,7 @@ export class FakeGh {
 /** A `GET /repos/{o}/{r}` answer as GitHub shapes it (the fields the tool reads). */
 export function repoJson(
   fullName: string,
-  opts: { hasIssues?: boolean; archived?: boolean; parent?: Record<string, unknown> } = {},
+  opts: { hasIssues?: boolean; archived?: boolean; parent?: Record<string, unknown>; triage?: boolean | null } = {},
 ): Record<string, unknown> {
   const j: Record<string, unknown> = {
     full_name: fullName,
@@ -104,6 +112,8 @@ export function repoJson(
     archived: opts.archived ?? false,
     fork: opts.parent !== undefined,
   };
+  // The viewer's rights (\`null\`: GitHub gave none, as in a fork's embedded parent).
+  if (opts.triage !== null) j.permissions = { admin: false, maintain: false, push: false, triage: opts.triage ?? true, pull: true };
   if (opts.parent) j.parent = opts.parent;
   return j;
 }

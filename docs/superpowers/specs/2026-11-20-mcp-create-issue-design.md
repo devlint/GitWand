@@ -56,7 +56,7 @@ without the user seeing it first.
 | `assignees` | string[]? | Logins; `@me` allowed (gh). No comma. |
 | `repo` | string? | `owner/repo`; must be `origin` or its fork parent (case-insensitive). |
 | `dry_run` | boolean? | **Default true.** |
-| `preview_id` | string? | Required to create: the preview's HMAC of (root, host, target, title, body, labels, assignees), per-process key. Added in review. |
+| `preview_id` | string? | Required to create: the preview's HMAC of (root, host, target, title, body, labels, assignees), per-process key; one create per preview. Added in review; plus an MCP elicitation confirm when the client supports it (pass 4). |
 
 ### Target
 
