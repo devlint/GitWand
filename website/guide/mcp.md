@@ -92,7 +92,7 @@ Use the same `command` + `args` pattern. Refer to your client's MCP documentatio
 
 ## Tools
 
-The MCP server exposes 5 tools:
+The MCP server exposes the tools below. The LLM resolution pair (`gitwand_resolve_hunk`, `gitwand_resolve_hunk_llm`) is described in [the collaboration loop](#the-collaboration-loop).
 
 ### `gitwand_status`
 
@@ -163,6 +163,26 @@ It does **not** validate what it writes: no residual-marker or syntax check. For
 | `content` | string | **Yes** | Resolved content to replace the conflict block |
 
 **Returns:** Confirmation + remaining conflict count in the file.
+
+### `gitwand_create_issue`
+
+File a GitHub issue on the repository the agent works in. **It previews by default:** without `dry_run: false` nothing is created, and the tool returns the target repository, the title, body, labels and assignees it would send, and what the secrets scan found. The agent is told to show you that preview and to create only once you agree.
+
+The issue goes to `origin`, or to its fork parent when issues are turned off (or the repository archived) on `origin`, as in the desktop app. It goes through the GitHub CLI (`gh`): signed in with `gh auth login`, or with `GH_TOKEN`/`GITHUB_TOKEN` in the server's environment; a GitHub Enterprise `origin` uses `gh`'s login for that host. Title and body are scanned first with the repository's `.gitwandrc` `secrets` settings: a known secret pattern refuses the issue, even with `dry_run: false`; a high-entropy string only warns.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `cwd` | string | No | Working directory |
+| `title` | string | **Yes** | Issue title (1–256 characters) |
+| `body` | string | No | Markdown body (at most 65,536 characters) |
+| `labels` | string[] | No | Labels; each must exist on the target repository |
+| `assignees` | string[] | No | Logins to assign (`@me` for yourself) |
+| `repo` | string | No | `owner/repo`: `origin`'s repository or its fork parent |
+| `dry_run` | boolean | No | Default `true` (preview). `false` creates the issue |
+
+**Returns:** the preview, or `{ created, repo, number, url }`. Errors are `{ error, message }` with a stable code: `gh_missing`, `no_origin`, `repo_not_allowed`, `issues_disabled`, `secrets_found`, `create_failed`…
 
 ## Resources
 

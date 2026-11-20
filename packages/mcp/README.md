@@ -49,7 +49,7 @@ Same config shape as Claude Desktop — drop it into the `mcpServers` block of y
 
 ## What the agent can do
 
-Seven tools are exposed:
+Eight tools are exposed:
 
 | Tool | What it does |
 |------|--------------|
@@ -60,8 +60,29 @@ Seven tools are exposed:
 | `gitwand_apply_resolution` | Apply an agent-provided resolution to a specific complex hunk, without validating it (an empty string removes the block) |
 | `gitwand_resolve_hunk` | Ask the connected agent (the caller) to propose a resolution for one hunk — inversion of the CLI `--llm-fallback` |
 | `gitwand_resolve_hunk_llm` | Validate + apply an LLM-proposed resolution (residual-markers check, JSON/YAML/TOML syntax, score threshold; an empty string removes the block) |
+| `gitwand_create_issue` | File a GitHub issue on `origin` (or its fork parent when `origin` takes no issues) through `gh`. Previews by default; creates only with `dry_run: false`; a known secret pattern in the title or body refuses it |
 
 Plus three resources (`gitwand://repo/conflicts`, `gitwand://repo/policy`, `gitwand://hunk/{file}/{line}`) for ambient context.
+
+### `gitwand_create_issue` — file an issue, after the user has seen it
+
+The agent can turn what it found (a bug, a resolution GitWand got wrong, a
+follow-up) into a GitHub issue on the repository it works in:
+
+1. It calls `gitwand_create_issue` with a `title` (and `body`, `labels`,
+   `assignees`). Nothing is created: the tool returns the target repository,
+   the text it would send and what the secrets scan found.
+2. It shows that preview to you.
+3. Once you agree, it calls again with `dry_run: false`; the tool returns the
+   issue's number and URL.
+
+The issue goes to `origin`, or to its fork parent when issues are off (or the
+repository archived) on `origin`; `repo` can pick between those two, never
+another. It goes through the GitHub CLI (`gh`), signed in or given
+`GH_TOKEN`/`GITHUB_TOKEN`, so GitHub Enterprise works through `gh`'s own
+host login. Before anything is sent, title and body are scanned with the
+repository's `.gitwandrc` secrets settings: a known secret pattern refuses the
+issue, a high-entropy string only warns.
 
 ### `gitwand_resolve_hunk` — inversion of `--llm-fallback`
 
