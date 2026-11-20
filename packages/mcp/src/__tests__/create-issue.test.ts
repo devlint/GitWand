@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseRemoteUrl, targetsFrom, ghEnv, createIssueTimeouts, resetCreateIssueCaches, runGh } from "../tools/create_issue.js";
+import { parseRemoteUrl, ghEnv, createIssueTimeouts, resetCreateIssueCaches, runGh, scanWorkerStarts } from "../tools/create_issue.js";
 import { gitTryAsync } from "../repo-config.js";
 import { handleToolCall, registerTools } from "../tools/index.js";
 import { FakeGh, repoJson, type FakeAnswer } from "./fake-gh.js";
@@ -52,51 +52,8 @@ describe("parseRemoteUrl", () => {
   );
 });
 
-describe("targetsFrom", () => {
-  it("origin alone", () => {
-    expect(targetsFrom(repoJson("me/proj"))).toEqual([{ repo: "me/proj", hasIssues: true, isOrigin: true, canTriage: true }]);
-  });
-
-  it("a fork: origin, then its parent", () => {
-    const j = repoJson("me/proj", { hasIssues: false, parent: repoJson("up/proj") });
-    expect(targetsFrom(j)).toEqual([
-      { repo: "me/proj", hasIssues: false, isOrigin: true, canTriage: true },
-      { repo: "up/proj", hasIssues: true, isOrigin: false, canTriage: true },
-    ]);
-  });
-
-  it("an archived repository takes no issue", () => {
-    const j = repoJson("me/proj", { parent: repoJson("up/proj", { archived: true }) });
-    expect(targetsFrom(j)[1].hasIssues).toBe(false);
-  });
-
-  it("parent without has_issues counts as without issues", () => {
-    const j = repoJson("me/proj", { parent: { full_name: "up/proj" } });
-    expect(targetsFrom(j)[1]).toEqual({ repo: "up/proj", hasIssues: false, isOrigin: false, canTriage: false });
-  });
-
-  it("a parent is ignored when the repository is not a fork", () => {
-    const j = { ...repoJson("me/proj"), fork: false, parent: repoJson("up/proj") };
-    expect(targetsFrom(j)).toHaveLength(1);
-  });
-
-  it("triage rights: triage, push, maintain or admin; none given is none", () => {
-    expect(targetsFrom(repoJson("me/proj", { triage: false }))[0].canTriage).toBe(false);
-    expect(targetsFrom(repoJson("me/proj", { triage: null }))[0].canTriage).toBe(false);
-    expect(targetsFrom({ ...repoJson("me/proj", { triage: false }), permissions: { push: true } })[0].canTriage).toBe(true);
-  });
-
-  it("a parent read on its own replaces the embedded copy", () => {
-    const j = repoJson("me/proj", { parent: repoJson("up/proj", { triage: null }) });
-    expect(targetsFrom(j)[1].canTriage).toBe(false);
-    expect(targetsFrom(j, repoJson("up/proj"))[1].canTriage).toBe(true);
-  });
-
-  it("nothing usable → no target", () => {
-    expect(targetsFrom(null)).toEqual([]);
-    expect(targetsFrom({ message: "Not Found" })).toEqual([]);
-  });
-});
+// The target rule (origin, or its fork parent) is core's `issueTargetsFrom`,
+// tested in packages/core; the tool's use of it is tested below.
 
 describe("ghEnv", () => {
   const saved = { ...process.env };
@@ -152,9 +109,15 @@ function makeRepo(origin: string | null = "https://github.com/me/proj.git"): str
 }
 
 const ISSUE_URL = "https://github.com/me/proj/issues/12";
+/** GitHub's answer to a created issue (the fields the tool reads). */
+const issueJson = (number = 12, url = ISSUE_URL) => JSON.stringify({ number, html_url: url, title: "x" });
 
-function fake(api: unknown = repoJson("me/proj"), create: FakeAnswer = { stdout: ISSUE_URL + "\n" }): FakeGh {
-  const answers: Record<string, FakeAnswer> = { api: { stdout: JSON.stringify(api) }, "issue create": create };
+function fake(api: unknown = repoJson("me/proj"), create: FakeAnswer = { stdout: issueJson() }): FakeGh {
+  const answers: Record<string, FakeAnswer> = {
+    api: { stdout: JSON.stringify(api) },
+    "api POST": create,
+    "api user": { stdout: JSON.stringify({ login: "octo" }) },
+  };
   // A fork's parent, read on its own, answers as itself.
   const parent = (api as any)?.parent;
   if (parent?.full_name) answers[`api repos/${parent.full_name}`] = { stdout: JSON.stringify(parent) };
@@ -174,8 +137,8 @@ async function create(cwd: string, args: Record<string, unknown>, confirm?: (mes
   return call(cwd, { ...args, dry_run: false, preview_id: preview.out.previewId }, confirm);
 }
 
-const creates = (g: FakeGh) => g.calls().filter((c) => c.tool === "gh" && c.argv[0] === "issue");
-const apis = (g: FakeGh) => g.calls().filter((c) => c.tool === "gh" && c.argv[0] === "api");
+const creates = (g: FakeGh) => g.calls().filter((c) => c.tool === "gh" && c.argv.includes("POST"));
+const apis = (g: FakeGh) => g.calls().filter((c) => c.tool === "gh" && c.argv[0] === "api" && !c.argv.includes("POST"));
 const token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8";
 
 describe("gitwand_create_issue", () => {
@@ -210,22 +173,33 @@ describe("gitwand_create_issue", () => {
     expect(g.calls().map((c) => c.argv)).toEqual([["api", "--hostname", "github.com", "repos/me/proj"]]);
   });
 
-  it("creates with dry_run: false, the body on stdin", async () => {
+  it("creates with dry_run: false, the whole issue on stdin, nothing of it on the command line", async () => {
     const g = fake();
+    const title = "Crash with KEY-zQ8vR2xL9pT4mN7bW1cY";
     const { isError, out } = await create(makeRepo(), {
-      title: "T",
+      title,
       body: "line 1\nline 2",
-      labels: ["bug"],
-      assignees: ["@me"],
+      labels: ["bug", "a,b"],
+      assignees: ["@me", "hubot"],
     });
     expect(isError).toBe(false);
     expect(out).toEqual({ created: true, repo: "me/proj", number: 12, url: ISSUE_URL });
     const [c] = creates(g);
-    expect(c.argv).toEqual([
-      "issue", "create", "--repo", "github.com/me/proj", "--title", "T", "--body-file", "-",
-      "--label", "bug", "--assignee", "@me",
-    ]);
-    expect(c.stdin).toBe("line 1\nline 2");
+    expect(c.argv).toEqual(["api", "--hostname", "github.com", "-X", "POST", "repos/me/proj/issues", "--input", "-"]);
+    // `@me` is the signed-in login; a label may hold a comma.
+    expect(JSON.parse(c.stdin!)).toEqual({ title, body: "line 1\nline 2", labels: ["bug", "a,b"], assignees: ["octo", "hubot"] });
+  });
+
+  it("the preview shows who @me is", async () => {
+    fake();
+    expect((await call(makeRepo(), { title: "T", assignees: ["@me"] })).out.assignees).toEqual(["octo"]);
+  });
+
+  it("@me that gh cannot name is refused", async () => {
+    const g = fake();
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "api user": { stderr: "HTTP 401: Bad credentials", code: 1 } });
+    const r = await call(makeRepo(), { title: "T", assignees: ["@me"] });
+    expect(r.out.error).toBe("gh_auth_failed");
   });
 
   it("files on the fork parent when the fork takes no issues", async () => {
@@ -295,7 +269,6 @@ describe("gitwand_create_issue", () => {
     [{ title: "😀".repeat(257) }, "invalid_title"],
     [{ title: "Crash\r" + "more" }, "invalid_title"],
     [{ title: "T", body: "x".repeat(65_537) }, "invalid_body"],
-    [{ title: "T", labels: ["a,b"] }, "invalid_list"],
     [{ title: "T", labels: [""] }, "invalid_list"],
     [{ title: "T", assignees: "me" }, "invalid_list"],
     [{ title: "T", dry_run: "false" }, "invalid_dry_run"],
@@ -359,16 +332,16 @@ describe("gitwand_create_issue", () => {
   });
 
   it("an enterprise origin names its host", async () => {
-    const g = fake(repoJson("me/proj"), { stdout: "https://ghe.corp/me/proj/issues/3\n" });
+    const g = fake();
     g.answer({
       api: { stdout: JSON.stringify(repoJson("me/proj")) },
-      "issue create": { stdout: "https://ghe.corp/me/proj/issues/3\n" },
+      "api POST": { stdout: issueJson(3, "https://ghe.corp/me/proj/issues/3") },
       "auth status": { stdout: "" },
     });
     const { out } = await create(makeRepo("git@ghe.corp:me/proj.git"), { title: "T" });
     expect(out).toMatchObject({ created: true, number: 3 });
     expect(apis(g)[0].argv).toEqual(["api", "--hostname", "ghe.corp", "repos/me/proj"]);
-    expect(creates(g)[0].argv.slice(0, 4)).toEqual(["issue", "create", "--repo", "ghe.corp/me/proj"]);
+    expect(creates(g)[0].argv.slice(0, 6)).toEqual(["api", "--hostname", "ghe.corp", "-X", "POST", "repos/me/proj/issues"]);
   });
 
   it("an SSH alias goes to the host ssh connects to", async () => {
@@ -409,7 +382,7 @@ describe("gitwand_create_issue", () => {
 
   it("a create that times out may have created the issue", async () => {
     createIssueTimeouts.createMs = 300;
-    fake(repoJson("me/proj"), { stdout: ISSUE_URL, sleepMs: 3000 });
+    fake(repoJson("me/proj"), { stdout: issueJson(), sleepMs: 3000 });
     const r = await create(makeRepo(), { title: "T" });
     expect(r.isError).toBe(true);
     expect(r.out.error).toBe("create_uncertain");
@@ -468,7 +441,7 @@ describe("gitwand_create_issue", () => {
   });
 
   it("a slow gh does not block the server", async () => {
-    fake(repoJson("me/proj"), { stdout: ISSUE_URL, sleepMs: 600 });
+    fake(repoJson("me/proj"), { stdout: issueJson(), sleepMs: 600 });
     let ticks = 0;
     const timer = setInterval(() => ticks++, 20);
     try {
@@ -483,7 +456,7 @@ describe("gitwand_create_issue", () => {
     const g = fake();
     g.answer({
       api: { stdout: JSON.stringify(repoJson("me/proj")) },
-      "issue create": { stdout: ISSUE_URL },
+      "api POST": { stdout: issueJson() },
       ssh: { stdout: "hostname github.com\n" },
     });
     const cwd = makeRepo("git@github-work:me/proj.git");
@@ -607,7 +580,7 @@ describe("gitwand_create_issue", () => {
     const a1 = { title: "T", dry_run: false, preview_id: p1.out.previewId };
     expect((await call(cwd, a1)).out.error).toBe("create_uncertain");
     expect((await call(cwd, a1)).out.error).toBe("preview_used");
-    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "issue create": { stderr: "could not add label", code: 1 } });
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, "api POST": { stderr: "could not add label", code: 1 } });
     const p2 = await call(cwd, { title: "U" });
     const a2 = { title: "U", dry_run: false, preview_id: p2.out.previewId };
     expect((await call(cwd, a2)).out.error).toBe("create_failed");
@@ -711,6 +684,98 @@ describe("gitwand_create_issue", () => {
   it("a client that cannot ask relies on the preview", async () => {
     fake();
     expect((await create(makeRepo(), { title: "T" }, async () => undefined)).out.created).toBe(true);
+  });
+
+  it("two creates of one preview at once file it once", async () => {
+    const g = fake(repoJson("me/proj"), { stdout: issueJson(), sleepMs: 300 });
+    const cwd = makeRepo();
+    const p = await call(cwd, { title: "T" });
+    const args = { title: "T", dry_run: false, preview_id: p.out.previewId };
+    const [a, b] = await Promise.all([call(cwd, args), call(cwd, args)]);
+    const outs = [a.out, b.out];
+    expect(outs.filter((o) => o.created === true)).toHaveLength(1);
+    expect(outs.filter((o) => o.error === "preview_used")).toHaveLength(1);
+    expect(creates(g)).toHaveLength(1);
+  });
+
+  it("a declined or failed confirmation leaves the preview usable", async () => {
+    const g = fake();
+    const cwd = makeRepo();
+    const p = await call(cwd, { title: "T" });
+    const args = { title: "T", dry_run: false, preview_id: p.out.previewId };
+    expect((await call(cwd, args, async () => false)).out.error).toBe("declined");
+    const failed = await call(cwd, args, async () => {
+      throw new Error("Request timed out");
+    });
+    expect(failed.out.error).toBe("confirm_failed");
+    expect(failed.out.message).toContain("Request timed out");
+    expect(creates(g)).toHaveLength(0);
+    expect((await call(cwd, args, async () => true)).out.created).toBe(true);
+  });
+
+  it("an underscore SSH alias is resolved too", async () => {
+    const g = fake();
+    g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj")) }, ssh: { stdout: "hostname github.com\n" } });
+    await call(makeRepo("git@github_work:me/proj.git"), { title: "T" });
+    expect(g.calls().find((c) => c.tool === "ssh")!.argv).toEqual(["-G", "github_work"]);
+    expect(apis(g)[0].argv).toContain("github.com");
+  });
+
+  it("a git:// port is the git daemon's, not the host's", () => {
+    expect(parseRemoteUrl("git://ghe.corp:9418/team/app.git")).toMatchObject({ host: "ghe.corp" });
+  });
+
+  it("a connection that never opened is a plain failure: nothing was sent", async () => {
+    fake(repoJson("me/proj"), { stderr: 'Post "https://api.github.com/repos/me/proj/issues": net/http: TLS handshake timeout', code: 1 });
+    const cwd = makeRepo();
+    const p = await call(cwd, { title: "T" });
+    const args = { title: "T", dry_run: false, preview_id: p.out.previewId };
+    expect((await call(cwd, args)).out.error).toBe("create_failed");
+    expect((await call(cwd, args)).out.error).toBe("create_failed");
+  });
+
+  it("another gh account reads the targets again", async () => {
+    const g = fake();
+    const cwd = makeRepo();
+    const saved = process.env.GH_TOKEN;
+    try {
+      process.env.GH_TOKEN = "account-a";
+      expect((await call(cwd, { title: "T", labels: ["bug"] })).isError).toBe(false);
+      process.env.GH_TOKEN = "account-b";
+      g.answer({ api: { stdout: JSON.stringify(repoJson("me/proj", { triage: false })) } });
+      expect((await call(cwd, { title: "T", labels: ["bug"] })).out.error).toBe("cannot_triage");
+    } finally {
+      if (saved === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = saved;
+    }
+  });
+
+  it("one scan worker serves every call, and a stuck one is replaced", async () => {
+    fake();
+    const cwd = makeRepo();
+    writeFileSync(
+      join(cwd, ".gitwandrc"),
+      JSON.stringify({ secrets: { patterns: [{ id: "corp", regex: "CORP-[0-9]{6}", severity: "high", description: "x" }] } }),
+    );
+    const before = scanWorkerStarts();
+    await call(cwd, { title: "a" });
+    await call(cwd, { title: "b" });
+    await call(cwd, { title: "c" });
+    expect(scanWorkerStarts() - before).toBe(1);
+
+    // A pattern that never ends: that worker is dropped, the next scan gets a new one.
+    createIssueTimeouts.scanMs = 500;
+    writeFileSync(
+      join(cwd, ".gitwandrc"),
+      JSON.stringify({ secrets: { patterns: [{ id: "bad", regex: "(a+)+$", severity: "high", description: "x" }] } }),
+    );
+    expect((await call(cwd, { title: "T", body: "a".repeat(40) + "!" })).out.error).toBe("scan_failed");
+    writeFileSync(
+      join(cwd, ".gitwandrc"),
+      JSON.stringify({ secrets: { patterns: [{ id: "corp", regex: "CORP-[0-9]{6}", severity: "high", description: "x" }] } }),
+    );
+    expect((await call(cwd, { title: "id CORP-123456" })).out.secrets.blocking[0].patternId).toBe("corp");
+    expect(scanWorkerStarts() - before).toBe(2);
   });
 });
 

@@ -168,7 +168,7 @@ It does **not** validate what it writes: no residual-marker or syntax check. For
 
 File a GitHub issue on the repository the agent works in. **It previews by default:** without `dry_run: false` nothing is created, and the tool returns the target repository, the title, labels and assignees it would send, the body's length (the body goes exactly as the agent passed it), and what the secrets scan found. The agent is told to show you that preview and to create only once you agree; a create must carry the preview's `previewId`, so it can only send what was previewed, once. When your MCP client supports elicitation, GitWand also asks you directly to confirm the issue before creating it.
 
-The issue goes to `origin`, or to its fork parent when issues are turned off (or the repository archived) on `origin`, as in the desktop app. It goes through the GitHub CLI (`gh`): signed in with `gh auth login`, or with `GH_TOKEN`/`GITHUB_TOKEN` in the server's environment; a GitHub Enterprise `origin` uses `gh`'s login for that host, and an SSH alias from `~/.ssh/config` is resolved to the host it connects to. Title and body are scanned first with the repository's `.gitwandrc` `secrets` settings: a known secret pattern refuses the issue, even with `dry_run: false`, and `secrets.ignore` does not apply (a cloned repository cannot allow-list a value out of a public issue); a high-entropy string only warns.
+The issue goes to `origin`, or to its fork parent when issues are turned off (or the repository archived) on `origin`, as in the desktop app. It goes through the GitHub CLI (`gh api`, the whole issue as JSON on stdin, so nothing of it appears on a command line): signed in with `gh auth login`, or with `GH_TOKEN`/`GITHUB_TOKEN` in the server's environment; a GitHub Enterprise `origin` uses `gh`'s login for that host, and an SSH alias from `~/.ssh/config` is resolved to the host it connects to. Title and body are scanned first with the repository's `.gitwandrc` `secrets` settings: a known secret pattern refuses the issue, even with `dry_run: false`, and `secrets.ignore` does not apply (a cloned repository cannot allow-list a value out of a public issue); a high-entropy string only warns.
 
 **Parameters:**
 
@@ -177,13 +177,13 @@ The issue goes to `origin`, or to its fork parent when issues are turned off (or
 | `cwd` | string | No | Working directory |
 | `title` | string | **Yes** | Issue title (1–256 characters) |
 | `body` | string | No | Markdown body (at most 65,536 characters) |
-| `labels` | string[] | No | Labels; each must exist on the target repository |
-| `assignees` | string[] | No | Logins to assign (`@me` for yourself) |
+| `labels` | string[] | No | Labels (GitHub creates a missing one only for someone who can push there); need triage rights on the target |
+| `assignees` | string[] | No | Logins to assign (`@me` for yourself); need triage rights on the target |
 | `repo` | string | No | `owner/repo`: `origin`'s repository or its fork parent |
 | `dry_run` | boolean | No | Default `true` (preview). `false` creates the issue |
 | `preview_id` | string | With `dry_run: false` | The `previewId` of a preview of this very issue: a create without it, or with other arguments, is refused |
 
-**Returns:** the preview, or `{ created, repo, number, url }`. Errors are `{ error, message }` with a stable code: `gh_missing`, `no_origin`, `not_github` (an `origin` on another forge), `gh_auth_failed`, `preview_required`, `preview_used`, `declined`, `cannot_triage` (labels or assignees without triage rights on the target), `scan_failed`, `repo_not_allowed`, `issues_disabled`, `secrets_found`, `create_failed`, and `create_uncertain` when `gh` was cut off while creating (the issue may exist: check before trying again)…
+**Returns:** the preview, or `{ created, repo, number, url }`. Errors are `{ error, message }` with a stable code: `gh_missing`, `no_origin`, `not_github` (an `origin` on another forge), `gh_auth_failed`, `preview_required`, `preview_used`, `declined`, `confirm_failed`, `cannot_triage` (labels or assignees without triage rights on the target), `scan_failed`, `repo_not_allowed`, `issues_disabled`, `secrets_found`, `create_failed`, and `create_uncertain` when `gh` was cut off while creating (the issue may exist: check before trying again)…
 
 ## Resources
 

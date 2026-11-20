@@ -14,9 +14,19 @@
  *   array args and only the environment it needs.
  */
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { DEFAULT_ENTROPY_THRESHOLD, scanReportBody, type ReportScan, type SecretFinding } from "@gitwand/core";
+import {
+  DEFAULT_ENTROPY_THRESHOLD,
+  issueTargetsFrom,
+  scanReportBody,
+  type IssueTarget,
+  type ReportScan,
+  type SecretFinding,
+} from "@gitwand/core";
 import { gitTryAsync, readGitwandrcAsync } from "../repo-config.js";
 import { run } from "../spawn.js";
 
@@ -60,57 +70,17 @@ export function parseRemoteUrl(url: string): RemoteRepo | null {
     if (!["https:", "http:", "ssh:", "git:"].includes(parsed.protocol)) return null;
     if (parsed.search || parsed.hash) return null;
     const ssh = parsed.protocol === "ssh:";
-    // Over https the port is the web/API server's (gh names such a host
-    // `host:port`); over ssh it is only the ssh daemon's.
-    return ownerRepo(ssh ? parsed.hostname : parsed.host, path, ssh);
+    // Over http(s) the port is the web/API server's (gh names such a host
+    // `host:port`); over ssh or git:// it is only that daemon's.
+    const web = parsed.protocol === "https:" || parsed.protocol === "http:";
+    return ownerRepo(web ? parsed.host : parsed.hostname, path, ssh);
   }
   // scp-like: [user@]host:path — a host has no slash, the path does not start with one.
   const m = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/.exec(u);
   return m ? ownerRepo(m[1], m[2], true) : null;
 }
 
-// ─── Targets ─────────────────────────────────────────────────
-
-export interface IssueTarget {
-  /** `owner/repo`, as GitHub spells it. */
-  repo: string;
-  /** Issues enabled and the repository not archived. */
-  hasIssues: boolean;
-  isOrigin: boolean;
-  /** The viewer may set labels and assignees (triage, push, maintain or admin). */
-  canTriage: boolean;
-}
-
-function target(v: unknown, isOrigin: boolean): IssueTarget | null {
-  if (!v || typeof v !== "object") return null;
-  const j = v as Record<string, unknown>;
-  if (typeof j.full_name !== "string" || !j.full_name) return null;
-  const perms = (j.permissions && typeof j.permissions === "object" ? j.permissions : {}) as Record<string, unknown>;
-  return {
-    repo: j.full_name,
-    hasIssues: j.has_issues === true && j.archived !== true,
-    isOrigin,
-    canTriage: ["triage", "push", "maintain", "admin"].some((k) => perms[k] === true),
-  };
-}
-
-/**
- * A `GET /repos/{o}/{r}` answer → origin, then its parent when it is a fork:
- * `parent` read on its own when given (the copy embedded in a fork's answer
- * may lack the viewer's rights), else the embedded one — as the desktop's
- * `targets_from`.
- */
-export function targetsFrom(json: unknown, parent?: unknown): IssueTarget[] {
-  const origin = target(json, true);
-  if (!origin) return [];
-  const out = [origin];
-  const j = json as Record<string, unknown>;
-  if (j.fork === true) {
-    const p = target(parent, false) ?? target(j.parent, false);
-    if (p) out.push(p);
-  }
-  return out;
-}
+// ─── Targets: core's `issueTargetsFrom` (shared with the desktop dev-server) ──
 
 // ─── Running gh ──────────────────────────────────────────────
 
@@ -239,7 +209,7 @@ export async function sshResolvedHost(host: string): Promise<string> {
   let resolved = host;
   let ok = false;
   // A plain host name only: never something ssh would read as an option.
-  if (/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(host)) {
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(host)) {
     const env: NodeJS.ProcessEnv = {};
     for (const k of SSH_ENV_ALLOW) if (process.env[k] !== undefined) env[k] = process.env[k];
     const r = await run("ssh", ["-G", host], { env, timeoutMs: createIssueTimeouts.sshMs, killGraceMs: createIssueTimeouts.killGraceMs });
@@ -292,12 +262,35 @@ async function isGithubHost(cwd: string, host: string): Promise<true | ToolResul
   return fail("gh_auth_failed", `gh could not check its sign-in to ${host}: ${r.stderr}`);
 }
 
+/**
+ * Which gh account answers: its token variables and its hosts file (`gh auth
+ * switch`, a login, a logout rewrite it). Cached answers that depend on the
+ * viewer (rights, `@me`) are kept per account.
+ */
+function accountKey(): string {
+  const env = process.env;
+  const dir =
+    env.GH_CONFIG_DIR ||
+    (env.XDG_CONFIG_HOME ? join(env.XDG_CONFIG_HOME, "gh") : env.APPDATA ? join(env.APPDATA, "GitHub CLI") : join(homedir(), ".config", "gh"));
+  let mtime = 0;
+  try {
+    mtime = statSync(join(dir, "hosts.yml")).mtimeMs;
+  } catch {
+    // No hosts file: tokens only.
+  }
+  const tokens = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"].map((k) => env[k] ?? "").join("\u0000");
+  return createHash("sha256").update(`${tokens}\u0000${mtime}`).digest("hex");
+}
+
 /** A target read stays good this long: a preview then its create read it once. */
 const TARGETS_TTL_MS = 60_000;
 const targetsCache = new Map<string, { at: number; targets: IssueTarget[] }>();
 
-/** Previews already used by a create (filed, or perhaps filed): one create per preview. */
+/** Previews used by a create — in flight, filed, or perhaps filed: one create per preview. */
 const usedPreviews = new Set<string>();
+
+/** The signed-in login per host and account (`@me`). */
+const logins = new Map<string, string>();
 
 /** Clears what the tool remembers between calls (tests); `keepHosts` keeps the host lookups. */
 export function resetCreateIssueCaches(opts: { keepHosts?: boolean } = {}): void {
@@ -307,6 +300,8 @@ export function resetCreateIssueCaches(opts: { keepHosts?: boolean } = {}): void
   }
   targetsCache.clear();
   usedPreviews.clear();
+  logins.clear();
+  if (scanner) dropScanner(scanner);
 }
 
 /** Signs previews: a create must carry the id of a preview of the very same issue. */
@@ -322,12 +317,12 @@ function samePreview(given: unknown, issue: unknown): given is string {
 }
 
 /**
- * gh's words after a failed create that may still have reached GitHub: a 5xx,
- * or the connection lost (EOF, reset, timeout) — the desktop's
- * `MAY_HAVE_BEEN_CREATED` cases. A refusal (4xx, unknown label or user)
- * means nothing was filed.
+ * gh's words after a failed create that may still have reached GitHub — the
+ * desktop's `post_may_have_landed`: a 500/502/503/504, or a connection lost
+ * mid-answer (reset, unexpected EOF). A refusal (4xx) or a connection that
+ * never opened (DNS, TLS handshake) filed nothing: safe to retry.
  */
-const MAYBE_SENT = /HTTP 5\d\d|unexpected EOF|connection reset|broken pipe|i\/o timeout|timeout awaiting|TLS handshake|stream error|GOAWAY|http2:/i;
+const MAYBE_SENT = /HTTP 50[0234]\b|connection reset|unexpected EOF/i;
 
 // ─── Secrets scan ────────────────────────────────────────────
 
@@ -336,7 +331,9 @@ type ScanOptions = Parameters<typeof scanReportBody>[1];
 /**
  * The repository's own patterns are code from the repository: a pattern that
  * backtracks forever must not freeze the server. With any, the scan runs in
- * a worker stopped after `scanMs`; built-in patterns alone run here.
+ * a worker — one, kept for the server's life and reused, replaced when a
+ * scan overruns `scanMs` (counted from when it is asked, not from the
+ * worker's start-up). Built-in patterns alone run here.
  */
 const SCAN_WORKER = new URL(
   // A data: URL is always an ES module, whatever package the server runs from
@@ -344,36 +341,107 @@ const SCAN_WORKER = new URL(
   "data:text/javascript," +
     encodeURIComponent(`
 import { parentPort, workerData } from "node:worker_threads";
-import(workerData.core).then(
-  (core) => parentPort.postMessage({ results: workerData.texts.map((t) => core.scanReportBody(t, workerData.opts)) }),
-  (e) => parentPort.postMessage({ error: String(e) }),
+const core = await import(workerData.core);
+parentPort.on("message", (m) =>
+  parentPort.postMessage({ id: m.id, results: m.texts.map((t) => core.scanReportBody(t, m.opts)) }),
 );
+parentPort.postMessage({ ready: true });
 `),
 );
 
-function scanTexts(texts: string[], opts: ScanOptions): Promise<ReportScan[] | null> {
-  if (!opts.extraPatterns.length) return Promise.resolve(texts.map((t) => scanReportBody(t, opts)));
+/** Its start-up (loading core) has its own, longer limit. */
+const SCAN_WORKER_STARTUP_MS = 20_000;
+
+interface Scanner {
+  worker: Worker;
+  ready: Promise<boolean>;
+  /** Scans run one after the other. */
+  queue: Promise<unknown>;
+}
+
+let scanner: Scanner | null = null;
+let workerStarts = 0;
+let scanIds = 0;
+
+/** How many scan workers have been started (tests). */
+export function scanWorkerStarts(): number {
+  return workerStarts;
+}
+
+function dropScanner(s: Scanner): void {
+  if (scanner === s) scanner = null;
+  void s.worker.terminate();
+}
+
+function getScanner(): Scanner | null {
+  if (scanner) return scanner;
+  let worker: Worker;
+  try {
+    worker = new Worker(SCAN_WORKER, { workerData: { core: import.meta.resolve("@gitwand/core") } });
+  } catch {
+    return null;
+  }
+  workerStarts++;
+  // The server's life is its stdin, not this worker.
+  worker.unref();
+  const s: Scanner = {
+    worker,
+    queue: Promise.resolve(),
+    ready: new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), SCAN_WORKER_STARTUP_MS);
+      worker.once("message", (m: { ready?: boolean }) => {
+        clearTimeout(timer);
+        resolve(m.ready === true);
+      });
+      worker.once("error", () => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+    }),
+  };
+  worker.on("exit", () => {
+    if (scanner === s) scanner = null;
+  });
+  scanner = s;
+  return s;
+}
+
+function scanInWorker(s: Scanner, texts: string[], opts: ScanOptions): Promise<ReportScan[] | null> {
+  const id = ++scanIds;
   return new Promise((resolve) => {
-    let worker: Worker;
-    try {
-      worker = new Worker(SCAN_WORKER, { workerData: { core: import.meta.resolve("@gitwand/core"), texts, opts } });
-    } catch {
-      resolve(null);
-      return;
-    }
-    const timer = setTimeout(() => {
-      void worker.terminate();
-      resolve(null);
-    }, createIssueTimeouts.scanMs);
-    const end = (v: ReportScan[] | null) => {
+    // Listeners removed once answered: the worker outlives many scans.
+    const finish = (v: ReportScan[] | null) => {
       clearTimeout(timer);
-      void worker.terminate();
+      s.worker.off("message", onMessage);
+      s.worker.off("exit", onExit);
       resolve(v);
     };
-    worker.once("message", (m: { results?: ReportScan[] }) => end(m.results ?? null));
-    worker.once("error", () => end(null));
-    worker.once("exit", () => end(null));
+    const timer = setTimeout(() => {
+      dropScanner(s);
+      finish(null);
+    }, createIssueTimeouts.scanMs);
+    const onMessage = (m: { id?: number; results?: ReportScan[] }) => {
+      if (m.id === id) finish(m.results ?? null);
+    };
+    const onExit = () => finish(null);
+    s.worker.on("message", onMessage);
+    s.worker.on("exit", onExit);
+    s.worker.postMessage({ id, texts, opts });
   });
+}
+
+async function scanTexts(texts: string[], opts: ScanOptions): Promise<ReportScan[] | null> {
+  if (!opts.extraPatterns.length) return texts.map((t) => scanReportBody(t, opts));
+  const s = getScanner();
+  if (!s) return null;
+  if (!(await s.ready)) {
+    dropScanner(s);
+    return null;
+  }
+  // A scan queued behind one that overran finds that worker gone: it starts over on a new one.
+  const run = s.queue.then(() => (scanner === s ? scanInWorker(s, texts, opts) : scanTexts(texts, opts)));
+  s.queue = run.catch(() => undefined);
+  return run;
 }
 
 // ─── The tool ────────────────────────────────────────────────
@@ -394,7 +462,8 @@ export const createIssueToolDefinition = {
     "Target: the `origin` remote's repository, or its fork parent when issues are disabled (or the repository archived) on " +
     "`origin`; an explicit `repo` must be one of those two. " +
     "Title and body are scanned for secrets first: a known secret pattern (high or medium severity) refuses the issue, even " +
-    "with `dry_run: false`; a high-entropy string only warns. Labels must already exist on the target repository.",
+    "with `dry_run: false`; a high-entropy string only warns. Labels should exist on the target repository (GitHub creates a " +
+    "missing one only for someone who can push there).",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -413,12 +482,12 @@ export const createIssueToolDefinition = {
       labels: {
         type: "array",
         items: { type: "string" },
-        description: "Label names; each must already exist on the target repository. No commas.",
+        description: "Label names; each must already exist on the target repository.",
       },
       assignees: {
         type: "array",
         items: { type: "string" },
-        description: "GitHub logins to assign (`@me` for the signed-in user). No commas.",
+        description: "GitHub logins to assign (`@me` for the signed-in user).",
       },
       repo: {
         type: "string",
@@ -448,11 +517,11 @@ const fail = (error: string, message: string): ToolResult => ({
 /** Control characters (NUL, tab, newlines…): never in a title, label or login. */
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
-/** A list argument: absent → [], else non-empty names without commas (gh splits on them) or control characters. */
+/** A list argument: absent → [], else non-empty names without control characters. */
 function list(v: unknown, name: string): string[] | ToolResult {
   if (v === undefined) return [];
-  if (!Array.isArray(v) || !v.every((x) => typeof x === "string" && x.trim() !== "" && !x.includes(",") && !CONTROL.test(x))) {
-    return fail("invalid_list", `\`${name}\` must be a list of non-empty names, without commas or control characters.`);
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string" && x.trim() !== "" && !CONTROL.test(x))) {
+    return fail("invalid_list", `\`${name}\` must be a list of non-empty names, without control characters.`);
   }
   return v.map((x: string) => x.trim());
 }
@@ -485,7 +554,7 @@ async function scanIssue(root: string, title: string, body: string): Promise<Rep
 
 /** origin's issue targets, read once a minute at most; a failure is not remembered. */
 async function readTargets(root: string, host: string, remote: RemoteRepo): Promise<IssueTarget[] | { error: ToolResult }> {
-  const key = `${host}/${remote.owner}/${remote.repo}`.toLowerCase();
+  const key = `${accountKey()}/${host}/${remote.owner}/${remote.repo}`.toLowerCase();
   const hit = targetsCache.get(key);
   if (hit && Date.now() - hit.at < TARGETS_TTL_MS) return hit.targets;
   const get = (nwo: string) => runGh(["api", "--hostname", host, `repos/${nwo}`], root, undefined, createIssueTimeouts.readMs);
@@ -507,7 +576,7 @@ async function readTargets(root: string, host: string, remote: RemoteRepo): Prom
     const p = await get(j.parent.full_name);
     parent = p.ok ? parseJson(p.stdout) ?? undefined : undefined;
   }
-  const targets = targetsFrom(json, parent);
+  const { targets } = issueTargetsFrom(json, parent);
   if (!targets.length) return { error: fail("target_lookup_failed", `gh gave no repository for ${remote.owner}/${remote.repo}.`) };
   targetsCache.set(key, { at: Date.now(), targets });
   return targets;
@@ -519,6 +588,25 @@ function parseJson(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+/** The logins to send: `@me` (as gh takes it) is the signed-in login, asked once per host and account. */
+async function resolveAssignees(root: string, host: string, assignees: string[]): Promise<string[] | ToolResult> {
+  if (!assignees.includes("@me")) return assignees;
+  const key = `${accountKey()}/${host}`;
+  let login = logins.get(key);
+  if (!login) {
+    const r = await runGh(["api", "--hostname", host, "user"], root, undefined, createIssueTimeouts.readMs);
+    if (!r.ok) {
+      if (r.missing) return ghMissing();
+      return fail("gh_auth_failed", `gh could not tell who \`@me\` is on ${host}: ${r.stderr}`);
+    }
+    const j = parseJson(r.stdout) as { login?: unknown } | null;
+    if (typeof j?.login !== "string" || !j.login) return fail("gh_auth_failed", `gh could not tell who \`@me\` is on ${host}.`);
+    login = j.login;
+    logins.set(key, login);
+  }
+  return [...new Set(assignees.map((a) => (a === "@me" ? login! : a)))];
 }
 
 const ghMissing = () => fail("gh_missing", "The GitHub CLI (`gh`) is not installed or not on PATH: https://cli.github.com");
@@ -601,6 +689,8 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
       `You cannot set labels or assignees on ${chosen.repo} (no triage rights there): call again without \`labels\` and \`assignees\`.`,
     );
   }
+  const logins = await resolveAssignees(root, host, assignees);
+  if (!Array.isArray(logins)) return logins;
 
   // 4. Secrets.
   const secrets = await scanIssue(root, title, body);
@@ -612,7 +702,7 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   }
   const canCreate = secrets.blocking.length === 0;
   // What a create must match: this preview's issue, where it goes.
-  const issue = [root, host, chosen.repo, title, body, labels, assignees];
+  const issue = [root, host, chosen.repo, title, body, labels, logins];
 
   if (dryRun) {
     return ok({
@@ -623,7 +713,7 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
       // The body is the caller's own text, sent verbatim: its size, not a copy.
       bodyChars,
       labels,
-      assignees,
+      assignees: logins,
       secrets,
       canCreate,
       ...(canCreate ? { previewId: previewId(issue) } : {}),
@@ -648,33 +738,49 @@ export async function handleCreateIssue(cwd: string, args: Record<string, unknow
   if (usedPreviews.has(id)) {
     return fail("preview_used", "This preview already led to a create (filed, or perhaps filed): check the repository's issues, and preview again to file another.");
   }
-  // When the client can ask, the user confirms here, not only through the agent.
-  const answer = await ctx.confirm?.(confirmMessage(chosen.repo, title, body, labels, assignees));
-  if (answer === false) return fail("declined", "The user declined: nothing was created.");
+  // Taken now, before anything is awaited: a second call with this preview,
+  // at the same moment, finds it used. Given back only when nothing was sent.
+  usedPreviews.add(id);
+  const release = (r: ToolResult) => {
+    usedPreviews.delete(id);
+    return r;
+  };
 
-  // 5. Create.
-  const create = [
-    "issue", "create",
-    "--repo", `${host}/${chosen.repo}`,
-    "--title", title,
-    "--body-file", "-",
-    ...labels.flatMap((l) => ["--label", l]),
-    ...assignees.flatMap((a) => ["--assignee", a]),
-  ];
-  const made = await runGh(create, root, body, createIssueTimeouts.createMs);
-  if (made.ok || made.interrupted || MAYBE_SENT.test(made.stderr)) usedPreviews.add(id);
+  // When the client can ask, the user confirms here, not only through the agent.
+  let answer: boolean | undefined;
+  try {
+    answer = await ctx.confirm?.(confirmMessage(chosen.repo, title, body, labels, logins));
+  } catch (e) {
+    return release(fail("confirm_failed", `The user could not be asked to confirm (${(e as Error).message}): nothing was created.`));
+  }
+  if (answer === false) return release(fail("declined", "The user declined: nothing was created."));
+
+  // 5. Create: the whole issue as JSON on stdin (the REST payload the desktop
+  // sends), so none of it — a title holding a token, say — is on a command line.
+  const payload: Record<string, unknown> = { title, body };
+  if (labels.length) payload.labels = labels;
+  if (logins.length) payload.assignees = logins;
+  const made = await runGh(
+    ["api", "--hostname", host, "-X", "POST", `repos/${chosen.repo}/issues`, "--input", "-"],
+    root,
+    JSON.stringify(payload),
+    createIssueTimeouts.createMs,
+  );
   if (!made.ok) {
-    if (made.missing) return ghMissing();
+    if (made.missing) return release(ghMissing());
     if (made.interrupted || MAYBE_SENT.test(made.stderr)) {
       return fail(
         "create_uncertain",
         `${made.stderr}. The issue may have been created: check https://${host}/${chosen.repo}/issues before trying again.`,
       );
     }
-    return fail("create_failed", `gh could not create the issue on ${chosen.repo}: ${made.stderr}`);
+    return release(fail("create_failed", `gh could not create the issue on ${chosen.repo}: ${made.stderr}`));
   }
-  // gh prints the new issue's URL last.
-  const issueUrl = made.stdout.trim().split("\n").pop()?.trim() ?? "";
-  const m = /\/issues\/(\d+)$/.exec(issueUrl);
-  return ok({ created: true, repo: chosen.repo, number: m ? Number(m[1]) : null, url: m ? issueUrl : null });
+  const created = parseJson(made.stdout) as { number?: unknown; html_url?: unknown } | null;
+  return ok({
+    created: true,
+    repo: chosen.repo,
+    number: typeof created?.number === "number" ? created.number : null,
+    url: typeof created?.html_url === "string" ? created.html_url : null,
+  });
 }

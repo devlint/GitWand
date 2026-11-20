@@ -1,8 +1,8 @@
 /**
  * A fake `gh` (and `ssh`) for the gitwand_create_issue tests (#301): an
  * executable that records each call (tool, argv, stdin) in `calls.jsonl` next
- * to it and answers from `answers.json` — keyed by `api`, `issue create` or
- * `ssh`. Tests put its
+ * to it and answers from `answers.json` — keyed by `api POST` (a create),
+ * `api <path>` (`api repos/o/r`, `api user`), `api`, `auth status` or `ssh`. Tests put its
  * directory first on PATH. Node runs it (its absolute path in the shebang),
  * so it needs nothing else on PATH.
  */
@@ -37,12 +37,14 @@ const path = require("node:path");
 const dir = __dirname;
 const tool = path.basename(process.argv[1]);
 const argv = process.argv.slice(2);
-const key0 = tool === "ssh" ? "ssh" : argv[0] === "api" ? "api" : argv.slice(0, 2).join(" ");
-const stdin = argv.includes("--body-file") ? fs.readFileSync(0, "utf8") : null;
+// \`api POST\` (a create), \`api <path>\` when answered (\`repos/o/r\`, \`user\`), else \`api\`.
+const apiPath = argv.find((a) => a.startsWith("repos/") || a === "user");
+const key0 = tool === "ssh" ? "ssh" : argv[0] === "api" ? (argv.includes("POST") ? "api POST" : "api") : argv.slice(0, 2).join(" ");
+const stdin = argv.includes("--input") ? fs.readFileSync(0, "utf8") : null;
 fs.appendFileSync(path.join(dir, "calls.jsonl"), JSON.stringify({ tool, argv, stdin }) + "\\n");
 const answers = JSON.parse(fs.readFileSync(path.join(dir, "answers.json"), "utf8"));
 // \`api repos/o/r\` answers that repository only; plain \`api\` any.
-const key = key0 === "api" && answers["api " + argv[argv.length - 1]] ? "api " + argv[argv.length - 1] : key0;
+const key = key0 === "api" && apiPath && answers["api " + apiPath] ? "api " + apiPath : key0;
 const a = answers[key] || { stderr: "fake " + tool + ": no answer for " + key, code: 1 };
 if (a.ignoreTerm) process.on("SIGTERM", () => {});
 if (a.floodBytes) process.stdout.write("x".repeat(a.floodBytes));

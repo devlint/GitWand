@@ -60,13 +60,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
  */
 async function confirm(message: string): Promise<boolean | undefined> {
   if (!server.getClientCapabilities()?.elicitation) return undefined;
-  try {
-    const r = await server.elicitInput({ message, requestedSchema: { type: "object", properties: {} } });
-    return r.action === "accept";
-  } catch {
-    // The client advertised elicitation but could not ask: a no, not a yes.
-    return false;
-  }
+  // The user reads the whole issue first: give them time. A failure (or no
+  // answer in time) throws, and the tool reports it as such, not as a no.
+  const r = await server.elicitInput(
+    { message, requestedSchema: { type: "object", properties: {} } },
+    { timeout: 10 * 60_000 },
+  );
+  return r.action === "accept";
 }
 
 server.setRequestHandler(CallToolRequestSchema, async (request: any) => {

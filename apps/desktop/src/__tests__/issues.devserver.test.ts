@@ -4,8 +4,11 @@
  * `issue_payload`), so `pnpm dev:web` exercises the same behaviour.
  */
 import { describe, it, expect } from "vitest";
+// `targets_from` is core's (shared with the MCP tool); its own tests are in
+// packages/core. These pin what the dev-server routes get from it.
+import { issueTargetsFrom as devIssueTargetsFrom } from "@gitwand/core";
 // @ts-expect-error — plain .mjs module, no type declarations
-import { devIssueTargetsFrom, devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles } from "../../dev-issues.mjs";
+import { devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles } from "../../dev-issues.mjs";
 
 const origin = (hasIssues: boolean, fork: boolean, parent?: object) => ({
   full_name: "me/app", html_url: "https://github.com/me/app", has_issues: hasIssues, fork, parent,

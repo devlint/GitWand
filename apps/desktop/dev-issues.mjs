@@ -1,28 +1,11 @@
 /**
  * dev-server helpers for issue creation (#301): the rules of
- * `commands/gh_issues.rs` (`targets_from`, `check_target`, `issue_payload`),
+ * `commands/gh_issues.rs` (`check_target`, `issue_payload`),
  * kept in their own module so they can be tested without the server.
  */
 
-/** A repository JSON (`GET /repos/{nwo}`) → its issue target, or null. */
-function issueTarget(v, isOrigin) {
-  if (!v || typeof v.full_name !== "string") return null;
-  const perms = v.permissions || {};
-  const canTriage = ["triage", "push", "maintain", "admin"].some((k) => perms[k] === true);
-  // An archived repository is read-only: it takes no new issue.
-  const hasIssues = v.has_issues === true && v.archived !== true;
-  return { repo: v.full_name, htmlUrl: v.html_url || "", hasIssues, isOrigin, canTriage };
-}
-
-/** `targets_from`: origin, then its parent (carried in origin's JSON) when it is a fork. */
-export function devIssueTargetsFrom(origin) {
-  const targets = [issueTarget(origin, true)].filter(Boolean);
-  if (origin?.fork === true) {
-    const p = issueTarget(origin.parent, false);
-    if (p) targets.push(p);
-  }
-  return { targets, defaultRepo: targets.find((t) => t.hasIssues)?.repo ?? null };
-}
+// `targets_from` lives in `@gitwand/core` (`issueTargetsFrom`), shared with
+// the MCP tool: the dev-server reads it through `loadDevCore()`.
 
 /**
  * `check_target` with issues required: `{ repo }` (GitHub's spelling, which

@@ -206,6 +206,9 @@ export { BUILT_IN_PATTERNS } from "./secrets/patterns.js";
 // #301 — the secrets scan of an issue's text (desktop issue form, MCP tool)
 export { scanReportBody, DEFAULT_ENTROPY_THRESHOLD } from "./secrets/report.js";
 export type { ReportScan } from "./secrets/report.js";
+// #301 — where a repository's issues can go (origin, or its fork parent)
+export { issueTargetsFrom } from "./issues/targets.js";
+export type { IssueTarget, IssueTargets } from "./issues/targets.js";
 export type {
   SecretSeverity,
   SecretPattern,

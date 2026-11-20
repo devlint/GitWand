@@ -92,16 +92,19 @@ without the user seeing it first.
 
 ### Running `gh`
 
-- `execFileSync` with array args, a 30 s timeout, body on stdin
-  (`--body-file -`), `--repo HOST/OWNER/REPO`.
+- Spawned asynchronously (`src/spawn.ts`: array args, time limit with
+  SIGTERM then SIGKILL, output cap): 30 s to read, 60 s to create.
+- Create through `gh api -X POST repos/{target}/issues --input -`: the whole
+  issue as JSON on stdin (the desktop's REST payload), nothing of it on a
+  command line; `@me` resolved with `gh api user`. (Review pass 5; first
+  written with `gh issue create`.)
 - Environment allow-list (AGENTS.md: only what the child needs): PATH, home
   and Windows profile vars, temp dirs, locale, XDG dirs, `GH_CONFIG_DIR`,
-  the gh/GitHub tokens, proxy and CA vars; plus `GH_PROMPT_DISABLED=1`,
-  `GH_NO_UPDATE_NOTIFIER=1`, `NO_COLOR=1`. `GH_HOST`/`GH_REPO` never passed.
-- `gh` missing (ENOENT) → `gh_missing`; non-zero exit → its stderr in the
-  message (`gh_failed` / `create_failed`).
-- The created issue's URL is the last line of stdout; the number is parsed
-  from it.
+  the gh/GitHub tokens, proxy and CA vars, the D-Bus session (Linux
+  keyring); plus `GH_PROMPT_DISABLED=1`, `GH_NO_UPDATE_NOTIFIER=1`,
+  `NO_COLOR=1`. `GH_HOST`/`GH_REPO` never passed.
+- `gh` missing → `gh_missing`; a create cut off or answered 500/502/503/504,
+  reset or EOF → `create_uncertain`; other failures → `create_failed`.
 
 ### Docs
 
