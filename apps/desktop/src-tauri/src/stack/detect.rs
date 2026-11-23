@@ -70,18 +70,28 @@ pub(crate) fn status(
     configured_trunk: Option<&str>,
     hints: &[MergedParentHint],
 ) -> Result<StackReport, String> {
-    status_inner(repo, configured_trunk, hints).map(|(report, _)| report)
+    status_inner(repo, configured_trunk, hints, true).map(|(report, _)| report)
 }
 
 /// `status`, plus the layers that must not be restacked yet because a
 /// pending record of their stack is unsettled, each with the reason (the
 /// text `restack::plan` errs with).
+///
+/// `settle` runs the pending step. Only `status` settles: `restack::plan`
+/// passes `false` and never finalizes (a finalization it ran would switch
+/// branches and its report would be lost). Without settling, every pending
+/// record blocks its stack, completed or not, until the next refresh.
 pub(crate) fn status_inner(
     repo: &Path,
     configured_trunk: Option<&str>,
     hints: &[MergedParentHint],
+    settle: bool,
 ) -> Result<(StackReport, BTreeMap<String, String>), String> {
-    let settled = settle_pending(repo)?;
+    let settled = if settle {
+        settle_pending(repo)?
+    } else {
+        unsettled(repo)?
+    };
     let all = read_all(repo)?;
     // Fail closed: a worktree we cannot inspect may hide a running rebase.
     let holders = branch_holders(repo)?;
@@ -194,6 +204,19 @@ struct Settled {
     errors: BTreeMap<String, String>,
     /// Completed records left for the next refresh (one finalize per call).
     deferred: BTreeSet<String>,
+}
+
+/// Every pending record left as it is, its top deferred to the next refresh.
+fn unsettled(repo: &Path) -> Result<Settled, String> {
+    let deferred = read_all(repo)?
+        .into_values()
+        .filter(|m| m.pending.is_some())
+        .map(|m| m.branch)
+        .collect();
+    Ok(Settled {
+        deferred,
+        ..Settled::default()
+    })
 }
 
 /// The pending step (D4, D5), run before classification. Unparsable records

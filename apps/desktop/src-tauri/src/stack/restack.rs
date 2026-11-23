@@ -64,14 +64,15 @@ pub(crate) fn plan(
     git_version: Option<(u32, u32)>,
 ) -> Result<RestackPlan, String> {
     validate_branch_name(layer)?;
-    let (report, blocked) = status_inner(repo, configured_trunk, hints)?;
+    // Never settles: finalizing is `status`'s job alone (D5).
+    let (report, blocked) = status_inner(repo, configured_trunk, hints, false)?;
     let l = report
         .layers
         .iter()
         .find(|l| l.branch == layer)
         .ok_or_else(|| format!("not a stacked branch: {layer}"))?;
-    // A pending record of this stack is unsettled (an error, or a finished
-    // restack waiting for the next refresh): a new record would replace it.
+    // A pending record of this stack (running, finished or failed) has not
+    // been settled by a refresh: a new record would replace it.
     if let Some(reason) = blocked.get(layer) {
         return Err(reason.clone());
     }
@@ -728,6 +729,15 @@ pub(crate) fn finalize(
             }
         }
         Moment::ParentMerged => {
+            // The merged parent leaves the stack (two children otherwise).
+            // Before the bottom: unsetting a bottom that is also the top
+            // removes the record, and a failure after that could not be
+            // retried.
+            if let Some(mp) = &p.merged_parent {
+                if all.contains_key(mp) {
+                    unset(repo, mp)?;
+                }
+            }
             match &p.new_parent {
                 Some(np) => {
                     if let Some(m) = bottom {
@@ -746,26 +756,21 @@ pub(crate) fn finalize(
                     }
                 }
             }
-            // The merged parent leaves the stack (two children otherwise).
-            if let Some(mp) = &p.merged_parent {
-                if all.contains_key(mp) {
-                    unset(repo, mp)?;
-                }
-            }
             merged_parent = p.merged_parent.clone();
         }
     }
-    clear_pending(repo, top)?;
-
     let mut moved = Vec::new();
     for b in &layers {
         if is_ancestor(repo, &p.onto, &format!("refs/heads/{b}"))? {
             moved.push(b.clone());
         }
     }
+    // The last write. Nothing after it may fail the finalize: the record
+    // would be gone and the report lost.
+    clear_pending(repo, top)?;
 
     // 3. Back to the branch the user was on when the restack started.
-    let (switched_back_to, switch_error) = switch_back(repo, top, &p.original)?;
+    let (switched_back_to, switch_error) = switch_back(repo, top, &p.original);
     Ok(FinalizedRestack {
         moment: p.moment,
         bottom: p.bottom.clone(),
@@ -791,8 +796,16 @@ fn merge_base(repo: &Path, parent: &str, layer: &str) -> Result<String, String> 
 
 /// When HEAD is still on `top` (where the rebase left it), switches to
 /// `original`. Skipped, and said why, when `original` is gone or tracked
-/// changes would have to be carried over.
-fn switch_back(
+/// changes would have to be carried over. Runs after the record is cleared,
+/// so it never fails: its own git errors are reported in `switch_error`.
+fn switch_back(repo: &Path, top: &str, original: &str) -> (Option<String>, Option<String>) {
+    match try_switch_back(repo, top, original) {
+        Ok(r) => r,
+        Err(e) => (None, Some(format!("not switched back to {original}: {e}"))),
+    }
+}
+
+fn try_switch_back(
     repo: &Path,
     top: &str,
     original: &str,
@@ -1905,9 +1918,11 @@ mod tests {
         let o2 = s.layers.iter().find(|l| l.branch == "other-2").unwrap();
         assert_eq!(o2.state, LayerState::OutOfDate);
         assert!(o2.actionable);
+        // `plan` never settles (round 2): any record blocks its stack with
+        // the deferred text; the error itself is in `pending_error`.
         assert_eq!(
             plan(&r.path, Some("main"), "step-2", &[], V).unwrap_err(),
-            msg
+            "A previous restack of step-3 is still being finalized. Refresh and try again."
         );
         assert!(plan(&r.path, Some("main"), "other-2", &[], V)
             .unwrap()
@@ -2112,5 +2127,66 @@ mod tests {
             Some("not switched back to scratch: the branch no longer exists")
         );
         assert_eq!(r.git(&["branch", "--show-current"]), "step-3");
+    }
+
+    // ── Task 5 review, round 2 ────────────────────────────────────────
+
+    #[test]
+    fn plan_never_finalizes_a_completed_restack() {
+        let r = TempRepo::new();
+        stack3(&r);
+        r.git(&["checkout", "-q", "step-1"]);
+        r.commit("a2.txt", "more\n", "s1 more");
+        assert!(!restack(&r, "step-2", &[]).conflict);
+        let keys = stack_keys(&r);
+        let e = plan(&r.path, Some("main"), "step-2", &[], V).unwrap_err();
+        assert_eq!(
+            e,
+            "A previous restack of step-3 is still being finalized. Refresh and try again."
+        );
+        assert_eq!(stack_keys(&r), keys, "plan wrote nothing");
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_some());
+        assert_eq!(r.git(&["branch", "--show-current"]), "step-3", "no switch");
+        let f = status(&r.path, Some("main"), &[])
+            .unwrap()
+            .finalized
+            .unwrap();
+        assert_eq!(f.switched_back_to.as_deref(), Some("step-1"));
+    }
+
+    #[test]
+    fn a_merged_parent_layer_on_the_trunk_and_a_single_layer_bottom_both_leave() {
+        // Moment 2 with no new parent and bottom == top: the merged parent
+        // is unset BEFORE the bottom, whose `unset` also removes the record,
+        // so a failure in between keeps the record for a retry. Here, the end
+        // state: both layers undeclared, no record. step-1 is declared on the
+        // trunk by hand (`set_parent` refuses that).
+        let r = TempRepo::new();
+        r.git(&["checkout", "-q", "-b", "step-1"]);
+        r.commit("a.txt", "1\n", "s1");
+        r.git(&["checkout", "-q", "-b", "step-2"]);
+        r.commit("b.txt", "2\n", "s2");
+        set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        r.git(&["config", "branch.step-1.gitwandParent", "main"]);
+        r.add_bare_origin();
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&["merge", "-q", "--squash", "step-1"]);
+        r.git(&["commit", "-q", "-m", "step 1 (squash)"]);
+        r.git(&["push", "-q", "origin", "main"]);
+        r.git(&["reset", "-q", "--hard", "HEAD~1"]);
+        r.git(&["checkout", "-q", "step-2"]);
+        assert!(!restack(&r, "step-2", &[]).conflict);
+        let f = status(&r.path, Some("main"), &[])
+            .unwrap()
+            .finalized
+            .unwrap();
+        assert_eq!(f.merged_parent.as_deref(), Some("step-1"));
+        assert!(ancestor(&r, "origin/main", "step-2"));
+        for k in ["gitwandParent", "gitwandStackBase", "gitwandRestack"] {
+            for b in ["step-1", "step-2"] {
+                let key = format!("branch.{b}.{k}");
+                assert!(cfg_opt(&r, &key).is_none(), "{key} still set");
+            }
+        }
     }
 }
