@@ -2057,6 +2057,19 @@ pub(crate) fn branch_pr_from_rest_json(v: &serde_json::Value) -> Option<crate::t
     })
 }
 
+/// The PR list URL for `branch` pushed by `owner`, in the base repo `repo`.
+/// A merged PR is a closed one, so `merged` lists `closed` (100 per page: the
+/// merged PR can sit behind many closed ones).
+fn branch_pr_url(repo: &str, owner: &str, branch: &str, state: &str) -> String {
+    format!(
+        "{}/repos/{}/pulls?state={}&head={}&per_page=100",
+        API_BASE,
+        repo,
+        if state == "merged" { "closed" } else { "open" },
+        enc_nwo(&format!("{}:{}", owner, branch)),
+    )
+}
+
 /// The PR of `branch` in the base repo (the fork's parent for a fork), by REST.
 /// `merged` lists closed PRs and keeps the newest merged one; `open` takes the
 /// first. The head filter names the `origin` owner: that is where the branch
@@ -2070,13 +2083,7 @@ pub(crate) fn rest_branch_pr(
     let merged = state == "merged";
     let (owner, _) = owner_repo(cwd)?;
     let repo = base_owner_repo(cwd, token)?;
-    let url = format!(
-        "{}/repos/{}/pulls?state={}&head={}&per_page=10",
-        API_BASE,
-        repo,
-        if merged { "closed" } else { "open" },
-        enc_nwo(&format!("{}:{}", owner, branch)),
-    );
+    let url = branch_pr_url(&repo, &owner, branch, state);
     let list = api_json("GET", &url, token, None)?;
     let prs: Vec<crate::types::BranchPr> = list
         .as_array()
@@ -2104,8 +2111,8 @@ pub(crate) fn rest_pr_set_base(
     token: &str,
 ) -> Result<(), String> {
     let payload = set_base_payload(base)?;
-    let fi = rest_fork_info(cwd, token).ok();
-    let repo = pr_target_repo(cwd, fi.as_ref())?;
+    // An automatic write: never fall back to origin when the fork lookup fails.
+    let repo = base_owner_repo(cwd, token)?;
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
     api_json("PATCH", &url, token, Some(&payload.to_string()))?;
     Ok(())
@@ -2790,6 +2797,15 @@ mod tests {
         let pr = branch_pr_from_rest_json(&v).unwrap();
         assert_eq!((pr.base.as_str(), pr.merged_at), ("step-1", None));
         assert_eq!((pr.head_ref_oid.as_str(), pr.url.as_str()), ("bbb", "u"));
+    }
+
+    #[test]
+    fn branch_pr_url_names_the_origin_owner_and_encodes_the_head() {
+        assert_eq!(
+            branch_pr_url("up/repo", "me", "feat/x y", "merged"),
+            "https://api.github.com/repos/up/repo/pulls?state=closed&head=me%3Afeat/x%20y&per_page=100"
+        );
+        assert!(branch_pr_url("o/r", "me", "b", "open").contains("state=open&"));
     }
 
     #[test]
