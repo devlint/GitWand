@@ -42,11 +42,11 @@ v3.14 succeeds when those two manual rebases disappear: GitWand notices each mom
 
 | | How GitWand knows the stack | Trade-off |
 |---|---|---|
-| **A. Explicit, stored in local git config** (picked) | "Stack on…" records `branch.<b>.gitwandParent` and `branch.<b>.gitwandBase` (parent commit) in `.git/config` | Reliable, offline, works before any PR exists. Needs one declaration per layer. |
+| **A. Explicit, stored in local git config** (picked) | "Stack on…" records `branch.<b>.gitwandParent` and `branch.<b>.gitwandStackBase` (parent commit) in `.git/config` | Reliable, offline, works before any PR exists. Needs one declaration per layer. |
 | B. Inferred from GitHub | Parent = the PR's base branch; old parent tip = the merged PR's `headRefOid` | Nothing to declare, but needs PRs, network, everything pushed; misses moment 1 before a push. |
 | C. Inferred from git (`merge-base --fork-point`) | Old parent tip from the parent's reflog | Nothing to store, but the reflog expires and is empty for branches fetched from elsewhere, and it fails silently. |
 
-**Picked: A, plus a bridge from B** (user decision). When a local branch's open GitHub PR targets another local branch that is not the trunk, GitWand offers "Stack `step-2` on `step-1`?". The merged PR's `headRefOid` is also a fallback for the old parent tip when `gitwandBase` is missing. Stored config stays the source of truth.
+**Picked: A, plus a bridge from B** (user decision). When a local branch's open GitHub PR targets another local branch that is not the trunk, GitWand offers "Stack `step-2` on `step-1`?". The merged PR's `headRefOid` is also a fallback for the old parent tip when `gitwandStackBase` is missing. Stored config stays the source of truth.
 
 The roadmap said "metadata in `.gitwand-workspace.json`". That file is a multi-repo workspace descriptor (`commands/workspace.rs`), not per-repo branch data, so it is not used.
 
@@ -67,18 +67,18 @@ Per layer, in the repo's local git config (`.git/config`, shared by all its work
 ```
 [branch "step-2"]
     gitwandParent = step-1
-    gitwandBase   = <sha of step-1 that step-2 currently sits on>
+    gitwandStackBase   = <sha of step-1 that step-2 currently sits on>
 ```
 
 - A branch is **stacked** when `gitwandParent` is set and names a branch other than the trunk.
 - **Linear stacks only** (user decision, for now): a branch has at most one stacked child. "Stack on…" refuses a parent that already has a stacked child, and explains why. The bridge (§5.2) does not offer it either. Trees are a possible later extension.
 - The trunk is the repo's default branch (the one GitWand already resolves for PR creation).
-- **Self-healing base** **(spec call)**: on every stack refresh, when the parent tip is an ancestor of the layer and differs from `gitwandBase`, set `gitwandBase` to the parent tip. A rebase the user finished by hand, or one that halted and was continued through the banner, then leaves correct metadata without special bookkeeping.
+- **Self-healing base** **(spec call)**: on every stack refresh, when the parent tip is an ancestor of the layer and differs from `gitwandStackBase`, set `gitwandStackBase` to the parent tip. A rebase the user finished by hand, or one that halted and was continued through the banner, then leaves correct metadata without special bookkeeping.
 - **Rename or delete of a branch.** A layer whose parent no longer exists locally shows "parent missing" and offers Unstack. If the parent's PR is known merged, it takes the moment-2 path instead.
 
 ### 5.2 Declaring a stack
 
-- Branch context menu: **"Stack on…"** (choose the parent from local branches) and **"Unstack"**. When declared, `gitwandBase = merge-base(layer, parent)`.
+- Branch context menu: **"Stack on…"** (choose the parent from local branches) and **"Unstack"**. When declared, `gitwandStackBase = merge-base(layer, parent)`.
 - **Bridge from GitHub**: when the PR list loads, for every local branch with an open PR whose base is a local non-trunk branch and with no `gitwandParent`, show a dismissible prompt on that branch: "Stack `step-2` on `step-1`?". A dismissal is remembered per branch **(spec call)**.
 - Cycles (A on B on A) are refused.
 
@@ -88,12 +88,12 @@ For each stacked layer, in order of precedence:
 
 1. **Parent merged.** True when either:
    - GitHub reports the parent's PR (head = parent branch) as merged, or
-   - git fallback: every commit of `gitwandBase`'s side is already in the trunk by patch-id (`git cherry <trunk> <parent>` prints only `-` lines).
+   - git fallback: every commit of `gitwandStackBase`'s side is already in the trunk by patch-id (`git cherry <trunk> <parent>` prints only `-` lines).
 
    The fallback catches merge commits, rebase merges and single-commit squashes, but **not** multi-commit squashes. Only the forge catches those. Say so in the UI's empty state for non-GitHub repos.
 
    → state **"parent merged"**, action *Restack on `<trunk>`*.
-2. **Parent moved.** The parent tip is not an ancestor of the layer, and `gitwandBase` is still an ancestor of the layer. → state **"out of date"**, action *Restack on `step-1`*.
+2. **Parent moved.** The parent tip is not an ancestor of the layer, and `gitwandStackBase` is still an ancestor of the layer. → state **"out of date"**, action *Restack on `step-1`*.
 3. Otherwise **up to date**.
 
 A layer whose parent is out of date or merged makes everything above it out of date too. The action is always offered on the **lowest** affected layer and moves the whole stack above it.
@@ -118,12 +118,12 @@ This makes a halted restack end exactly like an uninterrupted one. It also stops
 **Branch afterwards** **(spec call)**. A successful restack returns to the branch that was checked out before. When the rebase halts, git leaves the layer being rebased checked out, as with any rebase. On completion through the banner, GitWand switches back to the original branch, which is stored in the pending record.
 
 **Moment 1 — parent moved:**
-`git rebase --onto <parent> <gitwandBase> <top-of-stack> --update-refs`
-Then for each moved layer, `gitwandBase` = new tip of its parent.
+`git rebase --onto <parent> <gitwandStackBase> <top-of-stack> --update-refs`
+Then for each moved layer, `gitwandStackBase` = new tip of its parent.
 
 **Moment 2 — parent merged:**
 `git rebase --onto origin/<trunk> <old parent tip> <top-of-stack> --update-refs`
-- Old parent tip = the child's `gitwandBase`. When it is missing, use the merged PR's `headRefOid`. With neither, refuse and ask the user to restack by hand.
+- Old parent tip = the child's `gitwandStackBase`. When it is missing, use the merged PR's `headRefOid`. With neither, refuse and ask the user to restack by hand.
 - Afterwards:
   - the child's `gitwandParent` becomes the merged parent's own parent;
   - when that parent is the trunk, the metadata is removed, because the layer is now an ordinary branch;
@@ -175,6 +175,6 @@ Context menu: *Stack on…*, *Unstack*, *Restack…* (when applicable).
   - a local trunk behind `origin/<trunk>` after a squash;
   - a refused second child on the same parent;
   - abort;
-  - a missing `gitwandBase` with and without `headRefOid`.
+  - a missing `gitwandStackBase` with and without `headRefOid`.
 - Dev-server routes and parity probe entries for the new deterministic commands.
 - CHANGELOG `[Unreleased]` entry and the roadmap update (move the deferred items to a new planned minor) at ship time.
