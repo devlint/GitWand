@@ -604,6 +604,7 @@ const es: Locale = {
     },
     badge: {
       parent: "↳ {0}",
+      parentPr: "↳ {0} · #{1}",
     },
     restack: "Reapilar",
     menu: {
@@ -639,6 +640,7 @@ const es: Locale = {
       preview: "Previsualizar el reapilado",
       later: "Más tarde",
       pendingError: "GitWand no pudo terminar el último reapilado de {0}: {1}. Desapila {0} para borrarlo.",
+      statusError: "Las ramas apiladas no están disponibles: {0}",
     },
     after: {
       retargeted: "La PR #{0} ahora apunta a {1}.",
@@ -675,14 +677,17 @@ const es: Locale = {
     refusal: {
       rebase_in_progress: "Ya hay un rebase en curso.",
       up_to_date: "Nada que reapilar.",
-      git_too_old: "Reapilar requiere git 2.38 o posterior.",
+      git_too_old: "Reapilar requiere git 2.38 o posterior (se encontró {0}).",
       detached: "Primero cambia a una rama.",
       dirty: "Primero haz commit o stash de tus cambios.",
       occupied: "{0} está extraída en otro worktree ({1}). Reapilar la dejaría atrás.",
-      parent_behind: "La rama padre está por detrás de su remoto. Actualízala primero.",
+      occupied_rebasing: "{0} se está rebasando en otro worktree ({1}). Termina o aborta ese rebase primero.",
+      parent_behind: "{0} va {1} commit(s) por detrás de su remoto. Haz pull primero.",
       no_remote_trunk: "No hay rama origin para el tronco: haz primero un fetch de origin.",
+      parent_no_upstream: "{0} no tiene upstream, así que GitWand no puede comprobar que contiene el trabajo fusionado.",
+      merged_work_missing: "El trabajo fusionado aún no está en {0}: actualiza {0} primero.",
       no_old_base: "GitWand no puede saber qué commits pertenecían a la rama padre. Reapila esta rama a mano.",
-      fetch_failed: "No se pudo hacer fetch: el commit fusionado puede faltar en local. Inténtalo de nuevo con conexión.",
+      fetch_failed: "No se pudo hacer fetch ({0}): puede que falte localmente el commit fusionado. Inténtalo de nuevo con conexión.",
       stale_preview: "La pila cambió desde la previsualización. Previsualiza de nuevo.",
     },
   },

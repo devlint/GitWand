@@ -34,7 +34,10 @@ function layer(over: Partial<StackLayerStatus> = {}): StackLayerStatus {
   };
 }
 
-function mountBadge(props: { layer: StackLayerStatus | null; offer: BridgeOffer | null }, on: Record<string, () => void> = {}) {
+function mountBadge(
+  props: { layer: StackLayerStatus | null; offer: BridgeOffer | null; parentPr?: number | null },
+  on: Record<string, () => void> = {},
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   app = createApp({ render: () => h(StackBadge, { ...props, ...on }) });
@@ -52,6 +55,11 @@ describe("StackBadge", () => {
     expect(btn?.textContent?.trim()).toBe("Restack");
     btn!.click();
     expect(onRestack).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds the parent's PR number when known (M-8)", () => {
+    const el = mountBadge({ layer: layer({ parent: "main" }), offer: null, parentPr: 812 });
+    expect(el.textContent).toContain("↳ main · #812");
   });
 
   it("renders no state and no button when up to date", () => {

@@ -609,6 +609,7 @@ const fr: Locale = {
     },
     badge: {
       parent: "↳ {0}",
+      parentPr: "↳ {0} · #{1}",
     },
     restack: "Restacker",
     menu: {
@@ -644,6 +645,7 @@ const fr: Locale = {
       preview: "Prévisualiser le restack",
       later: "Plus tard",
       pendingError: "GitWand n'a pas pu terminer le dernier restack de {0} : {1}. Désempilez {0} pour l'effacer.",
+      statusError: "Branches empilées indisponibles : {0}",
     },
     after: {
       retargeted: "La PR #{0} cible maintenant {1}.",
@@ -680,14 +682,17 @@ const fr: Locale = {
     refusal: {
       rebase_in_progress: "Un rebase est déjà en cours.",
       up_to_date: "Rien à restacker.",
-      git_too_old: "Le restack nécessite git 2.38 ou plus récent.",
+      git_too_old: "Le restack nécessite git 2.38 ou plus récent ({0} trouvé).",
       detached: "Placez-vous d'abord sur une branche.",
       dirty: "Commitez ou remisez d'abord vos modifications.",
       occupied: "{0} est extraite dans un autre worktree ({1}). Le restack la laisserait en arrière.",
-      parent_behind: "La parente est en retard sur son remote. Mettez-la d'abord à jour.",
+      occupied_rebasing: "{0} est en cours de rebase dans un autre worktree ({1}). Terminez ou annulez ce rebase d'abord.",
+      parent_behind: "{0} a {1} commit(s) de retard sur sa branche distante. Récupérez-la d'abord.",
       no_remote_trunk: "Pas de branche origin pour le tronc : faites d'abord un fetch d'origin.",
+      parent_no_upstream: "{0} n'a pas d'upstream : GitWand ne peut pas vérifier qu'elle contient le travail fusionné.",
+      merged_work_missing: "Le travail fusionné n'est pas encore dans {0} : mettez {0} à jour d'abord.",
       no_old_base: "GitWand ne peut pas savoir quels commits appartenaient à la parente. Restackez cette branche à la main.",
-      fetch_failed: "Fetch impossible : le commit fusionné peut manquer en local. Réessayez une fois en ligne.",
+      fetch_failed: "Fetch impossible ({0}) : le commit fusionné manque peut-être localement. Réessayez une fois en ligne.",
       stale_preview: "La pile a changé depuis l'aperçu. Relancez l'aperçu.",
     },
   },

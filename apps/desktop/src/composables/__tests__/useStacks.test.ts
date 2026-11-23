@@ -69,6 +69,7 @@ const finalized = (over: Partial<FinalizedRestack> = {}): FinalizedRestack => ({
   moved: ["step-2", "step-3"],
   switched_back_to: null,
   switch_error: null,
+  delete_offer: null,
   ...over,
 });
 
@@ -94,6 +95,7 @@ const openPr = (number: number): BranchPr => ({
   head_ref_oid: "h",
   merged_at: null,
   url: `https://github.com/o/r/pull/${number}`,
+  merge_commit_oid: null,
 });
 
 /** Fakes for every IPC dep. `world.report` is what `status` returns; `world.next` is returned once. */
@@ -131,7 +133,8 @@ function setup(over: Partial<StacksDeps> = {}) {
     ...over,
   };
   const s = createStacks(deps);
-  s.setContext({ forge: null,
+  s.setContext({
+    forge: null,
     cwd: "/r",
     currentBranch: "step-3",
     localBranches: ["main", "step-1", "step-2", "step-3"],
@@ -185,15 +188,28 @@ describe("useStacks — refresh", () => {
     const { s, deps } = setup({
       branchPr: vi.fn(async (_c: string, b: string) => {
         if (b === "step-2") throw new Error("gh down");
-        return { ...openPr(42), head_ref_oid: "old1" };
+        return { ...openPr(42), head_ref_oid: "old1", merge_commit_oid: "sq1" };
       }),
     });
     await s.refresh("/r");
     await s.refresh("/r");
     expect(deps.status).toHaveBeenLastCalledWith("/r", "main", [
-      { branch: "step-1", number: 42, head_ref_oid: "old1" },
+      { branch: "step-1", number: 42, head_ref_oid: "old1", merge_commit_oid: "sq1" },
     ]);
     expect(s.report.value?.trunk).toBe("main");
+  });
+
+  it("exposes a failed status as statusError, cleared by the next success (I-3)", async () => {
+    const { s, deps } = setup();
+    (deps.status as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("git exploded"));
+    await s.refresh("/r");
+    expect(s.statusError.value).toBe("git exploded");
+    await s.refresh("/r");
+    expect(s.statusError.value).toBeNull();
+    (deps.status as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("again"));
+    await s.refresh("/r");
+    s.setContext({ forge: null, cwd: "/other", currentBranch: "main", localBranches: ["main"], prs: [] });
+    expect(s.statusError.value).toBeNull();
   });
 
   it("coalesces refreshes: one in flight, one queued", async () => {
@@ -237,7 +253,7 @@ describe("useStacks — refresh", () => {
 describe("useStacks — after a restack", () => {
   const momentTwo = () =>
     report({
-      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null }),
+      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null, delete_offer: "step-1" }),
     });
 
   it("finalized moment two retargets the child PR to the trunk on GitHub", async () => {
@@ -248,6 +264,16 @@ describe("useStacks — after a restack", () => {
     expect(deps.setPrBase).toHaveBeenCalledWith("/r", 813, "main");
     expect(s.after.value?.retarget).toEqual({ state: "done", number: 813, base: "main", error: null });
     expect(s.after.value?.deleteOffer).toBe("step-1");
+  });
+
+  it("offers to delete the merged parent only when the backend says it is safe (I-1, M-1)", async () => {
+    const { s, world } = setup();
+    world.next = report({
+      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null, delete_offer: null }),
+    });
+    await s.refresh("/r");
+    expect(s.after.value?.finalized.merged_parent).toBe("step-1");
+    expect(s.after.value?.deleteOffer).toBeNull();
   });
 
   it("retargets onto the new parent when the merged parent was itself stacked", async () => {
@@ -276,6 +302,20 @@ describe("useStacks — after a restack", () => {
     await s.retryRetarget();
     expect(s.after.value?.retarget).toEqual({ state: "done", number: 813, base: "main", error: null });
     expect(setPrBase).toHaveBeenCalledTimes(2);
+  });
+
+  it("a retry retargets onto the trunk of the restack, not the setting or another repo's (T11)", async () => {
+    const setPrBase = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+    const { s, world } = setup({ setPrBase, trunkSetting: () => "develop" });
+    world.next = report({
+      trunk: "trunk-of-r",
+      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null }),
+    });
+    await s.refresh("/r");
+    expect(s.after.value?.trunk).toBe("trunk-of-r");
+    s.setContext({ forge: null, cwd: "/other", currentBranch: "main", localBranches: ["main"], prs: [] });
+    await s.retryRetarget();
+    expect(setPrBase).toHaveBeenLastCalledWith("/r", 813, "trunk-of-r");
   });
 
   it("off GitHub the retarget is left to the user", async () => {
@@ -385,6 +425,7 @@ describe("useStacks — restack flow", () => {
     expect(s.flow.value.phase).toBe("refused");
     expect(s.flow.value.refusal?.code).toBe("fetch_failed");
     expect(s.flow.value.refusal?.message).toBe("offline");
+    expect(s.flow.value.refusal?.detail).toBe("offline");
     expect(deps.plan).not.toHaveBeenCalled();
   });
 
@@ -399,7 +440,7 @@ describe("useStacks — restack flow", () => {
   });
 
   it("a plan refusal stops at refused", async () => {
-    const refusal = { code: "dirty" as const, message: "dirty tree", branch: null, path: null };
+    const refusal = { code: "dirty" as const, message: "dirty tree", branch: null, path: null, detail: null };
     const { s } = setup({ plan: vi.fn(async () => plan({ refusal })) });
     await s.startRestack("/r", "step-2");
     expect(s.flow.value.phase).toBe("refused");
@@ -479,7 +520,8 @@ describe("useStacks — bridge, banner, candidates", () => {
     // q is a layer on p (p is not a layer): a PR p → q would make a cycle.
     world.report = report({ layers: [...stack(), layer({ branch: "q", parent: "p", top: "q" })] });
     await s.refresh("/r");
-    s.setContext({ forge: null,
+    s.setContext({
+      forge: null,
       cwd: "/r",
       currentBranch: "main",
       localBranches: ["main", "step-1", "step-2", "step-3", "a", "b", "c", "d", "x", "y", "p", "q"],
@@ -503,7 +545,8 @@ describe("useStacks — bridge, banner, candidates", () => {
     const { s, deps, world } = setup();
     world.forge = "gitlab";
     await s.refresh("/r");
-    s.setContext({ forge: null,
+    s.setContext({
+      forge: null,
       cwd: "/r",
       currentBranch: "main",
       localBranches: ["main", "c", "x"],
@@ -553,6 +596,39 @@ describe("useStacks — bridge, banner, candidates", () => {
     expect(s.banner.value?.layer.branch).toBe("step-2");
   });
 
+  it("the banner says what a merged parent was merged into: its stacked parent, else the trunk (M-2)", async () => {
+    const { s, world } = setup();
+    world.forge = "gitlab";
+    world.report = report({ layers: stack({ "step-3": { state: "parent_merged", actionable: true } }) });
+    await s.refresh("/r");
+    expect(s.banner.value?.mergedInto).toBe("step-1");
+    world.report = report({ layers: stack({ "step-2": { state: "parent_merged", actionable: true } }) });
+    await s.refresh("/r");
+    // step-1's own layer sits on main.
+    expect(s.banner.value?.mergedInto).toBe("main");
+  });
+
+  it("parentPrOf: the parent's open PR from the context, else the merged PR (M-8)", async () => {
+    const { s, world } = setup();
+    world.forge = "gitlab";
+    world.report = report({ layers: stack({ "step-3": { state: "parent_merged", merged_pr: 77 } }) });
+    await s.refresh("/r");
+    s.setContext({
+      forge: null,
+      cwd: "/r",
+      currentBranch: "step-3",
+      localBranches: ["main", "step-1", "step-2", "step-3"],
+      prs: [
+        { branch: "step-1", base: "main", number: 812, state: "OPEN" },
+        { branch: "step-2", base: "step-1", number: 813, state: "MERGED" },
+      ],
+    });
+    expect(s.parentPrOf("step-2")).toBe(812);
+    expect(s.parentPrOf("step-3")).toBe(77);
+    expect(s.parentPrOf("step-1")).toBeNull();
+    expect(s.parentPrOf("nope")).toBeNull();
+  });
+
   it("the banner reports a parent behind its upstream", async () => {
     const { s, world } = setup();
     world.forge = "gitlab";
@@ -581,7 +657,8 @@ describe("useStacks — bridge, banner, candidates", () => {
     const { s, world } = setup();
     world.forge = "gitlab";
     await s.refresh("/r");
-    s.setContext({ forge: null,
+    s.setContext({
+      forge: null,
       cwd: "/r",
       currentBranch: "step-2",
       localBranches: ["main", "step-1", "step-2", "step-3", "other"],
@@ -606,7 +683,7 @@ describe("useStacks — bridge, banner, candidates", () => {
 describe("useStacks — review round 1", () => {
   const momentTwo = () =>
     report({
-      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null }),
+      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null, delete_offer: "step-1" }),
     });
 
   it("refuses a moment-two plan when the fetch failed, even without a report", async () => {
@@ -652,6 +729,25 @@ describe("useStacks — review round 1", () => {
     expect(deps.setPrBase).toHaveBeenCalledTimes(1);
     expect(h.offerPush).toHaveBeenCalledTimes(1);
     expect(deps.status).toHaveBeenCalledTimes(2);
+  });
+
+  it("a finalization whose handling failed is handled again by the next refresh (T13)", async () => {
+    const offerPush = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("toast failed");
+      })
+      .mockImplementation(() => {});
+    host({ offerPush });
+    const { s, world } = setup();
+    world.report = report({ finalized: finalized() });
+    await s.refresh("/r");
+    expect(offerPush).toHaveBeenCalledTimes(1);
+    expect(s.statusError.value).toBe("toast failed");
+    await s.refresh("/r");
+    await settle();
+    // Handled again, then once only (the extra refresh after it is skipped).
+    expect(offerPush).toHaveBeenCalledTimes(2);
   });
 
   it("handles the same finalization again once a report in between had none", async () => {

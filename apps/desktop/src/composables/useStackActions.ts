@@ -29,6 +29,10 @@ export function createStackActions(stacks: Stacks, notify: (message: string) => 
     unstack: (cwd: string, branch: string) => guard(() => stacks.unstack(cwd, branch)),
     /** The after-restack banner's "Delete local …" (force-delete of the merged parent). */
     deleteMergedParent: () => guard(() => stacks.deleteMergedParent()),
+    /** The banner's "Preview restack" of `branch` exactly (M-5). */
+    preview: (cwd: string, branch: string) => guard(() => stacks.startRestack(cwd, branch)),
+    /** The after-restack banner's "Retry retarget" (M-5). */
+    retryRetarget: () => guard(() => stacks.retryRetarget()),
   };
 }
 

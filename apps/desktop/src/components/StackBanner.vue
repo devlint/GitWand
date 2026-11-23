@@ -40,10 +40,12 @@ const restackText = computed(() => {
   switch (m.kind) {
     case "parent_moved":
       return t("stacks.banner.parent_moved", parent, branch);
-    case "parent_merged":
+    case "parent_merged": {
+      const into = m.mergedInto ?? trunk.value;
       return merged_pr != null
-        ? t("stacks.banner.parentMergedPr", parent, trunk.value, merged_pr)
-        : t("stacks.banner.parent_merged", parent, trunk.value);
+        ? t("stacks.banner.parentMergedPr", parent, into, merged_pr)
+        : t("stacks.banner.parent_merged", parent, into);
+    }
     case "parent_behind":
       return t("stacks.banner.parent_behind", parent);
     case "parent_missing":
@@ -92,11 +94,13 @@ const switchText = computed(() => {
   return e ? t("stacks.after.switchFailed", e.branch, e.reason) : "";
 });
 
-const visible = computed(() => !!model.value || stacks.pendingErrors.value.length > 0 || !!after.value);
+const visible = computed(
+  () => !!stacks.statusError.value || !!model.value || stacks.pendingErrors.value.length > 0 || !!after.value,
+);
 
 function preview() {
   const m = model.value;
-  if (m && cwd.value) void stacks.startRestack(cwd.value, m.layer.branch);
+  if (m && cwd.value) void actions.preview(cwd.value, m.layer.branch);
 }
 
 function unstack(branch: string | null) {
@@ -106,6 +110,9 @@ function unstack(branch: string | null) {
 
 <template>
   <div v-if="visible" class="stack-banner" role="status">
+    <div v-if="stacks.statusError.value" class="stack-banner__row stack-banner__row--warn">
+      <span class="stack-banner__text">{{ t("stacks.banner.statusError", stacks.statusError.value) }}</span>
+    </div>
     <div v-for="e in stacks.pendingErrors.value" :key="e.top" class="stack-banner__row stack-banner__row--warn">
       <span class="stack-banner__text">{{ t("stacks.banner.pendingError", e.top, e.error) }}</span>
       <button class="stack-banner__btn" @click="unstack(e.top)">{{ t("stacks.menu.unstack") }}</button>
@@ -128,7 +135,7 @@ function unstack(branch: string | null) {
     <div v-if="after" class="stack-banner__after">
       <div v-if="retargetText" class="stack-banner__row">
         <span class="stack-banner__text">{{ retargetText }}</span>
-        <button v-if="after.retarget.state === 'failed'" class="stack-banner__btn" @click="stacks.retryRetarget()">
+        <button v-if="after.retarget.state === 'failed'" class="stack-banner__btn" @click="actions.retryRetarget()">
           {{ t("stacks.after.retry") }}
         </button>
       </div>

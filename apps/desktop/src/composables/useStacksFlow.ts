@@ -31,12 +31,14 @@ const synthesizedRefusal = (code: "fetch_failed" | "stale_preview", msg: string)
   message: msg,
   branch: null,
   path: null,
+  // The fetch error goes into the localized text (M-3).
+  detail: code === "fetch_failed" ? msg : null,
 });
 
 export type StacksFlow = ReturnType<typeof createStacksFlow>;
 
 export function createStacksFlow(c: StacksCore) {
-  const { deps, report, flow, after, ctx, state } = c;
+  const { deps, flow, after, state } = c;
   /** `cwd|parent` → the lookup's result (null: no merged PR, or it failed). */
   const hintCache = new Map<string, { at: number; hint: MergedParentHint | null }>();
 
@@ -54,7 +56,14 @@ export function createStacksFlow(c: StacksCore) {
       } else {
         try {
           const pr = await deps.branchPr(cwd, parent, "merged");
-          hint = pr ? { branch: parent, number: pr.number, head_ref_oid: pr.head_ref_oid } : null;
+          hint = pr
+            ? {
+                branch: parent,
+                number: pr.number,
+                head_ref_oid: pr.head_ref_oid,
+                merge_commit_oid: pr.merge_commit_oid ?? null,
+              }
+            : null;
         } catch {
           hint = null; // a hint, never a requirement: git's own signals still apply
         }
@@ -110,7 +119,8 @@ export function createStacksFlow(c: StacksCore) {
     const push = pushOffer(cwd, fin);
     // D19: the retarget comes first, then the push offer.
     const rt = await retarget(cwd, fin, trunk);
-    after.value = { cwd, finalized: fin, retarget: rt, deleteOffer: fin.merged_parent, push };
+    // I-1, M-1: the backend offers the delete only when nothing would be lost.
+    after.value = { cwd, trunk, finalized: fin, retarget: rt, deleteOffer: fin.delete_offer, push };
     // Something to say about the push: an offer, why there is none, or what
     // will not be pushed (Task 13 review, M-5).
     if (push.pushable.length > 0 || push.noLeases || push.skipped.length > 0) {
@@ -122,12 +132,15 @@ export function createStacksFlow(c: StacksCore) {
   async function retryRetarget(): Promise<void> {
     const a = after.value;
     if (!a || a.retarget.state !== "failed") return;
-    const trunk = ctx.value.cwd === a.cwd ? (report.value?.trunk ?? null) : null;
-    const rt = await retarget(a.cwd, a.finalized, trunk ?? deps.trunkSetting());
+    const rt = await retarget(a.cwd, a.finalized, a.trunk ?? deps.trunkSetting());
     if (after.value === a) after.value = { ...a, retarget: rt };
   }
 
-  /** Force-deletes the merged parent (`-D`: it was squash-merged, git cannot tell). Throws on failure. */
+  /**
+   * Force-deletes the merged parent (`-D`: it was squash-merged, git cannot
+   * tell). Only offered when the backend checked its tip is what was merged
+   * (`delete_offer`). Throws on failure.
+   */
   async function deleteMergedParent(): Promise<void> {
     const a = after.value;
     if (!a?.deleteOffer) return;

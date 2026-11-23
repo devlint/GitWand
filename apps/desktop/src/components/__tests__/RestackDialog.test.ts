@@ -107,11 +107,35 @@ describe("RestackDialog", () => {
   it("refused: the localized refusal with its branch and path, and Close", async () => {
     await mount({
       phase: "refused",
-      refusal: { code: "occupied", message: "raw", branch: "step-3", path: "/wt" },
+      refusal: { code: "occupied", message: "raw", branch: "step-3", path: "/wt", detail: null },
     });
     expect(body()).toContain("step-3 is checked out in another worktree (/wt). Restacking would leave it behind.");
     expect(body()).not.toContain("raw");
     expect(footerButtons()).toEqual(["Close"]);
+  });
+
+  it.each([
+    [
+      { code: "occupied_rebasing", branch: "step-3", path: "/wt", detail: null },
+      "step-3 is being rebased in another worktree (/wt). Finish or abort that rebase first.",
+    ],
+    [{ code: "parent_behind", branch: "step-1", path: null, detail: "2" }, "step-1 is 2 commit(s) behind its remote. Pull it first."],
+    [{ code: "git_too_old", branch: null, path: null, detail: "2.37" }, "Restacking needs git 2.38 or later (found 2.37)."],
+    [
+      { code: "fetch_failed", branch: null, path: null, detail: "offline" },
+      "Could not fetch (offline): the merged commit may be missing locally. Try again when online.",
+    ],
+    [
+      { code: "merged_work_missing", branch: "origin/main", path: null, detail: null },
+      "The merged work is not in origin/main yet: update origin/main first.",
+    ],
+    [
+      { code: "parent_no_upstream", branch: "step-1", path: null, detail: null },
+      "step-1 has no upstream, so GitWand cannot check it contains the merged work.",
+    ],
+  ] as const)("refused %#: the backend detail goes into the text (M-3)", async (r, text) => {
+    await mount({ phase: "refused", refusal: { ...r, message: "raw" } });
+    expect(body()).toContain(text);
   });
 
   it("preview: intro, fetch warning, the moving refs, and the restack preview asked for the plan", async () => {

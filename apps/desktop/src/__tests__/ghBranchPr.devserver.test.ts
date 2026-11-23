@@ -18,7 +18,17 @@ describe("devParseGhBranchPr", () => {
       head_ref_oid: "bbb",
       merged_at: "2026-11-20T00:00:00Z",
       url: "u2",
+      merge_commit_oid: null,
     });
+  });
+
+  it("a merged PR carries its merge commit, an open one none (I-2)", () => {
+    const merged = `[{"number":812,"baseRefName":"main","headRefOid":"h","mergedAt":"2026-11-20T00:00:00Z","url":"u","headRepositoryOwner":{"login":"o"},"mergeCommit":{"oid":"mmm"}}]`;
+    expect(devParseGhBranchPr(merged, "merged", "o").merge_commit_oid).toBe("mmm");
+    const open = `[{"number":9,"baseRefName":"main","headRefOid":"h","mergedAt":null,"url":"u","headRepositoryOwner":{"login":"o"},"mergeCommit":{"oid":"test-merge"}}]`;
+    expect(devParseGhBranchPr(open, "open", "o").merge_commit_oid).toBe(null);
+    const none = `[{"number":812,"baseRefName":"main","headRefOid":"h","mergedAt":"2026-11-20T00:00:00Z","url":"u","headRepositoryOwner":{"login":"o"},"mergeCommit":null}]`;
+    expect(devParseGhBranchPr(none, "merged", "o").merge_commit_oid).toBe(null);
   });
 
   it("filters to the origin owner, case-insensitively, before choosing", () => {

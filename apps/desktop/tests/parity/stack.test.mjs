@@ -213,6 +213,52 @@ describe("parity: stacked branches", () => {
     });
   }, 60_000);
 
+  it("a parent that gained commits after its merge is not merged (I-1)", async () => {
+    const { rustCwd, nodeCwd } = twoFixtures("merge-commit-grew");
+    const s = await statusBoth(dev, rustCwd, nodeCwd, "status");
+    const l2 = s.layers.find((l) => l.branch === "step-2");
+    expect([l2.state, l2.merge_signal]).toEqual(["out_of_date", null]);
+  }, 30_000);
+
+  it("no delete offer once the merged parent moved, nor for the current branch (I-1, M-1)", async () => {
+    const hint = [{ branch: "step-1", number: 812, head_ref_oid: null }];
+    const grew = (cwd) => {
+      git(cwd, ["checkout", "--quiet", "step-1"]);
+      writeFileSync(join(cwd, "late.txt"), "late\n");
+      git(cwd, ["add", "late.txt"]);
+      git(cwd, ["commit", "--quiet", "-m", "s1 after merge"]);
+      git(cwd, ["checkout", "--quiet", "step-3"]);
+    };
+    const moved = await restackBoth(dev, "squashed", "step-2", hint, grew);
+    const s = await statusBoth(dev, moved.rustCwd, moved.nodeCwd, "finalize, parent moved", hint);
+    expect([s.finalized.merged_parent, s.finalized.delete_offer]).toEqual(["step-1", null]);
+
+    const onStep1 = (cwd) => git(cwd, ["checkout", "--quiet", "step-1"]);
+    const current = await restackBoth(dev, "squashed", "step-2", [], onStep1);
+    const c = await statusBoth(dev, current.rustCwd, current.nodeCwd, "finalize, parent checked out");
+    expect([c.finalized.switched_back_to, c.finalized.delete_offer]).toEqual(["step-1", null]);
+  }, 60_000);
+
+  it("a repo without layers answers early, the trunk included (I-3)", async () => {
+    const prep = (cwd) => {
+      for (const b of ["step-2", "step-3"]) {
+        git(cwd, ["config", "--unset", `branch.${b}.gitwandParent`]);
+        git(cwd, ["config", "--unset", `branch.${b}.gitwandStackBase`]);
+      }
+    };
+    const { rustCwd, nodeCwd } = twoFixtures("squashed", prep);
+    const s = await statusBoth(dev, rustCwd, nodeCwd, "no layers");
+    expect(s).toEqual({
+      trunk: "main",
+      remote_trunk: null,
+      layers: [],
+      rebase_in_progress: false,
+      finalized: null,
+      git_supports_restack: false,
+      pending_errors: [],
+    });
+  }, 30_000);
+
   it("stack-status honours a merged-parent hint identically", async () => {
     const hint = [{ branch: "step-1", number: 812, head_ref_oid: null }];
     const rustCwd = fixtureStack("moved");
@@ -357,7 +403,7 @@ describe("parity: stacked branches", () => {
     const rs = status.rust(rustCwd);
     expectSame(rs, await status.node(dev, nodeCwd), "finalizing status");
     expect(rs.value.finalized).toMatchObject({
-      moment: "parent_merged", bottom: "step-2", merged_parent: "step-1", new_parent: null,
+      moment: "parent_merged", bottom: "step-2", merged_parent: "step-1", new_parent: null, delete_offer: "step-1",
     });
     expect(stateOf(nodeCwd)).toEqual(stateOf(rustCwd));
     // The bottom sat on the trunk now: it leaves the stack, on both sides.
@@ -432,6 +478,19 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     }
   }, 60_000);
 
+  it("empty layers above the bottom are moved by compare-and-swap too (T8)", async () => {
+    const { rustCwd, nodeCwd, plan: p } = await restackBoth(dev, "four-empty", "step-2");
+    expect(p.moving.map((m) => m.branch)).toEqual(["step-2", "step-3", "step-4"]);
+    for (const b of ["step-2", "step-3"]) expect(git(rustCwd, ["rev-parse", b])).toBe(p.upstream_sha);
+    const s = await statusBoth(dev, rustCwd, nodeCwd, "finalizing status");
+    expect(s.finalized.moved).toEqual(["step-2", "step-3", "step-4"]);
+    for (const cwd of [rustCwd, nodeCwd]) {
+      const tip = git(cwd, ["rev-parse", "step-1"]);
+      expect([git(cwd, ["rev-parse", "step-2"]), git(cwd, ["rev-parse", "step-3"])]).toEqual([tip, tip]);
+      expect(git(cwd, ["rev-parse", "step-4~1"])).toBe(tip);
+    }
+  }, 60_000);
+
   it("an empty layer checked out elsewhere keeps the record, then moves once freed", async () => {
     const { rustCwd, nodeCwd } = await restackBoth(dev, "empty", "step-2");
     for (const cwd of [rustCwd, nodeCwd]) git(cwd, ["worktree", "add", "--quiet", `${cwd}-wt`, "step-2"]);
@@ -487,6 +546,35 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     expect(up.value.onto_ref).toBe("step-1");
   }, 60_000);
 
+  it("moment 2 needs the merge commit in its target, and a grandparent with an upstream (I-2)", async () => {
+    const sq = twoFixtures("squashed");
+    const withMerge = (oid) => [{ branch: "step-1", number: 812, head_ref_oid: null, merge_commit_oid: oid }];
+    const landed = git(sq.rustCwd, ["rev-parse", "origin/main"]);
+    const ok = await planBoth(dev, sq.rustCwd, sq.nodeCwd, "step-2", "merge commit landed", withMerge(landed));
+    expect(ok.value.refusal).toBe(null);
+    for (const oid of [git(sq.rustCwd, ["rev-parse", "step-1"]), "f".repeat(40)]) {
+      const r = await planBoth(dev, sq.rustCwd, sq.nodeCwd, "step-2", `merge commit ${oid}`, withMerge(oid));
+      expect(r.value.refusal).toEqual({
+        code: "merged_work_missing",
+        message: "The merged work of step-1 (PR #812) is not in origin/main yet: update origin/main first.",
+        branch: "origin/main",
+        path: null,
+        detail: null,
+      });
+    }
+
+    const hint = [{ branch: "step-2", number: 812, head_ref_oid: null }];
+    const { rustCwd, nodeCwd } = twoFixtures("dropped");
+    const r = await planBoth(dev, rustCwd, nodeCwd, "step-3", "grandparent without upstream", hint);
+    expect(r.value.refusal).toEqual({
+      code: "parent_no_upstream",
+      message: "step-1 has no upstream, so GitWand cannot check it contains the merged work of step-2.",
+      branch: "step-1",
+      path: null,
+      detail: null,
+    });
+  }, 60_000);
+
   it("the restack stops at the first layer that no longer contains the one below", async () => {
     const { rustCwd, nodeCwd, plan: p } = await restackBoth(dev, "broken", "step-2");
     expect(p.top).toBe("step-3");
@@ -505,8 +593,9 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     expect(r.value.refusal).toEqual({
       code: "parent_behind",
       message: "step-1 is 1 commit(s) behind its upstream. Pull it first.",
-      branch: null,
+      branch: "step-1",
       path: null,
+      detail: "1",
     });
   }, 60_000);
 

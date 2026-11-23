@@ -605,6 +605,7 @@ const ptBR: Locale = {
     },
     badge: {
       parent: "↳ {0}",
+      parentPr: "↳ {0} · #{1}",
     },
     restack: "Reempilhar",
     menu: {
@@ -640,6 +641,7 @@ const ptBR: Locale = {
       preview: "Pré-visualizar o reempilhamento",
       later: "Mais tarde",
       pendingError: "O GitWand não conseguiu concluir o último reempilhamento de {0}: {1}. Desempilhe {0} para limpá-lo.",
+      statusError: "Branches empilhados indisponíveis: {0}",
     },
     after: {
       retargeted: "O PR #{0} agora aponta para {1}.",
@@ -676,14 +678,17 @@ const ptBR: Locale = {
     refusal: {
       rebase_in_progress: "Já existe um rebase em andamento.",
       up_to_date: "Nada para reempilhar.",
-      git_too_old: "Reempilhar requer git 2.38 ou mais recente.",
+      git_too_old: "Reempilhar exige git 2.38 ou mais recente (encontrado {0}).",
       detached: "Faça checkout de um branch primeiro.",
       dirty: "Faça commit ou stash das suas alterações primeiro.",
       occupied: "{0} está em checkout em outro worktree ({1}). Reempilhar o deixaria para trás.",
-      parent_behind: "O branch pai está atrás do remoto. Atualize-o primeiro.",
+      occupied_rebasing: "{0} está em rebase em outra worktree ({1}). Conclua ou aborte esse rebase primeiro.",
+      parent_behind: "{0} está {1} commit(s) atrás do remoto. Faça pull primeiro.",
       no_remote_trunk: "Não há branch origin para o tronco: faça fetch de origin primeiro.",
+      parent_no_upstream: "{0} não tem upstream, então o GitWand não consegue verificar se ele contém o trabalho mesclado.",
+      merged_work_missing: "O trabalho mesclado ainda não está em {0}: atualize {0} primeiro.",
       no_old_base: "O GitWand não consegue saber quais commits pertenciam ao branch pai. Reempilhe este branch manualmente.",
-      fetch_failed: "Não foi possível fazer fetch: o commit mesclado pode estar faltando localmente. Tente de novo quando estiver online.",
+      fetch_failed: "Não foi possível fazer fetch ({0}): o commit mesclado pode estar faltando localmente. Tente novamente quando estiver online.",
       stale_preview: "A pilha mudou desde a pré-visualização. Pré-visualize de novo.",
     },
   },

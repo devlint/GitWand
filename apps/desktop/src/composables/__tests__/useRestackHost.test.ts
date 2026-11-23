@@ -6,6 +6,7 @@ import type { ApplyOutcome } from "../useApplyFromPreview";
 
 const after = (push: AfterRestack["push"]): AfterRestack => ({
   cwd: "/r",
+  trunk: "main",
   finalized: {
     moment: "parent_moved",
     bottom: "step-2",
@@ -14,6 +15,7 @@ const after = (push: AfterRestack["push"]): AfterRestack => ({
     moved: ["step-2", "step-3"],
     switched_back_to: null,
     switch_error: null,
+    delete_offer: null,
   },
   retarget: { state: "none", number: null, base: null, error: null },
   deleteOffer: null,

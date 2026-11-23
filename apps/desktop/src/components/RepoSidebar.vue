@@ -1018,7 +1018,8 @@ function openBranchCtx(e: MouseEvent, b: GitBranch) {
 function closeBranchCtx() { branchCtx.value.visible = false; }
 
 // ─── Stacked branches (v3.14) ───────────────────────────
-const { report: stackReport, offers: stackOffers, layerOf, actionableFor, stackOnCandidates, dismissBridge } = useStacks();
+const { report: stackReport, offers: stackOffers, layerOf, parentPrOf, actionableFor, stackOnCandidates, dismissBridge } =
+  useStacks();
 const stackActions = useStackActions();
 const stackOnTarget = ref<string | null>(null);
 /** "Stack on…" is for a local branch that is not the trunk. */
@@ -1935,6 +1936,7 @@ function formatActivityDate(dateStr: string): string {
             <StackBadge
               v-if="!b.isRemote && (layerOf(b.name) || stackOffers.get(b.name))"
               :layer="layerOf(b.name)"
+              :parent-pr="parentPrOf(b.name)"
               :offer="stackOffers.get(b.name) ?? null"
               @restack="stackActions.restackFrom(cwd, b.name)"
               @accept-offer="stackActions.accept(cwd, stackOffers.get(b.name)!)"
@@ -1985,6 +1987,7 @@ function formatActivityDate(dateStr: string): string {
             <StackBadge
               v-if="!b.isRemote && (layerOf(b.name) || stackOffers.get(b.name))"
               :layer="layerOf(b.name)"
+              :parent-pr="parentPrOf(b.name)"
               :offer="stackOffers.get(b.name) ?? null"
               @restack="stackActions.restackFrom(cwd, b.name)"
               @accept-offer="stackActions.accept(cwd, stackOffers.get(b.name)!)"

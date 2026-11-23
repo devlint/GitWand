@@ -65,6 +65,10 @@ pub struct MergedParentHint {
     pub branch: String,
     pub number: i64,
     pub head_ref_oid: Option<String>,
+    /// The merged PR's merge commit on its base (the squash commit for a
+    /// squash merge). A moment-2 restack refuses a target that lacks it (I-2).
+    #[serde(default)]
+    pub merge_commit_oid: Option<String>,
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
@@ -91,6 +95,11 @@ pub struct FinalizedRestack {
     pub moved: Vec<String>,
     pub switched_back_to: Option<String>,
     pub switch_error: Option<SwitchError>,
+    /// Moment 2: the merged parent, when deleting it loses nothing (I-1,
+    /// M-1): it still exists, its tip is the commit the restack took as its
+    /// old tip or the merged PR's head, and no worktree has it checked out
+    /// (the current one included). `None` otherwise: no delete offer.
+    pub delete_offer: Option<String>,
 }
 
 /// Why the finalize could not switch back to the branch the user was on.
@@ -114,6 +123,7 @@ pub struct StackReport {
     pub layers: Vec<LayerStatus>,
     pub rebase_in_progress: bool,
     pub finalized: Option<FinalizedRestack>,
+    /// `false` as well when the repo has no layer: it is not evaluated then.
     pub git_supports_restack: bool,
     /// The pending records that could not be settled, one per top (sorted).
     /// Each is kept, and its stack is not actionable until it is.
@@ -139,8 +149,14 @@ pub struct MovingRef {
 pub struct RestackRefusal {
     pub code: String,
     pub message: String,
+    /// The branch the refusal is about: the occupied branch, or the target
+    /// (`parent_behind`, `parent_no_upstream`, `merged_work_missing`).
     pub branch: Option<String>,
+    /// The worktree holding `branch` (`occupied`, `occupied_rebasing`).
     pub path: Option<String>,
+    /// The value the code's text needs (M-3): the commit count for
+    /// `parent_behind`, the git version found for `git_too_old`.
+    pub detail: Option<String>,
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]

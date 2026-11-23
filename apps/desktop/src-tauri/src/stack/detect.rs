@@ -84,8 +84,28 @@ pub(crate) fn status_inner(
     hints: &[MergedParentHint],
     settle: bool,
 ) -> Result<(StackReport, BTreeMap<String, String>), String> {
+    // I-3: every refresh of every open repo lands here. Without a layer (a
+    // pending record only lives on a layer) there is nothing to settle,
+    // classify or guard: no worktree scan, no git version, no remote trunk.
+    // The trunk is still resolved: the bridge offers and the branch menu
+    // need it in a repo that has no stack yet.
+    if read_all(repo)?.is_empty() {
+        return Ok((
+            StackReport {
+                trunk: trunk(repo, configured_trunk),
+                remote_trunk: None,
+                layers: Vec::new(),
+                rebase_in_progress: false,
+                finalized: None,
+                // Not evaluated without a layer to restack.
+                git_supports_restack: false,
+                pending_errors: Vec::new(),
+            },
+            BTreeMap::new(),
+        ));
+    }
     let settled = if settle {
-        settle_pending(repo)?
+        settle_pending(repo, hints)?
     } else {
         unsettled(repo)?
     };
@@ -232,7 +252,7 @@ fn unsettled(repo: &Path) -> Result<Settled, String> {
 ///
 /// An error on one record is kept for that record (the record stays) and
 /// does not stop the others.
-fn settle_pending(repo: &Path) -> Result<Settled, String> {
+fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, String> {
     clear_malformed_pending(repo)?;
     let all = read_all(repo)?;
     let mut s = Settled::default();
@@ -253,7 +273,7 @@ fn settle_pending(repo: &Path) -> Result<Settled, String> {
                 s.deferred.insert(top.to_string());
                 Ok(())
             }
-            true => finalize(repo, top, p).map(|f| s.finalized = Some(f)),
+            true => finalize(repo, top, p, hints).map(|f| s.finalized = Some(f)),
         });
         if let Err(e) = step {
             s.errors.insert(top.to_string(), e);
@@ -366,8 +386,13 @@ fn classify(
         l.merged_pr = Some(h.number);
         return Ok(l);
     }
-    // 2. git fallback against the remote trunk (D7).
-    if let (Some(rt), Some(probe)) = (remote_trunk, base.as_deref().or(parent_tip.as_deref())) {
+    // 2. git fallback against the remote trunk (D7). Every commit of the
+    //    parent must be merged (I-1): when the parent grew from the recorded
+    //    base, probe its tip, not the base.
+    if let (Some(rt), Some(probe)) = (
+        remote_trunk,
+        merged_probe(repo, base.as_deref(), parent_tip.as_deref())?,
+    ) {
         if let Some(sig) = merged_signal(repo, rt, probe) {
             l.state = LayerState::ParentMerged;
             l.merge_signal = Some(sig);
@@ -399,6 +424,20 @@ fn classify(
     // 6. Neither the parent tip nor the base is below the layer (D17).
     l.state = LayerState::BaseLost;
     Ok(l)
+}
+
+/// What the merged fallback probes: the parent's tip when the recorded base
+/// is below it (the parent's commits since the base must be merged too),
+/// else the base, else the tip.
+fn merged_probe<'a>(
+    repo: &Path,
+    base: Option<&'a str>,
+    parent_tip: Option<&'a str>,
+) -> Result<Option<&'a str>, String> {
+    Ok(match (base, parent_tip) {
+        (Some(b), Some(t)) if is_ancestor(repo, b, t)? => Some(t),
+        (b, t) => b.or(t),
+    })
 }
 
 /// A merged-PR hint is stale when the parent's local tip has commits the
@@ -594,6 +633,33 @@ mod tests {
         );
     }
 
+    /// I-3: a repo without stacks pays for nothing beyond reading the stack
+    /// keys and the trunk — not even the worktree scan, which would fail here.
+    #[test]
+    fn a_repo_without_layers_returns_early() {
+        let r = TempRepo::new();
+        r.git(&["branch", "side"]);
+        let wt = r.sandbox.join("wt");
+        r.git(&["worktree", "add", "-q", wt.to_str().unwrap(), "side"]);
+        std::fs::write(wt.join(".git"), "gitdir: /nonexistent/gitwand\n").unwrap();
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert_eq!(
+            s.trunk.as_deref(),
+            Some("main"),
+            "the bridge needs the trunk"
+        );
+        assert!(s.layers.is_empty() && s.pending_errors.is_empty());
+        assert!(!s.rebase_in_progress && s.finalized.is_none());
+        // With a layer, the same broken worktree fails closed.
+        r.git(&["checkout", "-q", "-b", "step-1"]);
+        r.commit("a.txt", "1\n", "s1");
+        r.git(&["checkout", "-q", "-b", "step-2"]);
+        r.commit("b.txt", "2\n", "s2");
+        set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        let e = status(&r.path, Some("main"), &[]).unwrap_err();
+        assert!(e.contains("cannot inspect worktree"), "{e}");
+    }
+
     #[test]
     fn no_trunk_reports_no_layers() {
         let r = TempRepo::new();
@@ -653,6 +719,27 @@ mod tests {
         assert!(l2.actionable);
     }
 
+    /// I-1: step-1 merged with a merge commit, then a new commit on step-1.
+    /// The old base is merged, but step-1 is not: probe its tip.
+    #[test]
+    fn a_parent_that_gained_commits_after_its_merge_is_not_merged() {
+        let r = TempRepo::new();
+        stack3(&r);
+        r.add_bare_origin();
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&["merge", "-q", "--no-ff", "-m", "Merge step-1", "step-1"]);
+        r.git(&["push", "-q", "origin", "main"]);
+        r.git(&["reset", "-q", "--hard", "HEAD~1"]);
+        r.git(&["checkout", "-q", "step-1"]);
+        r.commit("a2.txt", "after\n", "s1 after merge");
+        r.git(&["checkout", "-q", "step-3"]);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        let l2 = layer(&s, "step-2");
+        assert_ne!(l2.state, LayerState::ParentMerged, "{l2:?}");
+        assert_eq!(l2.state, LayerState::OutOfDate);
+        assert_eq!(l2.merge_signal, None);
+    }
+
     #[test]
     fn multi_commit_squash_needs_the_forge_hint() {
         let r = TempRepo::new();
@@ -676,6 +763,7 @@ mod tests {
             branch: "step-1".into(),
             number: 812,
             head_ref_oid: None,
+            merge_commit_oid: None,
         }];
         let s = status(p, Some("main"), &h).unwrap();
         let l2 = layer(&s, "step-2");
@@ -950,6 +1038,7 @@ mod tests {
             branch: "step-1".into(),
             number: 7,
             head_ref_oid: Some(oid.into()),
+            merge_commit_oid: None,
         };
         // The PR's head is the parent's current tip: honoured.
         let s = status(&r.path, Some("main"), &[hint(&merged_head)]).unwrap();

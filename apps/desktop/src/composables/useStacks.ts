@@ -90,11 +90,19 @@ export interface RestackFlow {
 export interface StackBannerModel {
   layer: StackLayerStatus;
   kind: "parent_moved" | "parent_merged" | "parent_behind" | "parent_missing" | "base_lost";
+  /**
+   * `parent_merged`: where the parent's work went, as the restack targets
+   * it (M-2) — the parent's own stack parent when that is not the trunk,
+   * else the trunk. Null for the other kinds.
+   */
+  mergedInto: string | null;
 }
 
 export interface AfterRestack {
   /** The repo the restack ran in: show it only while that repo is open. */
   cwd: string;
+  /** That repo's trunk when the restack was finalized: a retried retarget uses it (T11). */
+  trunk: string | null;
   finalized: FinalizedRestack;
   retarget: {
     state: "none" | "done" | "failed" | "manual";
@@ -154,6 +162,8 @@ export interface StacksContext {
 
 export interface Stacks {
   report: Ref<StackReport | null>;
+  /** Why the last refresh of the open repo failed; null once one succeeds (I-3). */
+  statusError: Ref<string | null>;
   flow: Ref<RestackFlow>;
   after: Ref<AfterRestack | null>;
   /** What App.vue last passed to `setContext`. */
@@ -171,6 +181,8 @@ export interface Stacks {
   setContext(ctx: StacksContext): void;
   refresh(cwd: string): Promise<void>;
   layerOf(branch: string): StackLayerStatus | null;
+  /** The PR of `branch`'s stack parent (M-8): its open PR in the context, else the merged one the report names. */
+  parentPrOf(branch: string): number | null;
   actionableFor(branch: string): StackLayerStatus | null;
   stackOnCandidates(branch: string): string[];
   stackOn(cwd: string, branch: string, parent: string): Promise<void>;
@@ -248,6 +260,7 @@ export async function preloadStacksFlow(): Promise<void> {
 
 export function createStacks(deps: StacksDeps): Stacks {
   const report = ref<StackReport | null>(null);
+  const statusError = ref<string | null>(null);
   const flow = ref<RestackFlow>(idleFlow());
   const after = ref<AfterRestack | null>(null);
   const ctx = ref<StacksContext>({ cwd: null, forge: null, currentBranch: null, localBranches: [], prs: [] });
@@ -302,6 +315,13 @@ export function createStacks(deps: StacksDeps): Stacks {
     return (report.value?.layers ?? []).some((l) => l.parent === branch && l.branch !== except);
   }
 
+  function parentPrOf(branch: string): number | null {
+    const l = layerOf(branch);
+    if (!l) return null;
+    const open = ctx.value.prs.find((p) => p.branch === l.parent && p.state.toLowerCase() === "open");
+    return open?.number ?? l.merged_pr ?? null;
+  }
+
   function actionableFor(branch: string): StackLayerStatus | null {
     return chainDown(branch).find((l) => l.actionable) ?? null;
   }
@@ -338,8 +358,15 @@ export function createStacks(deps: StacksDeps): Stacks {
         : lowest.state === "up_to_date"
           ? "parent_moved" // unreachable: filtered above
           : lowest.state;
-    return { layer: lowest, kind };
+    return { layer: lowest, kind, mergedInto: kind === "parent_merged" ? mergedInto(lowest) : null };
   });
+
+  /** Where `l`'s merged parent went: its stacked grandparent, else the trunk. */
+  function mergedInto(l: StackLayerStatus): string | null {
+    const trunk = report.value?.trunk ?? null;
+    const grand = layerOf(l.parent)?.parent ?? null;
+    return grand && grand !== trunk ? grand : trunk;
+  }
 
   function later(): void {
     const b = banner.value;
@@ -375,6 +402,7 @@ export function createStacks(deps: StacksDeps): Stacks {
   function setContext(next: StacksContext): void {
     if (next.cwd !== ctx.value.cwd) {
       report.value = null;
+      statusError.value = null;
       hidden.value = null;
       state.lastHints = [];
     }
@@ -386,7 +414,12 @@ export function createStacks(deps: StacksDeps): Stacks {
   /** Merged-parent hints (D6): GitHub only, so other forges never load the flow module. */
   function hintsFor(cwd: string, parents: string[]): Promise<MergedParentHint[]> {
     if (deps.forge() !== "github" || parents.length === 0) return Promise.resolve([]);
-    return withFlow((f) => f.hintsFor(cwd, parents));
+    // A hint is never a requirement: when the flow module cannot load, the
+    // refresh goes on without hints, as it does when a lookup fails (T13).
+    return withFlow((f) => f.hintsFor(cwd, parents)).catch((e) => {
+      console.warn("[stacks] merged-parent hints unavailable:", message(e));
+      return [];
+    });
   }
 
   /** Distinct stack parents other than the trunk. */
@@ -415,6 +448,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     // in it is handled all the same (the backend already cleared its record).
     if (ctx.value.cwd === null || ctx.value.cwd === cwd) {
       report.value = r;
+      statusError.value = null;
       state.lastHints = hints;
     }
     if (!r.finalized) {
@@ -426,8 +460,10 @@ export function createStacks(deps: StacksDeps): Stacks {
     // The same finalization twice in a row would be a backend that failed to
     // clear its record: do not retarget or offer again, and stop the chain.
     if (lastFinalized.get(cwd) === key) return;
-    lastFinalized.set(cwd, key);
     await withFlow((fl) => fl.onFinalized(cwd, f, r.trunk));
+    // Only once handled (T13): a handling that failed is retried by the
+    // next refresh that reports it.
+    lastFinalized.set(cwd, key);
     // The backend settles one record per call: look for the next one.
     void refresh(cwd);
   }
@@ -453,6 +489,8 @@ export function createStacks(deps: StacksDeps): Stacks {
     const run = doRefresh(cwd)
       .catch((e) => {
         console.warn("[stacks] refresh failed:", message(e));
+        // Shown by the banner, for the repo open now only (I-3).
+        if (ctx.value.cwd === null || ctx.value.cwd === cwd) statusError.value = message(e);
       })
       .finally(() => {
         inFlight = null;
@@ -491,6 +529,7 @@ export function createStacks(deps: StacksDeps): Stacks {
 
   return {
     report,
+    statusError,
     flow,
     after,
     context: computed(() => ctx.value),
@@ -501,6 +540,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     setContext,
     refresh,
     layerOf,
+    parentPrOf,
     actionableFor,
     stackOnCandidates,
     stackOn,

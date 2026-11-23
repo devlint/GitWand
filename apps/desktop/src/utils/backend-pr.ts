@@ -572,6 +572,8 @@ export interface BranchPr {
   head_ref_oid: string;
   merged_at: string | null;
   url: string;
+  /** The merge commit on the base, once merged; null for an open PR. */
+  merge_commit_oid: string | null;
 }
 
 /**

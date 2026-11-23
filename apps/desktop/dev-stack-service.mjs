@@ -73,7 +73,12 @@ const key = (branch, v) => `branch.${branch}.${v}`;
 export function devValidateBranchName(name) {
   const invalid = () => fail(`invalid branch name: ${name}`);
   if (typeof name !== "string" || name === "" || name.startsWith("-") || name.startsWith("@{")) invalid();
-  const r = spawnSync(GIT, ["check-ref-format", "--branch", name], { cwd: tmpdir(), encoding: "utf-8" });
+  // No GIT_DIR / GIT_WORK_TREE: `--branch` must not expand against a repo
+  // the environment points at.
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  const r = spawnSync(GIT, ["check-ref-format", "--branch", name], { cwd: tmpdir(), encoding: "utf-8", env });
   if (r.error || r.status !== 0) invalid();
 }
 
@@ -227,16 +232,22 @@ function setParent(repo, trunkName, layer, parent) {
   try {
     metaRunOk(repo, ["config", "--local", key(layer, PARENT), parent]);
   } catch (e) {
+    let rollback = null;
     try {
       if (previousBase !== null) setBase(repo, layer, previousBase);
       else unsetKey(repo, key(layer, BASE));
-    } catch {
-      /* the original error wins */
+    } catch (re) {
+      rollback = re.message;
     }
-    throw e;
+    fail(withRollback(e.message, rollback));
   }
   const pending = readAll(repo).get(layer)?.pending ?? null;
   return { branch: layer, parent, base, pending };
+}
+
+/** `with_rollback`: the write error, plus the rollback's own when it failed. */
+function withRollback(error, rollbackError) {
+  return rollbackError === null ? error : `${error} (the previous base could not be restored: ${rollbackError})`;
 }
 
 function unsetKey(repo, k) {
@@ -428,7 +439,24 @@ function status(repo, configuredTrunk, hints) {
 /** `status`, plus the layers blocked by an unsettled pending record (with the
  *  text `plan` errs with). Only `status` settles; `plan` never finalizes. */
 function statusInner(repo, configuredTrunk, hints, settle) {
-  const settled = settle ? settlePending(repo) : unsettled(repo);
+  // I-3: without a layer there is nothing to settle, classify or guard; the
+  // trunk is still resolved (bridge offers, branch menu).
+  if (readAll(repo).size === 0) {
+    return {
+      report: {
+        trunk: trunk(repo, configuredTrunk),
+        remote_trunk: null,
+        layers: [],
+        rebase_in_progress: false,
+        finalized: null,
+        // Not evaluated without a layer to restack.
+        git_supports_restack: false,
+        pending_errors: [],
+      },
+      blocked: new Map(),
+    };
+  }
+  const settled = settle ? settlePending(repo, hints) : unsettled(repo);
   const all = readAll(repo);
   // Fail closed: a worktree we cannot inspect may hide a running rebase.
   const holders = branchHolders(repo);
@@ -529,7 +557,7 @@ function unsettled(repo) {
 /** The pending step (D4, D5): clear malformed records; per record by top
  *  name, wait while its top is being rebased, finalize ONE completed record
  *  (defer the others), clear an aborted one. An error is kept per record. */
-function settlePending(repo) {
+function settlePending(repo, hints) {
   clearMalformedPending(repo);
   const all = readAll(repo);
   const s = newSettled();
@@ -546,7 +574,7 @@ function settlePending(repo) {
     try {
       if (!completed(repo, top, p)) clearPending(repo, top);
       else if (s.finalized !== null) s.deferred.add(top);
-      else s.finalized = finalize(repo, top, p);
+      else s.finalized = finalize(repo, top, p, hints);
     } catch (e) {
       s.errors.set(top, e.message);
     }
@@ -615,8 +643,9 @@ function classify(repo, meta, hints, remoteTrunk, rebaseInProgress) {
     l.merged_pr = hint.number;
     return l;
   }
-  // 2. git fallback against the remote trunk (D7).
-  const probe = base ?? parentTip;
+  // 2. git fallback against the remote trunk (D7). Every commit of the parent
+  //    must be merged (I-1): when the parent grew from the base, probe its tip.
+  const probe = mergedProbe(repo, base, parentTip);
   if (remoteTrunk !== null && probe !== null) {
     const sig = mergedSignal(repo, remoteTrunk, probe);
     if (sig !== null) {
@@ -648,6 +677,13 @@ function classify(repo, meta, hints, remoteTrunk, rebaseInProgress) {
   // 6. Neither the parent tip nor the base is below the layer (D17).
   l.state = "base_lost";
   return l;
+}
+
+/** `merged_probe`: the parent's tip when the recorded base is below it, else
+ *  the base, else the tip. */
+function mergedProbe(repo, base, parentTip) {
+  if (base !== null && parentTip !== null && isAncestor(repo, base, parentTip)) return parentTip;
+  return base ?? parentTip;
 }
 
 /** A merged-PR hint is stale when the parent's local tip has commits the
@@ -838,6 +874,8 @@ function parentMoved(l) {
     upstream_sha: l.state === "out_of_date" ? l.base : tip,
     new_parent: null,
     onto_behind: l.parent_behind_upstream,
+    onto_no_upstream: false,
+    merge_commit_missing: null,
   };
 }
 
@@ -848,10 +886,11 @@ function parentMerged(repo, l, hints, trunkName) {
   const all = readAll(repo);
   const g = all.get(l.parent)?.parent;
   const grand = g !== undefined && g !== trunkName ? g : null;
-  let ontoRef, ontoSha, newParent, ontoBehind;
+  let ontoRef, ontoSha, newParent, ontoBehind, ontoNoUpstream;
   if (grand !== null) {
     ontoSha = resolveCommit(repo, `refs/heads/${grand}`) ?? fail(`unknown branch: ${grand}`);
     ontoBehind = behindUpstream(repo, grand);
+    ontoNoUpstream = !hasUpstream(repo, grand);
     ontoRef = grand;
     newParent = grand;
   } else {
@@ -859,8 +898,16 @@ function parentMerged(repo, l, hints, trunkName) {
     ontoRef = `origin/${trunkName}`;
     newParent = null;
     ontoBehind = 0;
+    ontoNoUpstream = false;
   }
   const honoured = hints.find((h) => h.branch === l.parent && l.merged_pr === h.number);
+  // I-2: the target must contain the merged PR's merge commit; unknown
+  // locally counts as missing.
+  let mergeCommitMissing = null;
+  const oid = honoured?.merge_commit_oid ?? null;
+  if (honoured && ontoSha !== null && oid !== null) {
+    if (!(commitExists(repo, oid) && isAncestor(repo, oid, ontoSha))) mergeCommitMissing = honoured.number;
+  }
   let upstream = null;
   for (const candidate of [l.base, honoured?.head_ref_oid ?? null]) {
     if (candidate === null || candidate === undefined) continue;
@@ -877,7 +924,15 @@ function parentMerged(repo, l, hints, trunkName) {
     upstream_sha: upstream,
     new_parent: newParent,
     onto_behind: ontoBehind,
+    onto_no_upstream: ontoNoUpstream,
+    merge_commit_missing: mergeCommitMissing,
   };
+}
+
+/** `has_upstream`: `branch` has an upstream configured. */
+function hasUpstream(repo, branch) {
+  devValidateBranchName(branch);
+  return runOk(repo, ["for-each-ref", "--format=%(upstream)", `refs/heads/${branch}`]) !== "";
 }
 
 /** `git cat-file -e <sha>^{commit}` (D20). A non-sha is never a commit. */
@@ -895,11 +950,12 @@ function rebasingHere(repo) {
   return false;
 }
 
-const refusalOf = (code, message) => ({ code, message, branch: null, path: null });
+const refusalOf = (code, message) => ({ code, message, branch: null, path: null, detail: null });
 
 /** The first refusal, in the order `rebase_in_progress`, `up_to_date`,
- *  `git_too_old`, `detached`, `dirty`, `occupied`, `parent_behind`,
- *  `no_remote_trunk`, `no_old_base`. */
+ *  `git_too_old`, `detached`, `dirty`, `occupied` / `occupied_rebasing`,
+ *  `parent_behind`, `no_remote_trunk`, `parent_no_upstream`,
+ *  `merged_work_missing`, `no_old_base`. */
 function firstRefusal(c) {
   if (c.rebaseInProgress) return refusalOf("rebase_in_progress", "A rebase is in progress. Finish or abort it first.");
   if (c.l.state === "up_to_date") {
@@ -907,7 +963,7 @@ function firstRefusal(c) {
   }
   if (!supportsUpdateRefs(c.version)) {
     const found = c.version !== null ? `${c.version[0]}.${c.version[1]}` : "unknown";
-    return refusalOf("git_too_old", `Restacking needs git 2.38 or later (found ${found}).`);
+    return { ...refusalOf("git_too_old", `Restacking needs git 2.38 or later (found ${found}).`), detail: found };
   }
   // D16: `symbolic-ref -q` exits 1 on a detached HEAD.
   const head = run(c.repo, ["symbolic-ref", "-q", "HEAD"]);
@@ -921,21 +977,44 @@ function firstRefusal(c) {
   for (const m of c.moving) {
     const h = c.holders.find((h) => h.branch === m.branch && !h.current);
     if (h) {
-      const how = h.rebasing ? "being rebased" : "checked out";
+      const [code, how] = h.rebasing ? ["occupied_rebasing", "being rebased"] : ["occupied", "checked out"];
       return {
-        code: "occupied",
+        code,
         message: `${m.branch} is ${how} in another worktree (${h.worktree}).`,
         branch: m.branch,
         path: h.worktree,
+        detail: null,
       };
     }
   }
   const t = c.target;
   if (t.onto_behind > 0) {
-    return refusalOf("parent_behind", `${t.onto_ref} is ${t.onto_behind} commit(s) behind its upstream. Pull it first.`);
+    return {
+      ...refusalOf("parent_behind", `${t.onto_ref} is ${t.onto_behind} commit(s) behind its upstream. Pull it first.`),
+      branch: t.onto_ref,
+      detail: String(t.onto_behind),
+    };
   }
   if (t.onto_sha === null) {
     return refusalOf("no_remote_trunk", `There is no origin/${c.trunk} to restack onto. Fetch from origin first.`);
+  }
+  if (t.onto_no_upstream) {
+    return {
+      code: "parent_no_upstream",
+      message: `${t.onto_ref} has no upstream, so GitWand cannot check it contains the merged work of ${c.l.parent}.`,
+      branch: t.onto_ref,
+      path: null,
+      detail: null,
+    };
+  }
+  if (t.merge_commit_missing !== null) {
+    return {
+      code: "merged_work_missing",
+      message: `The merged work of ${c.l.parent} (PR #${t.merge_commit_missing}) is not in ${t.onto_ref} yet: update ${t.onto_ref} first.`,
+      branch: t.onto_ref,
+      path: null,
+      detail: null,
+    };
   }
   if (t.upstream_sha === null) {
     return refusalOf(
@@ -1130,7 +1209,7 @@ function restackedLayers(all, bottom, top) {
  *  CAS (after a holders guard), records the new bases, re-parents a moment-2
  *  bottom and drops the merged parent, clears the record, switches back.
  *  Idempotent; an Err leaves the record in place. */
-function finalize(repo, top, p) {
+function finalize(repo, top, p, hints) {
   devValidateBranchName(top);
   devValidateBranchName(p.bottom);
   const all = readAll(repo);
@@ -1190,6 +1269,8 @@ function finalize(repo, top, p) {
 
   // 3. Back to the branch the user was on when the restack started.
   const [switchedBackTo, switchError] = switchBack(repo, top, p.original);
+  // After the switch back, which may check the merged parent out.
+  const offer = mergedParent !== null ? deleteOffer(repo, mergedParent, p.old_base, hints) : null;
   return {
     moment: p.moment,
     bottom: p.bottom,
@@ -1198,7 +1279,24 @@ function finalize(repo, top, p) {
     moved,
     switched_back_to: switchedBackTo,
     switch_error: switchError,
+    delete_offer: offer,
   };
+}
+
+/** I-1 (b), M-1: the merged parent may be force-deleted only when it still
+ *  points at `oldBase` or the merged PR's head, and no worktree holds it.
+ *  Never throws: anything it cannot check means no offer. */
+function deleteOffer(repo, merged, oldBase, hints) {
+  try {
+    devValidateBranchName(merged);
+    const tip = resolveCommit(repo, `refs/heads/${merged}`);
+    if (tip === null) return null;
+    const head = hints.find((h) => h.branch === merged)?.head_ref_oid ?? null;
+    if (tip !== oldBase && head !== tip) return null;
+    return branchHolders(repo).some((h) => h.branch === merged) ? null : merged;
+  } catch {
+    return null;
+  }
 }
 
 /** Switches back to `original` when HEAD is still on `top`. Never fails. */
@@ -1255,7 +1353,7 @@ function invalidType(v, expected) {
   return `invalid type: ${what}, expected ${expected}`;
 }
 
-/** `Vec<MergedParentHint>` (`{ branch, number, head_ref_oid? }`), required
+/** `Vec<MergedParentHint>` (`{ branch, number, head_ref_oid?, merge_commit_oid? }`), required
  *  like any non-`Option` argument of a Tauri command: missing is refused. */
 function mergedParentHints(v, command) {
   const name = "mergedParents";
@@ -1267,7 +1365,9 @@ function mergedParentHints(v, command) {
     if (!Number.isSafeInteger(h.number)) invalidArgs(name, command, "missing field `number`");
     const oid = h.head_ref_oid ?? null;
     if (oid !== null && typeof oid !== "string") invalidArgs(name, command, invalidType(oid, "a string"));
-    return { branch: h.branch, number: h.number, head_ref_oid: oid };
+    const merge = h.merge_commit_oid ?? null;
+    if (merge !== null && typeof merge !== "string") invalidArgs(name, command, invalidType(merge, "a string"));
+    return { branch: h.branch, number: h.number, head_ref_oid: oid, merge_commit_oid: merge };
   });
 }
 

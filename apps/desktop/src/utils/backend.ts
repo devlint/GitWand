@@ -1244,6 +1244,8 @@ export interface MergedParentHint {
   branch: string;
   number: number;
   head_ref_oid: string | null;
+  /** The merged PR's merge commit (the squash): a moment-2 target must contain it. */
+  merge_commit_oid: string | null;
 }
 
 export interface StackLayerStatus {
@@ -1268,6 +1270,8 @@ export interface FinalizedRestack {
   moved: string[];
   switched_back_to: string | null;
   switch_error: SwitchError | null;
+  /** The merged parent when deleting it loses nothing (unchanged since merged, not checked out); else null. */
+  delete_offer: string | null;
 }
 
 /** Why a finalize could not switch back to the branch the user was on. */
@@ -1302,7 +1306,9 @@ export interface StackMeta {
 /**
  * Why a restack plan is refused. The backend emits `rebase_in_progress`,
  * `up_to_date`, `git_too_old`, `detached`, `dirty`, `occupied`,
- * `parent_behind`, `no_remote_trunk` and `no_old_base`. `fetch_failed` and
+ * `occupied_rebasing`, `parent_behind`, `no_remote_trunk`, `parent_no_upstream`,
+ * `merged_work_missing` and `no_old_base` (`branch` names the target for
+ * `parent_no_upstream` and `merged_work_missing`). `fetch_failed` and
  * `stale_preview` are synthesized by the frontend (useStacks): the first from
  * a failed fetch, the second from a `git_restack` error starting with
  * "stale preview:". Rust never puts them in a plan's `refusal`.
@@ -1314,8 +1320,11 @@ export type RestackRefusalCode =
   | "detached"
   | "dirty"
   | "occupied"
+  | "occupied_rebasing"
   | "parent_behind"
   | "no_remote_trunk"
+  | "parent_no_upstream"
+  | "merged_work_missing"
   | "no_old_base"
   | "fetch_failed"
   | "stale_preview";
@@ -1323,8 +1332,12 @@ export type RestackRefusalCode =
 export interface RestackRefusal {
   code: RestackRefusalCode;
   message: string;
+  /** The occupied branch, or the target (`parent_behind`, `parent_no_upstream`, `merged_work_missing`). */
   branch: string | null;
+  /** The worktree holding `branch` (`occupied`, `occupied_rebasing`). */
   path: string | null;
+  /** The code's value: a commit count (`parent_behind`), a git version (`git_too_old`), a fetch error (`fetch_failed`). */
+  detail: string | null;
 }
 
 export interface RestackMovingRef {

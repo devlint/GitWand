@@ -604,6 +604,7 @@ const zhCN: Locale = {
     },
     badge: {
       parent: "↳ {0}",
+      parentPr: "↳ {0} · #{1}",
     },
     restack: "重新堆叠",
     menu: {
@@ -639,6 +640,7 @@ const zhCN: Locale = {
       preview: "预览重新堆叠",
       later: "稍后",
       pendingError: "GitWand 未能完成 {0} 的上一次重新堆叠：{1}。取消堆叠 {0} 即可清除。",
+      statusError: "堆叠分支不可用：{0}",
     },
     after: {
       retargeted: "PR #{0} 现在指向 {1}。",
@@ -675,14 +677,17 @@ const zhCN: Locale = {
     refusal: {
       rebase_in_progress: "已有 rebase 正在进行。",
       up_to_date: "无需重新堆叠。",
-      git_too_old: "重新堆叠需要 git 2.38 或更高版本。",
+      git_too_old: "重新堆叠需要 git 2.38 或更高版本（当前为 {0}）。",
       detached: "请先检出一个分支。",
       dirty: "请先提交或贮藏你的更改。",
       occupied: "{0} 已在另一个 worktree（{1}）中检出。重新堆叠会将其遗留在原处。",
-      parent_behind: "父分支落后于其远程分支。请先更新它。",
+      occupied_rebasing: "{0} 正在另一个工作树（{1}）中变基。请先完成或中止该变基。",
+      parent_behind: "{0} 落后其远程 {1} 个提交。请先拉取。",
       no_remote_trunk: "主干没有 origin 分支：请先从 origin 获取。",
+      parent_no_upstream: "{0} 没有上游，GitWand 无法确认它包含已合并的工作。",
+      merged_work_missing: "已合并的工作尚未进入 {0}：请先更新 {0}。",
       no_old_base: "GitWand 无法判断哪些提交属于父分支。请手动重新堆叠此分支。",
-      fetch_failed: "无法获取：已合并的提交可能在本地缺失。请联网后重试。",
+      fetch_failed: "无法 fetch（{0}）：本地可能缺少已合并的提交。请联网后重试。",
       stale_preview: "自预览以来堆栈已变化。请重新预览。",
     },
   },

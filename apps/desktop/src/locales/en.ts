@@ -616,6 +616,7 @@ const en = {
     },
     badge: {
       parent: "↳ {0}",
+      parentPr: "↳ {0} · #{1}",
     },
     restack: "Restack",
     menu: {
@@ -651,6 +652,7 @@ const en = {
       preview: "Preview restack",
       later: "Later",
       pendingError: "GitWand could not finish the last restack of {0}: {1}. Unstack {0} to clear it.",
+      statusError: "Stacked branches are unavailable: {0}",
     },
     after: {
       retargeted: "PR #{0} now targets {1}.",
@@ -687,14 +689,17 @@ const en = {
     refusal: {
       rebase_in_progress: "A rebase is already in progress.",
       up_to_date: "Nothing to restack.",
-      git_too_old: "Restacking needs git 2.38 or later.",
+      git_too_old: "Restacking needs git 2.38 or later (found {0}).",
       detached: "Check out a branch first.",
       dirty: "Commit or stash your changes first.",
       occupied: "{0} is checked out in another worktree ({1}). Restacking would leave it behind.",
-      parent_behind: "The parent is behind its remote. Pull it first.",
+      occupied_rebasing: "{0} is being rebased in another worktree ({1}). Finish or abort that rebase first.",
+      parent_behind: "{0} is {1} commit(s) behind its remote. Pull it first.",
       no_remote_trunk: "No origin branch for the trunk: fetch from origin first.",
+      parent_no_upstream: "{0} has no upstream, so GitWand cannot check it contains the merged work.",
+      merged_work_missing: "The merged work is not in {0} yet: update {0} first.",
       no_old_base: "GitWand cannot tell which commits belonged to the parent. Restack this branch by hand.",
-      fetch_failed: "Could not fetch: the merged commit may be missing locally. Try again when online.",
+      fetch_failed: "Could not fetch ({0}): the merged commit may be missing locally. Try again when online.",
       stale_preview: "The stack changed since the preview. Preview again.",
     },
   },

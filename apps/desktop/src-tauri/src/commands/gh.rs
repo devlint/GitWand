@@ -888,7 +888,7 @@ pub(crate) async fn gh_pr_edit(
 // ─── Branch PR lookup and retarget (stacked branches) ───────────────────────
 
 /// Parse `gh pr list --json number,baseRefName,headRefOid,mergedAt,url,
-/// headRepositoryOwner`, keeping each entry's head-owner login (empty when
+/// headRepositoryOwner,mergeCommit`, keeping each entry's head-owner login (empty when
 /// gh reports none).
 fn parse_gh_branch_prs(stdout: &str) -> Result<Vec<(String, BranchPr)>, String> {
     let v: serde_json::Value = serde_json::from_str(stdout.trim())
@@ -904,14 +904,24 @@ fn parse_gh_branch_prs(stdout: &str) -> Result<Vec<(String, BranchPr)>, String> 
                 .get("headRepositoryOwner")
                 .map(|o| s(o, "login"))
                 .unwrap_or_default();
+            let merged_at = x.get("mergedAt").and_then(|y| y.as_str()).map(String::from);
+            // Only once merged: an open PR's merge commit is a test merge.
+            let merge_commit_oid = merged_at.as_ref().and_then(|_| {
+                x.get("mergeCommit")
+                    .and_then(|m| m.get("oid"))
+                    .and_then(|o| o.as_str())
+                    .filter(|o| !o.is_empty())
+                    .map(String::from)
+            });
             Some((
                 owner,
                 BranchPr {
                     number: x.get("number")?.as_i64()?,
                     base: s(x, "baseRefName"),
                     head_ref_oid: s(x, "headRefOid"),
-                    merged_at: x.get("mergedAt").and_then(|y| y.as_str()).map(String::from),
+                    merged_at,
                     url: s(x, "url"),
+                    merge_commit_oid,
                 },
             ))
         })
@@ -998,7 +1008,7 @@ fn gh_branch_pr_inner(
         "--head",
         &branch,
         "--json",
-        "number,baseRefName,headRefOid,mergedAt,url,headRepositoryOwner",
+        "number,baseRefName,headRefOid,mergedAt,url,headRepositoryOwner,mergeCommit",
         "--limit",
         "100",
     ]);
@@ -1072,6 +1082,22 @@ mod branch_pr_tests {
             .collect();
         let pr = newest_merged(all).unwrap();
         assert_eq!((pr.number, pr.head_ref_oid.as_str()), (812, "bbb"));
+    }
+
+    /// I-2: the merge commit of a merged PR (the squash on its base).
+    #[test]
+    fn a_merged_pr_carries_its_merge_commit_an_open_one_none() {
+        let s = r#"[{"number":812,"baseRefName":"main","headRefOid":"h","mergedAt":"2026-11-20T00:00:00Z","url":"u","headRepositoryOwner":{"login":"o"},"mergeCommit":{"oid":"mmm"}}]"#;
+        let pr = parse_gh_branch_pr_json(s, "merged", "o").unwrap().unwrap();
+        assert_eq!(pr.merge_commit_oid.as_deref(), Some("mmm"));
+        let open = r#"[{"number":9,"baseRefName":"main","headRefOid":"h","mergedAt":null,"url":"u","headRepositoryOwner":{"login":"o"},"mergeCommit":{"oid":"test-merge"}}]"#;
+        let pr = parse_gh_branch_pr_json(open, "open", "o").unwrap().unwrap();
+        assert_eq!(pr.merge_commit_oid, None);
+        let missing = r#"[{"number":9,"baseRefName":"main","headRefOid":"h","mergedAt":"2026-11-20T00:00:00Z","url":"u","headRepositoryOwner":{"login":"o"},"mergeCommit":null}]"#;
+        let pr = parse_gh_branch_pr_json(missing, "merged", "o")
+            .unwrap()
+            .unwrap();
+        assert_eq!(pr.merge_commit_oid, None);
     }
 
     #[test]

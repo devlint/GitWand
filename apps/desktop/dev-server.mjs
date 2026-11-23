@@ -7483,7 +7483,7 @@ async function handleRequest(req, res) {
         const baseNwo = devGhBaseNwo(resolvedCwd);
         const r = spawnSync(GH, [
           "pr", "list", "--state", state, "--head", branch,
-          "--json", "number,baseRefName,headRefOid,mergedAt,url,headRepositoryOwner",
+          "--json", "number,baseRefName,headRefOid,mergedAt,url,headRepositoryOwner,mergeCommit",
           "--limit", "100",
         ], { cwd: resolvedCwd, encoding: "utf-8", env: ghRepoEnv(baseNwo), timeout: 20_000 });
         if (r.error) throw new Error(`Failed to run gh pr list (is GitHub CLI installed?): ${r.error.message}`);

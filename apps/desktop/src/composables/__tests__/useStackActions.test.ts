@@ -73,4 +73,17 @@ describe("useStackActions — error channel", () => {
     await actions.deleteMergedParent();
     expect(notify).toHaveBeenCalledWith("not deleted");
   });
+
+  it("preview and retryRetarget surface failures instead of rejecting (M-5)", async () => {
+    const notify = vi.fn();
+    const startRestack = vi.fn().mockRejectedValue(new Error("flow module failed to load"));
+    const actions = createStackActions(
+      fakeStacks({ startRestack, retryRetarget: vi.fn().mockRejectedValue(new Error("offline")) }),
+      notify,
+    );
+    await expect(actions.preview("/r", "step-2")).resolves.toBeUndefined();
+    expect(startRestack).toHaveBeenCalledWith("/r", "step-2");
+    await expect(actions.retryRetarget()).resolves.toBeUndefined();
+    expect(notify.mock.calls).toEqual([["flow module failed to load"], ["offline"]]);
+  });
 });

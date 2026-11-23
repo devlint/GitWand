@@ -6,7 +6,7 @@
 // the server.
 
 /** `parse_gh_branch_pr_json`: of `gh pr list --json number,baseRefName,
- *  headRefOid,mergedAt,url,headRepositoryOwner`, only the PRs whose head repo
+ *  headRefOid,mergedAt,url,headRepositoryOwner,mergeCommit`, only the PRs whose head repo
  *  owner is `originOwner` (ASCII case-insensitive; an entry with no owner is
  *  dropped — `--head` carries no owner, so a fork's same-named branch would
  *  match). `merged` keeps the newest merged one and never falls back to an
@@ -27,13 +27,19 @@ export function devParseGhBranchPr(stdout, state, originOwner) {
       const owner = str(x.headRepositoryOwner, "login");
       return owner !== "" && lower(owner) === lower(originOwner);
     })
-    .map((x) => ({
-      number: x.number,
-      base: str(x, "baseRefName"),
-      head_ref_oid: str(x, "headRefOid"),
-      merged_at: typeof x.mergedAt === "string" ? x.mergedAt : null,
-      url: str(x, "url"),
-    }));
+    .map((x) => {
+      const mergedAt = typeof x.mergedAt === "string" ? x.mergedAt : null;
+      // Only once merged: an open PR's merge commit is a test merge.
+      const oid = typeof x.mergeCommit?.oid === "string" && x.mergeCommit.oid !== "" ? x.mergeCommit.oid : null;
+      return {
+        number: x.number,
+        base: str(x, "baseRefName"),
+        head_ref_oid: str(x, "headRefOid"),
+        merged_at: mergedAt,
+        url: str(x, "url"),
+        merge_commit_oid: mergedAt !== null ? oid : null,
+      };
+    });
   if (state !== "merged") return prs[0] ?? null;
   // `newest_merged`: RFC 3339 strings order like the instants; `max_by`
   // returns the last of equal maxima.

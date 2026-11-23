@@ -132,6 +132,8 @@ pub struct BranchPr {
     pub head_ref_oid: String,
     pub merged_at: Option<String>,
     pub url: String,
+    /// The merge commit on the base, once merged (`None` for an open PR).
+    pub merge_commit_oid: Option<String>,
 }
 
 // ─── Git log types ─────────────────────────────────────────────────

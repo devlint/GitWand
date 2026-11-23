@@ -13,6 +13,8 @@ import type { BridgeOffer } from "../composables/useStacks";
 const props = defineProps<{
   layer: StackLayerStatus | null;
   offer: BridgeOffer | null;
+  /** The parent's PR number, when known (spec §5.5: `↳ main · #812`). */
+  parentPr?: number | null;
 }>();
 
 defineEmits<{
@@ -36,7 +38,9 @@ const stateLabel = computed(() => {
 <template>
   <span v-if="layer || offer" class="stack-badge" @click.stop>
     <template v-if="layer">
-      <span class="stack-badge__parent mono" :title="layer.parent">{{ t('stacks.badge.parent', layer.parent) }}</span>
+      <span class="stack-badge__parent mono" :title="layer.parent">{{
+        parentPr != null ? t('stacks.badge.parentPr', layer.parent, parentPr) : t('stacks.badge.parent', layer.parent)
+      }}</span>
       <span v-if="stateLabel" class="stack-badge__state">{{ stateLabel }}</span>
       <button v-if="layer.actionable" type="button" class="stack-badge__btn" @click="$emit('restack')">
         {{ t('stacks.restack') }}

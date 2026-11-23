@@ -79,7 +79,6 @@ export function _resetOtherCommitForTesting(): void {
   OTHER_COMMIT_SEEN.clear();
 }
 
-
 /**
  * CLI name + install URL per forge, used when `loadPrs()` detects the
  * forge's CLI binary is missing (issue #138). Only forges backed by a CLI

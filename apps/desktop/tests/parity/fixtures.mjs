@@ -534,15 +534,17 @@ export function fixtureStack(kind) {
     git(["fetch", "--quiet", "origin"]);
     git(["remote", "set-head", "origin", "main"]);
   };
-  const four = kind === "four" || kind === "broken";
+  const four = kind === "four" || kind === "broken" || kind === "four-empty";
+  // "four-empty": step-2 and step-3 have no commit of their own, so a
+  // non-bottom layer (step-3) sits at the restack's upstream too (T8).
 
   commitFile(cwd, "README.md", "# Stack\n", "initial commit", 0);
   git(["checkout", "--quiet", "-b", "step-1"]);
   commitFile(cwd, "a.txt", "1\n", "s1", 1);
   git(["checkout", "--quiet", "-b", "step-2"]);
-  if (kind !== "empty") commitFile(cwd, "b.txt", "2\n", "s2", 2);
+  if (kind !== "empty" && kind !== "four-empty") commitFile(cwd, "b.txt", "2\n", "s2", 2);
   git(["checkout", "--quiet", "-b", "step-3"]);
-  commitFile(cwd, "c.txt", "3\n", "s3", 3);
+  if (kind !== "four-empty") commitFile(cwd, "c.txt", "3\n", "s3", 3);
   if (four) {
     git(["checkout", "--quiet", "-b", "step-4"]);
     commitFile(cwd, "d.txt", "4\n", "s4", 4);
@@ -576,6 +578,7 @@ export function fixtureStack(kind) {
       break;
     case "squashed":
     case "merge-commit":
+    case "merge-commit-grew":
       addOrigin();
       git(["checkout", "--quiet", "main"]);
       if (kind === "squashed") {
@@ -586,6 +589,8 @@ export function fixtureStack(kind) {
       }
       git(["push", "--quiet", "origin", "main"]);
       git(["reset", "--quiet", "--hard", "HEAD~1"]);
+      // I-1: step-1 gets a commit after its merge, so it is not merged.
+      if (kind === "merge-commit-grew") moveStep1("a2.txt", "after\n", "s1 after merge");
       git(["checkout", "--quiet", "step-3"]);
       break;
     case "dropped":
@@ -595,6 +600,13 @@ export function fixtureStack(kind) {
       git(["checkout", "--quiet", "step-3"]);
       break;
     case "four":
+      // step-1, the target of step-3's moment 2, has an upstream (I-2).
+      addOrigin();
+      git(["push", "--quiet", "-u", "origin", "step-1"]);
+      git(["checkout", "--quiet", "step-4"]);
+      break;
+    case "four-empty":
+      moveStep1("a2.txt", "more\n", "s1 more");
       git(["checkout", "--quiet", "step-4"]);
       break;
     case "broken":

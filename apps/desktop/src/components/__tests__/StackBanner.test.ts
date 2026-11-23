@@ -77,10 +77,12 @@ async function seed(
 
 const after = (over: Partial<AfterRestack> = {}): AfterRestack => ({
   cwd: "/r",
+  trunk: "main",
   finalized: {
     moment: "parent_merged",
     bottom: "step-2",
     merged_parent: "step-1",
+    delete_offer: "step-1",
     new_parent: null,
     moved: ["step-2"],
     switched_back_to: null,
@@ -167,6 +169,21 @@ describe("StackBanner — restack mode", () => {
     expect(text()).toContain("step-2 still contains its old commits.");
   });
 
+  it("names the stacked grandparent a merged parent was merged into (M-2)", async () => {
+    await seed(
+      report({
+        layers: [
+          layer({ branch: "step-1", parent: "main" }),
+          layer({ branch: "step-2", parent: "step-1" }),
+          layer({ branch: "step-3", parent: "step-2", state: "parent_merged", actionable: true, merged_pr: 42 }),
+        ],
+      }),
+      "step-3",
+    );
+    mount();
+    expect(text()).toContain("step-2 was merged into step-1 (PR #42).");
+  });
+
   it("offers Unstack for a lost base", async () => {
     const { deps } = await seed(
       report({ layers: [layer({ branch: "step-1", parent: "main" }), layer({ state: "base_lost" })] }),
@@ -177,6 +194,15 @@ describe("StackBanner — restack mode", () => {
     button("Unstack")!.click();
     await flush();
     expect(deps.unset).toHaveBeenCalledWith("/r", "step-2");
+  });
+
+  it("says when stacked branches are unavailable (I-3)", async () => {
+    const { s, deps } = await seed(report());
+    (deps.status as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("cannot inspect worktree /wt"));
+    await s.refresh("/r");
+    mount();
+    await flush();
+    expect(text()).toContain("Stacked branches are unavailable: cannot inspect worktree /wt");
   });
 
   it("shows a pending record error with Unstack of the chain's top", async () => {
