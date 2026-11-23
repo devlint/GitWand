@@ -624,6 +624,14 @@ const es: Locale = {
       hint: "GitWand propondrá reapilar {0} cuando su rama padre cambie o se fusione.",
       forgeHint: "Los squash merges de más de un commit solo se detectan en GitHub. En otras forjas, usa Desapilar cuando la rama padre esté fusionada.",
       noCandidates: "Ninguna rama puede ser padre aquí: las pilas son lineales y el tronco no es una rama padre.",
+      error: {
+        self: "Una rama no puede apilarse sobre sí misma.",
+        trunkLayer: "{0} es el tronco: no se puede apilar.",
+        trunkParent: "{0} es el tronco: apilar sobre él no forma una pila. Usa Desapilar en su lugar.",
+        unknownBranch: "{0} no es una rama local.",
+        hasChild: "{0} ya tiene una rama apilada ({1}). Las pilas son lineales: apila sobre {1} en su lugar.",
+        cycle: "Apilar {0} sobre {1} crearía un ciclo.",
+      },
     },
     preview: {
       moving: "Ramas que se moverán",

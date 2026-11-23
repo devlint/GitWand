@@ -624,6 +624,14 @@ const zhCN: Locale = {
       hint: "当父分支变更或被合并时，GitWand 会建议重新堆叠 {0}。",
       forgeHint: "仅在 GitHub 上能检测包含多个提交的 squash 合并。在其他代码托管平台上，父分支合并后请使用“取消堆叠”。",
       noCandidates: "这里没有可作为父分支的分支：堆栈是线性的，主干不能作为父分支。",
+      error: {
+        self: "分支不能堆叠到自身。",
+        trunkLayer: "{0} 是主干：不能被堆叠。",
+        trunkParent: "{0} 是主干：堆叠到主干上不构成堆栈。请改用取消堆叠。",
+        unknownBranch: "{0} 不是本地分支。",
+        hasChild: "{0} 已有一个堆叠分支（{1}）。堆栈是线性的：请改为堆叠到 {1}。",
+        cycle: "将 {0} 堆叠到 {1} 会形成循环。",
+      },
     },
     preview: {
       moving: "将被移动的分支",

@@ -625,6 +625,14 @@ const ptBR: Locale = {
       hint: "O GitWand vai propor reempilhar {0} quando o branch pai mudar ou for mesclado.",
       forgeHint: "Squash merges de mais de um commit só são detectados no GitHub. Em outras forjas, use Desempilhar depois que o branch pai for mesclado.",
       noCandidates: "Nenhum branch pode ser pai aqui: as pilhas são lineares e o tronco não é um branch pai.",
+      error: {
+        self: "Um branch não pode ser empilhado sobre si mesmo.",
+        trunkLayer: "{0} é o tronco: não pode ser empilhado.",
+        trunkParent: "{0} é o tronco: empilhar sobre ele não forma uma pilha. Use Desempilhar.",
+        unknownBranch: "{0} não é um branch local.",
+        hasChild: "{0} já tem um branch empilhado ({1}). As pilhas são lineares: empilhe sobre {1}.",
+        cycle: "Empilhar {0} sobre {1} criaria um ciclo.",
+      },
     },
     preview: {
       moving: "Branches que vão se mover",

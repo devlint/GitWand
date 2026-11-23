@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /**
  * StackOnDialog — pick the parent branch a branch is stacked on (v3.14).
- * Calls useStacks().stackOn itself and shows the backend's refusal inline,
- * verbatim (the Rust refusals are human-readable sentences).
+ * Calls useStacks().stackOn itself and shows the backend's refusal inline:
+ * the known `set_parent` refusals localized, anything else verbatim.
  */
 import { computed, ref } from "vue";
 import BaseModal from "./BaseModal.vue";
 import { useI18n } from "../composables/useI18n";
 import { useStacks } from "../composables/useStacks";
+import { stackOnRefusal } from "../utils/stackOnError";
 
 const props = defineProps<{
   cwd: string;
@@ -22,6 +23,13 @@ const { t } = useI18n();
 const stacks = useStacks();
 
 const parent = ref(props.candidates[0] ?? "");
+/**
+ * The candidates, plus the chosen parent if a refresh (after a refusal, say)
+ * dropped it: the select keeps the user's choice instead of going blank.
+ */
+const options = computed(() =>
+  parent.value && !props.candidates.includes(parent.value) ? [...props.candidates, parent.value] : props.candidates,
+);
 /** Hidden until the forge is known (null), and for GitHub, which detects squash merges. */
 const showForgeHint = computed(() => props.forge !== null && props.forge !== "github");
 const busy = ref(false);
@@ -35,7 +43,9 @@ async function confirm() {
     await stacks.stackOn(props.cwd, props.branch, parent.value);
     emit("close");
   } catch (e) {
-    error.value = String((e as { message?: string })?.message ?? e);
+    const raw = String((e as { message?: string })?.message ?? e);
+    const known = stackOnRefusal(raw);
+    error.value = known ? t(known.key, ...known.args) : raw;
   } finally {
     busy.value = false;
   }
@@ -46,7 +56,7 @@ async function confirm() {
   <BaseModal :title="t('stacks.stackOn.title', branch)" size="sm" @close="emit('close')">
     <label class="sod-label" for="sod-parent">{{ t('stacks.stackOn.parent') }}</label>
     <select id="sod-parent" v-model="parent" class="sod-select mono" :disabled="busy">
-      <option v-for="c in candidates" :key="c" :value="c">{{ c }}</option>
+      <option v-for="c in options" :key="c" :value="c">{{ c }}</option>
     </select>
     <p class="sod-hint">{{ t('stacks.stackOn.hint', branch) }}</p>
     <p v-if="showForgeHint" class="sod-hint">{{ t('stacks.stackOn.forgeHint') }}</p>

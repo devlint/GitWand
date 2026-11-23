@@ -629,6 +629,14 @@ const fr: Locale = {
       hint: "GitWand proposera de restacker {0} quand sa parente change ou est fusionnée.",
       forgeHint: "Les squash merges de plusieurs commits ne sont détectés que sur GitHub. Sur les autres forges, utilisez Désempiler une fois la parente fusionnée.",
       noCandidates: "Aucune branche ne peut servir de parente ici : les piles sont linéaires et le tronc n'est pas une parente.",
+      error: {
+        self: "Une branche ne peut pas être empilée sur elle-même.",
+        trunkLayer: "{0} est le tronc : elle ne peut pas être empilée.",
+        trunkParent: "{0} est le tronc : empiler dessus ne forme pas une pile. Utilisez plutôt Désempiler.",
+        unknownBranch: "{0} n'est pas une branche locale.",
+        hasChild: "{0} a déjà une branche empilée ({1}). Les piles sont linéaires : empilez plutôt sur {1}.",
+        cycle: "Empiler {0} sur {1} créerait un cycle.",
+      },
     },
     preview: {
       moving: "Branches qui vont bouger",

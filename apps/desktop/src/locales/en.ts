@@ -636,6 +636,14 @@ const en = {
       hint: "GitWand will offer to restack {0} when its parent changes or is merged.",
       forgeHint: "Squash merges of more than one commit are detected on GitHub only. On other forges, use Unstack once the parent is merged.",
       noCandidates: "No branch can be a parent here: stacks are linear and the trunk is not a parent.",
+      error: {
+        self: "A branch can't be stacked on itself.",
+        trunkLayer: "{0} is the trunk: it can't be stacked.",
+        trunkParent: "{0} is the trunk: stacking on it makes no stack. Use Unstack instead.",
+        unknownBranch: "{0} is not a local branch.",
+        hasChild: "{0} already has a stacked branch ({1}). Stacks are linear: stack on {1} instead.",
+        cycle: "Stacking {0} on {1} would create a cycle.",
+      },
     },
     preview: {
       moving: "Branches that will move",
