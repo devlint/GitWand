@@ -23,7 +23,7 @@ fn stdout(out: &Output) -> String {
 }
 
 /// The sha `rev` resolves to as a commit, or `None` when it does not.
-fn resolve_commit(repo: &Path, rev: &str) -> Result<Option<String>, String> {
+pub(super) fn resolve_commit(repo: &Path, rev: &str) -> Result<Option<String>, String> {
     let out = run(
         repo,
         &[
@@ -51,13 +51,11 @@ fn is_ancestor(repo: &Path, a: &str, b: &str) -> Result<bool, String> {
     }
 }
 
-fn is_sha(s: &str) -> bool {
+pub(super) fn is_sha(s: &str) -> bool {
     (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Every declared layer and its report, bottom→top per chain (spec §5.3).
-// Consumed by Task 6 (Tauri commands) of the stacked-branches plan.
-#[allow(dead_code)]
 pub(crate) fn status(
     repo: &Path,
     configured_trunk: Option<&str>,

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) mod detect;
 pub(crate) mod guard;
 pub(crate) mod meta;
+pub(crate) mod restack;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -99,7 +100,6 @@ pub struct StackReport {
     pub git_supports_restack: bool,
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct MovingRef {
     pub branch: String,
@@ -108,7 +108,6 @@ pub struct MovingRef {
     pub remote_sha: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct RestackRefusal {
     pub code: String,
@@ -117,7 +116,6 @@ pub struct RestackRefusal {
     pub path: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct RestackPlan {
     pub moment: Moment,
