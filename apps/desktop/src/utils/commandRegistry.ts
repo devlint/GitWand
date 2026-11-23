@@ -79,6 +79,16 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
     cliPathOnly:
       "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
   },
+  gh_branch_pr: {
+    route: "/api/gh-branch-pr",
+    cliPathOnly:
+      "The dev-server always shells out to the `gh` CLI and covers github.com origins only; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
+  },
+  gh_pr_set_base: {
+    route: "/api/gh-pr-set-base",
+    cliPathOnly:
+      "The dev-server always shells out to the `gh` CLI and covers github.com origins only; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
+  },
   gh_dismiss_review: { route: "/api/gh-dismiss-review" },
   gh_enable_auto_merge: {
     route: "/api/gh-enable-auto-merge",
@@ -194,8 +204,14 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   git_operation_action: { route: "/api/git-operation-action" },
   git_pull: { route: "/api/git-pull" },
   git_push: { route: "/api/git-push" },
+  git_push_branch: { route: "/api/git-push-branch" },
   git_push_tags: { route: "/api/git-push-tags" },
   git_rebase_onto: { route: "/api/git-rebase-onto" },
+  git_restack: { route: "/api/git-restack" },
+  stack_restack_plan: { route: "/api/stack-restack-plan" },
+  stack_set_parent: { route: "/api/stack-set-parent" },
+  stack_status: { route: "/api/stack-status" },
+  stack_unset: { route: "/api/stack-unset" },
   git_remote_info: { route: "/api/git-remote-info" },
   git_rename_branch: { route: "/api/git-rename-branch" },
   git_repo_state: { route: "/api/git-repo-state" },
@@ -267,6 +283,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   preview_cherry_pick: { route: "/api/preview-cherry-pick" },
   preview_merge: { route: "/api/preview-merge" },
   preview_rebase: { route: "/api/preview-rebase" },
+  preview_restack: { route: "/api/preview-restack" },
   read_file: { route: "/api/read-file" },
   read_file_at_revision: { route: "/api/read-file-at-revision" },
   read_gitwandrc: { route: "/api/read-gitwandrc" },

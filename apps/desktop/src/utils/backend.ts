@@ -1228,6 +1228,237 @@ export async function gitRebaseOnto(
   return res.json();
 }
 
+// ─── Stacked branches (v3.14) ───────────────────────────────────────
+// Mirrors of the Rust types in src-tauri/src/stack/mod.rs, snake_case as
+// serialized. `PendingRestack` is internal to Rust and not exposed here.
+
+export type StackMoment = "parent_moved" | "parent_merged";
+export type StackLayerState =
+  | "up_to_date"
+  | "out_of_date"
+  | "parent_merged"
+  | "parent_missing"
+  | "base_lost";
+
+export interface MergedParentHint {
+  branch: string;
+  number: number;
+  head_ref_oid: string | null;
+}
+
+export interface StackLayerStatus {
+  branch: string;
+  parent: string;
+  base: string | null;
+  parent_tip: string | null;
+  state: StackLayerState;
+  inherited: boolean;
+  actionable: boolean;
+  merge_signal: "forge" | "cherry" | "merge_commit" | null;
+  merged_pr: number | null;
+  parent_behind_upstream: number;
+  top: string;
+}
+
+export interface FinalizedRestack {
+  moment: StackMoment;
+  bottom: string;
+  merged_parent: string | null;
+  new_parent: string | null;
+  moved: string[];
+  switched_back_to: string | null;
+  switch_error: string | null;
+}
+
+export interface StackReport {
+  trunk: string | null;
+  remote_trunk: string | null;
+  layers: StackLayerStatus[];
+  rebase_in_progress: boolean;
+  finalized: FinalizedRestack | null;
+  git_supports_restack: boolean;
+  pending_error: string | null;
+}
+
+export interface StackMeta {
+  branch: string;
+  parent: string;
+  base: string | null;
+}
+
+export type RestackRefusalCode =
+  | "rebase_in_progress"
+  | "up_to_date"
+  | "git_too_old"
+  | "detached"
+  | "dirty"
+  | "occupied"
+  | "parent_behind"
+  | "no_remote_trunk"
+  | "no_old_base"
+  | "fetch_failed"
+  | "stale_preview";
+
+export interface RestackRefusal {
+  code: RestackRefusalCode;
+  message: string;
+  branch: string | null;
+  path: string | null;
+}
+
+export interface RestackMovingRef {
+  branch: string;
+  in_stack: boolean;
+  upstream: string | null;
+  remote_sha: string | null;
+}
+
+export interface RestackPlan {
+  moment: StackMoment;
+  bottom: string;
+  parent: string;
+  onto_ref: string;
+  onto_sha: string;
+  upstream_sha: string;
+  top: string;
+  top_sha: string;
+  moving: RestackMovingRef[];
+  new_parent: string | null;
+  refusal: RestackRefusal | null;
+}
+
+export interface PreviewedRestack {
+  onto_sha: string;
+  upstream_sha: string;
+  top_sha: string;
+  moving: string[];
+}
+
+/** POST a stack route on the dev-server; a non-ok response throws its `error`. */
+async function devStackPost<T>(route: string, body: Record<string, unknown>, fallback: string): Promise<T> {
+  const res = await devFetch(`${DEV_SERVER}${route}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error ?? fallback);
+  }
+  return res.json();
+}
+
+/** Stack layers of the repo, with each layer's state against its parent. */
+export async function stackStatus(
+  cwd: string,
+  trunk: string | null,
+  mergedParents: MergedParentHint[],
+): Promise<StackReport> {
+  if (isTauri()) {
+    return tauriInvoke<StackReport>("stack_status", { cwd, configuredTrunk: trunk, mergedParents });
+  }
+  return devStackPost<StackReport>(
+    "/api/stack-status",
+    { cwd, configuredTrunk: trunk, mergedParents },
+    "stack status failed",
+  );
+}
+
+/** Declare `parent` as the stack parent of `branch`. */
+export async function stackSetParent(
+  cwd: string,
+  branch: string,
+  parent: string,
+  trunk: string | null,
+): Promise<StackMeta> {
+  if (isTauri()) {
+    return tauriInvoke<StackMeta>("stack_set_parent", { cwd, branch, parent, configuredTrunk: trunk });
+  }
+  return devStackPost<StackMeta>(
+    "/api/stack-set-parent",
+    { cwd, branch, parent, configuredTrunk: trunk },
+    `set stack parent of ${branch} failed`,
+  );
+}
+
+/** Remove `branch` from its stack. */
+export async function stackUnset(cwd: string, branch: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke<void>("stack_unset", { cwd, branch });
+    return;
+  }
+  await devStackPost<unknown>("/api/stack-unset", { cwd, branch }, `unset stack of ${branch} failed`);
+}
+
+/** Plan the restack of the stack whose top is `branch` (read-only). */
+export async function stackRestackPlan(
+  cwd: string,
+  branch: string,
+  trunk: string | null,
+  mergedParents: MergedParentHint[],
+): Promise<RestackPlan> {
+  if (isTauri()) {
+    return tauriInvoke<RestackPlan>("stack_restack_plan", {
+      cwd,
+      branch,
+      configuredTrunk: trunk,
+      mergedParents,
+    });
+  }
+  return devStackPost<RestackPlan>(
+    "/api/stack-restack-plan",
+    { cwd, branch, configuredTrunk: trunk, mergedParents },
+    `restack plan for ${branch} failed`,
+  );
+}
+
+/**
+ * Run the restack the user previewed. `previewed` pins the plan the preview
+ * showed; the backend refuses with `stale_preview` when the repo moved since.
+ * `{ conflict }` is true when the rebase halted on a merge conflict.
+ */
+export async function gitRestack(
+  cwd: string,
+  branch: string,
+  trunk: string | null,
+  mergedParents: MergedParentHint[],
+  previewed: PreviewedRestack,
+): Promise<{ conflict: boolean }> {
+  if (isTauri()) {
+    return tauriInvoke<{ conflict: boolean }>("git_restack", {
+      cwd,
+      branch,
+      configuredTrunk: trunk,
+      mergedParents,
+      previewed,
+    });
+  }
+  return devStackPost<{ conflict: boolean }>(
+    "/api/git-restack",
+    { cwd, branch, configuredTrunk: trunk, mergedParents, previewed },
+    `restack of ${branch} failed`,
+  );
+}
+
+/**
+ * Force-push one local branch to its upstream under `--force-with-lease`
+ * pinned to `leaseSha`, without checking it out.
+ */
+export async function gitPushBranch(
+  cwd: string,
+  branch: string,
+  leaseSha: string,
+): Promise<GitPushPullResult> {
+  if (isTauri()) {
+    return tauriInvoke<GitPushPullResult>("git_push_branch", { cwd, branch, leaseSha }, IPC_TIMEOUT.NETWORK);
+  }
+  return devStackPost<GitPushPullResult>(
+    "/api/git-push-branch",
+    { cwd, branch, leaseSha },
+    `push of ${branch} failed`,
+  );
+}
+
 /**
  * Start an interactive rebase with a caller-supplied todo list.
  * Returns `{ conflict }` — true when the rebase halted on a merge conflict.
@@ -2854,6 +3085,31 @@ export async function previewRebase(
   if (!res.ok) {
     const reason = await res.json().then((d) => d?.error).catch(() => null);
     throw new Error(reason || `Failed to preview rebase onto ${onto}`);
+  }
+  return res.json();
+}
+
+/**
+ * Simule `git rebase --onto <onto> <upstream> <branch>` sans toucher au working
+ * tree : ne rejoue que les commits de la couche, pas ceux de son parent.
+ */
+export async function previewRestack(
+  cwd: string,
+  onto: string,
+  upstream: string,
+  branch: string,
+): Promise<FileMergePreview[]> {
+  if (isTauri()) {
+    return tauriInvoke<FileMergePreview[]>("preview_restack", { cwd, onto, upstream, branch });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/preview-restack`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, onto, upstream, branch }),
+  });
+  if (!res.ok) {
+    const reason = await res.json().then((d) => d?.error).catch(() => null);
+    throw new Error(reason || `Failed to preview restack of ${branch}`);
   }
   return res.json();
 }

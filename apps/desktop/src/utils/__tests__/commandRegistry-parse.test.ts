@@ -97,6 +97,17 @@ describe("findDevServerRoutes", () => {
     const src = `if (url.pathname.startsWith("/api/gitea-")) {\n  switch (url.pathname) {\n    case "/api/gitea-get-pr": { break; }\n  }\n}\nswitch (x) {\n  case "/api/gitea-orphan": break;\n}`;
     expect(findDevServerRoutes(src)).toEqual(["/api/gitea-get-pr"]);
   });
+
+  it("finds the keys of a route table dispatched by Object.hasOwn", () => {
+    // How dev-server.mjs declares the stacked-branches routes.
+    const src = `const STACK_ROUTES = {\n  "/api/stack-status": (b) => f(b),\n  "/api/stack-unset": (b) => g(b),\n};\nif (Object.hasOwn(STACK_ROUTES, url.pathname)) {}`;
+    expect(findDevServerRoutes(src)).toEqual(["/api/stack-status", "/api/stack-unset"]);
+  });
+
+  it("ignores a route table nothing dispatches", () => {
+    const src = `const UNUSED = {\n  "/api/dead-route": (b) => f(b),\n};`;
+    expect(findDevServerRoutes(src)).toEqual([]);
+  });
 });
 
 describe("findRegisteredCommands", () => {

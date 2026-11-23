@@ -565,6 +565,52 @@ export async function ghPrEdit(cwd: string, number: number, edit: PrEdit): Promi
   return tauriInvoke<void>("gh_pr_edit", { cwd, number, title: edit.title ?? null, body: edit.body ?? null });
 }
 
+/** A PR found for a branch (stacked branches). Mirrors `BranchPr` in types.rs. */
+export interface BranchPr {
+  number: number;
+  base: string;
+  head_ref_oid: string;
+  merged_at: string | null;
+  url: string;
+}
+
+/**
+ * The PR whose head is `branch` and that is `open` or `merged` (never an
+ * unmerged one for `merged`), or null when there is none.
+ */
+export async function ghBranchPr(
+  cwd: string,
+  branch: string,
+  state: "open" | "merged",
+): Promise<BranchPr | null> {
+  if (isTauri()) {
+    return tauriInvoke<BranchPr | null>("gh_branch_pr", { cwd, branch, state }, IPC_TIMEOUT.NETWORK);
+  }
+  const resp = await devFetch(`${DEV_SERVER}/api/gh-branch-pr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, branch, state }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data?.error || `gh branch pr failed: ${resp.status}`);
+  return data;
+}
+
+/** Retarget an existing PR onto `base`. */
+export async function ghPrSetBase(cwd: string, number: number, base: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke<void>("gh_pr_set_base", { cwd, number, base }, IPC_TIMEOUT.NETWORK);
+    return;
+  }
+  const resp = await devFetch(`${DEV_SERVER}/api/gh-pr-set-base`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number, base }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data?.error) throw new Error(data?.error || `gh pr set base failed: ${resp.status}`);
+}
+
 /** Dismiss a submitted review (B4, v3.6.0). */
 export async function ghDismissReview(
   cwd: string,
