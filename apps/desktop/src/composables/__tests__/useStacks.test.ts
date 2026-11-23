@@ -131,7 +131,7 @@ function setup(over: Partial<StacksDeps> = {}) {
     ...over,
   };
   const s = createStacks(deps);
-  s.setContext({
+  s.setContext({ forge: null,
     cwd: "/r",
     currentBranch: "step-3",
     localBranches: ["main", "step-1", "step-2", "step-3"],
@@ -436,7 +436,7 @@ describe("useStacks — bridge, banner, candidates", () => {
     // q is a layer on p (p is not a layer): a PR p → q would make a cycle.
     world.report = report({ layers: [...stack(), layer({ branch: "q", parent: "p", top: "q" })] });
     await s.refresh("/r");
-    s.setContext({
+    s.setContext({ forge: null,
       cwd: "/r",
       currentBranch: "main",
       localBranches: ["main", "step-1", "step-2", "step-3", "a", "b", "c", "d", "x", "y", "p", "q"],
@@ -460,7 +460,7 @@ describe("useStacks — bridge, banner, candidates", () => {
     const { s, deps, world } = setup();
     world.forge = "gitlab";
     await s.refresh("/r");
-    s.setContext({
+    s.setContext({ forge: null,
       cwd: "/r",
       currentBranch: "main",
       localBranches: ["main", "c", "x"],
@@ -491,9 +491,9 @@ describe("useStacks — bridge, banner, candidates", () => {
     expect(s.banner.value?.layer.branch).toBe("step-2");
     expect(s.banner.value?.kind).toBe("parent_moved");
 
-    s.setContext({ cwd: "/r", currentBranch: "step-1", localBranches: ["main", "step-1", "step-2", "step-3"], prs: [] });
+    s.setContext({ forge: null, cwd: "/r", currentBranch: "step-1", localBranches: ["main", "step-1", "step-2", "step-3"], prs: [] });
     expect(s.banner.value).toBeNull();
-    s.setContext({ cwd: "/r", currentBranch: "step-3", localBranches: ["main", "step-1", "step-2", "step-3"], prs: [] });
+    s.setContext({ forge: null, cwd: "/r", currentBranch: "step-3", localBranches: ["main", "step-1", "step-2", "step-3"], prs: [] });
 
     s.later();
     expect(s.banner.value).toBeNull();
@@ -538,7 +538,7 @@ describe("useStacks — bridge, banner, candidates", () => {
     const { s, world } = setup();
     world.forge = "gitlab";
     await s.refresh("/r");
-    s.setContext({
+    s.setContext({ forge: null,
       cwd: "/r",
       currentBranch: "step-2",
       localBranches: ["main", "step-1", "step-2", "step-3", "other"],
@@ -557,5 +557,127 @@ describe("useStacks — bridge, banner, candidates", () => {
     await s.unstack("/r", "step-3");
     expect(deps.unset).toHaveBeenCalledWith("/r", "step-3");
     expect(deps.status).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("useStacks — review round 1", () => {
+  const momentTwo = () =>
+    report({
+      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null }),
+    });
+
+  it("refuses a moment-two plan when the fetch failed, even without a report", async () => {
+    const h = host();
+    const { s, deps } = setup({
+      fetch: vi.fn(async () => ({ success: false, message: "offline" })),
+      plan: vi.fn(async () => plan({ moment: "parent_merged", onto_ref: "refs/remotes/origin/main" })),
+    });
+    expect(s.report.value).toBeNull();
+    await s.startRestack("/r", "step-2");
+    expect(deps.plan).toHaveBeenCalled();
+    expect(s.flow.value.phase).toBe("refused");
+    expect(s.flow.value.refusal?.code).toBe("fetch_failed");
+    await s.applyRestack(0);
+    expect(h.apply).not.toHaveBeenCalled();
+  });
+
+  it("handles a finalized report even when the repo switched meanwhile", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { s, deps } = setup();
+    (deps.status as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      await gate;
+      return momentTwo();
+    });
+    const run = s.refresh("/r");
+    s.setContext({ forge: null, cwd: "/other", currentBranch: "main", localBranches: ["main"], prs: [] });
+    release();
+    await run;
+    expect(s.report.value, "the old repo's report is not shown").toBeNull();
+    expect(s.after.value?.cwd).toBe("/r");
+    expect(s.after.value?.retarget.state).toBe("done");
+    expect(deps.setPrBase).toHaveBeenCalledWith("/r", 813, "main");
+  });
+
+  it("ignores a finalized report identical to the one just handled", async () => {
+    const h = host();
+    const { s, deps, world } = setup();
+    world.report = momentTwo(); // a backend that keeps returning it
+    await s.refresh("/r");
+    await settle();
+    await settle();
+    expect(deps.setPrBase).toHaveBeenCalledTimes(1);
+    expect(h.offerPush).toHaveBeenCalledTimes(1);
+    expect(deps.status).toHaveBeenCalledTimes(2);
+  });
+
+  it("handles the same finalization again once a report in between had none", async () => {
+    const { s, deps, world } = setup();
+    world.next = momentTwo();
+    await s.refresh("/r");
+    await settle();
+    world.next = momentTwo();
+    await s.refresh("/r");
+    await settle();
+    expect(deps.setPrBase).toHaveBeenCalledTimes(2);
+  });
+
+  it("a GitHub finalization followed by the extra refresh retargets exactly once", async () => {
+    const { s, deps, world } = setup();
+    world.next = momentTwo();
+    await s.refresh("/r");
+    await settle();
+    expect((deps.status as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(deps.setPrBase).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers one bridge per base, the lowest PR number", async () => {
+    const { s, world } = setup();
+    world.forge = "gitlab";
+    await s.refresh("/r");
+    s.setContext({
+      forge: null,
+      cwd: "/r",
+      currentBranch: "main",
+      localBranches: ["main", "c", "d", "x"],
+      prs: [
+        { branch: "c", base: "x", number: 9, state: "OPEN" },
+        { branch: "d", base: "x", number: 4, state: "OPEN" },
+      ],
+    });
+    expect([...s.offers.value.values()]).toEqual([{ branch: "d", parent: "x", pr: 4 }]);
+  });
+
+  it("closing during the apply still refreshes once a clean run lands", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    host({
+      apply: vi.fn(async () => {
+        await gate;
+        return outcome();
+      }),
+    });
+    const { s, deps, world } = setup();
+    world.forge = "gitlab";
+    await s.startRestack("/r", "step-2");
+    const applying = s.applyRestack(0);
+    expect(s.flow.value.phase).toBe("applying");
+    s.closeRestack();
+    const before = (deps.status as ReturnType<typeof vi.fn>).mock.calls.length;
+    release();
+    await applying;
+    expect((deps.status as ReturnType<typeof vi.fn>).mock.calls.length).toBe(before + 1);
+    expect(s.flow.value.phase).toBe("idle");
+  });
+
+  it("a kept plan for another bottom gives no leases", async () => {
+    host({ apply: vi.fn(async () => outcome({ stoppedReason: "residual", finalized: false })) });
+    const { s, world } = setup();
+    world.forge = "gitlab";
+    await s.startRestack("/r", "step-2");
+    await s.applyRestack(0);
+    world.next = report({ finalized: finalized({ bottom: "step-1", moved: ["step-1"] }) });
+    await s.refresh("/r");
+    expect(s.after.value?.push).toEqual({ pushable: [], skipped: [], noLeases: true });
   });
 });

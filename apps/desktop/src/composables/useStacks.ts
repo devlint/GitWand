@@ -37,7 +37,6 @@ import {
 import { ghBranchPr, ghPrSetBase } from "../utils/backend-pr";
 import type { ApplyOutcome } from "./useApplyFromPreview";
 import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
-import { usePrCache } from "./usePrCache";
 
 export interface StacksDeps {
   status: typeof stackStatus;
@@ -85,6 +84,8 @@ export interface StackBannerModel {
 }
 
 export interface AfterRestack {
+  /** The repo the restack ran in: show it only while that repo is open. */
+  cwd: string;
   finalized: FinalizedRestack;
   retarget: {
     state: "none" | "done" | "failed" | "manual";
@@ -116,6 +117,8 @@ export interface RestackHost {
 
 export interface StacksContext {
   cwd: string | null;
+  /** ForgeName of the repo (`RemoteInfo.provider`); "github" enables hints and the retarget. */
+  forge: string | null;
   currentBranch: string | null;
   localBranches: string[];
   prs: { branch: string; base: string; number: number; state: string }[];
@@ -185,7 +188,7 @@ export function createStacks(deps: StacksDeps): Stacks {
   const report = ref<StackReport | null>(null);
   const flow = ref<RestackFlow>(idle());
   const after = ref<AfterRestack | null>(null);
-  const ctx = ref<StacksContext>({ cwd: null, currentBranch: null, localBranches: [], prs: [] });
+  const ctx = ref<StacksContext>({ cwd: null, forge: null, currentBranch: null, localBranches: [], prs: [] });
   /** The layer `later()` hid, as it was then. */
   const hidden = ref<{ branch: string; state: string; parent_tip: string | null } | null>(null);
   /** Bumped by `dismissBridge`: `deps.dismissed` is not reactive. */
@@ -197,7 +200,8 @@ export function createStacks(deps: StacksDeps): Stacks {
   let lastHints: MergedParentHint[] = [];
   /** The plan of the last applied restack: its `remote_sha`s are the push leases (D10). */
   let lastPlan: { cwd: string; plan: RestackPlan } | null = null;
-  let afterCwd: string | null = null;
+  /** Per cwd, the last finalization handled: an identical one is not handled twice in a row. */
+  const lastFinalized = new Map<string, string>();
   /** Invalidates an in-progress `startRestack` / `applyRestack` on close. */
   let flowGen = 0;
 
@@ -278,9 +282,12 @@ export function createStacks(deps: StacksDeps): Stacks {
     if (!r || !r.trunk || !cwd) return out;
     const local = new Set(ctx.value.localBranches);
     const dismissed = new Set(deps.dismissed(cwd));
-    for (const pr of ctx.value.prs) {
+    // One offer per base (accepting it takes the base): the lowest PR number.
+    const bases = new Set<string>();
+    const prs = [...ctx.value.prs].sort((a, b) => a.number - b.number);
+    for (const pr of prs) {
       if (pr.state.toLowerCase() !== "open") continue;
-      if (out.has(pr.branch)) continue;
+      if (out.has(pr.branch) || bases.has(pr.base)) continue;
       if (!local.has(pr.branch) || !local.has(pr.base)) continue;
       if (pr.base === r.trunk || pr.base === pr.branch) continue;
       if (layerOf(pr.branch)) continue;
@@ -288,6 +295,7 @@ export function createStacks(deps: StacksDeps): Stacks {
       if (ancestorsOf(pr.base).has(pr.branch)) continue;
       if (dismissed.has(pr.branch)) continue;
       out.set(pr.branch, { branch: pr.branch, parent: pr.base, pr: pr.number });
+      bases.add(pr.base);
     }
     return out;
   });
@@ -348,14 +356,25 @@ export function createStacks(deps: StacksDeps): Stacks {
         r = await deps.status(cwd, deps.trunkSetting(), hints);
       }
     }
-    if (ctx.value.cwd !== null && ctx.value.cwd !== cwd) return; // repo switched meanwhile
-    report.value = r;
-    lastHints = hints;
-    if (r.finalized) {
-      await onFinalized(cwd, r.finalized, r.trunk);
-      // The backend settles one record per call: look for the next one.
-      void refresh(cwd);
+    // Repo switched meanwhile: the report is not shown, but a finalization
+    // in it is handled all the same (the backend already cleared its record).
+    if (ctx.value.cwd === null || ctx.value.cwd === cwd) {
+      report.value = r;
+      lastHints = hints;
     }
+    if (!r.finalized) {
+      lastFinalized.delete(cwd);
+      return;
+    }
+    const f = r.finalized;
+    const key = JSON.stringify([f.moment, f.bottom, f.moved]);
+    // The same finalization twice in a row would be a backend that failed to
+    // clear its record: do not retarget or offer again, and stop the chain.
+    if (lastFinalized.get(cwd) === key) return;
+    lastFinalized.set(cwd, key);
+    await onFinalized(cwd, f, r.trunk);
+    // The backend settles one record per call: look for the next one.
+    void refresh(cwd);
   }
 
   let inFlight: Promise<void> | null = null;
@@ -426,8 +445,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     const push = pushOffer(cwd, fin);
     // D19: the retarget comes first, then the push offer.
     const rt = await retarget(cwd, fin, trunk);
-    afterCwd = cwd;
-    after.value = { finalized: fin, retarget: rt, deleteOffer: fin.merged_parent, push };
+    after.value = { cwd, finalized: fin, retarget: rt, deleteOffer: fin.merged_parent, push };
     if (push.pushable.length > 0 || push.noLeases) {
       host?.offerPush(after.value, async () => {
         await pushMoved();
@@ -437,16 +455,17 @@ export function createStacks(deps: StacksDeps): Stacks {
 
   async function retryRetarget(): Promise<void> {
     const a = after.value;
-    if (!a || !afterCwd || a.retarget.state !== "failed") return;
-    const rt = await retarget(afterCwd, a.finalized, report.value?.trunk ?? deps.trunkSetting());
+    if (!a || a.retarget.state !== "failed") return;
+    const trunk = ctx.value.cwd === a.cwd ? (report.value?.trunk ?? null) : null;
+    const rt = await retarget(a.cwd, a.finalized, trunk ?? deps.trunkSetting());
     if (after.value === a) after.value = { ...a, retarget: rt };
   }
 
   /** Force-deletes the merged parent (`-D`: it was squash-merged, git cannot tell). Throws on failure. */
   async function deleteMergedParent(): Promise<void> {
     const a = after.value;
-    const cwd = afterCwd;
-    if (!a?.deleteOffer || !cwd) return;
+    if (!a?.deleteOffer) return;
+    const cwd = a.cwd;
     await deps.deleteBranch(cwd, a.deleteOffer);
     if (after.value === a) after.value = { ...a, deleteOffer: null };
     await refresh(cwd);
@@ -454,8 +473,8 @@ export function createStacks(deps: StacksDeps): Stacks {
 
   async function pushMoved(): Promise<{ branch: string; ok: boolean; message: string }[]> {
     const a = after.value;
-    const cwd = afterCwd;
-    if (!a || !cwd) return [];
+    if (!a) return [];
+    const cwd = a.cwd;
     const results: { branch: string; ok: boolean; message: string }[] = [];
     for (const { branch, lease } of a.push.pushable) {
       try {
@@ -493,6 +512,16 @@ export function createStacks(deps: StacksDeps): Stacks {
     try {
       const plan = await deps.plan(cwd, branch, deps.trunkSetting(), lastHints);
       if (gen !== flowGen) return;
+      // D18, fail closed: the cached report may not have known it was moment 2.
+      if (!fetched.success && plan.moment === "parent_merged") {
+        flow.value = {
+          ...flow.value,
+          phase: "refused",
+          plan,
+          refusal: synthesizedRefusal("fetch_failed", fetched.message),
+        };
+        return;
+      }
       flow.value = plan.refusal
         ? { ...flow.value, phase: "refused", plan, refusal: plan.refusal }
         : { ...flow.value, phase: "preview", plan };
@@ -529,7 +558,12 @@ export function createStacks(deps: StacksDeps): Stacks {
       if (gen === flowGen) flow.value = { ...flow.value, phase: "error", error: message(e) };
       return;
     }
-    if (gen !== flowGen) return;
+    if (gen !== flowGen) {
+      // Closed meanwhile: nothing to show, but a clean run must still be
+      // finalized, without waiting for the watcher.
+      if (outcome.stoppedReason === "clean") await refresh(cwd);
+      return;
+    }
     switch (outcome.stoppedReason) {
       case "clean":
         flow.value = { ...flow.value, phase: "done", outcome };
@@ -606,8 +640,7 @@ let singleton: Stacks | null = null;
 
 export function useStacks(): Stacks {
   if (singleton) return singleton;
-  let ctxCwd: string | null = null;
-  const prCache = usePrCache();
+  let ctxForge: string | null = null;
   const s = createStacks({
     status: stackStatus,
     setParent: stackSetParent,
@@ -621,9 +654,8 @@ export function useStacks(): Stacks {
     setPrBase: ghPrSetBase,
     pushBranch: gitPushBranch,
     deleteBranch: (cwd, name) => gitDeleteBranch(cwd, name, true),
-    // The PR panel caches the repo's remote (with its Rust-detected forge).
-    // Unknown → treated as not GitHub: no hints, retarget left to the user.
-    forge: () => (ctxCwd ? (prCache.getRemote(ctxCwd)?.remote?.provider ?? null) : null),
+    // Supplied by App.vue through setContext; unknown → treated as not GitHub.
+    forge: () => ctxForge,
     trunkSetting: () => loadSettings().defaultBranch || null,
     dismissed: (cwd) => loadSettings().stackBridgeDismissals?.[normaliseCwd(cwd)] ?? [],
     dismiss: (cwd, branch) => {
@@ -638,7 +670,7 @@ export function useStacks(): Stacks {
   });
   const setContext = s.setContext;
   s.setContext = (ctx) => {
-    ctxCwd = ctx.cwd;
+    ctxForge = ctx.forge;
     setContext(ctx);
   };
   singleton = s;
