@@ -645,6 +645,7 @@ const zhCN: Locale = {
       retargetFailed: "无法将 PR #{0} 的目标改为 {1}：{2}",
       retry: "重试",
       retargetManual: "请在 {2} 上将 {0} 的 pull request 目标改为 {1}。",
+      retargetManualNoForge: "请将 {0} 的 pull request 目标改为 {1}。",
       deleteParent: "删除本地 {0}",
       switchFailed: "已重新堆叠，但无法切换回 {0}：{1}",
     },

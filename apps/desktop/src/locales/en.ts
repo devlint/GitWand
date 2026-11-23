@@ -657,6 +657,7 @@ const en = {
       retargetFailed: "Could not retarget PR #{0} to {1}: {2}",
       retry: "Retry retarget",
       retargetManual: "Retarget the pull request of {0} to {1} on {2}.",
+      retargetManualNoForge: "Retarget the pull request of {0} to {1}.",
       deleteParent: "Delete local {0}",
       switchFailed: "Restacked, but could not switch back to {0}: {1}",
     },

@@ -650,6 +650,7 @@ const fr: Locale = {
       retargetFailed: "Impossible de recibler la PR #{0} vers {1} : {2}",
       retry: "Réessayer",
       retargetManual: "Reciblez la pull request de {0} vers {1} sur {2}.",
+      retargetManualNoForge: "Reciblez la pull request de {0} vers {1}.",
       deleteParent: "Supprimer {0} en local",
       switchFailed: "Restack fait, mais impossible de revenir sur {0} : {1}",
     },

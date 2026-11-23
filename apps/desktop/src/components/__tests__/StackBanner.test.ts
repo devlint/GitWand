@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeAll, vi } from "vitest";
 import { createApp, nextTick, type App } from "vue";
 import {
   createStacks,
   registerRestackHost,
   __setStacksForTest,
+  preloadStacksFlow,
   type StacksDeps,
   type Stacks,
   type AfterRestack,
@@ -38,7 +39,11 @@ const report = (over: Partial<StackReport> = {}): StackReport => ({
   ...over,
 });
 
-async function seed(r: StackReport, currentBranch = "step-2"): Promise<{ s: Stacks; deps: StacksDeps }> {
+async function seed(
+  r: StackReport,
+  currentBranch = "step-2",
+  forge: string | null = "gitlab",
+): Promise<{ s: Stacks; deps: StacksDeps }> {
   const deps: StacksDeps = {
     status: vi.fn(async () => r),
     setParent: vi.fn(async (_c: string, branch: string, parent: string) => ({ branch, parent, base: null })),
@@ -60,7 +65,7 @@ async function seed(r: StackReport, currentBranch = "step-2"): Promise<{ s: Stac
   const s = createStacks(deps);
   s.setContext({
     cwd: "/r",
-    forge: "gitlab",
+    forge,
     currentBranch,
     localBranches: ["main", "step-1", "step-2"],
     prs: [],
@@ -86,6 +91,9 @@ const after = (over: Partial<AfterRestack> = {}): AfterRestack => ({
   push: { pushable: [], skipped: [], noLeases: false },
   ...over,
 });
+
+// The restack flow is a lazy module: load it once, so clicks act at once.
+beforeAll(() => preloadStacksFlow());
 
 let app: App | null = null;
 let container: HTMLElement;
@@ -229,6 +237,20 @@ describe("StackBanner — after a restack", () => {
     button("Retry retarget")!.click();
     await flush();
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["gitlab", "Retarget the pull request of step-2 to main on GitLab."],
+    ["azure", "Retarget the pull request of step-2 to main on Azure DevOps."],
+    ["gitea", "Retarget the pull request of step-2 to main on Gitea."],
+    ["unknown", "Retarget the pull request of step-2 to main."],
+    [null, "Retarget the pull request of step-2 to main."],
+  ] as const)("a manual retarget on %s names the forge, never an empty one", async (forge, expected) => {
+    const { s } = await seed(report(), "step-2", forge);
+    s.after.value = after({ retarget: { state: "manual", number: null, base: null, error: null } });
+    mount();
+    expect(text()).toContain(expected);
+    expect(text()).not.toContain(" on .");
   });
 
   it("offers to delete the merged parent", async () => {

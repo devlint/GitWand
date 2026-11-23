@@ -68,7 +68,8 @@ function close() {
 </script>
 
 <template>
-  <BaseModal :title="title" size="lg" :closable="!busy" @close="close">
+  <!-- While applying, nothing closes it: no ✕, no Escape, no backdrop, no footer button. -->
+  <BaseModal :title="title" size="lg" :closable="!busy" :hide-close="busy" @close="close">
     <div class="rsd">
       <p v-if="flow.phase === 'fetching'" class="rsd-muted">{{ t("stacks.dialog.fetching") }}</p>
       <p v-else-if="flow.phase === 'planning'" class="rsd-muted">{{ t("stacks.dialog.planning") }}</p>

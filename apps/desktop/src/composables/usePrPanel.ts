@@ -34,6 +34,7 @@ import {
   UNSUPPORTED_AUTO_MERGE,
 } from "../utils/backend";
 import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
+import { FORGE_LABELS } from "../utils/forgeNames";
 import { ForgeNotImplementedError, CURSOR_WEB_BASE, forgeSupportsPRs } from "./forge/types";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { whenIdle } from "../utils/idleSchedule";
@@ -78,14 +79,6 @@ export function _resetOtherCommitForTesting(): void {
   OTHER_COMMIT_SEEN.clear();
 }
 
-/** Human-facing forge names for "Open on …" / platform labels. */
-const FORGE_LABELS: Record<string, string> = {
-  github: "GitHub",
-  gitlab: "GitLab",
-  bitbucket: "Bitbucket",
-  azure: "Azure DevOps",
-  cursor: "Cursor Origin",
-};
 
 /**
  * CLI name + install URL per forge, used when `loadPrs()` detects the

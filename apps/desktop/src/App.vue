@@ -159,6 +159,7 @@ import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorkt
 import { registerRemovalHost } from "./composables/useWorktreeRemoval";
 import { registerMergeBackHost } from "./composables/useWorktreeMergeBack";
 import { registerRestackHost, useStacks } from "./composables/useStacks";
+import { createRestackHost } from "./composables/useRestackHost";
 import type { HookTrustDecision } from "./composables/useWorktreeHookTrust";
 import { aiTaskName, describeBase } from "./utils/worktreeBase";
 import { useCommitActions } from "./composables/useCommitActions";
@@ -3018,54 +3019,29 @@ registerMergeBackHost({
 // ─── v3.14 — stacked branches: how a restack is applied and announced ────
 const stacks = useStacks();
 
-registerRestackHost({
-  apply: async (cwd, plan, previewed, hints, estimated) => {
-    // The apply runs in the open repo: never in another one than the plan's.
-    if (repoFolderPath.value !== cwd) throw new Error(t("stacks.dialog.repoChanged", cwd));
-    const { gitRestack } = await import("./utils/backend");
-    applyingFromPreview.value = true;
-    try {
-      const out = await runApplyFromPreview("rebase", plan.onto_ref, estimated, {
-        runRebase: () => gitRestack(cwd, plan.bottom, settings.value.defaultBranch || null, hints, previewed),
-      });
-      if (out.residualFiles.length > 0) {
-        viewMode.value = "changes";
-        wipDiffOpen.value = true;
-        await repoSelectFile(out.residualFiles[0], false);
+registerRestackHost(
+  createRestackHost({
+    currentCwd: () => repoFolderPath.value || null,
+    applyRebase: async (cwd, plan, previewed, hints, estimated) => {
+      const { gitRestack } = await import("./utils/backend");
+      applyingFromPreview.value = true;
+      try {
+        const out = await runApplyFromPreview("rebase", plan.onto_ref, estimated, {
+          runRebase: () => gitRestack(cwd, plan.bottom, settings.value.defaultBranch || null, hints, previewed),
+        });
+        if (out.residualFiles.length > 0) {
+          viewMode.value = "changes";
+          wipDiffOpen.value = true;
+          await repoSelectFile(out.residualFiles[0], false);
+        }
+        return out;
+      } finally {
+        applyingFromPreview.value = false;
       }
-      return out;
-    } finally {
-      applyingFromPreview.value = false;
-    }
-  },
-  // Never pushes by itself: the push runs only from the toast's button (D10).
-  offerPush: (after, run) => {
-    if (after.push.noLeases) {
-      showDetailToast(t("stacks.push.noLeases"), null, 10000, { key: "stack-push" });
-      return;
-    }
-    const skipped = after.push.skipped;
-    showDetailToast(
-      t("stacks.push.offer", after.push.pushable.length),
-      skipped.length ? t("stacks.push.skipped", skipped.join(", ")) : null,
-      10000,
-      {
-        key: "stack-push",
-        action: {
-          label: t("stacks.push.action"),
-          run: () => {
-            void run().then((results) => {
-              const ok = results.filter((r) => r.ok).length;
-              const failures = results.filter((r) => !r.ok).map((r) => `${r.branch}: ${r.message}`);
-              showDetailToast(t("stacks.push.done", ok, results.length), failures.join("\n") || null, failures.length ? 0 : 4000);
-            });
-          },
-        },
-      },
-    );
-  },
-  notify: (message) => showDetailToast(t("common.error"), message, 8000),
-});
+    },
+    toast: (title, detail, ms, extras) => showDetailToast(title, detail, ms, extras),
+  }),
+);
 
 /** Merge-back done: "Remove the worktree" opens the removal dialog. */
 function onMergeBackCleanup(payload: { deleteBranch: boolean }) {
@@ -4508,28 +4484,66 @@ repoWatcher.on(["head", "refs"], () => {
 // The dock "prs" badge only refreshed on repo-open and manual refresh (PR #125).
 // A ref moving is the cheapest local proxy for "a PR's state may have changed";
 // the forge call itself is throttled to once a minute inside usePrPanel.
-// v3.14 — stacks: a branch moved, was created or deleted (D14). Event-driven.
-repoWatcher.on(["head", "refs"], () => {
-  watcherRefreshQueue.schedule("stacks", async () => {
-    if (repoFolderPath.value) await stacks.refresh(repoFolderPath.value);
-  });
-});
+// ─── v3.14 — stacked branches: context and refresh triggers (D14) ──────
+//
+// Event-driven only. Nothing refreshes before the forge of the open repo is
+// known (review M-1): a refresh without it would skip GitHub's merged-PR
+// hints and offer a manual retarget on GitHub.
 
 /** The active repo's forge (`RemoteInfo.provider`), tagged with the repo it was read for. */
 const stackForge = ref<{ cwd: string; forge: string | null } | null>(null);
 
+/**
+ * Which of the repo-derived lists already belong to the open repo (review
+ * M-2). On a switch, `repoStatus` and the PR list still hold the previous
+ * repo's data until they are reloaded; until then they are passed empty, so
+ * the store never mixes repo N with repo N-1. `branches` is reset to [] by
+ * openRepo and loaded per repo, so it needs no flag.
+ */
+const stackFresh = { cwd: null as string | null, status: false, prs: false };
+
+function stacksReady(): string | null {
+  const cwd = repoFolderPath.value || null;
+  return cwd && stackForge.value?.cwd === cwd ? cwd : null;
+}
+
+function refreshStacks() {
+  const cwd = stacksReady();
+  if (cwd) void stacks.refresh(cwd);
+}
+
 function syncStackContext() {
   const cwd = repoFolderPath.value || null;
+  const fresh = stackFresh.cwd === cwd;
   stacks.setContext({
     cwd,
     forge: stackForge.value && stackForge.value.cwd === cwd ? stackForge.value.forge : null,
-    currentBranch: repoStatus.value?.branch || null,
+    currentBranch: fresh && stackFresh.status ? repoStatus.value?.branch || null : null,
     localBranches: branches.value.filter((b) => !b.isRemote).map((b) => b.name),
-    prs: prPanel.prs.value.map((pr) => ({ branch: pr.branch, base: pr.base, number: pr.number, state: pr.state })),
+    prs:
+      fresh && stackFresh.prs
+        ? prPanel.prs.value.map((pr) => ({ branch: pr.branch, base: pr.base, number: pr.number, state: pr.state }))
+        : [],
   });
 }
 
-watch([repoFolderPath, () => repoStatus.value?.branch, branches], syncStackContext, { immediate: true });
+// Synchronous, so it runs before any other watcher sees the new repo.
+watch(
+  repoFolderPath,
+  (cwd) => {
+    stackFresh.cwd = cwd || null;
+    stackFresh.status = false;
+    stackFresh.prs = false;
+  },
+  { flush: "sync", immediate: true },
+);
+
+watch(repoStatus, () => {
+  if (stackFresh.cwd === (repoFolderPath.value || null)) stackFresh.status = true;
+  syncStackContext();
+});
+
+watch([repoFolderPath, branches], syncStackContext, { immediate: true });
 
 // Repo opened: read its forge first (GitHub enables hints and the retarget), then refresh.
 watch(
@@ -4545,17 +4559,27 @@ watch(
     if (repoFolderPath.value !== cwd) return;
     stackForge.value = { cwd, forge };
     syncStackContext();
-    void stacks.refresh(cwd);
+    refreshStacks();
   },
   { immediate: true },
 );
 
-// The PR list feeds the bridge offers.
+// A branch moved, was created or deleted.
+repoWatcher.on(["head", "refs"], () => {
+  watcherRefreshQueue.schedule("stacks", async () => {
+    const cwd = stacksReady();
+    if (cwd) await stacks.refresh(cwd);
+  });
+});
+
+// The PR list feeds the bridge offers. Its reset on a repo switch counts as
+// loaded: an empty list is the new repo's until its PRs arrive.
 watch(
   () => prPanel.prs.value,
   () => {
+    if (stackFresh.cwd === (repoFolderPath.value || null)) stackFresh.prs = true;
     syncStackContext();
-    if (repoFolderPath.value) void stacks.refresh(repoFolderPath.value);
+    refreshStacks();
   },
 );
 
@@ -4564,9 +4588,7 @@ watch(
 watch(
   () => repoOperationState.value?.state ?? "clean",
   (now, before) => {
-    if ((before === "rebase" || before === "rebase_interactive") && now === "clean" && repoFolderPath.value) {
-      void stacks.refresh(repoFolderPath.value);
-    }
+    if ((before === "rebase" || before === "rebase_interactive") && now === "clean") refreshStacks();
   },
 );
 

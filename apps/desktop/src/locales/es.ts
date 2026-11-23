@@ -645,6 +645,7 @@ const es: Locale = {
       retargetFailed: "No se pudo redirigir la PR #{0} a {1}: {2}",
       retry: "Reintentar",
       retargetManual: "Redirige la pull request de {0} a {1} en {2}.",
+      retargetManualNoForge: "Redirige la pull request de {0} a {1}.",
       deleteParent: "Eliminar {0} en local",
       switchFailed: "Reapilado, pero no se pudo volver a {0}: {1}",
     },

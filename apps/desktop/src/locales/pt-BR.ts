@@ -646,6 +646,7 @@ const ptBR: Locale = {
       retargetFailed: "Não foi possível redirecionar o PR #{0} para {1}: {2}",
       retry: "Tentar novamente",
       retargetManual: "Redirecione o pull request de {0} para {1} em {2}.",
+      retargetManualNoForge: "Redirecione o pull request de {0} para {1}.",
       deleteParent: "Excluir {0} localmente",
       switchFailed: "Reempilhado, mas não foi possível voltar para {0}: {1}",
     },

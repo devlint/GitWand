@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createStacks, registerRestackHost, type StacksDeps, type RestackHost } from "../useStacks";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
+import { createStacks, preloadStacksFlow, registerRestackHost, type StacksDeps, type RestackHost } from "../useStacks";
 import type {
   StackLayerStatus,
   StackReport,
@@ -153,6 +153,9 @@ function host(over: Partial<RestackHost> = {}) {
 
 /** Let queued refreshes (scheduled after a finalization) run to the end. */
 const settle = () => new Promise((r) => setTimeout(r, 0));
+
+// The restack flow is a lazy module: tests that read the phase synchronously need it loaded.
+beforeAll(() => preloadStacksFlow());
 
 beforeEach(() => {
   registerRestackHost(null);
@@ -708,5 +711,21 @@ describe("useStacks — banner support (Task 13)", () => {
     const pending = s.startRestack("/r", "step-2");
     expect(s.flow.value).toMatchObject({ phase: "fetching", branch: "step-2" });
     await pending;
+  });
+});
+
+describe("useStacks — push offer with nothing pushable (review M-5)", () => {
+  it("still tells the host when every moved branch was skipped", async () => {
+    const h = host();
+    const { s, world } = setup();
+    world.forge = "gitlab";
+    world.report = report({ layers: stack({ "step-2": { state: "out_of_date", actionable: true } }) });
+    await s.refresh("/r");
+    await s.startRestack("/r", "step-3");
+    // A plan whose moved layers have no upstream lease at all.
+    world.next = report({ finalized: finalized({ bottom: "step-2", moved: ["step-3"] }) });
+    await s.applyRestack(0);
+    expect(s.after.value?.push).toEqual({ pushable: [], skipped: ["step-3"], noLeases: false });
+    expect(h.offerPush).toHaveBeenCalledTimes(1);
   });
 });

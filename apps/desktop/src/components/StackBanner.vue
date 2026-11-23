@@ -17,6 +17,7 @@ import { computed } from "vue";
 import { useI18n } from "../composables/useI18n";
 import { useStacks } from "../composables/useStacks";
 import { useStackActions } from "../composables/useStackActions";
+import { forgeDisplayName } from "../utils/forgeNames";
 
 const { t } = useI18n();
 const stacks = useStacks();
@@ -74,13 +75,13 @@ const retargetText = computed(() => {
       return t("stacks.after.retargeted", r.number ?? "", r.base ?? "");
     case "failed":
       return t("stacks.after.retargetFailed", r.number ?? "", r.base ?? "", r.error ?? "");
-    case "manual":
-      return t(
-        "stacks.after.retargetManual",
-        a.finalized.bottom,
-        a.finalized.new_parent ?? trunk.value,
-        stacks.context.value.forge ?? "",
-      );
+    case "manual": {
+      const forge = forgeDisplayName(stacks.context.value.forge);
+      const base = a.finalized.new_parent ?? trunk.value;
+      return forge
+        ? t("stacks.after.retargetManual", a.finalized.bottom, base, forge)
+        : t("stacks.after.retargetManualNoForge", a.finalized.bottom, base);
+    }
     default:
       return "";
   }

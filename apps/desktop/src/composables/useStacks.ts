@@ -16,6 +16,11 @@
  *
  * `createStacks(deps)` is the testable core; `useStacks()` is the
  * module-level singleton bound to the real backend.
+ *
+ * Only the core (report, context, banner, bridge offers, refresh, stack
+ * edits) is in the main chunk. Hints, the restack flow and what follows a
+ * restack live in `useStacksFlow.ts`, imported on first use; the `Stacks`
+ * methods that need it await that import.
  */
 import { computed, ref, type ComputedRef, type Ref } from "vue";
 import {
@@ -37,6 +42,7 @@ import {
 } from "../utils/backend";
 import { ghBranchPr, ghPrSetBase } from "../utils/backend-pr";
 import type { ApplyOutcome } from "./useApplyFromPreview";
+import type { StacksFlow } from "./useStacksFlow";
 import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
 
 export interface StacksDeps {
@@ -170,13 +176,10 @@ export interface Stacks {
   dismissAfter(): void;
 }
 
-/** How long a merged-PR lookup for one repo+parent is reused (D6). */
-const HINT_TTL_MS = 60_000;
-const STALE_PREVIEW = "stale preview:";
-
 const message = (e: unknown) => String((e as { message?: string })?.message ?? e);
 
-const idle = (): RestackFlow => ({
+/** The flow of a closed (or never opened) restack dialog. */
+export const idleFlow = (): RestackFlow => ({
   phase: "idle",
   cwd: null,
   branch: null,
@@ -185,13 +188,6 @@ const idle = (): RestackFlow => ({
   fetchWarning: null,
   outcome: null,
   error: null,
-});
-
-const synthesizedRefusal = (code: "fetch_failed" | "stale_preview", msg: string): RestackRefusal => ({
-  code,
-  message: msg,
-  branch: null,
-  path: null,
 });
 
 let host: RestackHost | null = null;
@@ -206,26 +202,63 @@ export function restackHost(): RestackHost | null {
   return host;
 }
 
+/**
+ * What `createStacks` shares with the lazily loaded `useStacksFlow`. The
+ * mutable fields live in `state` so both modules see the same values.
+ */
+export interface StacksCore {
+  deps: StacksDeps;
+  report: Ref<StackReport | null>;
+  flow: Ref<RestackFlow>;
+  after: Ref<AfterRestack | null>;
+  ctx: Ref<StacksContext>;
+  state: {
+    /** Hints of the last refresh, reused by the plan and the run. */
+    lastHints: MergedParentHint[];
+    /** The plan of the last applied restack: its `remote_sha`s are the push leases (D10). */
+    lastPlan: { cwd: string; plan: RestackPlan } | null;
+    /** Invalidates an in-progress `startRestack` / `applyRestack` on close. */
+    flowGen: number;
+  };
+  layerOf(branch: string): StackLayerStatus | null;
+  refresh(cwd: string): Promise<void>;
+  stackOn(cwd: string, branch: string, parent: string): Promise<void>;
+}
+
+// ─── The lazily loaded flow module (Task 13 review, I-2) ──
+
+let flowModule: typeof import("./useStacksFlow") | null = null;
+
+/** Loads the restack flow module; once loaded, flow calls start synchronously. */
+export async function preloadStacksFlow(): Promise<void> {
+  flowModule ??= await import("./useStacksFlow");
+}
+
 export function createStacks(deps: StacksDeps): Stacks {
   const report = ref<StackReport | null>(null);
-  const flow = ref<RestackFlow>(idle());
+  const flow = ref<RestackFlow>(idleFlow());
   const after = ref<AfterRestack | null>(null);
   const ctx = ref<StacksContext>({ cwd: null, forge: null, currentBranch: null, localBranches: [], prs: [] });
   /** The layer `later()` hid, as it was then. */
   const hidden = ref<{ branch: string; state: string; parent_tip: string | null } | null>(null);
   /** Bumped by `dismissBridge`: `deps.dismissed` is not reactive. */
   const dismissRev = ref(0);
-
-  /** `cwd|parent` → the lookup's result (null: no merged PR, or it failed). */
-  const hintCache = new Map<string, { at: number; hint: MergedParentHint | null }>();
-  /** Hints of the last refresh, reused by the plan and the run. */
-  let lastHints: MergedParentHint[] = [];
-  /** The plan of the last applied restack: its `remote_sha`s are the push leases (D10). */
-  let lastPlan: { cwd: string; plan: RestackPlan } | null = null;
+  const state: StacksCore["state"] = { lastHints: [], lastPlan: null, flowGen: 0 };
   /** Per cwd, the last finalization handled: an identical one is not handled twice in a row. */
   const lastFinalized = new Map<string, string>();
-  /** Invalidates an in-progress `startRestack` / `applyRestack` on close. */
-  let flowGen = 0;
+
+  const core: StacksCore = { deps, report, flow, after, ctx, state, layerOf, refresh, stackOn };
+  let flowApi: StacksFlow | null = null;
+
+  /** Runs `fn` on this store's flow API, loading the module first if needed. */
+  function withFlow<T>(fn: (f: StacksFlow) => Promise<T>): Promise<T> {
+    if (!flowApi && flowModule) flowApi = flowModule.createStacksFlow(core);
+    if (flowApi) return fn(flowApi);
+    return preloadStacksFlow().then(() => {
+      flowApi ??= flowModule!.createStacksFlow(core);
+      return fn(flowApi);
+    });
+  }
 
   // ─── Layers ─────────────────────────────────────────────
 
@@ -331,34 +364,17 @@ export function createStacks(deps: StacksDeps): Stacks {
     if (next.cwd !== ctx.value.cwd) {
       report.value = null;
       hidden.value = null;
-      lastHints = [];
+      state.lastHints = [];
     }
     ctx.value = next;
   }
 
   // ─── Refresh ────────────────────────────────────────────
 
-  async function hintsFor(cwd: string, parents: string[]): Promise<MergedParentHint[]> {
-    if (deps.forge() !== "github") return [];
-    const out: MergedParentHint[] = [];
-    for (const parent of parents) {
-      const key = `${cwd}|${parent}`;
-      const cached = hintCache.get(key);
-      let hint: MergedParentHint | null;
-      if (cached && deps.now() - cached.at < HINT_TTL_MS) {
-        hint = cached.hint;
-      } else {
-        try {
-          const pr = await deps.branchPr(cwd, parent, "merged");
-          hint = pr ? { branch: parent, number: pr.number, head_ref_oid: pr.head_ref_oid } : null;
-        } catch {
-          hint = null; // a hint, never a requirement: git's own signals still apply
-        }
-        hintCache.set(key, { at: deps.now(), hint });
-      }
-      if (hint) out.push(hint);
-    }
-    return out;
+  /** Merged-parent hints (D6): GitHub only, so other forges never load the flow module. */
+  function hintsFor(cwd: string, parents: string[]): Promise<MergedParentHint[]> {
+    if (deps.forge() !== "github" || parents.length === 0) return Promise.resolve([]);
+    return withFlow((f) => f.hintsFor(cwd, parents));
   }
 
   /** Distinct stack parents other than the trunk. */
@@ -377,7 +393,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     // restack — the refresh scheduled for it carries the hints.
     if (!r.finalized) {
       const fresh = parentsIn(r).filter((p) => !known.includes(p));
-      const extra = fresh.length ? await hintsFor(cwd, fresh) : [];
+      const extra = await hintsFor(cwd, fresh);
       if (extra.length) {
         hints = [...hints, ...extra];
         r = await deps.status(cwd, deps.trunkSetting(), hints);
@@ -387,7 +403,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     // in it is handled all the same (the backend already cleared its record).
     if (ctx.value.cwd === null || ctx.value.cwd === cwd) {
       report.value = r;
-      lastHints = hints;
+      state.lastHints = hints;
     }
     if (!r.finalized) {
       lastFinalized.delete(cwd);
@@ -399,7 +415,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     // clear its record: do not retarget or offer again, and stop the chain.
     if (lastFinalized.get(cwd) === key) return;
     lastFinalized.set(cwd, key);
-    await onFinalized(cwd, f, r.trunk);
+    await withFlow((fl) => fl.onFinalized(cwd, f, r.trunk));
     // The backend settles one record per call: look for the next one.
     void refresh(cwd);
   }
@@ -433,191 +449,15 @@ export function createStacks(deps: StacksDeps): Stacks {
     return run;
   }
 
-  // ─── After a restack ────────────────────────────────────
-
-  function pushOffer(cwd: string, fin: FinalizedRestack): AfterRestack["push"] {
-    const mem = lastPlan;
-    if (!mem || mem.cwd !== cwd || mem.plan.bottom !== fin.bottom) {
-      return { pushable: [], skipped: [], noLeases: true };
-    }
-    lastPlan = null;
-    const pushable: { branch: string; lease: string }[] = [];
-    const skipped: string[] = [];
-    for (const b of fin.moved) {
-      const lease = mem.plan.moving.find((m) => m.branch === b)?.remote_sha ?? null;
-      if (lease) pushable.push({ branch: b, lease });
-      else skipped.push(b);
-    }
-    return { pushable, skipped, noLeases: false };
-  }
-
-  async function retarget(cwd: string, fin: FinalizedRestack, trunk: string | null): Promise<AfterRestack["retarget"]> {
-    if (fin.moment !== "parent_merged") return { state: "none", number: null, base: null, error: null };
-    if (deps.forge() !== "github") return { state: "manual", number: null, base: null, error: null };
-    const base = fin.new_parent ?? trunk;
-    let number: number | null = null;
-    try {
-      const pr = await deps.branchPr(cwd, fin.bottom, "open");
-      if (!pr) return { state: "none", number: null, base: null, error: null };
-      number = pr.number;
-      if (!base) throw new Error(`no base to retarget #${pr.number} onto`);
-      await deps.setPrBase(cwd, pr.number, base);
-      return { state: "done", number, base, error: null };
-    } catch (e) {
-      return { state: "failed", number, base, error: message(e) };
-    }
-  }
-
-  async function onFinalized(cwd: string, fin: FinalizedRestack, trunk: string | null): Promise<void> {
-    const push = pushOffer(cwd, fin);
-    // D19: the retarget comes first, then the push offer.
-    const rt = await retarget(cwd, fin, trunk);
-    after.value = { cwd, finalized: fin, retarget: rt, deleteOffer: fin.merged_parent, push };
-    if (push.pushable.length > 0 || push.noLeases) {
-      const offered = after.value;
-      host?.offerPush(offered, () => pushFor(offered));
-    }
-  }
-
-  async function retryRetarget(): Promise<void> {
-    const a = after.value;
-    if (!a || a.retarget.state !== "failed") return;
-    const trunk = ctx.value.cwd === a.cwd ? (report.value?.trunk ?? null) : null;
-    const rt = await retarget(a.cwd, a.finalized, trunk ?? deps.trunkSetting());
-    if (after.value === a) after.value = { ...a, retarget: rt };
-  }
-
-  /** Force-deletes the merged parent (`-D`: it was squash-merged, git cannot tell). Throws on failure. */
-  async function deleteMergedParent(): Promise<void> {
-    const a = after.value;
-    if (!a?.deleteOffer) return;
-    const cwd = a.cwd;
-    await deps.deleteBranch(cwd, a.deleteOffer);
-    if (after.value === a) after.value = { ...a, deleteOffer: null };
-    await refresh(cwd);
-  }
-
-  function pushMoved(): Promise<PushResult[]> {
-    const a = after.value;
-    return a ? pushFor(a) : Promise.resolve([]);
-  }
-
-  async function pushFor(a: AfterRestack): Promise<PushResult[]> {
-    const cwd = a.cwd;
-    const results: PushResult[] = [];
-    for (const { branch, lease } of a.push.pushable) {
-      try {
-        const r = await deps.pushBranch(cwd, branch, lease);
-        results.push({ branch, ok: r.success, message: r.message });
-      } catch (e) {
-        results.push({ branch, ok: false, message: message(e) });
-      }
-    }
-    return results;
-  }
-
-  // ─── Restack flow ───────────────────────────────────────
-
-  async function startRestack(cwd: string, branch: string): Promise<void> {
-    const gen = ++flowGen;
-    flow.value = { ...idle(), phase: "fetching", cwd, branch };
-    const merged = layerOf(branch)?.state === "parent_merged";
-    let fetched: { success: boolean; message: string };
-    try {
-      fetched = await deps.fetch(cwd);
-    } catch (e) {
-      fetched = { success: false, message: message(e) };
-    }
-    if (gen !== flowGen) return;
-    if (!fetched.success) {
-      // D18: moment 2 restacks onto the remote trunk, which must be fresh.
-      if (merged) {
-        flow.value = { ...flow.value, phase: "refused", refusal: synthesizedRefusal("fetch_failed", fetched.message) };
-        return;
-      }
-      flow.value = { ...flow.value, fetchWarning: fetched.message };
-    }
-    flow.value = { ...flow.value, phase: "planning" };
-    try {
-      const plan = await deps.plan(cwd, branch, deps.trunkSetting(), lastHints);
-      if (gen !== flowGen) return;
-      // D18, fail closed: the cached report may not have known it was moment 2.
-      if (!fetched.success && plan.moment === "parent_merged") {
-        flow.value = {
-          ...flow.value,
-          phase: "refused",
-          plan,
-          refusal: synthesizedRefusal("fetch_failed", fetched.message),
-        };
-        return;
-      }
-      flow.value = plan.refusal
-        ? { ...flow.value, phase: "refused", plan, refusal: plan.refusal }
-        : { ...flow.value, phase: "preview", plan };
-    } catch (e) {
-      // "restack X first", "X is merged: restack Y instead", a record still
-      // being finalized, a missing parent / lost base: plain errors.
-      if (gen !== flowGen) return;
-      flow.value = { ...flow.value, phase: "error", error: message(e) };
-    }
-  }
-
-  async function applyRestack(estimated: number): Promise<void> {
-    const f = flow.value;
-    if (f.phase !== "preview" || !f.plan || !f.cwd) return;
-    const { cwd, plan } = f;
-    if (!host) {
-      flow.value = { ...f, phase: "error", error: "No restack host registered: the restack cannot be applied." };
-      return;
-    }
-    const gen = flowGen;
-    const previewed: PreviewedRestack = {
-      onto_sha: plan.onto_sha,
-      upstream_sha: plan.upstream_sha,
-      top_sha: plan.top_sha,
-      moving: plan.moving.map((m) => m.branch),
-    };
-    // Kept before the run: the finalization may land in any later refresh.
-    lastPlan = { cwd, plan };
-    flow.value = { ...f, phase: "applying" };
-    let outcome: ApplyOutcome;
-    try {
-      outcome = await host.apply(cwd, plan, previewed, lastHints, estimated);
-    } catch (e) {
-      if (gen === flowGen) flow.value = { ...flow.value, phase: "error", error: message(e) };
-      return;
-    }
-    if (gen !== flowGen) {
-      // Closed meanwhile: nothing to show, but a clean run must still be
-      // finalized, without waiting for the watcher.
-      if (outcome.stoppedReason === "clean") await refresh(cwd);
-      return;
-    }
-    switch (outcome.stoppedReason) {
-      case "clean":
-        flow.value = { ...flow.value, phase: "done", outcome };
-        await refresh(cwd);
-        return;
-      case "op-failed": {
-        const err = (outcome.operationError ?? "").trim();
-        flow.value = err.startsWith(STALE_PREVIEW)
-          ? { ...flow.value, phase: "refused", outcome, refusal: synthesizedRefusal("stale_preview", err) }
-          : { ...flow.value, phase: "error", outcome, error: err || "restack failed" };
-        return;
-      }
-      default:
-        // residual / loop-bound / resolve-failed: the rebase banner takes over.
-        flow.value = { ...flow.value, phase: "residual", outcome };
-    }
-  }
+  // ─── Small synchronous actions ──────────────────────────
 
   function dismissAfter(): void {
     after.value = null;
   }
 
   function closeRestack(): void {
-    flowGen++;
-    flow.value = idle();
+    state.flowGen++;
+    flow.value = idleFlow();
   }
 
   // ─── Stack edits ────────────────────────────────────────
@@ -630,10 +470,6 @@ export function createStacks(deps: StacksDeps): Stacks {
   async function unstack(cwd: string, branch: string): Promise<void> {
     await deps.unset(cwd, branch);
     await refresh(cwd);
-  }
-
-  function acceptBridge(cwd: string, offer: BridgeOffer): Promise<void> {
-    return stackOn(cwd, offer.branch, offer.parent);
   }
 
   function dismissBridge(cwd: string, branch: string): void {
@@ -657,15 +493,15 @@ export function createStacks(deps: StacksDeps): Stacks {
     stackOnCandidates,
     stackOn,
     unstack,
-    acceptBridge,
+    acceptBridge: (cwd, offer) => withFlow((f) => f.acceptBridge(cwd, offer)),
     dismissBridge,
-    startRestack,
-    applyRestack,
+    startRestack: (cwd, branch) => withFlow((f) => f.startRestack(cwd, branch)),
+    applyRestack: (estimated) => withFlow((f) => f.applyRestack(estimated)),
     closeRestack,
     later,
-    retryRetarget,
-    deleteMergedParent,
-    pushMoved,
+    retryRetarget: () => withFlow((f) => f.retryRetarget()),
+    deleteMergedParent: () => withFlow((f) => f.deleteMergedParent()),
+    pushMoved: () => withFlow((f) => f.pushMoved()),
     dismissAfter,
   };
 }
