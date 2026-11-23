@@ -6,10 +6,6 @@
 //! record, kept on the stack's top). The key is `gitwandStackBase`, never
 //! `gitwandBase`, which the worktree service owns.
 
-// Commands and restack code (later tasks of the plan) are the consumers; until
-// they land, most of this module is only exercised by its tests.
-#![allow(dead_code)]
-
 use super::{Moment, PendingRestack, StackMeta};
 use crate::git::git_cmd;
 use std::collections::BTreeMap;
@@ -45,11 +41,13 @@ fn key(branch: &str, var: &str) -> String {
 /// `git check-ref-format --branch` rejects.
 pub(crate) fn validate_branch_name(name: &str) -> Result<(), String> {
     let invalid = || format!("invalid branch name: {name}");
-    if name.is_empty() || name.starts_with('-') {
+    // `@{-1}` / `@{u}` would expand against whatever repo the cwd is in.
+    if name.is_empty() || name.starts_with('-') || name.starts_with("@{") {
         return Err(invalid());
     }
     let ok = git_cmd()
         .args(["check-ref-format", "--branch", name])
+        .current_dir(std::env::temp_dir())
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
@@ -73,6 +71,8 @@ fn moment_str(m: Moment) -> &'static str {
 
 impl PendingRestack {
     /// `<moment> <onto> <old_base> <bottom> <new_parent|-> <original>`
+    // Consumed by Task 5 (run, pending record) of the stacked-branches plan.
+    #[allow(dead_code)]
     pub fn to_config(&self) -> String {
         format!(
             "{} {} {} {} {} {}",
@@ -85,6 +85,8 @@ impl PendingRestack {
         )
     }
 
+    // Consumed by Task 5 (run, pending record) of the stacked-branches plan.
+    #[allow(dead_code)]
     pub fn parse(s: &str) -> Option<Self> {
         let parts: Vec<&str> = s.split(' ').collect();
         let [moment, onto, old_base, bottom, new_parent, original] = parts.as_slice() else {
@@ -111,6 +113,8 @@ impl PendingRestack {
 
 /// Every declared layer, keyed by branch name. Branches lacking a
 /// `gitwandParent` are not layers and are skipped.
+// Consumed by Task 3 (detection) of the stacked-branches plan.
+#[allow(dead_code)]
 pub(crate) fn read_all(repo: &Path) -> Result<BTreeMap<String, StackMeta>, String> {
     let out = run(
         repo,
@@ -184,6 +188,8 @@ fn local_branch_exists(repo: &Path, name: &str) -> bool {
 
 /// The configured trunk, or the repo's detected one; `None` when there is
 /// none (never the current branch). A leading `origin/` is stripped.
+// Consumed by Task 3 (detection) of the stacked-branches plan.
+#[allow(dead_code)]
 pub(crate) fn trunk(repo: &Path, configured: Option<&str>) -> Option<String> {
     let cwd = repo.to_str()?;
     let name = crate::git::cmd::resolve_default_branch_strict(cwd, configured)?;
@@ -191,6 +197,8 @@ pub(crate) fn trunk(repo: &Path, configured: Option<&str>) -> Option<String> {
 }
 
 /// Declares `parent` as the layer below `layer` and records the merge-base.
+// Consumed by Task 6 (Tauri commands) of the stacked-branches plan.
+#[allow(dead_code)]
 pub(crate) fn set_parent(
     repo: &Path,
     trunk_name: Option<&str>,
@@ -237,21 +245,35 @@ pub(crate) fn set_parent(
         }
         cur = &m.parent;
     }
-    let base = run_ok(
+    let mb = run(
         repo,
         &[
             "merge-base",
             &format!("refs/heads/{layer}"),
             &format!("refs/heads/{parent}"),
         ],
-    )
-    .ok()
-    .filter(|s| !s.is_empty());
+    )?;
+    let base = if mb.status.success() {
+        Some(String::from_utf8_lossy(&mb.stdout).trim().to_string()).filter(|s| !s.is_empty())
+    } else if mb.status.code() == Some(1) {
+        None // no common ancestor
+    } else {
+        return Err(String::from_utf8_lossy(&mb.stderr).trim().to_string());
+    };
 
-    run_ok(repo, &["config", "--local", &key(layer, PARENT), parent])?;
+    // Base first, parent last: a layer without a parent is not declared, and
+    // if the parent write fails the previous base is put back.
+    let previous_base = all.get(layer).and_then(|m| m.base.clone());
     match &base {
         Some(sha) => set_base(repo, layer, sha)?,
         None => unset_key(repo, &key(layer, BASE))?,
+    }
+    if let Err(e) = run_ok(repo, &["config", "--local", &key(layer, PARENT), parent]) {
+        let _ = match &previous_base {
+            Some(sha) => set_base(repo, layer, sha),
+            None => unset_key(repo, &key(layer, BASE)),
+        };
+        return Err(e);
     }
     let pending = read_all(repo)?.remove(layer).and_then(|m| m.pending);
     Ok(StackMeta {
@@ -273,6 +295,8 @@ fn unset_key(repo: &Path, k: &str) -> Result<(), String> {
 }
 
 /// Removes the three stack keys of `layer`; absent keys are fine.
+// Consumed by Task 6 (Tauri commands) of the stacked-branches plan.
+#[allow(dead_code)]
 pub(crate) fn unset(repo: &Path, layer: &str) -> Result<(), String> {
     validate_branch_name(layer)?;
     for var in [PARENT, BASE, RESTACK] {
@@ -281,11 +305,15 @@ pub(crate) fn unset(repo: &Path, layer: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Consumed by Task 3 (detection) of the stacked-branches plan.
+#[allow(dead_code)]
 pub(crate) fn set_base(repo: &Path, layer: &str, sha: &str) -> Result<(), String> {
     validate_branch_name(layer)?;
     run_ok(repo, &["config", "--local", &key(layer, BASE), sha]).map(|_| ())
 }
 
+// Consumed by Task 5 (run, pending record) of the stacked-branches plan.
+#[allow(dead_code)]
 pub(crate) fn set_pending(repo: &Path, top: &str, p: &PendingRestack) -> Result<(), String> {
     validate_branch_name(top)?;
     run_ok(
@@ -295,6 +323,8 @@ pub(crate) fn set_pending(repo: &Path, top: &str, p: &PendingRestack) -> Result<
     .map(|_| ())
 }
 
+// Consumed by Task 5 (run, pending record) of the stacked-branches plan.
+#[allow(dead_code)]
 pub(crate) fn clear_pending(repo: &Path, top: &str) -> Result<(), String> {
     validate_branch_name(top)?;
     unset_key(repo, &key(top, RESTACK))
@@ -355,9 +385,82 @@ mod tests {
     #[test]
     fn re_declaring_the_same_child_is_allowed() {
         let r = TempRepo::new();
+        let s1 = two_layers(&r);
+        let first = set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        let second = set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        assert_eq!(first, second);
+        assert_eq!(second.parent, "step-1");
+        assert_eq!(second.base.as_deref(), Some(s1.as_str()));
+        assert_eq!(
+            r.git(&["config", "--get", "branch.step-2.gitwandParent"]),
+            "step-1"
+        );
+        assert_eq!(
+            r.git(&["config", "--get", "branch.step-2.gitwandStackBase"]),
+            s1
+        );
+    }
+
+    #[test]
+    fn re_declaring_keeps_a_pending_record() {
+        // set_parent never touches the restack key: a pending record survives
+        // a re-declaration and is reported back.
+        let r = TempRepo::new();
         two_layers(&r);
         set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        let p = PendingRestack {
+            moment: Moment::ParentMoved,
+            onto: "a".repeat(40),
+            old_base: "b".repeat(40),
+            bottom: "step-2".into(),
+            new_parent: None,
+            original: "step-1".into(),
+        };
+        set_pending(&r.path, "step-2", &p).unwrap();
+        let m = set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        assert_eq!(m.pending, Some(p.clone()));
+        assert_eq!(read_all(&r.path).unwrap()["step-2"].pending, Some(p));
+    }
+
+    #[test]
+    fn an_unknown_layer_is_refused() {
+        let r = TempRepo::new();
+        r.git(&["branch", "A"]);
+        assert_eq!(
+            set_parent(&r.path, Some("main"), "ghost", "A").unwrap_err(),
+            "Unknown local branch: ghost"
+        );
+        assert!(read_all(&r.path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_three_link_cycle_is_refused() {
+        let r = TempRepo::new();
+        for b in ["A", "B", "C"] {
+            r.git(&["branch", b]);
+        }
+        set_parent(&r.path, Some("main"), "A", "B").unwrap();
+        set_parent(&r.path, Some("main"), "B", "C").unwrap();
+        assert_eq!(
+            set_parent(&r.path, Some("main"), "C", "A").unwrap_err(),
+            "Stacking C on A would create a cycle."
+        );
+        assert!(!read_all(&r.path).unwrap().contains_key("C"));
+    }
+
+    #[test]
+    fn unrelated_histories_have_no_base_and_drop_a_stale_one() {
+        let r = TempRepo::new();
+        two_layers(&r);
         set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        r.git(&["branch", "other", "main"]);
+        r.git(&["checkout", "-q", "--orphan", "island"]);
+        r.git(&["rm", "-rfq", "."]);
+        r.commit("z.txt", "z\n", "island");
+        r.git(&["config", "branch.island.gitwandStackBase", &"d".repeat(40)]);
+        let m = set_parent(&r.path, Some("main"), "island", "other").unwrap();
+        assert_eq!(m.base, None);
+        assert!(!config_is_set(&r, "branch.island.gitwandStackBase"));
     }
 
     #[test]
@@ -529,5 +632,11 @@ mod tests {
         );
         assert!(validate_branch_name("bad..name").is_err());
         assert!(validate_branch_name("feat/ok.1").is_ok());
+        // `@{-1}` / `@{u}` expand against the cwd's repo: never accepted
+        assert_eq!(
+            validate_branch_name("@{-1}").unwrap_err(),
+            "invalid branch name: @{-1}"
+        );
+        assert!(validate_branch_name("@{u}").is_err());
     }
 }
