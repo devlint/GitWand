@@ -284,8 +284,8 @@ export function createStacks(deps: StacksDeps): Stacks {
       key: string;
       finalized: FinalizedRestack;
       trunk: string | null;
-      /** Its push offer, taken on the first attempt (null: not reached). */
-      push: AfterRestack["push"] | null;
+      /** The plan captured when it was first seen: its push leases. */
+      plan: RestackPlan | null;
       attempts: number;
     }
   >();
@@ -472,39 +472,42 @@ export function createStacks(deps: StacksDeps): Stacks {
     // The backend clears a record as it reports it finalized, so a report
     // never carries a finalization twice: one whose handling failed is
     // retried from memory (wave 3, item 7), at most MAX_ATTEMPTS times in all
-    // (wave 4, M3), always with the push offer taken on its first attempt.
-    const kept = unhandled.get(cwd) ?? null;
+    // (wave 4, M3), always with the plan captured when it was first seen,
+    // before anything that can fail (wave 5, item 4).
+    let kept = unhandled.get(cwd) ?? null;
     const f = r.finalized ?? kept?.finalized ?? null;
     if (!f) {
       lastFinalized.delete(cwd);
       return;
     }
     const key = JSON.stringify([f.moment, f.bottom, f.moved]);
-    const same = kept?.key === key ? kept : null;
-    const trunk = same ? same.trunk : r.trunk;
+    if (kept && kept.key !== key) {
+      // A newer finalization replaces the kept one: its offer is lost (wave 5, item 3).
+      notify(t("stacks.after.offersLost", kept.finalized.bottom));
+      unhandled.delete(cwd);
+      kept = null;
+    }
+    const trunk = kept ? kept.trunk : r.trunk;
     // The same finalization twice in a row would be a backend that failed to
     // clear its record: do not retarget or offer again, and stop the chain.
     if (lastFinalized.get(cwd) === key) {
       unhandled.delete(cwd);
       return;
     }
-    let push = same?.push ?? null;
+    const plan = kept ? kept.plan : takePlan(cwd, f);
     try {
-      await withFlow(async (fl) => {
-        push ??= fl.pushOfferFor(cwd, f);
-        await fl.onFinalized(cwd, f, trunk, push);
-      });
+      await withFlow((fl) => fl.onFinalized(cwd, f, trunk, fl.pushOfferFor(plan, f)));
     } catch (e) {
       // The status worked: a failure handling what followed the restack is
       // not a status error (wave 2, item 2). The report stays; the host says
       // what failed.
-      const attempts = (same?.attempts ?? 0) + 1;
+      const attempts = (kept?.attempts ?? 0) + 1;
       if (attempts >= MAX_ATTEMPTS) {
         unhandled.delete(cwd);
         lastFinalized.set(cwd, key);
         notify(t("stacks.after.offersLost", f.bottom));
       } else {
-        unhandled.set(cwd, { key, finalized: f, trunk, push, attempts });
+        unhandled.set(cwd, { key, finalized: f, trunk, plan, attempts });
         notify(message(e));
       }
       return;
@@ -513,6 +516,14 @@ export function createStacks(deps: StacksDeps): Stacks {
     lastFinalized.set(cwd, key);
     // The backend settles one record per call: look for the next one.
     void refresh(cwd);
+  }
+
+  /** The plan kept when `f`'s restack was applied (consumed), or null (D10). */
+  function takePlan(cwd: string, f: FinalizedRestack): RestackPlan | null {
+    const mem = state.lastPlan;
+    if (!mem || mem.cwd !== cwd || mem.plan.bottom !== f.bottom) return null;
+    state.lastPlan = null;
+    return mem.plan;
   }
 
   function notify(m: string): void {
@@ -601,7 +612,13 @@ export function createStacks(deps: StacksDeps): Stacks {
     acceptBridge: (cwd, offer) => withFlow((f) => f.acceptBridge(cwd, offer)),
     dismissBridge,
     startRestack: (cwd, branch) => withFlow((f) => f.startRestack(cwd, branch)),
-    applyRestack: (estimated) => withFlow((f) => f.applyRestack(estimated)),
+    applyRestack: (estimated) => {
+      // Kept before the module load and the run: the finalization may land
+      // in any later refresh, and its leases must not depend on the load.
+      const f = flow.value;
+      if (f.phase === "preview" && f.plan && f.cwd) state.lastPlan = { cwd: f.cwd, plan: f.plan };
+      return withFlow((fl) => fl.applyRestack(estimated));
+    },
     closeRestack,
     later,
     retryRetarget: () => withFlow((f) => f.retryRetarget()),

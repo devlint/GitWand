@@ -779,10 +779,30 @@ describe("useStacks — review round 1", () => {
       await settle();
     }
     expect(offerPush).toHaveBeenCalledTimes(3);
-    const lost = (h.notify as ReturnType<typeof vi.fn>).mock.calls.filter(([m]) => String(m).startsWith("GitWand could not finish"));
-    expect(lost).toEqual([
-      ["GitWand could not finish what follows the restack of step-2 (retarget, push and delete offers). Do them by hand."],
-    ]);
+    const lost = (h.notify as ReturnType<typeof vi.fn>).mock.calls.filter(([m]) => String(m).startsWith("The push offer"));
+    expect(lost).toEqual([["The push offer for step-2 could not be shown."]]);
+  });
+
+  it("a newer finalization replacing a kept one says the kept one's offer was lost, once (wave 5, item 3)", async () => {
+    const offerPush = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("toast failed");
+      })
+      .mockImplementation(() => {});
+    const h = host({ offerPush });
+    const { s, world } = setup();
+    world.next = report({ finalized: finalized() });
+    await s.refresh("/r"); // step-2's handling fails: kept
+    world.next = report({ finalized: finalized({ bottom: "step-3", moved: ["step-3"] }) });
+    await s.refresh("/r");
+    await settle();
+    await s.refresh("/r");
+    await settle();
+    const lost = (h.notify as ReturnType<typeof vi.fn>).mock.calls.filter(([m]) => String(m).startsWith("The push offer"));
+    expect(lost).toEqual([["The push offer for step-2 could not be shown."]]);
+    expect(offerPush).toHaveBeenCalledTimes(2);
+    expect(s.after.value?.finalized.bottom).toBe("step-3");
   });
 
   it("a retried finalization offers the leases of its own plan, never a later plan's (wave 4, M3)", async () => {

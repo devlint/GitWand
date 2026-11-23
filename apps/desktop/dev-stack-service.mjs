@@ -904,15 +904,13 @@ function parentMerged(repo, l, hints, trunkName) {
   // find the parent's commits below `onto` or merged into it, onto a stacked
   // P' and onto origin/<trunk> for a forge hint (a fallback detection already
   // probed origin/<trunk>). Parent commits that cannot be named → no_old_base.
-  let upstream = null;
-  for (const candidate of [l.base, honoured?.head_ref_oid ?? null]) {
-    if (candidate === null || candidate === undefined) continue;
-    const layerRef = `refs/heads/${l.branch}`;
-    if (commitExists(repo, candidate) && isAncestor(repo, candidate, layerRef)) {
-      upstream = candidate;
-      break;
-    }
-  }
+  // The merged PR's head, when it is known and below the layer (D20).
+  const layerRef = `refs/heads/${l.branch}`;
+  const h = honoured?.head_ref_oid ?? null;
+  const verifiedHead = h !== null && commitExists(repo, h) && isAncestor(repo, h, layerRef) ? h : null;
+  // The old parent tip: the recorded base when below the layer, else that head.
+  const upstream =
+    l.base !== null && commitExists(repo, l.base) && isAncestor(repo, l.base, layerRef) ? l.base : verifiedHead;
   let mergedWorkMissing = false;
   let parentCommitsUnknown = false;
   if (ontoSha !== null) {
@@ -921,11 +919,8 @@ function parentMerged(repo, l, hints, trunkName) {
       mergedWorkMissing = !(commitExists(repo, oid) && isAncestor(repo, oid, ontoSha));
     } else if (newParent !== null || honoured) {
       const base = l.base !== null && commitExists(repo, l.base) ? l.base : null;
-      // Wave 4 M1: base (or the parent's tip), then a verified PR head (D20),
-      // then the plan's upstream.
-      const h = honoured?.head_ref_oid ?? null;
-      const head = h !== null && commitExists(repo, h) && isAncestor(repo, h, `refs/heads/${l.branch}`) ? h : null;
-      const probe = mergedProbe(repo, base, l.parent_tip) ?? head ?? upstream;
+      // Wave 4 M1, wave 5: base (or the parent's tip), then the verified head.
+      const probe = mergedProbe(repo, base, l.parent_tip) ?? verifiedHead;
       if (probe === null) parentCommitsUnknown = true;
       else mergedWorkMissing = !(isAncestor(repo, probe, ontoSha) || mergedSignal(repo, ontoSha, probe) !== null);
     }

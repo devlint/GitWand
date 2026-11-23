@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { StacksDeps } from "../useStacks";
-import type { StackReport } from "../../utils/backend";
+import type { FinalizedRestack, RestackPlan, StackReport } from "../../utils/backend";
 
 const report = (over: Partial<StackReport> = {}): StackReport => ({
   trunk: "main",
@@ -96,5 +96,64 @@ describe("useStacks — the flow module not loaded yet (T13)", () => {
     expect(d.status).toHaveBeenCalledWith("/r", "main", []);
     expect(s.report.value?.layers).toHaveLength(1);
     expect(s.statusError.value).toBeNull();
+  });
+
+  it("a retry offers the leases captured when the finalization was first seen, even after a failed load (wave 5, item 4)", async () => {
+    let failing = true;
+    vi.doMock("../useStacksFlow", async (importOriginal) => {
+      if (failing) throw new Error("chunk load failed");
+      return importOriginal();
+    });
+    const { createStacks, registerRestackHost } = await import("../useStacks");
+    const offerPush = vi.fn();
+    registerRestackHost({ apply: vi.fn(async () => ({ stoppedReason: "residual" }) as never), offerPush, notify: vi.fn() });
+    const planOf = (lease: string): RestackPlan => ({
+      moment: "parent_moved",
+      bottom: "step-2",
+      parent: "step-1",
+      onto_ref: "step-1",
+      onto_sha: "o",
+      upstream_sha: "u",
+      top: "step-2",
+      top_sha: "t",
+      moving: [{ branch: "step-2", in_stack: true, upstream: "origin/step-2", remote_sha: lease, push_block: null }],
+      new_parent: null,
+      refusal: null,
+    });
+    const fin: FinalizedRestack = {
+      moment: "parent_moved",
+      bottom: "step-2",
+      merged_parent: null,
+      new_parent: null,
+      moved: ["step-2"],
+      switched_back_to: null,
+      switch_error: null,
+      delete_offer: null,
+    };
+    let next: StackReport | null = null;
+    const d = deps({
+      forge: () => "gitlab",
+      status: vi.fn(async () => {
+        const r = next ?? report();
+        next = null;
+        return r;
+      }),
+    });
+    const s = createStacks(d);
+    s.setContext(ctx);
+    // Plan A is applied (the run's own module load fails, the plan is kept).
+    s.flow.value = { ...s.flow.value, phase: "preview", cwd: "/r", branch: "step-2", plan: planOf("aaa") };
+    await s.applyRestack(0).catch(() => {});
+    // Its finalization: the first handling fails on the module load.
+    next = report({ finalized: fin });
+    await s.refresh("/r");
+    expect(offerPush).not.toHaveBeenCalled();
+    // A later plan B is applied before the retry.
+    s.flow.value = { ...s.flow.value, phase: "preview", plan: planOf("zzz") };
+    await s.applyRestack(0).catch(() => {});
+    failing = false;
+    await s.refresh("/r");
+    expect(offerPush).toHaveBeenCalledTimes(1);
+    expect(offerPush.mock.calls[0][0].push.pushable).toEqual([{ branch: "step-2", lease: "aaa" }]);
   });
 });

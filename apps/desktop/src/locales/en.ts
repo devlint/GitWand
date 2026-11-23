@@ -662,7 +662,7 @@ const en = {
       retargetManualNoForge: "Retarget the pull request of {0} to {1}.",
       deleteParent: "Delete local {0}",
       switchFailed: "Restacked, but could not switch back to {0}: {1}",
-      offersLost: "GitWand could not finish what follows the restack of {0} (retarget, push and delete offers). Do them by hand.",
+      offersLost: "The push offer for {0} could not be shown.",
     },
     push: {
       offer: "{0} restacked branches can be pushed.",

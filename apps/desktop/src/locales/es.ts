@@ -650,7 +650,7 @@ const es: Locale = {
       retargetManualNoForge: "Redirige la pull request de {0} a {1}.",
       deleteParent: "Eliminar {0} en local",
       switchFailed: "Reapilado, pero no se pudo volver a {0}: {1}",
-      offersLost: "GitWand no pudo terminar lo que sigue al reapilado de {0} (redirección del PR, ofertas de push y de borrado). Hazlo a mano.",
+      offersLost: "No se pudo mostrar la oferta de push de {0}.",
     },
     push: {
       offer: "Se pueden enviar {0} ramas reapiladas.",

@@ -651,7 +651,7 @@ const ptBR: Locale = {
       retargetManualNoForge: "Redirecione o pull request de {0} para {1}.",
       deleteParent: "Excluir {0} localmente",
       switchFailed: "Reempilhado, mas não foi possível voltar para {0}: {1}",
-      offersLost: "O GitWand não conseguiu concluir o que segue o reempilhamento de {0} (redirecionamento do PR, ofertas de push e de exclusão). Faça isso manualmente.",
+      offersLost: "Não foi possível mostrar a oferta de push de {0}.",
     },
     push: {
       offer: "{0} branches reempilhados podem ser enviados.",

@@ -168,8 +168,8 @@ async function statusBoth(dev, rustCwd, nodeCwd, label, mergedParents = []) {
 
 /** Plan on both sides: same plan or same Err (paths spelled `<cwd>`). */
 async function planBoth(dev, rustCwd, nodeCwd, branch, label, mergedParents = []) {
-  const r = ownResult(plan.rust(rustCwd, branch, mergedParents), rustCwd);
-  const n = ownResult(await plan.node(dev, nodeCwd, branch, mergedParents), nodeCwd);
+  const r = ownResult(plan.rust(rustCwd, branch, hintsOf(mergedParents, rustCwd)), rustCwd);
+  const n = ownResult(await plan.node(dev, nodeCwd, branch, hintsOf(mergedParents, nodeCwd)), nodeCwd);
   if (r.ok) expectSame(r, n, label);
   else expectSameError(r, n, label);
   expect(stateOf(nodeCwd), `${label}: state`).toEqual(stateOf(rustCwd));
@@ -561,11 +561,13 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
   it("moment 2 needs the merged work in its target (I-2, wave 2 items 4-5)", async () => {
     const sq = twoFixtures("squashed");
     const withMerge = (oid) => [{ branch: "step-1", number: 812, head_ref_oid: null, merge_commit_oid: oid }];
-    const landed = git(sq.rustCwd, ["rev-parse", "origin/main"]);
-    const ok = await planBoth(dev, sq.rustCwd, sq.nodeCwd, "step-2", "merge commit landed", withMerge(landed));
+    // Each side's hint is read from its own fixture (wave 5, item 1).
+    const landed = (cwd) => withMerge(git(cwd, ["rev-parse", "origin/main"]));
+    const ok = await planBoth(dev, sq.rustCwd, sq.nodeCwd, "step-2", "merge commit landed", landed);
     expect(ok.value.refusal).toBe(null);
-    for (const oid of [git(sq.rustCwd, ["rev-parse", "step-1"]), "f".repeat(40)]) {
-      const r = await planBoth(dev, sq.rustCwd, sq.nodeCwd, "step-2", `merge commit ${oid}`, withMerge(oid));
+    const elsewhere = (cwd) => withMerge(git(cwd, ["rev-parse", "step-1"]));
+    for (const [label, hints] of [["known elsewhere", elsewhere], ["unknown", withMerge("f".repeat(40))]]) {
+      const r = await planBoth(dev, sq.rustCwd, sq.nodeCwd, "step-2", `merge commit ${label}`, hints);
       expect(r.value.refusal).toEqual({
         code: "merged_work_missing",
         message: "GitWand cannot find the merged work of step-1 (PR #812) in origin/main. If the pull request was squash-merged elsewhere, unstack step-1's child and restack it by hand.",
@@ -620,15 +622,15 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     });
 
     // Item 5: no base, parent gone, no merge commit.
-    let oldTip = null;
+    const oldTips = new Map();
     const gone = twoFixtures("squashed", (cwd) => {
-      oldTip = git(cwd, ["rev-parse", "step-1"]);
+      oldTips.set(cwd, git(cwd, ["rev-parse", "step-1"]));
       git(cwd, ["config", "--unset", "branch.step-2.gitwandStackBase"]);
       git(cwd, ["branch", "--quiet", "-D", "step-1"]);
     });
     // Wave 4 M1: the merged PR's head still names them (found by patch-id);
     // an unknown head does not.
-    const withHead = [{ ...hint1[0], head_ref_oid: oldTip }];
+    const withHead = (cwd) => [{ ...hint1[0], head_ref_oid: oldTips.get(cwd) }];
     const c = await planBoth(dev, gone.rustCwd, gone.nodeCwd, "step-2", "probe from the PR head", withHead);
     expect(c.value.refusal).toBe(null);
     const unknownHead = [{ ...hint1[0], head_ref_oid: "f".repeat(40) }];
@@ -735,8 +737,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
   it("a hint's head sha is honoured, and a stale one is ignored", async () => {
     // Stale: step-1 moved past the merged head, so the name was reused.
     const stale = twoFixtures("moved");
-    const oldTip = git(stale.rustCwd, ["rev-parse", "step-1~1"]);
-    const staleHint = [{ branch: "step-1", number: 812, head_ref_oid: oldTip }];
+    const staleHint = (cwd) => [{ branch: "step-1", number: 812, head_ref_oid: git(cwd, ["rev-parse", "step-1~1"]) }];
     const s = await statusBoth(dev, stale.rustCwd, stale.nodeCwd, "stale hint", staleHint);
     expect([s.layers[0].state, s.layers[0].merge_signal]).toEqual(["out_of_date", null]);
 
@@ -744,7 +745,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     const unset = (cwd) => git(cwd, ["config", "--unset", "branch.step-2.gitwandStackBase"]);
     const kept = twoFixtures("squashed", unset);
     const tip = git(kept.rustCwd, ["rev-parse", "step-1"]);
-    const hint = [{ branch: "step-1", number: 812, head_ref_oid: tip }];
+    const hint = (cwd) => [{ branch: "step-1", number: 812, head_ref_oid: git(cwd, ["rev-parse", "step-1"]) }];
     const h = await statusBoth(dev, kept.rustCwd, kept.nodeCwd, "honoured hint", hint);
     expect([h.layers[0].merge_signal, h.layers[0].merged_pr]).toEqual(["forge", 812]);
     const r = await planBoth(dev, kept.rustCwd, kept.nodeCwd, "step-2", "plan from the hint", hint);

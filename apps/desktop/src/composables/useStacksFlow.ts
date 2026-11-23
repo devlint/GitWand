@@ -8,7 +8,13 @@
  * `createStacksFlow(core)` works on the state `createStacks` owns; callers
  * keep using the `Stacks` API, whose methods await this module.
  */
-import type { FinalizedRestack, MergedParentHint, PreviewedRestack, RestackRefusal } from "../utils/backend";
+import type {
+  FinalizedRestack,
+  MergedParentHint,
+  PreviewedRestack,
+  RestackPlan,
+  RestackRefusal,
+} from "../utils/backend";
 import type { ApplyOutcome } from "./useApplyFromPreview";
 import {
   idleFlow,
@@ -76,12 +82,10 @@ export function createStacksFlow(c: StacksCore) {
 
   // ─── After a restack ────────────────────────────────────
 
-  function pushOffer(cwd: string, fin: FinalizedRestack): AfterRestack["push"] {
-    const mem = state.lastPlan;
-    if (!mem || mem.cwd !== cwd || mem.plan.bottom !== fin.bottom) {
-      return { pushable: [], skipped: [], noLeases: true };
-    }
-    state.lastPlan = null;
+  /** The push offer from the plan the core captured for `fin` (null: none). */
+  function pushOffer(plan: RestackPlan | null, fin: FinalizedRestack): AfterRestack["push"] {
+    if (!plan) return { pushable: [], skipped: [], noLeases: true };
+    const mem = { plan };
     const pushable: { branch: string; lease: string }[] = [];
     const skipped: PushSkip[] = [];
     const skip = (branch: string, reason: PushSkip["reason"], detail: string | null = null) =>
@@ -116,12 +120,12 @@ export function createStacksFlow(c: StacksCore) {
   }
 
   /**
-   * The push offer of a finalization, from the plan kept when its restack
-   * was applied (consumed). Taken once per finalization: a retried handling
-   * reuses it, so it never offers a later plan's leases (wave 4, M3).
+   * The push offer of a finalization, from the plan the core captured when
+   * it first saw that finalization: a retried handling gets the same plan,
+   * so it never offers a later plan's leases (wave 4 M3, wave 5 item 4).
    */
-  function pushOfferFor(cwd: string, fin: FinalizedRestack): AfterRestack["push"] {
-    return pushOffer(cwd, fin);
+  function pushOfferFor(plan: RestackPlan | null, fin: FinalizedRestack): AfterRestack["push"] {
+    return pushOffer(plan, fin);
   }
 
   async function onFinalized(
@@ -244,8 +248,6 @@ export function createStacksFlow(c: StacksCore) {
       top_sha: plan.top_sha,
       moving: plan.moving.map((m) => m.branch),
     };
-    // Kept before the run: the finalization may land in any later refresh.
-    state.lastPlan = { cwd, plan };
     flow.value = { ...f, phase: "applying" };
     let outcome: ApplyOutcome;
     try {

@@ -254,20 +254,22 @@ fn parent_merged(
     // When the parent's commits cannot be named at all (no base, parent gone
     // locally, no usable PR head), the refusal is `no_old_base` (wave 3
     // item 5, wave 4 M1).
-    let mut upstream = None;
-    for candidate in [
-        l.base.as_deref(),
-        honoured.and_then(|h| h.head_ref_oid.as_deref()),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let layer_ref = format!("refs/heads/{}", l.branch);
-        if commit_exists(repo, candidate)? && is_ancestor(repo, candidate, &layer_ref)? {
-            upstream = Some(candidate.to_string());
-            break;
+    // The merged PR's head, when it is known and below the layer (D20).
+    let layer_ref = format!("refs/heads/{}", l.branch);
+    let verified_head = match honoured.and_then(|h| h.head_ref_oid.as_deref()) {
+        Some(h) if commit_exists(repo, h)? && is_ancestor(repo, h, &layer_ref)? => {
+            Some(h.to_string())
         }
-    }
+        _ => None,
+    };
+    // The old parent tip to replay from: the recorded base when it is below
+    // the layer, else the verified head.
+    let upstream = match l.base.as_deref() {
+        Some(b) if commit_exists(repo, b)? && is_ancestor(repo, b, &layer_ref)? => {
+            Some(b.to_string())
+        }
+        _ => verified_head.clone(),
+    };
     let mut merged_work_missing = false;
     let mut parent_commits_unknown = false;
     if let Some(onto) = onto_sha.as_deref() {
@@ -280,19 +282,10 @@ fn parent_merged(
                     Some(b) if commit_exists(repo, b)? => Some(b),
                     _ => None,
                 };
-                // Wave 4 M1: the recorded base (or the parent's tip), then
-                // the merged PR's head when it is known and below the layer
-                // (D20), then the plan's own upstream.
-                let layer_ref = format!("refs/heads/{}", l.branch);
-                let head = match honoured.and_then(|h| h.head_ref_oid.as_deref()) {
-                    Some(h) if commit_exists(repo, h)? && is_ancestor(repo, h, &layer_ref)? => {
-                        Some(h)
-                    }
-                    _ => None,
-                };
-                let probe = merged_probe(repo, base, l.parent_tip.as_deref())?
-                    .or(head)
-                    .or(upstream.as_deref());
+                // Wave 4 M1, wave 5: the recorded base (or the parent's tip),
+                // then the verified PR head; nothing else names them.
+                let probe =
+                    merged_probe(repo, base, l.parent_tip.as_deref())?.or(verified_head.as_deref());
                 match probe {
                     Some(probe) => {
                         merged_work_missing = !(is_ancestor(repo, probe, onto)?

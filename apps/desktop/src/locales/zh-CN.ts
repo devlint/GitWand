@@ -650,7 +650,7 @@ const zhCN: Locale = {
       retargetManualNoForge: "请将 {0} 的 pull request 目标改为 {1}。",
       deleteParent: "删除本地 {0}",
       switchFailed: "已重新堆叠，但无法切换回 {0}：{1}",
-      offersLost: "GitWand 无法完成 {0} 重新堆叠之后的步骤（重定向 PR、推送与删除提议）。请手动完成。",
+      offersLost: "无法显示 {0} 的推送提议。",
     },
     push: {
       offer: "可以推送 {0} 个已重新堆叠的分支。",

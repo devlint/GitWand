@@ -655,7 +655,7 @@ const fr: Locale = {
       retargetManualNoForge: "Reciblez la pull request de {0} vers {1}.",
       deleteParent: "Supprimer {0} en local",
       switchFailed: "Restack fait, mais impossible de revenir sur {0} : {1}",
-      offersLost: "GitWand n'a pas pu terminer la suite du restack de {0} (retarget, offres de push et de suppression). Faites-les à la main.",
+      offersLost: "L'offre de push de {0} n'a pas pu être affichée.",
     },
     push: {
       offer: "{0} branches restackées peuvent être poussées.",
