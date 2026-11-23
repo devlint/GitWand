@@ -8,8 +8,8 @@ use super::meta::{
 };
 use super::restack::finalize;
 use super::{
-    FinalizedRestack, LayerState, LayerStatus, MergeSignal, MergedParentHint, StackMeta,
-    StackReport,
+    FinalizedRestack, LayerState, LayerStatus, MergeSignal, MergedParentHint, PendingRestack,
+    StackMeta, StackReport,
 };
 use crate::git::git_cmd;
 use std::collections::{BTreeMap, BTreeSet};
@@ -62,36 +62,72 @@ pub(super) fn is_sha(s: &str) -> bool {
 }
 
 /// Every declared layer and its report, bottom→top per chain (spec §5.3).
+// Consumed by Task 6 (stack_status) of the stacked-branches plan; `plan`
+// uses `status_inner`.
+#[allow(dead_code)]
 pub(crate) fn status(
     repo: &Path,
     configured_trunk: Option<&str>,
     hints: &[MergedParentHint],
 ) -> Result<StackReport, String> {
-    let (waiting, finalized) = settle_pending(repo)?;
+    status_inner(repo, configured_trunk, hints).map(|(report, _)| report)
+}
+
+/// `status`, plus the layers that must not be restacked yet because a
+/// pending record of their stack is unsettled, each with the reason (the
+/// text `restack::plan` errs with).
+pub(crate) fn status_inner(
+    repo: &Path,
+    configured_trunk: Option<&str>,
+    hints: &[MergedParentHint],
+) -> Result<(StackReport, BTreeMap<String, String>), String> {
+    let settled = settle_pending(repo)?;
     let all = read_all(repo)?;
     // Fail closed: a worktree we cannot inspect may hide a running rebase.
     let holders = branch_holders(repo)?;
-    let rebase_in_progress = waiting
+    let rebase_in_progress = settled.waiting
         || holders
             .iter()
             .any(|h| h.rebasing && all.contains_key(&h.branch));
     let git_supports_restack = supports_update_refs(git_version());
+    let pending_error = (!settled.errors.is_empty()).then(|| {
+        settled
+            .errors
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ")
+    });
 
     let Some(trunk_name) = trunk(repo, configured_trunk) else {
-        return Ok(StackReport {
-            trunk: None,
-            remote_trunk: None,
-            layers: Vec::new(),
-            rebase_in_progress,
-            finalized,
-            git_supports_restack,
-        });
+        return Ok((
+            StackReport {
+                trunk: None,
+                remote_trunk: None,
+                layers: Vec::new(),
+                rebase_in_progress,
+                finalized: settled.finalized,
+                git_supports_restack,
+                pending_error,
+            },
+            BTreeMap::new(),
+        ));
     };
     let remote_ref = format!("refs/remotes/origin/{trunk_name}");
     let has_remote_trunk = resolve_commit(repo, &remote_ref)?.is_some();
 
     let mut layers = Vec::new();
+    let mut blocked = BTreeMap::new();
     for chain in chains(&all) {
+        // A stack carrying an unsettled record (an error, or a completed
+        // restack deferred to the next refresh): no self-heal, no action.
+        let hold = chain.iter().find_map(|b| {
+            settled
+                .errors
+                .get(b)
+                .cloned()
+                .or_else(|| settled.deferred.contains(b).then(|| deferred_message(b)))
+        });
         // A layer whose local branch is gone (deleted with its config kept)
         // has nothing to classify: it is left out, and the layer above it
         // reports `ParentMissing`.
@@ -109,7 +145,7 @@ pub(crate) fn status(
                 &all[branch],
                 hints,
                 has_remote_trunk.then_some(remote_ref.as_str()),
-                rebase_in_progress,
+                rebase_in_progress || hold.is_some(),
             )?;
             l.top = top.clone();
             classified.push(l);
@@ -121,50 +157,107 @@ pub(crate) fn status(
             l.actionable = needs_restack(l.state)
                 && f.blocker.is_none()
                 && f.dropped_for.is_none()
-                && !rebase_in_progress;
+                && !rebase_in_progress
+                && hold.is_none();
+            if let Some(h) = &hold {
+                blocked.insert(l.branch.clone(), h.clone());
+            }
             layers.push(l);
         }
     }
 
-    Ok(StackReport {
-        trunk: Some(trunk_name.clone()),
-        remote_trunk: has_remote_trunk.then(|| format!("origin/{trunk_name}")),
-        layers,
-        rebase_in_progress,
-        finalized,
-        git_supports_restack,
-    })
+    Ok((
+        StackReport {
+            trunk: Some(trunk_name.clone()),
+            remote_trunk: has_remote_trunk.then(|| format!("origin/{trunk_name}")),
+            layers,
+            rebase_in_progress,
+            finalized: settled.finalized,
+            git_supports_restack,
+            pending_error,
+        },
+        blocked,
+    ))
 }
 
-/// The pending step (D4, D5), run before classification. A record whose top
-/// is being rebased in any worktree waits; one whose rebase has landed (the
-/// top contains `onto`) is finalized; any other (aborted, never run, top
-/// gone) is cleared. Unparsable records are cleared. Returns whether a
-/// restack is still waiting, and the last finalization.
-fn settle_pending(repo: &Path) -> Result<(bool, Option<FinalizedRestack>), String> {
+fn deferred_message(top: &str) -> String {
+    format!("A previous restack of {top} is still being finalized. Refresh and try again.")
+}
+
+/// What the pending step did.
+#[derive(Default)]
+struct Settled {
+    /// A record's top is being rebased: the restack is still running.
+    waiting: bool,
+    finalized: Option<FinalizedRestack>,
+    /// Records that could not be settled, by top. Kept for the next refresh.
+    errors: BTreeMap<String, String>,
+    /// Completed records left for the next refresh (one finalize per call).
+    deferred: BTreeSet<String>,
+}
+
+/// The pending step (D4, D5), run before classification. Unparsable records
+/// are cleared. Then, per record, by top name:
+/// - its top is being rebased in any worktree → wait;
+/// - its restack has completed (`completed`) → finalize. At most ONE record
+///   is finalized per call, so the report carries a single `finalized`; any
+///   other completed record stays pending and is finalized by the next
+///   refresh (the frontend refreshes again after a non-null `finalized`);
+/// - otherwise (aborted, never run, top gone) → clear the record.
+///
+/// An error on one record is kept for that record (the record stays) and
+/// does not stop the others.
+fn settle_pending(repo: &Path) -> Result<Settled, String> {
     clear_malformed_pending(repo)?;
     let all = read_all(repo)?;
+    let mut s = Settled::default();
     if all.values().all(|m| m.pending.is_none()) {
-        return Ok((false, None));
+        return Ok(s);
     }
     let holders = branch_holders(repo)?;
-    let mut waiting = false;
-    let mut finalized = None;
     for m in all.values() {
         let Some(p) = &m.pending else { continue };
         let top = m.branch.as_str();
         if holders.iter().any(|h| h.rebasing && h.branch == top) {
-            waiting = true;
+            s.waiting = true;
             continue;
         }
-        let top_ref = format!("refs/heads/{top}");
-        if resolve_commit(repo, &top_ref)?.is_some() && is_ancestor(repo, &p.onto, &top_ref)? {
-            finalized = Some(finalize(repo, top, p)?);
-        } else {
-            clear_pending(repo, top)?;
+        let step = completed(repo, top, p).and_then(|done| match done {
+            false => clear_pending(repo, top),
+            true if s.finalized.is_some() => {
+                s.deferred.insert(top.to_string());
+                Ok(())
+            }
+            true => finalize(repo, top, p).map(|f| s.finalized = Some(f)),
+        });
+        if let Err(e) = step {
+            s.errors.insert(
+                top.to_string(),
+                format!("The restack of {top} could not be finalized: {e}"),
+            );
         }
     }
-    Ok((waiting, finalized))
+    Ok(s)
+}
+
+/// D4: the restack recorded on `top` has run to its end. The top moved since
+/// the record was written, it now contains `onto`, and so does the bottom
+/// (or the bottom, an empty layer, still waits at `old_base` for `finalize`).
+/// A top that merely contained `onto` already (the user merged the parent
+/// in) did not move, so an aborted restack is never taken for a finished one.
+fn completed(repo: &Path, top: &str, p: &PendingRestack) -> Result<bool, String> {
+    let top_ref = format!("refs/heads/{top}");
+    let Some(tip) = resolve_commit(repo, &top_ref)? else {
+        return Ok(false);
+    };
+    if tip == p.top_sha || !is_ancestor(repo, &p.onto, &top_ref)? {
+        return Ok(false);
+    }
+    let bottom_ref = format!("refs/heads/{}", p.bottom);
+    let Some(bottom_tip) = resolve_commit(repo, &bottom_ref)? else {
+        return Ok(false);
+    };
+    Ok(bottom_tip == p.old_base || is_ancestor(repo, &p.onto, &bottom_ref)?)
 }
 
 pub(crate) fn needs_restack(s: LayerState) -> bool {

@@ -70,22 +70,26 @@ fn moment_str(m: Moment) -> &'static str {
 }
 
 impl PendingRestack {
-    /// `<moment> <onto> <old_base> <bottom> <new_parent|-> <original>`
+    /// `<moment> <onto> <old_base> <bottom> <new_parent|-> <original> <top_sha> <merged_parent|->`
     pub fn to_config(&self) -> String {
         format!(
-            "{} {} {} {} {} {}",
+            "{} {} {} {} {} {} {} {}",
             moment_str(self.moment),
             self.onto,
             self.old_base,
             self.bottom,
             self.new_parent.as_deref().unwrap_or("-"),
-            self.original
+            self.original,
+            self.top_sha,
+            self.merged_parent.as_deref().unwrap_or("-")
         )
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         let parts: Vec<&str> = s.split(' ').collect();
-        let [moment, onto, old_base, bottom, new_parent, original] = parts.as_slice() else {
+        let [moment, onto, old_base, bottom, new_parent, original, top_sha, merged_parent] =
+            parts.as_slice()
+        else {
             return None;
         };
         let moment = match *moment {
@@ -93,7 +97,13 @@ impl PendingRestack {
             "parent_merged" => Moment::ParentMerged,
             _ => return None,
         };
-        if !is_sha(onto) || !is_sha(old_base) || bottom.is_empty() || original.is_empty() {
+        if !is_sha(onto)
+            || !is_sha(old_base)
+            || !is_sha(top_sha)
+            || bottom.is_empty()
+            || original.is_empty()
+            || merged_parent.is_empty()
+        {
             return None;
         }
         Some(PendingRestack {
@@ -103,6 +113,8 @@ impl PendingRestack {
             bottom: (*bottom).to_string(),
             new_parent: (*new_parent != "-").then(|| (*new_parent).to_string()),
             original: (*original).to_string(),
+            top_sha: (*top_sha).to_string(),
+            merged_parent: (*merged_parent != "-").then(|| (*merged_parent).to_string()),
         })
     }
 }
@@ -326,7 +338,10 @@ pub(crate) fn clear_malformed_pending(repo: &Path) -> Result<(), String> {
     }
     for line in String::from_utf8_lossy(&out.stdout).lines() {
         let (k, value) = line.split_once(' ').unwrap_or((line, ""));
-        // `k` is the key as git listed it, always `branch.…`: never an option.
+        // `k` is the key exactly as git listed it: git lower-cases the section
+        // and variable names (`branch.<b>.gitwandrestack`) but keeps the
+        // branch's case, and unsetting that spelling removes the key. It
+        // always starts with `branch.`, so it is never read as an option.
         if k.starts_with("branch.") && PendingRestack::parse(value).is_none() {
             unset_key(repo, k)?;
         }
@@ -433,6 +448,8 @@ mod tests {
             bottom: "step-2".into(),
             new_parent: None,
             original: "step-1".into(),
+            top_sha: "c".repeat(40),
+            merged_parent: None,
         };
         set_pending(&r.path, "step-2", &p).unwrap();
         let m = set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
@@ -542,18 +559,28 @@ mod tests {
             old_base: "b".repeat(40),
             bottom: "step-2".into(),
             new_parent: None,
-            original: "step-1".into(),
+            original: "step-3".into(),
+            top_sha: "c".repeat(40),
+            merged_parent: Some("step-1".into()),
         };
         assert_eq!(
             p.to_config(),
             format!(
-                "parent_merged {} {} step-2 - step-1",
+                "parent_merged {} {} step-2 - step-3 {} step-1",
                 "a".repeat(40),
-                "b".repeat(40)
+                "b".repeat(40),
+                "c".repeat(40)
             )
         );
         assert_eq!(PendingRestack::parse(&p.to_config()), Some(p));
         assert_eq!(PendingRestack::parse("parent_moved abc"), None);
+        // The 6-field form (never released) is malformed.
+        let six = format!(
+            "parent_moved {} {} step-2 - step-1",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        assert_eq!(PendingRestack::parse(&six), None);
     }
 
     #[test]
@@ -568,6 +595,8 @@ mod tests {
             bottom: "step-2".into(),
             new_parent: Some("main".into()),
             original: "step-1".into(),
+            top_sha: "c".repeat(40),
+            merged_parent: None,
         };
         set_pending(&r.path, "step-2", &p).unwrap();
         assert_eq!(read_all(&r.path).unwrap()["step-2"].pending, Some(p));
@@ -599,9 +628,10 @@ mod tests {
             "config",
             "branch.step-2.gitwandRestack",
             &format!(
-                "parent_moved {} {} step-2 - step-1",
+                "parent_moved {} {} step-2 - step-1 {} -",
                 "a".repeat(40),
-                "b".repeat(40)
+                "b".repeat(40),
+                "c".repeat(40)
             ),
         ]);
         unset(&r.path, "step-2").unwrap();

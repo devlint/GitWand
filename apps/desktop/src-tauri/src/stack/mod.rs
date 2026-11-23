@@ -54,6 +54,10 @@ pub struct PendingRestack {
     pub bottom: String,
     pub new_parent: Option<String>,
     pub original: String,
+    /// The top's tip read just before the rebase (D4).
+    pub top_sha: String,
+    /// Moment 2: the bottom's parent at run time; `None` for moment 1.
+    pub merged_parent: Option<String>,
 }
 
 #[derive(Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -97,6 +101,9 @@ pub struct StackReport {
     pub rebase_in_progress: bool,
     pub finalized: Option<FinalizedRestack>,
     pub git_supports_restack: bool,
+    /// A pending record that could not be settled; it is kept, and its
+    /// stack is not actionable until it is.
+    pub pending_error: Option<String>,
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
