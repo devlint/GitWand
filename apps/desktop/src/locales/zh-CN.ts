@@ -596,6 +596,33 @@ const zhCN: Locale = {
   },
 
   stacks: {
+    state: {
+      out_of_date: "已过期",
+      parent_merged: "父分支已合并",
+      parent_missing: "找不到父分支",
+      base_lost: "基点未知",
+    },
+    badge: {
+      parent: "↳ {0}",
+    },
+    restack: "重新堆叠",
+    menu: {
+      stackOn: "堆叠到…",
+      unstack: "取消堆叠",
+      restack: "重新堆叠…",
+    },
+    bridge: {
+      prompt: "将 {0} 堆叠到 {1}？",
+      accept: "堆叠",
+      dismiss: "忽略",
+    },
+    stackOn: {
+      title: "将 {0} 堆叠到…",
+      parent: "父分支",
+      confirm: "堆叠",
+      hint: "当父分支变更或被合并时，GitWand 会建议重新堆叠 {0}。",
+      forgeHint: "仅在 GitHub 上能检测包含多个提交的 squash 合并。在 {0} 上，父分支合并后请使用“取消堆叠”。",
+    },
     preview: {
       moving: "将被移动的分支",
       notInStack: "（不在堆栈中）",

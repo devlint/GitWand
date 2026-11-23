@@ -608,6 +608,33 @@ const en = {
   },
 
   stacks: {
+    state: {
+      out_of_date: "out of date",
+      parent_merged: "parent merged",
+      parent_missing: "parent missing",
+      base_lost: "base unknown",
+    },
+    badge: {
+      parent: "↳ {0}",
+    },
+    restack: "Restack",
+    menu: {
+      stackOn: "Stack on…",
+      unstack: "Unstack",
+      restack: "Restack…",
+    },
+    bridge: {
+      prompt: "Stack {0} on {1}?",
+      accept: "Stack",
+      dismiss: "Dismiss",
+    },
+    stackOn: {
+      title: "Stack {0} on…",
+      parent: "Parent branch",
+      confirm: "Stack",
+      hint: "GitWand will offer to restack {0} when its parent changes or is merged.",
+      forgeHint: "Squash merges of more than one commit are detected on GitHub only. On {0}, use Unstack once the parent is merged.",
+    },
     preview: {
       moving: "Branches that will move",
       notInStack: "(not in the stack)",

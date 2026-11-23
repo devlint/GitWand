@@ -596,6 +596,33 @@ const es: Locale = {
   },
 
   stacks: {
+    state: {
+      out_of_date: "desactualizada",
+      parent_merged: "padre fusionada",
+      parent_missing: "padre no encontrada",
+      base_lost: "base desconocida",
+    },
+    badge: {
+      parent: "↳ {0}",
+    },
+    restack: "Reapilar",
+    menu: {
+      stackOn: "Apilar sobre…",
+      unstack: "Desapilar",
+      restack: "Reapilar…",
+    },
+    bridge: {
+      prompt: "¿Apilar {0} sobre {1}?",
+      accept: "Apilar",
+      dismiss: "Ignorar",
+    },
+    stackOn: {
+      title: "Apilar {0} sobre…",
+      parent: "Rama padre",
+      confirm: "Apilar",
+      hint: "GitWand propondrá reapilar {0} cuando su rama padre cambie o se fusione.",
+      forgeHint: "Los squash merges de más de un commit solo se detectan en GitHub. En {0}, usa Desapilar cuando la rama padre esté fusionada.",
+    },
     preview: {
       moving: "Ramas que se moverán",
       notInStack: "(fuera de la pila)",

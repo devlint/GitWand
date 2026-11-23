@@ -601,6 +601,33 @@ const fr: Locale = {
   },
 
   stacks: {
+    state: {
+      out_of_date: "pas à jour",
+      parent_merged: "parent fusionnée",
+      parent_missing: "parent introuvable",
+      base_lost: "base inconnue",
+    },
+    badge: {
+      parent: "↳ {0}",
+    },
+    restack: "Restacker",
+    menu: {
+      stackOn: "Empiler sur…",
+      unstack: "Désempiler",
+      restack: "Restacker…",
+    },
+    bridge: {
+      prompt: "Empiler {0} sur {1} ?",
+      accept: "Empiler",
+      dismiss: "Ignorer",
+    },
+    stackOn: {
+      title: "Empiler {0} sur…",
+      parent: "Branche parente",
+      confirm: "Empiler",
+      hint: "GitWand proposera de restacker {0} quand sa parente change ou est fusionnée.",
+      forgeHint: "Les squash merges de plusieurs commits ne sont détectés que sur GitHub. Sur {0}, utilisez Désempiler une fois la parente fusionnée.",
+    },
     preview: {
       moving: "Branches qui vont bouger",
       notInStack: "(hors de la pile)",

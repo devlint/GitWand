@@ -6,6 +6,8 @@ import { getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type Git
 import PrListSidebar from "./PrListSidebar.vue";
 import ScopePicker from "./ScopePicker.vue";
 import TrackedIgnoredNotice from "./TrackedIgnoredNotice.vue";
+import StackBadge from "./StackBadge.vue";
+import { useStacks } from "../composables/useStacks";
 import { useI18n } from "../composables/useI18n";
 import Avatar from "./Avatar.vue";
 import { useCommitMessage } from "../composables/useCommitMessage";
@@ -31,6 +33,7 @@ import { useIssueSuggest, handleIssueKeydown, issueSuggestAt, pickIssueRow, shar
 import { repoRemotes } from "../composables/useRepoRemote";
 // Shown only while a `#` list is open (v-if): loaded then, not in the main chunk.
 const IssueSuggestList = defineAsyncComponent(() => import("./IssueSuggestList.vue"));
+const StackOnDialog = defineAsyncComponent(() => import("./StackOnDialog.vue"));
 import { issueListerFor } from "../composables/issueLister";
 import { COMMIT_SIGNATURE } from "../utils/commitSignature";
 import { loadSettings } from "../composables/useSettings";
@@ -1010,6 +1013,32 @@ function openBranchCtx(e: MouseEvent, b: GitBranch) {
 
 function closeBranchCtx() { branchCtx.value.visible = false; }
 
+// ─── Stacked branches (v3.14) ───────────────────────────
+const { report: stackReport, offers: stackOffers, layerOf, actionableFor, stackOnCandidates, unstack, acceptBridge, dismissBridge, startRestack } = useStacks();
+const stackOnTarget = ref<string | null>(null);
+/** "Stack on…" is for a local branch that is not the trunk. */
+const ctxCanStack = computed(() =>
+  !!branchCtx.value.branchName && !branchCtx.value.isRemote && branchCtx.value.branchName !== stackReport.value?.trunk,
+);
+function onBranchCtxStackOn() {
+  stackOnTarget.value = branchCtx.value.branchName;
+  closeBranchCtx();
+}
+function onBranchCtxUnstack() {
+  const name = branchCtx.value.branchName;
+  closeBranchCtx();
+  void unstack(props.cwd, name);
+}
+function onBranchCtxRestack() {
+  const layer = actionableFor(branchCtx.value.branchName);
+  closeBranchCtx();
+  if (layer) void startRestack(props.cwd, layer.branch);
+}
+function restackBranch(name: string) {
+  const layer = actionableFor(name);
+  if (layer) void startRestack(props.cwd, layer.branch);
+}
+
 function onBranchCtxPin() {
   _pinnedApi.pin(branchCtx.value.branchName);
   closeBranchCtx();
@@ -1899,6 +1928,14 @@ function formatActivityDate(dateStr: string): string {
               <span v-if="isMergedBranch(b.name) && !b.isCurrent" class="branch-badge branch-badge--merged">{{ t('branch.merged') }}</span>
               <span v-else-if="isInactiveBranch(b)" class="branch-badge branch-badge--inactive">{{ t('branch.inactive') }}</span>
             </span>
+            <StackBadge
+              v-if="!b.isRemote && (layerOf(b.name) || stackOffers.get(b.name))"
+              :layer="layerOf(b.name)"
+              :offer="stackOffers.get(b.name) ?? null"
+              @restack="restackBranch(b.name)"
+              @accept-offer="acceptBridge(cwd, stackOffers.get(b.name)!)"
+              @dismiss-offer="dismissBridge(cwd, b.name)"
+            />
             <span class="branch-indicator" v-if="b.ahead > 0 || b.behind > 0">
               <span v-if="b.ahead > 0" class="branch-up">↑{{ b.ahead }}</span>
               <span v-if="b.behind > 0" class="branch-down">↓{{ b.behind }}</span>
@@ -1941,6 +1978,14 @@ function formatActivityDate(dateStr: string): string {
               <span v-if="isMergedBranch(b.name)" class="branch-badge branch-badge--merged">{{ t('branch.merged') }}</span>
               <span v-else-if="isInactiveBranch(b)" class="branch-badge branch-badge--inactive">{{ t('branch.inactive') }}</span>
             </span>
+            <StackBadge
+              v-if="!b.isRemote && (layerOf(b.name) || stackOffers.get(b.name))"
+              :layer="layerOf(b.name)"
+              :offer="stackOffers.get(b.name) ?? null"
+              @restack="restackBranch(b.name)"
+              @accept-offer="acceptBridge(cwd, stackOffers.get(b.name)!)"
+              @dismiss-offer="dismissBridge(cwd, b.name)"
+            />
             <button
               class="branch-ctx-trigger"
               @click.stop="openBranchCtx($event, b)"
@@ -1975,6 +2020,20 @@ function formatActivityDate(dateStr: string): string {
             </button>
           </template>
 
+          <!-- Stacked branches (v3.14) -->
+          <template v-if="ctxCanStack || layerOf(branchCtx.branchName) || actionableFor(branchCtx.branchName)">
+            <div class="ctx-separator"></div>
+            <button class="ctx-item" v-if="ctxCanStack" @click="onBranchCtxStackOn">
+              {{ t('stacks.menu.stackOn') }}
+            </button>
+            <button class="ctx-item" v-if="layerOf(branchCtx.branchName)" @click="onBranchCtxUnstack">
+              {{ t('stacks.menu.unstack') }}
+            </button>
+            <button class="ctx-item" v-if="actionableFor(branchCtx.branchName)" @click="onBranchCtxRestack">
+              {{ t('stacks.menu.restack') }}
+            </button>
+          </template>
+
           <!-- Branch Deletion (v2.12) -->
           <template v-if="branchToDelete">
             <div class="ctx-separator"></div>
@@ -1990,6 +2049,15 @@ function formatActivityDate(dateStr: string): string {
           </template>
         </div>
       </Teleport>
+
+      <StackOnDialog
+        v-if="stackOnTarget"
+        :cwd="cwd"
+        :branch="stackOnTarget"
+        :candidates="stackOnCandidates(stackOnTarget)"
+        :forge="remoteInfo?.provider ?? null"
+        @close="stackOnTarget = null"
+      />
 
       <!-- Recent activity -->
       <div class="side-block" v-if="recentActivity.length > 0">

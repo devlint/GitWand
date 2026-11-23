@@ -48,10 +48,18 @@ import { useBranchPrSearch } from "../../composables/useBranchPrSearch";
 const MergePreviewPanel = defineAsyncComponent(() => import("../MergePreviewPanel.vue"));
 import BaseModal from "../BaseModal.vue";
 import BranchRowActions from "./BranchRowActions.vue";
+import StackBadge from "../StackBadge.vue";
+import { useStacks } from "../../composables/useStacks";
 // Lazy too — only mounted inside the v-if'd create-branch modal.
 const BranchNameField = defineAsyncComponent(() => import("../BranchNameField.vue"));
 
 const { t } = useI18n();
+
+const { offers: stackOffers, layerOf, actionableFor, acceptBridge, dismissBridge, startRestack } = useStacks();
+function restackBranch(name: string) {
+  const layer = actionableFor(name);
+  if (layer) void startRestack(props.cwd, layer.branch);
+}
 
 const props = defineProps<{
   branchDisplay: string;
@@ -774,6 +782,14 @@ onUnmounted(() => {
                 class="bp-pr-badge"
                 :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, false)!.number, prSearch.prFor(branch.name, false)!.title)"
               >#{{ prSearch.prFor(branch.name, false)!.number }}</span></span>
+              <StackBadge
+                v-if="layerOf(branch.name) || stackOffers.get(branch.name)"
+                :layer="layerOf(branch.name)"
+                :offer="stackOffers.get(branch.name) ?? null"
+                @restack="restackBranch(branch.name)"
+                @accept-offer="acceptBridge(cwd, stackOffers.get(branch.name)!)"
+                @dismiss-offer="dismissBridge(cwd, branch.name)"
+              />
               <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
                 <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                 <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
@@ -827,6 +843,14 @@ onUnmounted(() => {
                   class="bp-pr-badge"
                   :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, false)!.number, prSearch.prFor(branch.name, false)!.title)"
                 >#{{ prSearch.prFor(branch.name, false)!.number }}</span></span>
+                <StackBadge
+                  v-if="layerOf(branch.name) || stackOffers.get(branch.name)"
+                  :layer="layerOf(branch.name)"
+                  :offer="stackOffers.get(branch.name) ?? null"
+                  @restack="restackBranch(branch.name)"
+                  @accept-offer="acceptBridge(cwd, stackOffers.get(branch.name)!)"
+                  @dismiss-offer="dismissBridge(cwd, branch.name)"
+                />
                 <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
                   <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                   <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>

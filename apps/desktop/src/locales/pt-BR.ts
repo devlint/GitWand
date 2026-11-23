@@ -597,6 +597,33 @@ const ptBR: Locale = {
   },
 
   stacks: {
+    state: {
+      out_of_date: "desatualizada",
+      parent_merged: "pai mesclada",
+      parent_missing: "pai não encontrada",
+      base_lost: "base desconhecida",
+    },
+    badge: {
+      parent: "↳ {0}",
+    },
+    restack: "Reempilhar",
+    menu: {
+      stackOn: "Empilhar sobre…",
+      unstack: "Desempilhar",
+      restack: "Reempilhar…",
+    },
+    bridge: {
+      prompt: "Empilhar {0} sobre {1}?",
+      accept: "Empilhar",
+      dismiss: "Ignorar",
+    },
+    stackOn: {
+      title: "Empilhar {0} sobre…",
+      parent: "Branch pai",
+      confirm: "Empilhar",
+      hint: "O GitWand vai propor reempilhar {0} quando o branch pai mudar ou for mesclado.",
+      forgeHint: "Squash merges de mais de um commit só são detectados no GitHub. Em {0}, use Desempilhar depois que o branch pai for mesclado.",
+    },
     preview: {
       moving: "Branches que vão se mover",
       notInStack: "(fora da pilha)",
