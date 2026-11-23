@@ -1286,6 +1286,14 @@ export interface StackMeta {
   base: string | null;
 }
 
+/**
+ * Why a restack plan is refused. The backend emits `rebase_in_progress`,
+ * `up_to_date`, `git_too_old`, `detached`, `dirty`, `occupied`,
+ * `parent_behind`, `no_remote_trunk` and `no_old_base`. `fetch_failed` and
+ * `stale_preview` are synthesized by the frontend (useStacks): the first from
+ * a failed fetch, the second from a `git_restack` error starting with
+ * "stale preview:". Rust never puts them in a plan's `refusal`.
+ */
 export type RestackRefusalCode =
   | "rebase_in_progress"
   | "up_to_date"

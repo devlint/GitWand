@@ -71,6 +71,11 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   check_remote_reachable: { route: "/api/check-remote-reachable" },
   detect_monorepo: { route: "/api/detect-monorepo" },
   folder_diff: { route: "/api/folder-diff" },
+  gh_branch_pr: {
+    route: "/api/gh-branch-pr",
+    cliPathOnly:
+      "The dev-server always shells out to the `gh` CLI and covers github.com origins only; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
+  },
   gh_check_annotations: { route: "/api/gh-check-annotations" },
   gh_create_pr: { route: "/api/gh-create-pr" },
   gh_current_user: { route: "/api/gh-current-user" },
@@ -78,16 +83,6 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
     route: "/api/gh-disable-auto-merge",
     cliPathOnly:
       "The dev-server always shells out to the `gh` CLI; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
-  },
-  gh_branch_pr: {
-    route: "/api/gh-branch-pr",
-    cliPathOnly:
-      "The dev-server always shells out to the `gh` CLI and covers github.com origins only; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
-  },
-  gh_pr_set_base: {
-    route: "/api/gh-pr-set-base",
-    cliPathOnly:
-      "The dev-server always shells out to the `gh` CLI and covers github.com origins only; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
   },
   gh_dismiss_review: { route: "/api/gh-dismiss-review" },
   gh_enable_auto_merge: {
@@ -163,6 +158,11 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   gh_pr_issue_comments: { route: "/api/gh-pr-issue-comments" },
   gh_pr_review_threads: { route: "/api/gh-pr-review-threads" },
   gh_pr_reviews: { route: "/api/gh-pr-reviews" },
+  gh_pr_set_base: {
+    route: "/api/gh-pr-set-base",
+    cliPathOnly:
+      "The dev-server always shells out to the `gh` CLI and covers github.com origins only; the Rust command uses the REST API whenever a token is configured, so the two run different code.",
+  },
   gh_request_reviewers: { route: "/api/gh-request-reviewers" },
   gh_set_review_thread_resolved: { route: "/api/gh-set-review-thread-resolved" },
   git_amend_commit: { route: "/api/git-amend-commit" },
@@ -207,15 +207,11 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   git_push_branch: { route: "/api/git-push-branch" },
   git_push_tags: { route: "/api/git-push-tags" },
   git_rebase_onto: { route: "/api/git-rebase-onto" },
-  git_restack: { route: "/api/git-restack" },
-  stack_restack_plan: { route: "/api/stack-restack-plan" },
-  stack_set_parent: { route: "/api/stack-set-parent" },
-  stack_status: { route: "/api/stack-status" },
-  stack_unset: { route: "/api/stack-unset" },
   git_remote_info: { route: "/api/git-remote-info" },
   git_rename_branch: { route: "/api/git-rename-branch" },
   git_repo_state: { route: "/api/git-repo-state" },
   git_reset_to_commit: { route: "/api/git-reset-to-commit" },
+  git_restack: { route: "/api/git-restack" },
   git_rev_count: { route: "/api/git-rev-count" },
   git_revert_commit: { route: "/api/git-revert-commit" },
   git_shortlog: { route: "/api/git-shortlog" },
@@ -301,6 +297,10 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   snapshot_restore: { route: "/api/snapshot-restore" },
   software_rendering_get_state: { route: "/api/software-rendering" },
   software_rendering_set_enabled: { route: "/api/software-rendering" },
+  stack_restack_plan: { route: "/api/stack-restack-plan" },
+  stack_set_parent: { route: "/api/stack-set-parent" },
+  stack_status: { route: "/api/stack-status" },
+  stack_unset: { route: "/api/stack-unset" },
   telemetry_get_state: { route: "/api/telemetry-state" },
   telemetry_set_enabled: { route: "/api/telemetry-state" },
   terminal_close: { route: "/api/terminal-close" },
