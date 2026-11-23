@@ -6,7 +6,8 @@ import { getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type Git
 import PrListSidebar from "./PrListSidebar.vue";
 import ScopePicker from "./ScopePicker.vue";
 import TrackedIgnoredNotice from "./TrackedIgnoredNotice.vue";
-import StackBadge from "./StackBadge.vue";
+// Lazy: rendered only for stacked branches and bridge offers (v-if below).
+const StackBadge = defineAsyncComponent(() => import("./StackBadge.vue"));
 import { useStacks } from "../composables/useStacks";
 import { useStackActions } from "../composables/useStackActions";
 import { useI18n } from "../composables/useI18n";

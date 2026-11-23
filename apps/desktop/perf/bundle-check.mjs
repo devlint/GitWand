@@ -108,7 +108,15 @@ const BUDGETS = {
   // panel (RepoSidebar), so it is eager by nature; its list component and the
   // created-issue notice were made lazy, which left main at 951 KB. 960 still
   // catches the engine leak above (1085 KB) with ~125 KB to spare.
-  main_max_kb: 960,
+  //
+  // Raised to 980 for v3.14 stacked branches: the branch badge, the banner,
+  // the restack dialog and the restack flow (fetch / plan / apply / retarget /
+  // push, `useStacksFlow.ts`) are lazy chunks; lazy badge + lazy restack flow
+  // left main at 976 KB (999,590 bytes). The remaining overrun predates this
+  // feature (post-#307 merges): the Task 13 review measured ~963 KB with all
+  // stack code removed.
+  // 980 still catches the engine leak above (1085 KB) with ~105 KB to spare.
+  main_max_kb: 980,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked

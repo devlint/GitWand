@@ -48,7 +48,8 @@ import { useBranchPrSearch } from "../../composables/useBranchPrSearch";
 const MergePreviewPanel = defineAsyncComponent(() => import("../MergePreviewPanel.vue"));
 import BaseModal from "../BaseModal.vue";
 import BranchRowActions from "./BranchRowActions.vue";
-import StackBadge from "../StackBadge.vue";
+// Lazy: rendered only for stacked branches and bridge offers (v-if below).
+const StackBadge = defineAsyncComponent(() => import("../StackBadge.vue"));
 import { useStacks } from "../../composables/useStacks";
 import { useStackActions } from "../../composables/useStackActions";
 // Lazy too — only mounted inside the v-if'd create-branch modal.
