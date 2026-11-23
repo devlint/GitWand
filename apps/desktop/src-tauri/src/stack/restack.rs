@@ -100,14 +100,14 @@ pub(crate) fn plan(
     // Same rule as `status` (`detect::propagate`).
     if !rebase_in_progress {
         let flow = propagate(&chain)[pos];
+        if let Some(b) = flow.blocker {
+            return Err(format!("restack {} first", chain[b].branch));
+        }
         if let Some(up) = flow.dropped_for {
             return Err(format!(
                 "{layer} is merged: restack {} instead",
                 chain[up].branch
             ));
-        }
-        if let Some(b) = flow.blocker {
-            return Err(format!("restack {} first", chain[b].branch));
         }
     }
     // The restack's top: the highest layer reached from `layer` through a
@@ -125,10 +125,20 @@ pub(crate) fn plan(
     let top_sha = resolve_commit(repo, &format!("refs/heads/{top}"))?
         .ok_or_else(|| format!("unknown branch: {top}"))?;
     let stack: Vec<String> = chain.iter().map(|x| x.branch.clone()).collect();
-    let moving = match target.upstream_sha.as_deref() {
-        Some(up) => moving_refs(repo, up, &top, &stack)?,
-        None => Vec::new(),
-    };
+    let mut moving = Vec::new();
+    if let Some(up) = target.upstream_sha.as_deref() {
+        // Layers from the bottom up still sitting at `upstream` (no commit of
+        // their own) are outside `upstream..top`, and `--update-refs` does
+        // not move them. List them so the preview shows them and the
+        // occupied guard covers them.
+        // Task 5 finalize moves refs sitting at upstream.
+        for b in &run {
+            if resolve_commit(repo, &format!("refs/heads/{b}"))?.as_deref() == Some(up) {
+                moving.push(moving_ref(repo, b, true)?);
+            }
+        }
+        moving.extend(moving_refs(repo, up, &top, &stack)?);
+    }
     let refusal = first_refusal(Checks {
         repo,
         l,
@@ -429,23 +439,50 @@ pub(crate) fn moving_refs(
         };
         let upstream_ref = f.next().unwrap_or_default();
         let upstream_short = f.next().unwrap_or_default();
-        let remote_sha = if upstream_ref.is_empty() {
-            None
-        } else {
-            resolve_commit(repo, upstream_ref)?
-        };
+        let in_stack = stack.iter().any(|s| s == branch);
         out.push((
             pos,
-            MovingRef {
-                branch: branch.to_string(),
-                in_stack: stack.iter().any(|s| s == branch),
-                upstream: (!upstream_short.is_empty()).then(|| upstream_short.to_string()),
-                remote_sha,
-            },
+            tracked(repo, branch, in_stack, upstream_ref, upstream_short)?,
         ));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.branch.cmp(&b.1.branch)));
     Ok(out.into_iter().map(|(_, m)| m).collect())
+}
+
+/// One branch as a `MovingRef`, with its upstream read from git.
+fn moving_ref(repo: &Path, branch: &str, in_stack: bool) -> Result<MovingRef, String> {
+    let line = run_ok(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(upstream) %(upstream:short)",
+            &format!("refs/heads/{branch}"),
+        ],
+    )?;
+    let mut f = line.split(' ');
+    let upstream_ref = f.next().unwrap_or_default();
+    let upstream_short = f.next().unwrap_or_default();
+    tracked(repo, branch, in_stack, upstream_ref, upstream_short)
+}
+
+fn tracked(
+    repo: &Path,
+    branch: &str,
+    in_stack: bool,
+    upstream_ref: &str,
+    upstream_short: &str,
+) -> Result<MovingRef, String> {
+    let remote_sha = if upstream_ref.is_empty() {
+        None
+    } else {
+        resolve_commit(repo, upstream_ref)?
+    };
+    Ok(MovingRef {
+        branch: branch.to_string(),
+        in_stack,
+        upstream: (!upstream_short.is_empty()).then(|| upstream_short.to_string()),
+        remote_sha,
+    })
 }
 
 /// Invariant of a restack that will run: every layer from the bottom to the
@@ -897,7 +934,6 @@ mod tests {
         let e = plan(p, Some("main"), "step-3", &[], V).unwrap_err();
         assert_eq!(e, "restack step-2 first");
         // step-3 out of date too, still above the lowest one.
-
         let r2 = TempRepo::new();
         broken_chain(&r2);
         let e = plan(&r2.path, Some("main"), "step-3", &[], V).unwrap_err();
@@ -918,5 +954,83 @@ mod tests {
             code(plan(p, Some("main"), "step-3", &[], V)),
             "rebase_in_progress"
         );
+    }
+
+    #[test]
+    fn an_empty_bottom_layer_is_listed_as_moving() {
+        let r = TempRepo::new();
+        r.add_bare_origin();
+        // step-2 has no commit of its own: its tip is step-1's tip.
+        r.git(&["checkout", "-q", "-b", "step-1"]);
+        let old_tip = r.commit("a.txt", "1\n", "s1");
+        r.git(&["checkout", "-q", "-b", "step-2"]);
+        r.git(&["push", "-q", "-u", "origin", "step-2"]);
+        r.git(&["checkout", "-q", "-b", "step-3"]);
+        r.commit("c.txt", "3\n", "s3");
+        set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        set_parent(&r.path, Some("main"), "step-3", "step-2").unwrap();
+        r.git(&["checkout", "-q", "step-1"]);
+        r.commit("a2.txt", "more\n", "s1 more");
+        r.git(&["checkout", "-q", "step-3"]);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        let l2 = s.layers.iter().find(|l| l.branch == "step-2").unwrap();
+        assert_eq!(l2.state, LayerState::OutOfDate);
+        assert!(l2.actionable);
+        let p = plan(&r.path, Some("main"), "step-2", &[], V).unwrap();
+        assert!(p.refusal.is_none(), "{:?}", p.refusal);
+        assert_eq!(p.upstream_sha, old_tip);
+        assert_eq!(p.top, "step-3");
+        assert_eq!(names(&p.moving), ["step-2", "step-3"]);
+        let m2 = &p.moving[0];
+        assert!(m2.in_stack);
+        assert_eq!(m2.upstream.as_deref(), Some("origin/step-2"));
+        assert_eq!(m2.remote_sha.as_deref(), Some(old_tip.as_str()));
+    }
+
+    #[test]
+    fn an_empty_bottom_layer_checked_out_elsewhere_is_occupied() {
+        let r = TempRepo::new();
+        r.git(&["checkout", "-q", "-b", "step-1"]);
+        r.commit("a.txt", "1\n", "s1");
+        r.git(&["branch", "step-2"]);
+        r.git(&["checkout", "-q", "-b", "step-3"]);
+        r.commit("c.txt", "3\n", "s3");
+        set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        set_parent(&r.path, Some("main"), "step-3", "step-2").unwrap();
+        r.git(&["checkout", "-q", "step-1"]);
+        r.commit("a2.txt", "more\n", "s1 more");
+        r.git(&["checkout", "-q", "step-3"]);
+        let wt = r.sandbox.join("wt");
+        r.git(&["worktree", "add", "-q", wt.to_str().unwrap(), "step-2"]);
+        let rf = plan(&r.path, Some("main"), "step-2", &[], V)
+            .unwrap()
+            .refusal
+            .unwrap();
+        assert_eq!(rf.code, "occupied");
+        assert_eq!(rf.branch.as_deref(), Some("step-2"));
+    }
+
+    #[test]
+    fn a_dropped_layer_with_a_blocker_below_names_the_blocker() {
+        let r = TempRepo::new();
+        // main <- step-0 <- step-1 <- step-2 <- step-3, all declared above step-0.
+        r.git(&["checkout", "-q", "-b", "step-0"]);
+        r.commit("z.txt", "0\n", "s0");
+        r.git(&["checkout", "-q", "-b", "step-1"]);
+        r.commit("a.txt", "1\n", "s1");
+        r.git(&["checkout", "-q", "-b", "step-2"]);
+        r.commit("b.txt", "2\n", "s2");
+        r.git(&["checkout", "-q", "-b", "step-3"]);
+        r.commit("c.txt", "3\n", "s3");
+        set_parent(&r.path, Some("main"), "step-1", "step-0").unwrap();
+        set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        set_parent(&r.path, Some("main"), "step-3", "step-2").unwrap();
+        // step-0 moves (step-1 out of date) and step-2 is reported merged.
+        r.git(&["checkout", "-q", "step-0"]);
+        r.commit("z2.txt", "more\n", "s0 more");
+        r.git(&["checkout", "-q", "step-3"]);
+        let h = [hint("step-2", None)];
+        let e = plan(&r.path, Some("main"), "step-2", &h, V).unwrap_err();
+        assert_eq!(e, "restack step-1 first");
     }
 }
