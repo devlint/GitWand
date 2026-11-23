@@ -734,6 +734,7 @@ const en = {
     autoResolved: "auto-resolvable",
     manual: "manual",
     clean: "clean",
+    cleanOne: "clean",
     conflictsAutoResolved: "conflict(s) auto-resolved",
     partial: "auto-resolved",
     addDelete: "add/delete",

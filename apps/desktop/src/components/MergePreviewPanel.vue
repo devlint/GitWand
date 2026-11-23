@@ -79,7 +79,7 @@
         {{ summary.manualFiles }} {{ t('mergePreview.manual') }}
       </span>
       <span v-if="summary.cleanFiles > 0" class="stat stat--clean">
-        {{ summary.cleanFiles }} {{ t('mergePreview.clean') }}
+        {{ summary.cleanFiles }} {{ summary.cleanFiles === 1 ? t('mergePreview.cleanOne') : t('mergePreview.clean') }}
       </span>
     </div>
 

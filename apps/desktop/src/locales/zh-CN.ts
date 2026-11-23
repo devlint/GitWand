@@ -736,6 +736,7 @@ const zhCN: Locale = {
     autoResolved: "可自动解决",
     manual: "手动",
     clean: "干净",
+    cleanOne: "干净",
     conflictsAutoResolved: "个冲突已自动解决",
     partial: "已自动解决",
     addDelete: "新增/删除",

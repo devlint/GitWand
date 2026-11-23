@@ -132,6 +132,10 @@ function close() {
 .rsd p {
   margin: 0;
 }
+/* The preview card is capped for the branch-selector popover; in this modal it fills the width. */
+.rsd :deep(.preview-panel) {
+  max-width: none;
+}
 .rsd-muted {
   color: var(--color-text-muted);
 }
