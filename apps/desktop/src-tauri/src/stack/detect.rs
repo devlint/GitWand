@@ -38,7 +38,7 @@ pub(super) fn resolve_commit(repo: &Path, rev: &str) -> Result<Option<String>, S
 }
 
 /// `merge-base --is-ancestor`: exit 0 yes, 1 no, anything else an error.
-fn is_ancestor(repo: &Path, a: &str, b: &str) -> Result<bool, String> {
+pub(super) fn is_ancestor(repo: &Path, a: &str, b: &str) -> Result<bool, String> {
     let out = run(repo, &["merge-base", "--is-ancestor", a, b])?;
     match out.status.code() {
         Some(0) => Ok(true),
@@ -190,7 +190,7 @@ fn classify(
     if let Some(b) = base.as_deref() {
         if is_ancestor(repo, b, &layer_ref)? {
             l.state = LayerState::OutOfDate;
-            l.parent_behind_upstream = behind_upstream(repo, parent);
+            l.parent_behind_upstream = behind_upstream(repo, parent)?;
             return Ok(l);
         }
     }
@@ -291,16 +291,32 @@ pub(crate) fn chains(all: &BTreeMap<String, StackMeta>) -> Vec<Vec<String>> {
     out
 }
 
-/// Commits on `branch`'s upstream that `branch` lacks; 0 without an upstream
-/// (or on any error).
-pub(crate) fn behind_upstream(repo: &Path, branch: &str) -> u32 {
-    if validate_branch_name(branch).is_err() {
-        return 0;
+/// Commits on `branch`'s upstream that `branch` lacks. 0 when no upstream is
+/// configured, or when its tracking ref is gone (nothing local to be behind).
+/// Any other failure is an error: the `parent_behind` refusal fails closed.
+pub(crate) fn behind_upstream(repo: &Path, branch: &str) -> Result<u32, String> {
+    validate_branch_name(branch)?;
+    let local = format!("refs/heads/{branch}");
+    let out = run(repo, &["for-each-ref", "--format=%(upstream)", &local])?;
+    if !out.status.success() {
+        return Err(format!(
+            "git for-each-ref {local}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
-    let range = format!("refs/heads/{branch}..{branch}@{{upstream}}");
-    match run(repo, &["rev-list", "--count", &range]) {
-        Ok(out) if out.status.success() => stdout(&out).parse().unwrap_or(0),
-        _ => 0,
+    let upstream = stdout(&out);
+    if upstream.is_empty() || resolve_commit(repo, &upstream)?.is_none() {
+        return Ok(0);
+    }
+    let range = format!("{local}..{upstream}");
+    let out = run(repo, &["rev-list", "--count", &range, "--"])?;
+    let text = stdout(&out);
+    match (out.status.success(), text.parse()) {
+        (true, Ok(n)) => Ok(n),
+        _ => Err(format!(
+            "git rev-list --count {range}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )),
     }
 }
 
@@ -577,12 +593,25 @@ mod tests {
         // … and one only on the local step-1, so step-2 is out of date.
         r.commit("local.txt", "l\n", "local");
         r.git(&["checkout", "-q", "step-3"]);
-        assert_eq!(behind_upstream(&r.path, "step-1"), 1);
-        assert_eq!(behind_upstream(&r.path, "step-2"), 0);
+        assert_eq!(behind_upstream(&r.path, "step-1"), Ok(1));
+        assert_eq!(behind_upstream(&r.path, "step-2"), Ok(0));
         let s = status(&r.path, Some("main"), &[]).unwrap();
         let l2 = layer(&s, "step-2");
         assert_eq!(l2.state, LayerState::OutOfDate);
         assert_eq!(l2.parent_behind_upstream, 1);
+    }
+
+    #[test]
+    fn behind_upstream_is_zero_without_or_with_a_gone_upstream_and_errs_otherwise() {
+        let r = TempRepo::new();
+        stack3(&r);
+        assert_eq!(behind_upstream(&r.path, "step-1"), Ok(0));
+        // Configured, but the remote-tracking ref is gone (pruned): nothing
+        // local to be behind.
+        r.git(&["config", "branch.step-1.remote", "origin"]);
+        r.git(&["config", "branch.step-1.merge", "refs/heads/step-1"]);
+        assert_eq!(behind_upstream(&r.path, "step-1"), Ok(0));
+        assert!(behind_upstream(&r.path, "-x").is_err());
     }
 
     #[test]

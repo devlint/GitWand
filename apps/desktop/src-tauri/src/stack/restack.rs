@@ -2,7 +2,7 @@
 //! of one layer would do — which commits move onto what, which branches
 //! `--update-refs` would carry along — and every reason to refuse it.
 
-use super::detect::{behind_upstream, is_sha, resolve_commit, status};
+use super::detect::{behind_upstream, is_ancestor, is_sha, resolve_commit, status};
 use super::guard::{branch_holders, supports_update_refs, Holder};
 use super::meta::{read_all, validate_branch_name};
 use super::{
@@ -84,22 +84,44 @@ pub(crate) fn plan(
         LayerState::UpToDate | LayerState::OutOfDate => parent_moved(l)?,
         LayerState::ParentMerged => parent_merged(repo, l, hints, trunk)?,
     };
-    let top_sha = resolve_commit(repo, &format!("refs/heads/{}", l.top))?
-        .ok_or_else(|| format!("unknown branch: {}", l.top))?;
-    let stack: Vec<String> = report
-        .layers
-        .iter()
-        .filter(|x| x.top == l.top)
-        .map(|x| x.branch.clone())
-        .collect();
-    let moving = match target.upstream_sha.as_deref() {
-        Some(up) => moving_refs(repo, up, &l.top, &stack)?,
-        None => Vec::new(),
-    };
     let holders = branch_holders(repo)?;
     let rebase_in_progress = report.rebase_in_progress
         || holders.iter().any(|h| h.current && h.rebasing)
         || rebasing_here(repo)?;
+    // The layers of `layer`'s chain, bottom to top.
+    let chain: Vec<&LayerStatus> = report.layers.iter().filter(|x| x.top == l.top).collect();
+    let pos = chain
+        .iter()
+        .position(|x| x.branch == layer)
+        .ok_or_else(|| format!("not a stacked branch: {layer}"))?;
+    // Only the lowest layer needing a restack can be restacked: a layer above
+    // it would be replayed onto a parent that is about to move.
+    if l.inherited && !rebase_in_progress {
+        let lowest = chain[..pos]
+            .iter()
+            .find(|x| matches!(x.state, LayerState::OutOfDate | LayerState::ParentMerged))
+            .map_or(layer, |x| x.branch.as_str());
+        return Err(format!("restack {lowest} first"));
+    }
+    // The restack's top: the highest layer reached from `layer` through a
+    // contiguous run where each layer contains the one below. Layers above a
+    // break are not moved now; detection reports them out of date afterwards.
+    let mut run = vec![l.branch.clone()];
+    for next in &chain[pos + 1..] {
+        let below = format!("refs/heads/{}", run[run.len() - 1]);
+        if !is_ancestor(repo, &below, &format!("refs/heads/{}", next.branch))? {
+            break;
+        }
+        run.push(next.branch.clone());
+    }
+    let top = run[run.len() - 1].clone();
+    let top_sha = resolve_commit(repo, &format!("refs/heads/{top}"))?
+        .ok_or_else(|| format!("unknown branch: {top}"))?;
+    let stack: Vec<String> = chain.iter().map(|x| x.branch.clone()).collect();
+    let moving = match target.upstream_sha.as_deref() {
+        Some(up) => moving_refs(repo, up, &top, &stack)?,
+        None => Vec::new(),
+    };
     let refusal = first_refusal(Checks {
         repo,
         l,
@@ -110,6 +132,9 @@ pub(crate) fn plan(
         rebase_in_progress,
         git_version,
     })?;
+    if refusal.is_none() {
+        check_layers_moving(&run, &moving)?;
+    }
     Ok(RestackPlan {
         moment: target.moment,
         bottom: l.branch.clone(),
@@ -117,7 +142,7 @@ pub(crate) fn plan(
         onto_ref: target.onto_ref,
         onto_sha: target.onto_sha.unwrap_or_default(),
         upstream_sha: target.upstream_sha.unwrap_or_default(),
-        top: l.top.clone(),
+        top,
         top_sha,
         moving,
         new_parent: target.new_parent,
@@ -126,7 +151,8 @@ pub(crate) fn plan(
 }
 
 /// Moment 1: replay `base..top` onto the parent's new tip. The parent does
-/// not change, so `new_parent` is `None`. An up-to-date layer gets the same
+/// not change, so `new_parent` is `None`: `new_parent` is meaningful for
+/// moment 2 only (Task 5's finalize ignores it for moment 1). An up-to-date layer gets the same
 /// shape (with nothing to replay) and is refused `up_to_date`.
 fn parent_moved(l: &LayerStatus) -> Result<Target, String> {
     let tip = l
@@ -151,6 +177,8 @@ fn parent_moved(l: &LayerStatus) -> Result<Target, String> {
 /// parent P' — the local branch when P' is a non-trunk branch (D8), else
 /// `origin/<trunk>` with `new_parent = None`. The old tip is the recorded
 /// base, or failing that the head of the merged PR status honoured (D20).
+/// A candidate must exist and be an ancestor of the layer: replaying from
+/// anything else would replay commits that are not the layer's own.
 fn parent_merged(
     repo: &Path,
     l: &LayerStatus,
@@ -166,7 +194,7 @@ fn parent_merged(
         Some(g) => {
             let sha = resolve_commit(repo, &format!("refs/heads/{g}"))?
                 .ok_or_else(|| format!("unknown branch: {g}"))?;
-            let behind = behind_upstream(repo, &g);
+            let behind = behind_upstream(repo, &g)?;
             (g.clone(), Some(sha), Some(g), behind)
         }
         None => {
@@ -185,7 +213,8 @@ fn parent_merged(
     .into_iter()
     .flatten()
     {
-        if commit_exists(repo, candidate)? {
+        let layer_ref = format!("refs/heads/{}", l.branch);
+        if commit_exists(repo, candidate)? && is_ancestor(repo, candidate, &layer_ref)? {
             upstream = Some(candidate.to_string());
             break;
         }
@@ -411,11 +440,22 @@ pub(crate) fn moving_refs(
     out.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.branch.cmp(&b.1.branch)));
     Ok(out.into_iter().map(|(_, m)| m).collect())
 }
+
+/// Invariant of a restack that will run: every layer from the bottom to the
+/// top is among the refs `--update-refs` moves. A layer missing here would be
+/// left behind while the restack reports success.
+fn check_layers_moving(run: &[String], moving: &[MovingRef]) -> Result<(), String> {
+    match run.iter().find(|b| !moving.iter().any(|m| &m.branch == *b)) {
+        Some(b) => Err(format!("internal error: restack would leave {b} behind")),
+        None => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::stack::meta::set_parent;
-    use crate::stack::{MergedParentHint, Moment, RestackPlan};
+    use crate::stack::{LayerState, MergedParentHint, Moment, RestackPlan};
     use crate::worktree::test_support::{git_at, TempRepo};
 
     const V: Option<(u32, u32)> = Some((2, 54));
@@ -512,11 +552,8 @@ mod tests {
         let r = TempRepo::new();
         stack3(&r);
         let step3_base = r.git(&["config", "branch.step-3.gitwandStackBase"]);
-        // step-2's PR (based on step-1) is merged into step-1.
-        r.git(&["checkout", "-q", "step-1"]);
-        r.git(&["merge", "-q", "--squash", "step-2"]);
-        r.git(&["commit", "-q", "-m", "step 2 (squash)"]);
-        r.git(&["checkout", "-q", "step-3"]);
+        // The forge reports step-2's PR (based on step-1) merged; the local
+        // step-1 has not been pulled yet.
         let h = [hint("step-2", None)];
         let p = plan(&r.path, Some("main"), "step-3", &h, V).unwrap();
         assert_eq!(p.moment, Moment::ParentMerged);
@@ -741,5 +778,107 @@ mod tests {
         r.git(&["branch", "-m", "step-1", "step-one"]);
         let e = plan(p, Some("main"), "step-2", &[], V).unwrap_err();
         assert!(e.contains("step-2"), "{e}");
+    }
+
+    /// moved_stack, plus a commit on step-2 after step-3 branched from it:
+    /// step-3 no longer contains step-2's tip.
+    fn broken_chain(r: &TempRepo) {
+        moved_stack(r);
+        r.git(&["checkout", "-q", "step-2"]);
+        r.commit("b2.txt", "late\n", "s2 late");
+        r.git(&["checkout", "-q", "step-3"]);
+    }
+
+    #[test]
+    fn plan_stops_at_a_layer_that_does_not_contain_the_one_below() {
+        let r = TempRepo::new();
+        broken_chain(&r);
+        let p = plan(&r.path, Some("main"), "step-2", &[], V).unwrap();
+        assert_eq!(p.top, "step-2");
+        assert_eq!(p.top_sha, r.git(&["rev-parse", "step-2"]));
+        assert_eq!(names(&p.moving), ["step-2"]);
+        assert!(p.refusal.is_none(), "{:?}", p.refusal);
+        // Run that restack by hand: step-3, above the break, is then the
+        // next layer to restack, not silently lost.
+        r.git(&[
+            "rebase",
+            "-q",
+            "--onto",
+            &p.onto_sha,
+            &p.upstream_sha,
+            "step-2",
+        ]);
+        r.git(&["checkout", "-q", "step-3"]);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        let l3 = s.layers.iter().find(|l| l.branch == "step-3").unwrap();
+        assert_eq!(l3.state, LayerState::OutOfDate);
+        assert!(l3.actionable);
+    }
+
+    #[test]
+    fn every_layer_up_to_top_must_be_moving() {
+        let m = |b: &str| MovingRef {
+            branch: b.into(),
+            in_stack: true,
+            upstream: None,
+            remote_sha: None,
+        };
+        let run = ["step-2".to_string(), "step-3".to_string()];
+        assert!(check_layers_moving(&run, &[m("step-2"), m("step-3")]).is_ok());
+        let e = check_layers_moving(&run, &[m("step-3")]).unwrap_err();
+        assert!(e.contains("step-2"), "{e}");
+    }
+
+    #[test]
+    fn plan_skips_an_old_base_that_is_not_below_the_layer() {
+        let r = TempRepo::new();
+        stack3(&r);
+        let old_tip = r.git(&["rev-parse", "step-1"]);
+        squash_step1_on_origin(&r);
+        // An existing commit that is not an ancestor of step-2.
+        let elsewhere = r.git(&["rev-parse", "origin/main"]);
+        let p = &r.path;
+        // Recorded base not below the layer: fall through to the hint.
+        r.git(&["config", "branch.step-2.gitwandStackBase", &elsewhere]);
+        let h = [hint("step-1", Some(old_tip.clone()))];
+        let got = plan(p, Some("main"), "step-2", &h, V).unwrap();
+        assert_eq!(got.upstream_sha, old_tip);
+        assert!(got.refusal.is_none(), "{:?}", got.refusal);
+        // No base, hint head not below the layer: no old base.
+        r.git(&["config", "--unset", "branch.step-2.gitwandStackBase"]);
+        let h = [hint("step-1", Some(elsewhere))];
+        assert_eq!(code(plan(p, Some("main"), "step-2", &h, V)), "no_old_base");
+    }
+
+    #[test]
+    fn plan_errors_unless_the_layer_is_the_lowest_needing_a_restack() {
+        let r = TempRepo::new();
+        moved_stack(&r);
+        let p = &r.path;
+        // step-3 is up to date but inherits step-2's restack.
+        let e = plan(p, Some("main"), "step-3", &[], V).unwrap_err();
+        assert_eq!(e, "restack step-2 first");
+        // step-3 out of date too, still above the lowest one.
+
+        let r2 = TempRepo::new();
+        broken_chain(&r2);
+        let e = plan(&r2.path, Some("main"), "step-3", &[], V).unwrap_err();
+        assert_eq!(e, "restack step-2 first");
+        // A rebase in progress: its refusal wins over the Err.
+        r.git(&["checkout", "-q", "-b", "other", "main"]);
+        r.commit("README.md", "other\n", "other");
+        r.git(&["checkout", "-q", "main"]);
+        r.commit("README.md", "main\n", "main edit");
+        r.git(&["checkout", "-q", "other"]);
+        let out = crate::git::git_cmd()
+            .args(["rebase", "main"])
+            .current_dir(p)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        assert_eq!(
+            code(plan(p, Some("main"), "step-3", &[], V)),
+            "rebase_in_progress"
+        );
     }
 }
