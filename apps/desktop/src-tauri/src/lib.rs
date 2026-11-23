@@ -304,12 +304,6 @@ pub fn git_operation_action_parity(
         .map(|r| serde_json::json!({ "halted": r.halted }))
 }
 
-/// Collapse any success payload to a marker.
-///
-/// A closure cannot do this job: it would be monomorphised on its first use,
-/// and these commands return several different `Ok` types — `()` for some,
-/// `Option<SnapshotMeta>` for the ones that can take a snapshot. The tests
-/// assert on the repository, never on the payload.
 fn parity_opt(args: &serde_json::Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str()).map(str::to_string)
 }
@@ -324,6 +318,12 @@ fn parity_merged_parents(
     }
 }
 
+/// Collapse any success payload to a marker.
+///
+/// A closure cannot do this job: it would be monomorphised on its first use,
+/// and these commands return several different `Ok` types — `()` for some,
+/// `Option<SnapshotMeta>` for the ones that can take a snapshot. The tests
+/// assert on the repository, never on the payload.
 fn parity_ok_marker<T>(_: T) -> serde_json::Value {
     serde_json::json!({ "ok": true })
 }
@@ -1739,6 +1739,58 @@ mod command_parity_tests {
         );
     }
 
+    /// Reaches the command: whatever it answers, it is not an argument error.
+    fn assert_reaches_command(r: Result<serde_json::Value, String>, what: &str) {
+        if let Err(e) = r {
+            assert!(
+                !e.contains("missing required arg") && !e.contains("invalid arg"),
+                "{what}: argument parsing failed: {e}"
+            );
+        }
+    }
+
+    #[test]
+    fn stack_arms_parse_their_arguments_and_reach_the_command() {
+        let repo = crate::worktree::test_support::TempRepo::new();
+        let cwd = repo.path.to_str().unwrap();
+        let sha = "0".repeat(40);
+        let r = command_parity(
+            "stack_status".into(),
+            serde_json::json!({
+                "cwd": cwd,
+                "trunk": "main",
+                "mergedParents": [{ "branch": "a", "number": 7, "head_ref_oid": sha }],
+            }),
+        );
+        assert!(r.is_ok(), "{r:?}");
+        let r = command_parity(
+            "git_restack".into(),
+            serde_json::json!({
+                "cwd": cwd,
+                "branch": "nope",
+                "mergedParents": [],
+                "previewed": {
+                    "onto_sha": sha, "upstream_sha": sha, "top_sha": sha, "moving": ["nope"],
+                },
+            }),
+        );
+        assert_reaches_command(r, "git_restack");
+        let r = command_parity(
+            "stack_restack_plan".into(),
+            serde_json::json!({ "cwd": cwd, "branch": "nope" }),
+        );
+        assert_reaches_command(r, "stack_restack_plan");
+        let r = command_parity(
+            "stack_set_parent".into(),
+            serde_json::json!({ "cwd": cwd, "branch": "x", "parent": "y" }),
+        );
+        assert_reaches_command(r, "stack_set_parent");
+        let bad = command_parity(
+            "stack_status".into(),
+            serde_json::json!({ "cwd": cwd, "mergedParents": "oops" }),
+        );
+        assert!(bad.unwrap_err().contains("mergedParents"));
+    }
     #[test]
     fn command_parity_knows_the_stack_commands() {
         for c in [

@@ -551,10 +551,12 @@ pub(crate) async fn git_push_branch(
     let (Some(remote), Some(merge)) = (config("remote")?, config("merge")?) else {
         return Err(format!("{branch} has no upstream"));
     };
-    let remote_branch = merge
-        .strip_prefix("refs/heads/")
-        .unwrap_or(&merge)
-        .to_string();
+    if remote.starts_with('-') {
+        return Err(format!("invalid remote: {remote}"));
+    }
+    let Some(remote_branch) = merge.strip_prefix("refs/heads/").map(str::to_string) else {
+        return Err(format!("{branch} has no upstream branch under refs/heads/"));
+    };
     let lease = lease_for(&remote_branch)?;
     let refspec = format!("refs/heads/{branch}:refs/heads/{remote_branch}");
     let args = ["push", lease.as_str(), remote.as_str(), refspec.as_str()];
@@ -7125,5 +7127,40 @@ mod push_branch_tests {
         let repo = TempRepo::new();
         let err = push(&repo, "-f", &"0".repeat(40)).err().unwrap();
         assert_eq!(err, "invalid branch name: -f");
+    }
+
+    #[test]
+    fn push_branch_refuses_a_merge_ref_outside_refs_heads() {
+        let repo = TempRepo::new();
+        repo.add_bare_origin();
+        repo.git(&["branch", "step-4"]);
+        repo.git(&["config", "branch.step-4.remote", "origin"]);
+        repo.git(&["config", "branch.step-4.merge", "refs/tags/x"]);
+        let err = push(&repo, "step-4", &"0".repeat(40)).err().unwrap();
+        assert_eq!(err, "step-4 has no upstream branch under refs/heads/");
+    }
+
+    #[test]
+    fn push_branch_refuses_a_remote_starting_with_a_dash() {
+        let repo = TempRepo::new();
+        repo.git(&["branch", "step-5"]);
+        repo.git(&["config", "branch.step-5.remote", "--upload-pack=x"]);
+        repo.git(&["config", "branch.step-5.merge", "refs/heads/step-5"]);
+        let err = push(&repo, "step-5", &"0".repeat(40)).err().unwrap();
+        assert_eq!(err, "invalid remote: --upload-pack=x");
+    }
+
+    #[test]
+    fn push_branch_with_half_an_upstream_errors() {
+        let repo = TempRepo::new();
+        repo.add_bare_origin();
+        repo.git(&["branch", "only-remote"]);
+        repo.git(&["config", "branch.only-remote.remote", "origin"]);
+        let err = push(&repo, "only-remote", &"0".repeat(40)).err().unwrap();
+        assert_eq!(err, "only-remote has no upstream");
+        repo.git(&["branch", "only-merge"]);
+        repo.git(&["config", "branch.only-merge.merge", "refs/heads/only-merge"]);
+        let err = push(&repo, "only-merge", &"0".repeat(40)).err().unwrap();
+        assert_eq!(err, "only-merge has no upstream");
     }
 }
