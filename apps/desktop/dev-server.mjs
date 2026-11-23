@@ -21,7 +21,7 @@ import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
 import { devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
 import { resolveBin } from "./dev-bin.mjs";
 import { devForkParentNwo, devParseGhBranchPr } from "./dev-gh-branch-pr.mjs";
-import { devGitRestack, devStackRestackPlan, devStackSetParent, devStackStatus, devStackUnset, devValidateBranchName } from "./dev-stack-service.mjs";
+import { devGitRestack, devPushBlock, devStackRestackPlan, devStackSetParent, devStackStatus, devStackUnset, devValidateBranchName } from "./dev-stack-service.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -4413,6 +4413,9 @@ async function handleRequest(req, res) {
         if (remote.startsWith("-")) throw new Error(`invalid remote: ${remote}`);
         if (!merge.startsWith("refs/heads/")) throw new Error(`${branch} has no upstream branch under refs/heads/`);
         const remoteBranch = merge.slice("refs/heads/".length);
+        // C-1: never onto a local branch or a remote branch of another name.
+        const block = devPushBlock(branch, remote, merge);
+        if (block !== null) throw new Error(block);
         const lease = devForceWithLeaseArg(remoteBranch, leaseSha);
         const refspec = `refs/heads/${branch}:refs/heads/${remoteBranch}`;
         const r = spawnSync(GIT, ["push", lease, remote, refspec], { cwd: resolvedCwd, encoding: "utf-8" });

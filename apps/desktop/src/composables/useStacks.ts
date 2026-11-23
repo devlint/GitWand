@@ -103,7 +103,19 @@ export interface AfterRestack {
     error: string | null;
   };
   deleteOffer: string | null;
-  push: { pushable: { branch: string; lease: string }[]; skipped: string[]; noLeases: boolean };
+  push: { pushable: { branch: string; lease: string }[]; skipped: PushSkip[]; noLeases: boolean };
+}
+
+/**
+ * A branch the restack moved that the push offer leaves out, and why:
+ * no upstream; its tracking ref is gone; `blocked` by the backend's
+ * `push_block` (`detail` holds its words); `not_in_stack`, a non-stack
+ * branch `--update-refs` moved too.
+ */
+export interface PushSkip {
+  branch: string;
+  reason: "no_upstream" | "gone" | "blocked" | "not_in_stack";
+  detail: string | null;
 }
 
 export interface BridgeOffer {

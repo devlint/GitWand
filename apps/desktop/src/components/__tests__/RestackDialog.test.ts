@@ -50,8 +50,8 @@ const plan: RestackPlan = {
   top: "step-3",
   top_sha: "top",
   moving: [
-    { branch: "step-2", in_stack: true, upstream: null, remote_sha: null },
-    { branch: "tag-along", in_stack: false, upstream: null, remote_sha: null },
+    { branch: "step-2", in_stack: true, upstream: null, remote_sha: null, push_block: null },
+    { branch: "tag-along", in_stack: false, upstream: null, remote_sha: null, push_block: null },
   ],
   new_parent: null,
   refusal: null,

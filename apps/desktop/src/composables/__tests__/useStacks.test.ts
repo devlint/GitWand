@@ -53,8 +53,8 @@ const plan = (over: Partial<RestackPlan> = {}): RestackPlan => ({
   top: "step-3",
   top_sha: "top",
   moving: [
-    { branch: "step-2", in_stack: true, upstream: "origin/step-2", remote_sha: "aaa" },
-    { branch: "step-3", in_stack: true, upstream: null, remote_sha: null },
+    { branch: "step-2", in_stack: true, upstream: "origin/step-2", remote_sha: "aaa", push_block: null },
+    { branch: "step-3", in_stack: true, upstream: null, remote_sha: null, push_block: null },
   ],
   new_parent: null,
   refusal: null,
@@ -308,7 +308,7 @@ describe("useStacks — after a restack", () => {
     expect(s.flow.value.phase).toBe("done");
     expect(s.after.value?.push).toEqual({
       pushable: [{ branch: "step-2", lease: "aaa" }],
-      skipped: ["step-3"],
+      skipped: [{ branch: "step-3", reason: "no_upstream", detail: null }],
       noLeases: false,
     });
     expect(h.offerPush).toHaveBeenCalledTimes(1);
@@ -316,6 +316,43 @@ describe("useStacks — after a restack", () => {
     expect(deps.pushBranch).toHaveBeenCalledWith("/r", "step-2", "aaa");
     expect(deps.pushBranch).toHaveBeenCalledTimes(1);
     expect(res).toEqual([{ branch: "step-2", ok: true, message: "pushed" }]);
+  });
+
+  it("says why each moved branch is not pushed: blocked, gone, no upstream, not in the stack (C-1, M-4)", async () => {
+    host();
+    const { s, deps, world } = setup({
+      plan: vi.fn(async () =>
+        plan({
+          moving: [
+            { branch: "backup", in_stack: false, upstream: "origin/backup", remote_sha: "bbb", push_block: null },
+            {
+              branch: "step-2",
+              in_stack: true,
+              upstream: "origin/main",
+              remote_sha: null,
+              push_block: "step-2 tracks origin/main, not origin/step-2: push it yourself",
+            },
+            { branch: "step-3", in_stack: true, upstream: "origin/step-3", remote_sha: null, push_block: null },
+          ],
+        }),
+      ),
+    });
+    world.report = report({ layers: stack({ "step-2": { state: "out_of_date", actionable: true } }) });
+    await s.refresh("/r");
+    await s.startRestack("/r", "step-2");
+    world.next = report({ finalized: finalized() });
+    await s.applyRestack(0);
+    expect(s.after.value?.push).toEqual({
+      pushable: [],
+      skipped: [
+        { branch: "step-2", reason: "blocked", detail: "step-2 tracks origin/main, not origin/step-2: push it yourself" },
+        { branch: "step-3", reason: "gone", detail: null },
+        { branch: "backup", reason: "not_in_stack", detail: null },
+      ],
+      noLeases: false,
+    });
+    expect(await s.pushMoved()).toEqual([]);
+    expect(deps.pushBranch).not.toHaveBeenCalled();
   });
 
   it("a restack finalized without a plan in memory offers no push", async () => {
@@ -725,7 +762,11 @@ describe("useStacks — push offer with nothing pushable (review M-5)", () => {
     // A plan whose moved layers have no upstream lease at all.
     world.next = report({ finalized: finalized({ bottom: "step-2", moved: ["step-3"] }) });
     await s.applyRestack(0);
-    expect(s.after.value?.push).toEqual({ pushable: [], skipped: ["step-3"], noLeases: false });
+    expect(s.after.value?.push).toEqual({
+      pushable: [],
+      skipped: [{ branch: "step-3", reason: "no_upstream", detail: null }],
+      noLeases: false,
+    });
     expect(h.offerPush).toHaveBeenCalledTimes(1);
   });
 });

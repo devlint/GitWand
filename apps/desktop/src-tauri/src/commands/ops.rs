@@ -557,6 +557,11 @@ pub(crate) async fn git_push_branch(
     let Some(remote_branch) = merge.strip_prefix("refs/heads/").map(str::to_string) else {
         return Err(format!("{branch} has no upstream branch under refs/heads/"));
     };
+    // C-1: a layer tracking a local branch or another-named remote branch
+    // would be force-pushed onto that branch.
+    if let Some(block) = crate::stack::restack::push_block(&branch, &remote, &merge) {
+        return Err(block);
+    }
     let lease = lease_for(&remote_branch)?;
     let refspec = format!("refs/heads/{branch}:refs/heads/{remote_branch}");
     let args = ["push", lease.as_str(), remote.as_str(), refspec.as_str()];
@@ -7148,6 +7153,42 @@ mod push_branch_tests {
         repo.git(&["config", "branch.step-5.merge", "refs/heads/step-5"]);
         let err = push(&repo, "step-5", &"0".repeat(40)).err().unwrap();
         assert_eq!(err, "invalid remote: --upload-pack=x");
+    }
+
+    /// C-1: `git switch -c step-2 origin/main` makes step-2 track main. A
+    /// layer pushed to its upstream would land on the remote main.
+    #[test]
+    fn push_branch_refuses_an_upstream_with_another_name() {
+        let repo = TempRepo::new();
+        let bare = repo.add_bare_origin();
+        let remote_main = git_at(&bare, &["rev-parse", "main"]);
+        repo.git(&["switch", "-q", "-c", "step-2", "origin/main"]);
+        repo.commit("b.txt", "2", "step 2");
+        repo.git(&["checkout", "-q", "main"]);
+        let err = push(&repo, "step-2", &remote_main).err().unwrap();
+        assert_eq!(
+            err,
+            "step-2 tracks origin/main, not origin/step-2: push it yourself"
+        );
+        assert_eq!(git_at(&bare, &["rev-parse", "main"]), remote_main);
+    }
+
+    /// C-1: `--track step-1` gives step-2 the remote "." — a push would
+    /// overwrite the local step-1.
+    #[test]
+    fn push_branch_refuses_a_local_upstream() {
+        let repo = TempRepo::new();
+        repo.git(&["branch", "step-1"]);
+        repo.git(&["switch", "-q", "-c", "step-2", "--track", "step-1"]);
+        repo.commit("b.txt", "2", "step 2");
+        repo.git(&["checkout", "-q", "main"]);
+        let step1 = repo.git(&["rev-parse", "step-1"]);
+        let err = push(&repo, "step-2", &step1).err().unwrap();
+        assert_eq!(
+            err,
+            "step-2 tracks a local branch, not a remote: push it yourself"
+        );
+        assert_eq!(repo.git(&["rev-parse", "step-1"]), step1);
     }
 
     #[test]

@@ -16,6 +16,7 @@ import {
   type AfterRestack,
   type BridgeOffer,
   type PushResult,
+  type PushSkip,
   type StacksCore,
 } from "./useStacks";
 
@@ -73,12 +74,18 @@ export function createStacksFlow(c: StacksCore) {
     }
     state.lastPlan = null;
     const pushable: { branch: string; lease: string }[] = [];
-    const skipped: string[] = [];
+    const skipped: PushSkip[] = [];
+    const skip = (branch: string, reason: PushSkip["reason"], detail: string | null = null) =>
+      skipped.push({ branch, reason, detail });
     for (const b of fin.moved) {
-      const lease = mem.plan.moving.find((m) => m.branch === b)?.remote_sha ?? null;
-      if (lease) pushable.push({ branch: b, lease });
-      else skipped.push(b);
+      const m = mem.plan.moving.find((x) => x.branch === b);
+      if (m?.push_block) skip(b, "blocked", m.push_block);
+      else if (m?.remote_sha) pushable.push({ branch: b, lease: m.remote_sha });
+      else if (m?.upstream) skip(b, "gone");
+      else skip(b, "no_upstream");
     }
+    // Branches outside the stack that `--update-refs` moved: never offered.
+    for (const m of mem.plan.moving) if (!m.in_stack) skip(m.branch, "not_in_stack");
     return { pushable, skipped, noLeases: false };
   }
 

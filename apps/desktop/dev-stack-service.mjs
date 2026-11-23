@@ -984,12 +984,35 @@ function movingRef(repo, branch, inStack) {
 }
 
 function tracked(repo, branch, inStack, upstreamRef, upstreamShort) {
+  const block =
+    upstreamRef === ""
+      ? null
+      : devPushBlock(branch, branchConfig(repo, branch, "remote") ?? "", branchConfig(repo, branch, "merge") ?? "");
   return {
     branch,
     in_stack: inStack,
     upstream: upstreamShort !== "" ? upstreamShort : null,
-    remote_sha: upstreamRef === "" ? null : resolveCommit(repo, upstreamRef),
+    remote_sha: upstreamRef === "" || block !== null ? null : resolveCommit(repo, upstreamRef),
+    push_block: block,
   };
+}
+
+/** `branch.<b>.<var>`; null when unset. Any other failure is an error. */
+function branchConfig(repo, branch, v) {
+  const k = key(branch, v);
+  const out = run(repo, ["config", "--get", k]);
+  if (out.status === 0) return trimmed(out.stdout) || null;
+  if (out.status === 1) return null;
+  fail(`git config ${k}: ${trimmed(out.stderr)}`);
+}
+
+/** C-1, `push_block` (restack.rs): why `branch` must not be force-pushed to
+ *  the upstream its config names (a local branch, or another name), or null.
+ *  Shared by `/api/git-push-branch` and the plan's push leases. */
+export function devPushBlock(branch, remote, merge) {
+  if (remote === ".") return `${branch} tracks a local branch, not a remote: push it yourself`;
+  const other = merge.startsWith("refs/heads/") ? merge.slice("refs/heads/".length) : merge;
+  return other !== branch ? `${branch} tracks ${remote}/${other}, not ${remote}/${branch}: push it yourself` : null;
 }
 
 /** Invariant of a restack that will run: every layer bottom..top moves. */

@@ -1331,7 +1331,10 @@ export interface RestackMovingRef {
   branch: string;
   in_stack: boolean;
   upstream: string | null;
+  /** The push lease; null without an upstream, with a gone tracking ref, or when `push_block` is set. */
   remote_sha: string | null;
+  /** Why this branch must not be pushed to its upstream (it tracks a local or another-named branch). */
+  push_block: string | null;
 }
 
 export interface RestackPlan {

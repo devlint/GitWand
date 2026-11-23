@@ -125,7 +125,14 @@ pub struct MovingRef {
     pub branch: String,
     pub in_stack: bool,
     pub upstream: Option<String>,
+    /// The upstream tip read before the restack: the push lease. `None`
+    /// without an upstream, when its tracking ref is gone, or when the push
+    /// is blocked.
     pub remote_sha: Option<String>,
+    /// Why this branch must not be pushed to its upstream (C-1): it tracks a
+    /// local branch, or a remote branch of another name. Same words as the
+    /// `git_push_branch` refusal.
+    pub push_block: Option<String>,
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]

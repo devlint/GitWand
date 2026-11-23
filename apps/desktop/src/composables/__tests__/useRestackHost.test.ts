@@ -61,11 +61,40 @@ describe("createRestackHost", () => {
 
   it("skipped only: names them, with no action", () => {
     const { host, toast } = setup();
-    host.offerPush(after({ pushable: [], skipped: ["step-3"], noLeases: false }), vi.fn());
+    host.offerPush(
+      after({ pushable: [], skipped: [{ branch: "step-3", reason: "no_upstream", detail: null }], noLeases: false }),
+      vi.fn(),
+    );
     const [title, detail, , extras] = toast.mock.calls[0];
     expect(title).toBe("Restacked.");
     expect(detail).toBe("Not pushed (no upstream): step-3");
     expect(extras.action).toBeUndefined();
+  });
+
+  it("gives each reason its own line (C-1, M-4)", () => {
+    const { host, toast } = setup();
+    host.offerPush(
+      after({
+        pushable: [],
+        skipped: [
+          { branch: "a", reason: "no_upstream", detail: null },
+          { branch: "b", reason: "no_upstream", detail: null },
+          { branch: "c", reason: "gone", detail: null },
+          { branch: "d", reason: "blocked", detail: "d tracks a local branch, not a remote: push it yourself" },
+          { branch: "e", reason: "not_in_stack", detail: null },
+        ],
+        noLeases: false,
+      }),
+      vi.fn(),
+    );
+    expect(toast.mock.calls[0][1]).toBe(
+      [
+        "Not pushed (no upstream): a, b",
+        "Not pushed (its remote branch is gone): c",
+        "Not pushed: d tracks a local branch, not a remote: push it yourself",
+        "Not offered (not in the stack): e",
+      ].join("\n"),
+    );
   });
 
   it("offers Push with the skipped detail, and pushes only on click", async () => {
@@ -75,7 +104,7 @@ describe("createRestackHost", () => {
       { branch: "step-3", ok: false, message: "stale info" },
     ]);
     host.offerPush(
-      after({ pushable: [{ branch: "step-2", lease: "a" }, { branch: "step-3", lease: "b" }], skipped: ["x"], noLeases: false }),
+      after({ pushable: [{ branch: "step-2", lease: "a" }, { branch: "step-3", lease: "b" }], skipped: [{ branch: "x", reason: "no_upstream", detail: null }], noLeases: false }),
       run,
     );
     const [title, detail, , extras] = toast.mock.calls[0];

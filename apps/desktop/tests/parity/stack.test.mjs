@@ -652,6 +652,48 @@ describe("parity: git-push-branch", () => {
     expect(r.error).toBe("invalid lease sha");
   }, 60_000);
 
+  it("never pushes a layer onto another branch (C-1), with the same words", async () => {
+    const cases = [
+      // `git switch -c step-2 origin/main`: the upstream is the remote main.
+      ["origin", "refs/heads/main", "step-2 tracks origin/main, not origin/step-2: push it yourself"],
+      // `--track step-1`: the upstream is the local step-1.
+      [".", "refs/heads/step-1", "step-2 tracks a local branch, not a remote: push it yourself"],
+    ];
+    for (const [remote, merge, msg] of cases) {
+      const { rustCwd, nodeCwd } = twoFixtures("squashed", (cwd) => {
+        git(cwd, ["config", "branch.step-2.remote", remote]);
+        git(cwd, ["config", "branch.step-2.merge", merge]);
+      });
+      const before = (cwd) => [git(cwd, ["ls-remote", "origin", "refs/heads/main"]), git(cwd, ["rev-parse", "step-1"])];
+      const want = { rust: before(rustCwd), node: before(nodeCwd) };
+      // A lease that matches the target: only the refusal stops the push.
+      const leaseOf = (cwd) => (remote === "." ? git(cwd, ["rev-parse", "step-1"]) : git(cwd, ["rev-parse", "origin/main"]));
+      const r = ownResult(rust("git_push_branch", { cwd: rustCwd, branch: "step-2", leaseSha: leaseOf(rustCwd) }), rustCwd);
+      const n = ownResult(
+        await node(dev, "/api/git-push-branch", { cwd: nodeCwd, branch: "step-2", leaseSha: leaseOf(nodeCwd) }),
+        nodeCwd,
+      );
+      expectSameError(r, n, msg);
+      expect(r.error).toBe(msg);
+      expect(before(rustCwd)).toEqual(want.rust);
+      expect(before(nodeCwd)).toEqual(want.node);
+    }
+  }, 60_000);
+
+  it("a plan gives no lease to a layer tracking another branch (C-1)", async () => {
+    const prep = (cwd) => {
+      git(cwd, ["config", "branch.step-3.remote", "."]);
+      git(cwd, ["config", "branch.step-3.merge", "refs/heads/step-1"]);
+    };
+    const { rustCwd, nodeCwd } = twoFixtures("moved", prep);
+    const r = await planBoth(dev, rustCwd, nodeCwd, "step-2", "plan with a local upstream");
+    const s3 = r.value.moving.find((m) => m.branch === "step-3");
+    expect([s3.remote_sha, s3.push_block]).toEqual([
+      null,
+      "step-3 tracks a local branch, not a remote: push it yourself",
+    ]);
+  }, 60_000);
+
   it("force-pushes one branch under its lease, identically", async () => {
     const prep = (cwd) => {
       git(cwd, ["push", "--quiet", "-u", "origin", "step-2"]);

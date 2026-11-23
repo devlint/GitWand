@@ -480,7 +480,14 @@ fn tracked(
     upstream_ref: &str,
     upstream_short: &str,
 ) -> Result<MovingRef, String> {
-    let remote_sha = if upstream_ref.is_empty() {
+    let push_block = if upstream_ref.is_empty() {
+        None
+    } else {
+        let remote = branch_config(repo, branch, "remote")?.unwrap_or_default();
+        let merge = branch_config(repo, branch, "merge")?.unwrap_or_default();
+        push_block(branch, &remote, &merge)
+    };
+    let remote_sha = if upstream_ref.is_empty() || push_block.is_some() {
         None
     } else {
         resolve_commit(repo, upstream_ref)?
@@ -490,6 +497,42 @@ fn tracked(
         in_stack,
         upstream: (!upstream_short.is_empty()).then(|| upstream_short.to_string()),
         remote_sha,
+        push_block,
+    })
+}
+
+/// `branch.<b>.<var>`; `None` when unset. Any other failure is an error: it
+/// must not read as "nothing to block".
+fn branch_config(repo: &Path, branch: &str, var: &str) -> Result<Option<String>, String> {
+    let key = format!("branch.{branch}.{var}");
+    let out = exec(repo, &["config", "--get", &key])?;
+    match out.status.code() {
+        Some(0) => Ok(
+            Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|v| !v.is_empty()),
+        ),
+        Some(1) => Ok(None),
+        _ => Err(format!(
+            "git config {key}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )),
+    }
+}
+
+/// C-1: why `branch` must not be force-pushed to the upstream `remote` /
+/// `merge` its config names, or `None` when that upstream is `branch`'s own
+/// name on a real remote. A local upstream (remote `.`) would overwrite a
+/// local branch; another name (`git switch -c step-2 origin/main`) would
+/// land the layer on that branch. Shared by `git_push_branch` and the push
+/// leases of a restack plan.
+pub(crate) fn push_block(branch: &str, remote: &str, merge: &str) -> Option<String> {
+    if remote == "." {
+        return Some(format!(
+            "{branch} tracks a local branch, not a remote: push it yourself"
+        ));
+    }
+    let other = merge.strip_prefix("refs/heads/").unwrap_or(merge);
+    (other != branch).then(|| {
+        format!("{branch} tracks {remote}/{other}, not {remote}/{branch}: push it yourself")
     })
 }
 
@@ -1170,6 +1213,42 @@ mod tests {
         assert_eq!(s3.remote_sha, None);
     }
 
+    /// C-1: a layer whose upstream is another branch (or a local one) is
+    /// never given a lease: pushing it would overwrite that branch.
+    #[test]
+    fn plan_blocks_the_push_of_a_layer_tracking_another_branch() {
+        let r = TempRepo::new();
+        stack3(&r);
+        r.add_bare_origin();
+        r.git(&["push", "-q", "origin", "step-2:step-2"]);
+        r.git(&["branch", "-q", "--set-upstream-to=origin/main", "step-2"]);
+        r.git(&["branch", "-q", "--set-upstream-to=step-1", "step-3"]);
+        r.git(&["checkout", "-q", "step-1"]);
+        r.commit("a2.txt", "more\n", "s1 more");
+        r.git(&["checkout", "-q", "step-3"]);
+        let p = plan(&r.path, Some("main"), "step-2", &[], V).unwrap();
+        let s2 = p.moving.iter().find(|m| m.branch == "step-2").unwrap();
+        assert_eq!(s2.upstream.as_deref(), Some("origin/main"));
+        assert_eq!(s2.remote_sha, None);
+        assert_eq!(
+            s2.push_block.as_deref(),
+            Some("step-2 tracks origin/main, not origin/step-2: push it yourself")
+        );
+        let s3 = p.moving.iter().find(|m| m.branch == "step-3").unwrap();
+        assert_eq!(s3.remote_sha, None);
+        assert_eq!(
+            s3.push_block.as_deref(),
+            Some("step-3 tracks a local branch, not a remote: push it yourself")
+        );
+    }
+
+    #[test]
+    fn push_block_names_the_rule() {
+        assert_eq!(push_block("b", "origin", "refs/heads/b"), None);
+        assert!(push_block("b", ".", "refs/heads/a").is_some());
+        assert!(push_block("b", "origin", "refs/heads/main").is_some());
+    }
+
     #[test]
     fn plan_refuses_up_to_date_and_a_rebase_in_the_current_worktree() {
         let r = TempRepo::new();
@@ -1255,6 +1334,7 @@ mod tests {
             in_stack: true,
             upstream: None,
             remote_sha: None,
+            push_block: None,
         };
         let run = ["step-2".to_string(), "step-3".to_string()];
         assert!(check_layers_moving(&run, &[m("step-2"), m("step-3")]).is_ok());

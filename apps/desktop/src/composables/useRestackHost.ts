@@ -5,8 +5,9 @@
  * M-3); App.vue supplies the rebase runner and its toast.
  */
 import { useI18n } from "./useI18n";
+import type { LocaleKey } from "../locales";
 import type { ApplyOutcome } from "./useApplyFromPreview";
-import type { RestackHost } from "./useStacks";
+import type { PushSkip, RestackHost } from "./useStacks";
 import type { MergedParentHint, PreviewedRestack, RestackPlan } from "../utils/backend";
 
 export interface RestackToastExtras {
@@ -49,7 +50,18 @@ export function createRestackHost(deps: RestackHostDeps): RestackHost {
         deps.toast(t("stacks.push.noLeases"), null, OFFER_MS, { key: PUSH_KEY });
         return;
       }
-      const skippedDetail = skipped.length ? t("stacks.push.skipped", skipped.join(", ")) : null;
+      const names = (reason: PushSkip["reason"]) =>
+        skipped.filter((x) => x.reason === reason).map((x) => x.branch);
+      const lines: string[] = [];
+      const group = (reason: PushSkip["reason"], key: LocaleKey) => {
+        const n = names(reason);
+        if (n.length) lines.push(t(key, n.join(", ")));
+      };
+      group("no_upstream", "stacks.push.skipped");
+      group("gone", "stacks.push.skippedGone");
+      for (const x of skipped) if (x.reason === "blocked") lines.push(t("stacks.push.skippedReason", x.detail ?? x.branch));
+      group("not_in_stack", "stacks.push.notInStack");
+      const skippedDetail = lines.length ? lines.join("\n") : null;
       if (pushable.length === 0) {
         // Nothing can be pushed safely: say what was left out (review M-5).
         deps.toast(t("stacks.dialog.done"), skippedDetail, OFFER_MS, { key: PUSH_KEY });
