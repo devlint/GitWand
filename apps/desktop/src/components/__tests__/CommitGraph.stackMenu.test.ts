@@ -53,9 +53,10 @@ const layer = { branch: "step-2" } as StackLayerStatus;
 let app: App | null = null;
 let container: HTMLElement | null = null;
 
-function mount() {
+function mount(over: Record<string, unknown> = {}) {
   __setStacksForTest({
     report: ref({ trunk: "main" }),
+    trunk: () => "main",
     layerOf: (b: string) => (b === "step-2" ? layer : null),
     actionableFor: (b: string) => (b === "step-2" ? layer : null),
   } as unknown as Stacks);
@@ -74,6 +75,7 @@ function mount() {
         onStackOn: on("stack-on"),
         onUnstack: on("unstack"),
         onRestack: on("restack"),
+        ...over,
       }),
   });
   app.mount(container);
@@ -139,5 +141,21 @@ describe("CommitGraph — stack items in the branch context menu", () => {
     expect(itemTexts().some((x) => x.includes("stacks.menu."))).toBe(false);
     await openMenuOn("origin/feature");
     expect(itemTexts().some((x) => x.includes("stacks.menu."))).toBe(false);
+  });
+});
+
+describe("CommitGraph — stack items on the checked-out branch (QA2 item 4)", () => {
+  it("offers the items on the current (HEAD) branch when it is not the trunk", async () => {
+    const { emitted } = mount({
+      currentBranch: "step-2",
+      commits: [entry("aaa1111", "main"), entry("bbb2222", "HEAD -> step-2")],
+      branches: [branch("main"), { ...branch("step-2"), isCurrent: true }],
+    });
+    await openMenuOn("step-2");
+    const texts = itemTexts();
+    expect(texts.filter((x) => x.includes("stacks.menu.")).length).toBe(3);
+    item("stacks.menu.unstack").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await nextTick();
+    expect(emitted["unstack"]).toEqual([["step-2"]]);
   });
 });

@@ -8,7 +8,7 @@
  * `stackOnRequest`, and the single StackOnDialog host (StackOnHost, mounted by
  * App.vue) opens the dialog from it.
  */
-import { ref } from "vue";
+import { defineAsyncComponent, ref, type Component } from "vue";
 import { restackHost, useStacks, type BridgeOffer, type Stacks } from "./useStacks";
 import { useUndoToast } from "./useUndoToast";
 
@@ -20,16 +20,19 @@ export interface StackMenuItems {
 }
 
 /**
- * The stack items for local branch `branch`: "Stack on…" unless it is the
- * trunk, "Unstack" when it is a layer, "Restack…" when its chain has an
+ * The stack items for local branch `branch`: "Stack on…" when the trunk is
+ * known and `branch` is not it, "Unstack" when it is a layer, "Restack…" when its chain has an
  * actionable layer.
  */
 export function stackMenuFor(
-  stacks: Pick<Stacks, "report" | "layerOf" | "actionableFor">,
+  stacks: Pick<Stacks, "trunk" | "layerOf" | "actionableFor">,
   branch: string,
 ): StackMenuItems {
+  // No trunk known (no report, no Settings default): fail closed, the
+  // branch could be the trunk.
+  const trunk = stacks.trunk();
   return {
-    stackOn: !!branch && branch !== stacks.report.value?.trunk,
+    stackOn: !!branch && trunk !== null && branch !== trunk,
     unstack: !!stacks.layerOf(branch),
     restack: !!stacks.actionableFor(branch),
   };
@@ -42,6 +45,29 @@ export interface StackOnRequest {
 
 /** The pending "Stack on…" request (module state: one dialog for every entry point). */
 const stackOnRequest = ref<StackOnRequest | null>(null);
+
+/**
+ * The Git Tree menu's three items, bound to the open repository (`currentCwd`):
+ * without one they do nothing, so no action ever runs on an empty path.
+ */
+export function stackMenuHandlers(
+  actions: {
+    requestStackOn: (cwd: string, branch: string) => void;
+    unstack: (cwd: string, branch: string) => unknown;
+    restackFrom: (cwd: string, branch: string) => unknown;
+  },
+  currentCwd: () => string | null,
+) {
+  const withCwd = (run: (cwd: string, branch: string) => unknown) => (branch: string) => {
+    const cwd = currentCwd();
+    if (cwd) void run(cwd, branch);
+  };
+  return {
+    stackOn: withCwd(actions.requestStackOn),
+    unstack: withCwd(actions.unstack),
+    restack: withCwd(actions.restackFrom),
+  };
+}
 
 const message = (e: unknown) => String((e as { message?: string })?.message ?? e);
 
@@ -63,6 +89,10 @@ export function createStackActions(stacks: Stacks, notify: (message: string) => 
     closeStackOn: () => {
       stackOnRequest.value = null;
     },
+    /** The open repository changed: a request made in another one is dropped. */
+    repoSwitched: (cwd: string | null) => {
+      if (stackOnRequest.value && stackOnRequest.value.cwd !== cwd) stackOnRequest.value = null;
+    },
     /** The stack items of `branch`'s context menu. */
     menuFor: (branch: string) => stackMenuFor(stacks, branch),
     /** Restack the chain `branch` belongs to, from its lowest actionable layer. */
@@ -83,13 +113,36 @@ export function createStackActions(stacks: Stacks, notify: (message: string) => 
 }
 
 /**
- * Errors go to the restack host's `notify` (App.vue: the detail toast, which
- * wraps long text); the undo toast only when no host is registered.
+ * The stack error channel: the restack host's `notify` (App.vue: the detail
+ * toast, which wraps long text); the undo toast only when no host is registered.
  */
+function notifyStackError(m: string): void {
+  const h = restackHost();
+  if (h) h.notify(m);
+  else useUndoToast().notify(m);
+}
+
 export function useStackActions() {
-  return createStackActions(useStacks(), (m) => {
-    const h = restackHost();
-    if (h) h.notify(m);
-    else useUndoToast().notify(m);
+  return createStackActions(useStacks(), notifyStackError);
+}
+
+/** Rendered in place of a stack view whose chunk failed to load. */
+const NothingView: Component = { render: () => null };
+
+/**
+ * A lazy stack view (StackOnHost, StackBranchMenu) whose chunk may fail to
+ * load (offline, stale build): `onFail` undoes what asked for it (clears the
+ * request or the menu) and the error goes to the stack error channel. The
+ * next mount retries the import.
+ */
+export function lazyStackView(loader: () => Promise<{ default: Component } | Component>, onFail: () => void) {
+  return defineAsyncComponent({
+    loader: () =>
+      loader().catch((e: unknown) => {
+        onFail();
+        notifyStackError(message(e));
+        throw e;
+      }),
+    errorComponent: NothingView,
   });
 }

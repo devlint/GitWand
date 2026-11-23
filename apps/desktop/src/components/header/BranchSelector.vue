@@ -51,9 +51,12 @@ import BranchRowActions from "./BranchRowActions.vue";
 // Lazy: rendered only for stacked branches and bridge offers (v-if below).
 const StackBadge = defineAsyncComponent(() => import("../StackBadge.vue"));
 import { useStacks } from "../../composables/useStacks";
-import { useStackActions, type StackMenuItems } from "../../composables/useStackActions";
+import { lazyStackView, useStackActions, type StackMenuItems } from "../../composables/useStackActions";
 // Lazy: mounted only while a branch row's right-click menu is open (v-if below).
-const StackBranchMenu = defineAsyncComponent(() => import("../StackBranchMenu.vue"));
+// A failed chunk load closes the menu and reports through the stack error channel.
+const StackBranchMenu = lazyStackView(() => import("../StackBranchMenu.vue"), () => {
+  stackMenu.value = null;
+});
 // Lazy too — only mounted inside the v-if'd create-branch modal.
 const BranchNameField = defineAsyncComponent(() => import("../BranchNameField.vue"));
 
@@ -601,7 +604,8 @@ function onDocClick(e: MouseEvent) {
   // popover open while it's up — the modal owns its own backdrop dismissal.
   if (showCreate.value) return;
   const target = e.target as HTMLElement | null;
-  // A row's stack menu also teleports to <body>: picking an item keeps the list open.
+  // A row's stack menu also teleports to <body>: its item closes the popover
+  // itself (`picked`), after it has read what it needs.
   if (!target?.closest(".branch-popover-wrapper") && !target?.closest(".stack-branch-menu")) {
     closePopover();
   }
@@ -1108,6 +1112,7 @@ onUnmounted(() => {
       :x="stackMenu.x"
       :y="stackMenu.y"
       @close="stackMenu = null"
+      @picked="closePopover"
     />
   </div>
 </template>

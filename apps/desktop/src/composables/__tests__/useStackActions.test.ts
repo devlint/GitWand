@@ -91,9 +91,8 @@ describe("useStackActions — error channel", () => {
 describe("stack menu (QA bug 1)", () => {
   it("stackMenuFor: Stack on… for a non-trunk branch, Unstack for a layer, Restack… when actionable", async () => {
     const { stackMenuFor } = await import("../useStackActions");
-    const { ref } = await import("vue");
     const stacks = fakeStacks({
-      report: ref({ trunk: "main" }) as unknown as Stacks["report"],
+      trunk: () => "main",
       layerOf: (b: string) => (b === "step-2" ? ({ branch: "step-2" } as StackLayerStatus) : null),
       actionableFor: (b: string) => (b === "step-2" ? ({ branch: "step-2" } as StackLayerStatus) : null),
     });
@@ -110,6 +109,76 @@ describe("stack menu (QA bug 1)", () => {
     a.requestStackOn("/r", "step-2");
     expect(b.stackOnRequest.value).toEqual({ cwd: "/r", branch: "step-2" });
     b.closeStackOn();
+    expect(a.stackOnRequest.value).toBeNull();
+  });
+});
+
+describe("QA2 wave", () => {
+  async function realStacks(trunkSetting: string | null) {
+    const { createStacks } = await import("../useStacks");
+    const deps = {
+      status: vi.fn(),
+      setParent: vi.fn(),
+      unset: vi.fn(),
+      plan: vi.fn(),
+      fetch: vi.fn(),
+      branchPr: vi.fn(),
+      setPrBase: vi.fn(),
+      pushBranch: vi.fn(),
+      deleteMergedParent: vi.fn(),
+      forge: () => null,
+      trunkSetting: () => trunkSetting,
+      dismissed: () => [],
+      dismiss: vi.fn(),
+      now: () => 0,
+    };
+    return createStacks(deps as never);
+  }
+
+  it("stackMenuFor: with no report yet, the trunk comes from the settings (item 2)", async () => {
+    const { stackMenuFor } = await import("../useStackActions");
+    const s = await realStacks("main");
+    expect(s.report.value).toBeNull();
+    expect(stackMenuFor(s, "main").stackOn).toBe(false);
+    expect(stackMenuFor(s, "feature").stackOn).toBe(true);
+  });
+
+  it("stackMenuFor: no trunk known at all → no Stack on… (item 2)", async () => {
+    const { stackMenuFor } = await import("../useStackActions");
+    const s = await realStacks(null);
+    expect(stackMenuFor(s, "feature")).toEqual({ stackOn: false, unstack: false, restack: false });
+  });
+
+  it("stackMenuHandlers run on the current repo and do nothing without one (item 3)", async () => {
+    const { stackMenuHandlers } = await import("../useStackActions");
+    const actions = { requestStackOn: vi.fn(), unstack: vi.fn(), restackFrom: vi.fn() };
+    let cwd: string | null = null;
+    const h = stackMenuHandlers(actions, () => cwd);
+    h.stackOn("b");
+    h.unstack("b");
+    h.restack("b");
+    expect(actions.requestStackOn).not.toHaveBeenCalled();
+    expect(actions.unstack).not.toHaveBeenCalled();
+    expect(actions.restackFrom).not.toHaveBeenCalled();
+    cwd = "/r";
+    h.stackOn("b");
+    h.unstack("b");
+    h.restack("b");
+    expect(actions.requestStackOn).toHaveBeenCalledWith("/r", "b");
+    expect(actions.unstack).toHaveBeenCalledWith("/r", "b");
+    expect(actions.restackFrom).toHaveBeenCalledWith("/r", "b");
+  });
+
+  it("repoSwitched clears a Stack on… request made in another repo (item 7)", async () => {
+    const { useStackActions } = await import("../useStackActions");
+    const a = useStackActions();
+    a.requestStackOn("/r", "b");
+    a.repoSwitched("/r");
+    expect(a.stackOnRequest.value).toEqual({ cwd: "/r", branch: "b" });
+    a.repoSwitched("/other");
+    expect(a.stackOnRequest.value).toBeNull();
+    a.requestStackOn("/r", "b");
+    a.repoSwitched(null);
     expect(a.stackOnRequest.value).toBeNull();
   });
 });

@@ -184,6 +184,8 @@ export interface Stacks {
   setContext(ctx: StacksContext): void;
   refresh(cwd: string): Promise<void>;
   layerOf(branch: string): StackLayerStatus | null;
+  /** The trunk: the report's, else the Settings default branch before the first report; null when unknown. */
+  trunk(): string | null;
   /** The PR of `branch`'s stack parent (M-8): its open PR in the context, else the merged one the report names. */
   parentPrOf(branch: string): number | null;
   actionableFor(branch: string): StackLayerStatus | null;
@@ -346,10 +348,14 @@ export function createStacks(deps: StacksDeps): Stacks {
     return chainDown(branch).find((l) => l.actionable) ?? null;
   }
 
+  function trunk(): string | null {
+    return report.value?.trunk ?? deps.trunkSetting();
+  }
+
   function stackOnCandidates(branch: string): string[] {
-    const trunk = report.value?.trunk ?? deps.trunkSetting();
+    const t = trunk();
     return ctx.value.localBranches.filter(
-      (b) => b !== branch && b !== trunk && !hasStackedChild(b, branch) && !ancestorsOf(b).has(branch),
+      (b) => b !== branch && b !== t && !hasStackedChild(b, branch) && !ancestorsOf(b).has(branch),
     );
   }
 
@@ -619,6 +625,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     setContext,
     refresh,
     layerOf,
+    trunk,
     parentPrOf,
     actionableFor,
     stackOnCandidates,

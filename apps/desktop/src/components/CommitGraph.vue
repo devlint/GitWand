@@ -16,6 +16,7 @@ import { useStickyWidth } from "../composables/useStickyWidth";
 import { useTheme } from "../composables/useTheme";
 import { useStacks } from "../composables/useStacks";
 import { stackMenuFor, type StackMenuItems } from "../composables/useStackActions";
+import { clampMenuToWindow } from "../utils/contextMenu";
 
 defineOptions({ inheritAttrs: false });
 
@@ -275,15 +276,7 @@ function openCommitContextMenu(e: MouseEvent, entry: GitLogEntry, idx: number, b
   nextTick(() => {
     const menu = document.querySelector('.commit-ctx-menu') as HTMLElement;
     if (!menu) return;
-    const { offsetWidth: menuWidth, offsetHeight: menuHeight } = menu;
-    const { innerWidth: windowWidth, innerHeight: windowHeight } = window;
-
-    if (ctxMenu.value.x + menuWidth > windowWidth) {
-      ctxMenu.value.x = windowWidth - menuWidth - 4;
-    }
-    if (ctxMenu.value.y + menuHeight > windowHeight) {
-      ctxMenu.value.y = windowHeight - menuHeight - 4;
-    }
+    Object.assign(ctxMenu.value, clampMenuToWindow(ctxMenu.value, menu));
   });
 }
 
@@ -562,15 +555,7 @@ function openWipContextMenu(e: MouseEvent) {
   nextTick(() => {
     const menu = document.querySelector('.commit-ctx-menu') as HTMLElement;
     if (!menu) return;
-    const { offsetWidth: menuWidth, offsetHeight: menuHeight } = menu;
-    const { innerWidth: windowWidth, innerHeight: windowHeight } = window;
-
-    if (wipCtxMenu.value.x + menuWidth > windowWidth) {
-      wipCtxMenu.value.x = windowWidth - menuWidth - 4;
-    }
-    if (wipCtxMenu.value.y + menuHeight > windowHeight) {
-      wipCtxMenu.value.y = windowHeight - menuHeight - 4;
-    }
+    Object.assign(wipCtxMenu.value, clampMenuToWindow(wipCtxMenu.value, menu));
   });
 }
 

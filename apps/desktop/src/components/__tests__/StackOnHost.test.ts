@@ -68,3 +68,46 @@ describe("StackOnHost", () => {
     expect(document.querySelector("#sod-parent")).toBeNull();
   });
 });
+
+describe("StackOnHost — QA2", () => {
+  it("ignores a request made for another repository (item 7)", async () => {
+    __setStacksForTest({
+      report: ref(null),
+      context: ref({ cwd: "/other", forge: null, currentBranch: null, localBranches: [], prs: [] }),
+      stackOnCandidates: vi.fn(() => ["main"]),
+      stackOn: vi.fn(),
+    } as unknown as Stacks);
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    app = createApp({ render: () => h(StackOnHost) });
+    app.mount(container);
+    useStackActions().requestStackOn("/r", "step-2");
+    await flush();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.querySelector("#sod-parent")).toBeNull();
+  });
+});
+
+describe("lazyStackView — chunk load failure (item 8)", () => {
+  it("runs the cleanup and reports the error through the stack error channel", async () => {
+    const { lazyStackView } = await import("../../composables/useStackActions");
+    const { registerRestackHost } = await import("../../composables/useStacks");
+    const notify = vi.fn();
+    registerRestackHost({ apply: vi.fn(), offerPush: vi.fn(), notify } as never);
+    const onFail = vi.fn();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const View = lazyStackView(() => Promise.reject(new Error("Failed to fetch dynamically imported module")), onFail);
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      app = createApp({ render: () => h(View) });
+      app.config.errorHandler = () => {};
+      app.mount(container);
+      await vi.waitFor(() => expect(onFail).toHaveBeenCalledTimes(1));
+      expect(notify).toHaveBeenCalledWith("Failed to fetch dynamically imported module");
+    } finally {
+      registerRestackHost(null);
+      errSpy.mockRestore();
+    }
+  });
+});

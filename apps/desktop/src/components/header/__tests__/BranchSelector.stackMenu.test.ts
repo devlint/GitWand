@@ -50,6 +50,7 @@ beforeEach(() => {
   startRestack = vi.fn(async () => {});
   __setStacksForTest({
     report: ref({ trunk: "main" }),
+    trunk: () => "main",
     offers: ref(new Map()),
     layerOf: (b: string) => (b === "step-2" ? layer : null),
     actionableFor: (b: string) => (b === "step-2" ? layer : null),
@@ -75,7 +76,10 @@ const flush = async () => {
   }
 };
 
+let switched: string[] = [];
+
 async function mountOpen() {
+  switched = [];
   container = document.createElement("div");
   document.body.appendChild(container);
   app = createApp({
@@ -87,6 +91,7 @@ async function mountOpen() {
         branchesLoading: false,
         isSwitchingBranch: false,
         cwd: "/r",
+        onSwitchBranch: (name: string) => switched.push(name),
       }),
   });
   app.provide(PR_PANEL_KEY, { prs: ref([]), forge: ref(null), ensurePrsLoaded: async () => {} } as never);
@@ -139,6 +144,8 @@ describe("BranchSelector — stack context menu", () => {
     await flush();
     expect(unstack).toHaveBeenCalledWith("/r", "step-2");
 
+    document.querySelector<HTMLButtonElement>(".branch-trigger")!.click();
+    await flush();
     await rightClick(row("step-2"));
     await vi.waitFor(() => expect(document.querySelector(".stack-branch-menu")).not.toBeNull());
     Array.from(document.querySelectorAll<HTMLButtonElement>(".stack-branch-menu .ctx-item"))[2].click();
@@ -165,5 +172,107 @@ describe("BranchSelector — stack context menu", () => {
     document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flush();
     expect(document.querySelector(".stack-branch-menu")).toBeNull();
+  });
+});
+
+const popoverOpen = () => document.querySelector(".branch-popover") !== null;
+async function openMenu(name: string) {
+  await rightClick(row(name));
+  await vi.waitFor(() => expect(document.querySelector(".stack-branch-menu")).not.toBeNull());
+  await flush();
+}
+
+describe("BranchSelector — stack menu, QA2", () => {
+  it("a pinned row's right-click opens the menu too (item 4)", async () => {
+    const { usePinnedBranches } = await import("../../../composables/usePinnedBranches");
+    const pins = usePinnedBranches(() => "/r");
+    pins.pin("step-2");
+    try {
+      await mountOpen();
+      const pinnedRow = document.querySelector<HTMLElement>('.bp-section .bp-item');
+      expect(pinnedRow?.querySelector(".bp-item-name")?.getAttribute("title")).toBe("step-2");
+      await rightClick(pinnedRow!);
+      await vi.waitFor(() => expect(document.querySelector(".stack-branch-menu")).not.toBeNull());
+      expect(menuItems()).toEqual(["stacks.menu.stackOn", "stacks.menu.unstack", "stacks.menu.restack"]);
+    } finally {
+      pins.unpin("step-2");
+    }
+  });
+
+  it("a left-click on a row still switches branch (item 4)", async () => {
+    await mountOpen();
+    row("feature").click();
+    await flush();
+    expect(switched).toEqual(["feature"]);
+    expect(document.querySelector(".stack-branch-menu")).toBeNull();
+  });
+
+  it("running an item closes the branch popover (item 6)", async () => {
+    await mountOpen();
+    await openMenu("step-2");
+    expect(popoverOpen()).toBe(true);
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".stack-branch-menu .ctx-item"))[1].click();
+    await flush();
+    expect(popoverOpen()).toBe(false);
+  });
+
+  it("is clamped inside the window (item 1)", async () => {
+    const w = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+    const hgt = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => 240 });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get: () => 120 });
+    const iw = window.innerWidth;
+    const ih = window.innerHeight;
+    window.innerWidth = 1400;
+    window.innerHeight = 800;
+    try {
+      await mountOpen();
+      row("step-2").dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 1350, clientY: 760 }),
+      );
+      await vi.waitFor(() => expect(document.querySelector(".stack-branch-menu")).not.toBeNull());
+      await flush();
+      const menu = document.querySelector<HTMLElement>(".stack-branch-menu")!;
+      expect(menu.style.left).toBe(`${1400 - 240 - 4}px`);
+      expect(menu.style.top).toBe(`${800 - 120 - 4}px`);
+    } finally {
+      if (w) Object.defineProperty(HTMLElement.prototype, "offsetWidth", w);
+      if (hgt) Object.defineProperty(HTMLElement.prototype, "offsetHeight", hgt);
+      window.innerWidth = iw;
+      window.innerHeight = ih;
+    }
+  });
+
+  it("focuses the first item, moves with the arrow keys, and Escape gives focus back (item 5)", async () => {
+    await mountOpen();
+    const filter = document.querySelector<HTMLInputElement>(".bp-filter")!;
+    filter.focus();
+    await openMenu("step-2");
+    const items = Array.from(document.querySelectorAll<HTMLButtonElement>(".stack-branch-menu .ctx-item"));
+    expect(document.activeElement).toBe(items[0]);
+    const key = (k: string) => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+    key("ArrowDown");
+    expect(document.activeElement).toBe(items[1]);
+    key("ArrowUp");
+    key("ArrowUp");
+    expect(document.activeElement).toBe(items[2]);
+    key("Escape");
+    await flush();
+    expect(document.querySelector(".stack-branch-menu")).toBeNull();
+    expect(document.activeElement).toBe(filter);
+  });
+
+  it("a right-click elsewhere closes it; one on another row moves it there (item 5)", async () => {
+    await mountOpen();
+    await openMenu("step-2");
+    document.body.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await flush();
+    expect(document.querySelector(".stack-branch-menu")).toBeNull();
+
+    await openMenu("step-2");
+    await rightClick(row("feature"));
+    await flush();
+    expect(document.querySelector(".stack-branch-menu")).not.toBeNull();
+    expect(menuItems()).toEqual(["stacks.menu.stackOn"]);
   });
 });

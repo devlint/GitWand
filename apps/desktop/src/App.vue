@@ -62,7 +62,8 @@ const WorktreeRemoveDialog = defineAsyncComponent(() => import("./components/Wor
 const MergeBackDialog = defineAsyncComponent(() => import("./components/MergeBackDialog.vue"));
 // v3.14 — mounted only while a restack flow is open.
 const RestackDialog = defineAsyncComponent(() => import("./components/RestackDialog.vue"));
-const StackOnHost = defineAsyncComponent(() => import("./components/StackOnHost.vue"));
+// A failed chunk load drops the request and reports through the stack error channel.
+const StackOnHost = lazyStackView(() => import("./components/StackOnHost.vue"), () => useStackActions().closeStackOn());
 const AiTaskNameModal = defineAsyncComponent(() => import("./components/AiTaskNameModal.vue"));
 const WorktreeHookTrustModal = defineAsyncComponent(() => import("./components/WorktreeHookTrustModal.vue"));
 const CommandLogPanel = defineAsyncComponent(() => import("./components/CommandLogPanel.vue"));
@@ -161,7 +162,7 @@ import { registerRemovalHost } from "./composables/useWorktreeRemoval";
 import { registerMergeBackHost } from "./composables/useWorktreeMergeBack";
 import { registerRestackHost, useStacks } from "./composables/useStacks";
 import { createRestackHost } from "./composables/useRestackHost";
-import { useStackActions } from "./composables/useStackActions";
+import { lazyStackView, stackMenuHandlers, useStackActions } from "./composables/useStackActions";
 import type { HookTrustDecision } from "./composables/useWorktreeHookTrust";
 import { aiTaskName, describeBase } from "./utils/worktreeBase";
 import { useCommitActions } from "./composables/useCommitActions";
@@ -3022,6 +3023,7 @@ registerMergeBackHost({
 const stacks = useStacks();
 /** The Git Tree's branch menu stack items (the header selector calls it itself). */
 const stackActions = useStackActions();
+const graphStackMenu = stackMenuHandlers(stackActions, () => repoFolderPath.value || null);
 
 registerRestackHost(
   createRestackHost({
@@ -4538,6 +4540,8 @@ watch(
     stackFresh.cwd = cwd || null;
     stackFresh.status = false;
     stackFresh.prs = false;
+    // A "Stack on…" dialog asked for in the previous repo must not open here.
+    stackActions.repoSwitched(cwd || null);
   },
   { flush: "sync", immediate: true },
 );
@@ -5197,9 +5201,9 @@ onUnmounted(() => {
                   @force-push-branch="doForcePush"
                   @pin-branch="handlePinBranch"
                   @unpin-branch="handleUnpinBranch"
-                  @stack-on="(name: string) => stackActions.requestStackOn(repoFolderPath ?? '', name)"
-                  @unstack="(name: string) => stackActions.unstack(repoFolderPath ?? '', name)"
-                  @restack="(name: string) => stackActions.restackFrom(repoFolderPath ?? '', name)"
+                  @stack-on="graphStackMenu.stackOn"
+                  @unstack="graphStackMenu.unstack"
+                  @restack="graphStackMenu.restack"
                   @view-submodule="handleOpenSubmodule"
                   @apply-stash="applyStash"
                   @pop-stash="popStash"
