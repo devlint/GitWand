@@ -1061,8 +1061,10 @@ mod branch_pr_tests {
 
     #[test]
     fn parses_gh_branch_pr_json_and_keeps_the_newest_merge() {
-        let s = r#"[{"number":800,"baseRefName":"main","headRefOid":"aaa","mergedAt":"2026-11-01T00:00:00Z","url":"u1"},
-                   {"number":812,"baseRefName":"main","headRefOid":"bbb","mergedAt":"2026-11-20T00:00:00Z","url":"u2"}]"#;
+        let s = r#"[{"number":800,"baseRefName":"main","headRefOid":"aaa","mergedAt":"2026-11-01T00:00:00Z","url":"u1","headRepositoryOwner":{"login":"o"}},
+                   {"number":812,"baseRefName":"main","headRefOid":"bbb","mergedAt":"2026-11-20T00:00:00Z","url":"u2","headRepositoryOwner":{"login":"o"}}]"#;
+        let via_json = parse_gh_branch_pr_json(s, "merged", "o").unwrap().unwrap();
+        assert_eq!(via_json.number, 812);
         let all: Vec<BranchPr> = parse_gh_branch_prs(s)
             .unwrap()
             .into_iter()
@@ -1070,6 +1072,48 @@ mod branch_pr_tests {
             .collect();
         let pr = newest_merged(all).unwrap();
         assert_eq!((pr.number, pr.head_ref_oid.as_str()), (812, "bbb"));
+    }
+
+    #[test]
+    fn gh_list_is_filtered_to_the_origin_owner_before_choosing() {
+        let s = r#"[{"number":1,"baseRefName":"main","headRefOid":"a","mergedAt":"2026-11-25T00:00:00Z","url":"u1","headRepositoryOwner":{"login":"alice"}},
+                   {"number":2,"baseRefName":"main","headRefOid":"b","mergedAt":"2026-11-01T00:00:00Z","url":"u2","headRepositoryOwner":{"login":"Bob"}},
+                   {"number":3,"baseRefName":"main","headRefOid":"c","mergedAt":"2026-11-30T00:00:00Z","url":"u3"},
+                   {"number":4,"baseRefName":"main","headRefOid":"d","mergedAt":"2026-11-30T00:00:00Z","url":"u4","headRepositoryOwner":{"login":""}}]"#;
+        let pr = parse_gh_branch_pr_json(s, "merged", "bob")
+            .unwrap()
+            .unwrap();
+        assert_eq!(pr.number, 2);
+        assert_eq!(parse_gh_branch_pr_json(s, "merged", "carol").unwrap(), None);
+        // Ownerless entries are dropped even when the origin owner is empty.
+        assert_eq!(parse_gh_branch_pr_json(s, "merged", "").unwrap(), None);
+    }
+
+    #[test]
+    fn merged_lookup_never_falls_back_to_an_unmerged_pr() {
+        let null = r#"[{"number":9,"baseRefName":"m","headRefOid":"c","mergedAt":null,"url":"u","headRepositoryOwner":{"login":"o"}}]"#;
+        let missing = r#"[{"number":9,"baseRefName":"m","headRefOid":"c","url":"u","headRepositoryOwner":{"login":"o"}}]"#;
+        assert_eq!(parse_gh_branch_pr_json(null, "merged", "o").unwrap(), None);
+        assert_eq!(
+            parse_gh_branch_pr_json(missing, "merged", "o").unwrap(),
+            None
+        );
+        assert_eq!(
+            parse_gh_branch_pr_json(null, "open", "o")
+                .unwrap()
+                .unwrap()
+                .number,
+            9
+        );
+    }
+
+    #[test]
+    fn set_base_rejects_non_positive_number() {
+        for (n, msg) in [(0, "invalid PR number: 0"), (-1, "invalid PR number: -1")] {
+            let err = gh_pr_set_base_inner("/nonexistent".into(), n, "main".into()).unwrap_err();
+            assert_eq!(err, msg);
+        }
+        assert!(check_pr_number(7).is_ok());
     }
 
     #[test]
