@@ -684,7 +684,6 @@ const zhCN: Locale = {
       occupied_rebasing: "{0} 正在另一个工作树（{1}）中变基。请先完成或中止该变基。",
       parent_behind: "{0} 落后其远程 {1} 个提交。请先拉取。",
       no_remote_trunk: "主干没有 origin 分支：请先从 origin 获取。",
-      parent_no_upstream: "{0} 没有上游，GitWand 无法确认它包含已合并的工作。",
       merged_work_missing: "已合并的工作尚未进入 {0}：请先更新 {0}。",
       no_old_base: "GitWand 无法判断哪些提交属于父分支。请手动重新堆叠此分支。",
       fetch_failed: "无法 fetch（{0}）：本地可能缺少已合并的提交。请联网后重试。",

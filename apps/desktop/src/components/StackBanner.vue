@@ -144,7 +144,7 @@ function unstack(branch: string | null) {
       </div>
       <div v-if="after.deleteOffer" class="stack-banner__row">
         <button class="stack-banner__btn" @click="actions.deleteMergedParent()">
-          {{ t("stacks.after.deleteParent", after.deleteOffer) }}
+          {{ t("stacks.after.deleteParent", after.deleteOffer.branch) }}
         </button>
       </div>
       <button

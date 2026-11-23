@@ -18,7 +18,6 @@ export function restackRefusalArgs(r: RestackRefusal): string[] {
     case "git_too_old":
     case "fetch_failed":
       return [detail];
-    case "parent_no_upstream":
     case "merged_work_missing":
       return [branch];
     default:

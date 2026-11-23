@@ -689,7 +689,6 @@ const fr: Locale = {
       occupied_rebasing: "{0} est en cours de rebase dans un autre worktree ({1}). Terminez ou annulez ce rebase d'abord.",
       parent_behind: "{0} a {1} commit(s) de retard sur sa branche distante. Récupérez-la d'abord.",
       no_remote_trunk: "Pas de branche origin pour le tronc : faites d'abord un fetch d'origin.",
-      parent_no_upstream: "{0} n'a pas d'upstream : GitWand ne peut pas vérifier qu'elle contient le travail fusionné.",
       merged_work_missing: "Le travail fusionné n'est pas encore dans {0} : mettez {0} à jour d'abord.",
       no_old_base: "GitWand ne peut pas savoir quels commits appartenaient à la parente. Restackez cette branche à la main.",
       fetch_failed: "Fetch impossible ({0}) : le commit fusionné manque peut-être localement. Réessayez une fois en ligne.",

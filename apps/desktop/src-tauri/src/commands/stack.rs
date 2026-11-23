@@ -82,3 +82,15 @@ pub(crate) async fn git_restack(
         guard::git_version(),
     )
 }
+
+/// Deletes the merged parent a finalized restack offered to delete, only if
+/// it still points at the tip that offer verified (compare-and-swap).
+#[tauri::command]
+pub(crate) async fn stack_delete_merged_parent(
+    cwd: String,
+    branch: String,
+    tip: String,
+) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
+    restack::delete_merged_parent(Path::new(&cwd), &branch, &tip)
+}

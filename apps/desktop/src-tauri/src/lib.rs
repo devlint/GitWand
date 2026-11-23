@@ -554,6 +554,10 @@ pub fn command_parity(
             parity_opt(&args, "trunk"),
         ))
         .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
+        "stack_delete_merged_parent" => tauri::async_runtime::block_on(
+            commands::stack::stack_delete_merged_parent(s("cwd")?, s("branch")?, s("tip")?),
+        )
+        .map(parity_ok_marker),
         "stack_unset" => {
             tauri::async_runtime::block_on(commands::stack::stack_unset(s("cwd")?, s("branch")?))
                 .map(parity_ok_marker)
@@ -916,6 +920,7 @@ pub fn run() {
             commands::stack::stack_status,
             commands::stack::stack_set_parent,
             commands::stack::stack_unset,
+            commands::stack::stack_delete_merged_parent,
             commands::stack::stack_restack_plan,
             commands::stack::git_restack,
             commands::read::preview_restack,
@@ -1814,6 +1819,15 @@ mod command_parity_tests {
         );
         assert_reaches_command(r, "stack_unset", None);
         let r = command_parity(
+            "stack_delete_merged_parent".into(),
+            serde_json::json!({ "cwd": cwd, "branch": "gone", "tip": "a".repeat(40) }),
+        );
+        assert_reaches_command(
+            r,
+            "stack_delete_merged_parent",
+            Some("gone changed since the restack: not deleted"),
+        );
+        let r = command_parity(
             "preview_restack".into(),
             serde_json::json!({ "cwd": cwd, "onto": "main", "upstream": "main", "branch": "main" }),
         );
@@ -1831,6 +1845,7 @@ mod command_parity_tests {
             "stack_status",
             "stack_set_parent",
             "stack_unset",
+            "stack_delete_merged_parent",
             "stack_restack_plan",
             "git_restack",
             "preview_restack",

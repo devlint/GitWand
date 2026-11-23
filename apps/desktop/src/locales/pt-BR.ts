@@ -685,7 +685,6 @@ const ptBR: Locale = {
       occupied_rebasing: "{0} está em rebase em outra worktree ({1}). Conclua ou aborte esse rebase primeiro.",
       parent_behind: "{0} está {1} commit(s) atrás do remoto. Faça pull primeiro.",
       no_remote_trunk: "Não há branch origin para o tronco: faça fetch de origin primeiro.",
-      parent_no_upstream: "{0} não tem upstream, então o GitWand não consegue verificar se ele contém o trabalho mesclado.",
       merged_work_missing: "O trabalho mesclado ainda não está em {0}: atualize {0} primeiro.",
       no_old_base: "O GitWand não consegue saber quais commits pertenciam ao branch pai. Reempilhe este branch manualmente.",
       fetch_failed: "Não foi possível fazer fetch ({0}): o commit mesclado pode estar faltando localmente. Tente novamente quando estiver online.",

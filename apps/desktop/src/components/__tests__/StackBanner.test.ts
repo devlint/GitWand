@@ -55,7 +55,7 @@ async function seed(
     branchPr: vi.fn(async () => null),
     setPrBase: vi.fn(async () => {}),
     pushBranch: vi.fn(async (): Promise<GitPushPullResult> => ({ success: true, message: "" })),
-    deleteBranch: vi.fn(async () => {}),
+    deleteMergedParent: vi.fn(async () => {}),
     forge: () => "gitlab",
     trunkSetting: () => "main",
     dismissed: () => [],
@@ -82,7 +82,7 @@ const after = (over: Partial<AfterRestack> = {}): AfterRestack => ({
     moment: "parent_merged",
     bottom: "step-2",
     merged_parent: "step-1",
-    delete_offer: "step-1",
+    delete_offer: { branch: "step-1", tip: "t1" },
     new_parent: null,
     moved: ["step-2"],
     switched_back_to: null,
@@ -281,11 +281,11 @@ describe("StackBanner — after a restack", () => {
 
   it("offers to delete the merged parent", async () => {
     const { s, deps } = await seed(report());
-    s.after.value = after({ deleteOffer: "step-1" });
+    s.after.value = after({ deleteOffer: { branch: "step-1", tip: "t1" } });
     mount();
     button("Delete local step-1")!.click();
     await flush();
-    expect(deps.deleteBranch).toHaveBeenCalledWith("/r", "step-1");
+    expect(deps.deleteMergedParent).toHaveBeenCalledWith("/r", "step-1", "t1");
   });
 
   it("says when the restack could not switch back", async () => {
@@ -299,10 +299,10 @@ describe("StackBanner — after a restack", () => {
 
   it("is hidden while another repo is open, and ✕ dismisses it", async () => {
     const { s } = await seed(report());
-    s.after.value = after({ cwd: "/other", deleteOffer: "step-1" });
+    s.after.value = after({ cwd: "/other", deleteOffer: { branch: "step-1", tip: "t1" } });
     mount();
     expect(button("Delete local step-1")).toBeNull();
-    s.after.value = after({ deleteOffer: "step-1" });
+    s.after.value = after({ deleteOffer: { branch: "step-1", tip: "t1" } });
     await flush();
     container.querySelector<HTMLButtonElement>(".stack-banner__dismiss")!.click();
     await flush();

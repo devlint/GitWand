@@ -297,6 +297,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   snapshot_restore: { route: "/api/snapshot-restore" },
   software_rendering_get_state: { route: "/api/software-rendering" },
   software_rendering_set_enabled: { route: "/api/software-rendering" },
+  stack_delete_merged_parent: { route: "/api/stack-delete-merged-parent" },
   stack_restack_plan: { route: "/api/stack-restack-plan" },
   stack_set_parent: { route: "/api/stack-set-parent" },
   stack_status: { route: "/api/stack-status" },

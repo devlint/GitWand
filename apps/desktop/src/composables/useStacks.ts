@@ -24,13 +24,14 @@
  */
 import { computed, ref, type ComputedRef, type Ref } from "vue";
 import {
-  gitDeleteBranch,
   gitFetch,
   gitPushBranch,
   stackRestackPlan,
+  stackDeleteMergedParent,
   stackSetParent,
   stackStatus,
   stackUnset,
+  type DeleteOffer,
   type FinalizedRestack,
   type MergedParentHint,
   type PendingError,
@@ -54,7 +55,8 @@ export interface StacksDeps {
   branchPr: typeof ghBranchPr;
   setPrBase: typeof ghPrSetBase;
   pushBranch: typeof gitPushBranch;
-  deleteBranch: (cwd: string, name: string) => Promise<void>;
+  /** Compare-and-swap delete of the merged parent at its verified tip. */
+  deleteMergedParent: typeof stackDeleteMergedParent;
   /** ForgeName of the active repo; "github" enables hints and the retarget. */
   forge: () => string | null;
   /** settings.defaultBranch */
@@ -110,7 +112,7 @@ export interface AfterRestack {
     base: string | null;
     error: string | null;
   };
-  deleteOffer: string | null;
+  deleteOffer: DeleteOffer | null;
   push: { pushable: { branch: string; lease: string }[]; skipped: PushSkip[]; noLeases: boolean };
 }
 
@@ -460,9 +462,17 @@ export function createStacks(deps: StacksDeps): Stacks {
     // The same finalization twice in a row would be a backend that failed to
     // clear its record: do not retarget or offer again, and stop the chain.
     if (lastFinalized.get(cwd) === key) return;
-    await withFlow((fl) => fl.onFinalized(cwd, f, r.trunk));
-    // Only once handled (T13): a handling that failed is retried by the
-    // next refresh that reports it.
+    try {
+      await withFlow((fl) => fl.onFinalized(cwd, f, r.trunk));
+    } catch (e) {
+      // The status worked: a failure handling what followed the restack is
+      // not a status error (wave 2, item 2). The report stays; the host says
+      // what failed. Not marked handled (T13): a later report retries it.
+      const h = restackHost();
+      if (h) h.notify(message(e));
+      else console.warn("[stacks] after-restack handling failed:", message(e));
+      return;
+    }
     lastFinalized.set(cwd, key);
     // The backend settles one record per call: look for the next one.
     void refresh(cwd);
@@ -582,7 +592,7 @@ export function useStacks(): Stacks {
     branchPr: ghBranchPr,
     setPrBase: ghPrSetBase,
     pushBranch: gitPushBranch,
-    deleteBranch: (cwd, name) => gitDeleteBranch(cwd, name, true),
+    deleteMergedParent: stackDeleteMergedParent,
     // Supplied by App.vue through setContext; unknown → treated as not GitHub.
     forge: () => ctxForge,
     trunkSetting: () => loadSettings().defaultBranch || null,

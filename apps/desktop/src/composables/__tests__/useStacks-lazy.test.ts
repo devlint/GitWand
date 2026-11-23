@@ -43,7 +43,7 @@ function deps(over: Partial<StacksDeps> = {}): StacksDeps {
     branchPr: vi.fn(async () => null),
     setPrBase: vi.fn(),
     pushBranch: vi.fn(),
-    deleteBranch: vi.fn(),
+    deleteMergedParent: vi.fn(),
     forge: () => "github",
     trunkSetting: () => "main",
     dismissed: () => [],

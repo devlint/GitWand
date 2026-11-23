@@ -874,8 +874,7 @@ function parentMoved(l) {
     upstream_sha: l.state === "out_of_date" ? l.base : tip,
     new_parent: null,
     onto_behind: l.parent_behind_upstream,
-    onto_no_upstream: false,
-    merge_commit_missing: null,
+    merged_work_missing: false,
   };
 }
 
@@ -886,11 +885,10 @@ function parentMerged(repo, l, hints, trunkName) {
   const all = readAll(repo);
   const g = all.get(l.parent)?.parent;
   const grand = g !== undefined && g !== trunkName ? g : null;
-  let ontoRef, ontoSha, newParent, ontoBehind, ontoNoUpstream;
+  let ontoRef, ontoSha, newParent, ontoBehind;
   if (grand !== null) {
     ontoSha = resolveCommit(repo, `refs/heads/${grand}`) ?? fail(`unknown branch: ${grand}`);
     ontoBehind = behindUpstream(repo, grand);
-    ontoNoUpstream = !hasUpstream(repo, grand);
     ontoRef = grand;
     newParent = grand;
   } else {
@@ -898,15 +896,21 @@ function parentMerged(repo, l, hints, trunkName) {
     ontoRef = `origin/${trunkName}`;
     newParent = null;
     ontoBehind = 0;
-    ontoNoUpstream = false;
   }
   const honoured = hints.find((h) => h.branch === l.parent && l.merged_pr === h.number);
-  // I-2: the target must contain the merged PR's merge commit; unknown
-  // locally counts as missing.
-  let mergeCommitMissing = null;
-  const oid = honoured?.merge_commit_oid ?? null;
-  if (honoured && ontoSha !== null && oid !== null) {
-    if (!(commitExists(repo, oid) && isAncestor(repo, oid, ontoSha))) mergeCommitMissing = honoured.number;
+  // I-2, wave 2 items 4-5: the target must contain the merged work — the
+  // forge's merge commit when there is one (whatever P' tracks), else, onto
+  // a stacked P', git's own signals against the local P'.
+  let mergedWorkMissing = false;
+  if (ontoSha !== null) {
+    const oid = honoured?.merge_commit_oid ?? null;
+    if (oid !== null) {
+      mergedWorkMissing = !(commitExists(repo, oid) && isAncestor(repo, oid, ontoSha));
+    } else if (newParent !== null) {
+      const base = l.base !== null && commitExists(repo, l.base) ? l.base : null;
+      const probe = mergedProbe(repo, base, l.parent_tip);
+      mergedWorkMissing = probe === null || mergedSignal(repo, `refs/heads/${ontoRef}`, probe) === null;
+    }
   }
   let upstream = null;
   for (const candidate of [l.base, honoured?.head_ref_oid ?? null]) {
@@ -924,15 +928,8 @@ function parentMerged(repo, l, hints, trunkName) {
     upstream_sha: upstream,
     new_parent: newParent,
     onto_behind: ontoBehind,
-    onto_no_upstream: ontoNoUpstream,
-    merge_commit_missing: mergeCommitMissing,
+    merged_work_missing: mergedWorkMissing,
   };
-}
-
-/** `has_upstream`: `branch` has an upstream configured. */
-function hasUpstream(repo, branch) {
-  devValidateBranchName(branch);
-  return runOk(repo, ["for-each-ref", "--format=%(upstream)", `refs/heads/${branch}`]) !== "";
 }
 
 /** `git cat-file -e <sha>^{commit}` (D20). A non-sha is never a commit. */
@@ -954,8 +951,7 @@ const refusalOf = (code, message) => ({ code, message, branch: null, path: null,
 
 /** The first refusal, in the order `rebase_in_progress`, `up_to_date`,
  *  `git_too_old`, `detached`, `dirty`, `occupied` / `occupied_rebasing`,
- *  `parent_behind`, `no_remote_trunk`, `parent_no_upstream`,
- *  `merged_work_missing`, `no_old_base`. */
+ *  `parent_behind`, `no_remote_trunk`, `merged_work_missing`, `no_old_base`. */
 function firstRefusal(c) {
   if (c.rebaseInProgress) return refusalOf("rebase_in_progress", "A rebase is in progress. Finish or abort it first.");
   if (c.l.state === "up_to_date") {
@@ -998,19 +994,11 @@ function firstRefusal(c) {
   if (t.onto_sha === null) {
     return refusalOf("no_remote_trunk", `There is no origin/${c.trunk} to restack onto. Fetch from origin first.`);
   }
-  if (t.onto_no_upstream) {
-    return {
-      code: "parent_no_upstream",
-      message: `${t.onto_ref} has no upstream, so GitWand cannot check it contains the merged work of ${c.l.parent}.`,
-      branch: t.onto_ref,
-      path: null,
-      detail: null,
-    };
-  }
-  if (t.merge_commit_missing !== null) {
+  if (t.merged_work_missing) {
+    const pr = c.l.merged_pr !== null ? ` (PR #${c.l.merged_pr})` : "";
     return {
       code: "merged_work_missing",
-      message: `The merged work of ${c.l.parent} (PR #${t.merge_commit_missing}) is not in ${t.onto_ref} yet: update ${t.onto_ref} first.`,
+      message: `The merged work of ${c.l.parent}${pr} is not in ${t.onto_ref} yet: update ${t.onto_ref} first.`,
       branch: t.onto_ref,
       path: null,
       detail: null,
@@ -1293,7 +1281,7 @@ function deleteOffer(repo, merged, oldBase, hints) {
     if (tip === null) return null;
     const head = hints.find((h) => h.branch === merged)?.head_ref_oid ?? null;
     if (tip !== oldBase && head !== tip) return null;
-    return branchHolders(repo).some((h) => h.branch === merged) ? null : merged;
+    return branchHolders(repo).some((h) => h.branch === merged) ? null : { branch: merged, tip };
   } catch {
     return null;
   }
@@ -1325,6 +1313,22 @@ function trySwitchBack(repo, top, original) {
   const out = run(repo, ["switch", "--no-guess", original]);
   if (ok(out)) return [original, null];
   return [null, { branch: original, reason: trimmed(out.stderr) }];
+}
+
+/** Wave 2, item 1, `delete_merged_parent`: deletes `branch` only if it still
+ *  points at `tip` (compare-and-swap), never one a worktree holds; then its
+ *  config section, as `git branch -D` does. */
+function deleteMergedParent(repo, branch, tip) {
+  devValidateBranchName(branch);
+  if (!isSha(tip)) fail(`invalid ref: ${tip}`);
+  const h = branchHolders(repo).find((x) => x.branch === branch);
+  if (h) {
+    const how = h.rebasing ? "being rebased" : "checked out";
+    fail(`${branch} is ${how} in a worktree (${h.worktree}): not deleted.`);
+  }
+  const out = run(repo, ["update-ref", "-d", `refs/heads/${branch}`, tip]);
+  if (!ok(out)) fail(`${branch} changed since the restack: not deleted (${trimmed(out.stderr)})`);
+  run(repo, ["config", "--local", "--remove-section", `branch.${branch}`]);
 }
 
 // ── commands/stack.rs ───────────────────────────────────────────────────────
@@ -1414,4 +1418,9 @@ export function devGitRestack(cwd, branch, configuredTrunk, mergedParents, previ
     previewedRestack(previewed, "git_restack"),
     gitVersion(),
   );
+}
+
+export function devStackDeleteMergedParent(cwd, branch, tip) {
+  deleteMergedParent(cwd, branch, tip);
+  return null;
 }

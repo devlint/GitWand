@@ -577,11 +577,12 @@ export function fixtureStack(kind) {
       git(["checkout", "--quiet", "step-3"]);
       break;
     case "squashed":
+    case "amended":
     case "merge-commit":
     case "merge-commit-grew":
       addOrigin();
       git(["checkout", "--quiet", "main"]);
-      if (kind === "squashed") {
+      if (kind === "squashed" || kind === "amended") {
         git(["merge", "--quiet", "--squash", "step-1"]);
         git(["commit", "--quiet", "-m", "step 1 (squash)"], 5);
       } else {
@@ -591,6 +592,12 @@ export function fixtureStack(kind) {
       git(["reset", "--quiet", "--hard", "HEAD~1"]);
       // I-1: step-1 gets a commit after its merge, so it is not merged.
       if (kind === "merge-commit-grew") moveStep1("a2.txt", "after\n", "s1 after merge");
+      // step-1 amended after step-2 branched (same sha on every fixture): the
+      // merged PR's head is the amended tip, not step-2's recorded base.
+      if (kind === "amended") {
+        git(["checkout", "--quiet", "step-1"]);
+        git(["commit", "--quiet", "--amend", "-m", "s1 (amended)"], 7);
+      }
       git(["checkout", "--quiet", "step-3"]);
       break;
     case "dropped":
@@ -600,10 +607,24 @@ export function fixtureStack(kind) {
       git(["checkout", "--quiet", "step-3"]);
       break;
     case "four":
-      // step-1, the target of step-3's moment 2, has an upstream (I-2).
+      // step-2's PR (based on step-1) squash-merged and pulled into step-1:
+      // the target of step-3's moment 2 contains the merged work (I-2).
+      git(["checkout", "--quiet", "step-1"]);
+      git(["merge", "--quiet", "--squash", "step-2"]);
+      git(["commit", "--quiet", "-m", "step 2 (squash)"], 6);
+      git(["checkout", "--quiet", "step-4"]);
+      break;
+    case "retargeted":
+      // Wave 2, item 5: step-2's PR retargeted to main and squash-merged
+      // there; step-1 is up to date with its upstream but lacks the work.
       addOrigin();
       git(["push", "--quiet", "-u", "origin", "step-1"]);
-      git(["checkout", "--quiet", "step-4"]);
+      git(["checkout", "--quiet", "main"]);
+      git(["merge", "--quiet", "--squash", "step-2"]);
+      git(["commit", "--quiet", "-m", "step 2 (squash into main)"], 5);
+      git(["push", "--quiet", "origin", "main"]);
+      git(["reset", "--quiet", "--hard", "HEAD~1"]);
+      git(["checkout", "--quiet", "step-3"]);
       break;
     case "four-empty":
       moveStep1("a2.txt", "more\n", "s1 more");

@@ -99,7 +99,15 @@ pub struct FinalizedRestack {
     /// M-1): it still exists, its tip is the commit the restack took as its
     /// old tip or the merged PR's head, and no worktree has it checked out
     /// (the current one included). `None` otherwise: no delete offer.
-    pub delete_offer: Option<String>,
+    pub delete_offer: Option<DeleteOffer>,
+}
+
+/// A merged parent that may be deleted, and the tip that was verified: the
+/// delete is a compare-and-swap on it (`stack_delete_merged_parent`).
+#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
+pub struct DeleteOffer {
+    pub branch: String,
+    pub tip: String,
 }
 
 /// Why the finalize could not switch back to the branch the user was on.

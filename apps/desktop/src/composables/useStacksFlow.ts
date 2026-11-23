@@ -137,15 +137,15 @@ export function createStacksFlow(c: StacksCore) {
   }
 
   /**
-   * Force-deletes the merged parent (`-D`: it was squash-merged, git cannot
-   * tell). Only offered when the backend checked its tip is what was merged
-   * (`delete_offer`). Throws on failure.
+   * Deletes the merged parent, a compare-and-swap on the tip the backend
+   * verified when it offered the delete (`delete_offer`): a commit added
+   * since makes it fail and the branch stays. Throws on failure, offer kept.
    */
   async function deleteMergedParent(): Promise<void> {
     const a = after.value;
     if (!a?.deleteOffer) return;
     const cwd = a.cwd;
-    await deps.deleteBranch(cwd, a.deleteOffer);
+    await deps.deleteMergedParent(cwd, a.deleteOffer.branch, a.deleteOffer.tip);
     if (after.value === a) after.value = { ...a, deleteOffer: null };
     await c.refresh(cwd);
   }

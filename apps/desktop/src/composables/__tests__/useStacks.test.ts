@@ -122,7 +122,7 @@ function setup(over: Partial<StacksDeps> = {}) {
     ),
     setPrBase: vi.fn(async () => {}),
     pushBranch: vi.fn(async (): Promise<GitPushPullResult> => ({ success: true, message: "pushed" })),
-    deleteBranch: vi.fn(async () => {}),
+    deleteMergedParent: vi.fn(async () => {}),
     forge: () => world.forge,
     trunkSetting: () => "main",
     dismissed: () => world.dismissed,
@@ -253,7 +253,7 @@ describe("useStacks — refresh", () => {
 describe("useStacks — after a restack", () => {
   const momentTwo = () =>
     report({
-      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null, delete_offer: "step-1" }),
+      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null, delete_offer: { branch: "step-1", tip: "t1" } }),
     });
 
   it("finalized moment two retargets the child PR to the trunk on GitHub", async () => {
@@ -263,7 +263,7 @@ describe("useStacks — after a restack", () => {
     expect(deps.branchPr).toHaveBeenCalledWith("/r", "step-2", "open");
     expect(deps.setPrBase).toHaveBeenCalledWith("/r", 813, "main");
     expect(s.after.value?.retarget).toEqual({ state: "done", number: 813, base: "main", error: null });
-    expect(s.after.value?.deleteOffer).toBe("step-1");
+    expect(s.after.value?.deleteOffer).toEqual({ branch: "step-1", tip: "t1" });
   });
 
   it("offers to delete the merged parent only when the backend says it is safe (I-1, M-1)", async () => {
@@ -406,13 +406,25 @@ describe("useStacks — after a restack", () => {
     expect(deps.pushBranch).not.toHaveBeenCalled();
   });
 
-  it("deleting the merged parent force-deletes it and clears the offer", async () => {
+  it("deleting the merged parent is a compare-and-swap on the verified tip, then clears the offer", async () => {
     const { s, deps, world } = setup();
     world.next = momentTwo();
     await s.refresh("/r");
     await s.deleteMergedParent();
-    expect(deps.deleteBranch).toHaveBeenCalledWith("/r", "step-1");
+    expect(deps.deleteMergedParent).toHaveBeenCalledWith("/r", "step-1", "t1");
     expect(s.after.value?.deleteOffer).toBeNull();
+  });
+
+  it("a refused delete keeps the offer and rejects with the backend's words (wave 2, item 1)", async () => {
+    const { s, world } = setup({
+      deleteMergedParent: vi.fn(async () => {
+        throw new Error("step-1 changed since the restack: not deleted");
+      }),
+    });
+    world.next = momentTwo();
+    await s.refresh("/r");
+    await expect(s.deleteMergedParent()).rejects.toThrow("step-1 changed since the restack: not deleted");
+    expect(s.after.value?.deleteOffer).toEqual({ branch: "step-1", tip: "t1" });
   });
 });
 
@@ -683,7 +695,7 @@ describe("useStacks — bridge, banner, candidates", () => {
 describe("useStacks — review round 1", () => {
   const momentTwo = () =>
     report({
-      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null, delete_offer: "step-1" }),
+      finalized: finalized({ moment: "parent_merged", merged_parent: "step-1", new_parent: null, delete_offer: { branch: "step-1", tip: "t1" } }),
     });
 
   it("refuses a moment-two plan when the fetch failed, even without a report", async () => {
@@ -738,12 +750,16 @@ describe("useStacks — review round 1", () => {
         throw new Error("toast failed");
       })
       .mockImplementation(() => {});
-    host({ offerPush });
+    const h = host({ offerPush });
     const { s, world } = setup();
     world.report = report({ finalized: finalized() });
     await s.refresh("/r");
     expect(offerPush).toHaveBeenCalledTimes(1);
-    expect(s.statusError.value).toBe("toast failed");
+    // Wave 2, item 2: the status itself worked — not a status error; the
+    // report is kept and the failure goes to the host.
+    expect(s.statusError.value).toBeNull();
+    expect(s.report.value?.finalized).not.toBeNull();
+    expect(h.notify).toHaveBeenCalledWith("toast failed");
     await s.refresh("/r");
     await settle();
     // Handled again, then once only (the extra refresh after it is skipped).

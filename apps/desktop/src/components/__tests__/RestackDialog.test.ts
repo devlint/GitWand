@@ -129,10 +129,6 @@ describe("RestackDialog", () => {
       { code: "merged_work_missing", branch: "origin/main", path: null, detail: null },
       "The merged work is not in origin/main yet: update origin/main first.",
     ],
-    [
-      { code: "parent_no_upstream", branch: "step-1", path: null, detail: null },
-      "step-1 has no upstream, so GitWand cannot check it contains the merged work.",
-    ],
   ] as const)("refused %#: the backend detail goes into the text (M-3)", async (r, text) => {
     await mount({ phase: "refused", refusal: { ...r, message: "raw" } });
     expect(body()).toContain(text);

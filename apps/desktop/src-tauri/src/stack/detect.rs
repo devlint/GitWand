@@ -429,7 +429,7 @@ fn classify(
 /// What the merged fallback probes: the parent's tip when the recorded base
 /// is below it (the parent's commits since the base must be merged too),
 /// else the base, else the tip.
-fn merged_probe<'a>(
+pub(crate) fn merged_probe<'a>(
     repo: &Path,
     base: Option<&'a str>,
     parent_tip: Option<&'a str>,

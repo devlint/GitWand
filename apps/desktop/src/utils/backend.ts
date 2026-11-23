@@ -1271,7 +1271,13 @@ export interface FinalizedRestack {
   switched_back_to: string | null;
   switch_error: SwitchError | null;
   /** The merged parent when deleting it loses nothing (unchanged since merged, not checked out); else null. */
-  delete_offer: string | null;
+  delete_offer: DeleteOffer | null;
+}
+
+/** A merged parent that may be deleted, and the tip that was verified (the delete's compare-and-swap value). */
+export interface DeleteOffer {
+  branch: string;
+  tip: string;
 }
 
 /** Why a finalize could not switch back to the branch the user was on. */
@@ -1306,9 +1312,9 @@ export interface StackMeta {
 /**
  * Why a restack plan is refused. The backend emits `rebase_in_progress`,
  * `up_to_date`, `git_too_old`, `detached`, `dirty`, `occupied`,
- * `occupied_rebasing`, `parent_behind`, `no_remote_trunk`, `parent_no_upstream`,
+ * `occupied_rebasing`, `parent_behind`, `no_remote_trunk`,
  * `merged_work_missing` and `no_old_base` (`branch` names the target for
- * `parent_no_upstream` and `merged_work_missing`). `fetch_failed` and
+ * `merged_work_missing`). `fetch_failed` and
  * `stale_preview` are synthesized by the frontend (useStacks): the first from
  * a failed fetch, the second from a `git_restack` error starting with
  * "stale preview:". Rust never puts them in a plan's `refusal`.
@@ -1323,7 +1329,6 @@ export type RestackRefusalCode =
   | "occupied_rebasing"
   | "parent_behind"
   | "no_remote_trunk"
-  | "parent_no_upstream"
   | "merged_work_missing"
   | "no_old_base"
   | "fetch_failed"
@@ -1332,7 +1337,7 @@ export type RestackRefusalCode =
 export interface RestackRefusal {
   code: RestackRefusalCode;
   message: string;
-  /** The occupied branch, or the target (`parent_behind`, `parent_no_upstream`, `merged_work_missing`). */
+  /** The occupied branch, or the target (`parent_behind`, `merged_work_missing`). */
   branch: string | null;
   /** The worktree holding `branch` (`occupied`, `occupied_rebasing`). */
   path: string | null;
@@ -1425,6 +1430,23 @@ export async function stackUnset(cwd: string, branch: string): Promise<void> {
     return;
   }
   await devStackPost<unknown>("/api/stack-unset", { cwd, branch }, `unset stack of ${branch} failed`);
+}
+
+/**
+ * Delete the merged parent a restack offered to delete, only if it still
+ * points at `tip` (compare-and-swap): a commit added since makes it fail
+ * with "<branch> changed since the restack: not deleted …".
+ */
+export async function stackDeleteMergedParent(cwd: string, branch: string, tip: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke<void>("stack_delete_merged_parent", { cwd, branch, tip });
+    return;
+  }
+  await devStackPost<unknown>(
+    "/api/stack-delete-merged-parent",
+    { cwd, branch, tip },
+    `delete of ${branch} failed`,
+  );
 }
 
 /** Plan the restack of the stack whose top is `branch` (read-only). */

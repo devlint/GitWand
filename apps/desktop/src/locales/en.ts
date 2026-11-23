@@ -696,7 +696,6 @@ const en = {
       occupied_rebasing: "{0} is being rebased in another worktree ({1}). Finish or abort that rebase first.",
       parent_behind: "{0} is {1} commit(s) behind its remote. Pull it first.",
       no_remote_trunk: "No origin branch for the trunk: fetch from origin first.",
-      parent_no_upstream: "{0} has no upstream, so GitWand cannot check it contains the merged work.",
       merged_work_missing: "The merged work is not in {0} yet: update {0} first.",
       no_old_base: "GitWand cannot tell which commits belonged to the parent. Restack this branch by hand.",
       fetch_failed: "Could not fetch ({0}): the merged commit may be missing locally. Try again when online.",

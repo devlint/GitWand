@@ -403,7 +403,8 @@ describe("parity: stacked branches", () => {
     const rs = status.rust(rustCwd);
     expectSame(rs, await status.node(dev, nodeCwd), "finalizing status");
     expect(rs.value.finalized).toMatchObject({
-      moment: "parent_merged", bottom: "step-2", merged_parent: "step-1", new_parent: null, delete_offer: "step-1",
+      moment: "parent_merged", bottom: "step-2", merged_parent: "step-1", new_parent: null,
+      delete_offer: { branch: "step-1", tip: git(rustCwd, ["rev-parse", "step-1"]) },
     });
     expect(stateOf(nodeCwd)).toEqual(stateOf(rustCwd));
     // The bottom sat on the trunk now: it leaves the stack, on both sides.
@@ -529,7 +530,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     const keys = stateOf(rustCwd).keys;
     expect(keys).toMatch(/branch\.step-3\.gitwandparent step-1/);
     expect(keys).not.toMatch(/branch\.step-2\./);
-    expect(stateOf(rustCwd).log["step-4"].split("\n")).toEqual(["s4", "s3", "s1", "initial commit"]);
+    expect(stateOf(rustCwd).log["step-4"].split("\n")).toEqual(["s4", "s3", "step 2 (squash)", "s1", "initial commit"]);
   }, 60_000);
 
   it("a merged parent being dropped is refused, the layer above is planned", async () => {
@@ -546,7 +547,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     expect(up.value.onto_ref).toBe("step-1");
   }, 60_000);
 
-  it("moment 2 needs the merge commit in its target, and a grandparent with an upstream (I-2)", async () => {
+  it("moment 2 needs the merged work in its target (I-2, wave 2 items 4-5)", async () => {
     const sq = twoFixtures("squashed");
     const withMerge = (oid) => [{ branch: "step-1", number: 812, head_ref_oid: null, merge_commit_oid: oid }];
     const landed = git(sq.rustCwd, ["rev-parse", "origin/main"]);
@@ -563,16 +564,100 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
       });
     }
 
+    // Onto a stacked step-1 with no upstream: the work is found in it by
+    // patch-id, or by a merge commit verified there (item 4).
     const hint = [{ branch: "step-2", number: 812, head_ref_oid: null }];
-    const { rustCwd, nodeCwd } = twoFixtures("dropped");
-    const r = await planBoth(dev, rustCwd, nodeCwd, "step-3", "grandparent without upstream", hint);
+    const dropped = twoFixtures("dropped");
+    const found = await planBoth(dev, dropped.rustCwd, dropped.nodeCwd, "step-3", "pulled, no upstream", hint);
+    expect(found.value.refusal).toBe(null);
+    const squash = git(dropped.rustCwd, ["rev-parse", "step-1"]);
+    const verified = [{ ...hint[0], merge_commit_oid: squash }];
+    const v = await planBoth(dev, dropped.rustCwd, dropped.nodeCwd, "step-3", "merge commit in step-1", verified);
+    expect(v.value.refusal).toBe(null);
+
+    // Item 5: step-2 merged into main after a retarget; step-1 is up to date
+    // with origin/step-1 and lacks the work.
+    const re = twoFixtures("retargeted");
+    const r = await planBoth(dev, re.rustCwd, re.nodeCwd, "step-3", "merged elsewhere", hint);
     expect(r.value.refusal).toEqual({
-      code: "parent_no_upstream",
-      message: "step-1 has no upstream, so GitWand cannot check it contains the merged work of step-2.",
+      code: "merged_work_missing",
+      message: "The merged work of step-2 (PR #812) is not in step-1 yet: update step-1 first.",
       branch: "step-1",
       path: null,
       detail: null,
     });
+  }, 60_000);
+
+  it("occupied_rebasing: a moving branch being rebased in another worktree (M-3)", async () => {
+    const prep = (cwd) => {
+      git(cwd, ["branch", "backup", "step-2"]);
+      git(cwd, ["branch", "clash", "main"]);
+      git(cwd, ["worktree", "add", "--quiet", `${cwd}-wt`, "clash"]);
+      writeFileSync(join(`${cwd}-wt`, "b.txt"), "clash\n");
+      git(`${cwd}-wt`, ["add", "b.txt"]);
+      git(`${cwd}-wt`, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "clash"]);
+      git(`${cwd}-wt`, ["checkout", "--quiet", "backup"]);
+      const halted = spawnSync("git", ["-C", `${cwd}-wt`, "rebase", "clash"], { encoding: "utf-8" });
+      if (halted.status === 0) throw new Error("the rebase should halt on a conflict");
+    };
+    const { rustCwd, nodeCwd } = twoFixtures("moved", prep);
+    const r = await planBoth(dev, rustCwd, nodeCwd, "step-2", "occupied_rebasing");
+    expect(r.value.refusal).toEqual({
+      code: "occupied_rebasing",
+      message: "backup is being rebased in another worktree (<cwd>-wt).",
+      branch: "backup",
+      path: "<cwd>-wt",
+      detail: null,
+    });
+  }, 60_000);
+
+  it("the delete offer follows the PR head, and the delete is a compare-and-swap (wave 2, items 1 and 3)", async () => {
+    const tipOf = (cwd) => git(cwd, ["rev-parse", "step-1"]);
+    const { rustCwd, nodeCwd } = twoFixtures("amended");
+    const head = tipOf(rustCwd);
+    expect(tipOf(nodeCwd)).toBe(head);
+    const hint = [{ branch: "step-1", number: 812, head_ref_oid: head }];
+    const rp = plan.rust(rustCwd, "step-2", hint);
+    const np = await plan.node(dev, nodeCwd, "step-2", hint);
+    expectSame(rp, np, "plan");
+    // The recorded base is step-1 before the amend: not the head.
+    expect(rp.value.upstream_sha).not.toBe(head);
+    for (const [cwd, p, run] of [[rustCwd, rp.value, "rust"], [nodeCwd, np.value, "node"]]) {
+      const args = { cwd, branch: "step-2", mergedParents: hint, previewed: previewedOf(p) };
+      const res =
+        run === "rust"
+          ? rust("git_restack", { ...args, trunk: "main" })
+          : await node(dev, "/api/git-restack", { ...args, configuredTrunk: "main" });
+      expect(res.ok, res.error).toBe(true);
+    }
+    const s = await statusBoth(dev, rustCwd, nodeCwd, "finalize with the head sha", hint);
+    expect(s.finalized.delete_offer).toEqual({ branch: "step-1", tip: head });
+
+    const del = async (cwd, tip) => ({
+      r: ownResult(rust("stack_delete_merged_parent", { cwd: rustCwd, branch: "step-1", tip }), rustCwd),
+      n: ownResult(await node(dev, "/api/stack-delete-merged-parent", { cwd: nodeCwd, branch: "step-1", tip }), nodeCwd),
+    });
+    // A commit lands on step-1 after the offer: both refuse, branch intact.
+    for (const cwd of [rustCwd, nodeCwd]) {
+      git(cwd, ["checkout", "--quiet", "step-1"]);
+      writeFileSync(join(cwd, "late.txt"), "late\n");
+      git(cwd, ["add", "late.txt"]);
+      git(cwd, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "late"]);
+      git(cwd, ["checkout", "--quiet", "step-3"]);
+    }
+    const late = { rust: tipOf(rustCwd), node: tipOf(nodeCwd) };
+    const refused = await del(null, head);
+    expect(refused.r.ok).toBe(false);
+    expect(refused.n.ok).toBe(false);
+    expect(refused.r.error).toMatch(/^step-1 changed since the restack: not deleted/);
+    expect(refused.n.error).toMatch(/^step-1 changed since the restack: not deleted/);
+    expect([tipOf(rustCwd), tipOf(nodeCwd)]).toEqual([late.rust, late.node]);
+    // At the tip it was checked at: deleted on both sides.
+    const r = ownResult(rust("stack_delete_merged_parent", { cwd: rustCwd, branch: "step-1", tip: late.rust }), rustCwd);
+    const n = await node(dev, "/api/stack-delete-merged-parent", { cwd: nodeCwd, branch: "step-1", tip: late.node });
+    expect([r.ok, n.ok], `${r.error} ${n.error}`).toEqual([true, true]);
+    expect(stateOf(nodeCwd)).toEqual(stateOf(rustCwd));
+    expect(stateOf(rustCwd).log["step-1"]).toBeUndefined();
   }, 60_000);
 
   it("the restack stops at the first layer that no longer contains the one below", async () => {

@@ -21,7 +21,7 @@ import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
 import { devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
 import { resolveBin } from "./dev-bin.mjs";
 import { devForkParentNwo, devParseGhBranchPr } from "./dev-gh-branch-pr.mjs";
-import { devGitRestack, devPushBlock, devStackRestackPlan, devStackSetParent, devStackStatus, devStackUnset, devValidateBranchName } from "./dev-stack-service.mjs";
+import { devGitRestack, devPushBlock, devStackDeleteMergedParent, devStackRestackPlan, devStackSetParent, devStackStatus, devStackUnset, devValidateBranchName } from "./dev-stack-service.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -4374,6 +4374,7 @@ async function handleRequest(req, res) {
       "/api/stack-status": (b) => devStackStatus(b.cwd, b.configuredTrunk, b.mergedParents),
       "/api/stack-set-parent": (b) => devStackSetParent(b.cwd, b.branch, b.parent, b.configuredTrunk),
       "/api/stack-unset": (b) => devStackUnset(b.cwd, b.branch),
+      "/api/stack-delete-merged-parent": (b) => devStackDeleteMergedParent(b.cwd, b.branch, b.tip),
       "/api/stack-restack-plan": (b) => devStackRestackPlan(b.cwd, b.branch, b.configuredTrunk, b.mergedParents),
       "/api/git-restack": (b) => devGitRestack(b.cwd, b.branch, b.configuredTrunk, b.mergedParents, b.previewed),
     };
