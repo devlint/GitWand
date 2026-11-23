@@ -94,21 +94,26 @@ pub(crate) fn status(
             }
         }
         let top = present.last().cloned().unwrap_or_default();
-        let mut affected = false;
+        let mut classified = Vec::new();
         for branch in &present {
-            let meta = &all[branch];
             let mut l = classify(
                 repo,
-                meta,
+                &all[branch],
                 hints,
                 has_remote_trunk.then_some(remote_ref.as_str()),
                 rebase_in_progress,
             )?;
-            let needs_restack = matches!(l.state, LayerState::OutOfDate | LayerState::ParentMerged);
-            l.inherited = affected;
-            l.actionable = needs_restack && !affected && !rebase_in_progress;
-            affected |= needs_restack;
             l.top = top.clone();
+            classified.push(l);
+        }
+        let refs: Vec<&LayerStatus> = classified.iter().collect();
+        let flow = propagate(&refs);
+        for (mut l, f) in classified.into_iter().zip(flow) {
+            l.inherited = f.blocker.is_some();
+            l.actionable = needs_restack(l.state)
+                && f.blocker.is_none()
+                && f.dropped_for.is_none()
+                && !rebase_in_progress;
             layers.push(l);
         }
     }
@@ -121,6 +126,49 @@ pub(crate) fn status(
         finalized: None,
         git_supports_restack,
     })
+}
+
+pub(crate) fn needs_restack(s: LayerState) -> bool {
+    matches!(s, LayerState::OutOfDate | LayerState::ParentMerged)
+}
+
+/// How "needs a restack" flows up one chain (bottom to top).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Propagation {
+    /// Index of the lowest layer below that needs a restack first.
+    pub blocker: Option<usize>,
+    /// Index of the layer above whose merged parent this layer is: it is
+    /// being dropped from the chain by that layer's moment-2 restack.
+    pub dropped_for: Option<usize>,
+}
+
+/// The single rule shared by `status` (actionable / inherited) and
+/// `restack::plan` (which layer to restack first), so they cannot disagree.
+/// A layer needing a restack blocks every layer above it, unless it is being
+/// dropped: it is the merged parent of the layer right above it (that layer
+/// is `ParentMerged` with it as parent). Replaying a dropped layer would
+/// replay commits that are already merged; the layer above skips it.
+pub(crate) fn propagate(chain: &[&LayerStatus]) -> Vec<Propagation> {
+    let dropped_for: Vec<Option<usize>> = (0..chain.len())
+        .map(|i| {
+            chain.get(i + 1).and_then(|up| {
+                (up.state == LayerState::ParentMerged && up.parent == chain[i].branch)
+                    .then_some(i + 1)
+            })
+        })
+        .collect();
+    let mut blocker = None;
+    let mut out = Vec::with_capacity(chain.len());
+    for (i, l) in chain.iter().enumerate() {
+        out.push(Propagation {
+            blocker,
+            dropped_for: dropped_for[i],
+        });
+        if blocker.is_none() && needs_restack(l.state) && dropped_for[i].is_none() {
+            blocker = Some(i);
+        }
+    }
+    out
 }
 
 /// One layer's own state; `inherited`, `actionable` and `top` are set by the
@@ -799,5 +847,62 @@ mod tests {
             e.contains("merge-base --is-ancestor refs/heads/nope main"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn propagate_skips_only_the_merged_parent_of_the_layer_above() {
+        let l = |b: &str, p: &str, state: LayerState| LayerStatus {
+            branch: b.into(),
+            parent: p.into(),
+            base: None,
+            parent_tip: None,
+            state,
+            inherited: false,
+            actionable: false,
+            merge_signal: None,
+            merged_pr: None,
+            parent_behind_upstream: 0,
+            top: String::new(),
+        };
+        let p = |blocker, dropped_for| Propagation {
+            blocker,
+            dropped_for,
+        };
+        // a out of date blocks everything above.
+        let c = [
+            l("a", "main-ish", LayerState::OutOfDate),
+            l("b", "a", LayerState::UpToDate),
+            l("c", "b", LayerState::OutOfDate),
+        ];
+        let refs: Vec<&LayerStatus> = c.iter().collect();
+        assert_eq!(
+            propagate(&refs),
+            [p(None, None), p(Some(0), None), p(Some(0), None)]
+        );
+        // b is merged into a and dropped by c: c is not blocked by b, and
+        // d above c is blocked by c.
+        let c = [
+            l("a", "x", LayerState::UpToDate),
+            l("b", "a", LayerState::OutOfDate),
+            l("c", "b", LayerState::ParentMerged),
+            l("d", "c", LayerState::UpToDate),
+        ];
+        let refs: Vec<&LayerStatus> = c.iter().collect();
+        assert_eq!(
+            propagate(&refs),
+            [
+                p(None, None),
+                p(None, Some(2)),
+                p(None, None),
+                p(Some(2), None)
+            ]
+        );
+        // c's merged parent is a deleted branch, not b: b still blocks.
+        let c = [
+            l("b", "a", LayerState::OutOfDate),
+            l("c", "gone", LayerState::ParentMerged),
+        ];
+        let refs: Vec<&LayerStatus> = c.iter().collect();
+        assert_eq!(propagate(&refs), [p(None, None), p(Some(0), None)]);
     }
 }

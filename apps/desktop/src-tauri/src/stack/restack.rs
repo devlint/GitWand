@@ -2,7 +2,7 @@
 //! of one layer would do — which commits move onto what, which branches
 //! `--update-refs` would carry along — and every reason to refuse it.
 
-use super::detect::{behind_upstream, is_ancestor, is_sha, resolve_commit, status};
+use super::detect::{behind_upstream, is_ancestor, is_sha, propagate, resolve_commit, status};
 use super::guard::{branch_holders, supports_update_refs, Holder};
 use super::meta::{read_all, validate_branch_name};
 use super::{
@@ -95,13 +95,20 @@ pub(crate) fn plan(
         .position(|x| x.branch == layer)
         .ok_or_else(|| format!("not a stacked branch: {layer}"))?;
     // Only the lowest layer needing a restack can be restacked: a layer above
-    // it would be replayed onto a parent that is about to move.
-    if l.inherited && !rebase_in_progress {
-        let lowest = chain[..pos]
-            .iter()
-            .find(|x| matches!(x.state, LayerState::OutOfDate | LayerState::ParentMerged))
-            .map_or(layer, |x| x.branch.as_str());
-        return Err(format!("restack {lowest} first"));
+    // it would be replayed onto a parent that is about to move. A merged
+    // parent being dropped by the layer above neither blocks nor restacks.
+    // Same rule as `status` (`detect::propagate`).
+    if !rebase_in_progress {
+        let flow = propagate(&chain)[pos];
+        if let Some(up) = flow.dropped_for {
+            return Err(format!(
+                "{layer} is merged: restack {} instead",
+                chain[up].branch
+            ));
+        }
+        if let Some(b) = flow.blocker {
+            return Err(format!("restack {} first", chain[b].branch));
+        }
     }
     // The restack's top: the highest layer reached from `layer` through a
     // contiguous run where each layer contains the one below. Layers above a
@@ -564,6 +571,37 @@ mod tests {
         assert_eq!(p.new_parent.as_deref(), Some("step-1"));
         assert_eq!(names(&p.moving), ["step-3"]);
         assert!(p.refusal.is_none(), "{:?}", p.refusal);
+    }
+
+    #[test]
+    fn a_merged_parent_already_pulled_into_the_grandparent_does_not_block() {
+        let r = TempRepo::new();
+        stack3(&r);
+        let step3_base = r.git(&["config", "branch.step-3.gitwandStackBase"]);
+        // step-2's PR (based on step-1) is squash-merged into step-1 and the
+        // user pulled step-1: step-2 is now out of date against it.
+        r.git(&["checkout", "-q", "step-1"]);
+        r.git(&["merge", "-q", "--squash", "step-2"]);
+        r.git(&["commit", "-q", "-m", "step 2 (squash)"]);
+        r.git(&["checkout", "-q", "step-3"]);
+        let h = [hint("step-2", None)];
+        let s = status(&r.path, Some("main"), &h).unwrap();
+        let l2 = s.layers.iter().find(|l| l.branch == "step-2").unwrap();
+        let l3 = s.layers.iter().find(|l| l.branch == "step-3").unwrap();
+        assert_eq!(l2.state, LayerState::OutOfDate);
+        assert!(!l2.actionable, "the merged parent is being dropped");
+        assert_eq!(l3.state, LayerState::ParentMerged);
+        assert!(l3.actionable && !l3.inherited, "{l3:?}");
+        let p = plan(&r.path, Some("main"), "step-3", &h, V).unwrap();
+        assert_eq!(p.moment, Moment::ParentMerged);
+        assert_eq!(p.onto_ref, "step-1");
+        assert_eq!(p.onto_sha, r.git(&["rev-parse", "step-1"]));
+        assert_eq!(p.upstream_sha, step3_base);
+        assert_eq!(names(&p.moving), ["step-3"]);
+        assert!(p.refusal.is_none(), "{:?}", p.refusal);
+        // The dropped layer itself is not restackable.
+        let e = plan(&r.path, Some("main"), "step-2", &h, V).unwrap_err();
+        assert_eq!(e, "step-2 is merged: restack step-3 instead");
     }
 
     #[test]
