@@ -35,7 +35,6 @@ import { useIssueSuggest, handleIssueKeydown, issueSuggestAt, pickIssueRow, shar
 import { repoRemotes } from "../composables/useRepoRemote";
 // Shown only while a `#` list is open (v-if): loaded then, not in the main chunk.
 const IssueSuggestList = defineAsyncComponent(() => import("./IssueSuggestList.vue"));
-const StackOnDialog = defineAsyncComponent(() => import("./StackOnDialog.vue"));
 // Lazy: keeps the banner (and its locale-heavy logic) out of the main chunk.
 const StackBanner = defineAsyncComponent(() => import("./StackBanner.vue"));
 import { issueListerFor } from "../composables/issueLister";
@@ -1018,28 +1017,10 @@ function openBranchCtx(e: MouseEvent, b: GitBranch) {
 function closeBranchCtx() { branchCtx.value.visible = false; }
 
 // ─── Stacked branches (v3.14) ───────────────────────────
-const { report: stackReport, offers: stackOffers, layerOf, parentPrOf, actionableFor, stackOnCandidates, dismissBridge } =
-  useStacks();
+// The branch menus with Stack on… / Unstack / Restack… are the Git Tree's and
+// the header branch selector's; these rows only show the badges.
+const { offers: stackOffers, layerOf, parentPrOf, dismissBridge } = useStacks();
 const stackActions = useStackActions();
-const stackOnTarget = ref<string | null>(null);
-/** "Stack on…" is for a local branch that is not the trunk. */
-const ctxCanStack = computed(() =>
-  !!branchCtx.value.branchName && !branchCtx.value.isRemote && branchCtx.value.branchName !== stackReport.value?.trunk,
-);
-function onBranchCtxStackOn() {
-  stackOnTarget.value = branchCtx.value.branchName;
-  closeBranchCtx();
-}
-function onBranchCtxUnstack() {
-  const name = branchCtx.value.branchName;
-  closeBranchCtx();
-  void stackActions.unstack(props.cwd, name);
-}
-function onBranchCtxRestack() {
-  const name = branchCtx.value.branchName;
-  closeBranchCtx();
-  void stackActions.restackFrom(props.cwd, name);
-}
 
 function onBranchCtxPin() {
   _pinnedApi.pin(branchCtx.value.branchName);
@@ -2027,20 +2008,6 @@ function formatActivityDate(dateStr: string): string {
             </button>
           </template>
 
-          <!-- Stacked branches (v3.14) -->
-          <template v-if="ctxCanStack || layerOf(branchCtx.branchName) || actionableFor(branchCtx.branchName)">
-            <div class="ctx-separator"></div>
-            <button class="ctx-item" v-if="ctxCanStack" @click="onBranchCtxStackOn">
-              {{ t('stacks.menu.stackOn') }}
-            </button>
-            <button class="ctx-item" v-if="layerOf(branchCtx.branchName)" @click="onBranchCtxUnstack">
-              {{ t('stacks.menu.unstack') }}
-            </button>
-            <button class="ctx-item" v-if="actionableFor(branchCtx.branchName)" @click="onBranchCtxRestack">
-              {{ t('stacks.menu.restack') }}
-            </button>
-          </template>
-
           <!-- Branch Deletion (v2.12) -->
           <template v-if="branchToDelete">
             <div class="ctx-separator"></div>
@@ -2056,15 +2023,6 @@ function formatActivityDate(dateStr: string): string {
           </template>
         </div>
       </Teleport>
-
-      <StackOnDialog
-        v-if="stackOnTarget"
-        :cwd="cwd"
-        :branch="stackOnTarget"
-        :candidates="stackOnCandidates(stackOnTarget)"
-        :forge="remoteInfo?.provider ?? null"
-        @close="stackOnTarget = null"
-      />
 
       <!-- Recent activity -->
       <div class="side-block" v-if="recentActivity.length > 0">

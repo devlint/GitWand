@@ -87,3 +87,29 @@ describe("useStackActions — error channel", () => {
     expect(notify.mock.calls).toEqual([["flow module failed to load"], ["offline"]]);
   });
 });
+
+describe("stack menu (QA bug 1)", () => {
+  it("stackMenuFor: Stack on… for a non-trunk branch, Unstack for a layer, Restack… when actionable", async () => {
+    const { stackMenuFor } = await import("../useStackActions");
+    const { ref } = await import("vue");
+    const stacks = fakeStacks({
+      report: ref({ trunk: "main" }) as unknown as Stacks["report"],
+      layerOf: (b: string) => (b === "step-2" ? ({ branch: "step-2" } as StackLayerStatus) : null),
+      actionableFor: (b: string) => (b === "step-2" ? ({ branch: "step-2" } as StackLayerStatus) : null),
+    });
+    expect(stackMenuFor(stacks, "step-2")).toEqual({ stackOn: true, unstack: true, restack: true });
+    expect(stackMenuFor(stacks, "feature")).toEqual({ stackOn: true, unstack: false, restack: false });
+    expect(stackMenuFor(stacks, "main")).toEqual({ stackOn: false, unstack: false, restack: false });
+  });
+
+  it("requestStackOn / closeStackOn drive the shared stackOnRequest", async () => {
+    const { useStackActions } = await import("../useStackActions");
+    const a = useStackActions();
+    const b = useStackActions();
+    expect(a.stackOnRequest.value).toBeNull();
+    a.requestStackOn("/r", "step-2");
+    expect(b.stackOnRequest.value).toEqual({ cwd: "/r", branch: "step-2" });
+    b.closeStackOn();
+    expect(a.stackOnRequest.value).toBeNull();
+  });
+});

@@ -14,6 +14,8 @@ import { useBranchPrSearch } from "../composables/useBranchPrSearch";
 import { useResizeObserver } from "../composables/useResizeObserver";
 import { useStickyWidth } from "../composables/useStickyWidth";
 import { useTheme } from "../composables/useTheme";
+import { useStacks } from "../composables/useStacks";
+import { stackMenuFor, type StackMenuItems } from "../composables/useStackActions";
 
 defineOptions({ inheritAttrs: false });
 
@@ -111,6 +113,10 @@ const emit = defineEmits<{
   "force-push-branch": [];
   "pin-branch": [name: string];
   "unpin-branch": [name: string];
+  /** Stacked branches (v3.14): "Stack on…", "Unstack", "Restack…" of a local branch. */
+  "stack-on": [name: string];
+  "unstack": [name: string];
+  "restack": [name: string];
   "view-submodule": [path: string];
   "apply-stash": [index: number];
   "pop-stash": [index: number];
@@ -160,6 +166,27 @@ function onCtxTogglePin() {
   if (isBranchPinned(name)) emit("unpin-branch", name);
   else emit("pin-branch", name);
   closeCommitContextMenu();
+}
+
+// ─── Stacked branches (v3.14) ─────────────────────────
+const stacks = useStacks();
+const NO_STACK_ITEMS: StackMenuItems = { stackOn: false, unstack: false, restack: false };
+/** The stack items of the right-clicked ref: local branches only. */
+const ctxStackItems = computed<StackMenuItems>(() => {
+  const name = ctxMenu.value.clickedBranch;
+  if (!name || ctxMenu.value.clickedBranchType !== "branch") return NO_STACK_ITEMS;
+  return stackMenuFor(stacks, name);
+});
+const hasCtxStackItems = computed(
+  () => ctxStackItems.value.stackOn || ctxStackItems.value.unstack || ctxStackItems.value.restack,
+);
+function onCtxStack(event: "stack-on" | "unstack" | "restack") {
+  const name = ctxMenu.value.clickedBranch;
+  closeCommitContextMenu();
+  if (!name) return;
+  if (event === "stack-on") emit("stack-on", name);
+  else if (event === "unstack") emit("unstack", name);
+  else emit("restack", name);
 }
 
 // Sub-menu collision detection (v2.14)
@@ -2024,6 +2051,32 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           </svg>
           <span>{{ isBranchPinned(ctxMenu.clickedBranch) ? t('branch.unpin') : t('branch.pin') }}</span>
         </li>
+
+        <!-- Stacked branches (v3.14) — local branches only -->
+        <template v-if="hasCtxStackItems">
+          <li class="commit-ctx-menu-sep" role="separator"></li>
+          <li v-if="ctxStackItems.stackOn" class="commit-ctx-menu-item" role="menuitem" @click="onCtxStack('stack-on')">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="3" y="2.5" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.3" />
+              <rect x="3" y="9.5" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.3" />
+            </svg>
+            <span>{{ t('stacks.menu.stackOn') }}</span>
+          </li>
+          <li v-if="ctxStackItems.unstack" class="commit-ctx-menu-item" role="menuitem" @click="onCtxStack('unstack')">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="3" y="2.5" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.3" />
+              <path d="M3 11.5h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-dasharray="2 2" />
+            </svg>
+            <span>{{ t('stacks.menu.unstack') }}</span>
+          </li>
+          <li v-if="ctxStackItems.restack" class="commit-ctx-menu-item" role="menuitem" @click="onCtxStack('restack')">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M12.5 6A5 5 0 0 0 3.5 5M3.5 10a5 5 0 0 0 9 1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              <path d="M3.5 2.5V5H6M12.5 13.5V11H10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>{{ t('stacks.menu.restack') }}</span>
+          </li>
+        </template>
 
         <template v-if="ctxMenu.clickedBranch && ctxMenu.clickedBranch !== props.currentBranch">
           <li class="commit-ctx-menu-sep" role="separator"></li>

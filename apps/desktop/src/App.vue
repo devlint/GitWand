@@ -62,6 +62,7 @@ const WorktreeRemoveDialog = defineAsyncComponent(() => import("./components/Wor
 const MergeBackDialog = defineAsyncComponent(() => import("./components/MergeBackDialog.vue"));
 // v3.14 — mounted only while a restack flow is open.
 const RestackDialog = defineAsyncComponent(() => import("./components/RestackDialog.vue"));
+const StackOnHost = defineAsyncComponent(() => import("./components/StackOnHost.vue"));
 const AiTaskNameModal = defineAsyncComponent(() => import("./components/AiTaskNameModal.vue"));
 const WorktreeHookTrustModal = defineAsyncComponent(() => import("./components/WorktreeHookTrustModal.vue"));
 const CommandLogPanel = defineAsyncComponent(() => import("./components/CommandLogPanel.vue"));
@@ -160,6 +161,7 @@ import { registerRemovalHost } from "./composables/useWorktreeRemoval";
 import { registerMergeBackHost } from "./composables/useWorktreeMergeBack";
 import { registerRestackHost, useStacks } from "./composables/useStacks";
 import { createRestackHost } from "./composables/useRestackHost";
+import { useStackActions } from "./composables/useStackActions";
 import type { HookTrustDecision } from "./composables/useWorktreeHookTrust";
 import { aiTaskName, describeBase } from "./utils/worktreeBase";
 import { useCommitActions } from "./composables/useCommitActions";
@@ -3018,6 +3020,8 @@ registerMergeBackHost({
 
 // ─── v3.14 — stacked branches: how a restack is applied and announced ────
 const stacks = useStacks();
+/** The Git Tree's branch menu stack items (the header selector calls it itself). */
+const stackActions = useStackActions();
 
 registerRestackHost(
   createRestackHost({
@@ -5193,6 +5197,9 @@ onUnmounted(() => {
                   @force-push-branch="doForcePush"
                   @pin-branch="handlePinBranch"
                   @unpin-branch="handleUnpinBranch"
+                  @stack-on="(name: string) => stackActions.requestStackOn(repoFolderPath ?? '', name)"
+                  @unstack="(name: string) => stackActions.unstack(repoFolderPath ?? '', name)"
+                  @restack="(name: string) => stackActions.restackFrom(repoFolderPath ?? '', name)"
                   @view-submodule="handleOpenSubmodule"
                   @apply-stash="applyStash"
                   @pop-stash="popStash"
@@ -5363,6 +5370,8 @@ onUnmounted(() => {
       @open-residual="handleOpenResidual" />
     <!-- v3.14 — restack preview / apply, lazy while a restack flow is open -->
     <RestackDialog v-if="stacks.flow.value.phase !== 'idle'" />
+    <!-- "Stack on…" from the Git Tree or the header branch selector (v3.14) -->
+    <StackOnHost v-if="stackActions.stackOnRequest.value" />
     <button v-if="mergeBackDialog?.minimized" class="merge-back-resume" type="button"
       @click="mergeBackDialog.minimized = false">{{ t("mergeBack.resumePill") }}</button>
     <WorktreeRemoveDialog v-if="removalDialog" :cwd="removalDialog.cwd" :repo-path="removalDialog.projectPath"
