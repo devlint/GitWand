@@ -120,6 +120,20 @@ pub struct GitDiff {
     pub nested_repo: Option<bool>,
 }
 
+// ─── Branch PR lookup ──────────────────────────────────────────────
+
+/// A branch's GitHub PR, as the stacked-branches feature needs it: the base it
+/// targets, the head commit (the parent's old tip once merged) and when it
+/// merged. Consumed by `gh_branch_pr`.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct BranchPr {
+    pub number: i64,
+    pub base: String,
+    pub head_ref_oid: String,
+    pub merged_at: Option<String>,
+    pub url: String,
+}
+
 // ─── Git log types ─────────────────────────────────────────────────
 
 #[derive(Serialize)]

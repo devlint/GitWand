@@ -995,6 +995,8 @@ pub fn run() {
             commands::gh::gh_delete_reaction,
             commands::gh::gh_pr_ready,
             commands::gh::gh_pr_edit,
+            commands::gh::gh_branch_pr,
+            commands::gh::gh_pr_set_base,
             commands::gh::gh_dismiss_review,
             commands::gh::gh_pr_review_threads,
             commands::gh::gh_pr_create_comment,
