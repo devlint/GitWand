@@ -122,7 +122,6 @@ export function createStacksFlow(c: StacksCore) {
     }
   }
 
-
   async function onFinalized(
     cwd: string,
     fin: FinalizedRestack,
