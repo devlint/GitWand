@@ -310,6 +310,12 @@ export interface AppSettings {
   branchUpdatePromptSkips: Record<string, string[]>;
 
   /**
+   * v3.14 stacked branches: branches whose "stack on its PR's base" offer was
+   * dismissed, keyed by normalised repo path (cwd). No Settings UI.
+   */
+  stackBridgeDismissals: Record<string, string[]>;
+
+  /**
    * Number of days without a commit after which a branch receives an "Inactif"
    * badge in the sidebar. 0 = disabled. Default: 30.
    */
@@ -559,6 +565,7 @@ export const defaultAppSettings: AppSettings = {
   archivedBranches:        {},
   pinnedBranchesByRepo:    {},
   branchUpdatePromptSkips: {},
+  stackBridgeDismissals:   {},
   inactiveBranchDays:     30,
   identities:             [],
   activeIdentityId:       null,
