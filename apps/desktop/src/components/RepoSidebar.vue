@@ -8,6 +8,7 @@ import ScopePicker from "./ScopePicker.vue";
 import TrackedIgnoredNotice from "./TrackedIgnoredNotice.vue";
 import StackBadge from "./StackBadge.vue";
 import { useStacks } from "../composables/useStacks";
+import { useStackActions } from "../composables/useStackActions";
 import { useI18n } from "../composables/useI18n";
 import Avatar from "./Avatar.vue";
 import { useCommitMessage } from "../composables/useCommitMessage";
@@ -1014,7 +1015,8 @@ function openBranchCtx(e: MouseEvent, b: GitBranch) {
 function closeBranchCtx() { branchCtx.value.visible = false; }
 
 // ─── Stacked branches (v3.14) ───────────────────────────
-const { report: stackReport, offers: stackOffers, layerOf, actionableFor, stackOnCandidates, unstack, acceptBridge, dismissBridge, startRestack } = useStacks();
+const { report: stackReport, offers: stackOffers, layerOf, actionableFor, stackOnCandidates, dismissBridge } = useStacks();
+const stackActions = useStackActions();
 const stackOnTarget = ref<string | null>(null);
 /** "Stack on…" is for a local branch that is not the trunk. */
 const ctxCanStack = computed(() =>
@@ -1027,16 +1029,12 @@ function onBranchCtxStackOn() {
 function onBranchCtxUnstack() {
   const name = branchCtx.value.branchName;
   closeBranchCtx();
-  void unstack(props.cwd, name);
+  void stackActions.unstack(props.cwd, name);
 }
 function onBranchCtxRestack() {
-  const layer = actionableFor(branchCtx.value.branchName);
+  const name = branchCtx.value.branchName;
   closeBranchCtx();
-  if (layer) void startRestack(props.cwd, layer.branch);
-}
-function restackBranch(name: string) {
-  const layer = actionableFor(name);
-  if (layer) void startRestack(props.cwd, layer.branch);
+  void stackActions.restackFrom(props.cwd, name);
 }
 
 function onBranchCtxPin() {
@@ -1932,8 +1930,8 @@ function formatActivityDate(dateStr: string): string {
               v-if="!b.isRemote && (layerOf(b.name) || stackOffers.get(b.name))"
               :layer="layerOf(b.name)"
               :offer="stackOffers.get(b.name) ?? null"
-              @restack="restackBranch(b.name)"
-              @accept-offer="acceptBridge(cwd, stackOffers.get(b.name)!)"
+              @restack="stackActions.restackFrom(cwd, b.name)"
+              @accept-offer="stackActions.accept(cwd, stackOffers.get(b.name)!)"
               @dismiss-offer="dismissBridge(cwd, b.name)"
             />
             <span class="branch-indicator" v-if="b.ahead > 0 || b.behind > 0">
@@ -1982,8 +1980,8 @@ function formatActivityDate(dateStr: string): string {
               v-if="!b.isRemote && (layerOf(b.name) || stackOffers.get(b.name))"
               :layer="layerOf(b.name)"
               :offer="stackOffers.get(b.name) ?? null"
-              @restack="restackBranch(b.name)"
-              @accept-offer="acceptBridge(cwd, stackOffers.get(b.name)!)"
+              @restack="stackActions.restackFrom(cwd, b.name)"
+              @accept-offer="stackActions.accept(cwd, stackOffers.get(b.name)!)"
               @dismiss-offer="dismissBridge(cwd, b.name)"
             />
             <button

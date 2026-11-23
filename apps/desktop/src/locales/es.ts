@@ -598,8 +598,8 @@ const es: Locale = {
   stacks: {
     state: {
       out_of_date: "desactualizada",
-      parent_merged: "padre fusionada",
-      parent_missing: "padre no encontrada",
+      parent_merged: "rama padre fusionada",
+      parent_missing: "rama padre no encontrada",
       base_lost: "base desconocida",
     },
     badge: {
@@ -621,7 +621,8 @@ const es: Locale = {
       parent: "Rama padre",
       confirm: "Apilar",
       hint: "GitWand propondrá reapilar {0} cuando su rama padre cambie o se fusione.",
-      forgeHint: "Los squash merges de más de un commit solo se detectan en GitHub. En {0}, usa Desapilar cuando la rama padre esté fusionada.",
+      forgeHint: "Los squash merges de más de un commit solo se detectan en GitHub. En otras forjas, usa Desapilar cuando la rama padre esté fusionada.",
+      noCandidates: "Ninguna rama puede ser padre aquí: las pilas son lineales y el tronco no es una rama padre.",
     },
     preview: {
       moving: "Ramas que se moverán",

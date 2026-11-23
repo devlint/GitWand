@@ -598,9 +598,9 @@ const ptBR: Locale = {
 
   stacks: {
     state: {
-      out_of_date: "desatualizada",
-      parent_merged: "pai mesclada",
-      parent_missing: "pai não encontrada",
+      out_of_date: "desatualizado",
+      parent_merged: "pai mesclado",
+      parent_missing: "pai não encontrado",
       base_lost: "base desconhecida",
     },
     badge: {
@@ -622,7 +622,8 @@ const ptBR: Locale = {
       parent: "Branch pai",
       confirm: "Empilhar",
       hint: "O GitWand vai propor reempilhar {0} quando o branch pai mudar ou for mesclado.",
-      forgeHint: "Squash merges de mais de um commit só são detectados no GitHub. Em {0}, use Desempilhar depois que o branch pai for mesclado.",
+      forgeHint: "Squash merges de mais de um commit só são detectados no GitHub. Em outras forjas, use Desempilhar depois que o branch pai for mesclado.",
+      noCandidates: "Nenhum branch pode ser pai aqui: as pilhas são lineares e o tronco não é um branch pai.",
     },
     preview: {
       moving: "Branches que vão se mover",

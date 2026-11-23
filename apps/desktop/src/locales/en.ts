@@ -633,7 +633,8 @@ const en = {
       parent: "Parent branch",
       confirm: "Stack",
       hint: "GitWand will offer to restack {0} when its parent changes or is merged.",
-      forgeHint: "Squash merges of more than one commit are detected on GitHub only. On {0}, use Unstack once the parent is merged.",
+      forgeHint: "Squash merges of more than one commit are detected on GitHub only. On other forges, use Unstack once the parent is merged.",
+      noCandidates: "No branch can be a parent here: stacks are linear and the trunk is not a parent.",
     },
     preview: {
       moving: "Branches that will move",

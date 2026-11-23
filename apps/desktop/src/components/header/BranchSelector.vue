@@ -50,16 +50,14 @@ import BaseModal from "../BaseModal.vue";
 import BranchRowActions from "./BranchRowActions.vue";
 import StackBadge from "../StackBadge.vue";
 import { useStacks } from "../../composables/useStacks";
+import { useStackActions } from "../../composables/useStackActions";
 // Lazy too — only mounted inside the v-if'd create-branch modal.
 const BranchNameField = defineAsyncComponent(() => import("../BranchNameField.vue"));
 
 const { t } = useI18n();
 
-const { offers: stackOffers, layerOf, actionableFor, acceptBridge, dismissBridge, startRestack } = useStacks();
-function restackBranch(name: string) {
-  const layer = actionableFor(name);
-  if (layer) void startRestack(props.cwd, layer.branch);
-}
+const { offers: stackOffers, layerOf, dismissBridge } = useStacks();
+const stackActions = useStackActions();
 
 const props = defineProps<{
   branchDisplay: string;
@@ -786,8 +784,8 @@ onUnmounted(() => {
                 v-if="layerOf(branch.name) || stackOffers.get(branch.name)"
                 :layer="layerOf(branch.name)"
                 :offer="stackOffers.get(branch.name) ?? null"
-                @restack="restackBranch(branch.name)"
-                @accept-offer="acceptBridge(cwd, stackOffers.get(branch.name)!)"
+                @restack="stackActions.restackFrom(cwd, branch.name)"
+                @accept-offer="stackActions.accept(cwd, stackOffers.get(branch.name)!)"
                 @dismiss-offer="dismissBridge(cwd, branch.name)"
               />
               <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
@@ -847,8 +845,8 @@ onUnmounted(() => {
                   v-if="layerOf(branch.name) || stackOffers.get(branch.name)"
                   :layer="layerOf(branch.name)"
                   :offer="stackOffers.get(branch.name) ?? null"
-                  @restack="restackBranch(branch.name)"
-                  @accept-offer="acceptBridge(cwd, stackOffers.get(branch.name)!)"
+                  @restack="stackActions.restackFrom(cwd, branch.name)"
+                  @accept-offer="stackActions.accept(cwd, stackOffers.get(branch.name)!)"
                   @dismiss-offer="dismissBridge(cwd, branch.name)"
                 />
                 <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">

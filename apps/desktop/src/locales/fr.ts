@@ -626,7 +626,8 @@ const fr: Locale = {
       parent: "Branche parente",
       confirm: "Empiler",
       hint: "GitWand proposera de restacker {0} quand sa parente change ou est fusionnée.",
-      forgeHint: "Les squash merges de plusieurs commits ne sont détectés que sur GitHub. Sur {0}, utilisez Désempiler une fois la parente fusionnée.",
+      forgeHint: "Les squash merges de plusieurs commits ne sont détectés que sur GitHub. Sur les autres forges, utilisez Désempiler une fois la parente fusionnée.",
+      noCandidates: "Aucune branche ne peut servir de parente ici : les piles sont linéaires et le tronc n'est pas une parente.",
     },
     preview: {
       moving: "Branches qui vont bouger",

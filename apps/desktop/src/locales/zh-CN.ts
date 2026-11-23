@@ -621,7 +621,8 @@ const zhCN: Locale = {
       parent: "父分支",
       confirm: "堆叠",
       hint: "当父分支变更或被合并时，GitWand 会建议重新堆叠 {0}。",
-      forgeHint: "仅在 GitHub 上能检测包含多个提交的 squash 合并。在 {0} 上，父分支合并后请使用“取消堆叠”。",
+      forgeHint: "仅在 GitHub 上能检测包含多个提交的 squash 合并。在其他代码托管平台上，父分支合并后请使用“取消堆叠”。",
+      noCandidates: "这里没有可作为父分支的分支：堆栈是线性的，主干不能作为父分支。",
     },
     preview: {
       moving: "将被移动的分支",
