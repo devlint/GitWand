@@ -4,16 +4,19 @@
 
 use super::detect::{behind_upstream, is_ancestor, is_sha, propagate, resolve_commit, status};
 use super::guard::{branch_holders, supports_update_refs, Holder};
-use super::meta::{read_all, validate_branch_name};
+use super::meta::{
+    clear_pending, read_all, set_base, set_pending, unset, validate_branch_name, write_parent,
+};
 use super::{
-    LayerState, LayerStatus, MergedParentHint, Moment, MovingRef, RestackPlan, RestackRefusal,
+    FinalizedRestack, LayerState, LayerStatus, MergedParentHint, Moment, MovingRef, PendingRestack,
+    PreviewedRestack, RestackPlan, RestackRefusal, RestackRun, StackMeta,
 };
 use crate::git::git_cmd;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Output;
 
-fn run(repo: &Path, args: &[&str]) -> Result<Output, String> {
+fn exec(repo: &Path, args: &[&str]) -> Result<Output, String> {
     git_cmd()
         .args(args)
         .current_dir(repo)
@@ -22,7 +25,7 @@ fn run(repo: &Path, args: &[&str]) -> Result<Output, String> {
 }
 
 fn run_ok(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let out = run(repo, args)?;
+    let out = exec(repo, args)?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
@@ -51,8 +54,6 @@ struct Target {
 /// branch that is not a restackable layer, or when the repo cannot be read;
 /// every refusable condition is reported in `refusal`, first one wins, in the
 /// order of the refusal-code list.
-// Consumed by Task 5 (run) and Task 6 (Tauri commands) of the stacked-branches plan.
-#[allow(dead_code)]
 pub(crate) fn plan(
     repo: &Path,
     configured_trunk: Option<&str>,
@@ -130,8 +131,7 @@ pub(crate) fn plan(
         // Layers from the bottom up still sitting at `upstream` (no commit of
         // their own) are outside `upstream..top`, and `--update-refs` does
         // not move them. List them so the preview shows them and the
-        // occupied guard covers them.
-        // Task 5 finalize moves refs sitting at upstream.
+        // occupied guard covers them; `finalize` moves them.
         for b in &run {
             if resolve_commit(repo, &format!("refs/heads/{b}"))?.as_deref() == Some(up) {
                 moving.push(moving_ref(repo, b, true)?);
@@ -169,7 +169,7 @@ pub(crate) fn plan(
 
 /// Moment 1: replay `base..top` onto the parent's new tip. The parent does
 /// not change, so `new_parent` is `None`: `new_parent` is meaningful for
-/// moment 2 only (Task 5's finalize ignores it for moment 1). An up-to-date layer gets the same
+/// moment 2 only (`finalize` ignores it for moment 1). An up-to-date layer gets the same
 /// shape (with nothing to replay) and is refused `up_to_date`.
 fn parent_moved(l: &LayerStatus) -> Result<Target, String> {
     let tip = l
@@ -251,7 +251,7 @@ fn commit_exists(repo: &Path, sha: &str) -> Result<bool, String> {
     if !is_sha(sha) {
         return Ok(false);
     }
-    let out = run(repo, &["cat-file", "-e", &format!("{sha}^{{commit}}")])?;
+    let out = exec(repo, &["cat-file", "-e", &format!("{sha}^{{commit}}")])?;
     Ok(out.status.success())
 }
 
@@ -320,7 +320,7 @@ fn first_refusal(c: Checks) -> Result<Option<RestackRefusal>, String> {
         ));
     }
     // D16: `symbolic-ref -q` exits 1 on a detached HEAD.
-    let head = run(c.repo, &["symbolic-ref", "-q", "HEAD"])?;
+    let head = exec(c.repo, &["symbolic-ref", "-q", "HEAD"])?;
     match head.status.code() {
         Some(0) => {}
         Some(1) => {
@@ -495,11 +495,264 @@ fn check_layers_moving(run: &[String], moving: &[MovingRef]) -> Result<(), Strin
     }
 }
 
+const STALE_PREVIEW: &str = "stale preview: the stack changed since the preview. Preview again.";
+
+/// The current branch, `None` on a detached HEAD. Read in full and stripped,
+/// since `--short` turns an ambiguous name into `heads/<b>`.
+fn current_branch(repo: &Path) -> Result<Option<String>, String> {
+    let out = exec(repo, &["symbolic-ref", "-q", "HEAD"])?;
+    match out.status.code() {
+        Some(0) => {
+            let full = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            match full.strip_prefix("refs/heads/") {
+                Some(b) if !b.is_empty() => Ok(Some(b.to_string())),
+                _ => Err(format!("unexpected HEAD: {full}")),
+            }
+        }
+        Some(1) => Ok(None),
+        _ => Err(format!(
+            "git symbolic-ref HEAD: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )),
+    }
+}
+
+/// Runs the restack the user previewed (spec §5.4, D5). Re-plans first and
+/// refuses exactly as `plan` would, or when the stack changed since the
+/// preview. Writes the pending record only once every check has passed, then
+/// runs one `git rebase --update-refs`. Never finalizes: `status` does, on the
+/// next refresh, whether the rebase ended at once or after a halt.
+// Consumed by Task 6 (Tauri commands) of the stacked-branches plan.
+#[allow(dead_code)]
+pub(crate) fn run(
+    repo: &Path,
+    configured_trunk: Option<&str>,
+    layer: &str,
+    hints: &[MergedParentHint],
+    previewed: &PreviewedRestack,
+    git_version: Option<(u32, u32)>,
+) -> Result<RestackRun, String> {
+    let p = plan(repo, configured_trunk, layer, hints, git_version)?;
+    if let Some(r) = p.refusal {
+        return Err(r.message);
+    }
+    let moving: Vec<&str> = p.moving.iter().map(|m| m.branch.as_str()).collect();
+    if p.onto_sha != previewed.onto_sha
+        || p.upstream_sha != previewed.upstream_sha
+        || p.top_sha != previewed.top_sha
+        || moving != previewed.moving
+    {
+        return Err(STALE_PREVIEW.into());
+    }
+    validate_branch_name(&p.top)?;
+    if !is_sha(&p.onto_sha) || !is_sha(&p.upstream_sha) {
+        return Err(format!(
+            "internal error: restack of {layer} has no commit to rebase onto"
+        ));
+    }
+    let original = current_branch(repo)?
+        .ok_or_else(|| "HEAD is detached. Check out a branch first.".to_string())?;
+    let record = PendingRestack {
+        moment: p.moment,
+        onto: p.onto_sha.clone(),
+        old_base: p.upstream_sha.clone(),
+        bottom: p.bottom.clone(),
+        new_parent: match p.moment {
+            Moment::ParentMoved => None,
+            Moment::ParentMerged => p.new_parent.clone(),
+        },
+        original,
+    };
+    set_pending(repo, &p.top, &record)?;
+
+    let output = git_cmd()
+        .args([
+            "rebase",
+            "--update-refs",
+            "--onto",
+            &p.onto_sha,
+            &p.upstream_sha,
+            &p.top,
+        ])
+        .env("GIT_EDITOR", "true")
+        .env("EDITOR", "true")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        // The conflict check below matches git's own words.
+        .env("LC_ALL", "C")
+        .env("LANGUAGE", "")
+        .current_dir(repo)
+        .output();
+    let output = match output {
+        Ok(o) => o,
+        Err(e) => return Err(rebase_failed(repo, &p.top, e.to_string())),
+    };
+    if output.status.success() {
+        return Ok(RestackRun { conflict: false });
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if [&stderr, &stdout]
+        .iter()
+        .any(|s| s.contains("CONFLICT") || s.contains("could not apply"))
+    {
+        return Ok(RestackRun { conflict: true });
+    }
+    let msg = if stderr.is_empty() { stdout } else { stderr };
+    Err(rebase_failed(repo, &p.top, msg))
+}
+
+/// A rebase that failed without halting on a conflict: the record goes,
+/// unless a rebase is now in progress here (or that cannot be told), in
+/// which case `status` decides once it ends.
+fn rebase_failed(repo: &Path, top: &str, msg: String) -> String {
+    let msg = format!("git rebase failed: {msg}");
+    if !matches!(rebasing_here(repo), Ok(false)) {
+        return msg;
+    }
+    match clear_pending(repo, top) {
+        Ok(()) => msg,
+        Err(e) => format!("{msg} (the restack record could not be cleared: {e})"),
+    }
+}
+
+/// The layers `bottom` to `top`, following each layer's child. Err when
+/// `top` is no longer stacked above `bottom`.
+fn restacked_layers(
+    all: &BTreeMap<String, StackMeta>,
+    bottom: &str,
+    top: &str,
+) -> Result<Vec<String>, String> {
+    let mut out = vec![bottom.to_string()];
+    while out[out.len() - 1] != top {
+        let cur = &out[out.len() - 1];
+        let next = all.values().find(|m| &m.parent == cur);
+        match next {
+            Some(m) if out.len() <= all.len() => out.push(m.branch.clone()),
+            _ => {
+                return Err(format!(
+                    "cannot finalize the restack: {top} is no longer stacked above {bottom}"
+                ))
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Completes a restack whose rebase has ended (D5): moves the layers the
+/// rebase could not (empty ones), records the new bases, re-parents a moment-2
+/// bottom, clears the record and switches back to the branch the user was on.
+pub(crate) fn finalize(
+    repo: &Path,
+    top: &str,
+    p: &PendingRestack,
+) -> Result<FinalizedRestack, String> {
+    validate_branch_name(top)?;
+    validate_branch_name(&p.bottom)?;
+    let all = read_all(repo)?;
+    let layers = restacked_layers(&all, &p.bottom, top)?;
+
+    // 1. `--update-refs` does not move a ref sitting exactly at the rebase's
+    //    upstream (an empty layer): move it onto `onto`, compare-and-swap.
+    //    On a failure, that layer and those above keep their metadata.
+    let mut error = None;
+    let mut settled = layers.len();
+    for (i, b) in layers.iter().enumerate() {
+        let r = format!("refs/heads/{b}");
+        if resolve_commit(repo, &r)?.as_deref() != Some(p.old_base.as_str()) {
+            continue;
+        }
+        let out = exec(repo, &["update-ref", &r, &p.onto, &p.old_base])?;
+        if !out.status.success() {
+            error = Some(format!(
+                "could not move {b} onto the restacked stack: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+            settled = i;
+            break;
+        }
+    }
+
+    // 2. Metadata: each layer above the bottom sits on its parent's new tip.
+    let kept = &layers[..settled];
+    for b in kept.iter().skip(1) {
+        let parent = &all
+            .get(b)
+            .ok_or_else(|| format!("not a stacked branch: {b}"))?
+            .parent;
+        let tip = resolve_commit(repo, &format!("refs/heads/{parent}"))?
+            .ok_or_else(|| format!("unknown branch: {parent}"))?;
+        set_base(repo, b, &tip)?;
+    }
+    let mut merged_parent = None;
+    let mut new_parent = None;
+    if !kept.is_empty() {
+        // The bottom sits on `onto`, what the rebase replayed it onto.
+        match p.moment {
+            Moment::ParentMoved => set_base(repo, &p.bottom, &p.onto)?,
+            Moment::ParentMerged => {
+                merged_parent = all.get(&p.bottom).map(|m| m.parent.clone());
+                match &p.new_parent {
+                    Some(np) => {
+                        write_parent(repo, &p.bottom, np)?;
+                        set_base(repo, &p.bottom, &p.onto)?;
+                        new_parent = Some(np.clone());
+                    }
+                    None => unset(repo, &p.bottom)?,
+                }
+            }
+        }
+    }
+    clear_pending(repo, top)?;
+
+    let mut moved = Vec::new();
+    for b in &layers {
+        if is_ancestor(repo, &p.onto, &format!("refs/heads/{b}"))? {
+            moved.push(b.clone());
+        }
+    }
+
+    // 3. Back to the branch the user was on when the restack started.
+    let mut switched_back_to = None;
+    if current_branch(repo)?.as_deref() == Some(top)
+        && p.original != top
+        && validate_branch_name(&p.original).is_ok()
+        && resolve_commit(repo, &format!("refs/heads/{}", p.original))?.is_some()
+    {
+        let out = exec(repo, &["switch", "--no-guess", &p.original])?;
+        if out.status.success() {
+            switched_back_to = Some(p.original.clone());
+        } else {
+            let e = format!(
+                "could not switch back to {}: {}",
+                p.original,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+            error = Some(match error {
+                Some(prev) => format!("{prev}; {e}"),
+                None => e,
+            });
+        }
+    }
+
+    Ok(FinalizedRestack {
+        moment: p.moment,
+        bottom: p.bottom.clone(),
+        merged_parent,
+        new_parent,
+        moved,
+        switched_back_to,
+        switch_error: error,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::stack::meta::set_parent;
-    use crate::stack::{LayerState, MergedParentHint, Moment, RestackPlan};
+    use crate::stack::{
+        LayerState, MergedParentHint, Moment, PendingRestack, PreviewedRestack, RestackPlan,
+        RestackRun,
+    };
     use crate::worktree::test_support::{git_at, TempRepo};
 
     const V: Option<(u32, u32)> = Some((2, 54));
@@ -1032,5 +1285,405 @@ mod tests {
         let h = [hint("step-2", None)];
         let e = plan(&r.path, Some("main"), "step-2", &h, V).unwrap_err();
         assert_eq!(e, "restack step-1 first");
+    }
+
+    // ── Task 5: run, pending record, finalize ─────────────────────────
+
+    fn previewed(p: &RestackPlan) -> PreviewedRestack {
+        PreviewedRestack {
+            onto_sha: p.onto_sha.clone(),
+            upstream_sha: p.upstream_sha.clone(),
+            top_sha: p.top_sha.clone(),
+            moving: p.moving.iter().map(|m| m.branch.clone()).collect(),
+        }
+    }
+
+    fn restack(r: &TempRepo, layer: &str, h: &[MergedParentHint]) -> RestackRun {
+        let p = plan(&r.path, Some("main"), layer, h, V).unwrap();
+        run(&r.path, Some("main"), layer, h, &previewed(&p), V).unwrap()
+    }
+
+    fn cfg_opt(r: &TempRepo, k: &str) -> Option<String> {
+        let out = crate::git::git_cmd()
+            .args(["config", "--get", k])
+            .current_dir(&r.path)
+            .output()
+            .unwrap();
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    fn cfg(r: &TempRepo, k: &str) -> String {
+        cfg_opt(r, k).unwrap_or_else(|| panic!("{k} is not set"))
+    }
+
+    /// `a` is an ancestor of `b` (both branch names).
+    fn ancestor(r: &TempRepo, a: &str, b: &str) -> bool {
+        crate::git::git_cmd()
+            .args(["merge-base", "--is-ancestor", a, b])
+            .current_dir(&r.path)
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    /// `git <args>` in the repo with a non-interactive editor (rebase --continue).
+    fn git_no_editor(r: &TempRepo, args: &[&str]) {
+        let out = crate::git::git_cmd()
+            .args(args)
+            .env("GIT_EDITOR", "true")
+            .current_dir(&r.path)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Every local branch tip and every stack key, for before/after checks.
+    fn snapshot(r: &TempRepo) -> (String, String) {
+        let refs = r.git(&[
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/heads/",
+        ]);
+        let out = crate::git::git_cmd()
+            .args(["config", "--local", "--get-regexp", r"^branch\..*\.gitwand"])
+            .current_dir(&r.path)
+            .output()
+            .unwrap();
+        (
+            refs,
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        )
+    }
+
+    #[test]
+    fn moment_one_three_layers_end_to_end() {
+        let r = TempRepo::new();
+        stack3(&r);
+        r.git(&["checkout", "-q", "step-1"]);
+        r.commit("a2.txt", "more\n", "s1 more");
+        assert!(!restack(&r, "step-2", &[]).conflict);
+        // D5: a clean run does not finalize; the record stays until status.
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_some());
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        let f = s.finalized.clone().unwrap();
+        assert_eq!(f.moment, Moment::ParentMoved);
+        assert_eq!(f.bottom, "step-2");
+        assert_eq!(f.moved, ["step-2", "step-3"]);
+        assert_eq!(f.switched_back_to.as_deref(), Some("step-1"));
+        assert_eq!(f.switch_error, None);
+        assert!(ancestor(&r, "step-1", "step-2") && ancestor(&r, "step-2", "step-3"));
+        assert_eq!(
+            cfg(&r, "branch.step-2.gitwandStackBase"),
+            r.git(&["rev-parse", "step-1"])
+        );
+        assert_eq!(
+            cfg(&r, "branch.step-3.gitwandStackBase"),
+            r.git(&["rev-parse", "step-2"])
+        );
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+        assert_eq!(r.git(&["branch", "--show-current"]), "step-1");
+        assert!(s.layers.iter().all(|l| l.state == LayerState::UpToDate));
+        // Finalized once: the next refresh reports nothing.
+        assert!(status(&r.path, Some("main"), &[])
+            .unwrap()
+            .finalized
+            .is_none());
+    }
+
+    /// main <- step-1 (two commits) <- step-2 <- step-3, then step-1
+    /// squash-merged on origin/main with local main left behind.
+    fn two_commit_parent_squashed(r: &TempRepo) {
+        r.git(&["checkout", "-q", "-b", "step-1"]);
+        r.commit("a.txt", "1\n", "s1");
+        r.commit("a2.txt", "1b\n", "s1 second");
+        r.git(&["checkout", "-q", "-b", "step-2"]);
+        r.commit("b.txt", "2\n", "s2");
+        r.git(&["checkout", "-q", "-b", "step-3"]);
+        r.commit("c.txt", "3\n", "s3");
+        set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        set_parent(&r.path, Some("main"), "step-3", "step-2").unwrap();
+        squash_step1_on_origin(r);
+    }
+
+    #[test]
+    fn moment_two_lands_the_squash_while_local_main_stays_behind() {
+        let r = TempRepo::new();
+        two_commit_parent_squashed(&r);
+        let h = [hint("step-1", None)];
+        let main_before = r.git(&["rev-parse", "main"]);
+        assert!(!restack(&r, "step-2", &h).conflict);
+        let f = status(&r.path, Some("main"), &h)
+            .unwrap()
+            .finalized
+            .unwrap();
+        assert_eq!(f.moment, Moment::ParentMerged);
+        assert_eq!(f.merged_parent.as_deref(), Some("step-1"));
+        assert_eq!(f.new_parent, None);
+        assert_eq!(f.switched_back_to, None, "step-3 was checked out");
+        assert_eq!(r.git(&["rev-parse", "main"]), main_before);
+        assert!(ancestor(&r, "origin/main", "step-2"));
+        assert_eq!(r.git(&["rev-list", "--count", "origin/main..step-2"]), "1");
+        assert!(cfg_opt(&r, "branch.step-2.gitwandParent").is_none());
+        assert!(cfg_opt(&r, "branch.step-2.gitwandStackBase").is_none());
+        assert_eq!(cfg(&r, "branch.step-3.gitwandParent"), "step-2");
+        assert_eq!(
+            cfg(&r, "branch.step-3.gitwandStackBase"),
+            r.git(&["rev-parse", "step-2"])
+        );
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+    }
+
+    #[test]
+    fn moment_two_under_a_stacked_grandparent_reparents_the_bottom() {
+        let r = TempRepo::new();
+        stack3(&r);
+        // step-2's PR (based on step-1) is reported merged.
+        let h = [hint("step-2", None)];
+        assert!(!restack(&r, "step-3", &h).conflict);
+        let f = status(&r.path, Some("main"), &h)
+            .unwrap()
+            .finalized
+            .unwrap();
+        assert_eq!(f.merged_parent.as_deref(), Some("step-2"));
+        assert_eq!(f.new_parent.as_deref(), Some("step-1"));
+        assert_eq!(f.moved, ["step-3"]);
+        assert_eq!(cfg(&r, "branch.step-3.gitwandParent"), "step-1");
+        assert_eq!(
+            cfg(&r, "branch.step-3.gitwandStackBase"),
+            r.git(&["rev-parse", "step-1"])
+        );
+        assert_eq!(
+            r.git(&["rev-list", "--count", "step-1..step-3"]),
+            "1",
+            "only step-3's own commit is left above step-1"
+        );
+    }
+
+    /// stack3 where step-1 then gets a commit adding b.txt, which step-2
+    /// also adds: restacking step-2 halts on a conflict. Left on step-1.
+    fn conflicting_moment_one(r: &TempRepo) {
+        stack3(r);
+        r.git(&["checkout", "-q", "step-1"]);
+        r.commit("b.txt", "theirs\n", "s1 conflicting");
+    }
+
+    fn resolve_and_continue(r: &TempRepo) {
+        r.write("b.txt", "resolved\n");
+        r.git(&["add", "b.txt"]);
+        git_no_editor(r, &["rebase", "--continue"]);
+    }
+
+    #[test]
+    fn conflict_halt_then_continue_finalizes_moment_one() {
+        let r = TempRepo::new();
+        conflicting_moment_one(&r);
+        assert!(restack(&r, "step-2", &[]).conflict);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert!(s.finalized.is_none());
+        assert!(s.rebase_in_progress);
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_some());
+        resolve_and_continue(&r);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        let f = s.finalized.unwrap();
+        assert_eq!(f.moved, ["step-2", "step-3"]);
+        assert_eq!(f.switched_back_to.as_deref(), Some("step-1"));
+        assert_eq!(r.git(&["branch", "--show-current"]), "step-1");
+        assert!(ancestor(&r, "step-1", "step-2") && ancestor(&r, "step-2", "step-3"));
+        assert_eq!(
+            cfg(&r, "branch.step-2.gitwandStackBase"),
+            r.git(&["rev-parse", "step-1"])
+        );
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+        assert!(s.layers.iter().all(|l| l.state == LayerState::UpToDate));
+    }
+
+    #[test]
+    fn conflict_halt_then_continue_finalizes_moment_two() {
+        let r = TempRepo::new();
+        stack3(&r);
+        squash_step1_on_origin(&r);
+        // origin/main also gains a b.txt, which step-2 adds too.
+        r.git(&["checkout", "-q", "-b", "tmp", "origin/main"]);
+        r.commit("b.txt", "main\n", "main b");
+        r.git(&["push", "-q", "origin", "tmp:main"]);
+        r.git(&["fetch", "-q", "origin"]);
+        r.git(&["checkout", "-q", "step-1"]);
+        r.git(&["branch", "-q", "-D", "tmp"]);
+        assert!(restack(&r, "step-2", &[]).conflict);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert!(s.rebase_in_progress && s.finalized.is_none());
+        resolve_and_continue(&r);
+        let f = status(&r.path, Some("main"), &[])
+            .unwrap()
+            .finalized
+            .unwrap();
+        assert_eq!(f.moment, Moment::ParentMerged);
+        assert_eq!(f.merged_parent.as_deref(), Some("step-1"));
+        assert_eq!(f.switched_back_to.as_deref(), Some("step-1"));
+        assert!(ancestor(&r, "origin/main", "step-2"));
+        assert!(cfg_opt(&r, "branch.step-2.gitwandParent").is_none());
+        assert_eq!(cfg(&r, "branch.step-3.gitwandParent"), "step-2");
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+    }
+
+    #[test]
+    fn abort_clears_the_record_and_changes_nothing() {
+        let r = TempRepo::new();
+        conflicting_moment_one(&r);
+        r.git(&["checkout", "-q", "step-3"]);
+        let before = snapshot(&r);
+        assert!(restack(&r, "step-2", &[]).conflict);
+        r.git(&["rebase", "--abort"]);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert!(s.finalized.is_none());
+        assert!(!s.rebase_in_progress);
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+        assert_eq!(snapshot(&r), before);
+    }
+
+    #[test]
+    fn status_waits_while_top_is_rebasing_in_another_worktree() {
+        let r = TempRepo::new();
+        conflicting_moment_one(&r);
+        let p = plan(&r.path, Some("main"), "step-2", &[], V).unwrap();
+        let record = PendingRestack {
+            moment: Moment::ParentMoved,
+            onto: p.onto_sha.clone(),
+            old_base: p.upstream_sha.clone(),
+            bottom: "step-2".into(),
+            new_parent: None,
+            original: "step-1".into(),
+        };
+        crate::stack::meta::set_pending(&r.path, "step-3", &record).unwrap();
+        let wt = r.sandbox.join("wt");
+        r.git(&["worktree", "add", "-q", wt.to_str().unwrap(), "step-3"]);
+        let out = crate::git::git_cmd()
+            .args([
+                "rebase",
+                "--update-refs",
+                "--onto",
+                &p.onto_sha,
+                &p.upstream_sha,
+                "step-3",
+            ])
+            .env("GIT_EDITOR", "true")
+            .current_dir(&wt)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "rebase should halt on a conflict");
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert!(s.rebase_in_progress && s.finalized.is_none());
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_some());
+    }
+
+    #[test]
+    fn stale_preview_is_refused() {
+        let r = TempRepo::new();
+        moved_stack(&r);
+        let p = plan(&r.path, Some("main"), "step-2", &[], V).unwrap();
+        r.commit("c2.txt", "late\n", "s3 late");
+        let e = run(&r.path, Some("main"), "step-2", &[], &previewed(&p), V).unwrap_err();
+        assert_eq!(
+            e,
+            "stale preview: the stack changed since the preview. Preview again."
+        );
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+    }
+
+    #[test]
+    fn run_refuses_a_dirty_tree() {
+        let r = TempRepo::new();
+        moved_stack(&r);
+        let p = plan(&r.path, Some("main"), "step-2", &[], V).unwrap();
+        r.write("c.txt", "edited\n");
+        let e = run(&r.path, Some("main"), "step-2", &[], &previewed(&p), V).unwrap_err();
+        assert_eq!(
+            e,
+            "You have uncommitted changes to tracked files. Commit or stash them first."
+        );
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+    }
+
+    #[test]
+    fn run_errs_like_plan_and_writes_no_record() {
+        let r = TempRepo::new();
+        moved_stack(&r);
+        let before = snapshot(&r);
+        let pv = PreviewedRestack {
+            onto_sha: String::new(),
+            upstream_sha: String::new(),
+            top_sha: String::new(),
+            moving: Vec::new(),
+        };
+        let e = run(&r.path, Some("main"), "step-3", &[], &pv, V).unwrap_err();
+        assert_eq!(e, "restack step-2 first");
+        assert!(run(&r.path, Some("main"), "nope", &[], &pv, V).is_err());
+        // An old git: the refusal message, not a rebase.
+        let e = run(&r.path, Some("main"), "step-2", &[], &pv, Some((2, 37))).unwrap_err();
+        assert_eq!(e, "Restacking needs git 2.38 or later (found 2.37).");
+        assert_eq!(snapshot(&r), before);
+    }
+
+    #[test]
+    fn malformed_record_is_cleared() {
+        let r = TempRepo::new();
+        stack3(&r);
+        r.git(&["config", "branch.step-3.gitwandRestack", "garbage"]);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert!(s.finalized.is_none());
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+    }
+
+    #[test]
+    fn a_record_whose_rebase_never_ran_is_cleared() {
+        // The app stopped between writing the record and running the rebase.
+        let r = TempRepo::new();
+        moved_stack(&r);
+        let before = snapshot(&r);
+        let p = plan(&r.path, Some("main"), "step-2", &[], V).unwrap();
+        let record = PendingRestack {
+            moment: Moment::ParentMoved,
+            onto: p.onto_sha.clone(),
+            old_base: p.upstream_sha.clone(),
+            bottom: "step-2".into(),
+            new_parent: None,
+            original: "step-3".into(),
+        };
+        crate::stack::meta::set_pending(&r.path, "step-3", &record).unwrap();
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert!(s.finalized.is_none());
+        assert_eq!(snapshot(&r), before);
+    }
+
+    #[test]
+    fn an_empty_bottom_layer_follows_its_moved_parent() {
+        let r = TempRepo::new();
+        // step-2 has no commit of its own: its tip is step-1's tip.
+        r.git(&["checkout", "-q", "-b", "step-1"]);
+        r.commit("a.txt", "1\n", "s1");
+        r.git(&["checkout", "-q", "-b", "step-2"]);
+        r.git(&["checkout", "-q", "-b", "step-3"]);
+        r.commit("c.txt", "3\n", "s3");
+        set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        set_parent(&r.path, Some("main"), "step-3", "step-2").unwrap();
+        r.git(&["checkout", "-q", "step-1"]);
+        r.commit("a2.txt", "more\n", "s1 more");
+        assert!(!restack(&r, "step-2", &[]).conflict);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        let f = s.finalized.clone().unwrap();
+        assert_eq!(f.switch_error, None);
+        assert_eq!(f.moved, ["step-2", "step-3"]);
+        let tip = r.git(&["rev-parse", "step-1"]);
+        assert_eq!(r.git(&["rev-parse", "step-2"]), tip);
+        assert_eq!(cfg(&r, "branch.step-2.gitwandStackBase"), tip);
+        assert_eq!(cfg(&r, "branch.step-3.gitwandStackBase"), tip);
+        assert!(ancestor(&r, "step-2", "step-3"));
+        assert!(s.layers.iter().all(|l| l.state == LayerState::UpToDate));
     }
 }

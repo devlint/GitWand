@@ -3,8 +3,14 @@
 //! that a manual rebase left behind.
 
 use super::guard::{branch_holders, git_version, supports_update_refs};
-use super::meta::{read_all, set_base, trunk, validate_branch_name};
-use super::{LayerState, LayerStatus, MergeSignal, MergedParentHint, StackMeta, StackReport};
+use super::meta::{
+    clear_malformed_pending, clear_pending, read_all, set_base, trunk, validate_branch_name,
+};
+use super::restack::finalize;
+use super::{
+    FinalizedRestack, LayerState, LayerStatus, MergeSignal, MergedParentHint, StackMeta,
+    StackReport,
+};
 use crate::git::git_cmd;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -61,12 +67,14 @@ pub(crate) fn status(
     configured_trunk: Option<&str>,
     hints: &[MergedParentHint],
 ) -> Result<StackReport, String> {
+    let (waiting, finalized) = settle_pending(repo)?;
     let all = read_all(repo)?;
     // Fail closed: a worktree we cannot inspect may hide a running rebase.
     let holders = branch_holders(repo)?;
-    let rebase_in_progress = holders
-        .iter()
-        .any(|h| h.rebasing && all.contains_key(&h.branch));
+    let rebase_in_progress = waiting
+        || holders
+            .iter()
+            .any(|h| h.rebasing && all.contains_key(&h.branch));
     let git_supports_restack = supports_update_refs(git_version());
 
     let Some(trunk_name) = trunk(repo, configured_trunk) else {
@@ -75,7 +83,7 @@ pub(crate) fn status(
             remote_trunk: None,
             layers: Vec::new(),
             rebase_in_progress,
-            finalized: None,
+            finalized,
             git_supports_restack,
         });
     };
@@ -123,9 +131,40 @@ pub(crate) fn status(
         remote_trunk: has_remote_trunk.then(|| format!("origin/{trunk_name}")),
         layers,
         rebase_in_progress,
-        finalized: None,
+        finalized,
         git_supports_restack,
     })
+}
+
+/// The pending step (D4, D5), run before classification. A record whose top
+/// is being rebased in any worktree waits; one whose rebase has landed (the
+/// top contains `onto`) is finalized; any other (aborted, never run, top
+/// gone) is cleared. Unparsable records are cleared. Returns whether a
+/// restack is still waiting, and the last finalization.
+fn settle_pending(repo: &Path) -> Result<(bool, Option<FinalizedRestack>), String> {
+    clear_malformed_pending(repo)?;
+    let all = read_all(repo)?;
+    if all.values().all(|m| m.pending.is_none()) {
+        return Ok((false, None));
+    }
+    let holders = branch_holders(repo)?;
+    let mut waiting = false;
+    let mut finalized = None;
+    for m in all.values() {
+        let Some(p) = &m.pending else { continue };
+        let top = m.branch.as_str();
+        if holders.iter().any(|h| h.rebasing && h.branch == top) {
+            waiting = true;
+            continue;
+        }
+        let top_ref = format!("refs/heads/{top}");
+        if resolve_commit(repo, &top_ref)?.is_some() && is_ancestor(repo, &p.onto, &top_ref)? {
+            finalized = Some(finalize(repo, top, p)?);
+        } else {
+            clear_pending(repo, top)?;
+        }
+    }
+    Ok((waiting, finalized))
 }
 
 pub(crate) fn needs_restack(s: LayerState) -> bool {

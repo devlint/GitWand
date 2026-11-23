@@ -71,8 +71,6 @@ fn moment_str(m: Moment) -> &'static str {
 
 impl PendingRestack {
     /// `<moment> <onto> <old_base> <bottom> <new_parent|-> <original>`
-    // Consumed by Task 5 (run, pending record) of the stacked-branches plan.
-    #[allow(dead_code)]
     pub fn to_config(&self) -> String {
         format!(
             "{} {} {} {} {} {}",
@@ -289,8 +287,6 @@ fn unset_key(repo: &Path, k: &str) -> Result<(), String> {
 }
 
 /// Removes the three stack keys of `layer`; absent keys are fine.
-// Consumed by Task 6 (Tauri commands) of the stacked-branches plan.
-#[allow(dead_code)]
 pub(crate) fn unset(repo: &Path, layer: &str) -> Result<(), String> {
     validate_branch_name(layer)?;
     for var in [PARENT, BASE, RESTACK] {
@@ -304,8 +300,40 @@ pub(crate) fn set_base(repo: &Path, layer: &str, sha: &str) -> Result<(), String
     run_ok(repo, &["config", "--local", &key(layer, BASE), sha]).map(|_| ())
 }
 
-// Consumed by Task 5 (run, pending record) of the stacked-branches plan.
-#[allow(dead_code)]
+/// Points `layer` at `parent` without the checks and merge-base of
+/// `set_parent`: a moment-2 restack moves the layer onto its merged parent's
+/// own parent, which still has that merged parent declared as its child.
+pub(crate) fn write_parent(repo: &Path, layer: &str, parent: &str) -> Result<(), String> {
+    validate_branch_name(layer)?;
+    validate_branch_name(parent)?;
+    run_ok(repo, &["config", "--local", &key(layer, PARENT), parent]).map(|_| ())
+}
+
+/// Removes every pending record that does not parse (D4).
+pub(crate) fn clear_malformed_pending(repo: &Path) -> Result<(), String> {
+    let out = run(
+        repo,
+        &[
+            "config",
+            "--local",
+            "--get-regexp",
+            r"^branch\..*\.gitwandrestack$",
+        ],
+    )?;
+    // exit 1 = no match
+    if !out.status.success() && out.status.code() != Some(1) {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let (k, value) = line.split_once(' ').unwrap_or((line, ""));
+        // `k` is the key as git listed it, always `branch.…`: never an option.
+        if k.starts_with("branch.") && PendingRestack::parse(value).is_none() {
+            unset_key(repo, k)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn set_pending(repo: &Path, top: &str, p: &PendingRestack) -> Result<(), String> {
     validate_branch_name(top)?;
     run_ok(
@@ -315,8 +343,6 @@ pub(crate) fn set_pending(repo: &Path, top: &str, p: &PendingRestack) -> Result<
     .map(|_| ())
 }
 
-// Consumed by Task 5 (run, pending record) of the stacked-branches plan.
-#[allow(dead_code)]
 pub(crate) fn clear_pending(repo: &Path, top: &str) -> Result<(), String> {
     validate_branch_name(top)?;
     unset_key(repo, &key(top, RESTACK))

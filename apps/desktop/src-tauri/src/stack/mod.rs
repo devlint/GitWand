@@ -78,7 +78,6 @@ pub struct LayerStatus {
     pub top: String,
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct FinalizedRestack {
     pub moment: Moment,
@@ -131,7 +130,6 @@ pub struct RestackPlan {
     pub refusal: Option<RestackRefusal>,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct PreviewedRestack {
     pub onto_sha: String,
@@ -140,7 +138,6 @@ pub struct PreviewedRestack {
     pub moving: Vec<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RestackRun {
     pub conflict: bool,
