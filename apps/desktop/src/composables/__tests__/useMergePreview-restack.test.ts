@@ -10,7 +10,6 @@ vi.mock("../../utils/backend", () => ({
   previewCherryPick: vi.fn(),
   previewRestack: (...a: unknown[]) => previewRestack(...a),
   readGitwandrc: async () => "",
-  gitRepoState: async () => ({ state: "clean", targetBranch: null }),
 }));
 
 import { useMergePreview } from "../useMergePreview";
