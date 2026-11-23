@@ -28,6 +28,7 @@ import {
   stackUnset,
   type FinalizedRestack,
   type MergedParentHint,
+  type PendingError,
   type PreviewedRestack,
   type RestackPlan,
   type RestackRefusal,
@@ -140,11 +141,13 @@ export interface Stacks {
   /** What App.vue last passed to `setContext`. */
   context: ComputedRef<StacksContext>;
   /**
-   * The report's `pending_error`: a pending restack record that could not be
-   * settled. Its chain has no actionable layer, so the banner offers Unstack,
-   * never Preview.
+   * The report's `pending_errors`: pending restack records that could not be
+   * settled, one per top. Their chains have no actionable layer, so the
+   * banner offers Unstack of that top, never Preview.
    */
-  pendingError: ComputedRef<string | null>;
+  pendingErrors: ComputedRef<PendingError[]>;
+  /** `branch`'s stack holds a stuck record: nothing in it can be restacked. */
+  isBlocked(branch: string): boolean;
   banner: ComputedRef<StackBannerModel | null>;
   offers: ComputedRef<Map<string, BridgeOffer>>;
   setContext(ctx: StacksContext): void;
@@ -265,7 +268,12 @@ export function createStacks(deps: StacksDeps): Stacks {
     );
   }
 
-  const pendingError = computed(() => report.value?.pending_error ?? null);
+  const pendingErrors = computed<PendingError[]>(() => report.value?.pending_errors ?? []);
+
+  function isBlocked(branch: string): boolean {
+    const top = layerOf(branch)?.top;
+    return !!top && pendingErrors.value.some((e) => e.top === top);
+  }
 
   const banner = computed<StackBannerModel | null>(() => {
     const current = ctx.value.currentBranch;
@@ -638,7 +646,8 @@ export function createStacks(deps: StacksDeps): Stacks {
     flow,
     after,
     context: computed(() => ctx.value),
-    pendingError,
+    pendingErrors,
+    isBlocked,
     banner,
     offers,
     setContext,

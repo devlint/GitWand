@@ -638,7 +638,7 @@ const zhCN: Locale = {
       base_lost: "GitWand 已无法确定 {0} 位于 {1} 的哪个位置。请重新堆叠它以重置基点。",
       preview: "预览重新堆叠",
       later: "稍后",
-      pendingError: "GitWand 未能完成上一次重新堆叠：{0}。取消堆叠该分支即可清除。",
+      pendingError: "GitWand 未能完成 {0} 的上一次重新堆叠：{1}。取消堆叠 {0} 即可清除。",
     },
     after: {
       retargeted: "PR #{0} 现在指向 {1}。",

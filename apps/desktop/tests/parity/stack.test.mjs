@@ -135,9 +135,8 @@ const previewedOf = (p) => ({
 });
 
 /** Plans then restacks `branch` on each side's own fixture. */
-async function restackBoth(dev, kind, branch, mergedParents = []) {
-  const rustCwd = fixtureStack(kind);
-  const nodeCwd = fixtureStack(kind);
+async function restackBoth(dev, kind, branch, mergedParents = [], prep = () => {}) {
+  const { rustCwd, nodeCwd } = twoFixtures(kind, prep);
   const rp = plan.rust(rustCwd, branch, mergedParents);
   const np = await plan.node(dev, nodeCwd, branch, mergedParents);
   expectSame(rp, np, "plan");
@@ -438,10 +437,14 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     for (const cwd of [rustCwd, nodeCwd]) git(cwd, ["worktree", "add", "--quiet", `${cwd}-wt`, "step-2"]);
     const s = await statusBoth(dev, rustCwd, nodeCwd, "held status");
     expect(s.finalized).toBe(null);
-    expect(s.pending_error).toBe(
-      "The restack of step-3 could not be finalized: step-2 is checked out in a worktree (<cwd>-wt), " +
-        "so it cannot be moved onto the restacked stack. Free it, then refresh.",
-    );
+    expect(s.pending_errors).toEqual([
+      {
+        top: "step-3",
+        error:
+          "step-2 is checked out in a worktree (<cwd>-wt), " +
+          "so it cannot be moved onto the restacked stack. Free it, then refresh.",
+      },
+    ]);
     expect(s.layers.every((l) => !l.actionable)).toBe(true);
     await planBoth(dev, rustCwd, nodeCwd, "step-2", "plan while held");
     for (const cwd of [rustCwd, nodeCwd]) git(cwd, ["worktree", "remove", `${cwd}-wt`]);
@@ -526,11 +529,11 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     expect([r.value.upstream_sha, r.value.refusal]).toEqual([tip, null]);
   }, 60_000);
 
-  it("a malformed record is cleared, an unsettled one is reported as pending_error", async () => {
+  it("a malformed record is cleared, an unsettled one is reported in pending_errors", async () => {
     const bad = (cwd) => git(cwd, ["config", "branch.step-3.gitwandRestack", "parent_moved garbage"]);
     const m = twoFixtures("moved", bad);
     const s = await statusBoth(dev, m.rustCwd, m.nodeCwd, "malformed");
-    expect([s.pending_error, s.finalized]).toEqual([null, null]);
+    expect([s.pending_errors, s.finalized]).toEqual([[], null]);
     expect(stateOf(m.rustCwd).keys).not.toContain("gitwandrestack");
 
     // A completed record on step-2 whose bottom (step-3) is not below it:
@@ -541,15 +544,43 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
       git(cwd, ["config", "branch.step-2.gitwandRestack", record]);
     };
     const e = twoFixtures("moved", stuck);
-    const p = await statusBoth(dev, e.rustCwd, e.nodeCwd, "pending_error");
-    expect(p.pending_error).toBe(
-      "The restack of step-2 could not be finalized: cannot finalize the restack: step-2 is no longer stacked above step-3",
-    );
+    const p = await statusBoth(dev, e.rustCwd, e.nodeCwd, "pending_errors");
+    expect(p.pending_errors).toEqual([
+      { top: "step-2", error: "cannot finalize the restack: step-2 is no longer stacked above step-3" },
+    ]);
     expect(p.layers.every((l) => !l.actionable)).toBe(true);
     // plan never settles: every record blocks its stack as "still being finalized".
     const r = await planBoth(dev, e.rustCwd, e.nodeCwd, "step-2", "plan held by the record");
     expect(r.error).toBe("A previous restack of step-2 is still being finalized. Refresh and try again.");
     expect(stateOf(e.rustCwd).keys).toContain("gitwandrestack");
+  }, 60_000);
+
+  it("a failed switch back is reported as { branch, reason }", async () => {
+    const onStep1 = (cwd) => git(cwd, ["checkout", "--quiet", "step-1"]);
+    const { rustCwd, nodeCwd } = await restackBoth(dev, "moved", "step-2", [], onStep1);
+    for (const cwd of [rustCwd, nodeCwd]) writeFileSync(join(cwd, "c.txt"), "edited\n");
+    const s = await statusBoth(dev, rustCwd, nodeCwd, "finalize, dirty top");
+    expect([s.finalized.switched_back_to, s.finalized.switch_error]).toEqual([
+      null,
+      { branch: "step-1", reason: "uncommitted changes on step-3" },
+    ]);
+  }, 60_000);
+
+  it("two stacks, one stuck record: the entry names its own top", async () => {
+    // A second stack (other-1 <- other-2) next to the fixture's, and a stuck
+    // record on step-2 (its bottom step-3 is not below it).
+    const prep = (cwd) => {
+      git(cwd, ["branch", "other-1", "main"]);
+      git(cwd, ["branch", "other-2", "other-1"]);
+      git(cwd, ["config", "branch.other-2.gitwandParent", "other-1"]);
+      git(cwd, ["config", "branch.other-2.gitwandStackBase", git(cwd, ["rev-parse", "main"])]);
+      const mainSha = git(cwd, ["rev-parse", "main"]);
+      const record = ["parent_moved", mainSha, mainSha, "step-3", "-", "step-3", "0".repeat(40), "-"].join(" ");
+      git(cwd, ["config", "branch.step-2.gitwandRestack", record]);
+    };
+    const e = twoFixtures("moved", prep);
+    const p = await statusBoth(dev, e.rustCwd, e.nodeCwd, "two stacks");
+    expect(p.pending_errors.map((x) => x.top)).toEqual(["step-2"]);
   }, 60_000);
 
   it("detached and dirty refusals are identical", async () => {

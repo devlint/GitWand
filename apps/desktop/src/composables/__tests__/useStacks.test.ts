@@ -39,7 +39,7 @@ const report = (over: Partial<StackReport> = {}): StackReport => ({
   rebase_in_progress: false,
   finalized: null,
   git_supports_restack: true,
-  pending_error: null,
+  pending_errors: [],
   ...over,
 });
 
@@ -222,9 +222,12 @@ describe("useStacks — refresh", () => {
   it("exposes the pending record error of the report", async () => {
     const { s, world } = setup();
     world.forge = "gitlab";
-    world.report = report({ pending_error: "cannot settle step-3" });
+    world.report = report({ pending_errors: [{ top: "step-3", error: "cannot settle" }] });
     await s.refresh("/r");
-    expect(s.pendingError.value).toBe("cannot settle step-3");
+    expect(s.pendingErrors.value).toEqual([{ top: "step-3", error: "cannot settle" }]);
+    // A chain is blocked iff its top has an entry.
+    expect(s.isBlocked("step-1")).toBe(true);
+    expect(s.isBlocked("other")).toBe(false);
   });
 });
 

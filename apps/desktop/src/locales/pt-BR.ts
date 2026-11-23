@@ -639,7 +639,7 @@ const ptBR: Locale = {
       base_lost: "O GitWand não sabe mais onde {0} fica sobre {1}. Empilhe-o de novo para redefinir sua base.",
       preview: "Pré-visualizar o reempilhamento",
       later: "Mais tarde",
-      pendingError: "O GitWand não conseguiu concluir o último reempilhamento: {0}. Desempilhe o branch para limpá-lo.",
+      pendingError: "O GitWand não conseguiu concluir o último reempilhamento de {0}: {1}. Desempilhe {0} para limpá-lo.",
     },
     after: {
       retargeted: "O PR #{0} agora aponta para {1}.",

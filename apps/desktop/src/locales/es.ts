@@ -638,7 +638,7 @@ const es: Locale = {
       base_lost: "GitWand ya no sabe dónde se sitúa {0} sobre {1}. Apílala de nuevo para restablecer su base.",
       preview: "Previsualizar el reapilado",
       later: "Más tarde",
-      pendingError: "GitWand no pudo terminar el último reapilado: {0}. Desapila la rama para borrarlo.",
+      pendingError: "GitWand no pudo terminar el último reapilado de {0}: {1}. Desapila {0} para borrarlo.",
     },
     after: {
       retargeted: "La PR #{0} ahora apunta a {1}.",

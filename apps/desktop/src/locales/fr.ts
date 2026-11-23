@@ -643,7 +643,7 @@ const fr: Locale = {
       base_lost: "GitWand ne sait plus où {0} se trouve sur {1}. Empilez-la de nouveau pour réinitialiser sa base.",
       preview: "Prévisualiser le restack",
       later: "Plus tard",
-      pendingError: "GitWand n'a pas pu terminer le dernier restack : {0}. Désempilez la branche pour l'effacer.",
+      pendingError: "GitWand n'a pas pu terminer le dernier restack de {0} : {1}. Désempilez {0} pour l'effacer.",
     },
     after: {
       retargeted: "La PR #{0} cible maintenant {1}.",

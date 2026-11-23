@@ -435,7 +435,8 @@ function statusInner(repo, configuredTrunk, hints, settle) {
   const rebaseInProgress = settled.waiting || holders.some((h) => h.rebasing && all.has(h.branch));
   const gitSupportsRestack = supportsUpdateRefs(gitVersion());
   const errors = sortedMap(settled.errors);
-  const pendingError = errors.size ? [...errors.values()].join("; ") : null;
+  // One entry per stuck record, by top (sorted, as Rust's BTreeMap).
+  const pendingErrors = [...errors].map(([top, error]) => ({ top, error }));
 
   const trunkName = trunk(repo, configuredTrunk);
   if (trunkName === null) {
@@ -447,7 +448,7 @@ function statusInner(repo, configuredTrunk, hints, settle) {
         rebase_in_progress: rebaseInProgress,
         finalized: settled.finalized,
         git_supports_restack: gitSupportsRestack,
-        pending_error: pendingError,
+        pending_errors: pendingErrors,
       },
       blocked: new Map(),
     };
@@ -461,7 +462,8 @@ function statusInner(repo, configuredTrunk, hints, settle) {
     // A stack carrying an unsettled record: no self-heal, no action.
     let hold = null;
     for (const b of chain) {
-      const h = settled.errors.get(b) ?? (settled.deferred.has(b) ? deferredMessage(b) : null);
+      const e = settled.errors.get(b);
+      const h = e !== undefined ? unsettledMessage(b, e) : settled.deferred.has(b) ? deferredMessage(b) : null;
       if (h !== null) {
         hold = h;
         break;
@@ -501,10 +503,14 @@ function statusInner(repo, configuredTrunk, hints, settle) {
       rebase_in_progress: rebaseInProgress,
       finalized: settled.finalized,
       git_supports_restack: gitSupportsRestack,
-      pending_error: pendingError,
+      pending_errors: pendingErrors,
     },
     blocked,
   };
+}
+
+function unsettledMessage(top, error) {
+  return `The restack of ${top} could not be finalized: ${error}`;
 }
 
 function deferredMessage(top) {
@@ -542,7 +548,7 @@ function settlePending(repo) {
       else if (s.finalized !== null) s.deferred.add(top);
       else s.finalized = finalize(repo, top, p);
     } catch (e) {
-      s.errors.set(top, `The restack of ${top} could not be finalized: ${e.message}`);
+      s.errors.set(top, e.message);
     }
   }
   return s;
@@ -1177,7 +1183,7 @@ function switchBack(repo, top, original) {
   try {
     return trySwitchBack(repo, top, original);
   } catch (e) {
-    return [null, `not switched back to ${original}: ${e.message}`];
+    return [null, { branch: original, reason: e.message }];
   }
 }
 
@@ -1190,14 +1196,14 @@ function trySwitchBack(repo, top, original) {
     valid = false;
   }
   if (!valid || resolveCommit(repo, `refs/heads/${original}`) === null) {
-    return [null, `not switched back to ${original}: the branch no longer exists`];
+    return [null, { branch: original, reason: "the branch no longer exists" }];
   }
   if (runOk(repo, ["status", "--porcelain", "--untracked-files=no"]) !== "") {
-    return [null, `not switched back to ${original}: uncommitted changes on ${top}`];
+    return [null, { branch: original, reason: `uncommitted changes on ${top}` }];
   }
   const out = run(repo, ["switch", "--no-guess", original]);
   if (ok(out)) return [original, null];
-  return [null, `could not switch back to ${original}: ${trimmed(out.stderr)}`];
+  return [null, { branch: original, reason: trimmed(out.stderr) }];
 }
 
 // ── commands/stack.rs ───────────────────────────────────────────────────────

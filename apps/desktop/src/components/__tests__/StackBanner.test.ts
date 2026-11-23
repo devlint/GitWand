@@ -34,7 +34,7 @@ const report = (over: Partial<StackReport> = {}): StackReport => ({
   rebase_in_progress: false,
   finalized: null,
   git_supports_restack: true,
-  pending_error: null,
+  pending_errors: [],
   ...over,
 });
 
@@ -174,17 +174,48 @@ describe("StackBanner — restack mode", () => {
   it("shows a pending record error with Unstack of the chain's top", async () => {
     const { deps } = await seed(
       report({
-        layers: [layer({ branch: "step-1", parent: "main", top: "step-2" }), layer({ state: "out_of_date" })],
-        pending_error: "cannot settle step-2",
+        layers: [layer({ branch: "step-1", parent: "main", top: "step-2" }), layer({ state: "out_of_date", actionable: true })],
+        pending_errors: [{ top: "step-2", error: "cannot settle" }],
       }),
     );
     mount();
-    expect(text()).toContain("GitWand could not finish the last restack: cannot settle step-2. Unstack the branch to clear it.");
+    expect(text()).toContain("GitWand could not finish the last restack of step-2: cannot settle. Unstack step-2 to clear it.");
+    // Blocked chain: no Preview, even if a layer claims to be actionable.
     expect(button("Preview restack")).toBeNull();
     button("Unstack")!.click();
     await flush();
     expect(deps.unset).toHaveBeenCalledWith("/r", "step-2");
   });
+
+  it.each([["in another stack", "other-2"], ["not stacked", "loose"]])(
+    "one row per stuck record, whose Unstack targets its own top, with the current branch %s",
+    async (_what, current) => {
+      const { deps } = await seed(
+        report({
+          layers: [
+            layer({ branch: "step-1", parent: "main", top: "step-2" }),
+            layer({ top: "step-2" }),
+            layer({ branch: "other-1", parent: "main", top: "other-2" }),
+            layer({ branch: "other-2", parent: "other-1", top: "other-2" }),
+          ],
+          pending_errors: [
+            { top: "a-top", error: "e1" },
+            { top: "step-2", error: "e2" },
+          ],
+        }),
+        current,
+      );
+      mount();
+      expect(text()).toContain("GitWand could not finish the last restack of a-top: e1. Unstack a-top to clear it.");
+      expect(text()).toContain("GitWand could not finish the last restack of step-2: e2. Unstack step-2 to clear it.");
+      const unstacks = [...container.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Unstack");
+      expect(unstacks).toHaveLength(2);
+      unstacks[1].click();
+      await flush();
+      expect(deps.unset).toHaveBeenCalledWith("/r", "step-2");
+      expect(deps.unset).not.toHaveBeenCalledWith("/r", "other-2");
+    },
+  );
 });
 
 describe("StackBanner — after a restack", () => {
@@ -212,7 +243,7 @@ describe("StackBanner — after a restack", () => {
   it("says when the restack could not switch back", async () => {
     const { s } = await seed(report());
     s.after.value = after({
-      finalized: { ...after().finalized, switch_error: "not switched back to step-1: uncommitted changes on step-2" },
+      finalized: { ...after().finalized, switch_error: { branch: "step-1", reason: "uncommitted changes on step-2" } },
     });
     mount();
     expect(text()).toContain("Restacked, but could not switch back to step-1: uncommitted changes on step-2");

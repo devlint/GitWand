@@ -11,7 +11,7 @@ use super::meta::{
 };
 use super::{
     FinalizedRestack, LayerState, LayerStatus, MergedParentHint, Moment, MovingRef, PendingRestack,
-    PreviewedRestack, RestackPlan, RestackRefusal, RestackRun, StackMeta,
+    PreviewedRestack, RestackPlan, RestackRefusal, RestackRun, StackMeta, SwitchError,
 };
 use crate::git::git_cmd;
 use std::collections::BTreeMap;
@@ -657,7 +657,7 @@ fn restacked_layers(
 /// parent from the stack; clears the record; switches back to the branch the
 /// user was on. Every step checks whether it is already applied, so a
 /// finalize that stopped half-way completes on the next refresh. An Err
-/// leaves the record in place (`status` reports it as `pending_error`).
+/// leaves the record in place (`status` reports it in `pending_errors`).
 pub(crate) fn finalize(
     repo: &Path,
     top: &str,
@@ -796,10 +796,17 @@ fn merge_base(repo: &Path, parent: &str, layer: &str) -> Result<String, String> 
 /// `original`. Skipped, and said why, when `original` is gone or tracked
 /// changes would have to be carried over. Runs after the record is cleared,
 /// so it never fails: its own git errors are reported in `switch_error`.
-fn switch_back(repo: &Path, top: &str, original: &str) -> (Option<String>, Option<String>) {
+fn switch_back(repo: &Path, top: &str, original: &str) -> (Option<String>, Option<SwitchError>) {
     match try_switch_back(repo, top, original) {
         Ok(r) => r,
-        Err(e) => (None, Some(format!("not switched back to {original}: {e}"))),
+        Err(e) => (None, Some(switch_error(original, e))),
+    }
+}
+
+fn switch_error(branch: &str, reason: impl Into<String>) -> SwitchError {
+    SwitchError {
+        branch: branch.to_string(),
+        reason: reason.into(),
     }
 }
 
@@ -807,7 +814,7 @@ fn try_switch_back(
     repo: &Path,
     top: &str,
     original: &str,
-) -> Result<(Option<String>, Option<String>), String> {
+) -> Result<(Option<String>, Option<SwitchError>), String> {
     if original == top || current_branch(repo)?.as_deref() != Some(top) {
         return Ok((None, None));
     }
@@ -816,16 +823,15 @@ fn try_switch_back(
     if !exists {
         return Ok((
             None,
-            Some(format!(
-                "not switched back to {original}: the branch no longer exists"
-            )),
+            Some(switch_error(original, "the branch no longer exists")),
         ));
     }
     if !run_ok(repo, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
         return Ok((
             None,
-            Some(format!(
-                "not switched back to {original}: uncommitted changes on {top}"
+            Some(switch_error(
+                original,
+                format!("uncommitted changes on {top}"),
             )),
         ));
     }
@@ -835,9 +841,9 @@ fn try_switch_back(
     } else {
         Ok((
             None,
-            Some(format!(
-                "could not switch back to {original}: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
+            Some(switch_error(
+                original,
+                String::from_utf8_lossy(&out.stderr).trim(),
             )),
         ))
     }
@@ -850,7 +856,7 @@ mod tests {
     use crate::stack::meta::set_parent;
     use crate::stack::{
         LayerState, MergedParentHint, Moment, PendingRestack, PreviewedRestack, RestackPlan,
-        RestackRun,
+        RestackRun, SwitchError,
     };
     use crate::worktree::test_support::{git_at, TempRepo};
 
@@ -1839,7 +1845,7 @@ mod tests {
         r.git(&["rebase", "--abort"]);
         let s = status(&r.path, Some("main"), &[]).unwrap();
         assert!(s.finalized.is_none(), "{:?}", s.finalized);
-        assert_eq!(s.pending_error, None);
+        assert!(s.pending_errors.is_empty());
         assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
         assert_eq!(snapshot(&r), before);
     }
@@ -1906,8 +1912,11 @@ mod tests {
         };
         crate::stack::meta::set_pending(&r.path, "step-3", &record).unwrap();
         let s = status(&r.path, Some("main"), &[]).unwrap();
-        let msg = s.pending_error.clone().expect("pending_error");
-        assert!(msg.contains("step-3"), "{msg}");
+        // One entry, naming the top of the stack that holds the record, not
+        // the other stack (Task 13 review, I-1).
+        assert_eq!(s.pending_errors.len(), 1, "{:?}", s.pending_errors);
+        assert_eq!(s.pending_errors[0].top, "step-3");
+        assert!(!s.pending_errors[0].error.is_empty());
         assert!(s.finalized.is_none());
         assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_some());
         for l in s.layers.iter().filter(|l| l.top == "step-3") {
@@ -1917,7 +1926,7 @@ mod tests {
         assert_eq!(o2.state, LayerState::OutOfDate);
         assert!(o2.actionable);
         // `plan` never settles (round 2): any record blocks its stack with
-        // the deferred text; the error itself is in `pending_error`.
+        // the deferred text; the error itself is in `pending_errors`.
         assert_eq!(
             plan(&r.path, Some("main"), "step-2", &[], V).unwrap_err(),
             "A previous restack of step-3 is still being finalized. Refresh and try again."
@@ -1928,10 +1937,10 @@ mod tests {
             .is_none());
         // Unstacking the top is the way out.
         crate::stack::meta::unset(&r.path, "step-3").unwrap();
-        assert_eq!(
-            status(&r.path, Some("main"), &[]).unwrap().pending_error,
-            None
-        );
+        assert!(status(&r.path, Some("main"), &[])
+            .unwrap()
+            .pending_errors
+            .is_empty());
     }
 
     #[test]
@@ -1963,14 +1972,17 @@ mod tests {
         let lock = r.path.join(lock);
         std::fs::write(&lock, "").unwrap();
         let s = status(&r.path, Some("main"), &[]).unwrap();
-        let msg = s.pending_error.clone().expect("pending_error");
-        assert!(msg.contains("step-2"), "{msg}");
+        let [e] = s.pending_errors.as_slice() else {
+            panic!("{:?}", s.pending_errors)
+        };
+        assert_eq!(e.top, "step-3");
+        assert!(e.error.contains("step-2"), "{}", e.error);
         assert!(s.finalized.is_none());
         assert_eq!(r.git(&["rev-parse", "step-2"]), old_step2);
         assert_eq!(stack_keys(&r), keys, "no metadata written");
         std::fs::remove_file(&lock).unwrap();
         let s = status(&r.path, Some("main"), &[]).unwrap();
-        assert_eq!(s.pending_error, None);
+        assert!(s.pending_errors.is_empty());
         let f = s.finalized.unwrap();
         assert_eq!(f.switch_error, None);
         assert_eq!(f.moved, ["step-2", "step-3"]);
@@ -1992,8 +2004,15 @@ mod tests {
         let wt = r.sandbox.join("wt");
         r.git(&["worktree", "add", "-q", wt.to_str().unwrap(), "step-2"]);
         let s = status(&r.path, Some("main"), &[]).unwrap();
-        let msg = s.pending_error.clone().expect("pending_error");
-        assert!(msg.contains("step-2") && msg.contains("wt"), "{msg}");
+        let [e] = s.pending_errors.as_slice() else {
+            panic!("{:?}", s.pending_errors)
+        };
+        assert_eq!(e.top, "step-3");
+        assert!(
+            e.error.contains("step-2") && e.error.contains("wt"),
+            "{}",
+            e.error
+        );
         assert!(s.finalized.is_none());
         assert_eq!(r.git(&["rev-parse", "step-2"]), old_step2);
         assert_eq!(stack_keys(&r), keys);
@@ -2034,8 +2053,11 @@ mod tests {
             .unwrap();
         assert_eq!(f.switched_back_to, None);
         assert_eq!(
-            f.switch_error.as_deref(),
-            Some("not switched back to step-1: uncommitted changes on step-3")
+            f.switch_error,
+            Some(SwitchError {
+                branch: "step-1".into(),
+                reason: "uncommitted changes on step-3".into()
+            })
         );
         assert_eq!(r.git(&["branch", "--show-current"]), "step-3");
         assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
@@ -2121,8 +2143,11 @@ mod tests {
             .unwrap();
         assert_eq!(f.switched_back_to, None);
         assert_eq!(
-            f.switch_error.as_deref(),
-            Some("not switched back to scratch: the branch no longer exists")
+            f.switch_error,
+            Some(SwitchError {
+                branch: "scratch".into(),
+                reason: "the branch no longer exists".into()
+            })
         );
         assert_eq!(r.git(&["branch", "--show-current"]), "step-3");
     }

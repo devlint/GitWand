@@ -1267,7 +1267,19 @@ export interface FinalizedRestack {
   new_parent: string | null;
   moved: string[];
   switched_back_to: string | null;
-  switch_error: string | null;
+  switch_error: SwitchError | null;
+}
+
+/** Why a finalize could not switch back to the branch the user was on. */
+export interface SwitchError {
+  branch: string;
+  reason: string;
+}
+
+/** A pending restack record that could not be settled, by the top that holds it. */
+export interface PendingError {
+  top: string;
+  error: string;
 }
 
 export interface StackReport {
@@ -1277,7 +1289,8 @@ export interface StackReport {
   rebase_in_progress: boolean;
   finalized: FinalizedRestack | null;
   git_supports_restack: boolean;
-  pending_error: string | null;
+  /** One per stuck record, sorted by top. */
+  pending_errors: PendingError[];
 }
 
 export interface StackMeta {

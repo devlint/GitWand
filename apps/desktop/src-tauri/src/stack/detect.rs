@@ -8,8 +8,8 @@ use super::meta::{
 };
 use super::restack::finalize;
 use super::{
-    FinalizedRestack, LayerState, LayerStatus, MergeSignal, MergedParentHint, PendingRestack,
-    StackMeta, StackReport,
+    FinalizedRestack, LayerState, LayerStatus, MergeSignal, MergedParentHint, PendingError,
+    PendingRestack, StackMeta, StackReport,
 };
 use crate::git::git_cmd;
 use std::collections::{BTreeMap, BTreeSet};
@@ -97,14 +97,14 @@ pub(crate) fn status_inner(
             .iter()
             .any(|h| h.rebasing && all.contains_key(&h.branch));
     let git_supports_restack = supports_update_refs(git_version());
-    let pending_error = (!settled.errors.is_empty()).then(|| {
-        settled
-            .errors
-            .values()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("; ")
-    });
+    let pending_errors: Vec<PendingError> = settled
+        .errors
+        .iter()
+        .map(|(top, error)| PendingError {
+            top: top.clone(),
+            error: error.clone(),
+        })
+        .collect();
 
     let Some(trunk_name) = trunk(repo, configured_trunk) else {
         return Ok((
@@ -115,7 +115,7 @@ pub(crate) fn status_inner(
                 rebase_in_progress,
                 finalized: settled.finalized,
                 git_supports_restack,
-                pending_error,
+                pending_errors,
             },
             BTreeMap::new(),
         ));
@@ -132,7 +132,7 @@ pub(crate) fn status_inner(
             settled
                 .errors
                 .get(b)
-                .cloned()
+                .map(|e| unsettled_message(b, e))
                 .or_else(|| settled.deferred.contains(b).then(|| deferred_message(b)))
         });
         // A layer whose local branch is gone (deleted with its config kept)
@@ -181,10 +181,14 @@ pub(crate) fn status_inner(
             rebase_in_progress,
             finalized: settled.finalized,
             git_supports_restack,
-            pending_error,
+            pending_errors,
         },
         blocked,
     ))
+}
+
+fn unsettled_message(top: &str, error: &str) -> String {
+    format!("The restack of {top} could not be finalized: {error}")
 }
 
 fn deferred_message(top: &str) -> String {
@@ -197,7 +201,8 @@ struct Settled {
     /// A record's top is being rebased: the restack is still running.
     waiting: bool,
     finalized: Option<FinalizedRestack>,
-    /// Records that could not be settled, by top. Kept for the next refresh.
+    /// Records that could not be settled: top → the finalize error. Kept for
+    /// the next refresh.
     errors: BTreeMap<String, String>,
     /// Completed records left for the next refresh (one finalize per call).
     deferred: BTreeSet<String>,
@@ -251,10 +256,7 @@ fn settle_pending(repo: &Path) -> Result<Settled, String> {
             true => finalize(repo, top, p).map(|f| s.finalized = Some(f)),
         });
         if let Err(e) = step {
-            s.errors.insert(
-                top.to_string(),
-                format!("The restack of {top} could not be finalized: {e}"),
-            );
+            s.errors.insert(top.to_string(), e);
         }
     }
     Ok(s)

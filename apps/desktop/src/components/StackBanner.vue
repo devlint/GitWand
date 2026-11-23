@@ -5,7 +5,8 @@
  *
  *   restack mode → the current branch's lowest layer that needs attention,
  *                  with Preview restack / Later (Unstack when no restack can
- *                  help), plus a pending record that could not be settled;
+ *                  help), plus one row per pending record that could not be
+ *                  settled, with Unstack of its top;
  *   after mode   → what happened after a finalized restack in the open repo:
  *                  the PR retarget, the merged-parent delete offer, a failed
  *                  switch back.
@@ -29,12 +30,6 @@ const model = computed(() => stacks.banner.value);
 const after = computed(() => {
   const a = stacks.after.value;
   return a && a.cwd === cwd.value ? a : null;
-});
-
-/** The top of the current branch's stack: unstacking it clears a stuck record. */
-const currentTop = computed(() => {
-  const b = stacks.context.value.currentBranch;
-  return b ? (stacks.layerOf(b)?.top ?? null) : null;
 });
 
 const restackText = computed(() => {
@@ -61,7 +56,12 @@ const restackText = computed(() => {
 /** Preview only where a restack can run now: never for a blocked chain (ruling 3). */
 const canPreview = computed(() => {
   const m = model.value;
-  return !!m && (m.kind === "parent_moved" || m.kind === "parent_merged") && m.layer.actionable;
+  return (
+    !!m &&
+    (m.kind === "parent_moved" || m.kind === "parent_merged") &&
+    m.layer.actionable &&
+    !stacks.isBlocked(m.layer.branch)
+  );
 });
 const canUnstackLayer = computed(() => model.value?.kind === "parent_missing" || model.value?.kind === "base_lost");
 
@@ -86,15 +86,12 @@ const retargetText = computed(() => {
   }
 });
 
-/** The backend's text is "not switched back to <branch>: <reason>". */
 const switchText = computed(() => {
   const e = after.value?.finalized.switch_error;
-  if (!e) return "";
-  const m = /^not switched back to (\S+): (.*)$/s.exec(e);
-  return m ? t("stacks.after.switchFailed", m[1], m[2]) : e;
+  return e ? t("stacks.after.switchFailed", e.branch, e.reason) : "";
 });
 
-const visible = computed(() => !!model.value || !!stacks.pendingError.value || !!after.value);
+const visible = computed(() => !!model.value || stacks.pendingErrors.value.length > 0 || !!after.value);
 
 function preview() {
   const m = model.value;
@@ -108,9 +105,9 @@ function unstack(branch: string | null) {
 
 <template>
   <div v-if="visible" class="stack-banner" role="status">
-    <div v-if="stacks.pendingError.value" class="stack-banner__row stack-banner__row--warn">
-      <span class="stack-banner__text">{{ t("stacks.banner.pendingError", stacks.pendingError.value) }}</span>
-      <button v-if="currentTop" class="stack-banner__btn" @click="unstack(currentTop)">{{ t("stacks.menu.unstack") }}</button>
+    <div v-for="e in stacks.pendingErrors.value" :key="e.top" class="stack-banner__row stack-banner__row--warn">
+      <span class="stack-banner__text">{{ t("stacks.banner.pendingError", e.top, e.error) }}</span>
+      <button class="stack-banner__btn" @click="unstack(e.top)">{{ t("stacks.menu.unstack") }}</button>
     </div>
 
     <div v-if="model" class="stack-banner__row">

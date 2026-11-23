@@ -650,7 +650,7 @@ const en = {
       base_lost: "GitWand no longer knows where {0} sits on {1}. Stack it again to reset its base.",
       preview: "Preview restack",
       later: "Later",
-      pendingError: "GitWand could not finish the last restack: {0}. Unstack the branch to clear it.",
+      pendingError: "GitWand could not finish the last restack of {0}: {1}. Unstack {0} to clear it.",
     },
     after: {
       retargeted: "PR #{0} now targets {1}.",

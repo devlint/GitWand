@@ -90,7 +90,21 @@ pub struct FinalizedRestack {
     pub new_parent: Option<String>,
     pub moved: Vec<String>,
     pub switched_back_to: Option<String>,
-    pub switch_error: Option<String>,
+    pub switch_error: Option<SwitchError>,
+}
+
+/// Why the finalize could not switch back to the branch the user was on.
+#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
+pub struct SwitchError {
+    pub branch: String,
+    pub reason: String,
+}
+
+/// A pending record that could not be settled, by the top that holds it.
+#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
+pub struct PendingError {
+    pub top: String,
+    pub error: String,
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
@@ -101,9 +115,9 @@ pub struct StackReport {
     pub rebase_in_progress: bool,
     pub finalized: Option<FinalizedRestack>,
     pub git_supports_restack: bool,
-    /// A pending record that could not be settled; it is kept, and its
-    /// stack is not actionable until it is.
-    pub pending_error: Option<String>,
+    /// The pending records that could not be settled, one per top (sorted).
+    /// Each is kept, and its stack is not actionable until it is.
+    pub pending_errors: Vec<PendingError>,
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
