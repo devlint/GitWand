@@ -69,17 +69,14 @@ pub(crate) fn branch_holders(repo: &Path) -> Result<Vec<Holder>, String> {
         }
         // (b) The branch it is rebasing: HEAD is detached then, the branch
         // survives only in the rebase state's `head-name`.
-        let Ok(git_dir) = git_out(&worktree, &["rev-parse", "--absolute-git-dir"]) else {
-            continue;
-        };
+        let git_dir = git_out(&worktree, &["rev-parse", "--absolute-git-dir"])
+            .map_err(|e| format!("cannot inspect worktree {}: {e}", worktree.display()))?;
         for state in ["rebase-merge", "rebase-apply"] {
             let head_name = Path::new(&git_dir).join(state).join("head-name");
-            let Ok(raw) = std::fs::read_to_string(head_name) else {
-                continue;
-            };
-            if let Some(branch) = raw.trim().strip_prefix("refs/heads/") {
+            let read = std::fs::read_to_string(&head_name);
+            if let Some(branch) = interpret_head_name(&head_name, read)? {
                 holders.push(Holder {
-                    branch: branch.to_string(),
+                    branch,
                     worktree: worktree.clone(),
                     rebasing: true,
                     current,
@@ -89,6 +86,30 @@ pub(crate) fn branch_holders(repo: &Path) -> Result<Vec<Holder>, String> {
         }
     }
     Ok(holders)
+}
+
+/// What a rebase state's `head-name` says. Only a missing file means "no
+/// rebase here"; any other IO error or unexpected content is an error, since
+/// the guard protects user branches and must fail closed.
+fn interpret_head_name(
+    path: &Path,
+    read: std::io::Result<String>,
+) -> Result<Option<String>, String> {
+    match read {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("cannot read {}: {e}", path.display())),
+        Ok(raw) => match raw.trim() {
+            // A rebase started from a detached HEAD holds no branch.
+            "detached HEAD" => Ok(None),
+            name => match name.strip_prefix("refs/heads/") {
+                Some(b) if !b.is_empty() => Ok(Some(b.to_string())),
+                _ => Err(format!(
+                    "unexpected content in {}: {name:?}",
+                    path.display()
+                )),
+            },
+        },
+    }
 }
 
 fn git_out(dir: &Path, args: &[&str]) -> Result<String, String> {
@@ -177,5 +198,122 @@ mod tests {
             .find(|h| h.branch == "step-2")
             .unwrap();
         assert!(x.rebasing && !x.current);
+    }
+
+    #[test]
+    fn head_name_missing_file_means_no_rebase() {
+        let e = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(interpret_head_name(Path::new("p"), Err(e)), Ok(None));
+    }
+
+    #[test]
+    fn head_name_other_io_errors_fail_closed() {
+        let e = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert!(interpret_head_name(Path::new("p"), Err(e)).is_err());
+    }
+
+    #[test]
+    fn head_name_interprets_branch_detached_and_garbage() {
+        let p = Path::new("p");
+        assert_eq!(
+            interpret_head_name(p, Ok("refs/heads/feat/x\n".into())),
+            Ok(Some("feat/x".into()))
+        );
+        assert_eq!(
+            interpret_head_name(p, Ok("detached HEAD\n".into())),
+            Ok(None)
+        );
+        assert!(interpret_head_name(p, Ok("refs/tags/v1\n".into())).is_err());
+        assert!(interpret_head_name(p, Ok("refs/heads/\n".into())).is_err());
+        assert!(interpret_head_name(p, Ok("".into())).is_err());
+    }
+
+    #[test]
+    fn holders_fail_closed_when_a_worktree_cannot_be_inspected() {
+        let r = TempRepo::new();
+        let wt = step2_in_worktree(&r);
+        // Keep the admin dir (so git still lists and does not prune it) but
+        // point the linked worktree's `.git` file at nothing.
+        std::fs::write(wt.join(".git"), "gitdir: /nonexistent/gitwand-guard\n").unwrap();
+        let err = branch_holders(&r.path).unwrap_err();
+        assert!(err.contains("wt"), "error should name the worktree: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn holders_fail_closed_when_head_name_is_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = TempRepo::new();
+        let wt = step2_in_worktree(&r);
+        r.commit("b.txt", "theirs\n", "main b");
+        let out = git_cmd()
+            .args(["rebase", "main"])
+            .current_dir(&wt)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        let head_name = PathBuf::from(git_at(&wt, &["rev-parse", "--absolute-git-dir"]))
+            .join("rebase-merge")
+            .join("head-name");
+        std::fs::set_permissions(&head_name, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let unreadable = std::fs::read_to_string(&head_name).is_err();
+        let res = branch_holders(&r.path);
+        std::fs::set_permissions(&head_name, std::fs::Permissions::from_mode(0o644)).unwrap();
+        if unreadable {
+            assert!(res.is_err(), "unreadable head-name must be an error");
+        }
+    }
+
+    #[test]
+    fn rebase_in_the_current_worktree_is_current_and_rebasing() {
+        let r = TempRepo::new();
+        r.git(&["checkout", "-q", "-b", "step-2"]);
+        r.commit("b.txt", "mine\n", "s2");
+        r.git(&["checkout", "-q", "main"]);
+        r.commit("b.txt", "theirs\n", "main b");
+        r.git(&["checkout", "-q", "step-2"]);
+        let out = git_cmd()
+            .args(["rebase", "main"])
+            .current_dir(&r.path)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        let h = branch_holders(&r.path).unwrap();
+        let x = h.iter().find(|h| h.branch == "step-2").unwrap();
+        assert!(x.current && x.rebasing);
+    }
+
+    #[test]
+    fn prunable_worktrees_are_skipped() {
+        let r = TempRepo::new();
+        let wt = step2_in_worktree(&r);
+        std::fs::remove_dir_all(&wt).unwrap();
+        let h = branch_holders(&r.path).unwrap();
+        assert!(h.iter().all(|h| h.branch != "step-2"), "{h:?}");
+        assert!(h.iter().any(|h| h.branch == "main" && h.current));
+    }
+
+    #[test]
+    fn bare_entries_are_skipped() {
+        let r = TempRepo::new();
+        let bare = r.sandbox.join("bare.git");
+        git_at(
+            &r.sandbox,
+            &[
+                "clone",
+                "-q",
+                "--bare",
+                r.path.to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ],
+        );
+        let wt = r.sandbox.join("bare-wt");
+        git_at(
+            &bare,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "main"],
+        );
+        let h = branch_holders(&wt).unwrap();
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(h[0].branch == "main" && h[0].current);
     }
 }
