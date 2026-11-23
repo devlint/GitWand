@@ -62,9 +62,6 @@ pub(super) fn is_sha(s: &str) -> bool {
 }
 
 /// Every declared layer and its report, bottom→top per chain (spec §5.3).
-// Consumed by Task 6 (stack_status) of the stacked-branches plan; `plan`
-// uses `status_inner`.
-#[allow(dead_code)]
 pub(crate) fn status(
     repo: &Path,
     configured_trunk: Option<&str>,

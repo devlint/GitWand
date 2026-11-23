@@ -201,8 +201,6 @@ pub(crate) fn trunk(repo: &Path, configured: Option<&str>) -> Option<String> {
 }
 
 /// Declares `parent` as the layer below `layer` and records the merge-base.
-// Consumed by Task 6 (Tauri commands) of the stacked-branches plan.
-#[allow(dead_code)]
 pub(crate) fn set_parent(
     repo: &Path,
     trunk_name: Option<&str>,

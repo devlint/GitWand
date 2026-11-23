@@ -530,8 +530,6 @@ fn current_branch(repo: &Path) -> Result<Option<String>, String> {
 /// preview. Writes the pending record only once every check has passed, then
 /// runs one `git rebase --update-refs`. Never finalizes: `status` does, on the
 /// next refresh, whether the rebase ended at once or after a halt.
-// Consumed by Task 6 (Tauri commands) of the stacked-branches plan.
-#[allow(dead_code)]
 pub(crate) fn run(
     repo: &Path,
     configured_trunk: Option<&str>,

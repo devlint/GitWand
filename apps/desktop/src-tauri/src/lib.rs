@@ -310,6 +310,20 @@ pub fn git_operation_action_parity(
 /// and these commands return several different `Ok` types — `()` for some,
 /// `Option<SnapshotMeta>` for the ones that can take a snapshot. The tests
 /// assert on the repository, never on the payload.
+fn parity_opt(args: &serde_json::Value, key: &str) -> Option<String> {
+    args.get(key).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn parity_merged_parents(
+    args: &serde_json::Value,
+) -> Result<Vec<crate::stack::MergedParentHint>, String> {
+    match args.get("mergedParents") {
+        None | Some(serde_json::Value::Null) => Ok(vec![]),
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| format!("invalid arg 'mergedParents': {e}")),
+    }
+}
+
 fn parity_ok_marker<T>(_: T) -> serde_json::Value {
     serde_json::json!({ "ok": true })
 }
@@ -525,6 +539,57 @@ pub fn command_parity(
             tauri::async_runtime::block_on(commands::read::git_config_identity(s("cwd")?))
                 .map(|(name, email)| serde_json::json!([name, email]))
         }
+        // Stacked branches. Optional `trunk`; `mergedParents` / `previewed`
+        // carry the serde shapes of `MergedParentHint` / `PreviewedRestack`.
+        "stack_status" => tauri::async_runtime::block_on(commands::stack::stack_status(
+            s("cwd")?,
+            parity_opt(&args, "trunk"),
+            parity_merged_parents(&args)?,
+        ))
+        .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
+        "stack_set_parent" => tauri::async_runtime::block_on(commands::stack::stack_set_parent(
+            s("cwd")?,
+            s("branch")?,
+            s("parent")?,
+            parity_opt(&args, "trunk"),
+        ))
+        .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
+        "stack_unset" => {
+            tauri::async_runtime::block_on(commands::stack::stack_unset(s("cwd")?, s("branch")?))
+                .map(parity_ok_marker)
+        }
+        "stack_restack_plan" => {
+            tauri::async_runtime::block_on(commands::stack::stack_restack_plan(
+                s("cwd")?,
+                s("branch")?,
+                parity_opt(&args, "trunk"),
+                parity_merged_parents(&args)?,
+            ))
+            .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string()))
+        }
+        "git_restack" => {
+            let previewed = serde_json::from_value(
+                args.get("previewed")
+                    .cloned()
+                    .ok_or_else(|| format!("missing required arg 'previewed' for {}", command))?,
+            )
+            .map_err(|e| format!("invalid arg 'previewed': {e}"))?;
+            tauri::async_runtime::block_on(commands::stack::git_restack(
+                s("cwd")?,
+                s("branch")?,
+                parity_opt(&args, "trunk"),
+                parity_merged_parents(&args)?,
+                previewed,
+            ))
+            .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string()))
+        }
+        "preview_restack" => tauri::async_runtime::block_on(commands::read::preview_restack(
+            s("cwd")?,
+            s("onto")?,
+            s("upstream")?,
+            s("branch")?,
+        ))
+        .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
         other => Err(format!("command-parity does not know '{}'", other)),
     }
 }
@@ -839,6 +904,13 @@ pub fn run() {
             commands::read::git_repo_state,
             commands::ops::git_interactive_rebase,
             commands::ops::git_rebase_onto,
+            commands::ops::git_push_branch,
+            commands::stack::stack_status,
+            commands::stack::stack_set_parent,
+            commands::stack::stack_unset,
+            commands::stack::stack_restack_plan,
+            commands::stack::git_restack,
+            commands::read::preview_restack,
             commands::ops::git_add_to_gitignore,
             commands::ops::git_discard,
             commands::read::git_show,
@@ -1665,6 +1737,21 @@ mod command_parity_tests {
             err.contains("git_not_a_command"),
             "error names the command: {err}"
         );
+    }
+
+    #[test]
+    fn command_parity_knows_the_stack_commands() {
+        for c in [
+            "stack_status",
+            "stack_set_parent",
+            "stack_unset",
+            "stack_restack_plan",
+            "git_restack",
+            "preview_restack",
+        ] {
+            let err = command_parity(c.into(), serde_json::json!({})).unwrap_err();
+            assert!(!err.contains("does not know"), "{c}: {err}");
+        }
     }
 
     #[test]

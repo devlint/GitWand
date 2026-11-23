@@ -2091,7 +2091,6 @@ pub(crate) fn replay_preview(
 /// Preview a restack: replay only `upstream..branch` onto `onto` — the layer's
 /// own commits, never the merged parent's (which a plain `preview_rebase`
 /// from the merge-base would replay and report as phantom conflicts).
-// Consumed by Task 6 (Tauri commands) of the stacked-branches plan.
 #[allow(dead_code)]
 #[tauri::command]
 pub(crate) async fn preview_restack(

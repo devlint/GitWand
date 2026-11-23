@@ -512,6 +512,78 @@ pub(crate) async fn git_push(
     })
 }
 
+/// Force-push one local branch to its configured upstream, guarded by the
+/// remote tip the user was shown (`lease_sha`). The branch need not be checked
+/// out: the refspec names it explicitly. Used after a restack, which rewrites
+/// branches that sit below the one checked out.
+#[tauri::command]
+pub(crate) async fn git_push_branch(
+    cwd: String,
+    branch: String,
+    lease_sha: String,
+) -> Result<GitPushPullResult, String> {
+    crate::stack::meta::validate_branch_name(&branch)?;
+    let lease_for = |remote_branch: &str| force_with_lease_arg(remote_branch, &lease_sha);
+    // Same guard as `git_push`: refs only, so concurrent with reads, but
+    // serialized against writers and other pushes.
+    let _repo = repo_lock::push(&cwd);
+    let config = |var: &str| -> Result<Option<String>, String> {
+        let key = format!("branch.{branch}.{var}");
+        let out = git_cmd()
+            .args(["config", "--get", &key])
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("Failed to read {key}: {e}"))?;
+        match out.status.code() {
+            Some(0) => Ok(
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                    .filter(|v| !v.is_empty()),
+            ),
+            // Exit 1: the key is not set. Anything else is a failure we
+            // cannot evaluate, which must not read as "no upstream".
+            Some(1) => Ok(None),
+            _ => Err(format!(
+                "git config {key}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )),
+        }
+    };
+    let (Some(remote), Some(merge)) = (config("remote")?, config("merge")?) else {
+        return Err(format!("{branch} has no upstream"));
+    };
+    let remote_branch = merge
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&merge)
+        .to_string();
+    let lease = lease_for(&remote_branch)?;
+    let refspec = format!("refs/heads/{branch}:refs/heads/{remote_branch}");
+    let args = ["push", lease.as_str(), remote.as_str(), refspec.as_str()];
+    let _t0 = Instant::now();
+    let output = git_cmd()
+        .args(args)
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git push: {}", e))?;
+    record_cmd(
+        "git push (branch)",
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(GitPushPullResult {
+        success: output.status.success(),
+        message: if output.status.success() && !stdout.is_empty() {
+            stdout
+        } else {
+            stderr
+        },
+        conflicts: None,
+        refs_changed: None,
+    })
+}
+
 /// Fetch from remote, streaming `git fetch --progress`'s stderr over
 /// `on_progress` (v3.10.0). Reuses `CloneProgress`/`parse_clone_progress`
 /// from the clone path rather than a second shape — see the doc comment on
@@ -6991,5 +7063,67 @@ mod force_with_lease_tests {
         ] {
             assert!(force_with_lease_arg(b, SHA).is_err(), "{b:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod push_branch_tests {
+    use super::*;
+    use crate::worktree::test_support::{git_at, TempRepo};
+
+    /// `step-2` published with `-u`, then amended while `main` is checked out.
+    /// Returns (repo, bare, old origin/step-2 sha, local step-2 sha).
+    fn amended_step2() -> (TempRepo, std::path::PathBuf, String, String) {
+        let repo = TempRepo::new();
+        let bare = repo.add_bare_origin();
+        repo.git(&["checkout", "-q", "-b", "step-2"]);
+        repo.commit("b.txt", "1", "step 2");
+        repo.git(&["push", "-q", "-u", "origin", "step-2"]);
+        let old = git_at(&bare, &["rev-parse", "step-2"]);
+        repo.write("b.txt", "2");
+        repo.git(&["commit", "-q", "-a", "--amend", "-m", "step 2 amended"]);
+        let local = repo.git(&["rev-parse", "step-2"]);
+        repo.git(&["checkout", "-q", "main"]);
+        (repo, bare, old, local)
+    }
+
+    fn push(repo: &TempRepo, branch: &str, lease: &str) -> Result<GitPushPullResult, String> {
+        tauri::async_runtime::block_on(git_push_branch(
+            repo.path.to_str().unwrap().to_string(),
+            branch.to_string(),
+            lease.to_string(),
+        ))
+    }
+
+    #[test]
+    fn push_branch_force_pushes_a_non_checked_out_branch_with_its_lease() {
+        let (repo, bare, old, local) = amended_step2();
+        let r = push(&repo, "step-2", &old).unwrap();
+        assert!(r.success, "{}", r.message);
+        assert_eq!(git_at(&bare, &["rev-parse", "step-2"]), local);
+    }
+
+    #[test]
+    fn push_branch_refuses_a_stale_lease() {
+        let (repo, bare, old, _local) = amended_step2();
+        let r = push(&repo, "step-2", &"0".repeat(40)).unwrap();
+        assert!(!r.success);
+        assert_eq!(git_at(&bare, &["rev-parse", "step-2"]), old);
+    }
+
+    #[test]
+    fn push_branch_without_upstream_errors() {
+        let repo = TempRepo::new();
+        repo.add_bare_origin();
+        repo.git(&["branch", "step-3"]);
+        let err = push(&repo, "step-3", &"0".repeat(40)).err().unwrap();
+        assert_eq!(err, "step-3 has no upstream");
+    }
+
+    #[test]
+    fn push_branch_refuses_a_dash_name() {
+        let repo = TempRepo::new();
+        let err = push(&repo, "-f", &"0".repeat(40)).err().unwrap();
+        assert_eq!(err, "invalid branch name: -f");
     }
 }
