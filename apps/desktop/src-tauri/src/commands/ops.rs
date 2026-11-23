@@ -2753,7 +2753,7 @@ pub(crate) async fn git_worktree_list(cwd: String) -> Result<Vec<WorktreeEntry>,
 /// Factoring this out keeps the "command bodies never call one another"
 /// invariant true (see `git/repo_lock.rs`) so the non-reentrant `RwLock` can
 /// never be re-acquired on the same repo from a single command.
-fn list_worktrees(cwd: &str) -> Result<Vec<WorktreeEntry>, String> {
+pub(crate) fn list_worktrees(cwd: &str) -> Result<Vec<WorktreeEntry>, String> {
     let output = git_cmd()
         .args(["worktree", "list", "--porcelain"])
         .current_dir(cwd)

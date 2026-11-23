@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod guard;
 pub(crate) mod meta;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
