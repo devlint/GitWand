@@ -595,6 +595,13 @@ const zhCN: Locale = {
     resetToOriginTitle: "重置为远程状态？",
   },
 
+  stacks: {
+    preview: {
+      moving: "将被移动的分支",
+      notInStack: "（不在堆栈中）",
+    },
+  },
+
   mergePreview: {
 
     applying: "\u6b63\u5728\u5e94\u7528\u2026",

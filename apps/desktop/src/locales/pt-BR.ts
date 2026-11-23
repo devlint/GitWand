@@ -596,6 +596,13 @@ const ptBR: Locale = {
     resetToOriginTitle: "Redefinir para a origem?",
   },
 
+  stacks: {
+    preview: {
+      moving: "Branches que vão se mover",
+      notInStack: "(fora da pilha)",
+    },
+  },
+
   // ─── Merge Preview ──────────────────────────────────────
   mergePreview: {
     applying: "Aplicando\u2026",

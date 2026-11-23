@@ -332,3 +332,16 @@ describe("useApplyFromPreview — merge-back options (v3.13)", () => {
     expect(deps.finalize).not.toHaveBeenCalled();
   });
 });
+
+describe("useApplyFromPreview — custom rebase runner", () => {
+  it("a rebase with opts.runRebase never calls deps.runRebaseOnto", async () => {
+    const deps = makeDeps();
+    const { apply } = useApplyFromPreview(deps);
+    const runRebase = vi.fn(async () => ({ conflict: false }));
+
+    await apply("rebase", "step-1", 0, { runRebase });
+
+    expect(runRebase).toHaveBeenCalledWith("step-1");
+    expect(deps.runRebaseOnto).not.toHaveBeenCalled();
+  });
+});

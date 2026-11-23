@@ -600,6 +600,13 @@ const fr: Locale = {
     resetToOriginTitle: "Réinitialiser sur origin ?",
   },
 
+  stacks: {
+    preview: {
+      moving: "Branches qui vont bouger",
+      notInStack: "(hors de la pile)",
+    },
+  },
+
   // ─── Merge Preview (Phase 8.1) ──────────────────────────
   mergePreview: {
     applying: "Application\u2026",

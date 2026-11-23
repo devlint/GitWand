@@ -607,6 +607,13 @@ const en = {
     resetToOriginTitle: "Reset to origin?",
   },
 
+  stacks: {
+    preview: {
+      moving: "Branches that will move",
+      notInStack: "(not in the stack)",
+    },
+  },
+
   // ─── Merge Preview (Phase 8.1) ──────────────────────────
   mergePreview: {
     applying: "Applying\u2026",

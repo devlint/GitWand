@@ -83,6 +83,14 @@
       </span>
     </div>
 
+    <!-- v3.14 — branches a restack will move (absent for merge/rebase) -->
+    <div v-if="movingRefs && movingRefs.length > 0" class="preview-moving">
+      <div class="preview-moving__title">{{ t('stacks.preview.moving') }}</div>
+      <div v-for="m in movingRefs" :key="m.branch" class="preview-moving__row mono">
+        {{ m.branch }}<span v-if="!m.inStack" class="preview-moving__note"> {{ t('stacks.preview.notInStack') }}</span>
+      </div>
+    </div>
+
     <!-- Per-file list (conflicting files only) -->
     <div v-if="conflictingFiles.length > 0" class="preview-files">
       <div
@@ -267,6 +275,8 @@ const props = defineProps<{
   error: string | null;
   summary: MergePreviewSummary | null;
   conflictingFiles: PreviewFileResult[];
+  /** v3.14 restack — branches the operation will move; omitted for merge/rebase. */
+  movingRefs?: { branch: string; inStack: boolean }[];
   /** Risk level derived by useMergePreview (low / medium / high). */
   riskLevel?: RiskLevel;
   /** Operation currently simulated (merge / rebase / cherry-pick). */
@@ -639,6 +649,12 @@ function basename(path: string): string {
 .stat--auto     { background: var(--color-info-soft); color: var(--color-info); }
 .stat--manual   { background: var(--color-warning-soft); color: var(--color-warning); }
 .stat--clean    { background: var(--color-success-soft); color: var(--color-success); }
+
+/* Restack: branches that will move */
+.preview-moving { display: flex; flex-direction: column; gap: 2px; }
+.preview-moving__title { font-size: 11px; color: var(--text-muted); }
+.preview-moving__row { font-size: 12px; }
+.preview-moving__note { color: var(--text-muted); }
 
 /* File list */
 .preview-files {

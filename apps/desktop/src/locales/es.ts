@@ -595,6 +595,13 @@ const es: Locale = {
     resetToOriginTitle: "¿Restaurar a origin?",
   },
 
+  stacks: {
+    preview: {
+      moving: "Ramas que se moverán",
+      notInStack: "(fuera de la pila)",
+    },
+  },
+
   // ─── Merge Preview ──────────────────────────────────────
   mergePreview: {
     applying: "Aplicando\u2026",
