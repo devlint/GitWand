@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Stacked branches.** *Stack on…* records which branch a branch sits on (parent and base, in local git config: `branch.<b>.gitwandParent` / `gitwandStackBase`); stacks are linear. An open GitHub PR whose base is another local branch suggests *Stack on…*.
+  - **Detection.** GitWand notices when the parent gets new commits or is merged. On GitHub a merge is read from the PR, squash merges included; elsewhere git detects merge commits, rebase merges and single-commit squashes. A parent with no commits of its own is never read as merged.
+  - **Restack.** One click restacks the whole stack above the affected layer in a single `git rebase --onto … --update-refs`, after a conflict preview that lists every branch that will move, including branches outside the stack. Before a merged-parent restack GitWand fetches and lands onto `origin/<trunk>`; a failed fetch refuses it.
+  - **Refusals, with the reason.** A layer checked out or being rebased in another worktree, a dirty tree, a detached HEAD, git older than 2.38, a parent behind its remote.
+  - **Halted restacks.** A restack that halts on conflicts finishes like a clean one once the rebase is continued from the usual banner; an abort changes nothing.
+  - **After a merged parent,** the child's GitHub PR is retargeted automatically. GitWand then offers to push the moved branches (force-with-lease on the remote position read before the restack, never automatic) and to delete the merged local branch.
+  - **Unfinished restacks.** A restack GitWand could not finish is shown per branch, with *Unstack* as the way out.
+
+### Changed
+
+- **The desktop main-bundle budget is raised from 960 KB to 980 KB.** The overrun predates stacked branches; the stack badge, banner, dialog and restack flow are lazy chunks.
+
 ## [3.13.3] - 2026-11-20
 
 ### Added
