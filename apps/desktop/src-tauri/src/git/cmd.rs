@@ -538,42 +538,8 @@ pub(crate) fn output_with_timeout_input(
 ///    literal that caused `fatal: failed to find 'main'` (#136) whenever none
 ///    of the above candidates existed.
 pub(crate) fn resolve_default_branch(cwd: &str, configured: Option<&str>) -> String {
-    let verify = |name: &str| -> bool {
-        git_cmd()
-            .args(["rev-parse", "--verify", name])
-            .current_dir(cwd)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    };
-
-    if let Some(name) = configured {
-        let name = name.trim();
-        if !name.is_empty() && verify(name) {
-            return name.to_string();
-        }
-    }
-
-    if let Ok(output) = git_cmd()
-        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-        .current_dir(cwd)
-        .output()
-    {
-        if output.status.success() {
-            // e.g. "origin/main" -> "main"
-            let short = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if let Some((_, name)) = short.split_once('/') {
-                if !name.is_empty() && verify(name) {
-                    return name.to_string();
-                }
-            }
-        }
-    }
-
-    for name in ["main", "master", "origin/main", "origin/master"] {
-        if verify(name) {
-            return name.to_string();
-        }
+    if let Some(name) = resolve_default_branch_strict(cwd, configured) {
+        return name;
     }
 
     if let Ok(output) = git_cmd()
@@ -590,6 +556,49 @@ pub(crate) fn resolve_default_branch(cwd: &str, configured: Option<&str>) -> Str
     }
 
     "main".to_string()
+}
+
+/// Steps 1-3 of [`resolve_default_branch`] only: the configured branch, the
+/// remote's default branch, then `main`/`master`/`origin/main`/`origin/master`.
+/// Never falls back to the current branch, so `None` means "this repo has no
+/// identifiable trunk" (the stacked-branches feature needs that distinction).
+pub(crate) fn resolve_default_branch_strict(cwd: &str, configured: Option<&str>) -> Option<String> {
+    let verify = |name: &str| -> bool {
+        git_cmd()
+            .args(["rev-parse", "--verify", name])
+            .current_dir(cwd)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+
+    if let Some(name) = configured {
+        let name = name.trim();
+        if !name.is_empty() && verify(name) {
+            return Some(name.to_string());
+        }
+    }
+
+    if let Ok(output) = git_cmd()
+        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+        .current_dir(cwd)
+        .output()
+    {
+        if output.status.success() {
+            // e.g. "origin/main" -> "main"
+            let short = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some((_, name)) = short.split_once('/') {
+                if !name.is_empty() && verify(name) {
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+
+    ["main", "master", "origin/main", "origin/master"]
+        .into_iter()
+        .find(|name| verify(name))
+        .map(str::to_string)
 }
 
 /// Returns the list of files that differ between two revs (names only).
