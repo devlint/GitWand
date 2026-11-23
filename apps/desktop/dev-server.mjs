@@ -19,6 +19,8 @@ import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
 import { devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
+import { resolveBin } from "./dev-bin.mjs";
+import { devForkParentNwo, devParseGhBranchPr } from "./dev-gh-branch-pr.mjs";
 import { devGitRestack, devStackRestackPlan, devStackSetParent, devStackStatus, devStackUnset, devValidateBranchName } from "./dev-stack-service.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
@@ -204,21 +206,6 @@ function repoRelativePath(cwd, root, path, guarded) {
   }
   if (!parts.length) parts = relative(root, guarded).split(sep).filter(Boolean);
   return parts.join("/");
-}
-
-/** Resolve the full path to a CLI binary, checking Homebrew paths on macOS. */
-function resolveBin(name) {
-  // Try common macOS Homebrew locations first
-  const candidates = [
-    `/opt/homebrew/bin/${name}`,
-    `/usr/local/bin/${name}`,
-    `/usr/bin/${name}`,
-    name, // fallback: rely on PATH
-  ];
-  for (const c of candidates) {
-    try { if (existsSync(c)) return c; } catch { /* ignore */ }
-  }
-  return name;
 }
 
 const GH = resolveBin("gh");
@@ -1545,35 +1532,29 @@ function devForceWithLeaseArg(branch, sha) {
   return `--force-with-lease=refs/heads/${b}:${s}`;
 }
 
-/** `parse_gh_branch_pr_json` (commands/gh.rs): the PRs whose head repo owner
- *  is `originOwner` (ASCII case-insensitive; no owner is dropped), then the
- *  newest merged one for `merged` (never an unmerged one), else the first. */
-function devParseGhBranchPr(stdout, state, originOwner) {
+/** `gh_fork_parent` (commands/gh.rs) answers, by origin, for ten minutes. */
+const devForkParentCache = new Map();
+
+/** `gh_base_repo` (commands/gh.rs): the repo PRs are listed from and act on —
+ *  origin's fork parent when origin is a fork, else origin; null without a
+ *  github.com origin (gh chooses). A failed fork lookup is an error, never a
+ *  guess: a PR number sent to the wrong repo names another pull request. */
+function devGhBaseNwo(cwd) {
+  const origin = getRepoNwo(cwd);
+  if (!origin) return null;
+  const hit = devForkParentCache.get(origin);
+  if (hit && Date.now() - hit.at < 600_000) return hit.parent ?? origin;
+  const r = spawnSync(GH, ["repo", "view", origin, "--json", "isFork,parent"], {
+    cwd, encoding: "utf-8", env: { ...process.env, GH_HOST: "github.com" }, timeout: 20_000,
+  });
+  if (r.error) throw new Error(`Failed to run gh repo view (is GitHub CLI installed?): ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`gh repo view ${origin} failed: ${(r.stderr || "").trim()}`);
   let v;
-  try { v = JSON.parse(stdout.trim()); }
-  catch (e) { throw new Error(`Failed to parse gh pr list output: ${e.message}`); }
-  if (!Array.isArray(v)) throw new Error("gh pr list did not return a list");
-  const str = (x, k) => (typeof x?.[k] === "string" ? x[k] : "");
-  const prs = v
-    .filter((x) => Number.isSafeInteger(x?.number))
-    .filter((x) => {
-      const owner = str(x.headRepositoryOwner, "login");
-      return owner !== "" && owner.toLowerCase() === originOwner.toLowerCase();
-    })
-    .map((x) => ({
-      number: x.number,
-      base: str(x, "baseRefName"),
-      head_ref_oid: str(x, "headRefOid"),
-      merged_at: typeof x.mergedAt === "string" ? x.mergedAt : null,
-      url: str(x, "url"),
-    }));
-  if (state !== "merged") return prs[0] ?? null;
-  // `max_by`: the last of equal maxima wins.
-  let newest = null;
-  for (const p of prs) {
-    if (p.merged_at !== null && (newest === null || p.merged_at >= newest.merged_at)) newest = p;
-  }
-  return newest;
+  try { v = JSON.parse(r.stdout || ""); }
+  catch (e) { throw new Error(`Failed to parse gh repo view output: ${e.message}`); }
+  const parent = devForkParentNwo(v);
+  devForkParentCache.set(origin, { parent, at: Date.now() });
+  return parent ?? origin;
 }
 
 /** `gh_api_failure` (commands/gh.rs): GitHub's own message when gh relayed a
@@ -4085,15 +4066,9 @@ async function handleRequest(req, res) {
             return jsonResponse(req, res, { success: false, message: "lease_branch and lease_sha must be given together" });
           }
           if (hasBranch) {
-            // Mirrors force_with_lease_arg() in src-tauri/src/commands/ops.rs.
-            const shaOk = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(String(leaseSha));
-            const b = String(leaseBranch);
-            const branchOk =
-              b !== "" && !/^[-/]/.test(b) && !/[/.]$/.test(b) && !b.includes("..") && !b.includes("//") &&
-              !b.includes("@{") && !/[\u0000-\u0020\u007f~^:?*[\\]/.test(b);
-            if (!shaOk) return jsonResponse(req, res, { success: false, message: "invalid lease sha" });
-            if (!branchOk) return jsonResponse(req, res, { success: false, message: "invalid lease branch" });
-            args.push(`--force-with-lease=refs/heads/${b}:${leaseSha}`);
+            // force_with_lease_arg() in src-tauri/src/commands/ops.rs.
+            try { args.push(devForceWithLeaseArg(leaseBranch, leaseSha)); }
+            catch (e) { return jsonResponse(req, res, { success: false, message: e.message }); }
           } else {
             args.push("--force-with-lease");
           }
@@ -7491,8 +7466,9 @@ async function handleRequest(req, res) {
     // Mirrors `gh_branch_pr` (commands/gh.rs) on its gh CLI path: the same
     // argument checks, `gh pr list --head`, then only the PRs whose head repo
     // belongs to origin's owner (`--head` has no owner), and `merged` never
-    // falls back to an unmerged PR. Like the other dev-server gh routes, the
-    // repo is origin (`getRepoNwo`, github.com only), not a fork's parent.
+    // falls back to an unmerged PR. PRs are listed from the base repo (the
+    // fork parent when origin is a fork), as `gh_base_cmd` does; github.com
+    // origins only, like every dev-server gh route.
     if (url.pathname === "/api/gh-branch-pr" && req.method === "POST") {
       const { cwd, branch, state } = await readBody(req);
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
@@ -7501,11 +7477,12 @@ async function handleRequest(req, res) {
         if (typeof branch !== "string" || branch.startsWith("-")) throw new Error(`invalid branch name: ${branch}`);
         if (state !== "open" && state !== "merged") throw new Error(`invalid PR state: ${state}`);
         const nwo = getRepoNwo(resolvedCwd);
+        const baseNwo = devGhBaseNwo(resolvedCwd);
         const r = spawnSync(GH, [
           "pr", "list", "--state", state, "--head", branch,
           "--json", "number,baseRefName,headRefOid,mergedAt,url,headRepositoryOwner",
           "--limit", "100",
-        ], { cwd: resolvedCwd, encoding: "utf-8", env: ghRepoEnv(nwo), timeout: 20_000 });
+        ], { cwd: resolvedCwd, encoding: "utf-8", env: ghRepoEnv(baseNwo), timeout: 20_000 });
         if (r.error) throw new Error(`Failed to run gh pr list (is GitHub CLI installed?): ${r.error.message}`);
         if (r.status !== 0) throw new Error(`gh pr list failed: ${r.stderr || ""}`);
         const owner = nwo ? nwo.split("/")[0] : "";
@@ -7518,7 +7495,9 @@ async function handleRequest(req, res) {
 
     // POST /api/gh-pr-set-base  { cwd, number, base }  -> null
     // Mirrors `gh_pr_set_base` (commands/gh.rs) on its gh CLI path:
-    // `gh api -X PATCH repos/<nwo>/pulls/<n> -f base=<base>`.
+    // `gh api -X PATCH repos/<nwo>/pulls/<n> -f base=<base>`, <nwo> being the
+    // base repo (`gh_base_nwo`: the fork parent when origin is a fork), else
+    // the repo gh itself picks.
     if (url.pathname === "/api/gh-pr-set-base" && req.method === "POST") {
       const { cwd, number, base } = await readBody(req);
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
@@ -7527,7 +7506,7 @@ async function handleRequest(req, res) {
         if (!Number.isSafeInteger(number) || number <= 0) throw new Error(`invalid PR number: ${number}`);
         if (typeof base !== "string" || base === "") throw new Error("base must not be empty");
         if (base.startsWith("-")) throw new Error(`invalid branch name: ${base}`);
-        let nwo = await ghPrNwo(resolvedCwd, number);
+        let nwo = devGhBaseNwo(resolvedCwd);
         const env = nwo ? { ...process.env, GH_HOST: "github.com" } : process.env;
         if (!nwo) {
           const v = spawnSync(GH, ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], {

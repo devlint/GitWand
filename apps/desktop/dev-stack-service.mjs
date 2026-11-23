@@ -17,8 +17,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { resolveBin } from "./dev-bin.mjs";
 
-const GIT = "git";
+/** The git dev-server.mjs spawns (`resolveBin`), not whatever is first on PATH. */
+const GIT = resolveBin("git");
 
 /** `git_cmd().args(args).current_dir(repo).output()`: `{ status, stdout,
  *  stderr }`, or throws `git <first arg>: <spawn error>`. `status` is null
@@ -1201,38 +1203,64 @@ function trySwitchBack(repo, top, original) {
 // ── commands/stack.rs ───────────────────────────────────────────────────────
 // The route bodies: wire arguments in, `crate::stack` out. `mergedParents`
 // carries `MergedParentHint` and `previewed` carries `PreviewedRestack`, both
-// in serde's snake_case, as Tauri deserializes them.
+// in serde's snake_case, as Tauri deserializes them. Both are required, as
+// Tauri requires every non-`Option` argument: a missing one is refused with
+// Tauri's words (the probe's `command_parity` alone defaults it to `[]`).
 
 const optString = (v) => (typeof v === "string" ? v : null);
 
-/** `Vec<MergedParentHint>`: `{ branch, number, head_ref_oid? }`. */
-function mergedParentHints(v) {
-  if (v === undefined || v === null) return [];
-  const bad = (why) => fail(`invalid arg 'mergedParents': ${why}`);
-  if (!Array.isArray(v)) bad("expected a sequence");
+/** Tauri's own refusal of a bad top-level argument (`InvalidArgs`). */
+function invalidArgs(name, command, why) {
+  fail(`invalid args \`${name}\` for command \`${command}\`: ${why}`);
+}
+
+/** serde's "invalid type" for a JSON value where `expected` was wanted. */
+function invalidType(v, expected) {
+  const what =
+    v === null ? "null"
+    : Array.isArray(v) ? "sequence"
+    : typeof v === "string" ? `string ${JSON.stringify(v)}`
+    : typeof v === "object" ? "map"
+    : typeof v === "boolean" ? `boolean \`${v}\``
+    : `${Number.isInteger(v) ? "integer" : "floating point"} \`${v}\``;
+  return `invalid type: ${what}, expected ${expected}`;
+}
+
+/** `Vec<MergedParentHint>` (`{ branch, number, head_ref_oid? }`), required
+ *  like any non-`Option` argument of a Tauri command: missing is refused. */
+function mergedParentHints(v, command) {
+  const name = "mergedParents";
+  if (v === undefined) invalidArgs(name, command, `command ${command} missing required key ${name}`);
+  if (!Array.isArray(v)) invalidArgs(name, command, invalidType(v, "a sequence"));
   return v.map((h) => {
-    if (!h || typeof h !== "object") bad("expected struct MergedParentHint");
-    if (typeof h.branch !== "string") bad("missing field `branch`");
-    if (!Number.isSafeInteger(h.number)) bad("missing field `number`");
+    if (!h || typeof h !== "object" || Array.isArray(h)) invalidArgs(name, command, invalidType(h, "struct MergedParentHint"));
+    if (typeof h.branch !== "string") invalidArgs(name, command, "missing field `branch`");
+    if (!Number.isSafeInteger(h.number)) invalidArgs(name, command, "missing field `number`");
     const oid = h.head_ref_oid ?? null;
-    if (oid !== null && typeof oid !== "string") bad("invalid type for `head_ref_oid`");
+    if (oid !== null && typeof oid !== "string") invalidArgs(name, command, invalidType(oid, "a string"));
     return { branch: h.branch, number: h.number, head_ref_oid: oid };
   });
 }
 
-/** `PreviewedRestack`: `{ onto_sha, upstream_sha, top_sha, moving }`. */
-function previewedRestack(v) {
-  const bad = (why) => fail(`invalid arg 'previewed': ${why}`);
-  if (!v || typeof v !== "object") bad("expected struct PreviewedRestack");
-  for (const k of ["onto_sha", "upstream_sha", "top_sha"]) {
-    if (typeof v[k] !== "string") bad(`missing field \`${k}\``);
+/** `PreviewedRestack`: `{ onto_sha, upstream_sha, top_sha, moving }`, required. */
+function previewedRestack(v, command) {
+  const name = "previewed";
+  if (v === undefined) invalidArgs(name, command, `command ${command} missing required key ${name}`);
+  if (!v || typeof v !== "object" || Array.isArray(v)) invalidArgs(name, command, invalidType(v, "struct PreviewedRestack"));
+  for (const k of ["onto_sha", "upstream_sha", "top_sha", "moving"]) {
+    if (v[k] === undefined) invalidArgs(name, command, `missing field \`${k}\``);
   }
-  if (!Array.isArray(v.moving) || v.moving.some((b) => typeof b !== "string")) bad("missing field `moving`");
+  for (const k of ["onto_sha", "upstream_sha", "top_sha"]) {
+    if (typeof v[k] !== "string") invalidArgs(name, command, invalidType(v[k], "a string"));
+  }
+  if (!Array.isArray(v.moving) || v.moving.some((b) => typeof b !== "string")) {
+    invalidArgs(name, command, invalidType(v.moving, "a sequence of strings"));
+  }
   return { onto_sha: v.onto_sha, upstream_sha: v.upstream_sha, top_sha: v.top_sha, moving: v.moving };
 }
 
 export function devStackStatus(cwd, configuredTrunk, mergedParents) {
-  return status(cwd, optString(configuredTrunk), mergedParentHints(mergedParents));
+  return status(cwd, optString(configuredTrunk), mergedParentHints(mergedParents, "stack_status"));
 }
 
 export function devStackSetParent(cwd, branch, parent, configuredTrunk) {
@@ -1245,7 +1273,7 @@ export function devStackUnset(cwd, branch) {
 }
 
 export function devStackRestackPlan(cwd, branch, configuredTrunk, mergedParents) {
-  return plan(cwd, optString(configuredTrunk), branch, mergedParentHints(mergedParents), gitVersion());
+  return plan(cwd, optString(configuredTrunk), branch, mergedParentHints(mergedParents, "stack_restack_plan"), gitVersion());
 }
 
 export function devGitRestack(cwd, branch, configuredTrunk, mergedParents, previewed) {
@@ -1253,8 +1281,8 @@ export function devGitRestack(cwd, branch, configuredTrunk, mergedParents, previ
     cwd,
     optString(configuredTrunk),
     branch,
-    mergedParentHints(mergedParents),
-    previewedRestack(previewed),
+    mergedParentHints(mergedParents, "git_restack"),
+    previewedRestack(previewed, "git_restack"),
     gitVersion(),
   );
 }

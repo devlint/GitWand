@@ -583,6 +583,14 @@ pub fn command_parity(
             ))
             .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string()))
         }
+        // Pushes to the branch's own upstream: the tests point it at a local
+        // bare origin, never a network remote.
+        "git_push_branch" => tauri::async_runtime::block_on(commands::ops::git_push_branch(
+            s("cwd")?,
+            s("branch")?,
+            s("leaseSha")?,
+        ))
+        .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
         "preview_restack" => tauri::async_runtime::block_on(commands::read::preview_restack(
             s("cwd")?,
             s("onto")?,
@@ -1793,6 +1801,7 @@ mod command_parity_tests {
         );
         assert!(bad.unwrap_err().contains("mergedParents"));
     }
+
     #[test]
     fn command_parity_knows_the_stack_commands() {
         for c in [
@@ -1802,6 +1811,7 @@ mod command_parity_tests {
             "stack_restack_plan",
             "git_restack",
             "preview_restack",
+            "git_push_branch",
         ] {
             let err = command_parity(c.into(), serde_json::json!({})).unwrap_err();
             assert!(!err.contains("does not know"), "{c}: {err}");
