@@ -43,7 +43,11 @@ fn is_ancestor(repo: &Path, a: &str, b: &str) -> Result<bool, String> {
     match out.status.code() {
         Some(0) => Ok(true),
         Some(1) => Ok(false),
-        _ => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+        _ => Err(format!(
+            "git merge-base --is-ancestor {a} {b}: {}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )),
     }
 }
 
@@ -82,9 +86,18 @@ pub(crate) fn status(
 
     let mut layers = Vec::new();
     for chain in chains(&all) {
-        let top = chain.last().cloned().unwrap_or_default();
+        // A layer whose local branch is gone (deleted with its config kept)
+        // has nothing to classify: it is left out, and the layer above it
+        // reports `ParentMissing`.
+        let mut present = Vec::new();
+        for branch in chain {
+            if resolve_commit(repo, &format!("refs/heads/{branch}"))?.is_some() {
+                present.push(branch);
+            }
+        }
+        let top = present.last().cloned().unwrap_or_default();
         let mut affected = false;
-        for branch in &chain {
+        for branch in &present {
             let meta = &all[branch];
             let mut l = classify(
                 repo,
@@ -143,7 +156,11 @@ fn classify(
     };
 
     // 1. The forge says the parent's PR is merged.
-    if let Some(h) = hints.iter().find(|h| h.branch == parent) {
+    let hint = match hints.iter().find(|h| h.branch == parent) {
+        Some(h) if hint_is_stale(repo, h, parent_tip.as_deref())? => None,
+        h => h,
+    };
+    if let Some(h) = hint {
         l.state = LayerState::ParentMerged;
         l.merge_signal = Some(MergeSignal::Forge);
         l.merged_pr = Some(h.number);
@@ -184,11 +201,30 @@ fn classify(
     Ok(l)
 }
 
+/// A merged-PR hint is stale when the parent's local tip has commits the
+/// merged head never had (the branch name was reused after the merge). It
+/// cannot be judged, and is honoured, when the hint has no head sha, the sha
+/// is not known locally, or the parent is gone.
+fn hint_is_stale(
+    repo: &Path,
+    h: &MergedParentHint,
+    parent_tip: Option<&str>,
+) -> Result<bool, String> {
+    let (Some(oid), Some(tip)) = (h.head_ref_oid.as_deref(), parent_tip) else {
+        return Ok(false);
+    };
+    if !is_sha(oid) || resolve_commit(repo, oid)?.is_none() {
+        return Ok(false);
+    }
+    Ok(!is_ancestor(repo, tip, oid)?)
+}
+
 /// D7: has `base` (the old parent tip) landed on `remote_trunk`? (a) every
-/// commit of it is already there by patch-id; (b) it was merged with a merge
-/// commit whose first parent does not contain it (a parent with no commits
-/// of its own is already on the trunk's first-parent line, so it is not
-/// "merged"). Any git error reads as "not merged".
+/// commit of it is already there by patch-id; (b) `base` is an ancestor of
+/// `remote_trunk` but not on its first-parent line, so it came in through a
+/// merge commit. A parent with no commits of its own sits on the first-parent
+/// line and is not "merged", even when the trunk later merged a branch that
+/// had merged the trunk in. Any git error reads as "not merged".
 pub(crate) fn merged_signal(repo: &Path, remote_trunk: &str, base: &str) -> Option<MergeSignal> {
     if remote_trunk.starts_with('-') || base.starts_with('-') {
         return None;
@@ -202,39 +238,30 @@ pub(crate) fn merged_signal(repo: &Path, remote_trunk: &str, base: &str) -> Opti
             return Some(MergeSignal::Cherry);
         }
     }
-    // (b) merge commit
+    // (b) merge commit: walk the trunk's first-parent line down to `base`'s
+    // history. X = the oldest commit of that walk. X^1 == base: base is on
+    // the line, not merged. Otherwise the walk stepped over base, which only
+    // a merge commit can bring in.
     if !is_ancestor(repo, base, remote_trunk).ok()? {
         return None;
     }
-    let range = format!("{base}..{remote_trunk}");
-    let out = run(
-        repo,
-        &[
-            "rev-list",
-            "--merges",
-            "--ancestry-path",
-            "--reverse",
-            &range,
-        ],
-    )
-    .ok()?;
+    let base_sha = resolve_commit(repo, base).ok()??;
+    let range = format!("{base_sha}..{remote_trunk}");
+    let out = run(repo, &["rev-list", "--first-parent", &range]).ok()?;
     if !out.status.success() {
         return None;
     }
     let text = stdout(&out);
-    let first = text.lines().next()?.trim();
-    if first.is_empty() {
-        return None;
-    }
-    match is_ancestor(repo, base, &format!("{first}^1")) {
-        Ok(false) => Some(MergeSignal::MergeCommit),
-        _ => None,
-    }
+    let oldest = text.lines().map(str::trim).rfind(|l| !l.is_empty())?;
+    let first_parent = resolve_commit(repo, &format!("{oldest}^1")).ok()??;
+    (first_parent != base_sha).then_some(MergeSignal::MergeCommit)
 }
 
 /// Bottom→top lists of layers. A bottom is a layer whose parent is not
 /// itself a layer. A layer with several children (hand-edited config) follows
-/// the first by name; a cycle has no bottom and is left out.
+/// the first by name. Layers no walk reaches (a second child, or a cycle,
+/// which has no bottom) are not hidden: each is reported as its own
+/// single-layer chain, after the others, in name order.
 pub(crate) fn chains(all: &BTreeMap<String, StackMeta>) -> Vec<Vec<String>> {
     let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for m in all.values() {
@@ -257,6 +284,12 @@ pub(crate) fn chains(all: &BTreeMap<String, StackMeta>) -> Vec<Vec<String>> {
         }
         out.push(chain);
     }
+    let reached: BTreeSet<String> = out.iter().flatten().cloned().collect();
+    out.extend(
+        all.keys()
+            .filter(|b| !reached.contains(*b))
+            .map(|b| vec![b.clone()]),
+    );
     out
 }
 
@@ -276,6 +309,7 @@ pub(crate) fn behind_upstream(repo: &Path, branch: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stack::meta::read_all;
     use crate::stack::meta::set_parent;
     use crate::stack::LayerState;
     use crate::stack::LayerStatus;
@@ -593,6 +627,150 @@ mod tests {
         assert_eq!(
             merged_signal(&r.path, "refs/remotes/origin/main", "-x"),
             None
+        );
+    }
+
+    #[test]
+    fn an_empty_parent_is_not_merged_after_main_was_merged_into_a_feature() {
+        let r = TempRepo::new();
+        r.add_bare_origin();
+        // A feature forked before main's tip.
+        r.git(&["checkout", "-q", "-b", "feat", "main"]);
+        r.commit("f.txt", "f\n", "feat");
+        r.git(&["checkout", "-q", "main"]);
+        r.commit("m.txt", "m\n", "main moves");
+        // step-1 at main's tip with no commit of its own; step-2 on it.
+        r.git(&["branch", "step-1", "main"]);
+        r.git(&["checkout", "-q", "-b", "step-2", "step-1"]);
+        r.commit("b.txt", "2\n", "s2");
+        set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
+        // "Merge main into feat", then feat merged into main with --no-ff.
+        r.git(&["checkout", "-q", "feat"]);
+        r.git(&[
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge main into feat",
+            "main",
+        ]);
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&["merge", "-q", "--no-ff", "-m", "Merge feat", "feat"]);
+        r.git(&["push", "-q", "origin", "main"]);
+        r.git(&["checkout", "-q", "step-2"]);
+        let base = base_of(&r, "step-2");
+        assert_eq!(
+            merged_signal(&r.path, "refs/remotes/origin/main", &base),
+            None
+        );
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert_eq!(layer(&s, "step-2").state, LayerState::UpToDate);
+        assert_eq!(layer(&s, "step-2").merge_signal, None);
+    }
+
+    #[test]
+    fn a_layer_whose_branch_is_gone_is_left_out_without_failing() {
+        let r = TempRepo::new();
+        stack3(&r);
+        r.git(&["checkout", "-q", "step-2"]);
+        r.git(&["update-ref", "-d", "refs/heads/step-3"]);
+        assert!(read_all(&r.path).unwrap().contains_key("step-3"));
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert_eq!(
+            s.layers
+                .iter()
+                .map(|l| l.branch.as_str())
+                .collect::<Vec<_>>(),
+            ["step-2"]
+        );
+        assert_eq!(layer(&s, "step-2").top, "step-2");
+    }
+
+    #[test]
+    fn a_merged_parent_deleted_locally_is_merged_not_missing() {
+        let r = TempRepo::new();
+        stack3(&r);
+        squash_step1_on_origin(&r);
+        r.git(&["branch", "-q", "-D", "step-1"]);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        let l2 = layer(&s, "step-2");
+        assert_eq!(l2.state, LayerState::ParentMerged);
+        assert_eq!(l2.merge_signal, Some(MergeSignal::Cherry));
+        assert_eq!(l2.parent_tip, None);
+    }
+
+    #[test]
+    fn without_a_base_the_parent_tip_is_probed_for_a_merge() {
+        let r = TempRepo::new();
+        stack3(&r);
+        r.git(&["config", "--unset", "branch.step-2.gitwandStackBase"]);
+        squash_step1_on_origin(&r);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        let l2 = layer(&s, "step-2");
+        assert_eq!(l2.base, None);
+        assert_eq!(l2.state, LayerState::ParentMerged);
+        assert_eq!(l2.merge_signal, Some(MergeSignal::Cherry));
+    }
+
+    #[test]
+    fn a_stale_forge_hint_is_ignored_when_the_parent_moved_past_it() {
+        let r = TempRepo::new();
+        stack3(&r);
+        let merged_head = r.git(&["rev-parse", "step-1"]);
+        let hint = |oid: &str| MergedParentHint {
+            branch: "step-1".into(),
+            number: 7,
+            head_ref_oid: Some(oid.into()),
+        };
+        // The PR's head is the parent's current tip: honoured.
+        let s = status(&r.path, Some("main"), &[hint(&merged_head)]).unwrap();
+        assert_eq!(layer(&s, "step-2").state, LayerState::ParentMerged);
+        // The parent got a commit the merged PR never had: stale, ignored.
+        r.git(&["checkout", "-q", "step-1"]);
+        r.commit("a2.txt", "new\n", "s1 after merge");
+        r.git(&["checkout", "-q", "step-3"]);
+        let s = status(&r.path, Some("main"), &[hint(&merged_head)]).unwrap();
+        let l2 = layer(&s, "step-2");
+        assert_eq!(l2.state, LayerState::OutOfDate);
+        assert_eq!(l2.merged_pr, None);
+    }
+
+    #[test]
+    fn cycle_and_second_child_layers_are_reported_as_their_own_chain() {
+        let m = |b: &str, p: &str| StackMeta {
+            branch: b.into(),
+            parent: p.into(),
+            base: None,
+            pending: None,
+        };
+        let all: BTreeMap<String, StackMeta> = [
+            m("a1", "main"),
+            m("a2", "a1"),
+            m("a2b", "a1"),
+            m("x", "y"),
+            m("y", "x"),
+        ]
+        .into_iter()
+        .map(|x| (x.branch.clone(), x))
+        .collect();
+        assert_eq!(
+            chains(&all),
+            vec![
+                vec!["a1".to_string(), "a2".into()],
+                vec!["a2b".to_string()],
+                vec!["x".to_string()],
+                vec!["y".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn is_ancestor_errors_name_the_command() {
+        let r = TempRepo::new();
+        let e = is_ancestor(&r.path, "refs/heads/nope", "main").unwrap_err();
+        assert!(
+            e.contains("merge-base --is-ancestor refs/heads/nope main"),
+            "{e}"
         );
     }
 }
