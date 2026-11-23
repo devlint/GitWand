@@ -783,6 +783,21 @@ describe("useStacks — review round 1", () => {
     expect(lost).toEqual([["The push offer for step-2 could not be shown."]]);
   });
 
+  it("an apply that never started records no plan: a later finalization of that bottom offers no leases (wave 6, item 2)", async () => {
+    const { s, world } = setup();
+    world.report = report({ layers: stack({ "step-2": { state: "out_of_date", actionable: true } }) });
+    await s.refresh("/r");
+    await s.startRestack("/r", "step-2");
+    expect(s.flow.value.phase).toBe("preview");
+    await s.applyRestack(0); // no host: refused before the apply
+    expect(s.flow.value.phase).toBe("error");
+    host();
+    // A restack of step-2 finalized from elsewhere (the banner, the CLI).
+    world.next = report({ finalized: finalized() });
+    await s.refresh("/r");
+    expect(s.after.value?.push).toEqual({ pushable: [], skipped: [], noLeases: true });
+  });
+
   it("a newer finalization replacing a kept one says the kept one's offer was lost, once (wave 5, item 3)", async () => {
     const offerPush = vi
       .fn()

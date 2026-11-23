@@ -583,8 +583,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     const dropped = twoFixtures("dropped");
     const found = await planBoth(dev, dropped.rustCwd, dropped.nodeCwd, "step-3", "pulled, no upstream", hint);
     expect(found.value.refusal).toBe(null);
-    const squash = git(dropped.rustCwd, ["rev-parse", "step-1"]);
-    const verified = [{ ...hint[0], merge_commit_oid: squash }];
+    const verified = (cwd) => [{ ...hint[0], merge_commit_oid: git(cwd, ["rev-parse", "step-1"]) }];
     const v = await planBoth(dev, dropped.rustCwd, dropped.nodeCwd, "step-3", "merge commit in step-1", verified);
     expect(v.value.refusal).toBe(null);
 
@@ -841,9 +840,14 @@ describe("parity: git-push-branch", () => {
     await dev?.stop();
   });
 
+  /** `leaseSha` as given, or `(cwd) => sha` read from each side's own fixture. */
   const pushBoth = async (rustCwd, nodeCwd, branch, leaseSha) => {
-    const r = ownResult(rust("git_push_branch", { cwd: rustCwd, branch, leaseSha }), rustCwd);
-    const n = ownResult(await node(dev, "/api/git-push-branch", { cwd: nodeCwd, branch, leaseSha }), nodeCwd);
+    const leaseOf = (cwd) => (typeof leaseSha === "function" ? leaseSha(cwd) : leaseSha);
+    const r = ownResult(rust("git_push_branch", { cwd: rustCwd, branch, leaseSha: leaseOf(rustCwd) }), rustCwd);
+    const n = ownResult(
+      await node(dev, "/api/git-push-branch", { cwd: nodeCwd, branch, leaseSha: leaseOf(nodeCwd) }),
+      nodeCwd,
+    );
     return { r, n };
   };
 
@@ -926,7 +930,7 @@ describe("parity: git-push-branch", () => {
     const stale = await pushBoth(rustCwd, nodeCwd, "step-2", lease);
     expectSame(stale.r, stale.n, "stale lease");
     expect(stale.r.value.success).toBe(false);
-    const remote = git(rustCwd, ["rev-parse", "origin/step-2"]);
+    const remote = (cwd) => git(cwd, ["rev-parse", "origin/step-2"]);
     const ok = await pushBoth(rustCwd, nodeCwd, "step-2", remote);
     expectSame(ok.r, ok.n, "good lease");
     expect(ok.r.value.success, ok.r.value.message).toBe(true);

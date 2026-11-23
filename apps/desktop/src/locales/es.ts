@@ -651,6 +651,7 @@ const es: Locale = {
       deleteParent: "Eliminar {0} en local",
       switchFailed: "Reapilado, pero no se pudo volver a {0}: {1}",
       offersLost: "No se pudo mostrar la oferta de push de {0}.",
+      handlingLost: "GitWand no pudo terminar el seguimiento del reapilado de {0}: revisa su pull request y haz push tú mismo.",
     },
     push: {
       offer: "Se pueden enviar {0} ramas reapiladas.",

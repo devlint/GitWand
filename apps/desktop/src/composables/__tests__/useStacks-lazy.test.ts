@@ -53,6 +53,31 @@ function deps(over: Partial<StacksDeps> = {}): StacksDeps {
   } as StacksDeps;
 }
 
+const planOf = (lease: string): RestackPlan => ({
+  moment: "parent_moved",
+  bottom: "step-2",
+  parent: "step-1",
+  onto_ref: "step-1",
+  onto_sha: "o",
+  upstream_sha: "u",
+  top: "step-2",
+  top_sha: "t",
+  moving: [{ branch: "step-2", in_stack: true, upstream: "origin/step-2", remote_sha: lease, push_block: null }],
+  new_parent: null,
+  refusal: null,
+});
+
+const fin: FinalizedRestack = {
+  moment: "parent_moved",
+  bottom: "step-2",
+  merged_parent: null,
+  new_parent: null,
+  moved: ["step-2"],
+  switched_back_to: null,
+  switch_error: null,
+  delete_offer: null,
+};
+
 const ctx = { cwd: "/r", forge: "github", currentBranch: "step-2", localBranches: ["main", "step-1", "step-2"], prs: [] };
 
 beforeEach(() => {
@@ -98,7 +123,7 @@ describe("useStacks — the flow module not loaded yet (T13)", () => {
     expect(s.statusError.value).toBeNull();
   });
 
-  it("a retry offers the leases captured when the finalization was first seen, even after a failed load (wave 5, item 4)", async () => {
+  it("an apply whose module load failed records no plan; a later finalization offers no leases (wave 6, item 2)", async () => {
     let failing = true;
     vi.doMock("../useStacksFlow", async (importOriginal) => {
       if (failing) throw new Error("chunk load failed");
@@ -106,30 +131,7 @@ describe("useStacks — the flow module not loaded yet (T13)", () => {
     });
     const { createStacks, registerRestackHost } = await import("../useStacks");
     const offerPush = vi.fn();
-    registerRestackHost({ apply: vi.fn(async () => ({ stoppedReason: "residual" }) as never), offerPush, notify: vi.fn() });
-    const planOf = (lease: string): RestackPlan => ({
-      moment: "parent_moved",
-      bottom: "step-2",
-      parent: "step-1",
-      onto_ref: "step-1",
-      onto_sha: "o",
-      upstream_sha: "u",
-      top: "step-2",
-      top_sha: "t",
-      moving: [{ branch: "step-2", in_stack: true, upstream: "origin/step-2", remote_sha: lease, push_block: null }],
-      new_parent: null,
-      refusal: null,
-    });
-    const fin: FinalizedRestack = {
-      moment: "parent_moved",
-      bottom: "step-2",
-      merged_parent: null,
-      new_parent: null,
-      moved: ["step-2"],
-      switched_back_to: null,
-      switch_error: null,
-      delete_offer: null,
-    };
+    registerRestackHost({ apply: vi.fn(), offerPush, notify: vi.fn() });
     let next: StackReport | null = null;
     const d = deps({
       forge: () => "gitlab",
@@ -141,19 +143,38 @@ describe("useStacks — the flow module not loaded yet (T13)", () => {
     });
     const s = createStacks(d);
     s.setContext(ctx);
-    // Plan A is applied (the run's own module load fails, the plan is kept).
     s.flow.value = { ...s.flow.value, phase: "preview", cwd: "/r", branch: "step-2", plan: planOf("aaa") };
-    await s.applyRestack(0).catch(() => {});
-    // Its finalization: the first handling fails on the module load.
+    await expect(s.applyRestack(0)).rejects.toThrow();
+    failing = false;
     next = report({ finalized: fin });
     await s.refresh("/r");
-    expect(offerPush).not.toHaveBeenCalled();
-    // A later plan B is applied before the retry.
-    s.flow.value = { ...s.flow.value, phase: "preview", plan: planOf("zzz") };
-    await s.applyRestack(0).catch(() => {});
-    failing = false;
-    await s.refresh("/r");
     expect(offerPush).toHaveBeenCalledTimes(1);
-    expect(offerPush.mock.calls[0][0].push.pushable).toEqual([{ branch: "step-2", lease: "aaa" }]);
+    expect(offerPush.mock.calls[0][0].push).toEqual({ pushable: [], skipped: [], noLeases: true });
+  });
+
+  it("a handling that never ran (module load) is reported as lost handling, not a lost push offer (wave 6, item 3)", async () => {
+    vi.doMock("../useStacksFlow", () => {
+      throw new Error("chunk load failed");
+    });
+    const { createStacks, registerRestackHost } = await import("../useStacks");
+    const notify = vi.fn();
+    registerRestackHost({ apply: vi.fn(), offerPush: vi.fn(), notify });
+    let next: StackReport | null = report({ finalized: fin });
+    const d = deps({
+      forge: () => "gitlab",
+      status: vi.fn(async () => {
+        const r = next ?? report();
+        next = null;
+        return r;
+      }),
+    });
+    const s = createStacks(d);
+    s.setContext(ctx);
+    for (let i = 0; i < 4; i++) await s.refresh("/r");
+    const messages = notify.mock.calls.map(([m]) => m);
+    expect(messages.filter((m) => m.startsWith("GitWand could not finish handling"))).toEqual([
+      "GitWand could not finish handling the restack of step-2: check its pull request and push it yourself.",
+    ]);
+    expect(messages.some((m) => m.startsWith("The push offer"))).toBe(false);
   });
 });

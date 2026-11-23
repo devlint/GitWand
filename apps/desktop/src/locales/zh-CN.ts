@@ -651,6 +651,7 @@ const zhCN: Locale = {
       deleteParent: "删除本地 {0}",
       switchFailed: "已重新堆叠，但无法切换回 {0}：{1}",
       offersLost: "无法显示 {0} 的推送提议。",
+      handlingLost: "GitWand 无法完成 {0} 重新堆叠的后续处理：请检查其拉取请求并自行推送。",
     },
     push: {
       offer: "可以推送 {0} 个已重新堆叠的分支。",

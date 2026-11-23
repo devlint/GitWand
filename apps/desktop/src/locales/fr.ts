@@ -656,6 +656,7 @@ const fr: Locale = {
       deleteParent: "Supprimer {0} en local",
       switchFailed: "Restack fait, mais impossible de revenir sur {0} : {1}",
       offersLost: "L'offre de push de {0} n'a pas pu être affichée.",
+      handlingLost: "GitWand n'a pas pu terminer le suivi du restack de {0} : vérifiez sa pull request et poussez-la vous-même.",
     },
     push: {
       offer: "{0} branches restackées peuvent être poussées.",

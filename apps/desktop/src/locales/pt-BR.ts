@@ -652,6 +652,7 @@ const ptBR: Locale = {
       deleteParent: "Excluir {0} localmente",
       switchFailed: "Reempilhado, mas não foi possível voltar para {0}: {1}",
       offersLost: "Não foi possível mostrar a oferta de push de {0}.",
+      handlingLost: "O GitWand não conseguiu concluir o acompanhamento do reempilhamento de {0}: verifique o pull request e faça push você mesmo.",
     },
     push: {
       offer: "{0} branches reempilhados podem ser enviados.",

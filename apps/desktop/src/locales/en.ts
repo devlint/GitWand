@@ -663,6 +663,7 @@ const en = {
       deleteParent: "Delete local {0}",
       switchFailed: "Restacked, but could not switch back to {0}: {1}",
       offersLost: "The push offer for {0} could not be shown.",
+      handlingLost: "GitWand could not finish handling the restack of {0}: check its pull request and push it yourself.",
     },
     push: {
       offer: "{0} restacked branches can be pushed.",

@@ -82,23 +82,26 @@ export function createStacksFlow(c: StacksCore) {
 
   // ─── After a restack ────────────────────────────────────
 
-  /** The push offer from the plan the core captured for `fin` (null: none). */
-  function pushOffer(plan: RestackPlan | null, fin: FinalizedRestack): AfterRestack["push"] {
+  /**
+   * The push offer of a finalization, from the plan the core captured when
+   * it first saw that finalization: a retried handling gets the same plan,
+   * so it never offers a later plan's leases (wave 4 M3, wave 5 item 4).
+   */
+  function pushOfferFor(plan: RestackPlan | null, fin: FinalizedRestack): AfterRestack["push"] {
     if (!plan) return { pushable: [], skipped: [], noLeases: true };
-    const mem = { plan };
     const pushable: { branch: string; lease: string }[] = [];
     const skipped: PushSkip[] = [];
     const skip = (branch: string, reason: PushSkip["reason"], detail: string | null = null) =>
       skipped.push({ branch, reason, detail });
     for (const b of fin.moved) {
-      const m = mem.plan.moving.find((x) => x.branch === b);
+      const m = plan.moving.find((x) => x.branch === b);
       if (m?.push_block) skip(b, "blocked", m.push_block);
       else if (m?.remote_sha) pushable.push({ branch: b, lease: m.remote_sha });
       else if (m?.upstream) skip(b, "gone");
       else skip(b, "no_upstream");
     }
     // Branches outside the stack that `--update-refs` moved: never offered.
-    for (const m of mem.plan.moving) if (!m.in_stack) skip(m.branch, "not_in_stack");
+    for (const m of plan.moving) if (!m.in_stack) skip(m.branch, "not_in_stack");
     return { pushable, skipped, noLeases: false };
   }
 
@@ -119,14 +122,6 @@ export function createStacksFlow(c: StacksCore) {
     }
   }
 
-  /**
-   * The push offer of a finalization, from the plan the core captured when
-   * it first saw that finalization: a retried handling gets the same plan,
-   * so it never offers a later plan's leases (wave 4 M3, wave 5 item 4).
-   */
-  function pushOfferFor(plan: RestackPlan | null, fin: FinalizedRestack): AfterRestack["push"] {
-    return pushOffer(plan, fin);
-  }
 
   async function onFinalized(
     cwd: string,
@@ -242,6 +237,9 @@ export function createStacksFlow(c: StacksCore) {
       return;
     }
     const gen = state.flowGen;
+    // Recorded once the apply starts (wave 6, item 2): its finalization may
+    // land in any later refresh, which takes this plan before any lazy load.
+    state.lastPlan = { cwd, plan };
     const previewed: PreviewedRestack = {
       onto_sha: plan.onto_sha,
       upstream_sha: plan.upstream_sha,

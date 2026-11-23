@@ -286,6 +286,8 @@ export function createStacks(deps: StacksDeps): Stacks {
       trunk: string | null;
       /** The plan captured when it was first seen: its push leases. */
       plan: RestackPlan | null;
+      /** Its last handling ran (false: the module that handles it did not load). */
+      ran: boolean;
       attempts: number;
     }
   >();
@@ -483,7 +485,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     const key = JSON.stringify([f.moment, f.bottom, f.moved]);
     if (kept && kept.key !== key) {
       // A newer finalization replaces the kept one: its offer is lost (wave 5, item 3).
-      notify(t("stacks.after.offersLost", kept.finalized.bottom));
+      notify(lostNotice(kept.finalized.bottom, kept.ran));
       unhandled.delete(cwd);
       kept = null;
     }
@@ -495,8 +497,12 @@ export function createStacks(deps: StacksDeps): Stacks {
       return;
     }
     const plan = kept ? kept.plan : takePlan(cwd, f);
+    let ran = false;
     try {
-      await withFlow((fl) => fl.onFinalized(cwd, f, trunk, fl.pushOfferFor(plan, f)));
+      await withFlow((fl) => {
+        ran = true;
+        return fl.onFinalized(cwd, f, trunk, fl.pushOfferFor(plan, f));
+      });
     } catch (e) {
       // The status worked: a failure handling what followed the restack is
       // not a status error (wave 2, item 2). The report stays; the host says
@@ -505,9 +511,9 @@ export function createStacks(deps: StacksDeps): Stacks {
       if (attempts >= MAX_ATTEMPTS) {
         unhandled.delete(cwd);
         lastFinalized.set(cwd, key);
-        notify(t("stacks.after.offersLost", f.bottom));
+        notify(lostNotice(f.bottom, ran));
       } else {
-        unhandled.set(cwd, { key, finalized: f, trunk, plan, attempts });
+        unhandled.set(cwd, { key, finalized: f, trunk, plan, attempts, ran });
         notify(message(e));
       }
       return;
@@ -516,6 +522,15 @@ export function createStacks(deps: StacksDeps): Stacks {
     lastFinalized.set(cwd, key);
     // The backend settles one record per call: look for the next one.
     void refresh(cwd);
+  }
+
+  /**
+   * What a dropped finalization lost: only its push offer when its handling
+   * ran (the retarget and delete are already shown), all of it when the
+   * module that handles it never loaded (wave 6, item 3).
+   */
+  function lostNotice(bottom: string, ran: boolean): string {
+    return t(ran ? "stacks.after.offersLost" : "stacks.after.handlingLost", bottom);
   }
 
   /** The plan kept when `f`'s restack was applied (consumed), or null (D10). */
@@ -612,13 +627,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     acceptBridge: (cwd, offer) => withFlow((f) => f.acceptBridge(cwd, offer)),
     dismissBridge,
     startRestack: (cwd, branch) => withFlow((f) => f.startRestack(cwd, branch)),
-    applyRestack: (estimated) => {
-      // Kept before the module load and the run: the finalization may land
-      // in any later refresh, and its leases must not depend on the load.
-      const f = flow.value;
-      if (f.phase === "preview" && f.plan && f.cwd) state.lastPlan = { cwd: f.cwd, plan: f.plan };
-      return withFlow((fl) => fl.applyRestack(estimated));
-    },
+    applyRestack: (estimated) => withFlow((f) => f.applyRestack(estimated)),
     closeRestack,
     later,
     retryRetarget: () => withFlow((f) => f.retryRetarget()),
