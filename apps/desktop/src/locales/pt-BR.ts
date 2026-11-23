@@ -651,6 +651,7 @@ const ptBR: Locale = {
       retargetManualNoForge: "Redirecione o pull request de {0} para {1}.",
       deleteParent: "Excluir {0} localmente",
       switchFailed: "Reempilhado, mas não foi possível voltar para {0}: {1}",
+      offersLost: "O GitWand não conseguiu concluir o que segue o reempilhamento de {0} (redirecionamento do PR, ofertas de push e de exclusão). Faça isso manualmente.",
     },
     push: {
       offer: "{0} branches reempilhados podem ser enviados.",
@@ -686,6 +687,7 @@ const ptBR: Locale = {
       parent_behind: "{0} está {1} commit(s) atrás do remoto. Faça pull primeiro.",
       no_remote_trunk: "Não há branch origin para o tronco: faça fetch de origin primeiro.",
       merged_work_missing: "O trabalho mesclado ainda não está em {0}: atualize {0} primeiro.",
+      merged_work_missing_trunk: "O GitWand não encontra o trabalho mesclado de {0} em {1}. Se o pull request foi mesclado com squash em outro lugar, desempilhe o filho de {0} e reempilhe-o manualmente.",
       no_old_base: "O GitWand não consegue saber quais commits pertenciam ao branch pai. Reempilhe este branch manualmente.",
       fetch_failed: "Não foi possível fazer fetch ({0}): o commit mesclado pode estar faltando localmente. Tente novamente quando estiver online.",
       stale_preview: "A pilha mudou desde a pré-visualização. Pré-visualize de novo.",

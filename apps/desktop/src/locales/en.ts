@@ -662,6 +662,7 @@ const en = {
       retargetManualNoForge: "Retarget the pull request of {0} to {1}.",
       deleteParent: "Delete local {0}",
       switchFailed: "Restacked, but could not switch back to {0}: {1}",
+      offersLost: "GitWand could not finish what follows the restack of {0} (retarget, push and delete offers). Do them by hand.",
     },
     push: {
       offer: "{0} restacked branches can be pushed.",
@@ -697,6 +698,7 @@ const en = {
       parent_behind: "{0} is {1} commit(s) behind its remote. Pull it first.",
       no_remote_trunk: "No origin branch for the trunk: fetch from origin first.",
       merged_work_missing: "The merged work is not in {0} yet: update {0} first.",
+      merged_work_missing_trunk: "GitWand cannot find the merged work of {0} in {1}. If the pull request was squash-merged elsewhere, unstack {0}'s child and restack it by hand.",
       no_old_base: "GitWand cannot tell which commits belonged to the parent. Restack this branch by hand.",
       fetch_failed: "Could not fetch ({0}): the merged commit may be missing locally. Try again when online.",
       stale_preview: "The stack changed since the preview. Preview again.",

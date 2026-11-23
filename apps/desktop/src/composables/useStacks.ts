@@ -45,6 +45,7 @@ import { ghBranchPr, ghPrSetBase } from "../utils/backend-pr";
 import type { ApplyOutcome } from "./useApplyFromPreview";
 import type { StacksFlow } from "./useStacksFlow";
 import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
+import { t } from "./useI18n";
 
 export interface StacksDeps {
   status: typeof stackStatus;
@@ -216,6 +217,9 @@ export const idleFlow = (): RestackFlow => ({
   error: null,
 });
 
+/** Attempts at handling one finalization (wave 4, M3). */
+const MAX_ATTEMPTS = 3;
+
 let host: RestackHost | null = null;
 
 /** App.vue registers how a restack is applied, pushed and announced; null unregisters. */
@@ -274,7 +278,17 @@ export function createStacks(deps: StacksDeps): Stacks {
   /** Per cwd, the last finalization handled: an identical one is not handled twice in a row. */
   const lastFinalized = new Map<string, string>();
   /** Per cwd, a finalization whose after-restack handling failed, to retry. */
-  const unhandled = new Map<string, { finalized: FinalizedRestack; trunk: string | null }>();
+  const unhandled = new Map<
+    string,
+    {
+      key: string;
+      finalized: FinalizedRestack;
+      trunk: string | null;
+      /** Its push offer, taken on the first attempt (null: not reached). */
+      push: AfterRestack["push"] | null;
+      attempts: number;
+    }
+  >();
 
   const core: StacksCore = { deps, report, flow, after, ctx, state, layerOf, refresh, stackOn };
   let flowApi: StacksFlow | null = null;
@@ -457,37 +471,54 @@ export function createStacks(deps: StacksDeps): Stacks {
     }
     // The backend clears a record as it reports it finalized, so a report
     // never carries a finalization twice: one whose handling failed is
-    // retried from memory (wave 3, item 7).
+    // retried from memory (wave 3, item 7), at most MAX_ATTEMPTS times in all
+    // (wave 4, M3), always with the push offer taken on its first attempt.
     const kept = unhandled.get(cwd) ?? null;
     const f = r.finalized ?? kept?.finalized ?? null;
-    const trunk = r.finalized ? r.trunk : (kept?.trunk ?? null);
     if (!f) {
       lastFinalized.delete(cwd);
       return;
     }
     const key = JSON.stringify([f.moment, f.bottom, f.moved]);
+    const same = kept?.key === key ? kept : null;
+    const trunk = same ? same.trunk : r.trunk;
     // The same finalization twice in a row would be a backend that failed to
     // clear its record: do not retarget or offer again, and stop the chain.
     if (lastFinalized.get(cwd) === key) {
       unhandled.delete(cwd);
       return;
     }
+    let push = same?.push ?? null;
     try {
-      await withFlow((fl) => fl.onFinalized(cwd, f, trunk));
+      await withFlow(async (fl) => {
+        push ??= fl.pushOfferFor(cwd, f);
+        await fl.onFinalized(cwd, f, trunk, push);
+      });
     } catch (e) {
       // The status worked: a failure handling what followed the restack is
       // not a status error (wave 2, item 2). The report stays; the host says
-      // what failed. Kept, not marked handled: the next refresh retries it.
-      unhandled.set(cwd, { finalized: f, trunk });
-      const h = restackHost();
-      if (h) h.notify(message(e));
-      else console.warn("[stacks] after-restack handling failed:", message(e));
+      // what failed.
+      const attempts = (same?.attempts ?? 0) + 1;
+      if (attempts >= MAX_ATTEMPTS) {
+        unhandled.delete(cwd);
+        lastFinalized.set(cwd, key);
+        notify(t("stacks.after.offersLost", f.bottom));
+      } else {
+        unhandled.set(cwd, { key, finalized: f, trunk, push, attempts });
+        notify(message(e));
+      }
       return;
     }
     unhandled.delete(cwd);
     lastFinalized.set(cwd, key);
     // The backend settles one record per call: look for the next one.
     void refresh(cwd);
+  }
+
+  function notify(m: string): void {
+    const h = restackHost();
+    if (h) h.notify(m);
+    else console.warn("[stacks]", m);
   }
 
   let inFlight: Promise<void> | null = null;

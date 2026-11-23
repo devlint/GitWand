@@ -252,30 +252,8 @@ fn parent_merged(
     // retargeted and merged elsewhere) and onto `origin/<trunk>` for a forge
     // hint; a fallback detection already probed `origin/<trunk>` itself.
     // When the parent's commits cannot be named at all (no base, parent gone
-    // locally), the refusal is `no_old_base` (wave 3 item 5).
-    let mut merged_work_missing = false;
-    let mut parent_commits_unknown = false;
-    if let Some(onto) = onto_sha.as_deref() {
-        match honoured.and_then(|h| h.merge_commit_oid.as_deref()) {
-            Some(oid) => {
-                merged_work_missing = !(commit_exists(repo, oid)? && is_ancestor(repo, oid, onto)?);
-            }
-            None if new_parent.is_some() || honoured.is_some() => {
-                let base = match l.base.as_deref() {
-                    Some(b) if commit_exists(repo, b)? => Some(b),
-                    _ => None,
-                };
-                match merged_probe(repo, base, l.parent_tip.as_deref())? {
-                    Some(probe) => {
-                        merged_work_missing = !(is_ancestor(repo, probe, onto)?
-                            || merged_signal(repo, onto, probe).is_some());
-                    }
-                    None => parent_commits_unknown = true,
-                }
-            }
-            None => {}
-        }
-    }
+    // locally, no usable PR head), the refusal is `no_old_base` (wave 3
+    // item 5, wave 4 M1).
     let mut upstream = None;
     for candidate in [
         l.base.as_deref(),
@@ -288,6 +266,42 @@ fn parent_merged(
         if commit_exists(repo, candidate)? && is_ancestor(repo, candidate, &layer_ref)? {
             upstream = Some(candidate.to_string());
             break;
+        }
+    }
+    let mut merged_work_missing = false;
+    let mut parent_commits_unknown = false;
+    if let Some(onto) = onto_sha.as_deref() {
+        match honoured.and_then(|h| h.merge_commit_oid.as_deref()) {
+            Some(oid) => {
+                merged_work_missing = !(commit_exists(repo, oid)? && is_ancestor(repo, oid, onto)?);
+            }
+            None if new_parent.is_some() || honoured.is_some() => {
+                let base = match l.base.as_deref() {
+                    Some(b) if commit_exists(repo, b)? => Some(b),
+                    _ => None,
+                };
+                // Wave 4 M1: the recorded base (or the parent's tip), then
+                // the merged PR's head when it is known and below the layer
+                // (D20), then the plan's own upstream.
+                let layer_ref = format!("refs/heads/{}", l.branch);
+                let head = match honoured.and_then(|h| h.head_ref_oid.as_deref()) {
+                    Some(h) if commit_exists(repo, h)? && is_ancestor(repo, h, &layer_ref)? => {
+                        Some(h)
+                    }
+                    _ => None,
+                };
+                let probe = merged_probe(repo, base, l.parent_tip.as_deref())?
+                    .or(head)
+                    .or(upstream.as_deref());
+                match probe {
+                    Some(probe) => {
+                        merged_work_missing = !(is_ancestor(repo, probe, onto)?
+                            || merged_signal(repo, onto, probe).is_some());
+                    }
+                    None => parent_commits_unknown = true,
+                }
+            }
+            None => {}
         }
     }
     Ok(Target {
@@ -457,12 +471,22 @@ fn first_refusal(c: Checks) -> Result<Option<RestackRefusal>, String> {
             c.l.merged_pr
                 .map(|n| format!(" (PR #{n})"))
                 .unwrap_or_default();
-        return Ok(Some(RestackRefusal {
-            code: "merged_work_missing".into(),
-            message: format!(
+        // Wave 4 M2: onto the remote trunk, "update it first" does not apply
+        // (the fetch just ran); the work was most likely merged elsewhere.
+        let message = if t.new_parent.is_none() {
+            format!(
+                "GitWand cannot find the merged work of {}{pr} in {}. If the pull request was squash-merged elsewhere, unstack {}'s child and restack it by hand.",
+                c.l.parent, t.onto_ref, c.l.parent
+            )
+        } else {
+            format!(
                 "The merged work of {}{pr} is not in {} yet: update {} first.",
                 c.l.parent, t.onto_ref, t.onto_ref
-            ),
+            )
+        };
+        return Ok(Some(RestackRefusal {
+            code: "merged_work_missing".into(),
+            message,
             branch: Some(t.onto_ref.clone()),
             path: None,
             detail: None,
@@ -1233,7 +1257,7 @@ mod tests {
         assert_eq!(rf.branch.as_deref(), Some("origin/main"));
         assert_eq!(
             rf.message,
-            "The merged work of step-1 (PR #812) is not in origin/main yet: update origin/main first."
+            "GitWand cannot find the merged work of step-1 (PR #812) in origin/main. If the pull request was squash-merged elsewhere, unstack step-1's child and restack it by hand."
         );
         // Not known locally at all: the fetch did not bring it.
         let unknown = "f".repeat(40);
@@ -1337,9 +1361,10 @@ mod tests {
         );
     }
 
-    /// Wave 3, item 5: no merge commit, no recorded base and the parent gone
-    /// locally: GitWand cannot tell the parent's commits — no_old_base, not
-    /// "update <target> first".
+    /// Wave 3 item 5, wave 4 M1: no merge commit, no recorded base and the
+    /// parent gone locally. The merged PR's head (known, below the layer)
+    /// still names the parent's commits; with no head either, GitWand cannot
+    /// tell them — no_old_base, not "update <target> first".
     #[test]
     fn moment_two_without_any_trace_of_the_parent_is_no_old_base() {
         let r = TempRepo::new();
@@ -1348,12 +1373,20 @@ mod tests {
         squash_step1_on_origin(&r);
         r.git(&["config", "--unset", "branch.step-2.gitwandStackBase"]);
         r.git(&["branch", "-q", "-D", "step-1"]);
+        let p = &r.path;
+        // The head is probed: the single-commit squash is found by patch-id.
         let h = [hint("step-1", Some(old_tip))];
-        let rf = plan(&r.path, Some("main"), "step-2", &h, V)
-            .unwrap()
-            .refusal
-            .unwrap();
-        assert_eq!(rf.code, "no_old_base", "{rf:?}");
+        assert_eq!(code(plan(p, Some("main"), "step-2", &h, V)), "");
+        // A head not known locally is no trace.
+        let unknown = [hint("step-1", Some("f".repeat(40)))];
+        assert_eq!(
+            code(plan(p, Some("main"), "step-2", &unknown, V)),
+            "no_old_base"
+        );
+        assert_eq!(
+            code(plan(p, Some("main"), "step-2", &[hint("step-1", None)], V)),
+            "no_old_base"
+        );
     }
 
     /// Wave 2, item 5: step-2's PR was retargeted to main and merged there,

@@ -115,8 +115,21 @@ export function createStacksFlow(c: StacksCore) {
     }
   }
 
-  async function onFinalized(cwd: string, fin: FinalizedRestack, trunk: string | null): Promise<void> {
-    const push = pushOffer(cwd, fin);
+  /**
+   * The push offer of a finalization, from the plan kept when its restack
+   * was applied (consumed). Taken once per finalization: a retried handling
+   * reuses it, so it never offers a later plan's leases (wave 4, M3).
+   */
+  function pushOfferFor(cwd: string, fin: FinalizedRestack): AfterRestack["push"] {
+    return pushOffer(cwd, fin);
+  }
+
+  async function onFinalized(
+    cwd: string,
+    fin: FinalizedRestack,
+    trunk: string | null,
+    push: AfterRestack["push"],
+  ): Promise<void> {
     // D19: the retarget comes first, then the push offer.
     const rt = await retarget(cwd, fin, trunk);
     // I-1, M-1: the backend offers the delete only when nothing would be lost.
@@ -271,6 +284,7 @@ export function createStacksFlow(c: StacksCore) {
 
   return {
     hintsFor,
+    pushOfferFor,
     onFinalized,
     retryRetarget,
     deleteMergedParent,

@@ -134,18 +134,24 @@ const previewedOf = (p) => ({
   moving: p.moving.map((m) => m.branch),
 });
 
-/** Plans then restacks `branch` on each side's own fixture. */
+/** `mergedParents` as given, or computed from each side's own fixture. */
+const hintsOf = (mergedParents, cwd) => (typeof mergedParents === "function" ? mergedParents(cwd) : mergedParents);
+
+/** Plans then restacks `branch` on each side's own fixture. `mergedParents`
+ *  may be `(cwd) => hints`, read from that side's fixture. */
 async function restackBoth(dev, kind, branch, mergedParents = [], prep = () => {}) {
   const { rustCwd, nodeCwd } = twoFixtures(kind, prep);
-  const rp = plan.rust(rustCwd, branch, mergedParents);
-  const np = await plan.node(dev, nodeCwd, branch, mergedParents);
+  const rh = hintsOf(mergedParents, rustCwd);
+  const nh = hintsOf(mergedParents, nodeCwd);
+  const rp = plan.rust(rustCwd, branch, rh);
+  const np = await plan.node(dev, nodeCwd, branch, nh);
   expectSame(rp, np, "plan");
   const before = { rust: stateOf(rustCwd), node: stateOf(nodeCwd) };
   const rr = rust("git_restack", {
-    cwd: rustCwd, branch, trunk: "main", mergedParents, previewed: previewedOf(rp.value),
+    cwd: rustCwd, branch, trunk: "main", mergedParents: rh, previewed: previewedOf(rp.value),
   });
   const nr = await node(dev, "/api/git-restack", {
-    cwd: nodeCwd, branch, configuredTrunk: "main", mergedParents, previewed: previewedOf(np.value),
+    cwd: nodeCwd, branch, configuredTrunk: "main", mergedParents: nh, previewed: previewedOf(np.value),
   });
   expectSame(rr, nr, "git_restack");
   return { rustCwd, nodeCwd, rr, before, plan: rp.value };
@@ -153,8 +159,8 @@ async function restackBoth(dev, kind, branch, mergedParents = [], prep = () => {
 
 /** Status on both sides: same answer (paths spelled `<cwd>`), same state. */
 async function statusBoth(dev, rustCwd, nodeCwd, label, mergedParents = []) {
-  const r = ownResult(status.rust(rustCwd, mergedParents), rustCwd);
-  const n = ownResult(await status.node(dev, nodeCwd, mergedParents), nodeCwd);
+  const r = ownResult(status.rust(rustCwd, hintsOf(mergedParents, rustCwd)), rustCwd);
+  const n = ownResult(await status.node(dev, nodeCwd, hintsOf(mergedParents, nodeCwd)), nodeCwd);
   expectSame(r, n, label);
   expect(stateOf(nodeCwd), `${label}: state`).toEqual(stateOf(rustCwd));
   return r.value;
@@ -221,11 +227,12 @@ describe("parity: stacked branches", () => {
   }, 30_000);
 
   it("no delete offer once the merged parent moved, nor for the current branch (I-1, M-1)", async () => {
-    // The squash's sha is the same on every "squashed" fixture (fixed dates):
-    // the merge commit the forge gives, so the grown step-1 is not checked
-    // by git's signals (wave 3, item 2).
-    const squash = git(fixtureStack("squashed"), ["rev-parse", "origin/main"]);
-    const hint = [{ branch: "step-1", number: 812, head_ref_oid: null, merge_commit_oid: squash }];
+    // The forge gives the squash as the merge commit, so the grown step-1 is
+    // not checked by git's signals (wave 3, item 2). Read from each side's
+    // own fixture (wave 4, M4).
+    const hint = (cwd) => [
+      { branch: "step-1", number: 812, head_ref_oid: null, merge_commit_oid: git(cwd, ["rev-parse", "origin/main"]) },
+    ];
     const grew = (cwd) => {
       git(cwd, ["checkout", "--quiet", "step-1"]);
       writeFileSync(join(cwd, "late.txt"), "late\n");
@@ -561,7 +568,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
       const r = await planBoth(dev, sq.rustCwd, sq.nodeCwd, "step-2", `merge commit ${oid}`, withMerge(oid));
       expect(r.value.refusal).toEqual({
         code: "merged_work_missing",
-        message: "The merged work of step-1 (PR #812) is not in origin/main yet: update origin/main first.",
+        message: "GitWand cannot find the merged work of step-1 (PR #812) in origin/main. If the pull request was squash-merged elsewhere, unstack step-1's child and restack it by hand.",
         branch: "origin/main",
         path: null,
         detail: null,
@@ -606,23 +613,27 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     const b = await planBoth(dev, grew.rustCwd, grew.nodeCwd, "step-2", "trunk without merge commit", hint1);
     expect(b.value.refusal).toEqual({
       code: "merged_work_missing",
-      message: "The merged work of step-1 (PR #812) is not in origin/main yet: update origin/main first.",
+      message: "GitWand cannot find the merged work of step-1 (PR #812) in origin/main. If the pull request was squash-merged elsewhere, unstack step-1's child and restack it by hand.",
       branch: "origin/main",
       path: null,
       detail: null,
     });
 
-    // Item 5: no base, parent gone, no merge commit: the parent's commits
-    // cannot be named — no_old_base.
+    // Item 5: no base, parent gone, no merge commit.
     let oldTip = null;
     const gone = twoFixtures("squashed", (cwd) => {
       oldTip = git(cwd, ["rev-parse", "step-1"]);
       git(cwd, ["config", "--unset", "branch.step-2.gitwandStackBase"]);
       git(cwd, ["branch", "--quiet", "-D", "step-1"]);
     });
+    // Wave 4 M1: the merged PR's head still names them (found by patch-id);
+    // an unknown head does not.
     const withHead = [{ ...hint1[0], head_ref_oid: oldTip }];
-    const c = await planBoth(dev, gone.rustCwd, gone.nodeCwd, "step-2", "parent commits unknown", withHead);
-    expect(c.value.refusal.code).toBe("no_old_base");
+    const c = await planBoth(dev, gone.rustCwd, gone.nodeCwd, "step-2", "probe from the PR head", withHead);
+    expect(c.value.refusal).toBe(null);
+    const unknownHead = [{ ...hint1[0], head_ref_oid: "f".repeat(40) }];
+    const d = await planBoth(dev, gone.rustCwd, gone.nodeCwd, "step-2", "parent commits unknown", unknownHead);
+    expect(d.value.refusal.code).toBe("no_old_base");
   }, 60_000);
 
   it("occupied_rebasing: a moving branch being rebased in another worktree (M-3)", async () => {

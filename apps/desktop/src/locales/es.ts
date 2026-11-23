@@ -650,6 +650,7 @@ const es: Locale = {
       retargetManualNoForge: "Redirige la pull request de {0} a {1}.",
       deleteParent: "Eliminar {0} en local",
       switchFailed: "Reapilado, pero no se pudo volver a {0}: {1}",
+      offersLost: "GitWand no pudo terminar lo que sigue al reapilado de {0} (redirección del PR, ofertas de push y de borrado). Hazlo a mano.",
     },
     push: {
       offer: "Se pueden enviar {0} ramas reapiladas.",
@@ -685,6 +686,7 @@ const es: Locale = {
       parent_behind: "{0} va {1} commit(s) por detrás de su remoto. Haz pull primero.",
       no_remote_trunk: "No hay rama origin para el tronco: haz primero un fetch de origin.",
       merged_work_missing: "El trabajo fusionado aún no está en {0}: actualiza {0} primero.",
+      merged_work_missing_trunk: "GitWand no encuentra el trabajo fusionado de {0} en {1}. Si la pull request se fusionó con squash en otro sitio, desapila el hijo de {0} y reapílalo a mano.",
       no_old_base: "GitWand no puede saber qué commits pertenecían a la rama padre. Reapila esta rama a mano.",
       fetch_failed: "No se pudo hacer fetch ({0}): puede que falte localmente el commit fusionado. Inténtalo de nuevo con conexión.",
       stale_preview: "La pila cambió desde la previsualización. Previsualiza de nuevo.",

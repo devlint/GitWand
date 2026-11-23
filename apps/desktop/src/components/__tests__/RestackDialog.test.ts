@@ -134,6 +134,20 @@ describe("RestackDialog", () => {
     expect(body()).toContain(text);
   });
 
+  it("merged_work_missing onto the remote trunk says the work was likely merged elsewhere (wave 4, M2)", async () => {
+    const refusal = { code: "merged_work_missing", message: "raw", branch: "origin/main", path: null, detail: null } as const;
+    const trunkPlan = { ...plan, moment: "parent_merged", onto_ref: "origin/main", new_parent: null, refusal } as const;
+    await mount({ phase: "refused", plan: trunkPlan, refusal });
+    expect(body()).toContain(
+      "GitWand cannot find the merged work of step-1 in origin/main. If the pull request was squash-merged elsewhere, unstack step-1's child and restack it by hand.",
+    );
+    app?.unmount();
+    document.body.innerHTML = "";
+    const stacked = { ...trunkPlan, parent: "step-2", onto_ref: "step-1", new_parent: "step-1", refusal: { ...refusal, branch: "step-1" } };
+    await mount({ phase: "refused", plan: stacked, refusal: stacked.refusal });
+    expect(body()).toContain("The merged work is not in step-1 yet: update step-1 first.");
+  });
+
   it("preview: intro, fetch warning, the moving refs, and the restack preview asked for the plan", async () => {
     await mount({ phase: "preview", plan, fetchWarning: "offline" });
     expect(body()).toContain("Moves step-2 onto the new tip of step-1.");

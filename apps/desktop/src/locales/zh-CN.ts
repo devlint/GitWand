@@ -650,6 +650,7 @@ const zhCN: Locale = {
       retargetManualNoForge: "请将 {0} 的 pull request 目标改为 {1}。",
       deleteParent: "删除本地 {0}",
       switchFailed: "已重新堆叠，但无法切换回 {0}：{1}",
+      offersLost: "GitWand 无法完成 {0} 重新堆叠之后的步骤（重定向 PR、推送与删除提议）。请手动完成。",
     },
     push: {
       offer: "可以推送 {0} 个已重新堆叠的分支。",
@@ -685,6 +686,7 @@ const zhCN: Locale = {
       parent_behind: "{0} 落后其远程 {1} 个提交。请先拉取。",
       no_remote_trunk: "主干没有 origin 分支：请先从 origin 获取。",
       merged_work_missing: "已合并的工作尚未进入 {0}：请先更新 {0}。",
+      merged_work_missing_trunk: "GitWand 在 {1} 中找不到 {0} 已合并的工作。如果该拉取请求在别处被 squash 合并，请取消堆叠 {0} 的子分支并手动重新堆叠。",
       no_old_base: "GitWand 无法判断哪些提交属于父分支。请手动重新堆叠此分支。",
       fetch_failed: "无法 fetch（{0}）：本地可能缺少已合并的提交。请联网后重试。",
       stale_preview: "自预览以来堆栈已变化。请重新预览。",

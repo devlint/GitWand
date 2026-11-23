@@ -904,6 +904,15 @@ function parentMerged(repo, l, hints, trunkName) {
   // find the parent's commits below `onto` or merged into it, onto a stacked
   // P' and onto origin/<trunk> for a forge hint (a fallback detection already
   // probed origin/<trunk>). Parent commits that cannot be named → no_old_base.
+  let upstream = null;
+  for (const candidate of [l.base, honoured?.head_ref_oid ?? null]) {
+    if (candidate === null || candidate === undefined) continue;
+    const layerRef = `refs/heads/${l.branch}`;
+    if (commitExists(repo, candidate) && isAncestor(repo, candidate, layerRef)) {
+      upstream = candidate;
+      break;
+    }
+  }
   let mergedWorkMissing = false;
   let parentCommitsUnknown = false;
   if (ontoSha !== null) {
@@ -912,18 +921,13 @@ function parentMerged(repo, l, hints, trunkName) {
       mergedWorkMissing = !(commitExists(repo, oid) && isAncestor(repo, oid, ontoSha));
     } else if (newParent !== null || honoured) {
       const base = l.base !== null && commitExists(repo, l.base) ? l.base : null;
-      const probe = mergedProbe(repo, base, l.parent_tip);
+      // Wave 4 M1: base (or the parent's tip), then a verified PR head (D20),
+      // then the plan's upstream.
+      const h = honoured?.head_ref_oid ?? null;
+      const head = h !== null && commitExists(repo, h) && isAncestor(repo, h, `refs/heads/${l.branch}`) ? h : null;
+      const probe = mergedProbe(repo, base, l.parent_tip) ?? head ?? upstream;
       if (probe === null) parentCommitsUnknown = true;
       else mergedWorkMissing = !(isAncestor(repo, probe, ontoSha) || mergedSignal(repo, ontoSha, probe) !== null);
-    }
-  }
-  let upstream = null;
-  for (const candidate of [l.base, honoured?.head_ref_oid ?? null]) {
-    if (candidate === null || candidate === undefined) continue;
-    const layerRef = `refs/heads/${l.branch}`;
-    if (commitExists(repo, candidate) && isAncestor(repo, candidate, layerRef)) {
-      upstream = candidate;
-      break;
     }
   }
   return {
@@ -1004,7 +1008,11 @@ function firstRefusal(c) {
     const pr = c.l.merged_pr !== null ? ` (PR #${c.l.merged_pr})` : "";
     return {
       code: "merged_work_missing",
-      message: `The merged work of ${c.l.parent}${pr} is not in ${t.onto_ref} yet: update ${t.onto_ref} first.`,
+      // Wave 4 M2: onto the remote trunk, the work was most likely merged elsewhere.
+      message:
+        t.new_parent === null
+          ? `GitWand cannot find the merged work of ${c.l.parent}${pr} in ${t.onto_ref}. If the pull request was squash-merged elsewhere, unstack ${c.l.parent}'s child and restack it by hand.`
+          : `The merged work of ${c.l.parent}${pr} is not in ${t.onto_ref} yet: update ${t.onto_ref} first.`,
       branch: t.onto_ref,
       path: null,
       detail: null,

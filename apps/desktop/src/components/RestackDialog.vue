@@ -14,7 +14,7 @@ import { useMergePreview } from "../composables/useMergePreview";
 import { useSettings } from "../composables/useSettings";
 import BaseModal from "./BaseModal.vue";
 import MergePreviewPanel from "./MergePreviewPanel.vue";
-import { restackRefusalArgs } from "../utils/restackRefusal";
+import { restackRefusalText } from "../utils/restackRefusal";
 
 const { t } = useI18n();
 const { settings } = useSettings();
@@ -40,7 +40,9 @@ const intro = computed(() => {
 
 const refusalText = computed(() => {
   const r = flow.value.refusal;
-  return r ? t(`stacks.refusal.${r.code}` as const, ...restackRefusalArgs(r)) : "";
+  if (!r) return "";
+  const { key, args } = restackRefusalText(r, plan.value);
+  return t(key, ...args);
 });
 
 const movingRefs = computed(() => (plan.value?.moving ?? []).map((m) => ({ branch: m.branch, inStack: m.in_stack })));

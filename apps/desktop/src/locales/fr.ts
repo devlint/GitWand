@@ -655,6 +655,7 @@ const fr: Locale = {
       retargetManualNoForge: "Reciblez la pull request de {0} vers {1}.",
       deleteParent: "Supprimer {0} en local",
       switchFailed: "Restack fait, mais impossible de revenir sur {0} : {1}",
+      offersLost: "GitWand n'a pas pu terminer la suite du restack de {0} (retarget, offres de push et de suppression). Faites-les à la main.",
     },
     push: {
       offer: "{0} branches restackées peuvent être poussées.",
@@ -690,6 +691,7 @@ const fr: Locale = {
       parent_behind: "{0} a {1} commit(s) de retard sur sa branche distante. Récupérez-la d'abord.",
       no_remote_trunk: "Pas de branche origin pour le tronc : faites d'abord un fetch d'origin.",
       merged_work_missing: "Le travail fusionné n'est pas encore dans {0} : mettez {0} à jour d'abord.",
+      merged_work_missing_trunk: "GitWand ne trouve pas le travail fusionné de {0} dans {1}. Si la pull request a été squashée ailleurs, désempilez l'enfant de {0} et restackez-le à la main.",
       no_old_base: "GitWand ne peut pas savoir quels commits appartenaient à la parente. Restackez cette branche à la main.",
       fetch_failed: "Fetch impossible ({0}) : le commit fusionné manque peut-être localement. Réessayez une fois en ligne.",
       stale_preview: "La pile a changé depuis l'aperçu. Relancez l'aperçu.",

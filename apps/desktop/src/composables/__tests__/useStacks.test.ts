@@ -766,6 +766,58 @@ describe("useStacks — review round 1", () => {
     expect(offerPush).toHaveBeenCalledTimes(2);
   });
 
+  it("retries a kept finalization at most 3 times, then says the offers were lost, once (wave 4, M3)", async () => {
+    const offerPush = vi.fn(() => {
+      throw new Error("toast failed");
+    });
+    const h = host({ offerPush });
+    const { s, world } = setup();
+    // As the backend does: the finalization is reported once.
+    world.next = report({ finalized: finalized() });
+    for (let i = 0; i < 5; i++) {
+      await s.refresh("/r");
+      await settle();
+    }
+    expect(offerPush).toHaveBeenCalledTimes(3);
+    const lost = (h.notify as ReturnType<typeof vi.fn>).mock.calls.filter(([m]) => String(m).startsWith("GitWand could not finish"));
+    expect(lost).toEqual([
+      ["GitWand could not finish what follows the restack of step-2 (retarget, push and delete offers). Do them by hand."],
+    ]);
+  });
+
+  it("a retried finalization offers the leases of its own plan, never a later plan's (wave 4, M3)", async () => {
+    const offerPush = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("toast failed");
+      })
+      .mockImplementation(() => {});
+    host({ offerPush });
+    const { s, deps, world } = setup();
+    world.report = report({ layers: stack({ "step-2": { state: "out_of_date", actionable: true } }) });
+    await s.refresh("/r");
+    await s.startRestack("/r", "step-2");
+    world.next = report({ finalized: finalized() });
+    await s.applyRestack(0); // clean: refresh → the handling fails
+    expect(offerPush).toHaveBeenCalledTimes(1);
+    // A later restack is applied (halted, not finalized) with other leases.
+    (deps.plan as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      plan({
+        moving: [{ branch: "step-2", in_stack: true, upstream: "origin/step-2", remote_sha: "zzz", push_block: null }],
+      }),
+    );
+    registerRestackHost({
+      apply: vi.fn(async () => outcome({ stoppedReason: "residual", finalized: false })),
+      offerPush,
+      notify: vi.fn(),
+    });
+    await s.startRestack("/r", "step-2");
+    await s.applyRestack(0);
+    await s.refresh("/r");
+    expect(offerPush).toHaveBeenCalledTimes(2);
+    expect(offerPush.mock.calls[1][0].push.pushable).toEqual([{ branch: "step-2", lease: "aaa" }]);
+  });
+
   it("handles the same finalization again once a report in between had none", async () => {
     const { s, deps, world } = setup();
     world.next = momentTwo();
