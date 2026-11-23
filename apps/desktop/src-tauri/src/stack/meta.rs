@@ -85,8 +85,6 @@ impl PendingRestack {
         )
     }
 
-    // Consumed by Task 5 (run, pending record) of the stacked-branches plan.
-    #[allow(dead_code)]
     pub fn parse(s: &str) -> Option<Self> {
         let parts: Vec<&str> = s.split(' ').collect();
         let [moment, onto, old_base, bottom, new_parent, original] = parts.as_slice() else {
@@ -113,8 +111,6 @@ impl PendingRestack {
 
 /// Every declared layer, keyed by branch name. Branches lacking a
 /// `gitwandParent` are not layers and are skipped.
-// Consumed by Task 3 (detection) of the stacked-branches plan.
-#[allow(dead_code)]
 pub(crate) fn read_all(repo: &Path) -> Result<BTreeMap<String, StackMeta>, String> {
     let out = run(
         repo,
@@ -188,8 +184,6 @@ fn local_branch_exists(repo: &Path, name: &str) -> bool {
 
 /// The configured trunk, or the repo's detected one; `None` when there is
 /// none (never the current branch). A leading `origin/` is stripped.
-// Consumed by Task 3 (detection) of the stacked-branches plan.
-#[allow(dead_code)]
 pub(crate) fn trunk(repo: &Path, configured: Option<&str>) -> Option<String> {
     let cwd = repo.to_str()?;
     let name = crate::git::cmd::resolve_default_branch_strict(cwd, configured)?;
@@ -305,8 +299,6 @@ pub(crate) fn unset(repo: &Path, layer: &str) -> Result<(), String> {
     Ok(())
 }
 
-// Consumed by Task 3 (detection) of the stacked-branches plan.
-#[allow(dead_code)]
 pub(crate) fn set_base(repo: &Path, layer: &str, sha: &str) -> Result<(), String> {
     validate_branch_name(layer)?;
     run_ok(repo, &["config", "--local", &key(layer, BASE), sha]).map(|_| ())

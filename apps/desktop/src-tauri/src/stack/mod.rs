@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod detect;
 pub(crate) mod guard;
 pub(crate) mod meta;
 
@@ -18,7 +19,6 @@ pub enum Moment {
 
 // The types below are consumed by later tasks of the stacked-branches plan;
 // until then only `meta` uses a few of them.
-#[allow(dead_code)]
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum LayerState {
@@ -29,7 +29,6 @@ pub enum LayerState {
     BaseLost,
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum MergeSignal {
@@ -56,7 +55,6 @@ pub struct PendingRestack {
     pub original: String,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct MergedParentHint {
     pub branch: String,
@@ -64,7 +62,6 @@ pub struct MergedParentHint {
     pub head_ref_oid: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct LayerStatus {
     pub branch: String,
@@ -92,7 +89,6 @@ pub struct FinalizedRestack {
     pub switch_error: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct StackReport {
     pub trunk: Option<String>,

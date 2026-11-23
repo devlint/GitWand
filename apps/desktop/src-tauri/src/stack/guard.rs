@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 
 /// `git version 2.39.3 (Apple Git-146)` / `git version 2.45.1.windows.1`
 /// → `(2, 39)` / `(2, 45)`.
-// Consumed by Task 3 (stack status).
-#[allow(dead_code)]
 pub(crate) fn parse_git_version(s: &str) -> Option<(u32, u32)> {
     let rest = s.trim().strip_prefix("git version ")?;
     let mut nums = rest.split('.');
@@ -18,8 +16,6 @@ pub(crate) fn parse_git_version(s: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
-// Consumed by Task 3 (stack status).
-#[allow(dead_code)]
 pub(crate) fn git_version() -> Option<(u32, u32)> {
     let out = git_cmd().arg("--version").output().ok()?;
     if !out.status.success() {
@@ -29,15 +25,11 @@ pub(crate) fn git_version() -> Option<(u32, u32)> {
 }
 
 /// `--update-refs` landed in git 2.38.
-// Consumed by Task 3 (stack status).
-#[allow(dead_code)]
 pub(crate) fn supports_update_refs(v: Option<(u32, u32)>) -> bool {
     matches!(v, Some(v) if v >= (2, 38))
 }
 
 /// A branch held by a worktree: checked out there, or mid-rebase there.
-// Consumed by Task 5 (restack planning).
-#[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) struct Holder {
     pub branch: String,
@@ -46,8 +38,6 @@ pub(crate) struct Holder {
     pub current: bool,
 }
 
-// Consumed by Task 5 (restack planning).
-#[allow(dead_code)]
 pub(crate) fn branch_holders(repo: &Path) -> Result<Vec<Holder>, String> {
     let top = git_out(repo, &["rev-parse", "--show-toplevel"])?;
     let top = canonical(Path::new(&top));
