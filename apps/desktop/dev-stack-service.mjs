@@ -875,6 +875,7 @@ function parentMoved(l) {
     new_parent: null,
     onto_behind: l.parent_behind_upstream,
     merged_work_missing: false,
+    parent_commits_unknown: false,
   };
 }
 
@@ -898,18 +899,22 @@ function parentMerged(repo, l, hints, trunkName) {
     ontoBehind = 0;
   }
   const honoured = hints.find((h) => h.branch === l.parent && l.merged_pr === h.number);
-  // I-2, wave 2 items 4-5: the target must contain the merged work — the
-  // forge's merge commit when there is one (whatever P' tracks), else, onto
-  // a stacked P', git's own signals against the local P'.
+  // I-2, waves 2-3: the target must contain the merged work — the forge's
+  // merge commit when there is one (whatever P' tracks); without one, git must
+  // find the parent's commits below `onto` or merged into it, onto a stacked
+  // P' and onto origin/<trunk> for a forge hint (a fallback detection already
+  // probed origin/<trunk>). Parent commits that cannot be named → no_old_base.
   let mergedWorkMissing = false;
+  let parentCommitsUnknown = false;
   if (ontoSha !== null) {
     const oid = honoured?.merge_commit_oid ?? null;
     if (oid !== null) {
       mergedWorkMissing = !(commitExists(repo, oid) && isAncestor(repo, oid, ontoSha));
-    } else if (newParent !== null) {
+    } else if (newParent !== null || honoured) {
       const base = l.base !== null && commitExists(repo, l.base) ? l.base : null;
       const probe = mergedProbe(repo, base, l.parent_tip);
-      mergedWorkMissing = probe === null || mergedSignal(repo, `refs/heads/${ontoRef}`, probe) === null;
+      if (probe === null) parentCommitsUnknown = true;
+      else mergedWorkMissing = !(isAncestor(repo, probe, ontoSha) || mergedSignal(repo, ontoSha, probe) !== null);
     }
   }
   let upstream = null;
@@ -929,6 +934,7 @@ function parentMerged(repo, l, hints, trunkName) {
     new_parent: newParent,
     onto_behind: ontoBehind,
     merged_work_missing: mergedWorkMissing,
+    parent_commits_unknown: parentCommitsUnknown,
   };
 }
 
@@ -1004,7 +1010,7 @@ function firstRefusal(c) {
       detail: null,
     };
   }
-  if (t.upstream_sha === null) {
+  if (t.upstream_sha === null || t.parent_commits_unknown) {
     return refusalOf(
       "no_old_base",
       `The commit ${c.l.parent} pointed to before its merge is not available locally.`,
@@ -1326,7 +1332,7 @@ function deleteMergedParent(repo, branch, tip) {
     const how = h.rebasing ? "being rebased" : "checked out";
     fail(`${branch} is ${how} in a worktree (${h.worktree}): not deleted.`);
   }
-  const out = run(repo, ["update-ref", "-d", `refs/heads/${branch}`, tip]);
+  const out = run(repo, ["update-ref", "--no-deref", "-d", `refs/heads/${branch}`, tip]);
   if (!ok(out)) fail(`${branch} changed since the restack: not deleted (${trimmed(out.stderr)})`);
   run(repo, ["config", "--local", "--remove-section", `branch.${branch}`]);
 }

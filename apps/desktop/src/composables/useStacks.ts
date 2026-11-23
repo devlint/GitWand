@@ -273,6 +273,8 @@ export function createStacks(deps: StacksDeps): Stacks {
   const state: StacksCore["state"] = { lastHints: [], lastPlan: null, flowGen: 0 };
   /** Per cwd, the last finalization handled: an identical one is not handled twice in a row. */
   const lastFinalized = new Map<string, string>();
+  /** Per cwd, a finalization whose after-restack handling failed, to retry. */
+  const unhandled = new Map<string, { finalized: FinalizedRestack; trunk: string | null }>();
 
   const core: StacksCore = { deps, report, flow, after, ctx, state, layerOf, refresh, stackOn };
   let flowApi: StacksFlow | null = null;
@@ -453,26 +455,36 @@ export function createStacks(deps: StacksDeps): Stacks {
       statusError.value = null;
       state.lastHints = hints;
     }
-    if (!r.finalized) {
+    // The backend clears a record as it reports it finalized, so a report
+    // never carries a finalization twice: one whose handling failed is
+    // retried from memory (wave 3, item 7).
+    const kept = unhandled.get(cwd) ?? null;
+    const f = r.finalized ?? kept?.finalized ?? null;
+    const trunk = r.finalized ? r.trunk : (kept?.trunk ?? null);
+    if (!f) {
       lastFinalized.delete(cwd);
       return;
     }
-    const f = r.finalized;
     const key = JSON.stringify([f.moment, f.bottom, f.moved]);
     // The same finalization twice in a row would be a backend that failed to
     // clear its record: do not retarget or offer again, and stop the chain.
-    if (lastFinalized.get(cwd) === key) return;
+    if (lastFinalized.get(cwd) === key) {
+      unhandled.delete(cwd);
+      return;
+    }
     try {
-      await withFlow((fl) => fl.onFinalized(cwd, f, r.trunk));
+      await withFlow((fl) => fl.onFinalized(cwd, f, trunk));
     } catch (e) {
       // The status worked: a failure handling what followed the restack is
       // not a status error (wave 2, item 2). The report stays; the host says
-      // what failed. Not marked handled (T13): a later report retries it.
+      // what failed. Kept, not marked handled: the next refresh retries it.
+      unhandled.set(cwd, { finalized: f, trunk });
       const h = restackHost();
       if (h) h.notify(message(e));
       else console.warn("[stacks] after-restack handling failed:", message(e));
       return;
     }
+    unhandled.delete(cwd);
     lastFinalized.set(cwd, key);
     // The backend settles one record per call: look for the next one.
     void refresh(cwd);

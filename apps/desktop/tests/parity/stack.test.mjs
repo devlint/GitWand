@@ -221,7 +221,11 @@ describe("parity: stacked branches", () => {
   }, 30_000);
 
   it("no delete offer once the merged parent moved, nor for the current branch (I-1, M-1)", async () => {
-    const hint = [{ branch: "step-1", number: 812, head_ref_oid: null }];
+    // The squash's sha is the same on every "squashed" fixture (fixed dates):
+    // the merge commit the forge gives, so the grown step-1 is not checked
+    // by git's signals (wave 3, item 2).
+    const squash = git(fixtureStack("squashed"), ["rev-parse", "origin/main"]);
+    const hint = [{ branch: "step-1", number: 812, head_ref_oid: null, merge_commit_oid: squash }];
     const grew = (cwd) => {
       git(cwd, ["checkout", "--quiet", "step-1"]);
       writeFileSync(join(cwd, "late.txt"), "late\n");
@@ -588,6 +592,39 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     });
   }, 60_000);
 
+  it("without a merge commit, the merged work is checked by ancestry or git's signals (wave 3, items 1, 2, 5)", async () => {
+    // Item 1: step-1 fast-forwarded onto step-2 holds its commits.
+    const hint2 = [{ branch: "step-2", number: 812, head_ref_oid: null }];
+    const ff = twoFixtures("ff");
+    const a = await planBoth(dev, ff.rustCwd, ff.nodeCwd, "step-3", "fast-forwarded grandparent", hint2);
+    expect([a.value.onto_ref, a.value.refusal]).toEqual(["step-1", null]);
+
+    // Item 2: onto origin/main, a forge hint without a merge commit; step-1
+    // grew after its merge, so its commits are not all there.
+    const hint1 = [{ branch: "step-1", number: 812, head_ref_oid: null }];
+    const grew = twoFixtures("merge-commit-grew");
+    const b = await planBoth(dev, grew.rustCwd, grew.nodeCwd, "step-2", "trunk without merge commit", hint1);
+    expect(b.value.refusal).toEqual({
+      code: "merged_work_missing",
+      message: "The merged work of step-1 (PR #812) is not in origin/main yet: update origin/main first.",
+      branch: "origin/main",
+      path: null,
+      detail: null,
+    });
+
+    // Item 5: no base, parent gone, no merge commit: the parent's commits
+    // cannot be named — no_old_base.
+    let oldTip = null;
+    const gone = twoFixtures("squashed", (cwd) => {
+      oldTip = git(cwd, ["rev-parse", "step-1"]);
+      git(cwd, ["config", "--unset", "branch.step-2.gitwandStackBase"]);
+      git(cwd, ["branch", "--quiet", "-D", "step-1"]);
+    });
+    const withHead = [{ ...hint1[0], head_ref_oid: oldTip }];
+    const c = await planBoth(dev, gone.rustCwd, gone.nodeCwd, "step-2", "parent commits unknown", withHead);
+    expect(c.value.refusal.code).toBe("no_old_base");
+  }, 60_000);
+
   it("occupied_rebasing: a moving branch being rebased in another worktree (M-3)", async () => {
     const prep = (cwd) => {
       git(cwd, ["branch", "backup", "step-2"]);
@@ -633,7 +670,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     const s = await statusBoth(dev, rustCwd, nodeCwd, "finalize with the head sha", hint);
     expect(s.finalized.delete_offer).toEqual({ branch: "step-1", tip: head });
 
-    const del = async (cwd, tip) => ({
+    const del = async (tip) => ({
       r: ownResult(rust("stack_delete_merged_parent", { cwd: rustCwd, branch: "step-1", tip }), rustCwd),
       n: ownResult(await node(dev, "/api/stack-delete-merged-parent", { cwd: nodeCwd, branch: "step-1", tip }), nodeCwd),
     });
@@ -646,7 +683,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
       git(cwd, ["checkout", "--quiet", "step-3"]);
     }
     const late = { rust: tipOf(rustCwd), node: tipOf(nodeCwd) };
-    const refused = await del(null, head);
+    const refused = await del(head);
     expect(refused.r.ok).toBe(false);
     expect(refused.n.ok).toBe(false);
     expect(refused.r.error).toMatch(/^step-1 changed since the restack: not deleted/);

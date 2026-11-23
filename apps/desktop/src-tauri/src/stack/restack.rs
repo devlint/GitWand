@@ -52,11 +52,14 @@ struct Target {
     new_parent: Option<String>,
     /// Commits the local `onto_ref` lacks from its own upstream.
     onto_behind: u32,
-    /// Moment 2: the merged work is not shown to be in `onto` (I-2, wave 2
-    /// items 4-5): the forge's merge commit is not in it (unknown locally
-    /// included), or, onto a stacked P' without a merge commit to check,
-    /// git finds no trace of the parent's commits in P'.
+    /// Moment 2: the merged work is not shown to be in `onto` (I-2, waves
+    /// 2-3): the forge's merge commit is not in it (unknown locally
+    /// included), or, without one, git finds the parent's commits neither
+    /// below `onto` nor merged into it.
     merged_work_missing: bool,
+    /// Moment 2 without a merge commit, where the parent's commits cannot be
+    /// named (no base, parent gone locally): refused `no_old_base`.
+    parent_commits_unknown: bool,
 }
 
 /// The restack of `layer`'s chain from `layer` up (spec §5.4). Err only for a
@@ -203,6 +206,7 @@ fn parent_moved(l: &LayerStatus) -> Result<Target, String> {
         new_parent: None,
         onto_behind: l.parent_behind_upstream,
         merged_work_missing: false,
+        parent_commits_unknown: false,
     })
 }
 
@@ -241,27 +245,33 @@ fn parent_merged(
     // I-2: the target must contain the merged work. A forge merge commit is
     // the proof when there is one: it must be in `onto` (unknown locally —
     // the fetch did not bring it: a fork's parent, another remote — counts as
-    // missing), whatever P' tracks. Without one, onto a stacked P' (D8), git
-    // must find the parent's commits in the local P' by the fallback's own
-    // rules (wave 2, item 5); an upstream proves nothing (the PR may have
-    // been retargeted and merged elsewhere). The trunk case keeps the
-    // fetched `origin/<trunk>`, which the fallback already probed.
+    // missing), whatever P' tracks. Without one, git must find the parent's
+    // commits in `onto` (wave 2 item 5, wave 3 items 1-2): below it, or
+    // merged into it by the fallback's own rules. That check runs onto a
+    // stacked P' (an upstream proves nothing: the PR may have been
+    // retargeted and merged elsewhere) and onto `origin/<trunk>` for a forge
+    // hint; a fallback detection already probed `origin/<trunk>` itself.
+    // When the parent's commits cannot be named at all (no base, parent gone
+    // locally), the refusal is `no_old_base` (wave 3 item 5).
     let mut merged_work_missing = false;
+    let mut parent_commits_unknown = false;
     if let Some(onto) = onto_sha.as_deref() {
         match honoured.and_then(|h| h.merge_commit_oid.as_deref()) {
             Some(oid) => {
                 merged_work_missing = !(commit_exists(repo, oid)? && is_ancestor(repo, oid, onto)?);
             }
-            None if new_parent.is_some() => {
+            None if new_parent.is_some() || honoured.is_some() => {
                 let base = match l.base.as_deref() {
                     Some(b) if commit_exists(repo, b)? => Some(b),
                     _ => None,
                 };
-                let probe = merged_probe(repo, base, l.parent_tip.as_deref())?;
-                let target = format!("refs/heads/{onto_ref}");
-                merged_work_missing = probe
-                    .and_then(|p| merged_signal(repo, &target, p))
-                    .is_none();
+                match merged_probe(repo, base, l.parent_tip.as_deref())? {
+                    Some(probe) => {
+                        merged_work_missing = !(is_ancestor(repo, probe, onto)?
+                            || merged_signal(repo, onto, probe).is_some());
+                    }
+                    None => parent_commits_unknown = true,
+                }
             }
             None => {}
         }
@@ -288,6 +298,7 @@ fn parent_merged(
         new_parent,
         onto_behind,
         merged_work_missing,
+        parent_commits_unknown,
     })
 }
 
@@ -457,7 +468,7 @@ fn first_refusal(c: Checks) -> Result<Option<RestackRefusal>, String> {
             detail: None,
         }));
     }
-    if t.upstream_sha.is_none() {
+    if t.upstream_sha.is_none() || t.parent_commits_unknown {
         return Ok(refusal(
             "no_old_base",
             format!(
@@ -924,7 +935,8 @@ fn delete_offer(
 /// Wave 2, item 1: deletes the merged parent `branch` only if it still
 /// points at `tip`, the commit the delete offer verified. A compare-and-swap
 /// (`update-ref -d <ref> <tip>`), so a commit added since the offer makes it
-/// fail and nothing is lost. Never a branch a worktree holds (`update-ref`
+/// fail and nothing is lost (`--no-deref`: a symbolic ref is deleted itself,
+/// never the branch it points to). Never a branch a worktree holds (`update-ref`
 /// would pull it from under that checkout). Then drops its config section,
 /// as `git branch -D` does; a section that is already gone is fine.
 pub(crate) fn delete_merged_parent(repo: &Path, branch: &str, tip: &str) -> Result<(), String> {
@@ -944,7 +956,7 @@ pub(crate) fn delete_merged_parent(repo: &Path, branch: &str, tip: &str) -> Resu
         ));
     }
     let r = format!("refs/heads/{branch}");
-    let out = exec(repo, &["update-ref", "-d", &r, tip])?;
+    let out = exec(repo, &["update-ref", "--no-deref", "-d", &r, tip])?;
     if !out.status.success() {
         return Err(format!(
             "{branch} changed since the restack: not deleted ({})",
@@ -1088,6 +1100,14 @@ mod tests {
             head_ref_oid: oid,
             merge_commit_oid: None,
         }
+    }
+
+    /// The step-1 hint with the merge commit: the squash on origin/main.
+    fn squash_hint(r: &TempRepo) -> [MergedParentHint; 1] {
+        [MergedParentHint {
+            merge_commit_oid: Some(r.git(&["rev-parse", "origin/main"])),
+            ..hint("step-1", None)
+        }]
     }
 
     /// step-2's PR (based on step-1) squash-merged, and pulled into the local
@@ -1266,6 +1286,74 @@ mod tests {
             ..hint("step-2", None)
         }];
         assert_eq!(code(plan(p, Some("main"), "step-3", &verified, V)), "");
+    }
+
+    /// Wave 3, item 1: step-1 fast-forwarded onto step-2's tip holds every
+    /// commit of step-2, though neither cherry nor the merge-commit walk
+    /// says so: ancestry is enough.
+    #[test]
+    fn moment_two_onto_a_grandparent_fast_forwarded_onto_the_parent_is_allowed() {
+        let r = TempRepo::new();
+        stack3(&r);
+        r.git(&["checkout", "-q", "step-1"]);
+        r.git(&["merge", "-q", "--ff-only", "step-2"]);
+        r.git(&["checkout", "-q", "step-3"]);
+        let p = plan(&r.path, Some("main"), "step-3", &[hint("step-2", None)], V).unwrap();
+        assert_eq!(p.onto_ref, "step-1");
+        assert!(p.refusal.is_none(), "{:?}", p.refusal);
+    }
+
+    /// Wave 3, item 2: onto origin/<trunk>, a forge hint without a merge
+    /// commit is checked like the stacked case: a two-commit squash leaves
+    /// no trace git can see, so it is refused unless the merge commit says.
+    #[test]
+    fn moment_two_onto_the_trunk_without_a_merge_commit_needs_the_work_there() {
+        let r = TempRepo::new();
+        two_commit_parent_squashed(&r);
+        let p = &r.path;
+        let rf = plan(p, Some("main"), "step-2", &[hint("step-1", None)], V)
+            .unwrap()
+            .refusal
+            .unwrap();
+        assert_eq!(rf.code, "merged_work_missing");
+        assert_eq!(rf.branch.as_deref(), Some("origin/main"));
+        assert_eq!(
+            code(plan(p, Some("main"), "step-2", &squash_hint(&r), V)),
+            ""
+        );
+        // A single-commit squash is found by patch-id.
+        let r = TempRepo::new();
+        stack3(&r);
+        squash_step1_on_origin(&r);
+        assert_eq!(
+            code(plan(
+                &r.path,
+                Some("main"),
+                "step-2",
+                &[hint("step-1", None)],
+                V
+            )),
+            ""
+        );
+    }
+
+    /// Wave 3, item 5: no merge commit, no recorded base and the parent gone
+    /// locally: GitWand cannot tell the parent's commits — no_old_base, not
+    /// "update <target> first".
+    #[test]
+    fn moment_two_without_any_trace_of_the_parent_is_no_old_base() {
+        let r = TempRepo::new();
+        stack3(&r);
+        let old_tip = r.git(&["rev-parse", "step-1"]);
+        squash_step1_on_origin(&r);
+        r.git(&["config", "--unset", "branch.step-2.gitwandStackBase"]);
+        r.git(&["branch", "-q", "-D", "step-1"]);
+        let h = [hint("step-1", Some(old_tip))];
+        let rf = plan(&r.path, Some("main"), "step-2", &h, V)
+            .unwrap()
+            .refusal
+            .unwrap();
+        assert_eq!(rf.code, "no_old_base", "{rf:?}");
     }
 
     /// Wave 2, item 5: step-2's PR was retargeted to main and merged there,
@@ -1855,7 +1943,7 @@ mod tests {
     fn moment_two_lands_the_squash_while_local_main_stays_behind() {
         let r = TempRepo::new();
         two_commit_parent_squashed(&r);
-        let h = [hint("step-1", None)];
+        let h = squash_hint(&r);
         let main_before = r.git(&["rev-parse", "main"]);
         assert!(!restack(&r, "step-2", &h).conflict);
         let f = status(&r.path, Some("main"), &h)
@@ -1893,7 +1981,7 @@ mod tests {
         r.git(&["checkout", "-q", "step-1"]);
         r.commit("late.txt", "late\n", "s1 after merge");
         r.git(&["checkout", "-q", "step-3"]);
-        let h = [hint("step-1", None)];
+        let h = squash_hint(&r);
         assert!(!restack(&r, "step-2", &h).conflict);
         let f = status(&r.path, Some("main"), &h)
             .unwrap()
@@ -1909,7 +1997,7 @@ mod tests {
     fn the_merged_parent_delete_is_a_compare_and_swap() {
         let r = TempRepo::new();
         two_commit_parent_squashed(&r);
-        let h = [hint("step-1", None)];
+        let h = squash_hint(&r);
         assert!(!restack(&r, "step-2", &h).conflict);
         let f = status(&r.path, Some("main"), &h)
             .unwrap()
@@ -1952,7 +2040,10 @@ mod tests {
         r.git(&["commit", "-q", "--amend", "-m", "s1 second (amended)"]);
         r.git(&["checkout", "-q", "step-3"]);
         let head = r.git(&["rev-parse", "step-1"]);
-        let h = [hint("step-1", Some(head))];
+        let h = [MergedParentHint {
+            head_ref_oid: Some(head),
+            ..squash_hint(&r)[0].clone()
+        }];
         assert!(!restack(&r, "step-2", &h).conflict);
         let f = status(&r.path, Some("main"), &h)
             .unwrap()
@@ -1967,7 +2058,7 @@ mod tests {
         let r = TempRepo::new();
         two_commit_parent_squashed(&r);
         r.git(&["checkout", "-q", "step-1"]);
-        let h = [hint("step-1", None)];
+        let h = squash_hint(&r);
         assert!(!restack(&r, "step-2", &h).conflict);
         let f = status(&r.path, Some("main"), &h)
             .unwrap()

@@ -158,7 +158,7 @@ pub struct RestackRefusal {
     pub code: String,
     pub message: String,
     /// The branch the refusal is about: the occupied branch, or the target
-    /// (`parent_behind`, `parent_no_upstream`, `merged_work_missing`).
+    /// (`parent_behind`, `merged_work_missing`).
     pub branch: Option<String>,
     /// The worktree holding `branch` (`occupied`, `occupied_rebasing`).
     pub path: Option<String>,

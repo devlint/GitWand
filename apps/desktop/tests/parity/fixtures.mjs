@@ -614,6 +614,12 @@ export function fixtureStack(kind) {
       git(["commit", "--quiet", "-m", "step 2 (squash)"], 6);
       git(["checkout", "--quiet", "step-4"]);
       break;
+    case "ff":
+      // Wave 3, item 1: step-1 fast-forwarded onto step-2 (all its commits).
+      git(["checkout", "--quiet", "step-1"]);
+      git(["merge", "--quiet", "--ff-only", "step-2"]);
+      git(["checkout", "--quiet", "step-3"]);
+      break;
     case "retargeted":
       // Wave 2, item 5: step-2's PR retargeted to main and squash-merged
       // there; step-1 is up to date with its upstream but lacks the work.
