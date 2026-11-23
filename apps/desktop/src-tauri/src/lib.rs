@@ -1749,13 +1749,26 @@ mod command_parity_tests {
         );
     }
 
-    /// Reaches the command: whatever it answers, it is not an argument error.
-    fn assert_reaches_command(r: Result<serde_json::Value, String>, what: &str) {
-        if let Err(e) = r {
-            assert!(
-                !e.contains("missing required arg") && !e.contains("invalid arg"),
-                "{what}: argument parsing failed: {e}"
-            );
+    /// Reaches the command: it answers Ok, or the command's own error,
+    /// which must contain `expected` (never an argument-parsing error).
+    fn assert_reaches_command(
+        r: Result<serde_json::Value, String>,
+        what: &str,
+        expected: Option<&str>,
+    ) {
+        match (r, expected) {
+            (Ok(_), None) => {}
+            (Ok(v), Some(want)) => {
+                panic!("{what}: expected the command to err with {want:?}, got {v}")
+            }
+            (Err(e), want) => {
+                assert!(
+                    !e.contains("missing required arg") && !e.contains("invalid arg"),
+                    "{what}: argument parsing failed: {e}"
+                );
+                let want = want.unwrap_or_else(|| panic!("{what}: unexpected error: {e}"));
+                assert!(e.contains(want), "{what}: {e:?} does not contain {want:?}");
+            }
         }
     }
 
@@ -1784,17 +1797,27 @@ mod command_parity_tests {
                 },
             }),
         );
-        assert_reaches_command(r, "git_restack");
+        assert_reaches_command(r, "git_restack", Some("not a stacked branch: nope"));
         let r = command_parity(
             "stack_restack_plan".into(),
             serde_json::json!({ "cwd": cwd, "branch": "nope" }),
         );
-        assert_reaches_command(r, "stack_restack_plan");
+        assert_reaches_command(r, "stack_restack_plan", Some("not a stacked branch: nope"));
         let r = command_parity(
             "stack_set_parent".into(),
             serde_json::json!({ "cwd": cwd, "branch": "x", "parent": "y" }),
         );
-        assert_reaches_command(r, "stack_set_parent");
+        assert_reaches_command(r, "stack_set_parent", Some("Unknown local branch: x"));
+        let r = command_parity(
+            "stack_unset".into(),
+            serde_json::json!({ "cwd": cwd, "branch": "x" }),
+        );
+        assert_reaches_command(r, "stack_unset", None);
+        let r = command_parity(
+            "preview_restack".into(),
+            serde_json::json!({ "cwd": cwd, "onto": "main", "upstream": "main", "branch": "main" }),
+        );
+        assert_reaches_command(r, "preview_restack", None);
         let bad = command_parity(
             "stack_status".into(),
             serde_json::json!({ "cwd": cwd, "mergedParents": "oops" }),

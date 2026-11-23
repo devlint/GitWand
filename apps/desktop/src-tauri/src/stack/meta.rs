@@ -45,9 +45,7 @@ pub(crate) fn validate_branch_name(name: &str) -> Result<(), String> {
     if name.is_empty() || name.starts_with('-') || name.starts_with("@{") {
         return Err(invalid());
     }
-    let ok = git_cmd()
-        .args(["check-ref-format", "--branch", name])
-        .current_dir(std::env::temp_dir())
+    let ok = check_ref_format_cmd(name)
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
@@ -56,6 +54,18 @@ pub(crate) fn validate_branch_name(name: &str) -> Result<(), String> {
     } else {
         Err(invalid())
     }
+}
+
+/// `git check-ref-format --branch <name>`, run outside any repo: no
+/// GIT_DIR / GIT_WORK_TREE, so `--branch` cannot expand against a repo the
+/// environment points at.
+fn check_ref_format_cmd(name: &str) -> std::process::Command {
+    let mut c = git_cmd();
+    c.args(["check-ref-format", "--branch", name])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .current_dir(std::env::temp_dir());
+    c
 }
 
 fn is_sha(s: &str) -> bool {
@@ -271,11 +281,11 @@ pub(crate) fn set_parent(
         None => unset_key(repo, &key(layer, BASE))?,
     }
     if let Err(e) = run_ok(repo, &["config", "--local", &key(layer, PARENT), parent]) {
-        let _ = match &previous_base {
+        let rollback = match &previous_base {
             Some(sha) => set_base(repo, layer, sha),
             None => unset_key(repo, &key(layer, BASE)),
         };
-        return Err(e);
+        return Err(with_rollback(e, rollback));
     }
     let pending = read_all(repo)?.remove(layer).and_then(|m| m.pending);
     Ok(StackMeta {
@@ -284,6 +294,15 @@ pub(crate) fn set_parent(
         base,
         pending,
     })
+}
+
+/// The parent-write error, plus the rollback's own when it failed too: the
+/// base may then be left half-written, and the user must know.
+fn with_rollback(error: String, rollback: Result<(), String>) -> String {
+    match rollback {
+        Ok(()) => error,
+        Err(re) => format!("{error} (the previous base could not be restored: {re})"),
+    }
 }
 
 fn unset_key(repo: &Path, k: &str) -> Result<(), String> {
@@ -664,6 +683,32 @@ mod tests {
         r.add_bare_origin();
         r.git(&["branch", "-m", "main", "local-only"]);
         assert_eq!(trunk(&r.path, None).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn a_failed_rollback_is_appended_to_the_error() {
+        assert_eq!(with_rollback("boom".into(), Ok(())), "boom");
+        assert_eq!(
+            with_rollback("boom".into(), Err("locked".into())),
+            "boom (the previous base could not be restored: locked)"
+        );
+    }
+
+    /// T1: a GIT_DIR / GIT_WORK_TREE in the environment does not reach
+    /// the check (`None` = removed from the child's environment).
+    #[test]
+    fn check_ref_format_runs_without_git_dir_or_work_tree() {
+        let cmd = check_ref_format_cmd("x");
+        let removed: Vec<String> = cmd
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k.to_string_lossy().to_string())
+            .collect();
+        assert!(removed.contains(&"GIT_DIR".to_string()), "{removed:?}");
+        assert!(
+            removed.contains(&"GIT_WORK_TREE".to_string()),
+            "{removed:?}"
+        );
     }
 
     #[test]

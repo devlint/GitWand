@@ -226,7 +226,10 @@ mod tests {
         // point the linked worktree's `.git` file at nothing.
         std::fs::write(wt.join(".git"), "gitdir: /nonexistent/gitwand-guard\n").unwrap();
         let err = branch_holders(&r.path).unwrap_err();
-        assert!(err.contains("wt"), "error should name the worktree: {err}");
+        assert!(
+            err.contains("cannot inspect worktree") && err.contains(wt.to_str().unwrap()),
+            "error should name the worktree: {err}"
+        );
     }
 
     #[cfg(unix)]
@@ -249,9 +252,14 @@ mod tests {
         let unreadable = std::fs::read_to_string(&head_name).is_err();
         let res = branch_holders(&r.path);
         std::fs::set_permissions(&head_name, std::fs::Permissions::from_mode(0o644)).unwrap();
-        if unreadable {
-            assert!(res.is_err(), "unreadable head-name must be an error");
+        // root reads a 0o000 file: the precondition cannot be set up there.
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("skipped: running as root, a 0o000 head-name stays readable");
+            return;
         }
+        assert!(unreadable, "precondition: head-name must be unreadable");
+        let err = res.unwrap_err();
+        assert!(err.contains("cannot read"), "{err}");
     }
 
     #[test]
