@@ -71,6 +71,8 @@ export type RestackPhase =
 export interface RestackFlow {
   phase: RestackPhase;
   cwd: string | null;
+  /** The layer `startRestack` was asked for (the dialog's title before a plan exists). */
+  branch: string | null;
   plan: RestackPlan | null;
   refusal: RestackRefusal | null;
   fetchWarning: string | null;
@@ -103,6 +105,12 @@ export interface BridgeOffer {
   pr: number;
 }
 
+export interface PushResult {
+  branch: string;
+  ok: boolean;
+  message: string;
+}
+
 export interface RestackHost {
   apply(
     cwd: string,
@@ -111,7 +119,8 @@ export interface RestackHost {
     hints: MergedParentHint[],
     estimated: number,
   ): Promise<ApplyOutcome>;
-  offerPush(after: AfterRestack, run: () => Promise<void>): void;
+  /** `run` pushes the layers of `after` (the restack offered), whatever the banner shows by then. */
+  offerPush(after: AfterRestack, run: () => Promise<PushResult[]>): void;
   notify(message: string): void;
 }
 
@@ -128,6 +137,8 @@ export interface Stacks {
   report: Ref<StackReport | null>;
   flow: Ref<RestackFlow>;
   after: Ref<AfterRestack | null>;
+  /** What App.vue last passed to `setContext`. */
+  context: ComputedRef<StacksContext>;
   /**
    * The report's `pending_error`: a pending restack record that could not be
    * settled. Its chain has no actionable layer, so the banner offers Unstack,
@@ -151,7 +162,9 @@ export interface Stacks {
   later(): void;
   retryRetarget(): Promise<void>;
   deleteMergedParent(): Promise<void>;
-  pushMoved(): Promise<{ branch: string; ok: boolean; message: string }[]>;
+  pushMoved(): Promise<PushResult[]>;
+  /** The banner's ✕: forget the after-restack block. */
+  dismissAfter(): void;
 }
 
 /** How long a merged-PR lookup for one repo+parent is reused (D6). */
@@ -163,6 +176,7 @@ const message = (e: unknown) => String((e as { message?: string })?.message ?? e
 const idle = (): RestackFlow => ({
   phase: "idle",
   cwd: null,
+  branch: null,
   plan: null,
   refusal: null,
   fetchWarning: null,
@@ -182,6 +196,11 @@ let host: RestackHost | null = null;
 /** App.vue registers how a restack is applied, pushed and announced; null unregisters. */
 export function registerRestackHost(h: RestackHost | null): void {
   host = h;
+}
+
+/** The registered host, if any (useStackActions sends its errors to `notify`). */
+export function restackHost(): RestackHost | null {
+  return host;
 }
 
 export function createStacks(deps: StacksDeps): Stacks {
@@ -447,9 +466,8 @@ export function createStacks(deps: StacksDeps): Stacks {
     const rt = await retarget(cwd, fin, trunk);
     after.value = { cwd, finalized: fin, retarget: rt, deleteOffer: fin.merged_parent, push };
     if (push.pushable.length > 0 || push.noLeases) {
-      host?.offerPush(after.value, async () => {
-        await pushMoved();
-      });
+      const offered = after.value;
+      host?.offerPush(offered, () => pushFor(offered));
     }
   }
 
@@ -471,11 +489,14 @@ export function createStacks(deps: StacksDeps): Stacks {
     await refresh(cwd);
   }
 
-  async function pushMoved(): Promise<{ branch: string; ok: boolean; message: string }[]> {
+  function pushMoved(): Promise<PushResult[]> {
     const a = after.value;
-    if (!a) return [];
+    return a ? pushFor(a) : Promise.resolve([]);
+  }
+
+  async function pushFor(a: AfterRestack): Promise<PushResult[]> {
     const cwd = a.cwd;
-    const results: { branch: string; ok: boolean; message: string }[] = [];
+    const results: PushResult[] = [];
     for (const { branch, lease } of a.push.pushable) {
       try {
         const r = await deps.pushBranch(cwd, branch, lease);
@@ -491,7 +512,7 @@ export function createStacks(deps: StacksDeps): Stacks {
 
   async function startRestack(cwd: string, branch: string): Promise<void> {
     const gen = ++flowGen;
-    flow.value = { ...idle(), phase: "fetching", cwd };
+    flow.value = { ...idle(), phase: "fetching", cwd, branch };
     const merged = layerOf(branch)?.state === "parent_merged";
     let fetched: { success: boolean; message: string };
     try {
@@ -582,6 +603,10 @@ export function createStacks(deps: StacksDeps): Stacks {
     }
   }
 
+  function dismissAfter(): void {
+    after.value = null;
+  }
+
   function closeRestack(): void {
     flowGen++;
     flow.value = idle();
@@ -612,6 +637,7 @@ export function createStacks(deps: StacksDeps): Stacks {
     report,
     flow,
     after,
+    context: computed(() => ctx.value),
     pendingError,
     banner,
     offers,
@@ -631,12 +657,18 @@ export function createStacks(deps: StacksDeps): Stacks {
     retryRetarget,
     deleteMergedParent,
     pushMoved,
+    dismissAfter,
   };
 }
 
 // ─── Singleton bound to the real backend ──────────────────
 
 let singleton: Stacks | null = null;
+
+/** Tests only: install a store built with `createStacks` fakes (null resets). */
+export function __setStacksForTest(s: Stacks | null): void {
+  singleton = s;
+}
 
 export function useStacks(): Stacks {
   if (singleton) return singleton;

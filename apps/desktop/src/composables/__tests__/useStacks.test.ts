@@ -681,3 +681,29 @@ describe("useStacks — review round 1", () => {
     expect(s.after.value?.push).toEqual({ pushable: [], skipped: [], noLeases: true });
   });
 });
+
+describe("useStacks — banner support (Task 13)", () => {
+  it("the push offer's run pushes the restack it was offered for, even once the banner is dismissed", async () => {
+    let run: (() => Promise<{ branch: string; ok: boolean; message: string }[]>) | null = null;
+    host({ offerPush: vi.fn((_a, r) => { run = r; }) });
+    const { s, deps, world } = setup();
+    world.report = report({ layers: stack({ "step-2": { state: "out_of_date", actionable: true } }) });
+    await s.refresh("/r");
+    await s.startRestack("/r", "step-2");
+    world.next = report({ finalized: finalized() });
+    await s.applyRestack(0);
+    s.dismissAfter();
+    expect(s.after.value).toBeNull();
+    const res = await run!();
+    expect(deps.pushBranch).toHaveBeenCalledWith("/r", "step-2", "aaa");
+    expect(res).toEqual([{ branch: "step-2", ok: true, message: "pushed" }]);
+  });
+
+  it("exposes the context and names the branch being restacked", async () => {
+    const { s } = setup();
+    expect(s.context.value).toMatchObject({ cwd: "/r", currentBranch: "step-3" });
+    const pending = s.startRestack("/r", "step-2");
+    expect(s.flow.value).toMatchObject({ phase: "fetching", branch: "step-2" });
+    await pending;
+  });
+});

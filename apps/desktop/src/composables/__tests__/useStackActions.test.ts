@@ -47,3 +47,30 @@ describe("createStackActions", () => {
     expect(startRestack).not.toHaveBeenCalled();
   });
 });
+
+describe("useStackActions — error channel", () => {
+  it("sends errors to the registered restack host", async () => {
+    const { registerRestackHost, __setStacksForTest } = await import("../useStacks");
+    const { useStackActions } = await import("../useStackActions");
+    const notify = vi.fn();
+    registerRestackHost({ apply: vi.fn(), offerPush: vi.fn(), notify });
+    __setStacksForTest(fakeStacks({ unstack: vi.fn().mockRejectedValue(new Error("nope")) }));
+    try {
+      await useStackActions().unstack("/r", "b");
+      expect(notify).toHaveBeenCalledWith("nope");
+    } finally {
+      registerRestackHost(null);
+      __setStacksForTest(null);
+    }
+  });
+
+  it("deleteMergedParent surfaces a failure", async () => {
+    const notify = vi.fn();
+    const actions = createStackActions(
+      fakeStacks({ deleteMergedParent: vi.fn().mockRejectedValue(new Error("not deleted")) }),
+      notify,
+    );
+    await actions.deleteMergedParent();
+    expect(notify).toHaveBeenCalledWith("not deleted");
+  });
+});
