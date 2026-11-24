@@ -17,7 +17,7 @@ import { useTheme } from "../composables/useTheme";
 import { useStacks } from "../composables/useStacks";
 import { stackMenuFor, type StackMenuItems } from "../composables/useStackActions";
 import { clampMenuToWindow } from "../utils/contextMenu";
-import { useCommitSelection, COMBINE_MAX } from "../composables/useCommitSelection";
+import { useCommitSelection, orderSelection, COMBINE_MAX } from "../composables/useCommitSelection";
 import { isToggleModifier } from "../utils/platform";
 import { preventShiftSelect } from "../composables/useLineRange";
 
@@ -821,14 +821,12 @@ const logOrder = computed(() =>
   displayCommits.value.filter(isJoinable).map((e) => e.hashFull),
 );
 /**
- * THE selection list: selection ∩ loaded log, in full log order. A search
- * that only hides a selected row keeps it; chip, Enter, disabled state and
- * the emitted hashes all read this one list.
+ * THE selection list: selected hashes in the loaded log (full log order),
+ * then those beyond the loaded depth (selection order). A search that only
+ * hides a selected row keeps it; chip, Enter, disabled state and the
+ * emitted hashes all read this one list.
  */
-const orderedSelection = computed(() => {
-  const set = multiSet.value;
-  return logOrder.value.filter((h) => set.has(h));
-});
+const orderedSelection = computed(() => orderSelection(selection.selected.value, logOrder.value));
 const tooMany = computed(() => orderedSelection.value.length > COMBINE_MAX);
 const canCombine = computed(
   () => orderedSelection.value.length >= 2 && orderedSelection.value.length <= COMBINE_MAX,
@@ -1464,10 +1462,11 @@ const visibleRange = computed(() => {
   return { first, last };
 });
 
-// A reload that drops a commit (rebase, amend) prunes it from the selection.
-// An empty log is a reload in progress, not a log without these commits.
-watch(logOrder, (order) => {
-  if (multiSet.value.size > 0 && order.length > 0) selection.prune(order);
+// A reload that drops a commit (rebase, amend) prunes it from the selection —
+// only once the whole log is loaded: a shorter reload with more pages may just
+// stop before a selected commit. An empty log is a reload in progress.
+watch([logOrder, () => props.hasMore], ([order, more]) => {
+  if (multiSet.value.size > 0 && order.length > 0 && !more) selection.prune(order);
 });
 
 watch(() => visibleRange.value.last, (last) => {

@@ -208,6 +208,61 @@ describe("CommitGraph — multi-selection", () => {
     expect(useCommitSelection(ref(cwd)).selected.value).toEqual([full("aaa1111"), full("bbb2222")]);
   });
 
+  /** Mount on a reactive log + hasMore so one instance sees the reloads. */
+  function mountReactive(log: { value: GitLogEntry[] }, more: { value: boolean }) {
+    cwd = `/repo/multi-${n++}`;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    const emitted: Record<string, unknown[][]> = {};
+    app = createApp({
+      setup: () => () =>
+        h(CommitGraph, {
+          commits: log.value,
+          hasMore: more.value,
+          cwd,
+          selectedHash: full("aaa1111"),
+          onOpenCombined: (hs: string[]) => (emitted["open-combined"] ??= []).push([hs]),
+        }),
+    });
+    app.mount(container);
+    return { emitted };
+  }
+
+  it("a shorter reload with more pages keeps a selected commit beyond the loaded depth", async () => {
+    const log = shallowRef(commits);
+    const more = ref(false);
+    const { emitted } = mountReactive(log, more);
+    await click(3, { ctrlKey: true }); // seeds aaa, adds ddd
+    await click(1, { ctrlKey: true }); // bbb
+    expect(chip()?.textContent).toContain("combined.chip:3");
+    more.value = true;
+    log.value = commits.slice(0, 3); // ddd now lies beyond the loaded depth
+    await nextTick();
+    await nextTick();
+    expect(useCommitSelection(ref(cwd)).selected.value).toContain(full("ddd4444"));
+    expect(chip()?.textContent).toContain("combined.chip:3");
+    chip()!.querySelector<HTMLElement>(".cg-multi-chip__open")!.click();
+    // Loaded ones in log order, then the unloaded one in selection order.
+    expect(emitted["open-combined"][0][0]).toEqual([full("aaa1111"), full("bbb2222"), full("ddd4444")]);
+  });
+
+  it("a complete log without a selected commit prunes it", async () => {
+    const log = shallowRef(commits);
+    const more = ref(true);
+    mountReactive(log, more);
+    await click(3, { ctrlKey: true });
+    await click(1, { ctrlKey: true });
+    log.value = commits.slice(0, 3);
+    await nextTick();
+    await nextTick();
+    expect(useCommitSelection(ref(cwd)).selected.value).toContain(full("ddd4444"));
+    more.value = false; // the last page came in: ddd is really gone
+    await nextTick();
+    await nextTick();
+    expect(useCommitSelection(ref(cwd)).selected.value).toEqual([full("aaa1111"), full("bbb2222")]);
+    expect(chip()?.textContent).toContain("combined.chip:2");
+  });
+
   it("a transient empty log (reload) keeps the selection", async () => {
     const log = shallowRef(commits);
     app = null;

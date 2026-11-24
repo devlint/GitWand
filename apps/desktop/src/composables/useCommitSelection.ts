@@ -24,6 +24,18 @@ function stateFor(path: string): SelectionState {
   return (states[path] ??= { list: [], anchor: null, seeded: false });
 }
 
+/**
+ * The selection as the graph acts on it: selected hashes present in the
+ * loaded log, in log order, then those not loaded (beyond the loaded depth),
+ * in selection order. The backend re-orders topologically anyway.
+ */
+export function orderSelection(selected: readonly string[], logOrder: readonly string[]): string[] {
+  const set = new Set(selected);
+  const loaded = logOrder.filter((h) => set.has(h));
+  const inLog = new Set(loaded);
+  return [...loaded, ...selected.filter((h) => !inLog.has(h))];
+}
+
 export function useCommitSelection(repoPath: Ref<string>): {
   selected: ComputedRef<string[]>;
   anchor: ComputedRef<string | null>;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ref } from "vue";
-import { useCommitSelection, COMBINE_MAX } from "../useCommitSelection";
+import { useCommitSelection, orderSelection, COMBINE_MAX } from "../useCommitSelection";
 
 let n = 0;
 const fresh = () => ref(`/repo/${n++}`);
@@ -146,5 +146,14 @@ describe("useCommitSelection", () => {
     s.setAnchor("gone");
     s.range("c", ["a", "b", "c"], "a");
     expect(s.selected.value).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("orderSelection", () => {
+  it("lists loaded hashes in log order, then unloaded ones in selection order", () => {
+    expect(orderSelection(["e", "a", "d", "b"], ["a", "b", "c"])).toEqual(["a", "b", "e", "d"]);
+  });
+  it("is empty for an empty selection", () => {
+    expect(orderSelection([], ["a"])).toEqual([]);
   });
 });
