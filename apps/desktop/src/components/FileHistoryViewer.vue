@@ -5,6 +5,7 @@ import type { CombinedRequest } from "../composables/useCombinedDiff";
 import { useCommitSelection, COMBINE_MAX } from "../composables/useCommitSelection";
 import { isToggleModifier } from "../utils/platform";
 import { preventShiftSelect } from "../composables/useLineRange";
+import { combinedPathsFor } from "../utils/combinedPaths";
 import Avatar from "./Avatar.vue";
 import { getGitBlame, getGitFileLog, getGitFileLogPickaxe, getGitFileLogRange, getGitFileDiff, type BlameAlgorithm, type PickaxeMode } from "../utils/backend";
 import { loadSettings } from "../composables/useSettings";
@@ -61,10 +62,6 @@ function closeBlameExplain() {
 const props = defineProps<{
   filePath: string;
   cwd: string;
-  /** Test seams: default to the real backend wrappers. */
-  blameFetcher?: typeof getGitBlame;
-  logFetcher?: typeof getGitFileLog;
-  rangeFetcher?: typeof getGitFileLogRange;
 }>();
 
 const emit = defineEmits<{
@@ -90,7 +87,7 @@ const blameAlgo = ref<BlameAlgorithm>(loadSettings().blameAlgorithm ?? "histogra
 const lists = useFileHistoryLists({
   cwd: toRef(props, "cwd"),
   filePath: toRef(props, "filePath"),
-  loaders: { getPickaxe: getGitFileLogPickaxe, getRange: (...a) => (props.rangeFetcher ?? getGitFileLogRange)(...a) },
+  loaders: { getPickaxe: getGitFileLogPickaxe, getRange: getGitFileLogRange },
 });
 const {
   fileLog,
@@ -212,8 +209,8 @@ watch(
     error.value = null;
     try {
       const [blame, log] = await Promise.all([
-        (props.blameFetcher ?? getGitBlame)(props.cwd, path, blameAlgo.value),
-        (props.logFetcher ?? getGitFileLog)(props.cwd, path),
+        getGitBlame(props.cwd, path, blameAlgo.value),
+        getGitFileLog(props.cwd, path),
       ]);
       if (!lists.isCurrent(token)) return;
       blameLines.value = blame;
@@ -256,31 +253,7 @@ function onLogEntryClick(e: MouseEvent, hash: string) {
 function openCombined() {
   if (!selection.canCombine.value) return;
   const chosen = displayedLog.value.filter((x) => selectedSet.value.has(x.hashFull));
-  // Names to give git. Range results and merges carry no `path`: resolve it by
-  // hash from the unfiltered --follow log; an entry still unnamed gets every
-  // name the file has had (a superset within this file's lineage is correct,
-  // a missing name is not). Rename pairing: every name between the oldest and
-  // newest selected entries, plus the name of the entry just before the
-  // oldest — always added: when the oldest is a rename commit it is the old
-  // name `-M` needs to pair it, otherwise it is the same name (harmless).
-  const full = fileLog.value;
-  const known = new Map(full.map((x) => [x.hashFull, x.path]));
-  const lineage = [...new Set([props.filePath, ...full.flatMap((x) => (x.path ? [x.path] : []))])];
-  const names = new Set<string>([props.filePath]);
-  for (const x of chosen) {
-    const p = x.path ?? known.get(x.hashFull);
-    if (p) names.add(p);
-    else lineage.forEach((n) => names.add(n));
-  }
-  const idx = chosen.map((x) => full.findIndex((f) => f.hashFull === x.hashFull)).filter((i) => i >= 0);
-  if (idx.length) {
-    const newest = Math.min(...idx);
-    const oldest = Math.max(...idx);
-    for (let i = newest; i <= oldest; i++) if (full[i].path) names.add(full[i].path!);
-    const before = full[oldest + 1]?.path;
-    if (before) names.add(before);
-  }
-  const paths = [...names];
+  const paths = combinedPathsFor(chosen, fileLog.value, props.filePath);
   emit("open-combined", { hashes: chosen.map((x) => x.hashFull), paths });
 }
 
