@@ -174,6 +174,36 @@ describe("parity: git-combined-diff", () => {
     expect(rust.fallback.map((x) => [x.path, x.conflicted])).toEqual([["x.txt", false]]);
   });
 
+  // replay.rs `blockers_through_a_merge_in_the_range`: a merge record has no
+  // `\n` before its names; names of hex digits only are never read as hashes.
+  it("blockers through a merge in the range, hex-only names included", async () => {
+    const cwd = repo("mergeblockers");
+    const names = ["notes.txt", "cafe", "f"];
+    const all = (content) => Object.fromEntries(names.map((n) => [n, content]));
+    commitFiles(cwd, all("a\nx=1\nc\n"), "base", 0);
+    const a = commitFiles(cwd, all("a\nx=2\nc\n"), "A", 1);
+    git(cwd, ["checkout", "-q", "-b", "side"]);
+    commitFiles(cwd, all("a\nx=3\nc\n"), "S", 2);
+    git(cwd, ["checkout", "-q", "main"]);
+    commitFiles(cwd, { g: "g\n" }, "M1", 3);
+    try {
+      execFileSync("git", ["-C", cwd, "merge", "-q", "--no-ff", "--no-commit", "side"], { env: commitEnv(4), stdio: "ignore" });
+    } catch {
+      // conflicted: resolved below
+    }
+    commitFiles(cwd, all("a\nx=7\nc\n"), "M", 4);
+    const c = commitFiles(cwd, all("a\nx=8\nc\ne\n"), "C", 5);
+    const { rust } = await parity(cwd, [a, c]);
+    const perPath = (path) =>
+      git(cwd, ["rev-list", "--full-history", "--max-count", "5", `${c}^`, "--not", `${a}^`, a, "--", path]).split("\n");
+    for (const n of names) {
+      const f = rust.fallback.find((x) => x.path === n);
+      expect(f.conflicted).toBe(true);
+      expect(f.blockers).toHaveLength(2);
+      expect(f.blockers).toEqual(perPath(n));
+    }
+  });
+
   it("a merge=text attribute is the built-in text merge: the file stays net", async () => {
     const cwd = repo("textattr");
     commitFiles(cwd, { ".gitattributes": "f merge=text\n", f: ten("l"), g: "g\n" }, "base", 0);

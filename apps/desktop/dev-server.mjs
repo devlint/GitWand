@@ -1504,16 +1504,21 @@ class CombinedRepo {
   /**
    * replay.rs `blockers`: per path of `paths`, the commits outside the
    * selection touching it (`--full-history`), newest first, at most 5 — one
-   * unbounded `git log` walk per argv-sized pathspec batch.
+   * unbounded `git log` walk per argv-sized pathspec batch. A merge counts
+   * when it changed the path itself (its combined diff names it).
    */
   async blockers(parent, base, earlier, paths) {
+    // A printed name is a path or under one: none starts with the record
+    // marker unless a path does (see `combinedParseLogNames`).
+    const marked = paths.find((p) => p.startsWith(COMBINED_LOG_RECORD_MARK));
+    if (marked !== undefined) throw new Error(`Combined diffs do not support the file name: ${marked}`);
     const found = new Map();
     for (const batch of combinedPathspecBatches(paths.map((p) => [p]), COMBINED_PATHSPEC_BATCH_BYTES)) {
       const args = [
         "-c", "log.follow=false",
         "log", "--no-color", "--no-show-signature", "--no-renames", "--no-relative",
         "--ignore-submodules=none", "--full-history", "--root", "--diff-merges=combined",
-        "--name-only", "-z", "--format=%x00%H", parent, "--not",
+        "--name-only", "-z", "--format=%x00%x01%H", parent, "--not",
       ];
       if (base !== null) args.push(base);
       args.push(...earlier, "--", ...batch);
@@ -1535,25 +1540,30 @@ function combinedCovers(spec, path) {
   return path === q || (path.startsWith(q) && path.slice(q.length).startsWith("/"));
 }
 
-/** replay.rs `parse_log_names`: `[hash, names]` in walk order. */
+/** replay.rs `LOG_RECORD_MARK`: the byte after the NUL opening each record. */
+const COMBINED_LOG_RECORD_MARK = "\x01";
+
+/**
+ * replay.rs `parse_log_names`: `[hash, names]` in walk order, from
+ * `--format=%x00%x01%H --name-only -z`. Records split on `\0\x01`; a
+ * commit's names follow `\n`, a merge's an empty field.
+ */
 function combinedParseLogNames(out) {
   const commits = [];
-  let afterEmpty = true;
-  let firstName = false;
-  for (const field of out.split("\0")) {
-    if (field === "") {
-      afterEmpty = true;
-      continue;
+  const records = out.split("\0\x01");
+  if (records[0] !== "") throw new Error("Unexpected git log output");
+  for (const record of records.slice(1)) {
+    const fields = record.split("\0");
+    const hash = fields[0];
+    if (!/^[0-9a-fA-F]+$/.test(hash)) throw new Error(`Unexpected git log output: ${hash}`);
+    const names = [];
+    if (fields.length > 1) {
+      const first = fields[1];
+      if (first.startsWith("\n")) names.push(first.slice(1));
+      else if (first !== "") throw new Error(`Unexpected git log output: ${first}`);
     }
-    if (afterEmpty) {
-      if (!/^[0-9a-fA-F]+$/.test(field)) throw new Error(`Unexpected git log output: ${field}`);
-      commits.push([field, []]);
-      firstName = true;
-    } else if (commits.length > 0) {
-      commits[commits.length - 1][1].push(firstName && field.startsWith("\n") ? field.slice(1) : field);
-      firstName = false;
-    }
-    afterEmpty = false;
+    for (const f of fields.slice(2)) if (f !== "") names.push(f);
+    commits.push([hash, names]);
   }
   return commits;
 }

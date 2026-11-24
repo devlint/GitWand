@@ -372,7 +372,9 @@ impl<'a> Repo<'a> {
     /// one spawn per path. The walk is not bounded: with several paths, any
     /// `--max-count` could stop before an older blocker of a quieter path.
     /// `--full-history` keeps each path's answer independent of the other
-    /// paths of its batch (default history simplification is not).
+    /// paths of its batch (default history simplification is not). A merge
+    /// of the range is a blocker when it changed the path itself (its
+    /// combined diff names it); the commits it brings in are walked too.
     fn blockers(
         &self,
         parent: &str,
@@ -380,6 +382,11 @@ impl<'a> Repo<'a> {
         earlier: &[&str],
         paths: &[String],
     ) -> Result<HashMap<String, Vec<String>>, String> {
+        // A name `git log` prints is a path or under one: none starts with
+        // the record marker unless a path does (see `parse_log_names`).
+        if let Some(p) = paths.iter().find(|p| p.starts_with(LOG_RECORD_MARK)) {
+            return Err(format!("Combined diffs do not support the file name: {p}"));
+        }
         let mut found: HashMap<String, Vec<String>> = HashMap::new();
         let units: Vec<Vec<String>> = paths.iter().map(|p| vec![p.clone()]).collect();
         for batch in pathspec_batches(units, PATHSPEC_BATCH_BYTES) {
@@ -398,7 +405,7 @@ impl<'a> Repo<'a> {
                 "--diff-merges=combined",
                 "--name-only",
                 "-z",
-                "--format=%x00%H",
+                "--format=%x00%x01%H",
                 parent,
                 "--not",
             ]);
@@ -430,35 +437,40 @@ fn covers(spec: &str, path: &str) -> bool {
     path == spec || path.strip_prefix(spec).is_some_and(|r| r.starts_with('/'))
 }
 
-/// `git log --format=%x00%H --name-only -z` → `(hash, names)` in walk order.
-/// The stream is `\0<hash>\0\n<name>\0<name>\0…`, records separated by an
-/// extra NUL: a hash is the first field after an empty one (a name is never
-/// empty), the first name of a record carries the `\n` that ends the header.
+/// The byte after the NUL that opens each `git log` record
+/// (`--format=%x00%x01%H`).
+const LOG_RECORD_MARK: char = '\x01';
+
+/// `git log --format=%x00%x01%H --name-only -z` → `(hash, names)` in walk
+/// order. Each record opens with `\0\x01<hash>\0`; a commit's names follow
+/// a `\n` (`\0\n<name>\0<name>\0…`), a merge's (`--diff-merges=combined`)
+/// follow an empty field (`\0\0<name>\0…`). Records are split on
+/// `\0\x01`: a name never starts with `\x01` (`blockers` refuses such a
+/// path), so a name — even one of hex digits only — is never read as a hash.
 fn parse_log_names(out: &str) -> Result<Vec<(String, Vec<String>)>, String> {
     let mut commits: Vec<(String, Vec<String>)> = Vec::new();
-    let mut after_empty = true;
-    let mut first_name = false;
-    for field in out.split('\0') {
-        if field.is_empty() {
-            after_empty = true;
-            continue;
+    let mut records = out.split("\0\x01");
+    if records.next().is_some_and(|head| !head.is_empty()) {
+        return Err("Unexpected git log output".to_string());
+    }
+    for record in records {
+        let mut fields = record.split('\0');
+        let hash = fields.next().unwrap_or("");
+        if hash.is_empty() || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(format!("Unexpected git log output: {hash}"));
         }
-        if after_empty {
-            if !field.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err(format!("Unexpected git log output: {field}"));
+        let mut names: Vec<String> = Vec::new();
+        // A commit's first name carries the `\n` that ends its header; a
+        // merge's first field is empty.
+        if let Some(first) = fields.next() {
+            if let Some(name) = first.strip_prefix('\n') {
+                names.push(name.to_string());
+            } else if !first.is_empty() {
+                return Err(format!("Unexpected git log output: {first}"));
             }
-            commits.push((field.to_string(), Vec::new()));
-            first_name = true;
-        } else if let Some((_, names)) = commits.last_mut() {
-            let name = if first_name {
-                field.strip_prefix('\n').unwrap_or(field)
-            } else {
-                field
-            };
-            names.push(name.to_string());
-            first_name = false;
         }
-        after_empty = false;
+        names.extend(fields.filter(|f| !f.is_empty()).map(str::to_string));
+        commits.push((hash.to_string(), names));
     }
     Ok(commits)
 }
@@ -1380,20 +1392,48 @@ mod tests {
         assert_eq!(fb("q").blockers.len(), 2);
     }
 
-    /// The `git log -z --name-only` stream as git 2.5x writes it: a merge
-    /// with no combined names, a name starting with a newline.
+    /// The `git log -z --name-only --format=%x00%x01%H` stream as git 2.5x
+    /// writes it: a commit's names follow `\0\n`, a merge's follow `\0\0`
+    /// (no newline); names may be all hex digits or start with a newline.
     #[test]
     fn parse_log_names_reads_records() {
-        let out = "\0f7\0\n\nweird\0b\0\0bb\0\0\078\0\nb\0\0b7\0\na\0b\0";
+        let out = concat!(
+            "\0\x01f7\0\n\nweird\0b\0\0",
+            "\0\x01bb\0\0cafe\0\nnl\0\0",
+            "\0\x01aa\0\0",
+            "\0\x0178\0\nb\0\0",
+            "\0\x01b7\0\nf\0a\0",
+        );
         let got = parse_log_names(out).unwrap();
         let want: Vec<(String, Vec<String>)> = vec![
             ("f7".into(), vec!["\nweird".into(), "b".into()]),
-            ("bb".into(), vec![]),
+            ("bb".into(), vec!["cafe".into(), "\nnl".into()]),
+            ("aa".into(), vec![]),
             ("78".into(), vec!["b".into()]),
-            ("b7".into(), vec!["a".into(), "b".into()]),
+            ("b7".into(), vec!["f".into(), "a".into()]),
         ];
         assert_eq!(got, want);
-        assert!(parse_log_names("\0not-a-hash\0").is_err());
+        assert!(parse_log_names("\0\x01not-a-hash\0").is_err());
+        assert!(parse_log_names("junk\0\x01ab\0").is_err());
+        assert_eq!(parse_log_names("").unwrap(), vec![]);
+    }
+
+    /// A path starting with the record marker byte could pass for a record:
+    /// refused before any walk.
+    #[test]
+    fn blockers_refuse_a_path_starting_with_the_marker() {
+        let r = TempRepo::new();
+        let head = r.git(&["rev-parse", "HEAD"]);
+        let repo = Repo {
+            cwd: &cwd(&r),
+            lock: &cwd(&r),
+            paths: None,
+            empty_tree: None,
+        };
+        let err = repo
+            .blockers(&head, None, &[], &["ok".to_string(), "\x01x".to_string()])
+            .unwrap_err();
+        assert_eq!(err, "Combined diffs do not support the file name: \x01x");
     }
 
     /// Conflicts on more path bytes than one argv batch: every path still
@@ -1790,6 +1830,56 @@ mod tests {
             .collect();
         assert_eq!(fb, vec![("x.txt", false)]);
         assert!(got.steps.iter().flatten().all(|e| e.path != "x.txt"));
+    }
+
+    /// Blockers through a merge in the walked range: the merge (it changed
+    /// the files itself) and the side commit are both listed, for a plain
+    /// name and for names that are all hex digits — never read as a hash.
+    #[test]
+    fn blockers_through_a_merge_in_the_range() {
+        let r = TempRepo::new();
+        let names = ["notes.txt", "cafe", "f"];
+        let set = |content: &'static str| -> Vec<(&str, Option<&str>)> {
+            names.iter().map(|n| (*n, Some(content))).collect()
+        };
+        commit_files(&r, &set("a\nx=1\nc\n"), "base");
+        let a = commit_files(&r, &set("a\nx=2\nc\n"), "A");
+        r.git(&["checkout", "-q", "-b", "side"]);
+        commit_files(&r, &set("a\nx=3\nc\n"), "S");
+        r.git(&["checkout", "-q", "main"]);
+        commit_files(&r, &[("g", Some("g\n"))], "M1");
+        // Resolve as a third content: the merge itself changes the files.
+        let _ = std::process::Command::new(crate::git::git_binary())
+            .args(["merge", "-q", "--no-ff", "--no-commit", "side"])
+            .current_dir(&r.path)
+            .output()
+            .unwrap();
+        commit_files(&r, &set("a\nx=7\nc\n"), "M");
+        let c = commit_files(&r, &set("a\nx=8\nc\ne\n"), "C");
+        let got = run(&r, &[&a, &c], None);
+        let per_path = |path: &str| -> Vec<String> {
+            r.git(&[
+                "rev-list",
+                "--full-history",
+                "--max-count",
+                "5",
+                &format!("{c}^"),
+                "--not",
+                &format!("{a}^"),
+                &a,
+                "--",
+                path,
+            ])
+            .lines()
+            .map(str::to_string)
+            .collect()
+        };
+        for n in names {
+            let f = got.fallback.iter().find(|f| f.path == n).unwrap();
+            assert!(f.conflicted, "{n}");
+            assert_eq!(f.blockers.len(), 2, "{n}: {:?}", f.blockers);
+            assert_eq!(f.blockers, per_path(n), "{n}");
+        }
     }
 
     #[test]
