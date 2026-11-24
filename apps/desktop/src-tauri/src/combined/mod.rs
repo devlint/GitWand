@@ -7,7 +7,7 @@ pub(crate) mod order;
 pub(crate) const MIN_COMMITS: usize = 2;
 pub(crate) const MAX_COMMITS: usize = 50;
 
-/// `git diff --remerge-diff`-era plumbing needs git 2.38.
+/// The replay needs `git merge-tree --write-tree`, added in git 2.38.
 pub(crate) fn supports_combined_diff(v: Option<(u32, u32)>) -> bool {
     matches!(v, Some(v) if v >= (2, 38))
 }

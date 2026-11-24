@@ -29,6 +29,7 @@ fn describe(
     let mut args: Vec<&str> = vec![
         "log",
         "--no-walk=unsorted",
+        "--no-show-signature",
         "--format=%H%x00%ct%x00%h%x00%s%x00%an%x00%aI",
         "--end-of-options",
     ];
@@ -78,7 +79,19 @@ pub(crate) fn resolve_and_order(
             remaining.push(full);
         }
     }
+    // `validate_hashes` dedups raw strings; a short prefix and the full hash
+    // (or two cases of one hash) only collapse here.
+    if remaining.len() < super::MIN_COMMITS {
+        return Err("Select at least 2 commits.".to_string());
+    }
+    if remaining.len() > super::MAX_COMMITS {
+        return Err("Select at most 50 commits.".to_string());
+    }
     let meta = describe(cwd, &remaining)?;
+    // A commit whose metadata line did not parse must not vanish silently.
+    if let Some(missing) = remaining.iter().find(|h| !meta.contains_key(*h)) {
+        return Err(format!("Could not read commit metadata: {missing}"));
+    }
     let mut result: Vec<CombinedCommit> = Vec::with_capacity(remaining.len());
     while !remaining.is_empty() {
         let tips: Vec<String> = if remaining.len() == 1 {
@@ -175,6 +188,20 @@ mod tests {
         assert!(pos(&got, &x) < pos(&got, &x2));
         // Y is independent of X/X2: only ancestry is pinned.
         assert!(got.iter().any(|c| c.hash == y));
+        // Within a layer, independent tips go by committer date: Y (older)
+        // before X, whatever the input order.
+        let got = resolve_and_order(&cwd(&r), &[x.clone(), y.clone()]).unwrap();
+        let hashes: Vec<&str> = got.iter().map(|c| c.hash.as_str()).collect();
+        assert_eq!(hashes, vec![y.as_str(), x.as_str()]);
+    }
+
+    #[test]
+    fn duplicates_after_resolution_are_rebounded() {
+        let r = TempRepo::new();
+        let a = r.commit("a.txt", "a\n", "A");
+        // Short prefix and upper-case full hash: distinct strings, one commit.
+        let err = resolve_and_order(&cwd(&r), &[a[..8].to_string(), a.to_uppercase()]).unwrap_err();
+        assert_eq!(err, "Select at least 2 commits.");
     }
 
     #[test]
