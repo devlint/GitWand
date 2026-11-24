@@ -77,7 +77,7 @@ pub struct GitStatus {
 
 // ─── Diff types ────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct DiffLine {
     pub r#type: String,
     pub content: String,
@@ -85,7 +85,7 @@ pub struct DiffLine {
     pub new_line_no: Option<i32>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct DiffHunk {
     pub header: String,
     pub old_start: i32,
@@ -95,7 +95,7 @@ pub struct DiffHunk {
     pub lines: Vec<DiffLine>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct GitDiff {
     pub path: String,
     pub hunks: Vec<DiffHunk>,
@@ -118,6 +118,48 @@ pub struct GitDiff {
     /// panel rather than a file list that leads nowhere.
     #[serde(skip_serializing_if = "Option::is_none", rename = "nestedRepo")]
     pub nested_repo: Option<bool>,
+}
+
+// ─── Combined diff ─────────────────────────────────────────────────
+// Constructed by `git_combined_diff` (next task).
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinedCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    pub author: String,
+    /// Author date, strict ISO 8601 (`%aI`).
+    pub date: String,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct CombinedFallbackCommitDiff {
+    pub hash: String,
+    pub diff: GitDiff,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct CombinedFallbackFile {
+    pub path: String,
+    pub per_commit: Vec<CombinedFallbackCommitDiff>,
+    pub blockers: Vec<String>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct CombinedDiff {
+    pub base: Option<String>,
+    pub commits: Vec<CombinedCommit>,
+    pub diffs: Vec<GitDiff>,
+    pub steps: Vec<Vec<GitDiff>>,
+    pub fallback: Vec<CombinedFallbackFile>,
 }
 
 // ─── Branch PR lookup ──────────────────────────────────────────────

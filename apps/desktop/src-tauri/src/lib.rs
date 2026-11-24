@@ -1,3 +1,6 @@
+// Consumed by `git_combined_diff` (added in the next task).
+#[allow(dead_code)]
+pub(crate) mod combined;
 pub(crate) mod commands;
 pub mod git;
 pub(crate) mod process_tree;
