@@ -74,8 +74,8 @@ const fileNotes = computed<(string | null)[]>(() => {
 const fileCount = computed(() => new Set(entries.value.map((e) => e.diff.path)).size);
 const limitedTo = computed(() => props.request.paths?.join(", ") ?? "");
 
-/** `n file(s)`, with the header's own words. */
-const filesLabel = (n: number) => `${n} ${n === 1 ? t("header.file") : t("header.files")}`;
+/** `n file(s)`: the number's place is the locale's (`{0}`). */
+const filesLabel = (n: number) => t(n === 1 ? "combined.filesSingular" : "combined.filesPlural", n);
 
 /** `+N −M` of the net diff only: a fallback file's per-commit sections are
  *  not net, and a line two commits change would count twice. */

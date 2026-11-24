@@ -3234,6 +3234,8 @@ const es: Locale = {
     errHash: "Hash de commit no válido: {0}",
     errUnknown: "Commit desconocido: {0}",
     errName: "Nombre de archivo no compatible: {0}",
+    filesSingular: "{0} archivo",
+    filesPlural: "{0} archivos",
   },
 };
 

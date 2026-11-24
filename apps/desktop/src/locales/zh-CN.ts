@@ -3244,6 +3244,8 @@ const zhCN: Locale = {
     errHash: "无效的提交哈希：{0}",
     errUnknown: "未知提交：{0}",
     errName: "不支持的文件名：{0}",
+    filesSingular: "{0} 个文件",
+    filesPlural: "{0} 个文件",
   },
 };
 

@@ -198,7 +198,7 @@ describe("CombinedDiffBody", () => {
       diffs: [file("a.txt")],
       fallback: [{ path: "c.txt", conflicted: true, blockers: [], perCommit: [{ hash: H1, diff: file("c.txt") }, { hash: H2, diff: file("c.txt") }, { hash: H3, diff: file("c.txt") }] }],
     }));
-    expect(q(".cmb-counts")!.textContent).toContain("2 header.files");
+    expect(q(".cmb-counts")!.textContent).toContain("combined.filesPlural:2");
   });
 
   it("keeps the fallback banner on the first section when a fallback file is truncated", async () => {
@@ -276,19 +276,19 @@ describe("CombinedDiffBody", () => {
         { path: "e.txt", conflicted: false, blockers: [], perCommit: [{ hash: H3, diff: file("e.txt") }] },
       ],
     }));
-    expect(q(".cmb-fallback")!.textContent).toBe("combined.fallbackSummary:3 header.files,2222222, 4444444");
+    expect(q(".cmb-fallback")!.textContent).toBe("combined.fallbackSummary:combined.filesPlural:3,2222222, 4444444");
   });
 
   it("the fallback summary says between-selected without blockers, and other for companions only", async () => {
     await mount(combined({
       fallback: [{ path: "c.txt", conflicted: true, blockers: [], perCommit: [{ hash: H1, diff: file("c.txt") }] }],
     }));
-    expect(q(".cmb-fallback")!.textContent).toBe("combined.fallbackSummaryBetween:1 header.file");
+    expect(q(".cmb-fallback")!.textContent).toBe("combined.fallbackSummaryBetween:combined.filesSingular:1");
     app?.unmount();
     container?.remove();
     await mount(combined({
       fallback: [{ path: "u.txt", conflicted: false, blockers: [], perCommit: [{ hash: H1, diff: file("u.txt") }] }],
     }));
-    expect(q(".cmb-fallback")!.textContent).toBe("combined.fallbackSummaryOther:1 header.file");
+    expect(q(".cmb-fallback")!.textContent).toBe("combined.fallbackSummaryOther:combined.filesSingular:1");
   });
 });

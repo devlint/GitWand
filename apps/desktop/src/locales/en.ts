@@ -3279,6 +3279,8 @@ const en = {
     errHash: "Invalid commit hash: {0}",
     errUnknown: "Unknown commit: {0}",
     errName: "Unsupported file name: {0}",
+    filesSingular: "{0} file",
+    filesPlural: "{0} files",
   },
 } as const;
 
