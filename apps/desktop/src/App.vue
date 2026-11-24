@@ -215,6 +215,7 @@ import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from 
 import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 import { useCommitSelection } from "./composables/useCommitSelection";
+import { clearCombinedCache } from "./utils/combinedCache";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
 import { planDiscard, selectDiscardEntries, summarizeDiscard } from "./utils/discardPlan";
@@ -4916,7 +4917,9 @@ watch(selectedCommitHash, () => {
 const graphFileIdx = ref<number | null>(null);
 // Combined diff of the Git Tree multi-selection; replaces the graph while set.
 const combinedRequest = ref<import("./composables/useCombinedDiff").CombinedRequest | null>(null);
-watch(repoFolderPath, () => { combinedRequest.value = null; });
+watch(repoFolderPath, () => { combinedRequest.value = null; clearCombinedCache(); });
+// Closed: its kept result (up to the 16 MB payload budget) is dropped too.
+watch(combinedRequest, (req) => { if (!req) clearCombinedCache(); });
 const graphScrollIdx = ref<number | null>(null);
 
 /** Graph → select a commit: load its diffs, keep the graph, open no file. */
