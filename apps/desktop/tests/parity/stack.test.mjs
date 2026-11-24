@@ -480,6 +480,17 @@ describe("parity: stacked branches", () => {
     expect(stateOf(rustCwd).log["step-2"].split("\n")).toEqual(["s2", "s1 more", "s1", "initial commit"]);
   }, 60_000);
 
+  it("a rebase halted by an untracked file is a halt on both sides", async () => {
+    const prep = (cwd) => {
+      git(cwd, ["checkout", "-q", "step-2"]);
+      writeFileSync(join(cwd, "c.txt"), "untracked, in step-3's way\n", "utf-8");
+    };
+    const { rustCwd, nodeCwd, rr } = await restackBoth(dev, "moved", "step-2", [], prep);
+    expect(rr.value).toEqual({ conflict: true });
+    expect(stateOf(nodeCwd)).toEqual(stateOf(rustCwd));
+    expect(stateOf(rustCwd).rebasing).toBe(true);
+  }, 60_000);
+
   it("an abort started on a lower layer returns to it", async () => {
     const onStep2 = (cwd) => git(cwd, ["checkout", "-q", "step-2"]);
     const { rustCwd, nodeCwd, before } = await restackBoth(dev, "conflict", "step-2", [], onStep2);

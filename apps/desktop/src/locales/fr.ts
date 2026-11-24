@@ -669,6 +669,7 @@ const fr: Locale = {
     push: {
       offer: "{0} branches restackées peuvent être poussées.",
       offerOne: "1 branche restackée peut être poussée.",
+      repoChanged: "Un autre dépôt est ouvert. Rouvrez {0} pour pousser ses branches restackées.",
       action: "Pousser",
       skipped: "Non poussées (pas d'upstream) : {0}",
       skippedGone: "Non poussées (leur branche distante n'existe plus) : {0}",

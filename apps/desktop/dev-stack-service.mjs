@@ -593,6 +593,7 @@ function unwindAbort(repo, top, p) {
   } catch {
     // best effort: the user stays on `top`, unharmed
   }
+  reattach(repo, p.original);
 }
 
 /** D4: the restack recorded on `top` has run to its end. */
@@ -1191,7 +1192,30 @@ function runRestack(repo, configuredTrunk, layer, hints, previewed, version) {
   if ([stderr, stdout].some((s) => s.includes("CONFLICT") || s.includes("could not apply"))) {
     return { conflict: true };
   }
+  // Halted without those words (an untracked file a pick would overwrite):
+  // still a rebase in progress, which the rebase banner takes over.
+  let halted = false;
+  try {
+    halted = rebasingHere(repo);
+  } catch {
+    halted = false;
+  }
+  if (halted) return { conflict: true };
   fail(rebaseFailed(repo, p.top, back, stderr === "" ? stdout : stderr));
+}
+
+/** A HEAD left detached at `original`'s tip (a run that could not switch
+ *  back) goes back on `original`. Best effort, nothing else is touched. */
+function reattach(repo, original) {
+  try {
+    devValidateBranchName(original);
+    if (currentBranch(repo) !== null) return;
+    const head = resolveCommit(repo, "HEAD");
+    const tip = resolveCommit(repo, `refs/heads/${original}`);
+    if (head !== null && head === tip) run(repo, ["switch", "--no-guess", "--quiet", original]);
+  } catch {
+    // best effort
+  }
 }
 
 /** A rebase that failed without halting: the record goes, unless a rebase is

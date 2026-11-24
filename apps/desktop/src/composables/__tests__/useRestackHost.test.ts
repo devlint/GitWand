@@ -123,6 +123,21 @@ describe("createRestackHost", () => {
     expect(toast.mock.calls[1]).toEqual(["Pushed 1 of 2.", "step-3: stale info", 0]);
   });
 
+  // Review of the GitHub QA fixes, item 4: the sticky offer may come back
+  // after a repo switch; it never pushes another repo's branches.
+  it("does not push once another repo is open", async () => {
+    let cwd = "/r";
+    const toast = vi.fn();
+    const host = createRestackHost({ currentCwd: () => cwd, applyRebase: vi.fn(), toast });
+    const run = vi.fn(async (): Promise<PushResult[]> => []);
+    host.offerPush(after({ pushable: [{ branch: "step-2", lease: "a" }], skipped: [], noLeases: false }), run);
+    cwd = "/other";
+    toast.mock.calls[0][3].action.run();
+    await flush();
+    expect(run).not.toHaveBeenCalled();
+    expect(toast.mock.calls[1][1]).toBe("Another repository is open now. Reopen /r to push its restacked branches.");
+  });
+
   it("offers one branch in the singular", () => {
     const { host, toast } = setup();
     host.offerPush(after({ pushable: [{ branch: "step-3", lease: "a" }], skipped: [], noLeases: false }), vi.fn());

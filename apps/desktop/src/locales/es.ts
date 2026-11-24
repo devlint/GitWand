@@ -664,6 +664,7 @@ const es: Locale = {
     push: {
       offer: "Se pueden enviar {0} ramas reapiladas.",
       offerOne: "Se puede enviar 1 rama reapilada.",
+      repoChanged: "Hay otro repositorio abierto. Vuelve a abrir {0} para enviar sus ramas reapiladas.",
       action: "Enviar",
       skipped: "No enviadas (sin upstream): {0}",
       skippedGone: "No enviadas (su rama remota ya no existe): {0}",

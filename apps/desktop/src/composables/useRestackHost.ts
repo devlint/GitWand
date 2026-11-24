@@ -76,6 +76,11 @@ export function createRestackHost(deps: RestackHostDeps): RestackHost {
         action: {
           label: t("stacks.push.action"),
           run: () => {
+            // The offer is sticky and may come back after a repo switch.
+            if (deps.currentCwd() !== after.cwd) {
+              deps.toast(t("common.error"), t("stacks.push.repoChanged", after.cwd), 8000);
+              return;
+            }
             void run().then((results) => {
               const ok = results.filter((r) => r.ok).length;
               const failures = results.filter((r) => !r.ok).map((r) => `${r.branch}: ${r.message}`);

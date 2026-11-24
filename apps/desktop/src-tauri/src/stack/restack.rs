@@ -762,8 +762,28 @@ pub(crate) fn run(
     {
         return Ok(RestackRun { conflict: true });
     }
+    // Halted without those words (an untracked file a pick would overwrite):
+    // still a rebase in progress, which the rebase banner takes over.
+    if matches!(rebasing_here(repo), Ok(true)) {
+        return Ok(RestackRun { conflict: true });
+    }
     let msg = if stderr.is_empty() { stdout } else { stderr };
     Err(rebase_failed(repo, &p.top, back, msg))
+}
+
+/// A HEAD left detached at `original`'s tip (a run that could not switch
+/// back) goes back on `original`. Best effort, nothing else is touched.
+pub(crate) fn reattach(repo: &Path, original: &str) {
+    if validate_branch_name(original).is_err() || !matches!(current_branch(repo), Ok(None)) {
+        return;
+    }
+    let head = resolve_commit(repo, "HEAD");
+    let tip = resolve_commit(repo, &format!("refs/heads/{original}"));
+    if let (Ok(Some(h)), Ok(Some(t))) = (head, tip) {
+        if h == t {
+            let _ = run_ok(repo, &["switch", "--no-guess", "--quiet", original]);
+        }
+    }
 }
 
 /// A rebase that failed without halting on a conflict: the record goes,
@@ -2286,6 +2306,45 @@ mod tests {
         assert!(s.finalized.is_none() && s.pending_errors.is_empty());
         assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
         assert_eq!(snapshot(&r), before);
+        assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]), "step-2");
+    }
+
+    /// Review of the QA fix, item 2: a rebase halted by an untracked file a
+    /// pick would overwrite prints neither "CONFLICT" nor "could not apply",
+    /// yet is in progress: a halt (the rebase banner takes over), not a failure.
+    #[test]
+    fn a_halt_without_conflict_words_is_reported_as_a_halt() {
+        let r = TempRepo::new();
+        moved_stack(&r);
+        r.git(&["checkout", "-q", "step-2"]);
+        r.write("c.txt", "untracked, in step-3's way\n");
+        assert!(restack(&r, "step-2", &[]).conflict);
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_some());
+    }
+
+    /// Review of the QA fix, item 1: a record cleared while HEAD is still
+    /// detached at the branch the restack started from (the run could not
+    /// switch back) returns the user to that branch.
+    #[test]
+    fn a_cleared_record_reattaches_a_head_left_detached_at_the_original() {
+        let r = TempRepo::new();
+        moved_stack(&r);
+        let p = plan(&r.path, Some("main"), "step-2", &[], V).unwrap();
+        let record = PendingRestack {
+            moment: Moment::ParentMoved,
+            onto: p.onto_sha.clone(),
+            old_base: p.upstream_sha.clone(),
+            bottom: "step-2".into(),
+            new_parent: None,
+            original: "step-2".into(),
+            top_sha: p.top_sha.clone(),
+            merged_parent: None,
+        };
+        crate::stack::meta::set_pending(&r.path, "step-3", &record).unwrap();
+        r.git(&["checkout", "-q", "--detach", "step-2"]);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert!(s.finalized.is_none() && s.pending_errors.is_empty());
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
         assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]), "step-2");
     }
 

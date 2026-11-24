@@ -676,6 +676,7 @@ const en = {
     push: {
       offer: "{0} restacked branches can be pushed.",
       offerOne: "1 restacked branch can be pushed.",
+      repoChanged: "Another repository is open now. Reopen {0} to push its restacked branches.",
       action: "Push",
       skipped: "Not pushed (no upstream): {0}",
       skippedGone: "Not pushed (its remote branch is gone): {0}",

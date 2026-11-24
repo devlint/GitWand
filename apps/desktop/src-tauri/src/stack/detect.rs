@@ -6,7 +6,7 @@ use super::guard::{branch_holders, git_version, supports_update_refs};
 use super::meta::{
     clear_malformed_pending, clear_pending, read_all, set_base, trunk, validate_branch_name,
 };
-use super::restack::{finalize, switch_back};
+use super::restack::{finalize, reattach, switch_back};
 use super::{
     FinalizedRestack, LayerState, LayerStatus, MergeSignal, MergedParentHint, PendingError,
     PendingRestack, StackMeta, StackReport,
@@ -286,11 +286,13 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
 /// it: back to the branch the user was on, best effort (the restack's own
 /// switch-back guards apply; a failure keeps the user on `top`, unharmed).
 /// Only when `top` did not move: that is the abort, not a later checkout.
+/// Also a HEAD left detached at `original` by a run that failed.
 fn unwind_abort(repo: &Path, top: &str, p: &PendingRestack) {
     let tip = resolve_commit(repo, &format!("refs/heads/{top}"));
     if matches!(tip, Ok(Some(t)) if t == p.top_sha) {
         let _ = switch_back(repo, top, &p.original);
     }
+    reattach(repo, &p.original);
 }
 
 /// D4: the restack recorded on `top` has run to its end. The top moved since
