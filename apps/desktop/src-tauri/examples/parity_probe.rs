@@ -35,13 +35,14 @@
 use gitwand_desktop_lib::{
     command_parity, gh_disable_auto_merge_parity, gh_enable_auto_merge_parity, git_blame_parity,
     git_branches_parity, git_combined_diff_parity, git_commit_submodule_changes_parity,
-    git_diff_parity, git_log_parity, git_operation_action_parity, git_rebase_onto_parity,
-    git_remote_info_parity, git_show_parity, git_stash_list_parity, git_status_libgit2_parity,
-    git_status_parity, git_submodule_branches_parity, gl_disable_auto_merge_parity,
-    gl_enable_auto_merge_parity, list_repo_dir_parity, preview_cherry_pick_parity,
-    preview_merge_parity, preview_rebase_parity, read_file_parity, scan_secrets_parity,
-    snapshot_create_parity, snapshot_list_parity, snapshot_prune_parity, snapshot_restore_parity,
-    worktree_guard_parity, worktree_merge_back_check_parity, worktree_resolve_base_parity,
+    git_diff_parity, git_file_lineage_parity, git_log_parity, git_operation_action_parity,
+    git_rebase_onto_parity, git_remote_info_parity, git_show_parity, git_stash_list_parity,
+    git_status_libgit2_parity, git_status_parity, git_submodule_branches_parity,
+    gl_disable_auto_merge_parity, gl_enable_auto_merge_parity, list_repo_dir_parity,
+    preview_cherry_pick_parity, preview_merge_parity, preview_rebase_parity, read_file_parity,
+    scan_secrets_parity, snapshot_create_parity, snapshot_list_parity, snapshot_prune_parity,
+    snapshot_restore_parity, worktree_guard_parity, worktree_merge_back_check_parity,
+    worktree_resolve_base_parity,
 };
 use serde_json::{json, Value};
 use std::io::{self, Read};
@@ -51,7 +52,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("usage: parity-probe <command>");
-        eprintln!("commands: command-parity, git-operation-action, git-status, git-status-fast, git-log, git-branches, git-diff, git-show, git-combined-diff, git-blame, read-file, list-repo-dir, git-stash-list, git-submodule-branches, git-commit-submodule-changes, scan-secrets, gh-enable-auto-merge, gh-disable-auto-merge, gl-enable-auto-merge, gl-disable-auto-merge");
+        eprintln!("commands: command-parity, git-operation-action, git-status, git-status-fast, git-log, git-branches, git-diff, git-show, git-combined-diff, git-file-lineage, git-blame, read-file, list-repo-dir, git-stash-list, git-submodule-branches, git-commit-submodule-changes, scan-secrets, gh-enable-auto-merge, gh-disable-auto-merge, gl-enable-auto-merge, gl-disable-auto-merge");
         return ExitCode::from(2);
     }
 
@@ -180,6 +181,17 @@ fn main() -> ExitCode {
                 strings("paths"),
                 budget,
             ))
+        }
+        "git-file-lineage" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let path = match must_str("path") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            to_json(git_file_lineage_parity(cwd, path))
         }
         "git-log" => {
             let cwd = match must_str("cwd") {

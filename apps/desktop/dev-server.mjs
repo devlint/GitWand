@@ -1774,6 +1774,40 @@ function combinedValidatePaths(toplevel, paths) {
   }
 }
 
+/** lineage.rs `MAX_LINEAGE`. */
+const COMBINED_MAX_LINEAGE = 200_000;
+
+/**
+ * lineage.rs `file_lineage`: the `--follow` history of `pathIn` (root-relative,
+ * validated as the combined diff's `paths`), newest first, as `{ hash, path? }`
+ * (no `path` for a merge). Refused input throws `CombinedInputError` (400).
+ */
+async function devFileLineage(cwdIn, pathIn) {
+  const top = await combinedToplevel(cwdIn);
+  combinedValidatePaths(top, [pathIn]);
+  let out;
+  try {
+    out = await gitSpawnInput(
+      [
+        ...COMBINED_GIT_PINS,
+        "-c", "diff.relative=false",
+        "log", "--follow", "--no-show-signature", "--no-color", "--name-only", "-z",
+        "-n", String(COMBINED_MAX_LINEAGE + 1), "--format=%x00%x01%H", "--", pathIn,
+      ],
+      top,
+      { env: { GIT_LITERAL_PATHSPECS: "1" } },
+    );
+  } catch (e) {
+    throw new Error(`Failed to run git log: ${e.message}`);
+  }
+  if (out.code !== 0) throw new Error(`git log failed: ${out.stderr.trim()}`);
+  const records = combinedParseLogNames(combinedUtf8Names(out.stdoutBytes));
+  if (records.length > COMBINED_MAX_LINEAGE) {
+    throw new Error(`File history too long: more than ${COMBINED_MAX_LINEAGE} commits.`);
+  }
+  return records.map(([hash, names]) => (names.length > 0 ? { hash, path: names[0] } : { hash }));
+}
+
 const COMBINED_CANCELLED = "Combined diff cancelled.";
 
 /** replay.rs `generations`: toplevel → the generation of its latest request. */
@@ -5884,6 +5918,20 @@ async function handleRequest(req, res) {
       }
       try {
         return jsonResponse(req, res, await devCombinedDiff(resolve(cwd), hashes, paths ?? null));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, err instanceof CombinedInputError ? 400 : 500);
+      }
+    }
+
+    // GET /api/git-file-lineage?cwd=<path>&path=<root-relative file>
+    // Mirrors `git_file_lineage` (commands/combined.rs + combined/lineage.rs):
+    // see `devFileLineage`. Refused input → 400, any other failure → 500.
+    if (url.pathname === "/api/git-file-lineage" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const path = url.searchParams.get("path");
+      if (!cwd || path === null) return jsonResponse(req, res, { error: "Missing cwd or path" }, 400);
+      try {
+        return jsonResponse(req, res, await devFileLineage(resolve(cwd), path));
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, err instanceof CombinedInputError ? 400 : 500);
       }

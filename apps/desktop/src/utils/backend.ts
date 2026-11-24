@@ -1715,6 +1715,27 @@ export async function getCombinedDiff(cwd: string, hashes: string[], paths?: str
   return res.json();
 }
 
+/** One commit of a file's `--follow` history and the file's name there
+ *  (absent for a merge). */
+export interface FileLineageEntry {
+  hash: string;
+  path?: string;
+}
+
+/**
+ * Every commit of `path`'s `--follow` history (root-relative), newest first:
+ * the names a file-history combined diff needs, without the log bodies.
+ */
+export async function getGitFileLineage(cwd: string, path: string): Promise<FileLineageEntry[]> {
+  if (isTauri()) return tauriInvoke<FileLineageEntry[]>("git_file_lineage", { cwd, path });
+  const res = await devFetch(`${DEV_SERVER}/api/git-file-lineage?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Failed to get file lineage: ${res.status}`);
+  }
+  return res.json();
+}
+
 // ─── Git blame ───────────────────────────────────────────────
 
 export interface BlameLine {

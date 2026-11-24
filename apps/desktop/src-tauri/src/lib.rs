@@ -262,6 +262,14 @@ pub fn git_combined_diff_parity(
     }
 }
 
+/// Parity entry point for `git_file_lineage`.
+pub fn git_file_lineage_parity(
+    cwd: String,
+    path: String,
+) -> Result<Vec<types::FileLineageEntry>, String> {
+    tauri::async_runtime::block_on(commands::combined::git_file_lineage(cwd, path))
+}
+
 pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
     tauri::async_runtime::block_on(commands::ops::git_branches(cwd, None))
 }
@@ -946,6 +954,7 @@ pub fn run() {
             commands::ops::git_discard,
             commands::read::git_show,
             commands::combined::git_combined_diff,
+            commands::combined::git_file_lineage,
             commands::ops::git_branches,
             commands::ops::git_create_branch,
             commands::ops::git_switch_branch,

@@ -1,7 +1,8 @@
 //! `git_combined_diff` (v3.15): the net diff of several selected commits.
 
+use crate::combined::lineage::file_lineage;
 use crate::combined::replay::combined_diff;
-use crate::types::CombinedDiff;
+use crate::types::{CombinedDiff, FileLineageEntry};
 
 /// Combined diff of `hashes` (2..=50, any order), optionally limited to
 /// `paths` (root-relative; each kept inside the repository by
@@ -30,4 +31,20 @@ pub(crate) async fn git_combined_diff(
     tauri::async_runtime::spawn_blocking(move || combined_diff(&cwd, &hashes, paths.as_deref()))
         .await
         .map_err(|e| format!("Combined diff task failed: {e}"))?
+}
+
+/// Every commit of `path`'s `--follow` history with the file's name there,
+/// newest first (`combined/lineage.rs`): the names a file-history combined
+/// diff hands `git_combined_diff`. `path` is root-relative, validated as the
+/// combined diff's `paths` (through `safe_repo_path`). Read-only, no repo
+/// guard (same reasoning as `git_combined_diff`); capped at
+/// `MAX_LINEAGE` commits.
+#[tauri::command]
+pub(crate) async fn git_file_lineage(
+    cwd: String,
+    path: String,
+) -> Result<Vec<FileLineageEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || file_lineage(&cwd, &path))
+        .await
+        .map_err(|e| format!("File lineage task failed: {e}"))?
 }

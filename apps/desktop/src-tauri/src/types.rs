@@ -154,6 +154,16 @@ pub struct CombinedFallbackFile {
     pub blockers: Vec<String>,
 }
 
+/// One commit of a file's `--follow` history (`git_file_lineage`): its hash
+/// and the file's name there (`None` for a merge, which names nothing).
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileLineageEntry {
+    pub hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CombinedDiff {

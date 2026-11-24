@@ -477,7 +477,7 @@ const LOG_RECORD_MARK: char = '\x01';
 /// follow an empty field (`\0\0<name>\0…`). Records are split on
 /// `\0\x01`: a name never starts with `\x01` (`blockers` refuses such a
 /// path), so a name — even one of hex digits only — is never read as a hash.
-fn parse_log_names(out: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+pub(super) fn parse_log_names(out: &str) -> Result<Vec<(String, Vec<String>)>, String> {
     let mut commits: Vec<(String, Vec<String>)> = Vec::new();
     let mut records = out.split("\0\x01");
     if records.next().is_some_and(|head| !head.is_empty()) {
@@ -665,7 +665,7 @@ fn touches(d: &GitDiff, set: &FallbackSet) -> bool {
 /// that is not valid UTF-8 cannot be carried: decoded lossily it would match
 /// nothing — not the patch's names, not the fallback — and vanish from both
 /// views. The first such name is refused, its invalid bytes shown as `\xNN`.
-fn utf8_names(bytes: &[u8]) -> Result<&str, String> {
+pub(super) fn utf8_names(bytes: &[u8]) -> Result<&str, String> {
     std::str::from_utf8(bytes).map_err(|_| {
         let name = bytes
             .split(|b| *b == 0)
@@ -716,7 +716,7 @@ fn check_names(diffs: &[GitDiff], listed: &[(Option<String>, String)]) -> Result
 
 /// The working tree's toplevel of the repository `cwd` is in (`cwd` itself
 /// for a repository opened at its root).
-fn toplevel(cwd: &str) -> Result<String, String> {
+pub(super) fn toplevel(cwd: &str) -> Result<String, String> {
     let out = git_cmd()
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(cwd)
@@ -747,7 +747,7 @@ fn toplevel(cwd: &str) -> Result<String, String> {
 /// not resolved: a tracked symlink is a blob to git, which a pathspec never
 /// follows, and resolving it would refuse the history of any link pointing
 /// out of the repository.
-fn validate_paths(toplevel: &str, paths: &[String]) -> Result<(), String> {
+pub(super) fn validate_paths(toplevel: &str, paths: &[String]) -> Result<(), String> {
     for p in paths {
         validate_pathspec(p)?;
         // `covers` compares names textually; git normalises `./f`, `d//f`,

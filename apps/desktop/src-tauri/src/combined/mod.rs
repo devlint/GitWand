@@ -3,6 +3,7 @@
 //! command itself builds on them.
 
 pub(crate) mod budget;
+pub(crate) mod lineage;
 pub(crate) mod order;
 pub(crate) mod replay;
 

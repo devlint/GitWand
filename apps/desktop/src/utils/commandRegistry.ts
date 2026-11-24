@@ -189,6 +189,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   git_fetch: { route: "/api/git-fetch" },
   git_fast_forward_to_upstream: { route: "/api/git-fast-forward-to-upstream" },
   git_file_diff: { route: "/api/git-file-diff" },
+  git_file_lineage: { route: "/api/git-file-lineage" },
   git_file_log: { route: "/api/git-file-log" },
   git_file_log_pickaxe: { route: "/api/git-file-log-pickaxe" },
   git_file_log_range: { route: "/api/git-file-log-range" },
