@@ -3215,6 +3215,9 @@ const zhCN: Locale = {
     decisionReviewedClean: "已审查，暂存更改中未发现问题。",
     decisionRiskWarning: "有 {0} 项未解决的风险级发现。仅在您已查看过之后再担保。",
   },
+  combined: {
+    jumpToCommit: "跳转到提交 {0}",
+  },
 };
 
 export default zhCN;

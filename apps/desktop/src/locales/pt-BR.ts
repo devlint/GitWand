@@ -3205,6 +3205,9 @@ const ptBR: Locale = {
     decisionReviewedClean: "Revisado, sem achados nas suas mudanças em stage.",
     decisionRiskWarning: "{0} achado(s) de nível de risco não resolvido(s). Ateste somente se já os revisou.",
   },
+  combined: {
+    jumpToCommit: "Ir para o commit {0}",
+  },
 };
 
 export default ptBR;

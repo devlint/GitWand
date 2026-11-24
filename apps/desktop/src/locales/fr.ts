@@ -3215,6 +3215,9 @@ const fr: Locale = {
     decisionReviewedClean: "Revue effectuée, aucun constat dans vos changements indexés.",
     decisionRiskWarning: "{0} constat(s) de niveau risque non résolu(s). Validez uniquement si vous les avez examinés.",
   },
+  combined: {
+    jumpToCommit: "Aller au commit {0}",
+  },
 };
 
 export default fr;

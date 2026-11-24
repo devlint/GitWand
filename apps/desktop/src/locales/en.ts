@@ -3250,6 +3250,9 @@ const en = {
     decisionReviewedClean: "Reviewed, no findings in your staged changes.",
     decisionRiskWarning: "{0} unresolved risk-level finding(s). Vouch only if you have looked at them.",
   },
+  combined: {
+    jumpToCommit: "Jump to commit {0}",
+  },
 } as const;
 
 // Widen literal string types to plain `string` for locale compatibility

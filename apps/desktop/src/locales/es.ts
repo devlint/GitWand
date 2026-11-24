@@ -3205,6 +3205,9 @@ const es: Locale = {
     decisionReviewedClean: "Revisado, sin hallazgos en tus cambios en stage.",
     decisionRiskWarning: "{0} hallazgo(s) de riesgo sin resolver. Avala solo si ya los revisaste.",
   },
+  combined: {
+    jumpToCommit: "Ir al commit {0}",
+  },
 };
 
 export default es;

@@ -12,6 +12,9 @@ import { CREATE_ISSUE_KEY, useSelectionPublisher } from "../composables/useCreat
 import { useLineRange, preventShiftSelect } from "../composables/useLineRange";
 import { parseRowGroup, rowGroup, rowsInColumn, type RowSide } from "../utils/diffRange";
 import type { DiffSelection } from "../utils/issuePrefill";
+import type { FileAttribution } from "../utils/combinedAttribution";
+import { lineKeyFor } from "../utils/diffLineKey";
+import { commitColor } from "../utils/commitColors";
 
 const { t } = useI18n();
 
@@ -24,12 +27,49 @@ const props = defineProps<{
   commitInfo: GitLogEntry | null;
   diffMode: DiffMode;
   scrollToFileIdx?: number | null;
+  /** Combined diff: per-file line / hunk attribution, aligned with `diffs`. */
+  attribution?: FileAttribution[];
+  /** Combined diff: the commits `attribution` indexes refer to. */
+  attributionCommits?: { hash: string; shortHash: string; subject: string }[];
+  /** Combined diff: a note shown under each file's header (null = none). */
+  fileNotes?: (string | null)[];
 }>();
 
 const emit = defineEmits<{
   "update:diffMode": [mode: DiffMode];
   "update:visibleFileIdx": [idx: number];
+  "jump-to-commit": [hash: string];
 }>();
+
+// ─── Combined-diff attribution ───────────────────────────
+function commitAt(idx: number | undefined) {
+  return idx === undefined ? undefined : props.attributionCommits?.[idx];
+}
+
+/** The commit index a diff line is attributed to, if any. */
+function lineCommitIdx(fileIdx: number, line: DiffLine | null | undefined): number | undefined {
+  if (!line) return undefined;
+  const key = lineKeyFor(line);
+  return key === null ? undefined : props.attribution?.[fileIdx]?.lineCommit.get(key);
+}
+
+function markerStyle(idx: number | undefined) {
+  return idx !== undefined && commitAt(idx) ? { background: commitColor(idx) } : undefined;
+}
+
+function markerTitle(idx: number | undefined): string | undefined {
+  const c = commitAt(idx);
+  return c ? `${c.shortHash} ${c.subject}` : undefined;
+}
+
+function hunkChips(fileIdx: number, hunkIdx: number): number[] {
+  return (props.attribution?.[fileIdx]?.hunkCommits[hunkIdx] ?? []).filter((i) => !!commitAt(i));
+}
+
+function sectionChip(fileIdx: number): number | undefined {
+  const i = props.attribution?.[fileIdx]?.sectionCommit;
+  return commitAt(i) ? i : undefined;
+}
 
 // ─── Side-by-side line pairing with word-diff ────────
 interface SbsPair {
@@ -544,6 +584,16 @@ function onContentScroll(e: Event) {
             <span class="cdv-collapse-icon" :class="{ 'cdv-collapse-icon--open': isExpanded(fileIdx - 1) }">&#9654;</span>
             <span class="cdv-file-name mono">{{ fileName(diffs[fileIdx - 1].path) }}</span>
             <span class="cdv-file-path muted">{{ diffs[fileIdx - 1].path }}</span>
+            <button
+              v-if="sectionChip(fileIdx - 1) !== undefined"
+              type="button"
+              class="cdv-attr-chip"
+              :style="{ '--chip-color': commitColor(sectionChip(fileIdx - 1)!) }"
+              :title="markerTitle(sectionChip(fileIdx - 1))"
+              :aria-label="t('combined.jumpToCommit', commitAt(sectionChip(fileIdx - 1))!.shortHash)"
+              @click.stop="emit('jump-to-commit', commitAt(sectionChip(fileIdx - 1))!.hash)"
+              @keydown.enter.stop
+            >{{ commitAt(sectionChip(fileIdx - 1))!.shortHash }}</button>
             <div class="cdv-file-stats">
               <span class="cdv-stat cdv-stat--add" v-if="fileStats[fileIdx - 1]?.adds > 0">
                 +{{ fileStats[fileIdx - 1].adds }}
@@ -554,6 +604,8 @@ function onContentScroll(e: Event) {
             </div>
           </div>
 
+          <div v-if="fileNotes?.[fileIdx - 1]" class="cdv-file-note" role="note">{{ fileNotes[fileIdx - 1] }}</div>
+
           <!-- Hunks (only rendered if expanded) -->
           <template v-if="isExpanded(fileIdx - 1)">
             <div
@@ -563,6 +615,18 @@ function onContentScroll(e: Event) {
             >
               <div class="cdv-hunk-header mono">
                 <span>{{ hunk.header }}</span>
+                <span v-if="hunkChips(fileIdx - 1, hunkIdx).length" class="cdv-attr-chips">
+                  <button
+                    v-for="ci in hunkChips(fileIdx - 1, hunkIdx)"
+                    :key="ci"
+                    type="button"
+                    class="cdv-attr-chip"
+                    :style="{ '--chip-color': commitColor(ci) }"
+                    :title="markerTitle(ci)"
+                    :aria-label="t('combined.jumpToCommit', commitAt(ci)!.shortHash)"
+                    @click="emit('jump-to-commit', commitAt(ci)!.hash)"
+                  >{{ commitAt(ci)!.shortHash }}</button>
+                </span>
                 <button
                   v-if="selection && isHunkSelected(fileIdx - 1, hunkIdx)"
                   type="button"
@@ -594,6 +658,12 @@ function onContentScroll(e: Event) {
                       @mousedown="canSelectLines && preventShiftSelect($event)"
                       @click="onLineNoClick($event, fileIdx - 1, hunkIdx, lineIdx, 'row')"
                     >{{ line.newLineNo ?? '' }}</td>
+                    <td
+                      v-if="attribution"
+                      class="cdv-attr-marker"
+                      :style="markerStyle(lineCommitIdx(fileIdx - 1, line))"
+                      :title="markerTitle(lineCommitIdx(fileIdx - 1, line))"
+                    ></td>
                     <td class="cdv-line-marker mono">
                       {{ line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' ' }}
                     </td>
@@ -627,7 +697,14 @@ function onContentScroll(e: Event) {
                     <td class="cdv-line-content mono cdv-sbs-content" :class="pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty'">
                       <span v-html="pair.leftHtml || '\u00a0'"></span>
                     </td>
-                    <td class="cdv-sbs-gutter"></td>
+                    <td class="cdv-sbs-gutter">
+                      <span
+                        v-if="attribution"
+                        class="cdv-attr-marker"
+                        :style="markerStyle(lineCommitIdx(fileIdx - 1, pair.right?.type === 'add' ? pair.right : (pair.left?.type === 'delete' ? pair.left : pair.right)))"
+                        :title="markerTitle(lineCommitIdx(fileIdx - 1, pair.right?.type === 'add' ? pair.right : (pair.left?.type === 'delete' ? pair.left : pair.right)))"
+                      ></span>
+                    </td>
                     <td
                       class="cdv-line-no mono"
                       :class="[pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty', { 'cdv-line-no--pick': canSelectLines && pair.right, 'cdv-cell--selected': isSelected(fileIdx - 1, hunkIdx, pairIdx, 'new') }]"
@@ -948,6 +1025,71 @@ function onContentScroll(e: Event) {
   cursor: pointer;
 }
 .cdv-issue-btn:hover { background: var(--color-accent-hover); }
+
+/* ─── Combined-diff attribution ───────────────────────── */
+/* 8 commit colours, ≥ 3:1 against the diff backgrounds in both themes
+   (context / added / deleted rows). Dark is the default theme. */
+.commit-diff-viewer {
+  --combined-c0: #a78bfa;
+  --combined-c1: #f472b6;
+  --combined-c2: #f87171;
+  --combined-c3: #fb923c;
+  --combined-c4: #facc15;
+  --combined-c5: #4ade80;
+  --combined-c6: #22d3ee;
+  --combined-c7: #60a5fa;
+}
+:global([data-theme="light"]) .commit-diff-viewer {
+  --combined-c0: #7c3aed;
+  --combined-c1: #db2777;
+  --combined-c2: #dc2626;
+  --combined-c3: #c2410c;
+  --combined-c4: #a16207;
+  --combined-c5: #15803d;
+  --combined-c6: #0e7490;
+  --combined-c7: #2563eb;
+}
+
+td.cdv-attr-marker {
+  width: 3px;
+  min-width: 3px;
+  padding: 0;
+}
+.cdv-sbs-gutter > .cdv-attr-marker {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 1.5em;
+}
+
+.cdv-attr-chips {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.cdv-attr-chip {
+  flex-shrink: 0;
+  margin-block: -2px;
+  padding: 0 6px;
+  border: 1px solid var(--chip-color);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--chip-color) 14%, transparent);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  cursor: pointer;
+}
+.cdv-attr-chip:hover { background: color-mix(in srgb, var(--chip-color) 28%, transparent); }
+.cdv-attr-chip:focus-visible { outline: 2px solid var(--chip-color); outline-offset: 1px; }
+
+.cdv-file-note {
+  padding: 6px 16px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-info-soft);
+  border-bottom: 1px solid var(--color-border);
+}
 
 .cdv-table {
   width: 100%;
