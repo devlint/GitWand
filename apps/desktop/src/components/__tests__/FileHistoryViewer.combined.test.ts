@@ -139,4 +139,14 @@ describe("FileHistoryViewer combined", () => {
     expect(combineBtn()?.disabled).toBe(true);
     expect(combineBtn()?.title).toContain("combined.tooMany");
   });
+  it("Shift-press on a log entry does not start a text selection", async () => {
+    await mount();
+    const press = (shiftKey: boolean) => {
+      const ev = new MouseEvent("mousedown", { bubbles: true, cancelable: true, shiftKey });
+      infos()[1].dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    expect(press(true)).toBe(true);
+    expect(press(false)).toBe(false);
+  });
 });

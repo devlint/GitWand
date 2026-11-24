@@ -208,6 +208,48 @@ describe("CommitGraph — multi-selection", () => {
     expect(useCommitSelection(ref(cwd)).selected.value).toEqual([full("aaa1111"), full("bbb2222")]);
   });
 
+  it("a transient empty log (reload) keeps the selection", async () => {
+    const log = shallowRef(commits);
+    app = null;
+    cwd = `/repo/multi-${n++}`;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    app = createApp({ setup: () => () => h(CommitGraph, { commits: log.value, cwd, selectedHash: full("aaa1111") }) });
+    app.mount(container);
+    await click(1, { ctrlKey: true });
+    expect(chip()?.textContent).toContain("combined.chip:2");
+    log.value = [];
+    await nextTick();
+    log.value = commits;
+    await nextTick();
+    await nextTick();
+    expect(useCommitSelection(ref(cwd)).selected.value).toEqual([full("aaa1111"), full("bbb2222")]);
+  });
+
+  it("Cmd/Ctrl- or Shift-click on a stash row leaves the multi-selection alone", async () => {
+    const withStash = [...commits.slice(0, 4), { ...commits[4], refs: "refs/stash" }];
+    const { emitted } = mount({ commits: withStash });
+    await click(1, { ctrlKey: true });
+    await click(2, { ctrlKey: true });
+    expect(chip()?.textContent).toContain("combined.chip:3");
+    await click(4, { ctrlKey: true });
+    await click(4, { shiftKey: true });
+    expect(emitted["select-commit"]).toBeUndefined();
+    expect(chip()?.textContent).toContain("combined.chip:3");
+  });
+
+  it("Shift-press on a row does not start a text selection", async () => {
+    mount();
+    await nextTick();
+    const press = (shiftKey: boolean) => {
+      const ev = new MouseEvent("mousedown", { bubbles: true, cancelable: true, shiftKey });
+      rows()[2].dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    expect(press(true)).toBe(true);
+    expect(press(false)).toBe(false);
+  });
+
   it("a search that hides a selected row keeps it counted and emitted", async () => {
     const { emitted } = mount();
     await click(1, { ctrlKey: true });

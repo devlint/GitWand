@@ -5139,7 +5139,7 @@ onUnmounted(() => {
                     <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
                       :cwd="repoFolderPath" @close="closeFileHistory"
                       @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }"
-                      @open-combined="(req) => { closeFileHistory(); onViewModeChange('graph'); combinedRequest = req; }" />
+                      @open-combined="(req) => { closeFileHistory(); onViewModeChange('graph'); graphFileIdx = null; combinedRequest = req; }" />
                     <!--
                       Image files (PNG, JPEG, WebP, GIF, SVG) get the ImageDiffViewer
                       branch; the line-based DiffViewer would hit its "binary file"

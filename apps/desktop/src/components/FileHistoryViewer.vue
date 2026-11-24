@@ -4,6 +4,7 @@ import type { BlameLine, FileLogEntry, GitDiff } from "../utils/backend";
 import type { CombinedRequest } from "../composables/useCombinedDiff";
 import { useCommitSelection, COMBINE_MAX } from "../composables/useCommitSelection";
 import { isToggleModifier } from "../utils/platform";
+import { preventShiftSelect } from "../composables/useLineRange";
 import Avatar from "./Avatar.vue";
 import { getGitBlame, getGitFileLog, getGitFileLogPickaxe, getGitFileLogRange, getGitFileDiff, type BlameAlgorithm, type PickaxeMode } from "../utils/backend";
 import { loadSettings } from "../composables/useSettings";
@@ -254,8 +255,9 @@ function openCombined() {
   // hash from the unfiltered --follow log; an entry still unnamed gets every
   // name the file has had (a superset within this file's lineage is correct,
   // a missing name is not). Rename pairing: every name between the oldest and
-  // newest selected entries, plus the name just before the oldest when that
-  // entry is itself a rename commit, so `-M` can pair it instead of an add.
+  // newest selected entries, plus the name of the entry just before the
+  // oldest — always added: when the oldest is a rename commit it is the old
+  // name `-M` needs to pair it, otherwise it is the same name (harmless).
   const full = fileLog.value;
   const known = new Map(full.map((x) => [x.hashFull, x.path]));
   const lineage = [...new Set([props.filePath, ...full.flatMap((x) => (x.path ? [x.path] : []))])];
@@ -562,7 +564,7 @@ function shortHash(hash: string): string {
       >
         <div class="fhv-log-top">
           <Avatar class="fhv-log-avatar" :name="entry.author" />
-          <div class="fhv-log-info" @click="onLogEntryClick($event, entry.hashFull)">
+          <div class="fhv-log-info" @mousedown="preventShiftSelect" @click="onLogEntryClick($event, entry.hashFull)">
             <div class="fhv-log-message">{{ entry.message }}</div>
             <div class="fhv-log-meta muted">
               <span>{{ entry.author }}</span>

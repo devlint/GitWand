@@ -19,6 +19,7 @@ import { stackMenuFor, type StackMenuItems } from "../composables/useStackAction
 import { clampMenuToWindow } from "../utils/contextMenu";
 import { useCommitSelection, COMBINE_MAX } from "../composables/useCommitSelection";
 import { isToggleModifier } from "../utils/platform";
+import { preventShiftSelect } from "../composables/useLineRange";
 
 defineOptions({ inheritAttrs: false });
 
@@ -842,14 +843,17 @@ function openCombined() {
 function onRowClick(e: MouseEvent, index: number) {
   const entry = renderedCommits.value[index];
   if (!entry) return;
-  if (entry.hashFull === "WIP") { emit("change-view", "changes"); return; }
-  if (isJoinable(entry) && (isToggleModifier(e) || e.shiftKey)) {
+  if (isToggleModifier(e) || e.shiftKey) {
+    // A stash or WIP row cannot join: a modifier slip on it must not wipe
+    // the multi-selection (nor open the stash or the changes view).
+    if (!isJoinable(entry)) return;
     const cur = props.selectedHash ?? null;
     const current = cur && joinableOrder.value.includes(cur) ? cur : null;
     if (e.shiftKey) selection.range(entry.hashFull, joinableOrder.value, current);
     else selection.toggle(entry.hashFull, current);
     return;
   }
+  if (entry.hashFull === "WIP") { emit("change-view", "changes"); return; }
   selection.clear();
   selection.setAnchor(entry.hashFull);
   emit("select-commit", entry.hashFull);
@@ -1461,8 +1465,9 @@ const visibleRange = computed(() => {
 });
 
 // A reload that drops a commit (rebase, amend) prunes it from the selection.
+// An empty log is a reload in progress, not a log without these commits.
 watch(logOrder, (order) => {
-  if (multiSet.value.size > 0) selection.prune(order);
+  if (multiSet.value.size > 0 && order.length > 0) selection.prune(order);
 });
 
 watch(() => visibleRange.value.last, (last) => {
@@ -1762,6 +1767,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           class="cg-row-tint"
           v-bind="bandRect(node)"
           :style="{ fill: bandFill(node) }"
+          @mousedown="preventShiftSelect"
           @click="onRowClick($event, node.index)"
           @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         />
@@ -1834,6 +1840,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           v-for="node in visibleNodes"
           :key="'n' + node.index"
           class="cg-node"
+          @mousedown="preventShiftSelect"
           @click="onRowClick($event, node.index)"
           @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         >
@@ -1945,7 +1952,10 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
              top: vc.index * ROW_H + 'px',
              height: ROW_H + 'px',
              '--cg-row-hl': commitRowHighlight(vc.index)
-           }"          @click="onRowClick($event, vc.index)"          @dblclick="onRowDblClick(vc.entry)"
+           }"
+          @mousedown="preventShiftSelect"
+          @click="onRowClick($event, vc.index)"
+          @dblclick="onRowDblClick(vc.entry)"
           @contextmenu="vc.entry.hashFull === 'WIP' ? openWipContextMenu($event) : openCommitContextMenu($event, vc.entry, vc.index)"
         >
           <template v-if="vc.entry.hashFull === 'WIP'">
