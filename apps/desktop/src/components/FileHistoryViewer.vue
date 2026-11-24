@@ -5,7 +5,8 @@ import type { CombinedRequest } from "../composables/useCombinedDiff";
 import { useCommitSelection, COMBINE_MAX } from "../composables/useCommitSelection";
 import { isToggleModifier } from "../utils/platform";
 import { preventShiftSelect } from "../composables/useLineRange";
-import { combinedPathsFor, FULL_FILE_LOG } from "../utils/combinedPaths";
+import { FULL_FILE_LOG } from "../utils/combinedPaths";
+import { useFileHistoryCombine } from "../composables/useFileHistoryCombine";
 import Avatar from "./Avatar.vue";
 import { getGitBlame, getGitFileLog, getGitFileLogPickaxe, getGitFileLogRange, getGitFileDiff, type BlameAlgorithm, type PickaxeMode } from "../utils/backend";
 import { loadSettings } from "../composables/useSettings";
@@ -250,32 +251,17 @@ function onLogEntryClick(e: MouseEvent, hash: string) {
   }
 }
 
-// The file's names come from its complete `--follow` history, fetched at
-// open time: the 50 loaded entries can miss an older rename, or the name
-// before a rename commit that is the 50th entry — a partial net diff.
-const combineBusy = ref(false);
-const combineError = ref<string | null>(null);
-async function openCombined() {
-  if (!selection.canCombine.value || combineBusy.value) return;
-  const chosen = displayedLog.value.filter((x) => selectedSet.value.has(x.hashFull));
-  const cwd = props.cwd;
-  const file = props.filePath;
-  combineBusy.value = true;
-  combineError.value = null;
-  try {
-    const fullLog = await getGitFileLog(cwd, file, FULL_FILE_LOG);
-    if (props.cwd !== cwd || props.filePath !== file) return;
-    const paths = combinedPathsFor(chosen, fullLog, file);
-    emit("open-combined", { hashes: chosen.map((x) => x.hashFull), paths });
-  } catch (err: any) {
-    if (props.cwd === cwd && props.filePath === file) combineError.value = err?.message || String(err);
-  } finally {
-    combineBusy.value = false;
-  }
-}
-watch(() => [props.cwd, props.filePath], () => {
-  combineError.value = null;
+// Opening it (full `--follow` log, names, stale-reply guard) and clearing
+// the selection afterwards or when the viewer goes: `useFileHistoryCombine`.
+const combine = useFileHistoryCombine({
+  cwd: toRef(props, "cwd"),
+  filePath: toRef(props, "filePath"),
+  selection,
+  displayedLog,
+  loadFullLog: (cwd, path) => getGitFileLog(cwd, path, FULL_FILE_LOG),
+  onOpen: (req) => emit("open-combined", req),
 });
+const { busy: combineBusy, error: combineError, open: openCombined } = combine;
 
 // ─── Helpers ────────────────────────────────────────────
 function fileName(path: string): string {
