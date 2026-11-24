@@ -5,8 +5,14 @@
 import type { FileLogEntry } from "./backend";
 
 /**
- * `selected`: the chosen versions; `fullLog`: the file's unfiltered
- * `--follow` log, newest first; `filePath`: the viewed file.
+ * The `count` that asks `getGitFileLog` for a file's whole `--follow`
+ * history: unbounded in practice. The lineage below must see every rename.
+ */
+export const FULL_FILE_LOG = 1_000_000;
+
+/**
+ * `selected`: the chosen versions; `fullLog`: the file's complete, unfiltered
+ * `--follow` log (`FULL_FILE_LOG` entries), newest first; `filePath`: the viewed file.
  *
  * Range results and merges carry no `path`: it is resolved by hash from the
  * full log; an entry still unnamed gets every name the file has had (a
