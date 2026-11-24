@@ -438,9 +438,11 @@ function devParseMultiFileDiff(core, stdout, cap = null) {
     let renameTo = null;
     let minus = null;
     let plus = null;
+    let binary = false;
     for (const line of section.slice(1)) {
       if (line.startsWith("@@")) break;
-      if (line.startsWith("new file mode")) status = "added";
+      if (line.startsWith("Binary files ")) binary = true;
+      else if (line.startsWith("new file mode")) status = "added";
       else if (line.startsWith("deleted file mode")) status = "deleted";
       else if (line.startsWith("rename from ")) {
         status = "renamed";
@@ -467,6 +469,8 @@ function devParseMultiFileDiff(core, stdout, cap = null) {
       ...(status !== null ? { status } : {}),
       ...(oldPath !== null ? { oldPath } : {}),
       ...(truncated ? { truncatedFromBytes: size } : {}),
+      // read.rs: `binary` only on a `Binary files … differ` section.
+      ...(binary ? { binary: true } : {}),
     });
   }
   return diffs;
@@ -1566,8 +1570,10 @@ class CombinedRepo {
 
 /**
  * replay.rs `opaque_names`: names (new and old) of the sections with no hunk
- * whose blobs differ (an `index` header) — binary changes. A pure rename or a
- * mode change keeps its blob. Each such section is parsed alone.
+ * whose content changed — binary (`binary`), or any other hunkless section
+ * with an `index` line that is not an empty file's creation or deletion (fail
+ * closed). A pure rename or a mode change keeps its blob (no `index` line).
+ * Each such section is parsed alone.
  */
 function combinedOpaqueNames(core, out) {
   const sections = [];
@@ -1578,8 +1584,11 @@ function combinedOpaqueNames(core, out) {
   const names = [];
   for (const section of sections) {
     const headers = section.slice(1);
-    if (headers.some((l) => l.startsWith("@@")) || !headers.some((l) => l.startsWith("index "))) continue;
+    if (headers.some((l) => l.startsWith("@@"))) continue;
+    const indexed = headers.some((l) => l.startsWith("index "));
     for (const d of devParseMultiFileDiff(core, section.join("\n"))) {
+      const emptyFile = d.status === "added" || d.status === "deleted";
+      if (!(d.binary === true || (indexed && !emptyFile))) continue;
       if (d.oldPath !== undefined) names.push(d.oldPath);
       names.push(d.path);
     }

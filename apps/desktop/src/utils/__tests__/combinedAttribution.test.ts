@@ -268,7 +268,7 @@ describe("buildCombinedEntries", () => {
     expect(e[0].attribution.hunkCommits).toEqual([]);
   });
 
-  it("hunkless_step_entry_that_is_not_a_pure_rename_makes_the_path_unattributable", () => {
+  it("binary_step_entry_makes_the_path_unattributable", () => {
     // text → binary (no hunk) → text: the model cannot know which lines the
     // binary step replaced, so the net lines get no marker rather than a wrong one.
     const e = buildCombinedEntries(
@@ -276,14 +276,54 @@ describe("buildCombinedEntries", () => {
         3,
         [file("f", [hunk(3, 1, 3, 1, [del(3), add(3)])])],
         [
-          [file("f", [])],
-          [file("f", [])],
+          [file("f", [], { binary: true })],
+          [file("f", [], { binary: true })],
           [file("f", [hunk(3, 1, 3, 1, [del(3), add(3)])])],
         ],
       ),
     )[0];
     expect(e.attribution.lineCommit.size).toBe(0);
     expect(e.attribution.hunkCommits).toEqual([[]]);
+  });
+});
+
+describe("buildCombinedEntries — hunkless step entries with no content change", () => {
+  it("chmod_then_edit_keeps_markers", () => {
+    // Commit 0 only changes the mode (no hunk), commit 1 edits line 3.
+    const e = buildCombinedEntries(
+      combined(
+        2,
+        [file("f", [hunk(3, 1, 3, 1, [del(3), add(3)])])],
+        [[file("f", [])], [file("f", [hunk(3, 1, 3, 1, [del(3), add(3)])])]],
+      ),
+    )[0];
+    expect(e.attribution.lineCommit.get("RIGHT:3")).toBe(1);
+    expect(e.attribution.lineCommit.get("LEFT:3")).toBe(1);
+    expect(e.attribution.hunkCommits).toEqual([[1]]);
+  });
+
+  it("touch_then_fill_keeps_markers", () => {
+    // Commit 0 creates an empty file (no hunk), commit 1 fills it.
+    const e = buildCombinedEntries(
+      combined(
+        2,
+        [file("f", [hunk(0, 0, 1, 2, [add(1), add(2)])], { status: "added" })],
+        [[file("f", [], { status: "added" })], [file("f", [hunk(0, 0, 1, 2, [add(1), add(2)])])]],
+      ),
+    )[0];
+    expect(e.attribution.lineCommit.get("RIGHT:1")).toBe(1);
+    expect(e.attribution.lineCommit.get("RIGHT:2")).toBe(1);
+  });
+
+  it("empty_file_deleted_then_re_added_keeps_markers", () => {
+    const e = buildCombinedEntries(
+      combined(
+        2,
+        [file("f", [hunk(0, 0, 1, 1, [add(1)])])],
+        [[file("f", [], { status: "deleted" })], [file("f", [hunk(0, 0, 1, 1, [add(1)])], { status: "added" })]],
+      ),
+    )[0];
+    expect(e.attribution.lineCommit.get("RIGHT:1")).toBe(1);
   });
 });
 

@@ -621,10 +621,13 @@ fn truncated_names(
 }
 
 /// Names (new and old) of the opaque entries of a `diff-tree -p` output: a
-/// section with no hunk whose blobs differ (an `index` header) — a binary
-/// change, whose lines no hunk describes. A pure rename or a mode change
-/// keeps its blob (no `index` line) and is not opaque. Each such section is
-/// parsed alone, by the same parser as the whole output.
+/// section with no hunk whose content changed — a binary change (`binary`),
+/// whose lines no hunk describes. A hunkless section with no content change
+/// is a no-op for the attribution: a pure rename or a mode change keeps its
+/// blob (no `index` line), an empty file's creation or deletion has no line.
+/// Any other hunkless section with an `index` line is opaque too (fail
+/// closed). Each such section is parsed alone, by the same parser as the
+/// whole output.
 fn opaque_names(out: &str) -> Vec<String> {
     let mut sections: Vec<Vec<&str>> = Vec::new();
     for line in out.lines() {
@@ -637,14 +640,16 @@ fn opaque_names(out: &str) -> Vec<String> {
     let mut names = Vec::new();
     for section in sections {
         let headers = &section[1..];
-        if headers.iter().any(|l| l.starts_with("@@"))
-            || !headers.iter().any(|l| l.starts_with("index "))
-        {
+        if headers.iter().any(|l| l.starts_with("@@")) {
             continue;
         }
+        let indexed = headers.iter().any(|l| l.starts_with("index "));
         for d in parse_multi_file_diff_capped(&section.join("\n"), None) {
-            names.extend(d.old_path);
-            names.push(d.path);
+            let empty_file = matches!(d.status.as_deref(), Some("added" | "deleted"));
+            if d.binary == Some(true) || (indexed && !empty_file) {
+                names.extend(d.old_path);
+                names.push(d.path);
+            }
         }
     }
     names
@@ -1976,6 +1981,39 @@ mod tests {
         assert_eq!(paths_of(&got.steps[3]), vec!["g2", "m"]);
     }
 
+    /// An empty file's creation or deletion (no hunk, no content) is no
+    /// opaque change: its steps stay, so a later fill is attributed. A
+    /// binary section carries `binary`, a text one does not.
+    #[test]
+    fn empty_file_steps_stay_and_binary_is_flagged() {
+        let r = TempRepo::new();
+        commit_files(&r, &[("g", Some("g\n")), ("old", Some(""))], "base");
+        let a = commit_files(&r, &[("e", Some(""))], "A");
+        // Not in A: git would pair the two empty files as a rename.
+        let b = commit_files(&r, &[("e", Some("e1\ne2\n")), ("old", None)], "B");
+        std::fs::write(r.path.join("bin.dat"), [0u8, 1, 2, 3, 0, 255]).unwrap();
+        let c = commit_files(&r, &[("g", Some("g2\n"))], "C");
+        let got = run(&r, &[&a, &b, &c], None);
+        assert_eq!(paths_of(&got.steps[0]), vec!["e"]);
+        assert!(got.steps[0][0].hunks.is_empty() && got.steps[0][0].binary.is_none());
+        assert_eq!(paths_of(&got.steps[1]), vec!["e", "old"]);
+        let fill = got.steps[1].iter().find(|x| x.path == "e").unwrap();
+        assert!(!fill.hunks.is_empty());
+        let gone = got.steps[1].iter().find(|x| x.path == "old").unwrap();
+        assert_eq!(gone.status.as_deref(), Some("deleted"));
+        assert!(gone.hunks.is_empty());
+        let bin = got.diffs.iter().find(|d| d.path == "bin.dat").unwrap();
+        assert_eq!(bin.binary, Some(true));
+        assert!(got
+            .diffs
+            .iter()
+            .filter(|d| d.path != "bin.dat")
+            .all(|d| d.binary.is_none()));
+        // The binary file's own step goes (opaque), the others stay.
+        assert!(got.steps.iter().flatten().all(|e| e.path != "bin.dat"));
+        assert_eq!(paths_of(&got.steps[2]), vec!["g"]);
+    }
+
     /// Repo where `f` carries the `merge` attribute `driver`; B (unselected)
     /// and C edit the same line of `f`; A edits `g`. Returns (A, C).
     fn merge_driver_repo(r: &TempRepo, driver: &str) -> (String, String) {
@@ -2592,6 +2630,7 @@ mod tests {
             is_directory: None,
             new_files: None,
             nested_repo: None,
+            binary: None,
         };
         let listed = vec![
             (None, "plan b/f.txt".to_string()),

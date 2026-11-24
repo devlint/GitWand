@@ -57,6 +57,11 @@ describe("mapRawGitDiff", () => {
     expect(d.hunks).toEqual([]);
   });
 
+  it("keeps binary (a `Binary files … differ` section), absent otherwise", () => {
+    expect(mapRawGitDiff({ path: "bin.dat", hunks: [], binary: true }).binary).toBe(true);
+    expect("binary" in mapRawGitDiff(RAW_DIFF)).toBe(false);
+  });
+
   it("leaves truncatedFromBytes out when absent", () => {
     expect("truncatedFromBytes" in mapRawGitDiff(RAW_DIFF)).toBe(false);
   });

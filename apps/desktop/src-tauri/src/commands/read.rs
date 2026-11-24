@@ -864,6 +864,7 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
         is_directory: None,
         new_files: None,
         nested_repo: None,
+        binary: None,
     })
 }
 
@@ -947,6 +948,7 @@ fn git_diff_directory(cwd: &str, path: String) -> Result<GitDiff, String> {
         is_directory: Some(true),
         new_files: Some(if nested { Vec::new() } else { raw }),
         nested_repo: if nested { Some(true) } else { None },
+        binary: None,
     })
 }
 
@@ -1298,8 +1300,11 @@ pub(crate) fn parse_multi_file_diff_capped(stdout: &str, cap: Option<usize>) -> 
         let mut rename_to: Option<String> = None;
         let mut minus: Option<String> = None;
         let mut plus: Option<String> = None;
+        let mut binary = false;
         for line in section.iter().skip(1).take_while(|l| !l.starts_with("@@")) {
-            if line.starts_with("new file mode") {
+            if line.starts_with("Binary files ") {
+                binary = true;
+            } else if line.starts_with("new file mode") {
                 status = Some("added".to_string());
             } else if line.starts_with("deleted file mode") {
                 status = Some("deleted".to_string());
@@ -1350,6 +1355,7 @@ pub(crate) fn parse_multi_file_diff_capped(stdout: &str, cap: Option<usize>) -> 
             is_directory: None,
             new_files: None,
             nested_repo: None,
+            binary: binary.then_some(true),
         });
     }
     diffs
@@ -1829,6 +1835,7 @@ pub(crate) async fn git_file_diff(
         is_directory: None,
         new_files: None,
         nested_repo: None,
+        binary: None,
     })
 }
 

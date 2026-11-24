@@ -591,6 +591,9 @@ export interface GitDiff {
    * a "diff truncated at X MB" banner.
    */
   truncatedFromBytes?: number;
+  /** Set when git printed `Binary files … differ`: a content change no hunk
+   *  describes (multi-file diffs: `git_show`, the combined diff). */
+  binary?: true;
 }
 
 /**
@@ -1571,6 +1574,7 @@ export interface RawGitDiff {
   status?: string;
   oldPath?: string;
   truncatedFromBytes?: number;
+  binary?: boolean;
 }
 
 /** Maps a Rust `GitDiff` (snake_case hunks) to the frontend `GitDiff`. */
@@ -1594,6 +1598,7 @@ export function mapRawGitDiff(d: RawGitDiff): GitDiff {
     status: d.status as GitDiff["status"],
     oldPath: d.oldPath,
     ...(d.truncatedFromBytes !== undefined ? { truncatedFromBytes: d.truncatedFromBytes } : {}),
+    ...(d.binary === true ? { binary: true as const } : {}),
   };
 }
 

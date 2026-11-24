@@ -384,6 +384,22 @@ describe("parity: git-combined-diff", () => {
     expect(rust.steps.map((s) => s.map((x) => x.path).sort())).toEqual([[], [], ["g"], ["g2", "m"]]);
   });
 
+  // replay.rs `empty_file_steps_stay_and_binary_is_flagged`: an empty
+  // file's creation and deletion keep their steps (no content changed), a
+  // binary file's entries carry `binary: true` and its step goes.
+  it("empty-file steps stay; a binary entry is flagged", async () => {
+    const cwd = repo("emptyfile");
+    commitFiles(cwd, { g: "g\n", old: "" }, "base", 0);
+    const a = commitFiles(cwd, { e: "" }, "A", 1);
+    const b = commitFiles(cwd, { e: "e1\ne2\n", old: null }, "B", 2);
+    writeFileSync(join(cwd, "bin.dat"), Buffer.from([0, 1, 2, 3, 0, 255]));
+    const c = commitFiles(cwd, { g: "g2\n" }, "C", 3);
+    const { rust } = await parity(cwd, [a, b, c]);
+    expect(rust.steps.map((s) => s.map((x) => x.path).sort())).toEqual([["e"], ["e", "old"], ["g"]]);
+    expect(rust.diffs.find((x) => x.path === "bin.dat").binary).toBe(true);
+    expect(rust.diffs.filter((x) => x.binary).map((x) => x.path)).toEqual(["bin.dat"]);
+  });
+
   // A truncated step under an earlier name (`p`) drops the steps of every
   // name the file takes later (`q`), through the renames of the steps and
   // of the net diff: C and D each stay under the cap, the net is small.

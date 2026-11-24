@@ -121,10 +121,11 @@ function replay(c: CombinedDiff): Map<string, Model> {
         models.set(f.path, freshModel(f.path));
       }
       const model = models.get(f.path)!;
-      // A step entry with no hunk that is not a pure rename (a binary change,
-      // say) replaced lines no hunk describes: the backend drops such files'
-      // steps; should one still come through, guess nothing for its path.
-      if (f.hunks.length === 0 && f.status !== "renamed") model.unattributable = true;
+      // A binary step entry replaced lines no hunk describes: the backend
+      // drops such files' steps; should one still come through, guess
+      // nothing for its path. Any other hunkless entry changed no line (a
+      // mode change, a pure rename, an empty file's creation or deletion).
+      if (f.hunks.length === 0 && f.binary) model.unattributable = true;
       for (let k = f.hunks.length - 1; k >= 0; k--) applyHunk(model, f.hunks[k], i);
     }
   });

@@ -118,6 +118,11 @@ pub struct GitDiff {
     /// panel rather than a file list that leads nowhere.
     #[serde(skip_serializing_if = "Option::is_none", rename = "nestedRepo")]
     pub nested_repo: Option<bool>,
+    /// `Some(true)` when git printed `Binary files … differ` for the file:
+    /// its content changed in a way no hunk describes. Set by
+    /// `parse_multi_file_diff_capped` only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary: Option<bool>,
 }
 
 // ─── Combined diff ─────────────────────────────────────────────────

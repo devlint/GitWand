@@ -71,6 +71,26 @@ describe("parity: git-show", () => {
     }
   });
 
+  // `Binary files … differ` sets `binary: true` on that file only.
+  it("flags a binary file, and only it", async () => {
+    const cwd = mkTempRepo("gw-parity-show-binary-");
+    commitFile(cwd, "t.txt", "t\n", "t", 0);
+    writeFileSync(join(cwd, "bin.dat"), Buffer.from([0, 1, 2, 3, 0, 255]));
+    writeFileSync(join(cwd, "t.txt"), "t2\n");
+    execFileSync("git", ["-C", cwd, "add", "-A"]);
+    execFileSync("git", ["-C", cwd, "commit", "-q", "-m", "bin"]);
+
+    const { rust, node } = await assertParity(dev, {
+      command: "git-show",
+      args: { cwd, hash: "HEAD" },
+      httpPath: `/api/git-show?cwd=${encodeURIComponent(cwd)}&hash=HEAD`,
+    });
+    for (const side of [rust, node]) {
+      expect(side.filter((d) => d.binary === true).map((d) => d.path)).toEqual(["bin.dat"]);
+      expect(side.find((d) => d.path === "t.txt").binary).toBeUndefined();
+    }
+  });
+
   // Both backends split git's output like Rust's `str::lines()`: a CRLF
   // file's lines lose their `\r`, on both sides.
   it("a CRLF file parses like Rust's lines()", async () => {

@@ -226,6 +226,7 @@ mod tests {
             is_directory: None,
             new_files: None,
             nested_repo: None,
+            binary: None,
         }
     }
 
