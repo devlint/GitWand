@@ -3257,6 +3257,14 @@ const en = {
     clear: "Clear selection",
     tooMany: "Too many commits (max {0})",
     jumpToCommit: "Jump to commit {0}",
+    fallbackBlocked: "{0} could not be combined without {1}: shown commit by commit.",
+    fallbackBetween: "{0} conflicts between the selected commits: shown commit by commit.",
+    fallbackCompanion: "{0} is shown commit by commit because a related change could not be combined.",
+    limitedTo: "Limited to {0}",
+    empty: "No net change between these commits.",
+    retry: "Retry",
+    loading: "Combining {0} commits…",
+    tooLarge: "File too large to display ({0})",
   },
 } as const;
 

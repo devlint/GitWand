@@ -32,6 +32,7 @@ const MergeEditor = defineAsyncComponent(() => import("./components/MergeEditor.
 const DiffViewer = defineAsyncComponent(() => import("./components/DiffViewer.vue"));
 const ImageDiffViewer = defineAsyncComponent(() => import("./components/ImageDiffViewer.vue"));
 const CommitDiffViewer = defineAsyncComponent(() => import("./components/CommitDiffViewer.vue"));
+const CombinedDiffView = defineAsyncComponent(() => import("./components/CombinedDiffView.vue"));
 const FileHistoryViewer = defineAsyncComponent(() => import("./components/FileHistoryViewer.vue"));
 const CommitGraph = defineAsyncComponent(() => import("./components/CommitGraph.vue"));
 const PrDetailView = defineAsyncComponent(() => import("./components/PrDetailView.vue"));
@@ -4917,6 +4918,8 @@ watch(selectedCommitHash, () => {
 //   graphFileIdx === null → no file opened → show graph only, nothing highlighted
 //   graphFileIdx >= 0     → diff panel open, scrolled to that file
 const graphFileIdx = ref<number | null>(null);
+// Combined diff of the Git Tree multi-selection; replaces the graph while set.
+const combinedRequest = ref<import("./composables/useCombinedDiff").CombinedRequest | null>(null);
 const graphScrollIdx = ref<number | null>(null);
 
 /** Graph → select a commit: load its diffs, keep the graph, open no file. */
@@ -5155,6 +5158,11 @@ onUnmounted(() => {
                   </div>
                 </div>
 
+                <CombinedDiffView v-else-if="viewMode === 'graph' && combinedRequest && repoFolderPath"
+                  :cwd="repoFolderPath" :request="combinedRequest" :diff-mode="diffMode"
+                  @update:diff-mode="onDiffModeChange" @close="combinedRequest = null"
+                  @select-commit="(h: string) => { combinedRequest = null; onGraphSelectCommit(h); }" />
+
                 <!-- A clicked file replaces the graph with its diff (X to return). -->
                 <div v-else-if="viewMode === 'graph' && graphFileIdx !== null && selectedCommitHash" class="graph-diff-full">
                   <button class="graph-diff-close" @click="onGraphCloseDiff" :title="t('common.close')"
@@ -5185,6 +5193,7 @@ onUnmounted(() => {
                   @set-log-branch-filter="setLogBranchFilter"
                   @set-log-author-filter="setLogAuthorFilter"
                   @select-commit="onGraphSelectCommit"
+                  @open-combined="(h: string[]) => { graphFileIdx = null; combinedRequest = { hashes: h }; }"
                   @change-view="onViewModeChange"
                   @edit-commit="handleEditCommit"
                   @split-commit="handleSplitCommitRequest"

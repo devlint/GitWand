@@ -3212,6 +3212,14 @@ const es: Locale = {
     clear: "Borrar la selección",
     tooMany: "Demasiados commits (máx. {0})",
     jumpToCommit: "Ir al commit {0}",
+    fallbackBlocked: "{0} no se pudo combinar sin {1}: se muestra commit por commit.",
+    fallbackBetween: "{0} tiene conflictos entre los commits seleccionados: se muestra commit por commit.",
+    fallbackCompanion: "{0} se muestra commit por commit porque un cambio relacionado no se pudo combinar.",
+    limitedTo: "Limitado a {0}",
+    empty: "Sin cambios netos entre estos commits.",
+    retry: "Reintentar",
+    loading: "Combinando {0} commits…",
+    tooLarge: "Archivo demasiado grande para mostrarlo ({0})",
   },
 };
 

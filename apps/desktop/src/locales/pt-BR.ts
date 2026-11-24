@@ -3212,6 +3212,14 @@ const ptBR: Locale = {
     clear: "Limpar a seleção",
     tooMany: "Commits demais (máx. {0})",
     jumpToCommit: "Ir para o commit {0}",
+    fallbackBlocked: "{0} não pôde ser combinado sem {1}: exibido commit a commit.",
+    fallbackBetween: "{0} tem conflito entre os commits selecionados: exibido commit a commit.",
+    fallbackCompanion: "{0} é exibido commit a commit porque uma alteração relacionada não pôde ser combinada.",
+    limitedTo: "Limitado a {0}",
+    empty: "Nenhuma alteração líquida entre estes commits.",
+    retry: "Tentar novamente",
+    loading: "Combinando {0} commits…",
+    tooLarge: "Arquivo grande demais para exibir ({0})",
   },
 };
 
