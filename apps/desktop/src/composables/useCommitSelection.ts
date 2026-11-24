@@ -26,6 +26,10 @@ export function useCommitSelection(repoPath: Ref<string>): {
   toggle(hash: string, current: string | null): void;
   range(hash: string, visibleOrder: string[], current?: string | null): void;
   clear(): void;
+  /** Make `hash` the range anchor (the last plain click). */
+  setAnchor(hash: string | null): void;
+  /** Drop selected hashes that are not in `existing` (they left the loaded log). */
+  prune(existing: Iterable<string>): void;
   canCombine: ComputedRef<boolean>;
 } {
   const selected = computed(() => states[repoPath.value]?.list ?? []);
@@ -53,10 +57,12 @@ export function useCommitSelection(repoPath: Ref<string>): {
     const to = visibleOrder.indexOf(hash);
     if (to < 0) return;
     const s = stateFor(repoPath.value);
-    const from = visibleOrder.indexOf(s.anchor ?? current ?? "");
+    // A stale anchor (gone from the visible rows) falls back to the current commit.
+    let from = visibleOrder.indexOf(s.anchor ?? "");
+    if (from < 0) from = visibleOrder.indexOf(current ?? "");
     const [a, b] = from < 0 ? [to, to] : [Math.min(from, to), Math.max(from, to)];
     s.list = visibleOrder.slice(a, b + 1);
-    if (s.anchor === null) s.anchor = from < 0 ? hash : visibleOrder[from];
+    s.anchor = visibleOrder[from < 0 ? to : from];
   }
 
   function clear() {
@@ -66,5 +72,18 @@ export function useCommitSelection(repoPath: Ref<string>): {
     s.anchor = null;
   }
 
-  return { selected, anchor, toggle, range, clear, canCombine };
+  function setAnchor(hash: string | null) {
+    stateFor(repoPath.value).anchor = hash;
+  }
+
+  function prune(existing: Iterable<string>) {
+    const s = states[repoPath.value];
+    if (!s) return;
+    const keep = new Set(existing);
+    const next = s.list.filter((h) => keep.has(h));
+    if (next.length !== s.list.length) s.list = next;
+    if (s.anchor !== null && !keep.has(s.anchor)) s.anchor = null;
+  }
+
+  return { selected, anchor, toggle, range, clear, setAnchor, prune, canCombine };
 }

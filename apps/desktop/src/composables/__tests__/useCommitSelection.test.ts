@@ -90,4 +90,33 @@ describe("useCommitSelection", () => {
     expect(s.selected.value).toEqual(["a", "b"]);
     s.clear();
   });
+
+  it("prune drops hashes that left the log and a stale anchor", () => {
+    const s = useCommitSelection(fresh());
+    s.toggle("b", "a");
+    s.toggle("c", null);
+    s.prune(["a", "c"]);
+    expect(s.selected.value).toEqual(["a", "c"]);
+    s.prune(["a"]);
+    expect(s.anchor.value).toBeNull();
+  });
+
+  it("anchor follows plain click / toggle: click, shift, cmd, shift", () => {
+    const order = ["a", "b", "c", "d", "e", "f", "g"];
+    const s = useCommitSelection(fresh());
+    s.setAnchor("b"); // plain click on b
+    s.range("d", order, "b");
+    expect(s.selected.value).toEqual(["b", "c", "d"]);
+    s.toggle("f", "b"); // cmd-click f: anchor moves to f
+    expect(s.selected.value).toEqual(["b", "c", "d", "f"]);
+    s.range("e", order, "b");
+    expect(s.selected.value).toEqual(["e", "f"]);
+  });
+
+  it("a stale anchor falls back to the current commit", () => {
+    const s = useCommitSelection(fresh());
+    s.setAnchor("gone");
+    s.range("c", ["a", "b", "c"], "a");
+    expect(s.selected.value).toEqual(["a", "b", "c"]);
+  });
 });

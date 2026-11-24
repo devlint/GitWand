@@ -554,14 +554,29 @@ onUnmounted(() => {
   window.removeEventListener("keydown", onCtxKey);
 });
 
+/**
+ * Esc/Enter act on the selection only for a key the graph owns: not already
+ * handled, not typed in a field, not while a modal is open, and from the
+ * graph itself or the bare page (focus on nothing).
+ */
+function selectionKeyAllowed(e: KeyboardEvent): boolean {
+  if (e.defaultPrevented) return false;
+  const t = e.target as HTMLElement | null;
+  if (t && t !== document.body && t.nodeType === 1) {
+    if (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) return false;
+    if (!cgRoot.value?.contains(t)) return false;
+  }
+  return !document.querySelector('[aria-modal="true"]');
+}
+
 function onCtxKey(e: KeyboardEvent) {
   if (e.key === "Escape") {
     // A first Esc closes an open menu; the multi-selection goes on the next one.
     if (ctxMenu.value.visible || wipCtxMenu.value.visible) { closeCommitContextMenu(); closeWipContextMenu(); return; }
-    if (selection.selected.value.length > 0) selection.clear();
-  } else if (e.key === "Enter" && selection.canCombine.value) {
+    if (selectionKeyAllowed(e) && multiSet.value.size > 0) selection.clear();
+  } else if (e.key === "Enter" && canCombine.value && selectionKeyAllowed(e)) {
     const t = e.target as HTMLElement | null;
-    if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(t.tagName))) return;
+    if (t && ["BUTTON", "A"].includes(t.tagName)) return;
     openCombined();
   }
 }
@@ -788,6 +803,7 @@ const renderedCommits = computed(() => {
 });
 
 // ─── Multi-selection for the combined diff (v3.15) ───
+const cgRoot = ref<HTMLElement | null>(null);
 const selection = useCommitSelection(computed(() => props.cwd ?? ""));
 const multiSet = computed(() => new Set(selection.selected.value));
 /** WIP and stash rows never join a multi-selection. */
@@ -795,19 +811,30 @@ function isJoinable(entry: GitLogEntry | undefined): entry is GitLogEntry {
   if (!entry || entry.hashFull === "WIP") return false;
   return !commitRefs(entry).some((r) => r.type === "stash");
 }
-/** Rows as the graph lists them now (filters/search applied), joinable ones only. */
+/** Rows as the graph lists them now (filters/search applied), joinable ones only: the ⇧ range. */
 const joinableOrder = computed(() =>
   renderedCommits.value.filter(isJoinable).map((e) => e.hashFull),
 );
-/** The selection in graph row order, whatever the click order was. */
+/** The whole loaded log, unfiltered, joinable rows only. */
+const logOrder = computed(() =>
+  displayCommits.value.filter(isJoinable).map((e) => e.hashFull),
+);
+/**
+ * THE selection list: selection ∩ loaded log, in full log order. A search
+ * that only hides a selected row keeps it; chip, Enter, disabled state and
+ * the emitted hashes all read this one list.
+ */
 const orderedSelection = computed(() => {
   const set = multiSet.value;
-  return joinableOrder.value.filter((h) => set.has(h));
+  return logOrder.value.filter((h) => set.has(h));
 });
 const tooMany = computed(() => orderedSelection.value.length > COMBINE_MAX);
+const canCombine = computed(
+  () => orderedSelection.value.length >= 2 && orderedSelection.value.length <= COMBINE_MAX,
+);
 
 function openCombined() {
-  if (!selection.canCombine.value || orderedSelection.value.length < 2) return;
+  if (!canCombine.value) return;
   emit("open-combined", [...orderedSelection.value]);
 }
 
@@ -824,6 +851,7 @@ function onRowClick(e: MouseEvent, index: number) {
     return;
   }
   selection.clear();
+  selection.setAnchor(entry.hashFull);
   emit("select-commit", entry.hashFull);
 }
 
@@ -1432,6 +1460,11 @@ const visibleRange = computed(() => {
   return { first, last };
 });
 
+// A reload that drops a commit (rebase, amend) prunes it from the selection.
+watch(logOrder, (order) => {
+  if (multiSet.value.size > 0) selection.prune(order);
+});
+
 watch(() => visibleRange.value.last, (last) => {
   emit("view-anchor", renderedCommits.value[last]?.hashFull ?? null);
 });
@@ -1477,7 +1510,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 </script>
 
 <template>
-  <div class="cg" v-if="displayCommits.length > 0" v-bind="$attrs">
+  <div class="cg" ref="cgRoot" v-if="displayCommits.length > 0" v-bind="$attrs">
     <div class="cg-search-bar" ref="searchBarEl">
       <!-- Branch filter toggle -->
       <button
@@ -2004,7 +2037,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <button
         type="button"
         class="cg-multi-chip__open"
-        :disabled="!selection.canCombine.value"
+        :disabled="!canCombine"
         @click.stop="openCombined"
       >{{ t('combined.open') }}</button>
       <button
@@ -2040,10 +2073,10 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <template v-if="ctxInMulti">
         <li
           class="commit-ctx-menu-item"
-          :class="{ 'commit-ctx-menu-item--disabled': !selection.canCombine.value }"
+          :class="{ 'commit-ctx-menu-item--disabled': !canCombine }"
           role="menuitem"
           :title="tooMany ? t('combined.tooMany', COMBINE_MAX) : undefined"
-          @click="selection.canCombine.value && (openCombined(), closeCommitContextMenu())"
+          @click="canCombine && (openCombined(), closeCommitContextMenu())"
         >
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M3 3h10M3 8h10M3 13h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>

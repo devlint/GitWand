@@ -6,7 +6,7 @@
  * Mounted like CommitGraph.stackMenu.test.ts; the real useCommitSelection runs.
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { createApp, h, nextTick, type App } from "vue";
+import { createApp, h, nextTick, shallowRef, type App } from "vue";
 import CommitGraph from "../CommitGraph.vue";
 import type { GitLogEntry } from "../../utils/backend";
 import { useCommitSelection } from "../../composables/useCommitSelection";
@@ -181,5 +181,83 @@ describe("CommitGraph — multi-selection", () => {
     rows()[1].dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
     await nextTick();
     expect(document.querySelector(".commit-ctx-menu")?.textContent).not.toContain("combined.ctxOpen");
+  });
+
+  it("a reload that drops a selected commit prunes it", async () => {
+    const log = shallowRef(commits);
+    const { emitted } = mount();
+    app!.unmount();
+    container!.remove();
+    // remount with a reactive log so the same instance sees the reload
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    app = createApp({
+      setup: () => () =>
+        h(CommitGraph, { commits: log.value, cwd, selectedHash: full("aaa1111"), onOpenCombined: (hs: string[]) => (emitted["open-combined"] ??= []).push([hs]) }),
+    });
+    app.mount(container);
+    await click(1, { ctrlKey: true });
+    await click(2, { ctrlKey: true });
+    expect(chip()?.textContent).toContain("combined.chip:3");
+    log.value = commits.filter((c) => c.hash !== "ccc3333");
+    await nextTick();
+    await nextTick();
+    expect(chip()?.textContent).toContain("combined.chip:2");
+    chip()!.querySelector<HTMLElement>(".cg-multi-chip__open")!.click();
+    expect(emitted["open-combined"][0][0]).toEqual([full("aaa1111"), full("bbb2222")]);
+    expect(useCommitSelection(ref(cwd)).selected.value).toEqual([full("aaa1111"), full("bbb2222")]);
+  });
+
+  it("a search that hides a selected row keeps it counted and emitted", async () => {
+    const { emitted } = mount();
+    await click(1, { ctrlKey: true });
+    await click(2, { ctrlKey: true });
+    const input = document.querySelector<HTMLInputElement>(".cg-search-input")!;
+    input.value = "ddd4444";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await nextTick();
+    expect(chip()?.textContent).toContain("combined.chip:3");
+    chip()!.querySelector<HTMLElement>(".cg-multi-chip__open")!.click();
+    expect(emitted["open-combined"][0][0]).toEqual([full("aaa1111"), full("bbb2222"), full("ccc3333")]);
+  });
+
+  it("Esc and Enter typed in the search box leave the selection alone", async () => {
+    const { emitted } = mount();
+    await click(1, { ctrlKey: true });
+    const input = document.querySelector<HTMLInputElement>(".cg-search-input")!;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await nextTick();
+    expect(chip()).not.toBeNull();
+    expect(emitted["open-combined"]).toBeUndefined();
+  });
+
+  it("Enter on a control outside the graph, or under a modal, does not open it", async () => {
+    const { emitted } = mount();
+    await click(1, { ctrlKey: true });
+    const outside = document.createElement("div");
+    document.body.appendChild(outside);
+    outside.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    outside.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(emitted["open-combined"]).toBeUndefined();
+    expect(chip()).not.toBeNull();
+    const modal = document.createElement("div");
+    modal.setAttribute("aria-modal", "true");
+    document.body.appendChild(modal);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await nextTick();
+    expect(chip()).not.toBeNull();
+    modal.remove();
+    outside.remove();
+  });
+
+  it("click, shift, cmd, shift keeps following the last anchor", async () => {
+    mount({ selectedHash: full("bbb2222") });
+    await click(1);
+    await click(3, { shiftKey: true });
+    await click(4, { ctrlKey: true });
+    await click(2, { shiftKey: true });
+    const multi = rows().map((r) => r.classList.contains("cg-row--multi"));
+    expect(multi).toEqual([false, false, true, true, true]);
   });
 });
