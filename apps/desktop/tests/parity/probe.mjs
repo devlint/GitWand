@@ -60,6 +60,9 @@ export function runProbe(command, args) {
     input: JSON.stringify(args || {}),
     encoding: "utf-8",
     timeout: 10_000,
+    // A combined diff over thousands of files answers several MB of JSON
+    // (spawnSync's default cap is 1 MB).
+    maxBuffer: 64 * 1024 * 1024,
   });
 
   if (result.error) {

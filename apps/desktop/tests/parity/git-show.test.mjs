@@ -14,7 +14,7 @@
  */
 
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
@@ -118,6 +118,35 @@ describe("parity: git-show", () => {
         ["add", "B", null, 3],
       ]);
       expect(side[1].hunks[0].lines.map((l) => [l.type, l.content])).toEqual([["delete", "x"], ["add", "y"]]);
+    }
+  });
+
+  // A name holding ` b/` and names git C-quotes (`"`, `\\`, a tab, non-ASCII
+  // with the default core.quotePath=true) come out exactly as git stores them.
+  it.skipIf(process.platform === "win32")("names files with ` b/`, quotes, escapes and non-ASCII exactly", async () => {
+    const cwd = mkTempRepo("gw-parity-show-names-");
+    const names = ["plan b/f.txt", 'we"ird.txt', "ta\tb.txt", "back\\slash.txt", "é.txt"];
+    names.forEach((n, i) => commitFile(cwd, n, "1\n", n, i));
+    for (const n of names.slice(0, 4)) writeFileSync(join(cwd, n), "2\n");
+    mkdirSync(join(cwd, "è b"));
+    execFileSync("git", ["-C", cwd, "mv", "é.txt", "è b/é.txt"]);
+    execFileSync("git", ["-C", cwd, "commit", "-q", "-am", "edit"]);
+
+    const { rust, node } = await assertParity(dev, {
+      command: "git-show",
+      args: { cwd, hash: "HEAD" },
+      httpPath: `/api/git-show?cwd=${encodeURIComponent(cwd)}&hash=HEAD`,
+    });
+    for (const side of [rust, node]) {
+      expect(side.map((d) => [d.path, d.oldPath ?? null]).sort()).toEqual(
+        [
+          ["back\\slash.txt", null],
+          ["plan b/f.txt", null],
+          ["ta\tb.txt", null],
+          ["we\"ird.txt", null],
+          ["è b/é.txt", "é.txt"],
+        ].sort(),
+      );
     }
   });
 });

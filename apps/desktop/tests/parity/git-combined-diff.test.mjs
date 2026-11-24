@@ -181,6 +181,58 @@ describe("parity: git-combined-diff", () => {
     expect(rust.steps.flat().map((x) => x.path)).toEqual(["t.txt"]);
   }, 60_000);
 
+  // Names a split on ` b/` misreads and names git C-quotes: A `1→2`, B
+  // `2→3` (unselected), C deletes. Each falls back under its real name with
+  // its blocker; none reaches the net view.
+  const ODD = ["plan b/f.txt", 'we"ird.txt', "ta\tb.txt", "back\\slash.txt", "é.txt"];
+  const oddSet = (content) => Object.fromEntries(ODD.map((n) => [n, content]));
+
+  it.skipIf(process.platform === "win32")("odd file names fall back under their real name", async () => {
+    const cwd = repo("oddnames");
+    commitFiles(cwd, oddSet("1\n"), "base", 0);
+    const a = commitFiles(cwd, oddSet("2\n"), "A", 1);
+    const b = commitFiles(cwd, oddSet("3\n"), "B", 2);
+    const c = commitFiles(cwd, oddSet(null), "C", 3);
+    const { rust } = await parity(cwd, [a, c]);
+    expect(rust.diffs).toEqual([]);
+    expect(rust.fallback.map((f) => f.path).sort()).toEqual([...ODD].sort());
+    for (const f of rust.fallback) {
+      expect(f.conflicted).toBe(true);
+      expect(f.blockers).toEqual([b]);
+      expect(f.perCommit.map((p) => [p.hash, p.diff.path])).toEqual([[a, f.path], [c, f.path]]);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("odd file names replay cleanly under their real name", async () => {
+    const cwd = repo("oddclean");
+    const f1 = ten("l").replace("l1\n", "A1\n");
+    commitFiles(cwd, oddSet(ten("l")), "base", 0);
+    const a = commitFiles(cwd, oddSet(f1), "A", 1);
+    commitFiles(cwd, { other: "o\n" }, "B", 2);
+    const c = commitFiles(cwd, oddSet(f1.replace("l10\n", "C10\n")), "C", 3);
+    const { rust } = await parity(cwd, [a, c]);
+    expect(rust.diffs.map((d) => d.path).sort()).toEqual([...ODD].sort());
+    expect(rust.fallback).toEqual([]);
+    expect(rust.steps[1].map((d) => d.path).sort()).toEqual([...ODD].sort());
+  });
+
+  // A conflicting commit that also adds 1 400 long paths: they all fall back
+  // as companions, ~1.1 MB of names — more than an argv holds on macOS
+  // (1 MB) and Windows (32 KB). The per-commit diffs diff the commit whole
+  // instead of listing them.
+  it("thousands of long fallback paths stay off the command line", async () => {
+    const cwd = repo("argv");
+    const dir = ["d".repeat(200), "e".repeat(200), "f".repeat(200)].join("/");
+    const names = Array.from({ length: 1400 }, (_, i) => `${dir}/${String(i).padStart(5, "0")}${"n".repeat(190)}`);
+    commitFiles(cwd, { "c.txt": "1\n" }, "base", 0);
+    const a = commitFiles(cwd, { "c.txt": "2\n" }, "A", 1);
+    commitFiles(cwd, { "c.txt": "3\n" }, "B", 2);
+    const c = commitFiles(cwd, { ...Object.fromEntries(names.map((n) => [n, "x\n"])), "c.txt": "4\n" }, "C", 3);
+    const { rust } = await parity(cwd, [a, c]);
+    expect(rust.fallback).toHaveLength(names.length + 1);
+    expect(rust.fallback.every((f) => f.perCommit.length > 0)).toBe(true);
+  }, 120_000);
+
   it("invalid input fails with the same message on both sides", async () => {
     const cwd = repo("errors");
     const a = commitFiles(cwd, { f: "1\n" }, "A", 0);

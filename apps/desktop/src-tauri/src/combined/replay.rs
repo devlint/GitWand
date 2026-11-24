@@ -18,7 +18,7 @@ use crate::stack::guard::git_version;
 use crate::types::{
     CombinedDiff, CombinedFallbackCommitDiff, CombinedFallbackFile, GitDiff, DIFF_TRUNCATE_BYTES,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::process::{Command, Output, Stdio};
 
 /// Most blockers named per fallback file.
@@ -90,12 +90,11 @@ impl<'a> Repo<'a> {
     }
 
     /// Appends `-- <paths>` (literal pathspecs) when a filter is set.
-    fn pathspec(&self, cmd: &mut Command, extra: &[&str]) {
+    fn pathspec(&self, cmd: &mut Command) {
         cmd.arg("--");
         if let Some(paths) = self.paths {
             cmd.args(paths);
         }
-        cmd.args(extra);
         cmd.env("GIT_LITERAL_PATHSPECS", "1");
     }
 
@@ -232,13 +231,23 @@ impl<'a> Repo<'a> {
     }
 
     /// `a → b` tree diff, rename-aware, each file capped at the `git_diff`
-    /// truncation threshold.
-    fn diff(
+    /// truncation threshold, its file names checked against `touched`.
+    fn diff(&self, a: &str, b: &str, unified0: bool) -> Result<Vec<GitDiff>, String> {
+        let listed = self.touched(a, b)?;
+        self.diff_listed(a, b, unified0, &listed)
+    }
+
+    /// [`Repo::diff`] when `listed` (the `touched(a, b)` of the same trees)
+    /// is already known. The patch's file names come from a text parser; the
+    /// `-z` listing is exact. Any name that differs is refused — a misread
+    /// name would slip past the fallback filter, which matches by name, and
+    /// show a wrong net diff.
+    fn diff_listed(
         &self,
         a: &str,
         b: &str,
         unified0: bool,
-        extra: &[&str],
+        listed: &[(Option<String>, String)],
     ) -> Result<Vec<GitDiff>, String> {
         let mut cmd = self.git();
         cmd.args([
@@ -254,12 +263,11 @@ impl<'a> Repo<'a> {
             cmd.arg("-U0");
         }
         cmd.args([a, b]);
-        self.pathspec(&mut cmd, extra);
+        self.pathspec(&mut cmd);
         let out = self.stdout(cmd, "diff-tree")?;
-        Ok(parse_multi_file_diff_capped(
-            &out,
-            Some(DIFF_TRUNCATE_BYTES),
-        ))
+        let diffs = parse_multi_file_diff_capped(&out, Some(DIFF_TRUNCATE_BYTES));
+        check_names(&diffs, listed)?;
+        Ok(diffs)
     }
 
     /// Every change of a tree diff within `paths`, as `(old path of a
@@ -276,7 +284,7 @@ impl<'a> Repo<'a> {
             a,
             b,
         ]);
-        self.pathspec(&mut cmd, &[]);
+        self.pathspec(&mut cmd);
         let out = self.stdout(cmd, "diff-tree")?;
         let mut changes = Vec::new();
         let mut fields = out.split('\0').filter(|f| !f.is_empty());
@@ -432,6 +440,29 @@ fn touches(d: &GitDiff, set: &FallbackSet) -> bool {
     set.contains_key(&d.path) || d.old_path.as_ref().is_some_and(|p| set.contains_key(p))
 }
 
+/// Every name the parsed patch carries (`path`, `old_path`) must be one the
+/// exact `-z` listing of the same trees carries, and the other way round.
+fn check_names(diffs: &[GitDiff], listed: &[(Option<String>, String)]) -> Result<(), String> {
+    let parsed: BTreeSet<&str> = diffs
+        .iter()
+        .flat_map(|d| std::iter::once(d.path.as_str()).chain(d.old_path.as_deref()))
+        .collect();
+    let exact: BTreeSet<&str> = listed
+        .iter()
+        .flat_map(|(old, new)| {
+            old.as_deref()
+                .into_iter()
+                .chain(std::iter::once(new.as_str()))
+        })
+        .collect();
+    match parsed.symmetric_difference(&exact).min() {
+        Some(name) => Err(format!(
+            "Combined diffs do not support the file name: {name}"
+        )),
+        None => Ok(()),
+    }
+}
+
 /// The combined diff of `hashes` (any order), optionally limited to `paths`.
 pub(crate) fn combined_diff(
     cwd: &str,
@@ -512,7 +543,7 @@ pub(crate) fn combined_diff(
         } else {
             (c.tree.clone(), None)
         };
-        let step = repo.diff(&acc, &result, true, &[])?;
+        let step = repo.diff(&acc, &result, true)?;
         // What `Ci` itself changes. On the fast path it is the step diff.
         let ci_changes = if merged {
             repo.touched(&parent_tree, &c.tree)?
@@ -591,7 +622,7 @@ pub(crate) fn combined_diff(
     }
 
     // 3. Net diff. A rename pair touching the fallback goes there whole.
-    let mut diffs = repo.diff(&base_tree, &acc, false, &[])?;
+    let mut diffs = repo.diff(&base_tree, &acc, false)?;
     join_pairs(&mut fallback, &rename_pairs(&diffs));
     diffs.retain(|d| !touches(d, &fallback));
 
@@ -618,10 +649,11 @@ pub(crate) fn combined_diff(
 
     // 4. Per-commit diffs of the fallback files, in replay order. A rename
     //    entry belongs to its new path; to its old one only when the new path
-    //    is not itself in fallback.
+    //    is not itself in fallback. Each commit is diffed whole and filtered
+    //    here: the fallback can hold thousands of paths, more than an argv
+    //    holds (32 KB on Windows).
     let mut per_path: BTreeMap<String, Vec<CombinedFallbackCommitDiff>> = BTreeMap::new();
     if !fallback.is_empty() {
-        let fb_paths: Vec<&str> = fallback.keys().map(String::as_str).collect();
         let whole = Repo {
             cwd,
             paths: None,
@@ -632,7 +664,14 @@ pub(crate) fn combined_diff(
                 Some(t) => t.clone(),
                 None => repo.empty_tree()?,
             };
-            for d in whole.diff(&parent_tree, &c.tree, false, &fb_paths)? {
+            let listed = whole.touched(&parent_tree, &c.tree)?;
+            let relevant = listed.iter().any(|(old, new)| {
+                fallback.contains_key(new) || old.as_ref().is_some_and(|o| fallback.contains_key(o))
+            });
+            if !relevant {
+                continue;
+            }
+            for d in whole.diff_listed(&parent_tree, &c.tree, false, &listed)? {
                 let owner = if fallback.contains_key(&d.path) {
                     Some(d.path.clone())
                 } else {
@@ -1200,5 +1239,134 @@ mod tests {
         let a = r.git(&["rev-parse", "HEAD"]);
         let err = combined_diff(&cwd(&r), &[a, "--output=x".to_string()], None).unwrap_err();
         assert_eq!(err, "Invalid commit hash: --output=x");
+    }
+
+    /// Names a split on ` b/` misreads, and names git C-quotes.
+    #[cfg(unix)]
+    const ODD_NAMES: [&str; 5] = [
+        "plan b/f.txt",
+        "we\"ird.txt",
+        "ta\tb.txt",
+        "back\\slash.txt",
+        "é.txt",
+    ];
+
+    /// The review's case: A `1→2`, B `2→3` (unselected), C deletes the file.
+    /// Every odd name falls back under its real name, with its blocker — none
+    /// shows up in the net view, under any name.
+    #[cfg(unix)]
+    #[test]
+    fn odd_names_fall_back_by_their_real_name() {
+        let r = TempRepo::new();
+        let set = |content: Option<&'static str>| -> Vec<(&str, Option<&str>)> {
+            ODD_NAMES.iter().map(|f| (*f, content)).collect()
+        };
+        commit_files(&r, &set(Some("1\n")), "base");
+        let a = commit_files(&r, &set(Some("2\n")), "A");
+        let b = commit_files(&r, &set(Some("3\n")), "B");
+        let c = commit_files(&r, &set(None), "C");
+        let got = run(&r, &[&a, &c], None);
+        assert!(got.diffs.is_empty(), "net: {:?}", paths_of(&got.diffs));
+        let mut fallback: Vec<&str> = got.fallback.iter().map(|f| f.path.as_str()).collect();
+        fallback.sort_unstable();
+        let mut want = ODD_NAMES.to_vec();
+        want.sort_unstable();
+        assert_eq!(fallback, want);
+        for f in &got.fallback {
+            assert!(f.conflicted, "{}", f.path);
+            assert_eq!(f.blockers, vec![b.clone()], "{}", f.path);
+            let per: Vec<&str> = f.per_commit.iter().map(|p| p.hash.as_str()).collect();
+            assert_eq!(per, vec![a.as_str(), c.as_str()], "{}", f.path);
+            assert!(f.per_commit.iter().all(|p| p.diff.path == f.path));
+        }
+    }
+
+    /// A clean non-contiguous replay keeps every odd name in the net view,
+    /// under its real name, with its steps.
+    #[cfg(unix)]
+    #[test]
+    fn odd_names_replay_cleanly() {
+        let r = TempRepo::new();
+        let set = |content: &str| -> Vec<(String, String)> {
+            ODD_NAMES
+                .iter()
+                .map(|f| (f.to_string(), content.to_string()))
+                .collect()
+        };
+        let commit = |files: Vec<(String, String)>, msg: &str| {
+            let files: Vec<(&str, Option<&str>)> = files
+                .iter()
+                .map(|(p, c)| (p.as_str(), Some(c.as_str())))
+                .collect();
+            commit_files(&r, &files, msg)
+        };
+        let f1 = ten("l").replacen("l1\n", "A1\n", 1);
+        commit(set(&ten("l")), "base");
+        let a = commit(set(&f1), "A");
+        commit_files(&r, &[("other", Some("o\n"))], "B");
+        let c = commit(set(&f1.replacen("l10\n", "C10\n", 1)), "C");
+        let got = run(&r, &[&a, &c], None);
+        let mut want: Vec<String> = ODD_NAMES.iter().map(|s| s.to_string()).collect();
+        want.sort();
+        assert_eq!(paths_of(&got.diffs), want);
+        assert!(got.fallback.is_empty());
+        for d in &got.diffs {
+            assert_eq!(lines(d, "add"), vec!["A1", "C10"], "{}", d.path);
+        }
+        assert_eq!(paths_of(&got.steps[1]), want);
+    }
+
+    #[test]
+    fn check_names_refuses_a_misread_name() {
+        let d = |path: &str, old: Option<&str>| GitDiff {
+            path: path.to_string(),
+            hunks: Vec::new(),
+            status: None,
+            old_path: old.map(str::to_string),
+            truncated_from_bytes: None,
+            is_directory: None,
+            new_files: None,
+            nested_repo: None,
+        };
+        let listed = vec![
+            (None, "plan b/f.txt".to_string()),
+            (Some("o".to_string()), "n".to_string()),
+        ];
+        assert_eq!(
+            check_names(&[d("plan b/f.txt", None), d("n", Some("o"))], &listed),
+            Ok(())
+        );
+        assert_eq!(
+            check_names(&[d("f.txt", None), d("n", Some("o"))], &listed),
+            Err("Combined diffs do not support the file name: f.txt".to_string())
+        );
+        // A name the parser dropped.
+        assert_eq!(
+            check_names(&[d("n", Some("o"))], &listed),
+            Err("Combined diffs do not support the file name: plan b/f.txt".to_string())
+        );
+    }
+
+    /// A conflicting commit that also touches thousands of long paths: they
+    /// all join the fallback as companions, more bytes than an argv holds
+    /// (1 MB on macOS, 2 MB on Linux, 32 KB on Windows). The per-commit diffs
+    /// must not list them on the command line.
+    #[test]
+    fn thousands_of_fallback_paths_fit() {
+        let r = TempRepo::new();
+        let dir = ["d".repeat(200), "e".repeat(200), "f".repeat(200)].join("/");
+        let names: Vec<String> = (0..2800)
+            .map(|i| format!("{dir}/{i:05}{}", "n".repeat(190)))
+            .collect();
+        commit_files(&r, &[("c.txt", Some("1\n"))], "base");
+        let a = commit_files(&r, &[("c.txt", Some("2\n"))], "A");
+        commit_files(&r, &[("c.txt", Some("3\n"))], "B");
+        let mut files: Vec<(&str, Option<&str>)> =
+            names.iter().map(|n| (n.as_str(), Some("x\n"))).collect();
+        files.push(("c.txt", Some("4\n")));
+        let c = commit_files(&r, &files, "C");
+        let got = run(&r, &[&a, &c], None);
+        assert_eq!(got.fallback.len(), names.len() + 1);
+        assert!(got.fallback.iter().all(|f| !f.per_commit.is_empty()));
     }
 }

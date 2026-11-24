@@ -338,6 +338,82 @@ function rustLines(s) {
 }
 
 /**
+ * read.rs `read_c_quoted`: a C-quoted name at the start of `s` →
+ * `[unquoted name (UTF-8), rest after the closing quote]`, or null.
+ */
+function readCQuoted(s) {
+  if (!s.startsWith('"')) return null;
+  const body = Buffer.from(s.slice(1), "utf8");
+  const out = [];
+  const simple = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+  let i = 0;
+  while (i < body.length) {
+    const b = body[i];
+    if (b === 0x22) return [Buffer.from(out).toString("utf8"), body.subarray(i + 1).toString("utf8")];
+    if (b !== 0x5c) {
+      out.push(b);
+      i += 1;
+      continue;
+    }
+    if (i + 1 >= body.length) return null;
+    const c = String.fromCharCode(body[i + 1]);
+    i += 2;
+    if (c in simple) out.push(simple[c]);
+    else if (c >= "0" && c <= "3") {
+      if (i + 1 >= body.length) return null;
+      const d1 = body[i];
+      const d2 = body[i + 1];
+      if (d1 < 0x30 || d1 > 0x37 || d2 < 0x30 || d2 > 0x37) return null;
+      out.push((c.charCodeAt(0) - 0x30) * 64 + (d1 - 0x30) * 8 + (d2 - 0x30));
+      i += 2;
+    } else return null;
+  }
+  return null;
+}
+
+/** read.rs `unquote_header_name`. */
+function unquoteHeaderName(s) {
+  if (!s.startsWith('"')) return s;
+  const q = readCQuoted(s);
+  return q !== null && q[1] === "" ? q[0] : null;
+}
+
+/** read.rs `file_line_name`. */
+function fileLineName(s, prefix) {
+  let name;
+  if (s.startsWith('"')) {
+    const q = readCQuoted(s);
+    if (q === null || (q[1] !== "" && q[1] !== "\t")) return null;
+    name = q[0];
+  } else {
+    const t = s.endsWith("\t") ? s.slice(0, -1) : s;
+    if (t === "/dev/null") return null;
+    name = t;
+  }
+  return name.startsWith(prefix) ? name.slice(prefix.length) : null;
+}
+
+/** read.rs `symmetric_git_header_name`. */
+function symmetricGitHeaderName(line) {
+  if (!line.startsWith("diff --git ")) return null;
+  const rest = line.slice("diff --git ".length);
+  if (rest.startsWith('"')) {
+    const qa = readCQuoted(rest);
+    if (qa === null || !qa[1].startsWith(" ")) return null;
+    const qb = readCQuoted(qa[1].slice(1));
+    if (qb === null || qb[1] !== "") return null;
+    const [a, b] = [qa[0], qb[0]];
+    if (!a.startsWith("a/") || !b.startsWith("b/")) return null;
+    return a.slice(2) === b.slice(2) ? a.slice(2) : null;
+  }
+  // `a/P b/P`: 2·len(P) + 5 (UTF-16 units here, bytes in Rust: same split).
+  const len = rest.length - 5;
+  if (len < 0 || len % 2 !== 0) return null;
+  const p = rest.slice(2, 2 + len / 2);
+  return rest.startsWith("a/") && rest.slice(2 + len / 2) === ` b/${p}` ? p : null;
+}
+
+/**
  * The dev-server twin of Rust's `parse_multi_file_diff_capped`
  * (commands/read.rs) — the one multi-file parser, shared by `/api/git-show`
  * (no cap, like `git_show`) and the combined diff (`DIFF_TRUNCATE_BYTES`).
@@ -355,26 +431,36 @@ function devParseMultiFileDiff(core, stdout, cap = null) {
   }
   const diffs = [];
   for (const section of sections) {
-    const parts = section[0].split(" b/");
-    if (parts.length < 2) continue;
     let status = null;
     let oldPath = null;
+    let renameTo = null;
+    let minus = null;
+    let plus = null;
     for (const line of section.slice(1)) {
       if (line.startsWith("@@")) break;
       if (line.startsWith("new file mode")) status = "added";
       else if (line.startsWith("deleted file mode")) status = "deleted";
       else if (line.startsWith("rename from ")) {
         status = "renamed";
-        oldPath = line.substring("rename from ".length);
-      } else if (line.startsWith("rename to ") && status === null) status = "renamed";
+        oldPath = unquoteHeaderName(line.substring("rename from ".length));
+      } else if (line.startsWith("rename to ")) {
+        if (status === null) status = "renamed";
+        renameTo = unquoteHeaderName(line.substring("rename to ".length));
+      } else if (line.startsWith("copy to ")) renameTo = unquoteHeaderName(line.substring("copy to ".length));
+      else if (line.startsWith("--- ")) minus = fileLineName(line.substring(4), "a/");
+      else if (line.startsWith("+++ ")) plus = fileLineName(line.substring(4), "b/");
     }
+    // Rust's order: `rename to`, `+++ b/…`, `--- a/…`, then the two
+    // identical halves of `diff --git a/P b/P`.
+    const path = renameTo ?? plus ?? minus ?? symmetricGitHeaderName(section[0]);
+    if (path === null) continue;
     // `status` matters downstream: patchBuilder needs /dev/null for an added
     // or deleted file, or `git apply --cached` fails during a commit split.
     // Bytes of the section as git printed it (one `\n` per line).
     const size = section.reduce((n, l) => n + Buffer.byteLength(l, "utf-8") + 1, 0);
     const truncated = cap !== null && size > cap;
     diffs.push({
-      path: parts[1],
+      path,
       hunks: truncated ? [] : devParseDiffHunks(core, section.join("\n")).hunks,
       ...(status !== null ? { status } : {}),
       ...(oldPath !== null ? { oldPath } : {}),
@@ -1144,9 +1230,9 @@ class CombinedRepo {
     return out.stdout;
   }
 
-  /** `-- <paths> <extra>` (literal pathspecs). */
-  pathspec(extra) {
-    return ["--", ...(this.paths ?? []), ...extra];
+  /** `-- <paths>` (literal pathspecs). */
+  pathspec() {
+    return ["--", ...(this.paths ?? [])];
   }
 
   inPaths(path) {
@@ -1218,18 +1304,26 @@ class CombinedRepo {
     return [tree, paths];
   }
 
-  async diff(a, b, unified0, extra) {
+  /** replay.rs `diff`: the patch, its names checked against `touched`. */
+  async diff(a, b, unified0) {
+    return this.diffListed(a, b, unified0, await this.touched(a, b));
+  }
+
+  /** replay.rs `diff_listed`. */
+  async diffListed(a, b, unified0, listed) {
     const args = ["diff-tree", "-r", "-p", "-M", "--no-color", "--no-ext-diff", "--no-relative"];
     if (unified0) args.push("-U0");
-    args.push(a, b, ...this.pathspec(extra));
+    args.push(a, b, ...this.pathspec());
     const out = await this.stdout(args, "diff-tree", { env: { GIT_LITERAL_PATHSPECS: "1" } });
-    return devParseMultiFileDiff(this.core, out, DIFF_TRUNCATE_BYTES);
+    const diffs = devParseMultiFileDiff(this.core, out, DIFF_TRUNCATE_BYTES);
+    combinedCheckNames(diffs, listed);
+    return diffs;
   }
 
   /** `[old path of a rename | null, path]` per change. */
   async touched(a, b) {
     const out = await this.stdout(
-      ["diff-tree", "-r", "-M", "--name-status", "-z", "--no-relative", a, b, ...this.pathspec([])],
+      ["diff-tree", "-r", "-M", "--name-status", "-z", "--no-relative", a, b, ...this.pathspec()],
       "diff-tree",
       { env: { GIT_LITERAL_PATHSPECS: "1" } },
     );
@@ -1268,6 +1362,29 @@ class CombinedRepo {
     args.push(...earlier, "--", path);
     const out = await this.stdout(args, "rev-list", { env: { GIT_LITERAL_PATHSPECS: "1" } });
     return rustLines(out).map((l) => l.trim()).filter((l) => l !== "");
+  }
+}
+
+/**
+ * replay.rs `check_names`: the parsed names (`path`, `oldPath`) must be
+ * exactly the names of the `-z` listing; the first difference, in code-point
+ * order, is refused.
+ */
+function combinedCheckNames(diffs, listed) {
+  const parsed = new Set();
+  for (const d of diffs) {
+    parsed.add(d.path);
+    if (d.oldPath !== undefined) parsed.add(d.oldPath);
+  }
+  const exact = new Set();
+  for (const [old, path] of listed) {
+    if (old !== null) exact.add(old);
+    exact.add(path);
+  }
+  const diff = [...parsed].filter((n) => !exact.has(n)).concat([...exact].filter((n) => !parsed.has(n)));
+  if (diff.length > 0) {
+    const name = diff.sort(cmpCodePoints)[0];
+    throw new Error(`Combined diffs do not support the file name: ${name}`);
   }
 }
 
@@ -1341,7 +1458,7 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
     const parentTree = c.parentTree ?? (await repo.emptyTree());
     const merged = acc !== parentTree;
     const [result, conflicted] = merged ? await repo.merge(parentTree, acc, c.tree) : [c.tree, null];
-    const step = await repo.diff(acc, result, true, []);
+    const step = await repo.diff(acc, result, true);
     const ciChanges = merged ? await repo.touched(parentTree, c.tree) : [];
     if (conflicted !== null) {
       // (a) conflicted, with blockers.
@@ -1385,7 +1502,7 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
   }
 
   // 3. Net diff. A rename pair touching the fallback goes there whole.
-  let diffs = await repo.diff(baseTree, acc, false, []);
+  let diffs = await repo.diff(baseTree, acc, false);
   combinedJoinPairs(fallback, combinedRenamePairs(diffs));
   diffs = diffs.filter((d) => !combinedTouches(d, fallback));
 
@@ -1405,14 +1522,17 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
     ),
   );
 
-  // 4. Per-commit diffs of the fallback files, in replay order.
+  // 4. Per-commit diffs of the fallback files, in replay order. Each commit
+  //    is diffed whole and filtered here: the fallback can hold more paths
+  //    than an argv holds (32 KB on Windows).
   const perPath = new Map();
   if (fallback.size > 0) {
-    const fbPaths = [...fallback.keys()].sort(cmpCodePoints);
     const whole = new CombinedRepo(cwd, null, core);
     for (const c of replayed) {
       const parentTree = c.parentTree ?? (await repo.emptyTree());
-      for (const d of await whole.diff(parentTree, c.tree, false, fbPaths)) {
+      const listed = await whole.touched(parentTree, c.tree);
+      if (!listed.some(([old, path]) => fallback.has(path) || (old !== null && fallback.has(old)))) continue;
+      for (const d of await whole.diffListed(parentTree, c.tree, false, listed)) {
         const owner = fallback.has(d.path)
           ? d.path
           : d.oldPath !== undefined && fallback.has(d.oldPath)
