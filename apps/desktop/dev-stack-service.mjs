@@ -579,15 +579,15 @@ function settlePending(repo, hints) {
     const p = m.pending;
     if (!p) continue;
     const top = m.branch;
-    // Another worktree's restack: its own refresh settles it (review pass 2).
-    if (here !== null && here !== p.worktree) {
-      let owner = false;
+    // Any worktree settles a record (review pass 3); only the worktree it
+    // ran in may touch a detached HEAD.
+    let mine = here === null || here === p.worktree;
+    if (!mine) {
       try {
-        owner = worktreeExists(repo, p.worktree);
+        mine = !worktreeExists(repo, p.worktree);
       } catch {
-        owner = false;
+        mine = false;
       }
-      if (owner) continue;
     }
     if (holders.some((h) => h.rebasing && h.branch === top)) {
       s.waiting = true;
@@ -596,7 +596,7 @@ function settlePending(repo, hints) {
     try {
       if (!completed(repo, top, p)) {
         clearPending(repo, top);
-        unwindAbort(repo, top, p);
+        unwindAbort(repo, top, p, mine);
       } else if (s.finalized !== null) s.deferred.add(top);
       else s.finalized = finalize(repo, top, p, hints);
     } catch (e) {
@@ -609,13 +609,13 @@ function settlePending(repo, hints) {
 /** An aborted restack leaves HEAD on `top`, which git checked out to rebase
  *  it: back to the branch the user was on, best effort. Only when `top` did
  *  not move: that is the abort, not a later checkout. */
-function unwindAbort(repo, top, p) {
+function unwindAbort(repo, top, p, mine) {
   try {
     if (resolveCommit(repo, `refs/heads/${top}`) === p.top_sha) switchBack(repo, top, p.original);
   } catch {
     // best effort: the user stays on `top`, unharmed
   }
-  reattach(repo, p.original);
+  if (mine) reattach(repo, p.original);
 }
 
 /** D4: the restack recorded on `top` has run to its end. */
@@ -1223,10 +1223,23 @@ function runRestack(repo, configuredTrunk, layer, hints, previewed, version) {
   }
   // Halted without those words (an untracked file a pick would overwrite):
   // a pick is still to do, which the rebase banner takes over. A rebase
-  // left with nothing to do (a ref git could not update) is a failure.
+  // left with nothing to pick (a ref git could not update) is a failure
+  // whose words must reach the user, with what to do about the open rebase.
   if (haltedOnAPick(repo)) return { conflict: true };
-  fail(rebaseFailed(repo, p.top, back, stderr === "" ? stdout : stderr));
+  let msg = stderr === "" ? stdout : stderr;
+  let open = false;
+  try {
+    open = rebasingHere(repo);
+  } catch {
+    open = false;
+  }
+  if (open) msg += STILL_OPEN;
+  fail(rebaseFailed(repo, p.top, back, msg));
 }
+
+/** `STILL_OPEN`: appended to a failed run that leaves a rebase open with nothing to pick. */
+const STILL_OPEN =
+  " (the rebase is still open: abort it to put every branch back, fix the cause, then restack again)";
 
 /** `halted_on_a_pick`: a rebase in progress here with a command still to do. */
 function haltedOnAPick(repo) {
@@ -1245,7 +1258,17 @@ function haltedOnAPick(repo) {
 /** `worktree_id`: `-` for the main worktree, else its id in lowercase hex. */
 function worktreeId(repo) {
   const [dir, common] = lines(runOk(repo, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]));
-  if (dir === undefined || common === undefined) fail("unexpected rev-parse output");
+  // A git older than 2.31 echoes `--path-format=absolute` back: anything but
+  // two absolute paths, the git dir under the common one, is unknown.
+  if (
+    dir === undefined ||
+    common === undefined ||
+    !isAbsolute(dir) ||
+    !isAbsolute(common) ||
+    !(dir === common || dir.startsWith(common.endsWith("/") ? common : `${common}/`))
+  ) {
+    fail("unexpected rev-parse output");
+  }
   if (dir === common) return "-";
   const id = dir.split("/").filter(Boolean).pop() ?? fail(`unexpected git dir: ${dir}`);
   return Buffer.from(id, "utf-8").toString("hex");

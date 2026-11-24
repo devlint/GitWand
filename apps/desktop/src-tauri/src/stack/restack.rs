@@ -768,14 +768,20 @@ pub(crate) fn run(
     }
     // Halted without those words (an untracked file a pick would overwrite):
     // a pick is still to do, which the rebase banner takes over. A rebase
-    // left with nothing to do (a ref git could not update) is a failure:
-    // `--continue` cannot help, and git's words must reach the user.
+    // left with nothing to pick (a ref git could not update) is a failure
+    // whose words must reach the user, with what to do about the open rebase.
     if halted_on_a_pick(repo) {
         return Ok(RestackRun { conflict: true });
     }
-    let msg = if stderr.is_empty() { stdout } else { stderr };
+    let mut msg = if stderr.is_empty() { stdout } else { stderr };
+    if matches!(rebasing_here(repo), Ok(true)) {
+        msg.push_str(STILL_OPEN);
+    }
     Err(rebase_failed(repo, &p.top, back, msg))
 }
+
+/// Appended to a failed run that leaves a rebase open with nothing to pick.
+const STILL_OPEN: &str = " (the rebase is still open: abort it to put every branch back, fix the cause, then restack again)";
 
 /// A rebase in progress here with a command still to do.
 fn halted_on_a_pick(repo: &Path) -> bool {
@@ -815,6 +821,14 @@ pub(crate) fn worktree_id(repo: &Path) -> Result<String, String> {
     let (Some(dir), Some(common)) = (lines.next(), lines.next()) else {
         return Err(format!("unexpected rev-parse output: {out}"));
     };
+    // A git older than 2.31 echoes `--path-format=absolute` back instead of
+    // honouring it: anything but two absolute paths is unknown, not an id.
+    if !Path::new(dir).is_absolute()
+        || !Path::new(common).is_absolute()
+        || !Path::new(dir).starts_with(common)
+    {
+        return Err(format!("unexpected rev-parse output: {out}"));
+    }
     if dir == common {
         return Ok("-".into());
     }
@@ -2385,13 +2399,11 @@ mod tests {
         assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]), "step-2");
     }
 
-    /// Review pass 2, item 2: the record belongs to the worktree the restack
-    /// ran in. Another worktree's refresh leaves it (it could not switch that
-    /// worktree back); the owner's refresh settles it and switches back.
-    #[test]
-    fn only_the_restacking_worktree_settles_its_record() {
-        let r = TempRepo::new();
-        conflicting_moment_one(&r);
+    /// A restack in a linked worktree, aborted there. Review pass 3: any
+    /// worktree settles the record (left to its owner, it held the stack with
+    /// nothing saying why); only the owner reattaches a detached HEAD.
+    fn aborted_in_a_linked_worktree(r: &TempRepo) -> std::path::PathBuf {
+        conflicting_moment_one(r);
         r.git(&["checkout", "-q", "main"]);
         let wt = r.sandbox.join("wt");
         r.git(&["worktree", "add", "-q", wt.to_str().unwrap(), "step-2"]);
@@ -2402,13 +2414,37 @@ mod tests {
                 .conflict
         );
         git_at(&wt, &["rebase", "--abort"]);
-        // The main worktree's refresh leaves the linked worktree's record.
-        status(&r.path, Some("main"), &[]).unwrap();
-        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_some());
-        // Its own refresh clears it and puts it back on step-2.
+        wt
+    }
+
+    #[test]
+    fn the_restacking_worktree_settles_its_record_and_switches_back() {
+        let r = TempRepo::new();
+        let wt = aborted_in_a_linked_worktree(&r);
         status(&wt, Some("main"), &[]).unwrap();
         assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
         assert_eq!(git_at(&wt, &["symbolic-ref", "--short", "HEAD"]), "step-2");
+    }
+
+    #[test]
+    fn another_worktree_settles_the_record_without_touching_its_head() {
+        let r = TempRepo::new();
+        let wt = aborted_in_a_linked_worktree(&r);
+        // The main worktree happens to sit detached at step-2's tip.
+        r.git(&["checkout", "-q", "--detach", "step-2"]);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+        // The stack is not held: step-2 can be restacked again.
+        let l = s.layers.iter().find(|l| l.branch == "step-2").unwrap();
+        assert!(l.actionable, "{l:?}");
+        // Neither worktree was switched: main stays detached, wt on the top.
+        assert!(crate::git::git_cmd()
+            .args(["symbolic-ref", "-q", "HEAD"])
+            .current_dir(&r.path)
+            .status()
+            .map(|st| !st.success())
+            .unwrap());
+        assert_eq!(git_at(&wt, &["symbolic-ref", "--short", "HEAD"]), "step-3");
     }
 
     /// Review pass 2, item 1: a ref git could not update leaves a rebase
@@ -2426,6 +2462,7 @@ mod tests {
         std::fs::remove_file(&lock).unwrap();
         assert!(e.starts_with("git rebase failed:"), "{e}");
         assert!(e.contains("refs/heads/step-2"), "{e}");
+        assert!(e.contains("the rebase is still open"), "{e}");
     }
 
     /// Review of the QA fix, item 2: a rebase halted by an untracked file a

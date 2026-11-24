@@ -264,19 +264,17 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
     for m in all.values() {
         let Some(p) = &m.pending else { continue };
         let top = m.branch.as_str();
-        // Another worktree's restack: its own refresh settles it, so it is
-        // switched back where it ran (review pass 2). Unless it is gone.
-        if here.as_deref().is_some_and(|h| h != p.worktree)
-            && worktree_exists(repo, &p.worktree).unwrap_or(false)
-        {
-            continue;
-        }
+        // Any worktree settles a record (a record left to its owner would
+        // hold the stack until that worktree is opened again: review pass 3).
+        // Only the worktree it ran in may touch a detached HEAD.
+        let mine = here.as_deref().is_none_or(|h| h == p.worktree)
+            || !worktree_exists(repo, &p.worktree).unwrap_or(true);
         if holders.iter().any(|h| h.rebasing && h.branch == top) {
             s.waiting = true;
             continue;
         }
         let step = completed(repo, top, p).and_then(|done| match done {
-            false => clear_pending(repo, top).map(|()| unwind_abort(repo, top, p)),
+            false => clear_pending(repo, top).map(|()| unwind_abort(repo, top, p, mine)),
             true if s.finalized.is_some() => {
                 s.deferred.insert(top.to_string());
                 Ok(())
@@ -294,13 +292,17 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
 /// it: back to the branch the user was on, best effort (the restack's own
 /// switch-back guards apply; a failure keeps the user on `top`, unharmed).
 /// Only when `top` did not move: that is the abort, not a later checkout.
-/// Also a HEAD left detached at `original` by a run that failed.
-fn unwind_abort(repo: &Path, top: &str, p: &PendingRestack) {
+/// `switch_back` acts only where `top` is checked out, so only in the
+/// worktree the restack ran in. `mine`: this is that worktree, which alone
+/// may reattach a HEAD a failed run left detached at `original`.
+fn unwind_abort(repo: &Path, top: &str, p: &PendingRestack, mine: bool) {
     let tip = resolve_commit(repo, &format!("refs/heads/{top}"));
     if matches!(tip, Ok(Some(t)) if t == p.top_sha) {
         let _ = switch_back(repo, top, &p.original);
     }
-    reattach(repo, &p.original);
+    if mine {
+        reattach(repo, &p.original);
+    }
 }
 
 /// D4: the restack recorded on `top` has run to its end. The top moved since
