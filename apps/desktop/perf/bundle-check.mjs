@@ -121,7 +121,11 @@ const BUDGETS = {
   // + wiring). Combined view, selection, summary and attribution code are all
   // lazy chunks; main only carries the `getCombinedDiff` / `mapRawGitDiff`
   // wrappers in backend.ts, the en `combined` strings and the App.vue wiring.
-  main_max_kb: 983,
+  // Review pass 3 (word-order-safe file counts, the kept result dropped when
+  // the view closes, prune limited to the unfiltered log): measured at 984 KB
+  // (1,007,247 bytes). The selection code stays lazy (CombinedDiffView sets
+  // the range anchor, not App).
+  main_max_kb: 984,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked
