@@ -20,7 +20,8 @@
 
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { assertParity } from "./harness.mjs";
@@ -594,6 +595,41 @@ describe("parity: git-combined-diff", () => {
     commitIndex(conflict, [[latin1, "x=2\n"]], "B", 2);
     const c2 = commitIndex(conflict, [[latin1, "x=3\n"]], "C", 3);
     await expectError(conflict, [a2, c2], "Combined diffs do not support the file name: caf\\xe9.txt");
+  });
+
+  // replay.rs `paths_outside_the_repository_are_refused` and the symlink
+  // cases: refused input (400 on the dev-server), accepted historical names.
+  it.skipIf(process.platform === "win32")("paths are validated the same way on both sides", async () => {
+    const cwd = repo("paths");
+    const outside = mkdtempSync(join(tmpdir(), "gw-parity-combined-outside-"));
+    repos.push(outside);
+    symlinkSync(outside, join(cwd, "out"));
+    const a = commitFiles(cwd, { "old/f": "1\n" }, "A", 0);
+    git(cwd, ["mv", "old", "new"]);
+    execFileSync("git", ["-C", cwd, "commit", "-q", "-m", "rename"], { env: commitEnv(1) });
+    const b = commitFiles(cwd, { "new/f": "2\n" }, "B", 2);
+    const top = realpathSync.native(cwd);
+    const cases = [
+      [["f", "../x"], "path must not contain `..` (got: ../x)"],
+      [["/etc/passwd"], "path must be relative to the repo (got: /etc/passwd)"],
+      [[" "], "path must not be empty"],
+      [["out/secret"], `path escapes cwd (resolved: ${realpathSync.native(outside)}, cwd: ${top})`],
+    ];
+    for (const [paths, message] of cases) {
+      const probe = runProbe(COMMAND, { cwd, hashes: [a, b], paths });
+      expect(probe.ok).toBe(false);
+      expect(probe.error).toBe(message);
+      const res = await dev.fetch(HTTP_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cwd, hashes: [a, b], paths }),
+      });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe(message);
+    }
+    // `old/f` no longer exists on disk: still a valid path.
+    const { rust } = await parity(cwd, [a, b], ["old/f", "new/f"]);
+    expect(rust.diffs.length + rust.fallback.length).toBeGreaterThan(0);
   });
 
   it("invalid input fails with the same message on both sides", async () => {

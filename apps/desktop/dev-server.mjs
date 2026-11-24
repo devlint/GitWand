@@ -214,7 +214,8 @@ const GLAB = resolveBin("glab");
 const GIT = resolveBin("git");
 
 /**
- * Lexical check of a pathspec handed to `git rm --cached`. Mirrors
+ * Lexical check of a pathspec handed to `git rm --cached` (and of the
+ * combined diff's `paths`, `combinedValidatePaths`). Mirrors
  * `validate_pathspec` (commands/tracked_ignored.rs) - keep the two in sync.
  * Not `safeRepoPath`: that one resolves symlinks, so a tracked link pointing
  * outside the repo would fail the whole batch, though `git rm --cached` only
@@ -1719,6 +1720,26 @@ async function combinedToplevel(cwd) {
   return top;
 }
 
+/**
+ * replay.rs `validate_paths`: each root-relative path passes the lexical
+ * pathspec check (not empty, no NUL, not absolute, no `..`), then its
+ * directory goes through `safeRepoPath` against the toplevel (a missing tail
+ * is accepted, a symlinked directory leading out refused). The last component
+ * is not resolved: a tracked symlink is a blob to git. Refused input (400).
+ */
+function combinedValidatePaths(toplevel, paths) {
+  for (const p of paths) {
+    try {
+      validateUntrackPathspec(p);
+      const trimmed = p.replace(/\/+$/, "");
+      const i = trimmed.lastIndexOf("/");
+      safeRepoPath(toplevel, i > 0 ? p.slice(0, i) : ".");
+    } catch (e) {
+      throw new CombinedInputError(e.message);
+    }
+  }
+}
+
 /** replay.rs `combined_diff`. `pathsIn`: repository-root-relative. */
 async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
   const version = await combinedGitVersion();
@@ -1730,6 +1751,7 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
   // Every command runs from the toplevel (replay.rs): `check-attr --stdin`
   // and pathspecs are cwd-relative, printed names and `paths` root-relative.
   const cwd = await combinedToplevel(cwdIn);
+  if (pathsIn) combinedValidatePaths(cwd, pathsIn);
   const commits = await combinedResolveAndOrder(cwd, hashes);
   const core = await loadDevCore();
   const repo = new CombinedRepo(cwd, pathsIn && pathsIn.length > 0 ? pathsIn : null, core);

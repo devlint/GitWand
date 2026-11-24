@@ -14,7 +14,8 @@ use super::budget::{apply_budget, root, COMBINED_BUDGET_BYTES};
 use super::order::resolve_and_order;
 use super::{supports_combined_diff, validate_hashes};
 use crate::commands::read::parse_multi_file_diff_capped;
-use crate::git::{git_cmd, repo_lock};
+use crate::commands::tracked_ignored::validate_pathspec;
+use crate::git::{git_cmd, repo_lock, safe_repo_path};
 use crate::stack::guard::git_version;
 use crate::types::{
     CombinedDiff, CombinedFallbackCommitDiff, CombinedFallbackFile, GitDiff, DIFF_TRUNCATE_BYTES,
@@ -689,6 +690,27 @@ fn toplevel(cwd: &str) -> Result<String, String> {
     Ok(top.to_string())
 }
 
+/// Each of `paths` — repository-root-relative literal pathspecs, possibly a
+/// name that no longer exists (a file renamed away since) — must stay inside
+/// the repository at `toplevel`. First lexically (`validate_pathspec`: not
+/// empty, no NUL, not absolute, no `..` component) for a clear error, then
+/// its directory through `safe_repo_path`, which accepts a missing tail and
+/// refuses a symlinked directory leading out. The last component itself is
+/// not resolved: a tracked symlink is a blob to git, which a pathspec never
+/// follows, and resolving it would refuse the history of any link pointing
+/// out of the repository.
+fn validate_paths(toplevel: &str, paths: &[String]) -> Result<(), String> {
+    for p in paths {
+        validate_pathspec(p)?;
+        let dir = match p.trim_end_matches('/').rfind('/') {
+            Some(i) if i > 0 => &p[..i],
+            _ => ".",
+        };
+        safe_repo_path(toplevel, dir)?;
+    }
+    Ok(())
+}
+
 /// The combined diff of `hashes` (any order), optionally limited to `paths`
 /// (repository-root-relative, as `git log` reports names), within the
 /// production payload budget.
@@ -725,6 +747,9 @@ pub(crate) fn combined_diff_with_budget(
     let lock = cwd;
     let toplevel = toplevel(cwd)?;
     let cwd = toplevel.as_str();
+    if let Some(paths) = paths {
+        validate_paths(cwd, paths)?;
+    }
     let commits = resolve_and_order(cwd, &hashes)?;
     let mut repo = Repo {
         cwd,
@@ -2117,6 +2142,65 @@ mod tests {
         let a = r.git(&["rev-parse", "HEAD"]);
         let err = combined_diff(&cwd(&r), &[a, "--output=x".to_string()], None).unwrap_err();
         assert_eq!(err, "Invalid commit hash: --output=x");
+    }
+
+    fn paths_err(r: &TempRepo, hashes: &[&String], paths: &[&str]) -> String {
+        let hashes: Vec<String> = hashes.iter().map(|h| h.to_string()).collect();
+        let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+        combined_diff(&cwd(r), &hashes, Some(&paths)).unwrap_err()
+    }
+
+    /// `paths` stay inside the repository: no `..`, nothing absolute, no
+    /// empty entry — each refused with a clear error before any replay.
+    #[test]
+    fn paths_outside_the_repository_are_refused() {
+        let r = TempRepo::new();
+        let a = commit_files(&r, &[("f", Some("1\n"))], "A");
+        let b = commit_files(&r, &[("f", Some("2\n"))], "B");
+        assert_eq!(
+            paths_err(&r, &[&a, &b], &["f", "../x"]),
+            "path must not contain `..` (got: ../x)"
+        );
+        assert_eq!(
+            paths_err(&r, &[&a, &b], &["d/../../x"]),
+            "path must not contain `..` (got: d/../../x)"
+        );
+        assert_eq!(
+            paths_err(&r, &[&a, &b], &["/etc/passwd"]),
+            "path must be relative to the repo (got: /etc/passwd)"
+        );
+        assert_eq!(paths_err(&r, &[&a, &b], &[" "]), "path must not be empty");
+    }
+
+    /// A directory that is a symlink leading out of the repository is
+    /// refused by `safe_repo_path`.
+    #[cfg(unix)]
+    #[test]
+    fn a_path_through_a_symlink_out_of_the_repository_is_refused() {
+        let r = TempRepo::new();
+        let outside = r.sandbox.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, r.path.join("out")).unwrap();
+        let a = commit_files(&r, &[("f", Some("1\n"))], "A");
+        let b = commit_files(&r, &[("f", Some("2\n"))], "B");
+        let err = paths_err(&r, &[&a, &b], &["out/secret"]);
+        assert!(err.starts_with("path escapes cwd"), "{err}");
+    }
+
+    /// A historical name that no longer exists (renamed away), and a tracked
+    /// symlink pointing out of the repository (a blob to git, never followed
+    /// by a pathspec), are accepted.
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_name_and_a_tracked_symlink_leaf_are_accepted() {
+        let r = TempRepo::new();
+        let a = commit_files(&r, &[("old/f", Some("1\n"))], "A");
+        r.git(&["mv", "old", "new"]);
+        r.git(&["commit", "-q", "-m", "rename"]);
+        std::os::unix::fs::symlink("/etc/hosts", r.path.join("link")).unwrap();
+        let b = commit_files(&r, &[("new/f", Some("2\n"))], "B");
+        let got = run(&r, &[&a, &b], Some(&["old/f", "new/f", "link"]));
+        assert!(!got.diffs.is_empty());
     }
 
     /// Names a split on ` b/` misreads, and names git C-quotes.

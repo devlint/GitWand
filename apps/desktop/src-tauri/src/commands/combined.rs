@@ -4,7 +4,8 @@ use crate::combined::replay::combined_diff;
 use crate::types::CombinedDiff;
 
 /// Combined diff of `hashes` (2..=50, any order), optionally limited to
-/// `paths`. Read-only: writes only unreachable objects. Runs on a blocking
+/// `paths` (root-relative; each kept inside the repository by
+/// `validate_paths` in `combined/replay.rs`, through `safe_repo_path`). Read-only: writes only unreachable objects. Runs on a blocking
 /// thread — a 50-commit replay spawns a few hundred git processes.
 ///
 /// No repo guard for the whole command, unlike the other commands: the
