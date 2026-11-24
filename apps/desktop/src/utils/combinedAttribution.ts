@@ -31,12 +31,22 @@ interface Model {
   segs: Seg[];
   /** base line number → index of the commit that deleted it */
   deletedBy: Map<number, number>;
+  /** Base path whose lines the `base` segments and `deletedBy` count; null for a file absent from the base. */
+  baseOrigin: string | null;
+  /**
+   * Set once two different base lineages met on this path (e.g. a rename
+   * onto a path that still had its own model): no line of it can be
+   * attributed with certainty, so it gets none.
+   */
+  unattributable: boolean;
 }
 
-function freshModel(added: boolean): Model {
+function freshModel(baseOrigin: string | null): Model {
   return {
-    segs: added ? [] : [{ kind: "base", start: 1, len: Infinity }],
+    segs: baseOrigin === null ? [] : [{ kind: "base", start: 1, len: Infinity }],
     deletedBy: new Map(),
+    baseOrigin,
+    unattributable: false,
   };
 }
 
@@ -90,17 +100,24 @@ function replay(c: CombinedDiff): Map<string, Model> {
   c.steps.forEach((files, i) => {
     for (const f of files) {
       if (f.status === "renamed" && f.oldPath) {
-        const moved = models.get(f.oldPath);
+        const moved = models.get(f.oldPath) ?? freshModel(f.oldPath);
         models.delete(f.oldPath);
-        models.set(f.path, moved ?? freshModel(false));
+        const target = models.get(f.path);
+        // The target still has a model of another base file (deleted earlier
+        // in the range, say): its net `-` lines count that file's base lines,
+        // the moved model counts the source's. Never guess between the two.
+        if (target && target !== moved && target.baseOrigin !== null && target.baseOrigin !== moved.baseOrigin) {
+          moved.unattributable = true;
+        }
+        models.set(f.path, moved);
       } else if (f.status === "added") {
         // Re-added after an earlier step deleted it: the new content starts
         // empty, but the base lines it lost keep their deleter.
         const prev = models.get(f.path);
         if (prev) prev.segs = [];
-        else models.set(f.path, freshModel(true));
+        else models.set(f.path, freshModel(null));
       } else if (!models.has(f.path)) {
-        models.set(f.path, freshModel(false));
+        models.set(f.path, freshModel(f.path));
       }
       const model = models.get(f.path)!;
       for (let k = f.hunks.length - 1; k >= 0; k--) applyHunk(model, f.hunks[k], i);
@@ -112,6 +129,7 @@ function replay(c: CombinedDiff): Map<string, Model> {
 function attributeNet(diff: GitDiff, model: Model | undefined): FileAttribution {
   const lineCommit = new Map<string, number>();
   const hunkCommits: number[][] = [];
+  if (model?.unattributable) return { lineCommit, hunkCommits: diff.hunks.map(() => []) };
   for (const h of diff.hunks) {
     const set = new Set<number>();
     for (const l of h.lines) {

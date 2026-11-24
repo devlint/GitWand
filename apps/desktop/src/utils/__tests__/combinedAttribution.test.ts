@@ -104,6 +104,59 @@ describe("buildCombinedEntries", () => {
     expect(e.attribution.lineCommit.get("LEFT:4")).toBe(1);
   });
 
+  it("rename_onto_a_path_with_another_base_is_unattributable", () => {
+    // Commit 0 deletes q, commit 1 renames p -> q, commit 2 edits q. Net, q
+    // is modified against q's base, but its replay model carries p's base:
+    // q gets no marker at all rather than a guess.
+    const e = buildCombinedEntries(
+      combined(
+        3,
+        [file("q", [hunk(1, 3, 1, 2, [del(1), del(2), del(3), add(1), add(2)])])],
+        [
+          [file("q", [hunk(1, 3, 0, 0, [del(1), del(2), del(3)])], { status: "deleted" })],
+          [file("q", [], { status: "renamed", oldPath: "p" })],
+          [file("q", [hunk(1, 0, 2, 1, [add(2)])])],
+        ],
+      ),
+    )[0];
+    expect(e.attribution.lineCommit.size).toBe(0);
+    expect(e.attribution.hunkCommits).toEqual([[]]);
+  });
+
+  it("unattributable_path_stays_so_after_a_later_rename", () => {
+    const e = buildCombinedEntries(
+      combined(
+        4,
+        [file("r", [hunk(1, 0, 2, 1, [add(2)])], { status: "renamed", oldPath: "q" })],
+        [
+          [file("q", [hunk(1, 3, 0, 0, [del(1), del(2), del(3)])], { status: "deleted" })],
+          [file("q", [], { status: "renamed", oldPath: "p" })],
+          [file("r", [], { status: "renamed", oldPath: "q" })],
+          [file("r", [hunk(1, 0, 2, 1, [add(2)])])],
+        ],
+      ),
+    )[0];
+    expect(e.attribution.lineCommit.size).toBe(0);
+    expect(e.attribution.hunkCommits).toEqual([[]]);
+  });
+
+  it("rename_onto_a_fresh_path_keeps_attribution", () => {
+    // p -> q where q was never touched before: the moved model is p's.
+    const e = buildCombinedEntries(
+      combined(
+        2,
+        [file("q", [hunk(2, 1, 2, 1, [del(2), add(2)])], { status: "renamed", oldPath: "p" })],
+        [
+          [file("q", [hunk(2, 1, 2, 1, [del(2), add(2)])], { status: "renamed", oldPath: "p" })],
+          [file("z", [hunk(0, 0, 1, 1, [add(1)])], { status: "added" })],
+        ],
+      ),
+    )[0];
+    expect(e.attribution.lineCommit.get("LEFT:2")).toBe(0);
+    expect(e.attribution.lineCommit.get("RIGHT:2")).toBe(0);
+    expect(e.attribution.hunkCommits).toEqual([[0]]);
+  });
+
   it("added_file_starts_empty", () => {
     const e = buildCombinedEntries(
       combined(
