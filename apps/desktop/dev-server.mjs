@@ -1589,8 +1589,8 @@ function combinedOpaqueNames(core, out) {
 
 /** replay.rs `covers`: the literal pathspec `spec` matches `path` or a path under it. */
 function combinedCovers(spec, path) {
-  const q = spec.replace(/\/+$/, "");
-  return path === q || (path.startsWith(q) && path.slice(q.length).startsWith("/"));
+  // `spec` is canonical (`combinedValidatePaths`): no empty or `.` component.
+  return path === spec || (path.startsWith(spec) && path.slice(spec.length).startsWith("/"));
 }
 
 /** replay.rs `LOG_RECORD_MARK`: the byte after the NUL opening each record. */
@@ -1751,7 +1751,8 @@ async function combinedToplevel(cwd) {
 
 /**
  * replay.rs `validate_paths`: each root-relative path passes the lexical
- * pathspec check (not empty, no NUL, not absolute, no `..`), then its
+ * pathspec check (not empty, no NUL, not absolute, no `..`; then no empty or
+ * `.` component, trailing `/` included), then its
  * directory goes through `safeRepoPath` against the toplevel (a missing tail
  * is accepted, a symlinked directory leading out refused). The last component
  * is not resolved: a tracked symlink is a blob to git. Refused input (400).
@@ -1760,8 +1761,12 @@ function combinedValidatePaths(toplevel, paths) {
   for (const p of paths) {
     try {
       validateUntrackPathspec(p);
-      const trimmed = p.replace(/\/+$/, "");
-      const i = trimmed.lastIndexOf("/");
+      // `combinedCovers` compares names textually; git normalises `./f`,
+      // `d//f`, `d/./f` and `d/`. Refused, so the two never disagree.
+      if (p.split("/").some((c) => c === "" || c === ".")) {
+        throw new Error(`path must not have an empty or \`.\` component (got: ${p})`);
+      }
+      const i = p.lastIndexOf("/");
       safeRepoPath(toplevel, i > 0 ? p.slice(0, i) : ".");
     } catch (e) {
       throw new CombinedInputError(e.message);

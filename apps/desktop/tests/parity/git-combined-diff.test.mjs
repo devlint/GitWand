@@ -631,6 +631,10 @@ describe("parity: git-combined-diff", () => {
       [["f", "../x"], "path must not contain `..` (got: ../x)"],
       [["/etc/passwd"], "path must be relative to the repo (got: /etc/passwd)"],
       [[" "], "path must not be empty"],
+      [["./new/f"], "path must not have an empty or `.` component (got: ./new/f)"],
+      [["new//f"], "path must not have an empty or `.` component (got: new//f)"],
+      [["new/./f"], "path must not have an empty or `.` component (got: new/./f)"],
+      [["new/"], "path must not have an empty or `.` component (got: new/)"],
       [["out/secret"], `path escapes cwd (resolved: ${realpathSync.native(outside)}, cwd: ${top})`],
     ];
     for (const [paths, message] of cases) {

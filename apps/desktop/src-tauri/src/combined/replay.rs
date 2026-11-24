@@ -460,8 +460,8 @@ impl<'a> Repo<'a> {
 
 /// Whether the literal pathspec `spec` matches `path`: the path itself or a
 /// path under it.
+/// `spec` is canonical (`validate_paths`): no empty or `.` component.
 fn covers(spec: &str, path: &str) -> bool {
-    let spec = spec.trim_end_matches('/');
     path == spec || path.strip_prefix(spec).is_some_and(|r| r.starts_with('/'))
 }
 
@@ -738,7 +738,8 @@ fn toplevel(cwd: &str) -> Result<String, String> {
 /// Each of `paths` — repository-root-relative literal pathspecs, possibly a
 /// name that no longer exists (a file renamed away since) — must stay inside
 /// the repository at `toplevel`. First lexically (`validate_pathspec`: not
-/// empty, no NUL, not absolute, no `..` component) for a clear error, then
+/// empty, no NUL, not absolute, no `..` component; then no empty or `.`
+/// component, trailing `/` included) for a clear error, then
 /// its directory through `safe_repo_path`, which accepts a missing tail and
 /// refuses a symlinked directory leading out. The last component itself is
 /// not resolved: a tracked symlink is a blob to git, which a pathspec never
@@ -747,9 +748,16 @@ fn toplevel(cwd: &str) -> Result<String, String> {
 fn validate_paths(toplevel: &str, paths: &[String]) -> Result<(), String> {
     for p in paths {
         validate_pathspec(p)?;
-        let dir = match p.trim_end_matches('/').rfind('/') {
-            Some(i) if i > 0 => &p[..i],
-            _ => ".",
+        // `covers` compares names textually; git normalises `./f`, `d//f`,
+        // `d/./f` and `d/`. Refused, so the two never disagree.
+        if p.split('/').any(|c| c.is_empty() || c == ".") {
+            return Err(format!(
+                "path must not have an empty or `.` component (got: {p})"
+            ));
+        }
+        let dir = match p.rfind('/') {
+            Some(i) => &p[..i],
+            None => ".",
         };
         safe_repo_path(toplevel, dir)?;
     }
@@ -2254,6 +2262,25 @@ mod tests {
             "path must be relative to the repo (got: /etc/passwd)"
         );
         assert_eq!(paths_err(&r, &[&a, &b], &[" "]), "path must not be empty");
+    }
+
+    /// A path git would match differently from `covers` (`./f`, `d//f`,
+    /// `d/./f`, `d/`) is refused, not normalised.
+    #[test]
+    fn non_canonical_paths_are_refused() {
+        let r = TempRepo::new();
+        let a = commit_files(&r, &[("d/f", Some("1\n"))], "A");
+        let b = commit_files(&r, &[("d/f", Some("2\n"))], "B");
+        for p in ["./d/f", "d//f", "d/./f", "d/", "."] {
+            assert_eq!(
+                paths_err(&r, &[&a, &b], &[p]),
+                format!("path must not have an empty or `.` component (got: {p})")
+            );
+        }
+        assert_eq!(
+            paths_of(&run(&r, &[&a, &b], Some(&["d"])).diffs),
+            vec!["d/f"]
+        );
     }
 
     /// A directory that is a symlink leading out of the repository is
