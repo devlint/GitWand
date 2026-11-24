@@ -572,14 +572,27 @@ function settlePending(repo, hints) {
       continue;
     }
     try {
-      if (!completed(repo, top, p)) clearPending(repo, top);
-      else if (s.finalized !== null) s.deferred.add(top);
+      if (!completed(repo, top, p)) {
+        clearPending(repo, top);
+        unwindAbort(repo, top, p);
+      } else if (s.finalized !== null) s.deferred.add(top);
       else s.finalized = finalize(repo, top, p, hints);
     } catch (e) {
       s.errors.set(top, e.message);
     }
   }
   return s;
+}
+
+/** An aborted restack leaves HEAD on `top`, which git checked out to rebase
+ *  it: back to the branch the user was on, best effort. Only when `top` did
+ *  not move: that is the abort, not a later checkout. */
+function unwindAbort(repo, top, p) {
+  try {
+    if (resolveCommit(repo, `refs/heads/${top}`) === p.top_sha) switchBack(repo, top, p.original);
+  } catch {
+    // best effort: the user stays on `top`, unharmed
+  }
 }
 
 /** D4: the restack recorded on `top` has run to its end. */
@@ -1147,6 +1160,16 @@ function runRestack(repo, configuredTrunk, layer, hints, previewed, version) {
     merged_parent: merged ? p.parent : null,
   });
 
+  // `--update-refs` never moves the branch checked out in the worktree it
+  // runs in (git 2.54, verified): a user on a lower layer would see the
+  // layers above move without it. From a detached HEAD at the same commit,
+  // the rebase moves every ref; finalize switches back to `original`.
+  const back = original !== p.top && moving.includes(original) ? original : null;
+  if (back !== null) {
+    const d = run(repo, ["switch", "--detach", "--quiet"]);
+    if (!ok(d)) fail(rebaseFailed(repo, p.top, null, trimmed(d.stderr)));
+  }
+
   const r = spawnSync(GIT, ["rebase", "--update-refs", "--onto", p.onto_sha, p.upstream_sha, p.top], {
     cwd: repo,
     encoding: "utf-8",
@@ -1161,20 +1184,21 @@ function runRestack(repo, configuredTrunk, layer, hints, previewed, version) {
       LANGUAGE: "",
     },
   });
-  if (r.error) fail(rebaseFailed(repo, p.top, r.error.message));
+  if (r.error) fail(rebaseFailed(repo, p.top, back, r.error.message));
   if (r.status === 0) return { conflict: false };
   const stderr = (r.stderr ?? "").trim();
   const stdout = (r.stdout ?? "").trim();
   if ([stderr, stdout].some((s) => s.includes("CONFLICT") || s.includes("could not apply"))) {
     return { conflict: true };
   }
-  fail(rebaseFailed(repo, p.top, stderr === "" ? stdout : stderr));
+  fail(rebaseFailed(repo, p.top, back, stderr === "" ? stdout : stderr));
 }
 
 /** A rebase that failed without halting: the record goes, unless a rebase is
- *  now in progress here (or that cannot be told). */
-function rebaseFailed(repo, top, detail) {
-  const msg = `git rebase failed: ${detail}`;
+ *  now in progress here (or that cannot be told). `back`: the branch the run
+ *  detached HEAD from, checked out again (nothing moved). */
+function rebaseFailed(repo, top, back, detail) {
+  let msg = `git rebase failed: ${detail}`;
   let here;
   try {
     here = rebasingHere(repo);
@@ -1182,6 +1206,10 @@ function rebaseFailed(repo, top, detail) {
     return msg;
   }
   if (here) return msg;
+  if (back !== null) {
+    const out = run(repo, ["switch", "--no-guess", "--quiet", back]);
+    if (!ok(out)) msg = `${msg} (HEAD is left detached: ${trimmed(out.stderr)})`;
+  }
   try {
     clearPending(repo, top);
     return msg;

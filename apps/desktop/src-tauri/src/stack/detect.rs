@@ -6,7 +6,7 @@ use super::guard::{branch_holders, git_version, supports_update_refs};
 use super::meta::{
     clear_malformed_pending, clear_pending, read_all, set_base, trunk, validate_branch_name,
 };
-use super::restack::finalize;
+use super::restack::{finalize, switch_back};
 use super::{
     FinalizedRestack, LayerState, LayerStatus, MergeSignal, MergedParentHint, PendingError,
     PendingRestack, StackMeta, StackReport,
@@ -268,7 +268,7 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
             continue;
         }
         let step = completed(repo, top, p).and_then(|done| match done {
-            false => clear_pending(repo, top),
+            false => clear_pending(repo, top).map(|()| unwind_abort(repo, top, p)),
             true if s.finalized.is_some() => {
                 s.deferred.insert(top.to_string());
                 Ok(())
@@ -280,6 +280,17 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
         }
     }
     Ok(s)
+}
+
+/// An aborted restack leaves HEAD on `top`, which git checked out to rebase
+/// it: back to the branch the user was on, best effort (the restack's own
+/// switch-back guards apply; a failure keeps the user on `top`, unharmed).
+/// Only when `top` did not move: that is the abort, not a later checkout.
+fn unwind_abort(repo: &Path, top: &str, p: &PendingRestack) {
+    let tip = resolve_commit(repo, &format!("refs/heads/{top}"));
+    if matches!(tip, Ok(Some(t)) if t == p.top_sha) {
+        let _ = switch_back(repo, top, &p.original);
+    }
 }
 
 /// D4: the restack recorded on `top` has run to its end. The top moved since

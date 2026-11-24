@@ -464,6 +464,31 @@ describe("parity: stacked branches", () => {
     expect(stateOf(nodeCwd)).toEqual(before.node);
     expect(stateOf(nodeCwd)).toEqual(stateOf(rustCwd));
   }, 60_000);
+
+  // QA on a real stack: `--update-refs` skips the branch checked out where it
+  // runs, so a restack started from a lower layer detaches HEAD first.
+  it("a restack started on a lower layer moves it and switches back to it", async () => {
+    const onStep2 = (cwd) => git(cwd, ["checkout", "-q", "step-2"]);
+    const { rustCwd, nodeCwd, rr } = await restackBoth(dev, "moved", "step-2", [], onStep2);
+    expect(rr.value).toEqual({ conflict: false });
+    expect(stateOf(nodeCwd)).toEqual(stateOf(rustCwd));
+    const r = status.rust(rustCwd);
+    expectSame(r, await status.node(dev, nodeCwd), "finalizing status");
+    expect(r.value.finalized).toMatchObject({ moved: ["step-2", "step-3"], switched_back_to: "step-2" });
+    expect(stateOf(nodeCwd)).toEqual(stateOf(rustCwd));
+    expect(stateOf(rustCwd).current).toBe("step-2");
+    expect(stateOf(rustCwd).log["step-2"].split("\n")).toEqual(["s2", "s1 more", "s1", "initial commit"]);
+  }, 60_000);
+
+  it("an abort started on a lower layer returns to it", async () => {
+    const onStep2 = (cwd) => git(cwd, ["checkout", "-q", "step-2"]);
+    const { rustCwd, nodeCwd, before } = await restackBoth(dev, "conflict", "step-2", [], onStep2);
+    for (const cwd of [rustCwd, nodeCwd]) git(cwd, ["rebase", "--abort"]);
+    expectSame(status.rust(rustCwd), await status.node(dev, nodeCwd), "status after abort");
+    expect(stateOf(rustCwd)).toEqual(before.rust);
+    expect(stateOf(nodeCwd)).toEqual(before.node);
+    expect(stateOf(rustCwd).current).toBe("step-2");
+  }, 60_000);
 });
 
 describe("parity: stacked branches, the paths that rewrite branches", () => {

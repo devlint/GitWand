@@ -713,7 +713,22 @@ pub(crate) fn run(
         top_sha,
         merged_parent: merged.then(|| p.parent.clone()),
     };
+    let original = record.original.clone();
     set_pending(repo, &p.top, &record)?;
+
+    // `--update-refs` never moves the branch checked out in the worktree it
+    // runs in (git 2.54, verified): a user on a lower layer would see the
+    // layers above move without it. From a detached HEAD at the same commit,
+    // the rebase moves every ref; `finalize` switches back to `original`.
+    let detached = original != p.top && moving.contains(&original.as_str());
+    if detached {
+        let out = exec(repo, &["switch", "--detach", "--quiet"])?;
+        if !out.status.success() {
+            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            return Err(rebase_failed(repo, &p.top, None, msg));
+        }
+    }
+    let back = detached.then_some(original.as_str());
 
     let output = git_cmd()
         .args([
@@ -734,7 +749,7 @@ pub(crate) fn run(
         .output();
     let output = match output {
         Ok(o) => o,
-        Err(e) => return Err(rebase_failed(repo, &p.top, e.to_string())),
+        Err(e) => return Err(rebase_failed(repo, &p.top, back, e.to_string())),
     };
     if output.status.success() {
         return Ok(RestackRun { conflict: false });
@@ -748,16 +763,22 @@ pub(crate) fn run(
         return Ok(RestackRun { conflict: true });
     }
     let msg = if stderr.is_empty() { stdout } else { stderr };
-    Err(rebase_failed(repo, &p.top, msg))
+    Err(rebase_failed(repo, &p.top, back, msg))
 }
 
 /// A rebase that failed without halting on a conflict: the record goes,
 /// unless a rebase is now in progress here (or that cannot be told), in
-/// which case `status` decides once it ends.
-fn rebase_failed(repo: &Path, top: &str, msg: String) -> String {
-    let msg = format!("git rebase failed: {msg}");
+/// which case `status` decides once it ends. `back`: the branch `run`
+/// detached HEAD from, checked out again (nothing moved).
+fn rebase_failed(repo: &Path, top: &str, back: Option<&str>, msg: String) -> String {
+    let mut msg = format!("git rebase failed: {msg}");
     if !matches!(rebasing_here(repo), Ok(false)) {
         return msg;
+    }
+    if let Some(b) = back {
+        if let Err(e) = run_ok(repo, &["switch", "--no-guess", "--quiet", b]) {
+            msg = format!("{msg} (HEAD is left detached: {e})");
+        }
     }
     match clear_pending(repo, top) {
         Ok(()) => msg,
@@ -1001,7 +1022,11 @@ fn merge_base(repo: &Path, parent: &str, layer: &str) -> Result<String, String> 
 /// `original`. Skipped, and said why, when `original` is gone or tracked
 /// changes would have to be carried over. Runs after the record is cleared,
 /// so it never fails: its own git errors are reported in `switch_error`.
-fn switch_back(repo: &Path, top: &str, original: &str) -> (Option<String>, Option<SwitchError>) {
+pub(crate) fn switch_back(
+    repo: &Path,
+    top: &str,
+    original: &str,
+) -> (Option<String>, Option<SwitchError>) {
     match try_switch_back(repo, top, original) {
         Ok(r) => r,
         Err(e) => (None, Some(switch_error(original, e))),
@@ -1915,6 +1940,35 @@ mod tests {
         )
     }
 
+    /// QA on a real stack: the user is on a layer below the top. `--update-refs`
+    /// never moves the branch checked out in the worktree it runs in, so the
+    /// rebase must start from a detached HEAD, and the finalize switches back.
+    #[test]
+    fn moment_one_from_a_checked_out_lower_layer_moves_every_layer() {
+        for on in ["step-2", "step-3"] {
+            let r = TempRepo::new();
+            moved_stack(&r);
+            // A fourth layer, so step-3 is a middle layer when checked out.
+            r.git(&["checkout", "-q", "-b", "step-4"]);
+            r.commit("d.txt", "4\n", "s4");
+            set_parent(&r.path, Some("main"), "step-4", "step-3").unwrap();
+            r.git(&["checkout", "-q", on]);
+            assert!(!restack(&r, "step-2", &[]).conflict);
+            let s = status(&r.path, Some("main"), &[]).unwrap();
+            let f = s
+                .finalized
+                .clone()
+                .unwrap_or_else(|| panic!("on {on}: not finalized"));
+            assert_eq!(f.moved, ["step-2", "step-3", "step-4"], "on {on}");
+            assert_eq!(f.switched_back_to.as_deref(), Some(on), "on {on}");
+            assert_eq!(f.switch_error, None, "on {on}");
+            assert!(ancestor(&r, "step-1", "step-2"), "on {on}");
+            assert!(ancestor(&r, "step-2", "step-3"), "on {on}");
+            assert!(ancestor(&r, "step-3", "step-4"), "on {on}");
+            assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]), on);
+        }
+    }
+
     #[test]
     fn moment_one_three_layers_end_to_end() {
         let r = TempRepo::new();
@@ -2216,6 +2270,23 @@ mod tests {
         assert!(!s.rebase_in_progress);
         assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
         assert_eq!(snapshot(&r), before);
+    }
+
+    /// An abort returns to the top (git checked it out to rebase it): the
+    /// record's settlement puts the user back on the layer they were on.
+    #[test]
+    fn abort_from_a_lower_layer_returns_to_it() {
+        let r = TempRepo::new();
+        conflicting_moment_one(&r);
+        r.git(&["checkout", "-q", "step-2"]);
+        let before = snapshot(&r);
+        assert!(restack(&r, "step-2", &[]).conflict);
+        r.git(&["rebase", "--abort"]);
+        let s = status(&r.path, Some("main"), &[]).unwrap();
+        assert!(s.finalized.is_none() && s.pending_errors.is_empty());
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+        assert_eq!(snapshot(&r), before);
+        assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]), "step-2");
     }
 
     #[test]
