@@ -59,14 +59,25 @@ function fallbackNote(path: string, fb: { blockers: string[]; conflicted: boolea
   return t("combined.fallbackBlocked", path, fb.blockers.map(shortOf).join(", "));
 }
 
-/** One note per entry: the fallback banner on a file's first section, or the too-large notice. */
+/**
+ * One note per entry: the fallback banner on a file's first section, and/or
+ * the size notice — "too large (size)" for the 5 MB per-file cap, a neutral
+ * "omitted" for an entry the payload budget cut (its byte count is an
+ * estimated weight, not the file's size).
+ */
 const fileNotes = computed<(string | null)[]>(() => {
   const seen = new Set<string>();
+  const omitted = new Set(props.data?.budgetOmitted ?? []);
   return entries.value.map((e) => {
     const first = !seen.has(e.diff.path);
     seen.add(e.diff.path);
     const banner = e.fallback && first ? fallbackNote(e.diff.path, e.fallback) : null;
-    const big = e.diff.truncatedFromBytes !== undefined ? t("combined.tooLarge", formatBytes(e.diff.truncatedFromBytes)) : null;
+    const big =
+      e.diff.truncatedFromBytes === undefined
+        ? null
+        : omitted.has(e.diff.path)
+          ? t("combined.omittedForSize")
+          : t("combined.tooLarge", formatBytes(e.diff.truncatedFromBytes));
     return banner && big ? `${banner} ${big}` : (banner ?? big);
   });
 });

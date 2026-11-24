@@ -16,6 +16,7 @@ const combined = (tag: string): CombinedDiff => ({
   steps: [[]],
   fallback: [],
   truncated: false,
+  budgetOmitted: [],
 });
 
 describe("combinedResultCache", () => {

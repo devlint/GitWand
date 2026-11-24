@@ -166,6 +166,10 @@ pub struct CombinedDiff {
     /// entries of some files (no attribution for them) and/or entries made
     /// header-only.
     pub truncated: bool,
+    /// Paths with an entry the budget made header-only (sorted, unique): its
+    /// `truncated_from_bytes` is an estimated payload weight, not a file
+    /// size over the per-file cap.
+    pub budget_omitted: Vec<String>,
 }
 
 // ─── Branch PR lookup ──────────────────────────────────────────────

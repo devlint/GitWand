@@ -15,7 +15,7 @@ function file(path: string, hunks: DiffHunk[], extra: Partial<GitDiff> = {}): Gi
 const commits = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ hash: `h${i}`, shortHash: `h${i}`, subject: `c${i}`, author: "a", date: "d" }));
 function combined(n: number, diffs: GitDiff[], steps: GitDiff[][], fallback: CombinedDiff["fallback"] = []): CombinedDiff {
-  return { base: "base", commits: commits(n), diffs, steps, fallback, truncated: false };
+  return { base: "base", commits: commits(n), diffs, steps, fallback, truncated: false, budgetOmitted: [] };
 }
 
 describe("buildCombinedEntries", () => {

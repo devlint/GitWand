@@ -61,7 +61,18 @@ pub(crate) fn root(parent: &mut BTreeMap<String, String>, name: &str) -> String 
     cur
 }
 
-/// Brings the payload under `budget` bytes. Returns whether anything was cut.
+/// What [`apply_budget`] cut.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct BudgetCut {
+    /// Anything was cut (steps and/or entries).
+    pub truncated: bool,
+    /// Paths with an entry made header-only by step (b), sorted, unique —
+    /// unlike an entry over the parser's 5 MB per-file cap, its
+    /// `truncated_from_bytes` is an estimated weight, not the file's size.
+    pub omitted: Vec<String>,
+}
+
+/// Brings the payload under `budget` bytes.
 ///
 /// (a) Step entries go first, one file at a time — a file being every name
 ///     its step entries link by renames, so a file loses all its steps or
@@ -79,7 +90,7 @@ pub(crate) fn apply_budget(
     steps: &mut [Vec<GitDiff>],
     fallback: &mut [CombinedFallbackFile],
     budget: usize,
-) -> bool {
+) -> BudgetCut {
     let mut total: usize = diffs.iter().map(weight).sum::<usize>()
         + steps.iter().flatten().map(weight).sum::<usize>()
         + fallback
@@ -88,9 +99,10 @@ pub(crate) fn apply_budget(
             .map(|p| weight(&p.diff))
             .sum::<usize>();
     if total <= budget {
-        return false;
+        return BudgetCut::default();
     }
     let mut cut = false;
+    let mut omitted: BTreeSet<String> = BTreeSet::new();
 
     // (a) Group step entries into files (names linked by renames).
     let mut parent: BTreeMap<String, String> = BTreeMap::new();
@@ -153,11 +165,15 @@ pub(crate) fn apply_budget(
             let d = &mut entries[i];
             d.hunks.clear();
             d.truncated_from_bytes = Some(s as u64);
+            omitted.insert(d.path.clone());
             total -= s;
             cut = true;
         }
     }
-    cut
+    BudgetCut {
+        truncated: cut,
+        omitted: omitted.into_iter().collect(),
+    }
 }
 
 #[cfg(test)]
@@ -221,7 +237,13 @@ mod tests {
     #[test]
     fn many_short_lines_trigger_the_budget() {
         let mut diffs = vec![lines_entry("a", None, 1000, 1)];
-        assert!(apply_budget(&mut diffs, &mut [], &mut [], 10_000));
+        assert_eq!(
+            apply_budget(&mut diffs, &mut [], &mut [], 10_000),
+            BudgetCut {
+                truncated: true,
+                omitted: vec!["a".to_string()]
+            }
+        );
         assert!(diffs[0].hunks.is_empty());
         assert_eq!(diffs[0].truncated_from_bytes, Some(1000 * 65));
     }
@@ -231,7 +253,10 @@ mod tests {
         let mut diffs = vec![entry("a", None, 10)];
         let mut steps = vec![vec![entry("a", None, 10)]];
         let before = (diffs.clone(), steps.clone());
-        assert!(!apply_budget(&mut diffs, &mut steps, &mut [], 2 * w(10)));
+        assert_eq!(
+            apply_budget(&mut diffs, &mut steps, &mut [], 2 * w(10)),
+            BudgetCut::default()
+        );
         assert_eq!((diffs, steps), before);
     }
 
@@ -244,12 +269,10 @@ mod tests {
         ];
         // Files: a = 2 × w(10), b = w(1000), the larger; dropping b is enough.
         let total = 4 * w(10) + w(1000);
-        assert!(apply_budget(
-            &mut diffs,
-            &mut steps,
-            &mut [],
-            total - w(1000)
-        ));
+        let cut = apply_budget(&mut diffs, &mut steps, &mut [], total - w(1000));
+        assert!(cut.truncated);
+        // Steps only: no entry was made header-only.
+        assert!(cut.omitted.is_empty());
         assert_eq!(names(&steps[0]), vec!["a"]);
         assert_eq!(names(&steps[1]), vec!["a"]);
         assert!(diffs.iter().all(|d| d.truncated_from_bytes.is_none()));
@@ -264,12 +287,7 @@ mod tests {
         ];
         // p+p2 weigh 2 × w(20) as one file, more than q.
         let total = w(5) + 2 * w(20) + w(25);
-        assert!(apply_budget(
-            &mut diffs,
-            &mut steps,
-            &mut [],
-            total - 2 * w(20)
-        ));
+        assert!(apply_budget(&mut diffs, &mut steps, &mut [], total - 2 * w(20)).truncated);
         assert_eq!(names(&steps[0]), vec!["q"]);
         assert!(steps[1].is_empty());
     }
@@ -277,7 +295,7 @@ mod tests {
     #[test]
     fn equal_sizes_drop_the_smallest_name_first() {
         let mut steps = vec![vec![entry("b", None, 10), entry("a", None, 10)]];
-        assert!(apply_budget(&mut [], &mut steps, &mut [], w(10) + 10));
+        assert!(apply_budget(&mut [], &mut steps, &mut [], w(10) + 10).truncated);
         assert_eq!(names(&steps[0]), vec!["b"]);
     }
 
@@ -298,7 +316,9 @@ mod tests {
         // the file overhead.
         let total = w(10) + w(40) + w(10) + w(30);
         let budget = total - w(10) - (64 + 40);
-        assert!(apply_budget(&mut diffs, &mut steps, &mut fallback, budget));
+        let cut = apply_budget(&mut diffs, &mut steps, &mut fallback, budget);
+        assert!(cut.truncated);
+        assert_eq!(cut.omitted, vec!["b".to_string()]);
         assert!(steps[0].is_empty());
         assert!(diffs[1].hunks.is_empty());
         assert_eq!(diffs[1].truncated_from_bytes, Some(64 + 40));
@@ -321,12 +341,9 @@ mod tests {
             }],
             blockers: Vec::new(),
         }];
-        assert!(apply_budget(
-            &mut diffs,
-            &mut [],
-            &mut fallback,
-            w(10) + w(30) - 1
-        ));
+        let cut = apply_budget(&mut diffs, &mut [], &mut fallback, w(10) + w(30) - 1);
+        assert!(cut.truncated);
+        assert_eq!(cut.omitted, vec!["c".to_string()]);
         assert_eq!(
             fallback[0].per_commit[0].diff.truncated_from_bytes,
             Some(64 + 30)

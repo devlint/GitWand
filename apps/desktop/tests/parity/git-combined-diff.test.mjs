@@ -326,6 +326,7 @@ describe("parity: git-combined-diff", () => {
     const entry = rust.diffs.find((x) => x.path === "big.txt");
     expect(entry.truncatedFromBytes).toBeGreaterThan(5 * 1024 * 1024);
     expect(entry.hunks).toEqual([]);
+    expect(rust.budgetOmitted).toEqual([]);
     expect(rust.steps.flat().map((x) => x.path)).toEqual(["t.txt"]);
   }, 60_000);
 
@@ -446,8 +447,11 @@ describe("parity: git-combined-diff", () => {
         if (budget === "0") {
           expect(rust.steps.flat()).toEqual([]);
           expect(rust.diffs.every((d) => d.hunks.length === 0 && d.truncatedFromBytes > 0)).toBe(true);
+          expect(rust.budgetOmitted).toEqual(rust.diffs.map((d) => d.path).sort());
+          expect(rust.budgetOmitted.length).toBeGreaterThan(0);
         } else {
           expect(rust.steps.flat().map((d) => d.path)).toEqual(["small.txt"]);
+          expect(rust.budgetOmitted).toEqual([]);
         }
       } finally {
         await small.stop();
@@ -455,6 +459,7 @@ describe("parity: git-combined-diff", () => {
     }
     const { rust } = await parity(cwd, [a, c]);
     expect(rust.truncated).toBe(false);
+    expect(rust.budgetOmitted).toEqual([]);
   }, 30_000);
 
   // budget.rs `many_short_lines_trigger_the_budget`: 3 000 one-byte lines are
@@ -476,6 +481,7 @@ describe("parity: git-combined-diff", () => {
       const many = rust.diffs.find((d) => d.path === "many.txt");
       expect(many.hunks).toEqual([]);
       expect(many.truncatedFromBytes).toBe(3000 * 65);
+      expect(rust.budgetOmitted).toEqual(["many.txt"]);
     } finally {
       await small.stop();
     }

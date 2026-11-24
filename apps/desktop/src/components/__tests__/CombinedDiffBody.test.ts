@@ -38,7 +38,7 @@ const commits = [
 function combined(over: Partial<CombinedDiff> = {}): CombinedDiff {
   return {
     base: "b", commits, diffs: [file("a.txt"), file("b.txt")], steps: [[file("a.txt")], [file("b.txt")], []],
-    fallback: [], truncated: false, ...over,
+    fallback: [], truncated: false, budgetOmitted: [], ...over,
   };
 }
 
@@ -150,6 +150,18 @@ describe("CombinedDiffBody", () => {
   it("flags a truncated file instead of an empty diff", async () => {
     await mount(combined({ diffs: [file("big.bin", [], { truncatedFromBytes: 9_000_000 })] }));
     expect(q(".cdv-file-note")!.textContent).toContain("combined.tooLarge");
+  });
+
+  it("says a budget-cut file is omitted for size, without its estimated weight", async () => {
+    await mount(combined({
+      truncated: true,
+      diffs: [file("a.txt", [], { truncatedFromBytes: 4_000 })],
+      budgetOmitted: ["a.txt"],
+    }));
+    const note = q(".cdv-file-note")!.textContent!;
+    expect(note).toContain("combined.omittedForSize");
+    expect(note).not.toContain("combined.tooLarge");
+    expect(note).not.toContain("4");
   });
 
   it("lists the files in its own list", async () => {

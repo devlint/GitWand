@@ -3231,6 +3231,7 @@ const zhCN: Locale = {
     retry: "重试",
     loading: "正在合并 {0} 个提交…",
     tooLarge: "文件过大，无法显示（{0}）",
+    omittedForSize: "已省略：内容过多，无法一次显示",
     summarize: "总结这 {0} 个提交",
     summaryError: "无法生成摘要。",
     perCommitCount: "{0} 逐个提交显示",

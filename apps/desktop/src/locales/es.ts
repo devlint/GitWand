@@ -3221,6 +3221,7 @@ const es: Locale = {
     retry: "Reintentar",
     loading: "Combinando {0} commits…",
     tooLarge: "Archivo demasiado grande para mostrarlo ({0})",
+    omittedForSize: "Omitido: demasiado contenido para mostrar a la vez",
     summarize: "Resumir estos {0} commits",
     summaryError: "No se pudo generar el resumen.",
     perCommitCount: "{0} commit a commit",

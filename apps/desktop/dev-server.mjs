@@ -1159,14 +1159,16 @@ function combinedTruncatedNames(diffs, steps) {
  * linked by renames), heaviest first, ties by smallest name; (b) then make the
  * net / per-commit entries whose lines weigh most header-only, ties in payload
  * order. Entries with no line are never made header-only. Mutates; returns
- * whether it cut anything.
+ * `{ truncated, omitted }` — whether it cut anything, and the paths of the
+ * entries (b) made header-only, sorted, unique (`BudgetCut`).
  */
 function combinedApplyBudget(diffs, steps, fallback, budget) {
   const entries = [...diffs, ...fallback.flatMap((f) => f.perCommit.map((p) => p.diff))];
   let total = entries.reduce((n, d) => n + combinedWeight(d), 0) +
     steps.flat().reduce((n, d) => n + combinedWeight(d), 0);
-  if (total <= budget) return false;
+  if (total <= budget) return { truncated: false, omitted: [] };
   let cut = false;
+  const omitted = new Set();
 
   // (a) Files = names linked by renames; each file's root is its smallest name.
   const parent = new Map();
@@ -1213,11 +1215,12 @@ function combinedApplyBudget(diffs, steps, fallback, budget) {
       if (total <= budget) break;
       entries[i].hunks = [];
       entries[i].truncatedFromBytes = n;
+      omitted.add(entries[i].path);
       total -= n;
       cut = true;
     }
   }
-  return cut;
+  return { truncated: cut, omitted: [...omitted].sort(cmpCodePoints) };
 }
 
 /** `git version 2.39.3 (Apple Git-146)` → `[2, 39]` (`stack::guard`). */
@@ -1824,7 +1827,10 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
 
   // 6. Total payload budget: steps first, then header-only entries.
   const cut = combinedApplyBudget(diffs, keptSteps, fallbackOut, combinedBudget());
-  return { base, commits, diffs, steps: keptSteps, fallback: fallbackOut, truncated: cut };
+  return {
+    base, commits, diffs, steps: keptSteps, fallback: fallbackOut,
+    truncated: cut.truncated, budgetOmitted: cut.omitted,
+  };
 }
 
 /**

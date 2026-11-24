@@ -1650,6 +1650,12 @@ export interface CombinedDiff {
   fallback: CombinedFallbackFile[];
   /** The 16 MB payload budget cut steps (no markers) or entries (header-only). */
   truncated: boolean;
+  /**
+   * Paths with an entry the budget made header-only (sorted, unique): their
+   * `truncatedFromBytes` is an estimated payload weight, not a file size over
+   * the 5 MB per-file cap.
+   */
+  budgetOmitted: string[];
 }
 
 /** The Rust `CombinedDiff` payload: its `GitDiff`s keep snake_case hunks. */
@@ -1673,6 +1679,7 @@ export function mapRawCombinedDiff(raw: RawCombinedDiff): CombinedDiff {
       blockers: f.blockers,
     })),
     truncated: raw.truncated,
+    budgetOmitted: raw.budgetOmitted,
   };
 }
 

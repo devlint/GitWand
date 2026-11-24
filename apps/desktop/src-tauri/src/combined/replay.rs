@@ -999,7 +999,7 @@ pub(crate) fn combined_diff_with_budget(
 
     // 6. Total payload budget: steps first, then header-only entries.
     let mut steps = steps;
-    let truncated = apply_budget(&mut diffs, &mut steps, &mut fallback, budget);
+    let cut = apply_budget(&mut diffs, &mut steps, &mut fallback, budget);
 
     Ok(CombinedDiff {
         base,
@@ -1007,7 +1007,8 @@ pub(crate) fn combined_diff_with_budget(
         diffs,
         steps,
         fallback,
-        truncated,
+        truncated: cut.truncated,
+        budget_omitted: cut.omitted,
     })
 }
 
@@ -1907,6 +1908,9 @@ mod tests {
         let d = got.diffs.iter().find(|d| d.path == "big.txt").unwrap();
         assert!(d.hunks.is_empty());
         assert!(d.truncated_from_bytes.unwrap() > crate::types::DIFF_TRUNCATE_BYTES as u64);
+        // The per-file cap, not the payload budget: not listed as omitted.
+        assert!(!got.truncated);
+        assert!(got.budget_omitted.is_empty());
         assert!(got.steps.iter().flatten().all(|d| d.path != "big.txt"));
         let t = got.diffs.iter().find(|d| d.path == "t.txt").unwrap();
         assert!(t.truncated_from_bytes.is_none());
@@ -1943,6 +1947,7 @@ mod tests {
 
         let cut = combined_diff_with_budget(&cwd(&r), &hashes, None, total - 1).unwrap();
         assert!(cut.truncated);
+        assert!(cut.budget_omitted.is_empty());
         assert_eq!(cut.diffs, full.diffs);
         assert_eq!(paths_of(&cut.steps.concat()), vec!["small.txt"]);
 
@@ -1950,6 +1955,7 @@ mod tests {
         assert!(zero.truncated);
         assert!(zero.steps.iter().all(|s| s.is_empty()));
         assert_eq!(paths_of(&zero.diffs), vec!["large.txt", "small.txt"]);
+        assert_eq!(zero.budget_omitted, vec!["large.txt", "small.txt"]);
         for d in &zero.diffs {
             assert!(d.hunks.is_empty());
             assert!(d.truncated_from_bytes.unwrap() > 0);
