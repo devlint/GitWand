@@ -22,6 +22,8 @@ use crate::types::{
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Most blockers named per fallback file.
 const MAX_BLOCKERS: usize = 5;
@@ -797,13 +799,67 @@ pub(crate) fn combined_diff_with_budget(
     // Every command runs from the toplevel: `check-attr --stdin` reads its
     // paths relative to the cwd and pathspecs are cwd-relative, while the
     // names git prints (`--no-relative`) and `paths` are root-relative.
-    let lock = cwd;
-    let toplevel = toplevel(cwd)?;
-    let cwd = toplevel.as_str();
+    let top = toplevel(cwd)?;
     if let Some(paths) = paths {
-        validate_paths(cwd, paths)?;
+        validate_paths(&top, paths)?;
     }
-    let commits = resolve_and_order(cwd, &hashes)?;
+    let ticket = Ticket::take(&top);
+    replay_all(cwd, &top, &hashes, paths, budget, &ticket)
+}
+
+const CANCELLED: &str = "Combined diff cancelled.";
+
+/// Per-repository generation of combined-diff requests (keyed by toplevel).
+/// Each request bumps it; a replay whose generation is no longer the current
+/// one has been superseded — its result would be dropped by the view anyway
+/// — and stops at its next check, so abandoned replays do not stack. Closing
+/// the view without a new request lets the current replay finish.
+fn generations() -> &'static Mutex<HashMap<String, Arc<AtomicU64>>> {
+    static GENERATIONS: OnceLock<Mutex<HashMap<String, Arc<AtomicU64>>>> = OnceLock::new();
+    GENERATIONS.get_or_init(Default::default)
+}
+
+/// One request's place in its repository's [`generations`].
+struct Ticket {
+    counter: Arc<AtomicU64>,
+    mine: u64,
+}
+
+impl Ticket {
+    /// Supersedes every request of `toplevel` taken before.
+    fn take(toplevel: &str) -> Ticket {
+        let counter = generations()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(toplevel.to_string())
+            .or_default()
+            .clone();
+        let mine = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        Ticket { counter, mine }
+    }
+
+    /// `Err` once a later request of the same repository has started.
+    fn check(&self) -> Result<(), String> {
+        if self.counter.load(Ordering::SeqCst) == self.mine {
+            Ok(())
+        } else {
+            Err(CANCELLED.to_string())
+        }
+    }
+}
+
+/// The replay itself, once the input is validated: `lock` is the directory
+/// the caller opened, `cwd` its toplevel. Checks `ticket` between steps and
+/// before the blocker and fallback phases.
+fn replay_all(
+    lock: &str,
+    cwd: &str,
+    hashes: &[String],
+    paths: Option<&[String]>,
+    budget: usize,
+    ticket: &Ticket,
+) -> Result<CombinedDiff, String> {
+    let commits = resolve_and_order(cwd, hashes)?;
     let mut repo = Repo {
         cwd,
         lock,
@@ -860,6 +916,7 @@ pub(crate) fn combined_diff_with_budget(
     // Names of the opaque (binary) step entries: their file loses every step.
     let mut opaque: Vec<String> = Vec::new();
     for (i, c) in replayed.iter().enumerate() {
+        ticket.check()?;
         let parent_tree = match &c.parent_tree {
             Some(t) => t.clone(),
             None => repo.empty_tree()?,
@@ -1015,6 +1072,7 @@ pub(crate) fn combined_diff_with_budget(
     diffs.retain(|d| !touches(d, &fallback));
 
     // Blockers of the conflicted paths shown: one batched walk per step.
+    ticket.check()?;
     let mut sources: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
     for fb in fallback.values() {
         if let Some((i, path)) = &fb.source {
@@ -1069,6 +1127,7 @@ pub(crate) fn combined_diff_with_budget(
             empty_tree: repo.empty_tree.clone(),
         };
         for c in &replayed {
+            ticket.check()?;
             let parent_tree = match &c.parent_tree {
                 Some(t) => t.clone(),
                 None => repo.empty_tree()?,
@@ -2262,6 +2321,53 @@ mod tests {
             "path must be relative to the repo (got: /etc/passwd)"
         );
         assert_eq!(paths_err(&r, &[&a, &b], &[" "]), "path must not be empty");
+    }
+
+    /// A request of the same repository taken after this one's supersedes
+    /// it: the replay stops with `Combined diff cancelled.`; the latest runs.
+    #[test]
+    fn a_later_request_cancels_the_replay() {
+        let r = TempRepo::new();
+        let a = commit_files(&r, &[("f", Some("1\n"))], "A");
+        let b = commit_files(&r, &[("f", Some("2\n"))], "B");
+        let top = toplevel(&cwd(&r)).unwrap();
+        let hashes = vec![a, b];
+        let first = Ticket::take(&top);
+        let second = Ticket::take(&top);
+        let run_with =
+            |t: &Ticket| replay_all(&cwd(&r), &top, &hashes, None, COMBINED_BUDGET_BYTES, t);
+        assert_eq!(run_with(&first).unwrap_err(), CANCELLED);
+        assert_eq!(paths_of(&run_with(&second).unwrap().diffs), vec!["f"]);
+        // Another repository's requests are independent.
+        let other = TempRepo::new();
+        let c = commit_files(&other, &[("g", Some("1\n"))], "C");
+        let d = commit_files(&other, &[("g", Some("2\n"))], "D");
+        Ticket::take(&toplevel(&cwd(&other)).unwrap());
+        assert_eq!(paths_of(&run(&other, &[&c, &d], None).diffs), vec!["g"]);
+        assert_eq!(paths_of(&run_with(&second).unwrap().diffs), vec!["f"]);
+    }
+
+    /// The same, through `combined_diff` on two threads: a slow replay (50
+    /// merged steps) started first is cancelled by a request started while
+    /// it runs.
+    #[test]
+    fn a_running_replay_is_cancelled_by_a_new_request() {
+        let r = TempRepo::new();
+        commit_files(&r, &[("f", Some(&ten("l")))], "base");
+        let mut selected: Vec<String> = Vec::new();
+        for i in 0..50 {
+            selected.push(commit_files(&r, &[(&format!("s{i}"), Some("s\n"))], "S"));
+            commit_files(&r, &[(&format!("u{i}"), Some("u\n"))], "U");
+        }
+        let dir = cwd(&r);
+        let first = {
+            let (dir, hashes) = (dir.clone(), selected.clone());
+            std::thread::spawn(move || combined_diff(&dir, &hashes, None))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let second = combined_diff(&dir, &selected[..2], None).unwrap();
+        assert_eq!(paths_of(&second.diffs), vec!["s0", "s1"]);
+        assert_eq!(first.join().unwrap().unwrap_err(), CANCELLED);
     }
 
     /// A path git would match differently from `covers` (`./f`, `d//f`,

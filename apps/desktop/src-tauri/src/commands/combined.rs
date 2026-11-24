@@ -16,6 +16,11 @@ use crate::types::CombinedDiff;
 /// fair, every reader queued behind one). The one step that reads the
 /// worktree — `check-attr` on `.gitattributes`, which a checkout rewrites —
 /// takes the shared guard for its own short spawn (`Repo::merge_driven`).
+///
+/// A later call for the same repository cancels this one: the replay checks
+/// its generation between steps and fails with `Combined diff cancelled.`,
+/// which the view ignores (`Ticket` in `combined/replay.rs`). Closing the
+/// view without a new request lets the current replay finish.
 #[tauri::command]
 pub(crate) async fn git_combined_diff(
     cwd: String,

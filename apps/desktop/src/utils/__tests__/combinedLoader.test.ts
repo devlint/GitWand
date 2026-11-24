@@ -132,4 +132,18 @@ describe("combinedLoader", () => {
     expect(last(states)).toEqual({ data: null, loading: false, error: null });
     expect(cache.get("/r", req)).toBeNull();
   });
+
+  it("a replay the backend cancelled (a newer request superseded it) is ignored", async () => {
+    const { cache, pending, states, loader } = setup();
+    const done = loader.load("/r", req);
+    const before = states.length;
+    pending[0].reject("Combined diff cancelled.");
+    await done;
+    expect(states).toHaveLength(before);
+    expect(cache.get("/r", req)).toBeNull();
+    const again = loader.load("/r", req);
+    pending[1].reject(new Error("Combined diff cancelled."));
+    await again;
+    expect(last(states)?.error).toBeNull();
+  });
 });

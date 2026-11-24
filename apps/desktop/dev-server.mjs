@@ -1774,6 +1774,26 @@ function combinedValidatePaths(toplevel, paths) {
   }
 }
 
+const COMBINED_CANCELLED = "Combined diff cancelled.";
+
+/** replay.rs `generations`: toplevel → the generation of its latest request. */
+const combinedGenerations = new Map();
+
+/**
+ * replay.rs `Ticket`: each request supersedes the earlier ones of the same
+ * repository; `check()` throws once a later one started. Closing the view
+ * without a new request lets the current replay finish.
+ */
+function combinedTakeTicket(toplevel) {
+  const mine = (combinedGenerations.get(toplevel) ?? 0) + 1;
+  combinedGenerations.set(toplevel, mine);
+  return {
+    check() {
+      if (combinedGenerations.get(toplevel) !== mine) throw new Error(COMBINED_CANCELLED);
+    },
+  };
+}
+
 /** replay.rs `combined_diff`. `pathsIn`: repository-root-relative. */
 async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
   const version = await combinedGitVersion();
@@ -1786,6 +1806,7 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
   // and pathspecs are cwd-relative, printed names and `paths` root-relative.
   const cwd = await combinedToplevel(cwdIn);
   if (pathsIn) combinedValidatePaths(cwd, pathsIn);
+  const ticket = combinedTakeTicket(cwd);
   const commits = await combinedResolveAndOrder(cwd, hashes);
   const core = await loadDevCore();
   const repo = new CombinedRepo(cwd, pathsIn && pathsIn.length > 0 ? pathsIn : null, core);
@@ -1815,6 +1836,7 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
   // Names of the opaque (binary) step entries: their file loses every step.
   const opaque = [];
   for (let i = 0; i < replayed.length; i++) {
+    ticket.check();
     const c = replayed[i];
     const parentTree = c.parentTree ?? (await repo.emptyTree());
     const merged = acc !== parentTree;
@@ -1897,6 +1919,7 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
   diffs = diffs.filter((d) => !combinedTouches(d, fallback));
 
   // Blockers of the conflicted paths shown: one batched walk per step.
+  ticket.check();
   const sources = new Map();
   for (const fb of fallback.values()) {
     if (fb.source === null) continue;
@@ -1932,6 +1955,7 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
   if (fallback.size > 0) {
     const whole = new CombinedRepo(cwd, null, core);
     for (const c of replayed) {
+      ticket.check();
       const parentTree = c.parentTree ?? (await repo.emptyTree());
       const listed = await whole.touched(parentTree, c.tree);
       const units = listed

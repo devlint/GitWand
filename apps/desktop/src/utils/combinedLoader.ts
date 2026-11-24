@@ -3,12 +3,18 @@
  * result of the same repository and request, otherwise run the request and
  * keep only the latest one (`latestOnly`). `dispose()` — the view closed —
  * makes the run in flight stale: a replay settling afterwards reaches
- * neither the state nor the cache, which App has just cleared.
+ * neither the state nor the cache, which App has just cleared. A replay the
+ * backend cancelled (a newer request of the repository superseded it) is
+ * ignored the same way.
  */
 import type { CombinedDiff } from "./backend";
 import type { combinedResultCache } from "./combinedCache";
 import { rawErrorText } from "./combinedError";
 import { latestOnly } from "./latestOnly";
+
+/** What both backends answer for a replay a newer request superseded
+ *  (`combined/replay.rs`, `devCombinedDiff`). */
+export const COMBINED_CANCELLED = "Combined diff cancelled.";
 
 /** The request shape of `useCombinedDiff` (structural). */
 interface CombinedLoadRequest {
@@ -46,7 +52,11 @@ export function combinedLoader(
       cache.set(cwd, req, r.value);
       set({ data: r.value, loading: false, error: null });
     } else {
-      set({ data: null, loading: false, error: rawErrorText(r.error) });
+      const error = rawErrorText(r.error);
+      // A newer request of the same repository superseded this replay on
+      // the backend: its result is stale anyway, the newer one fills the view.
+      if (error === COMBINED_CANCELLED) return;
+      set({ data: null, loading: false, error });
     }
   }
 

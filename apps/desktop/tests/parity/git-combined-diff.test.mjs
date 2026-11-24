@@ -654,6 +654,33 @@ describe("parity: git-combined-diff", () => {
     expect(rust.diffs.length + rust.fallback.length).toBeGreaterThan(0);
   });
 
+  // replay.rs `a_running_replay_is_cancelled_by_a_new_request`, on the dev
+  // server (the probe runs one request per process): a later request of the
+  // same repository cancels the replay in flight.
+  it("a new request cancels the replay in flight on the dev server", async () => {
+    const cwd = repo("cancel");
+    commitFiles(cwd, { f: ten("l") }, "base", 0);
+    const selected = [];
+    for (let i = 0; i < 50; i++) {
+      selected.push(commitFiles(cwd, { [`s${i}`]: "s\n" }, "S", 2 * i + 1));
+      commitFiles(cwd, { [`u${i}`]: "u\n" }, "U", 2 * i + 2);
+    }
+    const post = (hashes) =>
+      dev.fetch(HTTP_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cwd, hashes }),
+      });
+    const first = post(selected);
+    await new Promise((r) => setTimeout(r, 300));
+    const second = await post(selected.slice(0, 2));
+    expect(second.status).toBe(200);
+    expect((await second.json()).diffs.map((d) => d.path)).toEqual(["s0", "s1"]);
+    const res = await first;
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe("Combined diff cancelled.");
+  }, 60_000);
+
   it("invalid input fails with the same message on both sides", async () => {
     const cwd = repo("errors");
     const a = commitFiles(cwd, { f: "1\n" }, "A", 0);
