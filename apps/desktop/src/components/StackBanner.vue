@@ -115,7 +115,7 @@ function unstack(branch: string | null) {
     </div>
     <div v-for="e in stacks.pendingErrors.value" :key="e.top" class="stack-banner__row stack-banner__row--warn">
       <span class="stack-banner__text">{{ t("stacks.banner.pendingError", e.top, e.error) }}</span>
-      <button class="stack-banner__btn" @click="unstack(e.top)">{{ t("stacks.menu.unstack") }}</button>
+      <button class="btn btn--secondary btn--sm" @click="unstack(e.top)">{{ t("stacks.menu.unstack") }}</button>
     </div>
 
     <div v-if="model" class="stack-banner__row">
@@ -123,19 +123,19 @@ function unstack(branch: string | null) {
         {{ restackText }}
         <template v-if="model.kind === 'parent_merged'"> {{ t("stacks.banner.oldCommits", model.layer.branch) }}</template>
       </span>
-      <button v-if="canPreview" class="stack-banner__btn stack-banner__btn--primary" @click="preview">
+      <button v-if="canPreview" class="btn btn--primary btn--sm" @click="preview">
         {{ t("stacks.banner.preview") }}
       </button>
-      <button v-if="canUnstackLayer" class="stack-banner__btn" @click="unstack(model.layer.branch)">
+      <button v-if="canUnstackLayer" class="btn btn--secondary btn--sm" @click="unstack(model.layer.branch)">
         {{ t("stacks.menu.unstack") }}
       </button>
-      <button class="stack-banner__btn" @click="stacks.later()">{{ t("stacks.banner.later") }}</button>
+      <button class="btn btn--secondary btn--sm" @click="stacks.later()">{{ t("stacks.banner.later") }}</button>
     </div>
 
     <div v-if="after" class="stack-banner__after">
       <div v-if="retargetText" class="stack-banner__row">
         <span class="stack-banner__text">{{ retargetText }}</span>
-        <button v-if="after.retarget.state === 'failed'" class="stack-banner__btn" @click="actions.retryRetarget()">
+        <button v-if="after.retarget.state === 'failed'" class="btn btn--secondary btn--sm" @click="actions.retryRetarget()">
           {{ t("stacks.after.retry") }}
         </button>
       </div>
@@ -143,7 +143,7 @@ function unstack(branch: string | null) {
         <span class="stack-banner__text">{{ switchText }}</span>
       </div>
       <div v-if="after.deleteOffer" class="stack-banner__row">
-        <button class="stack-banner__btn" @click="actions.deleteMergedParent()">
+        <button class="btn btn--secondary btn--sm" @click="actions.deleteMergedParent()">
           {{ t("stacks.after.deleteParent", after.deleteOffer.branch) }}
         </button>
       </div>
@@ -190,29 +190,6 @@ function unstack(branch: string | null) {
   flex-direction: column;
   gap: var(--space-1);
   padding-right: var(--space-5);
-}
-.stack-banner__btn {
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-}
-.stack-banner__btn:hover {
-  background: var(--color-bg-hover, var(--color-bg-secondary));
-}
-.stack-banner__btn--primary {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-accent-text, #fff);
-}
-/* `.stack-banner__btn:hover` outranks the modifier: without this, a hovered
-   primary button got the light hover background under its white text. */
-.stack-banner__btn--primary:hover {
-  border-color: var(--color-accent-hover, var(--color-accent));
-  background: var(--color-accent-hover, var(--color-accent));
 }
 .stack-banner__dismiss {
   position: absolute;

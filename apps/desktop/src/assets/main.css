@@ -405,6 +405,8 @@ button:focus-visible,
 }
 
 .btn--sm { padding: var(--space-2) var(--space-4); font-size: var(--font-size-base); border-radius: var(--radius-sm); }
+/* Inline in a dense row (branch list badges): keeps the row's height. */
+.btn--xs { gap: var(--space-1); padding: 1px var(--space-2); font-size: var(--font-size-sm); border-radius: var(--radius-sm); }
 .btn--lg { padding: var(--space-5) var(--space-7); font-size: var(--font-size-lg); }
 
 /*

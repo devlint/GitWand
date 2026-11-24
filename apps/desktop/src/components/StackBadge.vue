@@ -42,16 +42,16 @@ const stateLabel = computed(() => {
         parentPr != null ? t('stacks.badge.parentPr', layer.parent, parentPr) : t('stacks.badge.parent', layer.parent)
       }}</span>
       <span v-if="stateLabel" class="stack-badge__state">{{ stateLabel }}</span>
-      <button v-if="layer.actionable" type="button" class="stack-badge__btn" @click="$emit('restack')">
+      <button v-if="layer.actionable" type="button" class="btn btn--secondary btn--xs" @click="$emit('restack')">
         {{ t('stacks.restack') }}
       </button>
     </template>
     <span v-if="offer" class="stack-badge__offer">
       <span class="stack-badge__prompt">{{ t('stacks.bridge.prompt', offer.branch, offer.parent) }}</span>
-      <button type="button" class="stack-badge__btn stack-badge__btn--primary" @click="$emit('acceptOffer')">
+      <button type="button" class="btn btn--primary btn--xs" @click="$emit('acceptOffer')">
         {{ t('stacks.bridge.accept') }}
       </button>
-      <button type="button" class="stack-badge__btn" @click="$emit('dismissOffer')">
+      <button type="button" class="btn btn--secondary btn--xs" @click="$emit('dismissOffer')">
         {{ t('stacks.bridge.dismiss') }}
       </button>
     </span>
@@ -86,22 +86,5 @@ const stateLabel = computed(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-1);
-}
-.stack-badge__btn {
-  padding: 1px 6px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
-  font: inherit;
-  cursor: pointer;
-}
-.stack-badge__btn:hover {
-  background: var(--color-bg-hover, var(--color-bg-tertiary));
-}
-.stack-badge__btn--primary {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-accent-contrast, #fff);
 }
 </style>
