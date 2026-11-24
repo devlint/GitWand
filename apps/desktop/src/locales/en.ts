@@ -3281,6 +3281,7 @@ const en = {
     errHash: "Invalid commit hash: {0}",
     errUnknown: "Unknown commit: {0}",
     errName: "Unsupported file name: {0}",
+    errCancelled: "Interrupted by another combined diff of this repository.",
     filesSingular: "{0} file",
     filesPlural: "{0} files",
   },

@@ -8,6 +8,7 @@ describe("combinedErrorMessage", () => {
     expect(combinedErrorMessage("Combined diffs need git 2.38 or later (found 2.37).", t)).toBe("combined.errGit:2.37");
     expect(combinedErrorMessage("Combined diffs need git 2.38 or later (found unknown).", t)).toBe("combined.errGit:unknown");
     expect(combinedErrorMessage("Select at least 2 commits.", t)).toBe("combined.errMin");
+    expect(combinedErrorMessage("Combined diff cancelled.", t)).toBe("combined.errCancelled");
     expect(combinedErrorMessage("Select at most 50 commits.", t)).toBe("combined.tooMany:50");
     expect(combinedErrorMessage("Invalid commit hash: --output=x", t)).toBe("combined.errHash:--output=x");
     expect(combinedErrorMessage("Unknown commit: deadbeef", t)).toBe("combined.errUnknown:deadbeef");

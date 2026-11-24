@@ -13,7 +13,7 @@ import type { CombinedRequest } from "../composables/useCombinedDiff";
 import { formatBytes } from "../composables/useFilePreview";
 import { buildCombinedEntries } from "../utils/combinedAttribution";
 import { commitColor } from "../utils/commitColors";
-import { combinedErrorMessage } from "../utils/combinedError";
+import { COMBINED_CANCELLED, combinedErrorMessage } from "../utils/combinedError";
 import "../assets/combined-palette.css";
 import type { CombinedDiff } from "../utils/backend";
 import type { DiffMode } from "../utils/diffMode";
@@ -141,6 +141,7 @@ function openFile(idx: number) {
 
 /** The backend's message in the user's language (unknown ones as is). */
 const errorText = computed(() => (props.error ? combinedErrorMessage(props.error, t) : ""));
+const cancelled = computed(() => props.error === COMBINED_CANCELLED);
 </script>
 
 <template>
@@ -213,7 +214,13 @@ const errorText = computed(() => (props.error ? combinedErrorMessage(props.error
     </div>
 
     <div v-if="loading" class="cmb-state cmb-loading">{{ t("combined.loading", request.hashes.length) }}</div>
-    <div v-else-if="error" class="cmb-state cmb-error" role="alert">
+    <!-- A replay another caller's request cancelled is no failure: a neutral note. -->
+    <div
+      v-else-if="error"
+      class="cmb-state cmb-error"
+      :class="{ 'cmb-error--neutral': cancelled }"
+      :role="cancelled ? 'status' : 'alert'"
+    >
       <span class="cmb-error-text">{{ errorText }}</span>
       <button class="cmb-retry" @click="emit('retry')">{{ t("combined.retry") }}</button>
     </div>
@@ -307,6 +314,7 @@ const errorText = computed(() => (props.error ? combinedErrorMessage(props.error
 .cmb-mode--active { color: var(--color-accent); border-color: var(--color-accent); }
 .cmb-state { padding: var(--space-5, 16px); color: var(--color-text-muted); display: flex; align-items: center; gap: 10px; }
 .cmb-error { color: var(--color-danger, #f85149); }
+.cmb-error--neutral { color: var(--color-text-muted); }
 .cmb-retry {
   padding: 3px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm, 6px);
   background: var(--color-bg-secondary); color: var(--color-text); cursor: pointer;

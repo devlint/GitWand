@@ -3246,6 +3246,7 @@ const fr: Locale = {
     errHash: "Hash de commit invalide : {0}",
     errUnknown: "Commit inconnu : {0}",
     errName: "Nom de fichier non pris en charge : {0}",
+    errCancelled: "Interrompu par un autre diff combiné de ce dépôt.",
     filesSingular: "{0} fichier",
     filesPlural: "{0} fichiers",
   },

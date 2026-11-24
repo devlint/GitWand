@@ -124,6 +124,7 @@ describe("CombinedDiffBody", () => {
   it("renders the localized error message and a retry button", async () => {
     const { emitted } = await mount(new Error("Unknown commit: abc1234"));
     expect(q(".cmb-error")!.textContent).toContain("combined.errUnknown:abc1234");
+    expect(q(".cmb-error")!.getAttribute("role")).toBe("alert");
     q(".cmb-retry")!.click();
     expect(emitted.retry).toHaveLength(1);
   });
@@ -203,6 +204,16 @@ describe("CombinedDiffBody", () => {
     const inner = box.querySelector("bdi[dir='ltr']");
     expect(inner?.textContent).toBe(".env.local)");
     expect(box.textContent).toBe(".env.local)");
+  });
+
+  it("a replay another caller cancelled is a neutral note with Retry, not an alert", async () => {
+    const { emitted } = await mount(new Error("Combined diff cancelled."));
+    const note = q(".cmb-error")!;
+    expect(note.getAttribute("role")).toBe("status");
+    expect(note.classList.contains("cmb-error--neutral")).toBe(true);
+    expect(q(".cmb-error-text")!.textContent).toBe("combined.errCancelled");
+    q(".cmb-retry")!.click();
+    expect(emitted.retry).toHaveLength(1);
   });
 
   it("an unknown backend error is shown as is", async () => {

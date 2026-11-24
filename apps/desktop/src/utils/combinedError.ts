@@ -17,6 +17,10 @@ const PATTERNS: [RegExp, LocaleKey][] = [
   [/^Combined diffs do not support the file name: (.*)$/s, "combined.errName"],
 ];
 
+/** What both backends answer for a replay a newer request superseded
+ *  (`combined/replay.rs`, `devCombinedDiff`). */
+export const COMBINED_CANCELLED = "Combined diff cancelled.";
+
 /** A rejection's text, verbatim: an `Error`'s message, or the string Tauri's
  *  `invoke` rejects with. */
 export function rawErrorText(e: unknown): string {
@@ -24,6 +28,7 @@ export function rawErrorText(e: unknown): string {
 }
 
 export function combinedErrorMessage(raw: string, t: T): string {
+  if (raw === COMBINED_CANCELLED) return t("combined.errCancelled");
   if (raw === "Select at least 2 commits.") return t("combined.errMin");
   if (raw === `Select at most ${COMBINE_MAX} commits.`) return t("combined.tooMany", COMBINE_MAX);
   for (const [re, key] of PATTERNS) {

@@ -133,17 +133,34 @@ describe("combinedLoader", () => {
     expect(cache.get("/r", req)).toBeNull();
   });
 
-  it("a replay the backend cancelled (a newer request superseded it) is ignored", async () => {
+  it("a replay the backend cancelled for another caller ends the loading with the cancellation, nothing cached", async () => {
     const { cache, pending, states, loader } = setup();
     const done = loader.load("/r", req);
-    const before = states.length;
     pending[0].reject("Combined diff cancelled.");
     await done;
-    expect(states).toHaveLength(before);
+    expect(last(states)).toEqual({ data: null, loading: false, error: "Combined diff cancelled." });
     expect(cache.get("/r", req)).toBeNull();
-    const again = loader.load("/r", req);
-    pending[1].reject(new Error("Combined diff cancelled."));
+    // Retry runs it again.
+    const again = loader.load("/r", req, true);
+    pending[1].resolve(combined("ok"));
     await again;
-    expect(last(states)?.error).toBeNull();
+    expect(last(states)?.data?.commits[0].shortHash).toBe("ok");
+  });
+
+  it("a cancellation of a run this loader already superseded or dropped is ignored", async () => {
+    const { pending, states, loader } = setup();
+    const first = loader.load("/r", req);
+    const second = loader.load("/r", { hashes: ["a", "c"] });
+    pending[0].reject(new Error("Combined diff cancelled."));
+    await first;
+    expect(last(states)).toEqual({ data: null, loading: true, error: null });
+    pending[1].resolve(combined("new"));
+    await second;
+    const third = loader.load("/r", req, true);
+    const seen = states.length;
+    loader.dispose();
+    pending[2].reject("Combined diff cancelled.");
+    await third;
+    expect(states).toHaveLength(seen);
   });
 });
