@@ -2081,7 +2081,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         </div>
       </div>
     </div>
-    <!-- Multi-selection chip (v3.15): pinned at the bottom of the graph -->
+    <!-- Multi-selection chip (v3.15): at the bottom of the graph, above the dock -->
     <div v-if="orderedSelection.length >= 2" class="cg-multi-chip" role="status">
       <span class="cg-multi-chip__label">{{ tooMany ? t('combined.tooMany', COMBINE_MAX) : t('combined.chip', orderedSelection.length) }}</span>
       <button
@@ -3052,10 +3052,12 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   box-shadow: inset 3px 0 0 var(--color-accent);
 }
 
+/* Clears the floating AppDock like UndoToast: the dock's own offset and
+   height place it, so a change to either moves the chip with it. */
 .cg-multi-chip {
   position: absolute;
   left: 50%;
-  bottom: 12px;
+  bottom: calc(var(--space-4, 12px) + var(--app-dock-height, 44px) + 12px);
   transform: translateX(-50%);
   z-index: 3;
   display: flex;
