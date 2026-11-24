@@ -1477,7 +1477,7 @@ class CombinedRepo {
     return changes;
   }
 
-  /** Paths whose `merge` attribute is neither `unspecified` nor `set`. */
+  /** Paths whose `merge` attribute is not `unspecified`, `set` or `text` (the built-in text merge). */
   async mergeDriven(paths) {
     const out = new Set();
     if (paths.length === 0) return out;
@@ -1487,7 +1487,7 @@ class CombinedRepo {
     const fields = stdout.split("\0");
     for (let i = 0; i + 3 <= fields.length; i += 3) {
       const value = fields[i + 2];
-      if (value !== "unspecified" && value !== "set") out.add(fields[i]);
+      if (value !== "unspecified" && value !== "set" && value !== "text") out.add(fields[i]);
     }
     return out;
   }

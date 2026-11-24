@@ -304,8 +304,8 @@ impl<'a> Repo<'a> {
 
     /// Paths whose `merge` attribute names a driver (`union`, `binary`, a
     /// custom `merge.<name>.driver`, or `-merge`): `merge-tree` may resolve
-    /// them with content that is not the net effect. Only `unspecified` and
-    /// `set` (the built-in text merge) are trusted. Attributes are read as git
+    /// them with content that is not the net effect. Only `unspecified`,
+    /// `set` and `text` (all three the built-in text merge) are trusted. Attributes are read as git
     /// reads them for this repository: worktree `.gitattributes` and
     /// `$GIT_DIR/info/attributes`.
     fn merge_driven(&self, paths: &[&str]) -> Result<HashSet<String>, String> {
@@ -354,7 +354,7 @@ impl<'a> Repo<'a> {
         let fields: Vec<&str> = stdout.split('\0').collect();
         for chunk in fields.chunks(3) {
             if let [path, _, value] = chunk {
-                if *value != "unspecified" && *value != "set" {
+                if !matches!(*value, "unspecified" | "set" | "text") {
                     out.insert(path.to_string());
                 }
             }
@@ -1307,6 +1307,30 @@ mod tests {
         assert_eq!(paths_of(&got.diffs), vec!["g"]);
         let fb: Vec<&str> = got.fallback.iter().map(|x| x.path.as_str()).collect();
         assert_eq!(fb, vec!["f"]);
+    }
+
+    /// `merge=text` names the built-in text merge: a clean merge of such a
+    /// path is trusted like an unspecified one and stays in the net view.
+    #[test]
+    fn text_merge_attribute_is_trusted() {
+        let r = TempRepo::new();
+        commit_files(
+            &r,
+            &[
+                (".gitattributes", Some("f merge=text\n")),
+                ("f", Some(&ten("l"))),
+                ("g", Some("g\n")),
+            ],
+            "base",
+        );
+        let f1 = ten("l").replacen("l1\n", "A1\n", 1);
+        let a = commit_files(&r, &[("f", Some(&f1))], "A");
+        commit_files(&r, &[("g", Some("g2\n"))], "B");
+        let c = commit_files(&r, &[("f", Some(&f1.replacen("l10\n", "C10\n", 1)))], "C");
+        let got = run(&r, &[&a, &c], None);
+        assert_eq!(paths_of(&got.diffs), vec!["f"]);
+        assert!(got.fallback.is_empty());
+        assert_eq!(paths_of(&got.steps[1]), vec!["f"]);
     }
 
     #[test]

@@ -141,6 +141,18 @@ describe("parity: git-combined-diff", () => {
     expect(rust.fallback.map((x) => [x.path, x.conflicted])).toEqual([["f", false]]);
   });
 
+  it("a merge=text attribute is the built-in text merge: the file stays net", async () => {
+    const cwd = repo("textattr");
+    commitFiles(cwd, { ".gitattributes": "f merge=text\n", f: ten("l"), g: "g\n" }, "base", 0);
+    const f1 = ten("l").replace("l1\n", "A1\n");
+    const a = commitFiles(cwd, { f: f1 }, "A", 1);
+    commitFiles(cwd, { g: "g2\n" }, "B", 2);
+    const c = commitFiles(cwd, { f: f1.replace("l10\n", "C10\n") }, "C", 3);
+    const { rust } = await parity(cwd, [a, c]);
+    expect(rust.diffs.map((d) => d.path)).toEqual(["f"]);
+    expect(rust.fallback).toEqual([]);
+  });
+
   it("a clean rename of a fallback path keeps both names in the fallback", async () => {
     const cwd = repo("rename");
     commitFiles(cwd, { keep: "k\n" }, "base", 0);
