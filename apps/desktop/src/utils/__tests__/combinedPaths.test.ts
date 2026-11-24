@@ -75,4 +75,21 @@ describe("combinedPathsFor", () => {
     expect(sorted(paths([log[0], log[49]], log, "new.txt"))).toEqual(["new.txt", "old.txt"]);
     expect(paths([log[0], log[49]], log.slice(0, 50), "new.txt")).toEqual(["new.txt"]);
   });
+
+  it("a merge (no path) right before the oldest selected one: the name past it pairs the rename", () => {
+    // C newest, R renames old.txt -> new.txt, M is a merge, O predates the rename
+    const log = [entry("c", "new.txt"), entry("r", "new.txt"), strip(entry("m")), entry("o", "old.txt")];
+    expect(sorted(paths([log[0], log[1]], log, "new.txt"))).toEqual(["new.txt", "old.txt"]);
+  });
+
+  it("only unnamed entries before the oldest: every lineage name", () => {
+    // z.txt is a later name; nothing past R names the file
+    const log = [entry("z", "z.txt"), entry("c", "new.txt"), entry("r", "new.txt"), strip(entry("m"))];
+    expect(sorted(paths([log[1], log[2]], log, "new.txt"))).toEqual(["new.txt", "z.txt"]);
+  });
+
+  it("the oldest selected entry is the first one: nothing before it to add", () => {
+    const log = [entry("z", "z.txt"), entry("c", "new.txt"), entry("r", "new.txt")];
+    expect(paths([log[1], log[2]], log, "new.txt")).toEqual(["new.txt"]);
+  });
 });

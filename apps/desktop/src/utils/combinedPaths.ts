@@ -13,9 +13,10 @@ import type { FileLineageEntry, FileLogEntry } from "./backend";
  * lineage; an entry still unnamed gets every name the file has had (a
  * superset within this file's lineage is correct, a missing name is not).
  * Rename pairing: every name between the oldest and newest selected entries,
- * plus the name of the entry just before the oldest — always added: when the
- * oldest is a rename commit it is the old name `-M` needs to pair it,
- * otherwise it is the same name (harmless).
+ * plus the name of the first named entry before the oldest (a merge in
+ * between carries none) — always added: when the oldest is a rename commit
+ * it is the old name `-M` needs to pair it, otherwise it is the same name
+ * (harmless). Older entries all unnamed: every name of the lineage.
  */
 export function combinedPathsFor(
   selected: readonly FileLogEntry[],
@@ -38,8 +39,12 @@ export function combinedPathsFor(
       const p = fullLog[i].path;
       if (p) names.add(p);
     }
-    const before = fullLog[oldest + 1]?.path;
-    if (before) names.add(before);
+    // The name before the oldest: the first named entry past it (a merge
+    // carries no `path`); all pathless, every name the file has had.
+    const before = fullLog.slice(oldest + 1);
+    const named = before.find((x) => x.path)?.path;
+    if (named) names.add(named);
+    else if (before.length) lineage.forEach((n) => names.add(n));
   }
   return [...names];
 }
