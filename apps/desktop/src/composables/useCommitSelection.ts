@@ -25,6 +25,15 @@ function stateFor(path: string): SelectionState {
 }
 
 /**
+ * Whether `path` holds any selection state. An emptied selection forgets its
+ * key (`clear`, `setAnchor(null)`, a toggle that empties it with no current
+ * commit), so the file histories one opens do not leave a state each.
+ */
+export function hasSelectionState(path: string): boolean {
+  return path in states;
+}
+
+/**
  * The selection as the graph acts on it: selected hashes present in the
  * loaded log, in log order, then those not loaded (beyond the loaded depth),
  * in selection order. The backend re-orders topologically anyway.
@@ -64,6 +73,9 @@ export function useCommitSelection(repoPath: Ref<string>): {
     if (i >= 0) {
       s.list.splice(i, 1);
       if (s.anchor === hash) s.anchor = s.list[s.list.length - 1] ?? null;
+      // Nothing left to remember: with no current commit there is nothing to
+      // re-seed (only a plain click sets one, and it resets `seeded` anyway).
+      if (s.list.length === 0 && s.anchor === null && !current) delete states[repoPath.value];
     } else {
       s.list.push(hash);
       s.anchor = hash;
@@ -84,15 +96,16 @@ export function useCommitSelection(repoPath: Ref<string>): {
     s.anchor = visibleOrder[from < 0 ? to : from];
   }
 
+  /** Empties selection and anchor: the key's state goes (a fresh one is the same). */
   function clear() {
-    const s = states[repoPath.value];
-    if (!s) return;
-    s.list = [];
-    s.anchor = null;
-    s.seeded = false;
+    delete states[repoPath.value];
   }
 
   function setAnchor(hash: string | null) {
+    if (hash === null && !states[repoPath.value]?.list.length) {
+      delete states[repoPath.value];
+      return;
+    }
     const s = stateFor(repoPath.value);
     s.anchor = hash;
     s.seeded = false;

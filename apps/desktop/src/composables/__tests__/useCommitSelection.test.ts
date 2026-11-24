@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ref } from "vue";
-import { useCommitSelection, orderSelection, COMBINE_MAX } from "../useCommitSelection";
+import { useCommitSelection, orderSelection, COMBINE_MAX, hasSelectionState } from "../useCommitSelection";
 
 let n = 0;
 const fresh = () => ref(`/repo/${n++}`);
@@ -127,6 +127,40 @@ describe("useCommitSelection", () => {
     expect(s.selected.value).toEqual(["a", "c"]);
     s.prune(["a"]);
     expect(s.anchor.value).toBeNull();
+  });
+
+  it("an emptied selection forgets its key: one state per opened file history does not pile up", () => {
+    const keys = Array.from({ length: 5 }, () => fresh());
+    for (const key of keys) {
+      const s = useCommitSelection(key);
+      // File history: ⌘-click on, ⌘-click off (no current commit), then a
+      // plain click, which only clears (the viewer closes).
+      s.toggle("a", null);
+      expect(hasSelectionState(key.value)).toBe(true);
+      s.toggle("a", null);
+      expect(hasSelectionState(key.value)).toBe(false);
+      s.toggle("b", null);
+      s.clear();
+      expect(hasSelectionState(key.value)).toBe(false);
+    }
+    const s = useCommitSelection(keys[0]);
+    s.setAnchor(null);
+    expect(hasSelectionState(keys[0].value)).toBe(false);
+    s.setAnchor("x");
+    expect(hasSelectionState(keys[0].value)).toBe(true);
+    s.setAnchor(null);
+    expect(hasSelectionState(keys[0].value)).toBe(false);
+  });
+
+  it("an emptied selection with a current commit keeps its no-reseed memory", () => {
+    const key = fresh();
+    const s = useCommitSelection(key);
+    s.toggle("Y", "X");
+    s.toggle("X", "X");
+    s.toggle("Y", "X");
+    expect(hasSelectionState(key.value)).toBe(true);
+    s.toggle("Z", "X");
+    expect(s.selected.value).toEqual(["Z"]);
   });
 
   it("anchor follows plain click / toggle: click, shift, cmd, shift", () => {

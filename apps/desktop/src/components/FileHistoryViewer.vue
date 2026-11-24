@@ -243,9 +243,9 @@ function onLogEntryClick(e: MouseEvent, hash: string) {
   } else if (e.shiftKey) {
     selection.range(hash, displayedLog.value.map((x) => x.hashFull));
   } else {
-    // Like the Git Tree: a plain click ends the multi-selection.
+    // Like the Git Tree: a plain click ends the multi-selection. No anchor:
+    // the viewer closes on it, and a kept anchor would keep a state per file.
     selection.clear();
-    selection.setAnchor(hash);
     emit("select-commit", hash);
   }
 }
