@@ -4920,6 +4920,7 @@ watch(selectedCommitHash, () => {
 const graphFileIdx = ref<number | null>(null);
 // Combined diff of the Git Tree multi-selection; replaces the graph while set.
 const combinedRequest = ref<import("./composables/useCombinedDiff").CombinedRequest | null>(null);
+watch(repoFolderPath, () => { combinedRequest.value = null; });
 const graphScrollIdx = ref<number | null>(null);
 
 /** Graph → select a commit: load its diffs, keep the graph, open no file. */
@@ -4939,6 +4940,7 @@ function onDashboardSelectCommit(hash: string) {
 
 /** Graph → click a file in the right rail: open the diff scrolled to it. */
 function onGraphOpenFile(idx: number) {
+  combinedRequest.value = null;
   graphFileIdx.value = idx;
   graphScrollIdx.value = idx;
   nextTick(() => { graphScrollIdx.value = null; });

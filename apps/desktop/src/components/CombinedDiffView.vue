@@ -55,13 +55,15 @@ function fallbackNote(path: string, fb: { blockers: string[]; conflicted: boolea
 const fileNotes = computed<(string | null)[]>(() => {
   const seen = new Set<string>();
   return entries.value.map((e) => {
-    if (e.diff.truncatedFromBytes !== undefined) return t("combined.tooLarge", formatBytes(e.diff.truncatedFromBytes));
-    if (!e.fallback || seen.has(e.diff.path)) return null;
+    const first = !seen.has(e.diff.path);
     seen.add(e.diff.path);
-    return fallbackNote(e.diff.path, e.fallback);
+    const banner = e.fallback && first ? fallbackNote(e.diff.path, e.fallback) : null;
+    const big = e.diff.truncatedFromBytes !== undefined ? t("combined.tooLarge", formatBytes(e.diff.truncatedFromBytes)) : null;
+    return banner && big ? `${banner} ${big}` : (banner ?? big);
   });
 });
 
+const fileCount = computed(() => new Set(entries.value.map((e) => e.diff.path)).size);
 const limitedTo = computed(() => props.request.paths?.join(", ") ?? "");
 
 const stats = computed(() => {
@@ -92,7 +94,7 @@ const root = ref<HTMLElement | null>(null);
 function onKey(e: KeyboardEvent) {
   if (e.key !== "Escape" || e.defaultPrevented) return;
   const el = e.target as HTMLElement | null;
-  if (el && el !== document.body && el.nodeType === 1) {
+  if (el && el !== document.body && el !== document.documentElement && el.nodeType === 1) {
     if (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
     if (!root.value?.contains(el)) return;
   }
@@ -122,7 +124,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
       <div class="cmb-meta">
         <span v-if="request.paths?.length" class="cmb-limited mono">{{ t("combined.limitedTo", limitedTo) }}</span>
         <span v-if="data" class="cmb-counts">
-          {{ entries.length }} {{ entries.length === 1 ? t("header.file") : t("header.files") }}
+          {{ fileCount }} {{ fileCount === 1 ? t("header.file") : t("header.files") }}
           <span class="cmb-add" v-if="stats.adds > 0">+{{ stats.adds }}</span>
           <span class="cmb-del" v-if="stats.dels > 0">&minus;{{ stats.dels }}</span>
         </span>

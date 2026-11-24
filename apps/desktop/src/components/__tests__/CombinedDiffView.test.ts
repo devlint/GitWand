@@ -153,6 +153,41 @@ describe("CombinedDiffView", () => {
     expect(emitted.close).toHaveLength(1);
   });
 
+  it("Esc closes from the bare page (document, html, body) and from inside the view", async () => {
+    const { emitted } = await mount(combined());
+    const ev = () => new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+    document.dispatchEvent(ev());
+    document.documentElement.dispatchEvent(ev());
+    q(".cmb-chip")!.dispatchEvent(ev());
+    expect(emitted.close).toHaveLength(3);
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.dispatchEvent(ev());
+    expect(emitted.close).toHaveLength(3);
+  });
+
+  it("counts unique paths, not fallback sections", async () => {
+    await mount(combined({
+      diffs: [file("a.txt")],
+      fallback: [{ path: "c.txt", conflicted: true, blockers: [], perCommit: [{ hash: H1, diff: file("c.txt") }, { hash: H2, diff: file("c.txt") }, { hash: H3, diff: file("c.txt") }] }],
+    }));
+    expect(q(".cmb-counts")!.textContent).toContain("2 header.files");
+  });
+
+  it("keeps the fallback banner on the first section when a fallback file is truncated", async () => {
+    await mount(combined({
+      diffs: [],
+      fallback: [{ path: "c.txt", conflicted: true, blockers: [], perCommit: [
+        { hash: H1, diff: file("c.txt", [], { truncatedFromBytes: 9_000_000 }) },
+        { hash: H2, diff: file("c.txt") },
+      ] }],
+    }));
+    const notes = qa(".cdv-file-note").map((n) => n.textContent);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("combined.fallbackBetween:c.txt");
+    expect(notes[0]).toContain("combined.tooLarge");
+  });
+
   it("the close button emits close", async () => {
     const { emitted } = await mount(combined());
     q(".cmb-close")!.click();
