@@ -535,6 +535,31 @@ describe("parity: stacked branches", () => {
     }
   }, 60_000);
 
+  // Review pass 4: a finalize settled by a worktree that has since checked
+  // the top out never switches it.
+  it("a non-owner on the top is not switched by a finalize", async () => {
+    const { rustCwd, nodeCwd } = twoFixtures("moved", (cwd) => git(cwd, ["checkout", "-q", "main"]));
+    const wt = (cwd) => `${cwd}-wt`;
+    for (const cwd of [rustCwd, nodeCwd]) git(cwd, ["worktree", "add", "-q", wt(cwd), "step-2"]);
+    const rp = plan.rust(wt(rustCwd), "step-2");
+    const np = await plan.node(dev, wt(nodeCwd), "step-2");
+    const rr = rust("git_restack", {
+      cwd: wt(rustCwd), branch: "step-2", trunk: "main", mergedParents: [], previewed: previewedOf(rp.value),
+    });
+    const nr = await node(dev, "/api/git-restack", {
+      cwd: wt(nodeCwd), branch: "step-2", configuredTrunk: "main", mergedParents: [], previewed: previewedOf(np.value),
+    });
+    expectSame(rr, nr, "git_restack in the linked worktree");
+    for (const cwd of [rustCwd, nodeCwd]) {
+      git(wt(cwd), ["switch", "-q", "--detach"]);
+      git(cwd, ["switch", "-q", "step-3"]);
+    }
+    const r = status.rust(rustCwd);
+    expectSame(r, await status.node(dev, nodeCwd), "finalize in the main worktree");
+    expect(r.value.finalized).toMatchObject({ moved: ["step-2", "step-3"], switched_back_to: null });
+    for (const cwd of [rustCwd, nodeCwd]) expect(git(cwd, ["branch", "--show-current"])).toBe("step-3");
+  }, 60_000);
+
   it("an abort started on a lower layer returns to it", async () => {
     const onStep2 = (cwd) => git(cwd, ["checkout", "-q", "step-2"]);
     const { rustCwd, nodeCwd, before } = await restackBoth(dev, "conflict", "step-2", [], onStep2);

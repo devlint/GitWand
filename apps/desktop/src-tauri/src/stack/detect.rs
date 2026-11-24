@@ -6,7 +6,7 @@ use super::guard::{branch_holders, git_version, supports_update_refs};
 use super::meta::{
     clear_malformed_pending, clear_pending, read_all, set_base, trunk, validate_branch_name,
 };
-use super::restack::{finalize, reattach, switch_back, worktree_exists, worktree_id};
+use super::restack::{finalize, reattach, switch_back, worktree_id};
 use super::{
     FinalizedRestack, LayerState, LayerStatus, MergeSignal, MergedParentHint, PendingError,
     PendingRestack, StackMeta, StackReport,
@@ -266,9 +266,9 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
         let top = m.branch.as_str();
         // Any worktree settles a record (a record left to its owner would
         // hold the stack until that worktree is opened again: review pass 3).
-        // Only the worktree it ran in may touch a detached HEAD.
-        let mine = here.as_deref().is_none_or(|h| h == p.worktree)
-            || !worktree_exists(repo, &p.worktree).unwrap_or(true);
+        // Only the worktree it ran in switches branches: another one may have
+        // checked the top out since (review pass 4).
+        let mine = here.as_deref() == Some(p.worktree.as_str());
         if holders.iter().any(|h| h.rebasing && h.branch == top) {
             s.waiting = true;
             continue;
@@ -279,7 +279,7 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
                 s.deferred.insert(top.to_string());
                 Ok(())
             }
-            true => finalize(repo, top, p, hints).map(|f| s.finalized = Some(f)),
+            true => finalize(repo, top, p, hints, mine).map(|f| s.finalized = Some(f)),
         });
         if let Err(e) = step {
             s.errors.insert(top.to_string(), e);
@@ -292,17 +292,18 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
 /// it: back to the branch the user was on, best effort (the restack's own
 /// switch-back guards apply; a failure keeps the user on `top`, unharmed).
 /// Only when `top` did not move: that is the abort, not a later checkout.
-/// `switch_back` acts only where `top` is checked out, so only in the
-/// worktree the restack ran in. `mine`: this is that worktree, which alone
-/// may reattach a HEAD a failed run left detached at `original`.
+/// `mine`: this is the worktree the restack ran in, the only one switched
+/// (back from the top, or reattached from a HEAD a failed run left detached
+/// at `original`).
 fn unwind_abort(repo: &Path, top: &str, p: &PendingRestack, mine: bool) {
+    if !mine {
+        return;
+    }
     let tip = resolve_commit(repo, &format!("refs/heads/{top}"));
     if matches!(tip, Ok(Some(t)) if t == p.top_sha) {
         let _ = switch_back(repo, top, &p.original);
     }
-    if mine {
-        reattach(repo, &p.original);
-    }
+    reattach(repo, &p.original);
 }
 
 /// D4: the restack recorded on `top` has run to its end. The top moved since

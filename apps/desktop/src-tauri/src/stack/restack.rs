@@ -817,7 +817,7 @@ pub(crate) fn worktree_id(repo: &Path) -> Result<String, String> {
             "--git-common-dir",
         ],
     )?;
-    let mut lines = out.lines();
+    let mut lines = out.lines().map(|l| l.trim_end_matches('/'));
     let (Some(dir), Some(common)) = (lines.next(), lines.next()) else {
         return Err(format!("unexpected rev-parse output: {out}"));
     };
@@ -837,28 +837,6 @@ pub(crate) fn worktree_id(repo: &Path) -> Result<String, String> {
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or_else(|| format!("unexpected git dir: {dir}"))?;
     Ok(id.bytes().map(|b| format!("{b:02x}")).collect())
-}
-
-/// The worktree a record names still exists (the main one always does).
-pub(crate) fn worktree_exists(repo: &Path, id: &str) -> Result<bool, String> {
-    if id == "-" {
-        return Ok(true);
-    }
-    let bytes: Option<Vec<u8>> = (0..id.len())
-        .step_by(2)
-        .map(|i| {
-            id.get(i..i + 2)
-                .and_then(|h| u8::from_str_radix(h, 16).ok())
-        })
-        .collect();
-    let Some(name) = bytes.and_then(|b| String::from_utf8(b).ok()) else {
-        return Ok(false);
-    };
-    let common = run_ok(
-        repo,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    )?;
-    Ok(Path::new(&common).join("worktrees").join(name).is_dir())
 }
 
 /// A HEAD left detached at `original`'s tip (a run that could not switch
@@ -931,6 +909,7 @@ pub(crate) fn finalize(
     top: &str,
     p: &PendingRestack,
     hints: &[MergedParentHint],
+    mine: bool,
 ) -> Result<FinalizedRestack, String> {
     validate_branch_name(top)?;
     validate_branch_name(&p.bottom)?;
@@ -1037,7 +1016,13 @@ pub(crate) fn finalize(
     clear_pending(repo, top)?;
 
     // 3. Back to the branch the user was on when the restack started.
-    let (switched_back_to, switch_error) = switch_back(repo, top, &p.original);
+    // Only in the worktree the restack ran in: another one may have checked
+    // the top out since (review pass 4).
+    let (switched_back_to, switch_error) = if mine {
+        switch_back(repo, top, &p.original)
+    } else {
+        (None, None)
+    };
     // After the switch back, which may check the merged parent out.
     let delete_offer = merged_parent
         .as_deref()
@@ -2424,6 +2409,43 @@ mod tests {
         status(&wt, Some("main"), &[]).unwrap();
         assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
         assert_eq!(git_at(&wt, &["symbolic-ref", "--short", "HEAD"]), "step-2");
+    }
+
+    /// Review pass 4: the top later checked out in another worktree. That
+    /// worktree's refresh settles the record but never switches it.
+    #[test]
+    fn a_non_owner_on_the_top_is_not_switched_after_an_abort() {
+        let r = TempRepo::new();
+        let wt = aborted_in_a_linked_worktree(&r);
+        git_at(&wt, &["switch", "-q", "--detach"]);
+        r.git(&["switch", "-q", "step-3"]);
+        status(&r.path, Some("main"), &[]).unwrap();
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+        assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]), "step-3");
+    }
+
+    #[test]
+    fn a_non_owner_on_the_top_is_not_switched_by_a_finalize() {
+        let r = TempRepo::new();
+        moved_stack(&r);
+        r.git(&["checkout", "-q", "main"]);
+        let wt = r.sandbox.join("wt");
+        r.git(&["worktree", "add", "-q", wt.to_str().unwrap(), "step-2"]);
+        let p = plan(&wt, Some("main"), "step-2", &[], V).unwrap();
+        assert!(
+            !run(&wt, Some("main"), "step-2", &[], &previewed(&p), V)
+                .unwrap()
+                .conflict
+        );
+        git_at(&wt, &["switch", "-q", "--detach"]);
+        r.git(&["switch", "-q", "step-3"]);
+        let f = status(&r.path, Some("main"), &[])
+            .unwrap()
+            .finalized
+            .unwrap();
+        assert_eq!(f.moved, ["step-2", "step-3"]);
+        assert_eq!(f.switched_back_to, None);
+        assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]), "step-3");
     }
 
     #[test]

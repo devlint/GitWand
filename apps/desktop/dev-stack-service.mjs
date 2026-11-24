@@ -580,15 +580,8 @@ function settlePending(repo, hints) {
     if (!p) continue;
     const top = m.branch;
     // Any worktree settles a record (review pass 3); only the worktree it
-    // ran in may touch a detached HEAD.
-    let mine = here === null || here === p.worktree;
-    if (!mine) {
-      try {
-        mine = !worktreeExists(repo, p.worktree);
-      } catch {
-        mine = false;
-      }
-    }
+    // ran in switches branches (review pass 4).
+    const mine = here !== null && here === p.worktree;
     if (holders.some((h) => h.rebasing && h.branch === top)) {
       s.waiting = true;
       continue;
@@ -598,7 +591,7 @@ function settlePending(repo, hints) {
         clearPending(repo, top);
         unwindAbort(repo, top, p, mine);
       } else if (s.finalized !== null) s.deferred.add(top);
-      else s.finalized = finalize(repo, top, p, hints);
+      else s.finalized = finalize(repo, top, p, hints, mine);
     } catch (e) {
       s.errors.set(top, e.message);
     }
@@ -610,12 +603,14 @@ function settlePending(repo, hints) {
  *  it: back to the branch the user was on, best effort. Only when `top` did
  *  not move: that is the abort, not a later checkout. */
 function unwindAbort(repo, top, p, mine) {
+  // `mine`: the worktree the restack ran in, the only one switched.
+  if (!mine) return;
   try {
     if (resolveCommit(repo, `refs/heads/${top}`) === p.top_sha) switchBack(repo, top, p.original);
   } catch {
     // best effort: the user stays on `top`, unharmed
   }
-  if (mine) reattach(repo, p.original);
+  reattach(repo, p.original);
 }
 
 /** D4: the restack recorded on `top` has run to its end. */
@@ -1257,7 +1252,9 @@ function haltedOnAPick(repo) {
 
 /** `worktree_id`: `-` for the main worktree, else its id in lowercase hex. */
 function worktreeId(repo) {
-  const [dir, common] = lines(runOk(repo, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]));
+  const [dir, common] = lines(runOk(repo, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])).map(
+    (l) => l.replace(/\/+$/, ""),
+  );
   // A git older than 2.31 echoes `--path-format=absolute` back: anything but
   // two absolute paths, the git dir under the common one, is unknown.
   if (
@@ -1272,14 +1269,6 @@ function worktreeId(repo) {
   if (dir === common) return "-";
   const id = dir.split("/").filter(Boolean).pop() ?? fail(`unexpected git dir: ${dir}`);
   return Buffer.from(id, "utf-8").toString("hex");
-}
-
-/** `worktree_exists`: the worktree a record names still exists. */
-function worktreeExists(repo, id) {
-  if (id === "-") return true;
-  const name = Buffer.from(id, "hex").toString("utf-8");
-  const common = runOk(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-  return existsSync(join(common, "worktrees", name));
 }
 
 /** A HEAD left detached at `original`'s tip (a run that could not switch
@@ -1336,7 +1325,7 @@ function restackedLayers(all, bottom, top) {
  *  CAS (after a holders guard), records the new bases, re-parents a moment-2
  *  bottom and drops the merged parent, clears the record, switches back.
  *  Idempotent; an Err leaves the record in place. */
-function finalize(repo, top, p, hints) {
+function finalize(repo, top, p, hints, mine) {
   devValidateBranchName(top);
   devValidateBranchName(p.bottom);
   const all = readAll(repo);
@@ -1395,7 +1384,8 @@ function finalize(repo, top, p, hints) {
   clearPending(repo, top);
 
   // 3. Back to the branch the user was on when the restack started.
-  const [switchedBackTo, switchError] = switchBack(repo, top, p.original);
+  // Only in the worktree the restack ran in (review pass 4).
+  const [switchedBackTo, switchError] = mine ? switchBack(repo, top, p.original) : [null, null];
   // After the switch back, which may check the merged parent out.
   const offer = mergedParent !== null ? deleteOffer(repo, mergedParent, p.old_base, hints) : null;
   return {
