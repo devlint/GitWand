@@ -129,6 +129,25 @@ describe("useFileHistoryCombine", () => {
     t.scope.stop();
   });
 
+  it("shows the lineage's errors in the user's language (English by default)", async () => {
+    const t = setup(async () => {
+      throw "File history too long: more than 200000 commits.";
+    });
+    t.selection.toggle("c3", null);
+    t.selection.toggle("c2", null);
+    await t.combine.open();
+    expect(t.combine.error.value).toBe("File history too long: more than 200000 commits."); // combined.errHistoryTooLong (en)
+    const u = setup(async () => {
+      throw new Error("Combined diffs do not support the file name: a/./b");
+    });
+    u.selection.toggle("c3", null);
+    u.selection.toggle("c2", null);
+    await u.combine.open();
+    expect(u.combine.error.value).toBe("Unsupported file name: a/./b");
+    t.scope.stop();
+    u.scope.stop();
+  });
+
   it("forgets the selection when the viewer goes", () => {
     const t = setup(async () => fullLog);
     t.selection.toggle("c3", null);

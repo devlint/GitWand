@@ -16,6 +16,11 @@ describe("combinedErrorMessage", () => {
       .toBe("combined.errName:plan b/f.txt");
   });
 
+  it("maps the file lineage's errors (file history entry point)", () => {
+    expect(combinedErrorMessage("File history too long: more than 200000 commits.", t)).toBe("combined.errHistoryTooLong:200000");
+    expect(combinedErrorMessage("Combined diffs do not support the file name: a/./b", t)).toBe("combined.errName:a/./b");
+  });
+
   it("keeps a name with a newline whole", () => {
     expect(combinedErrorMessage("Combined diffs do not support the file name: a\nb", t)).toBe("combined.errName:a\nb");
   });

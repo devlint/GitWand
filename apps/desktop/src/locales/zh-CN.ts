@@ -3247,6 +3247,7 @@ const zhCN: Locale = {
     errUnknown: "未知提交：{0}",
     errName: "不支持的文件名：{0}",
     errCancelled: "已被此仓库的另一个合并差异中断。",
+    errHistoryTooLong: "文件历史过长：超过 {0} 个提交。",
     filesSingular: "{0} 个文件",
     filesPlural: "{0} 个文件",
   },

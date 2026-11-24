@@ -1,7 +1,7 @@
 /**
  * The combined diff's backend errors, in the user's language. Both backends
  * answer the same English strings (`combined/mod.rs`, `combined/replay.rs`,
- * `devCombinedDiff`); a known one maps to its `combined.err*` key with its
+ * `combined/lineage.rs`, `devCombinedDiff`, `devFileLineage`); a known one maps to its `combined.err*` key with its
  * argument, anything else is shown as is. Imported by the combined view and
  * `useCombinedDiff` only, so it stays in that lazy chunk.
  */
@@ -15,6 +15,7 @@ const PATTERNS: [RegExp, LocaleKey][] = [
   [/^Invalid commit hash: (.*)$/s, "combined.errHash"],
   [/^Unknown commit: (.*)$/s, "combined.errUnknown"],
   [/^Combined diffs do not support the file name: (.*)$/s, "combined.errName"],
+  [/^File history too long: more than (\d+) commits\.$/, "combined.errHistoryTooLong"],
 ];
 
 /** What both backends answer for a replay a newer request superseded

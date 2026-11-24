@@ -3237,6 +3237,7 @@ const es: Locale = {
     errUnknown: "Commit desconocido: {0}",
     errName: "Nombre de archivo no compatible: {0}",
     errCancelled: "Interrumpido por otro diff combinado de este repositorio.",
+    errHistoryTooLong: "Historial del archivo demasiado largo: más de {0} commits.",
     filesSingular: "{0} archivo",
     filesPlural: "{0} archivos",
   },

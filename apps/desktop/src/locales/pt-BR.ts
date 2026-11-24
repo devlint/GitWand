@@ -3237,6 +3237,7 @@ const ptBR: Locale = {
     errUnknown: "Commit desconhecido: {0}",
     errName: "Nome de arquivo não suportado: {0}",
     errCancelled: "Interrompido por outro diff combinado deste repositório.",
+    errHistoryTooLong: "Histórico do arquivo longo demais: mais de {0} commits.",
     filesSingular: "{0} arquivo",
     filesPlural: "{0} arquivos",
   },

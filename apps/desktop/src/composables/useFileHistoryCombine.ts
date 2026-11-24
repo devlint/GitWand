@@ -6,6 +6,8 @@
  * diff), its names through `combinedPathsFor`, and the guard that drops a
  * reply for a file the viewer no longer shows.
  *
+ * Errors are shown localized (`combinedErrorMessage`).
+ *
  * The selection is the viewer's (`useCommitSelection`, keyed per file). The
  * combined diff opens with the selection as it is once the lineage is in
  * (the user may change it meanwhile) — nothing if fewer than two remain —
@@ -18,6 +20,8 @@ import type { FileLineageEntry, FileLogEntry } from "../utils/backend";
 import type { CombinedRequest } from "./useCombinedDiff";
 import { COMBINE_MAX, forgetSelection, type useCommitSelection } from "./useCommitSelection";
 import { combinedPathsFor } from "../utils/combinedPaths";
+import { combinedErrorMessage, rawErrorText } from "../utils/combinedError";
+import { useI18n } from "./useI18n";
 
 export function useFileHistoryCombine(opts: {
   cwd: Readonly<Ref<string>>;
@@ -31,6 +35,7 @@ export function useFileHistoryCombine(opts: {
   loadLineage: (cwd: string, path: string) => Promise<FileLineageEntry[]>;
   onOpen: (req: CombinedRequest) => void;
 }) {
+  const { t } = useI18n();
   const busy = ref(false);
   const error = ref<string | null>(null);
   const { selection } = opts;
@@ -55,7 +60,8 @@ export function useFileHistoryCombine(opts: {
       opts.onOpen({ hashes: chosen.map((x) => x.hashFull), paths });
       if (snapshot() === clicked) selection.clear();
     } catch (err: unknown) {
-      if (current()) error.value = err instanceof Error ? err.message : String(err);
+      // The lineage's errors in the user's language (unknown ones as is).
+      if (current()) error.value = combinedErrorMessage(rawErrorText(err), t);
     } finally {
       busy.value = false;
     }

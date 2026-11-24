@@ -3247,6 +3247,7 @@ const fr: Locale = {
     errUnknown: "Commit inconnu : {0}",
     errName: "Nom de fichier non pris en charge : {0}",
     errCancelled: "Interrompu par un autre diff combiné de ce dépôt.",
+    errHistoryTooLong: "Historique du fichier trop long : plus de {0} commits.",
     filesSingular: "{0} fichier",
     filesPlural: "{0} fichiers",
   },

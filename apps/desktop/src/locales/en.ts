@@ -3282,6 +3282,7 @@ const en = {
     errUnknown: "Unknown commit: {0}",
     errName: "Unsupported file name: {0}",
     errCancelled: "Interrupted by another combined diff of this repository.",
+    errHistoryTooLong: "File history too long: more than {0} commits.",
     filesSingular: "{0} file",
     filesPlural: "{0} files",
   },
