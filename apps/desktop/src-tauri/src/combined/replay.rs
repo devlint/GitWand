@@ -63,6 +63,10 @@ impl<'a> Repo<'a> {
             "diff.mnemonicPrefix=false",
             "-c",
             "core.quotePath=false",
+            // Same rename budget as the merge below, so the diffs see the
+            // renames `merge-tree` acts on.
+            "-c",
+            "diff.renameLimit=7000",
         ])
         .current_dir(self.cwd)
         .stdin(Stdio::null());
@@ -178,7 +182,25 @@ impl<'a> Repo<'a> {
         let b1 = self.commit_tree(ours, Some(&p))?;
         let b2 = self.commit_tree(theirs, Some(&p))?;
         let mut cmd = self.git();
-        cmd.args(["merge-tree", "--write-tree", "--name-only", "-z", &b1, &b2]);
+        // Pin every merge setting that changes the result tree: a user's
+        // `merge.directoryRenames=true` would move a file into a directory
+        // the other side renamed, a path no selected commit wrote.
+        cmd.args([
+            "-c",
+            "merge.renames=true",
+            "-c",
+            "merge.directoryRenames=conflict",
+            "-c",
+            "merge.renameLimit=7000",
+            "-c",
+            "merge.renormalize=false",
+            "merge-tree",
+            "--write-tree",
+            "--name-only",
+            "-z",
+            &b1,
+            &b2,
+        ]);
         let out = self.output(cmd, "merge-tree")?;
         let code = out.status.code();
         if code != Some(0) && code != Some(1) {
@@ -238,8 +260,9 @@ impl<'a> Repo<'a> {
         ))
     }
 
-    /// Every path (old and new) a tree diff touches, within `paths`.
-    fn touched(&self, a: &str, b: &str) -> Result<Vec<String>, String> {
+    /// Every change of a tree diff within `paths`, as `(old path of a
+    /// rename, path)`.
+    fn touched(&self, a: &str, b: &str) -> Result<Vec<(Option<String>, String)>, String> {
         let mut cmd = self.git();
         cmd.args([
             "diff-tree",
@@ -253,21 +276,19 @@ impl<'a> Repo<'a> {
         ]);
         self.pathspec(&mut cmd, &[]);
         let out = self.stdout(cmd, "diff-tree")?;
-        let mut paths = Vec::new();
+        let mut changes = Vec::new();
         let mut fields = out.split('\0').filter(|f| !f.is_empty());
         while let Some(status) = fields.next() {
-            let n = if status.starts_with('R') || status.starts_with('C') {
-                2
-            } else {
-                1
-            };
-            for _ in 0..n {
-                if let Some(p) = fields.next() {
-                    paths.push(p.to_string());
+            let first = fields.next().map(str::to_string);
+            if status.starts_with('R') || status.starts_with('C') {
+                if let Some(new) = fields.next() {
+                    changes.push((first, new.to_string()));
                 }
+            } else if let Some(p) = first {
+                changes.push((None, p));
             }
         }
-        Ok(paths)
+        Ok(changes)
     }
 
     /// Commits outside the selection that touch `path` between the replay
@@ -294,6 +315,34 @@ impl<'a> Repo<'a> {
             .filter(|l| !l.is_empty())
             .collect())
     }
+}
+
+/// Rename pairs with one side in the fallback bring the other side in,
+/// inheriting its blockers, until nothing changes.
+fn join_pairs(fallback: &mut BTreeMap<String, Vec<String>>, pairs: &[(String, String)]) {
+    loop {
+        let mut joined = false;
+        for (a, b) in pairs {
+            for (from, to) in [(a, b), (b, a)] {
+                if !fallback.contains_key(to) {
+                    if let Some(blockers) = fallback.get(from).cloned() {
+                        fallback.insert(to.clone(), blockers);
+                        joined = true;
+                    }
+                }
+            }
+        }
+        if !joined {
+            return;
+        }
+    }
+}
+
+fn rename_pairs(diffs: &[GitDiff]) -> Vec<(String, String)> {
+    diffs
+        .iter()
+        .filter_map(|d| d.old_path.clone().map(|o| (o, d.path.clone())))
+        .collect()
 }
 
 fn touches(d: &GitDiff, set: &BTreeMap<String, Vec<String>>) -> bool {
@@ -375,12 +424,19 @@ pub(crate) fn combined_diff(
             Some(t) => t.clone(),
             None => repo.empty_tree()?,
         };
-        let (result, conflicted) = if acc == parent_tree {
-            (c.tree.clone(), None)
-        } else {
+        let merged = acc != parent_tree;
+        let (result, conflicted) = if merged {
             repo.merge(&parent_tree, &acc, &c.tree)?
+        } else {
+            (c.tree.clone(), None)
         };
         let step = repo.diff(&acc, &result, true, &[])?;
+        // What `Ci` itself changes. On the fast path it is the step diff.
+        let ci_changes = if merged && (conflicted.is_some() || !fallback.is_empty()) {
+            repo.touched(&parent_tree, &c.tree)?
+        } else {
+            Vec::new()
+        };
         if let Some(conflicted) = conflicted {
             // `--name-only` misses paths a conflict moves (`f` → `f~<oid>`):
             // also take everything this step and `Ci` itself touch.
@@ -392,7 +448,10 @@ pub(crate) fn combined_diff(
                 grown.push(d.path.clone());
                 grown.extend(d.old_path.clone());
             }
-            grown.extend(repo.touched(&parent_tree, &c.tree)?);
+            for (old, new) in &ci_changes {
+                grown.extend(old.clone());
+                grown.push(new.clone());
+            }
             let earlier: Vec<&str> = replayed[..i].iter().map(|r| r.hash.as_str()).collect();
             for path in grown {
                 if fallback.contains_key(&path) {
@@ -405,35 +464,26 @@ pub(crate) fn combined_diff(
                 fallback.insert(path, blockers);
             }
         }
+        // After every step, clean ones included: a rename that moves a
+        // fallback path carries its content (conflict markers included) to
+        // the new path, which must join the fallback. Renames come from the
+        // step diff and from `Ci` itself (the side `merge-tree` followed).
+        if !fallback.is_empty() {
+            let mut pairs = rename_pairs(&step);
+            pairs.extend(
+                ci_changes
+                    .iter()
+                    .filter_map(|(old, new)| old.clone().map(|o| (o, new.clone()))),
+            );
+            join_pairs(&mut fallback, &pairs);
+        }
         steps.push(step);
         acc = result;
     }
 
     // 3. Net diff. A rename pair touching the fallback goes there whole.
     let mut diffs = repo.diff(&base_tree, &acc, false, &[])?;
-    loop {
-        let mut joins: Vec<(String, Vec<String>)> = Vec::new();
-        for d in diffs.iter().filter(|d| touches(d, &fallback)) {
-            let pair: Vec<&String> = std::iter::once(&d.path).chain(d.old_path.iter()).collect();
-            // The half that joins inherits its partner's blockers.
-            let blockers = pair
-                .iter()
-                .find_map(|p| fallback.get(*p).cloned())
-                .unwrap_or_default();
-            for p in pair {
-                if !fallback.contains_key(p) {
-                    joins.push((p.clone(), blockers.clone()));
-                }
-            }
-        }
-        let joined = !joins.is_empty();
-        for (p, b) in joins {
-            fallback.entry(p).or_insert(b);
-        }
-        if !joined {
-            break;
-        }
-    }
+    join_pairs(&mut fallback, &rename_pairs(&diffs));
     diffs.retain(|d| !touches(d, &fallback));
 
     // 5. Steps: no fallback file, and no file whose net diff was truncated
@@ -823,6 +873,78 @@ mod tests {
         assert_eq!(clean.fallback.len(), 1);
         assert_eq!(paths_of(&clean.diffs), vec!["g"]);
         assert_eq!(lines(&clean.diffs[0], "add").len(), 10);
+    }
+
+    /// A clean step that renames a fallback path must take the new path into
+    /// the fallback too: its content carries the earlier conflict markers.
+    #[test]
+    fn clean_rename_of_a_fallback_path_stays_in_fallback() {
+        let r = TempRepo::new();
+        let a = commit_files(&r, &[("p", Some(&ten("l")))], "A");
+        let _b = commit_files(
+            &r,
+            &[("p", Some(&ten("l").replacen("l5\n", "B\n", 1)))],
+            "B",
+        );
+        let c = commit_files(
+            &r,
+            &[("p", Some(&ten("l").replacen("l5\n", "C\n", 1)))],
+            "C",
+        );
+        r.git(&["mv", "p", "p2"]);
+        r.git(&["commit", "-q", "-m", "D"]);
+        let d = r.git(&["rev-parse", "HEAD"]);
+        let got = run(&r, &[&a, &c, &d], None);
+        for e in &got.diffs {
+            assert!(e.path != "p" && e.path != "p2", "net leaks {e:?}");
+            assert!(lines(e, "add").iter().all(|l| !l.starts_with("<<<<<<<")));
+        }
+        assert!(got
+            .steps
+            .iter()
+            .flatten()
+            .all(|e| e.path != "p2" && e.path != "p"));
+        let p2 = got
+            .fallback
+            .iter()
+            .find(|f| f.path == "p2")
+            .expect("p2 in fallback");
+        assert!(p2.per_commit.iter().any(|pc| pc.hash == d));
+    }
+
+    /// `merge-tree` must not follow the user's merge config: with
+    /// `merge.directoryRenames=true` a file added in a directory the other
+    /// side renamed would silently land at a path no selected commit wrote.
+    #[test]
+    fn hostile_merge_config() {
+        let r = TempRepo::new();
+        let z = commit_files(
+            &r,
+            &[("d/a", Some(&ten("a"))), ("d/b", Some(&ten("b")))],
+            "Z",
+        );
+        r.git(&["checkout", "-q", "-b", "b1"]);
+        r.git(&["mv", "d", "e"]);
+        r.git(&["commit", "-q", "-m", "X"]);
+        let x = r.git(&["rev-parse", "HEAD"]);
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&["checkout", "-q", "-b", "b2"]);
+        let y = commit_files(&r, &[("d/new", Some("new\n"))], "Y");
+        let clean = run(&r, &[&z, &x, &y], None);
+        assert!(clean.diffs.iter().all(|e| e.path != "e/new"));
+        assert!(!clean.fallback.is_empty());
+        for (key, value) in [
+            ("merge.directoryRenames", "true"),
+            ("merge.renames", "false"),
+            ("merge.renameLimit", "1"),
+            ("merge.renormalize", "true"),
+            ("diff.renames", "false"),
+            ("diff.renameLimit", "1"),
+        ] {
+            r.git(&["config", key, value]);
+        }
+        let hostile = run(&r, &[&z, &x, &y], None);
+        assert_eq!(hostile, clean);
     }
 
     #[test]
