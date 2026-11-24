@@ -268,7 +268,9 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
         // hold the stack until that worktree is opened again: review pass 3).
         // Only the worktree it ran in switches branches: another one may have
         // checked the top out since (review pass 4).
-        let mine = here.as_deref() == Some(p.worktree.as_str());
+        // An id that cannot be read here (it was read by the run) falls back
+        // to the switch's own guards: HEAD on the top, or detached at `original`.
+        let mine = here.as_deref().is_none_or(|h| h == p.worktree);
         if holders.iter().any(|h| h.rebasing && h.branch == top) {
             s.waiting = true;
             continue;

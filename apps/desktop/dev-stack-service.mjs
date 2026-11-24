@@ -581,7 +581,8 @@ function settlePending(repo, hints) {
     const top = m.branch;
     // Any worktree settles a record (review pass 3); only the worktree it
     // ran in switches branches (review pass 4).
-    const mine = here !== null && here === p.worktree;
+    // An id that cannot be read here falls back to the switch's own guards.
+    const mine = here === null || here === p.worktree;
     if (holders.some((h) => h.rebasing && h.branch === top)) {
       s.waiting = true;
       continue;
@@ -1262,7 +1263,7 @@ function worktreeId(repo) {
     common === undefined ||
     !isAbsolute(dir) ||
     !isAbsolute(common) ||
-    !(dir === common || dir.startsWith(common.endsWith("/") ? common : `${common}/`))
+    !(dir === common || dir.startsWith(`${common}/`))
   ) {
     fail("unexpected rev-parse output");
   }

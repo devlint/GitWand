@@ -117,6 +117,7 @@ _What v3.14.0 deliberately left out: the stack UI extras and the forge work arou
 - **Retargeting on GitLab / Azure DevOps** after a merged parent
 - **Tree-shaped stacks** (a parent with several children)
 - **Bottom-up restack for git < 2.38** (no `--update-refs`), if users ask for it
+- **Switch back across worktrees** (known limitation of v3.14, from its review) — whichever worktree refreshes first settles a pending restack, and only the worktree that ran it switches branches. If another GitWand window, on another worktree, refreshes first, the restacking worktree stays on the top layer (nothing lost), and after an abort may stay on a detached HEAD. Fix: leave a "switch back" note for that worktree to act on at its next refresh (keyed on its id and the top's tip), without holding the stack meanwhile
 
 ---
 
