@@ -145,6 +145,11 @@ pub struct CombinedFallbackCommitDiff {
 #[serde(rename_all = "camelCase")]
 pub struct CombinedFallbackFile {
     pub path: String,
+    /// `merge-tree` reported this path conflicted (or it is the other half
+    /// of a rename pair with such a path). `false` for a companion that
+    /// falls back conservatively (touched by the conflicted commit, carried
+    /// by a rename, or under a `merge` attribute driver).
+    pub conflicted: bool,
     pub per_commit: Vec<CombinedFallbackCommitDiff>,
     pub blockers: Vec<String>,
 }

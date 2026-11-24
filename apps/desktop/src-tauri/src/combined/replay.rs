@@ -194,6 +194,8 @@ impl<'a> Repo<'a> {
             "merge.renameLimit=7000",
             "-c",
             "merge.renormalize=false",
+            "-c",
+            "merge.default=text",
             "merge-tree",
             "--write-tree",
             "--name-only",
@@ -291,6 +293,32 @@ impl<'a> Repo<'a> {
         Ok(changes)
     }
 
+    /// Paths whose `merge` attribute names a driver (`union`, `binary`, a
+    /// custom `merge.<name>.driver`, or `-merge`): `merge-tree` may resolve
+    /// them with content that is not the net effect. Only `unspecified` and
+    /// `set` (the built-in text merge) are trusted. Attributes are read as git
+    /// reads them for this repository: worktree `.gitattributes` and
+    /// `$GIT_DIR/info/attributes`.
+    fn merge_driven(&self, paths: &[&str]) -> Result<HashSet<String>, String> {
+        let mut out = HashSet::new();
+        if paths.is_empty() {
+            return Ok(out);
+        }
+        let mut cmd = self.git();
+        cmd.args(["check-attr", "-z", "merge", "--"]).args(paths);
+        let stdout = self.stdout(cmd, "check-attr")?;
+        // `-z`: `<path>\0merge\0<value>\0` per path.
+        let fields: Vec<&str> = stdout.split('\0').collect();
+        for chunk in fields.chunks(3) {
+            if let [path, _, value] = chunk {
+                if *value != "unspecified" && *value != "set" {
+                    out.insert(path.to_string());
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Commits outside the selection that touch `path` between the replay
     /// base / earlier selected commits and `Ci^`, at most `MAX_BLOCKERS`.
     fn blockers(
@@ -317,18 +345,39 @@ impl<'a> Repo<'a> {
     }
 }
 
-/// Rename pairs with one side in the fallback bring the other side in,
-/// inheriting its blockers, until nothing changes.
-fn join_pairs(fallback: &mut BTreeMap<String, Vec<String>>, pairs: &[(String, String)]) {
+/// A path in the fallback set.
+#[derive(Clone, Default)]
+struct Fb {
+    /// Reported conflicted by `merge-tree`, or the other half of a rename
+    /// pair with such a path.
+    conflicted: bool,
+    /// Only computed for conflicted paths.
+    blockers: Vec<String>,
+}
+
+type FallbackSet = BTreeMap<String, Fb>;
+
+/// Rename pairs with one side in the fallback bring the other side in, until
+/// nothing changes. A conflicted side makes its partner conflicted too, with
+/// the same blockers.
+fn join_pairs(fallback: &mut FallbackSet, pairs: &[(String, String)]) {
     loop {
         let mut joined = false;
         for (a, b) in pairs {
             for (from, to) in [(a, b), (b, a)] {
-                if !fallback.contains_key(to) {
-                    if let Some(blockers) = fallback.get(from).cloned() {
-                        fallback.insert(to.clone(), blockers);
+                let Some(src) = fallback.get(from).cloned() else {
+                    continue;
+                };
+                match fallback.get_mut(to) {
+                    None => {
+                        fallback.insert(to.clone(), src);
                         joined = true;
                     }
+                    Some(dst) if src.conflicted && !dst.conflicted => {
+                        *dst = src;
+                        joined = true;
+                    }
+                    Some(_) => {}
                 }
             }
         }
@@ -338,6 +387,11 @@ fn join_pairs(fallback: &mut BTreeMap<String, Vec<String>>, pairs: &[(String, St
     }
 }
 
+/// Adds `path` as a companion (not conflicted, no blockers) unless present.
+fn add_companion(fallback: &mut FallbackSet, path: String) {
+    fallback.entry(path).or_default();
+}
+
 fn rename_pairs(diffs: &[GitDiff]) -> Vec<(String, String)> {
     diffs
         .iter()
@@ -345,7 +399,7 @@ fn rename_pairs(diffs: &[GitDiff]) -> Vec<(String, String)> {
         .collect()
 }
 
-fn touches(d: &GitDiff, set: &BTreeMap<String, Vec<String>>) -> bool {
+fn touches(d: &GitDiff, set: &FallbackSet) -> bool {
     set.contains_key(&d.path) || d.old_path.as_ref().is_some_and(|p| set.contains_key(p))
 }
 
@@ -414,10 +468,9 @@ pub(crate) fn combined_diff(
         None => repo.empty_tree()?,
     };
 
-    // 2. Replay, recording each step and growing the fallback set (path →
-    //    blockers) on conflicted steps.
+    // 2. Replay, recording each step and growing the fallback set.
     let mut acc = base_tree.clone();
-    let mut fallback: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut fallback: FallbackSet = BTreeMap::new();
     let mut steps: Vec<Vec<GitDiff>> = Vec::with_capacity(replayed.len());
     for (i, c) in replayed.iter().enumerate() {
         let parent_tree = match &c.parent_tree {
@@ -432,36 +485,63 @@ pub(crate) fn combined_diff(
         };
         let step = repo.diff(&acc, &result, true, &[])?;
         // What `Ci` itself changes. On the fast path it is the step diff.
-        let ci_changes = if merged && (conflicted.is_some() || !fallback.is_empty()) {
+        let ci_changes = if merged {
             repo.touched(&parent_tree, &c.tree)?
         } else {
             Vec::new()
         };
         if let Some(conflicted) = conflicted {
-            // `--name-only` misses paths a conflict moves (`f` → `f~<oid>`):
-            // also take everything this step and `Ci` itself touch.
-            let mut grown: Vec<String> = conflicted
-                .into_iter()
-                .filter(|p| repo.in_paths(p))
-                .collect();
-            for d in &step {
-                grown.push(d.path.clone());
-                grown.extend(d.old_path.clone());
-            }
-            for (old, new) in &ci_changes {
-                grown.extend(old.clone());
-                grown.push(new.clone());
-            }
+            // (a) What `merge-tree` reports: conflicted, with blockers.
             let earlier: Vec<&str> = replayed[..i].iter().map(|r| r.hash.as_str()).collect();
-            for path in grown {
-                if fallback.contains_key(&path) {
+            for path in conflicted.into_iter().filter(|p| repo.in_paths(p)) {
+                if fallback.get(&path).is_some_and(|f| f.conflicted) {
                     continue;
                 }
                 let blockers = match &c.parent {
                     Some(p) => repo.blockers(p, base.as_deref(), &earlier, &path)?,
                     None => Vec::new(),
                 };
-                fallback.insert(path, blockers);
+                fallback.insert(
+                    path,
+                    Fb {
+                        conflicted: true,
+                        blockers,
+                    },
+                );
+            }
+            // (b), (c) Companions: `--name-only` misses paths a conflict
+            // moves (`f` → `f~<oid>`), so everything this step and `Ci`
+            // itself touch falls back too.
+            for d in &step {
+                add_companion(&mut fallback, d.path.clone());
+                if let Some(old) = &d.old_path {
+                    add_companion(&mut fallback, old.clone());
+                }
+            }
+            for (old, new) in &ci_changes {
+                if let Some(old) = old {
+                    add_companion(&mut fallback, old.clone());
+                }
+                add_companion(&mut fallback, new.clone());
+            }
+        } else if merged {
+            // A clean merge is only trusted for the built-in text driver:
+            // `union`, a custom driver… can succeed with content that is not
+            // the net effect (`ours` even leaves the step diff silent, hence
+            // `Ci`'s own paths).
+            let mut candidates: Vec<&str> = Vec::new();
+            for d in &step {
+                candidates.push(&d.path);
+                candidates.extend(d.old_path.as_deref());
+            }
+            for (old, new) in &ci_changes {
+                candidates.extend(old.as_deref());
+                candidates.push(new);
+            }
+            candidates.sort_unstable();
+            candidates.dedup();
+            for path in repo.merge_driven(&candidates)? {
+                add_companion(&mut fallback, path);
             }
         }
         // After every step, clean ones included: a rename that moves a
@@ -486,12 +566,13 @@ pub(crate) fn combined_diff(
     join_pairs(&mut fallback, &rename_pairs(&diffs));
     diffs.retain(|d| !touches(d, &fallback));
 
-    // 5. Steps: no fallback file, and no file whose net diff was truncated
-    //    (there are no lines to attribute) or whose own step diff was.
-    let truncated: HashSet<&String> = diffs
+    // 5. Steps: no fallback file, and no file with a truncated net diff or a
+    //    truncated entry in any step: its attribution would be partial.
+    let truncated: HashSet<String> = diffs
         .iter()
+        .chain(steps.iter().flatten())
         .filter(|d| d.truncated_from_bytes.is_some())
-        .flat_map(|d| std::iter::once(&d.path).chain(d.old_path.iter()))
+        .flat_map(|d| std::iter::once(d.path.clone()).chain(d.old_path.clone()))
         .collect();
     let steps: Vec<Vec<GitDiff>> = steps
         .into_iter()
@@ -499,7 +580,6 @@ pub(crate) fn combined_diff(
             step.into_iter()
                 .filter(|d| {
                     !touches(d, &fallback)
-                        && d.truncated_from_bytes.is_none()
                         && !truncated.contains(&d.path)
                         && !d.old_path.as_ref().is_some_and(|p| truncated.contains(p))
                 })
@@ -544,12 +624,13 @@ pub(crate) fn combined_diff(
     // Fallback paths no selected commit touches are conflict artefacts.
     let fallback: Vec<CombinedFallbackFile> = fallback
         .into_iter()
-        .filter_map(|(path, blockers)| {
+        .filter_map(|(path, fb)| {
             let per_commit = per_path.remove(&path)?;
             Some(CombinedFallbackFile {
                 path,
+                conflicted: fb.conflicted,
                 per_commit,
-                blockers,
+                blockers: fb.blockers,
             })
         })
         .collect();
@@ -865,6 +946,7 @@ mod tests {
             ("core.quotePath", "true"),
             ("log.showSignature", "true"),
             ("diff.relative", "true"),
+            ("merge.default", "union"),
         ] {
             r.git(&["config", key, value]);
         }
@@ -945,6 +1027,90 @@ mod tests {
         }
         let hostile = run(&r, &[&z, &x, &y], None);
         assert_eq!(hostile, clean);
+    }
+
+    /// Only the path `merge-tree` reported is `conflicted` (with blockers); a
+    /// companion pulled in because `Ci` also touches it is not.
+    #[test]
+    fn conflicted_flag_and_blockers_only_on_real_conflicts() {
+        let r = TempRepo::new();
+        commit_files(&r, &[("f", Some("a\nx=1\nc\n"))], "base");
+        let a = commit_files(&r, &[("f", Some("a\nx=2\nc\n"))], "A");
+        let b = commit_files(&r, &[("f", Some("a\nx=3\nc\n"))], "B");
+        let c = commit_files(
+            &r,
+            &[("f", Some("a\nx=4\nc\ne\n")), ("g", Some("g\n"))],
+            "C",
+        );
+        let got = run(&r, &[&a, &c], None);
+        let f = got.fallback.iter().find(|x| x.path == "f").unwrap();
+        assert!(f.conflicted);
+        assert_eq!(f.blockers, vec![b]);
+        let g = got.fallback.iter().find(|x| x.path == "g").unwrap();
+        assert!(!g.conflicted);
+        assert!(g.blockers.is_empty());
+        assert_eq!(g.per_commit.len(), 1);
+    }
+
+    /// A file with any truncated step entry loses all its step entries: no
+    /// partial attribution.
+    #[test]
+    fn truncated_step_drops_every_step_of_that_file() {
+        let r = TempRepo::new();
+        let big: String = (0..700_000).map(|i| format!("line {i}\n")).collect();
+        let a = commit_files(&r, &[("big.txt", Some(&big))], "A");
+        let edited = big.replacen("line 5\n", "five\n", 1);
+        let c = commit_files(&r, &[("big.txt", Some(&edited))], "C");
+        let d = commit_files(&r, &[("big.txt", None), ("t.txt", Some("t\n"))], "D");
+        let got = run(&r, &[&a, &c, &d], None);
+        assert!(got.diffs.iter().all(|e| e.path != "big.txt"));
+        assert!(got.steps.iter().flatten().all(|e| e.path != "big.txt"));
+        assert_eq!(paths_of(&got.steps[2]), vec!["t.txt"]);
+    }
+
+    /// Repo where `f` carries the `merge` attribute `driver`; B (unselected)
+    /// and C edit the same line of `f`; A edits `g`. Returns (A, C).
+    fn merge_driver_repo(r: &TempRepo, driver: &str) -> (String, String) {
+        commit_files(
+            r,
+            &[
+                (".gitattributes", Some(&format!("f merge={driver}\n"))),
+                ("f", Some("a\nx=1\nc\n")),
+                ("g", Some("g\n")),
+            ],
+            "base",
+        );
+        let a = commit_files(r, &[("g", Some("g2\n"))], "A");
+        let _b = commit_files(r, &[("f", Some("a\nx=2\nc\n"))], "B");
+        let c = commit_files(r, &[("f", Some("a\nx=3\nc\n"))], "C");
+        (a, c)
+    }
+
+    /// `merge=union` makes `merge-tree` succeed with both sides' lines: not
+    /// the net effect, so `f` falls back.
+    #[test]
+    fn union_merge_attribute_falls_back() {
+        let r = TempRepo::new();
+        let (a, c) = merge_driver_repo(&r, "union");
+        let got = run(&r, &[&a, &c], None);
+        assert_eq!(paths_of(&got.diffs), vec!["g"]);
+        let fb: Vec<&str> = got.fallback.iter().map(|x| x.path.as_str()).collect();
+        assert_eq!(fb, vec!["f"]);
+        assert!(!got.fallback[0].conflicted);
+        assert!(got.steps.iter().flatten().all(|e| e.path != "f"));
+    }
+
+    /// A custom driver that keeps "ours" drops C's edit from the merge: the
+    /// step diff never mentions `f`, only C's own diff does.
+    #[test]
+    fn custom_merge_driver_falls_back() {
+        let r = TempRepo::new();
+        r.git(&["config", "merge.keep.driver", "true"]);
+        let (a, c) = merge_driver_repo(&r, "keep");
+        let got = run(&r, &[&a, &c], None);
+        assert_eq!(paths_of(&got.diffs), vec!["g"]);
+        let fb: Vec<&str> = got.fallback.iter().map(|x| x.path.as_str()).collect();
+        assert_eq!(fb, vec!["f"]);
     }
 
     #[test]
