@@ -39,9 +39,9 @@ const { data, entries, loading, error, reload } = useCombinedDiff(
   props.fetcher,
 );
 
-const { available: aiAvailable, summary, loading: summarizing, error: summaryErr, generate } = useCombinedSummary(props.summaryDeps);
+const { available: aiAvailable, summary, loading: summarizing, error: summaryErr, generate, reset: resetSummary } = useCombinedSummary(props.summaryDeps);
 // A new/reloaded diff makes a previous summary stale.
-watch(data, () => { summary.value = null; });
+watch(data, () => resetSummary());
 function summarize() {
   if (data.value) void generate(data.value, locale?.value ?? "en");
 }

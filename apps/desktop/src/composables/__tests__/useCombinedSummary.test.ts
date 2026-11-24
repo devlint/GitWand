@@ -83,4 +83,27 @@ describe("useCombinedSummary", () => {
     av.value = true;
     expect(s.available.value).toBe(true);
   });
+
+  it("reset drops a late result and releases loading for a new generate", async () => {
+    const pending: ((v: string) => void)[] = [];
+    const s = useCombinedSummary({ rawPrompt: () => new Promise<string>((r) => { pending.push(r); }), isAvailable: ref(true) });
+    const first = s.generate(data(), "en");
+    s.reset();
+    expect(s.loading.value).toBe(false);
+    const second = s.generate(data(), "en");
+    pending[0]("old");
+    await first;
+    expect(s.summary.value).toBeNull();
+    expect(s.loading.value).toBe(true);
+    pending[1]("new");
+    await second;
+    expect(s.summary.value).toBe("new");
+    expect(s.loading.value).toBe(false);
+  });
+  it("reset clears an earlier error", async () => {
+    const s = useCombinedSummary({ rawPrompt: async () => { throw new Error("boom"); }, isAvailable: ref(true) });
+    await s.generate(data(), "en");
+    s.reset();
+    expect(s.error.value).toBeNull();
+  });
 });

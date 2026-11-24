@@ -70,20 +70,33 @@ export function useCombinedSummary(deps?: CombinedSummaryDeps) {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
+  let gen = 0;
+
+  /** Drop any in-flight request and clear the result (the selection changed). */
+  function reset() {
+    gen++;
+    summary.value = null;
+    error.value = null;
+    loading.value = false;
+  }
+
   async function generate(c: CombinedDiff, locale: string): Promise<void> {
     if (loading.value) return;
+    const my = ++gen;
     loading.value = true;
     error.value = null;
     summary.value = null;
     try {
       const raw = await ai.rawPrompt(buildSystemPrompt(locale, c.commits.length), buildCombinedUserPrompt(c));
+      if (my !== gen) return;
       summary.value = raw.trim();
     } catch (e) {
+      if (my !== gen) return;
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
-      loading.value = false;
+      if (my === gen) loading.value = false;
     }
   }
 
-  return { available: ai.isAvailable, summary, loading, error, generate };
+  return { available: ai.isAvailable, summary, loading, error, generate, reset };
 }
