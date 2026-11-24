@@ -208,6 +208,12 @@ function unstack(branch: string | null) {
   background: var(--color-accent);
   color: var(--color-accent-text, #fff);
 }
+/* `.stack-banner__btn:hover` outranks the modifier: without this, a hovered
+   primary button got the light hover background under its white text. */
+.stack-banner__btn--primary:hover {
+  border-color: var(--color-accent-hover, var(--color-accent));
+  background: var(--color-accent-hover, var(--color-accent));
+}
 .stack-banner__dismiss {
   position: absolute;
   top: 0;
