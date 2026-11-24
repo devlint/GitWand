@@ -11,9 +11,11 @@
  * The scenarios mirror the Rust unit tests of `combined/replay.rs`: a
  * contiguous range (fast path only), a non-contiguous clean replay (a real
  * `merge-tree` step), an overlap that falls back (conflicted file with its
- * blocker, plus a companion), a `merge=union` attribute, a rename that
- * carries a fallback path, a root commit, the `paths` filter, and the error
- * strings of invalid input.
+ * blocker, plus a companion), a `merge=union` attribute (also inside a filter
+ * whose step conflicts outside it), a rename that carries a fallback path, a
+ * root commit, the `paths` filter, a repository opened from a subdirectory,
+ * blockers through a merge (hex-only names), and the error strings of
+ * invalid input.
  */
 
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
@@ -382,14 +384,18 @@ describe("parity: git-combined-diff", () => {
     expect(rust.steps[1].map((d) => d.path).sort()).toEqual([...ODD].sort());
   });
 
-  // A conflicting commit that also adds 1 400 long paths: they all fall back
-  // as companions, ~1.1 MB of names — more than an argv holds on macOS
-  // (1 MB) and Windows (32 KB). The per-commit diffs list them in pathspec
-  // batches of a few KB, the same batches on both sides.
-  it("thousands of long fallback paths are diffed in argv-sized batches", async () => {
+  // A conflicting commit that also adds 60 long paths (~800 bytes each): they
+  // all fall back as companions, ~48 KB of names — more than a Windows argv
+  // (32 KB) and several 7 KB pathspec batches. The per-commit diffs list them
+  // in the same batches on both sides. Kept small: a few seconds per backend.
+  it("many long fallback paths are diffed in argv-sized batches", async () => {
     const cwd = repo("argv");
     const dir = ["d".repeat(200), "e".repeat(200), "f".repeat(200)].join("/");
-    const names = Array.from({ length: 1400 }, (_, i) => `${dir}/${String(i).padStart(5, "0")}${"n".repeat(190)}`);
+    const names = Array.from({ length: 60 }, (_, i) => `${dir}/${String(i).padStart(5, "0")}${"n".repeat(190)}`);
+    // replay.rs `PATHSPEC_BATCH_BYTES`: name + NUL per path, 7 KB per batch.
+    const bytes = names.reduce((n, p) => n + Buffer.byteLength(p) + 1, 0);
+    expect(bytes).toBeGreaterThan(32 * 1024);
+    expect(Math.floor(bytes / (7 * 1024))).toBeGreaterThan(2);
     commitFiles(cwd, { "c.txt": "1\n" }, "base", 0);
     const a = commitFiles(cwd, { "c.txt": "2\n" }, "A", 1);
     commitFiles(cwd, { "c.txt": "3\n" }, "B", 2);
@@ -397,7 +403,7 @@ describe("parity: git-combined-diff", () => {
     const { rust } = await parity(cwd, [a, c]);
     expect(rust.fallback).toHaveLength(names.length + 1);
     expect(rust.fallback.every((f) => f.perCommit.length > 0)).toBe(true);
-  }, 120_000);
+  }, 30_000);
 
   // replay.rs `fallback_diffs_go_in_pathspec_batches`: 120 names of ~250
   // bytes plus a rename span several 7 KB batches; the rename keeps its pair.
