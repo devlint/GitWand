@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The desktop main-bundle budget is raised from 980 KB to 983 KB** for the combined-diff wrappers and strings; the view itself is a lazy chunk.
+- **The desktop main-bundle budget is raised from 980 KB to 984 KB** for the combined-diff wrappers and strings; the view itself is a lazy chunk.
 
 ## [3.14.0] - 2026-11-24
 
