@@ -1710,8 +1710,12 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
           combinedAddCompanion(fallback, path);
         }
       }
-    } else if (merged) {
-      // A clean merge is only trusted for the built-in text driver.
+    } else {
+      await crossing();
+    }
+    if (merged) {
+      // Every merged step, conflicted ones too: a merge is only trusted for
+      // the built-in text driver (replay.rs).
       const candidates = [];
       for (const d of step) {
         candidates.push(d.path);
@@ -1721,11 +1725,8 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
         if (old !== null) candidates.push(old);
         candidates.push(path);
       }
-      const unique = [...new Set(candidates)].sort(cmpCodePoints);
+      const unique = [...new Set(candidates)].filter((p) => !fallback.has(p)).sort(cmpCodePoints);
       for (const path of await repo.mergeDriven(unique)) combinedAddCompanion(fallback, path);
-      await crossing();
-    } else {
-      await crossing();
     }
     // After every step: the fallback set is closed under renames.
     if (fallback.size > 0) combinedJoinPairs(fallback, pairs);

@@ -160,6 +160,20 @@ describe("parity: git-combined-diff", () => {
     expect(filtered.rust.fallback.map((x) => x.path)).toEqual(["sub/x.txt"]);
   });
 
+  // replay.rs `union_in_filter_falls_back_when_the_step_conflicts_outside_it`:
+  // the step conflicts only outside the filter (`other`), yet the in-filter
+  // `merge=union` file still goes through the merge-driver check.
+  it("a merge=union file in the filter falls back when the step conflicts outside it", async () => {
+    const cwd = repo("unionfilter");
+    commitFiles(cwd, { ".gitattributes": "x.txt merge=union\n", "x.txt": "a\nx=1\nc\n", other: "a\nx=1\nc\n" }, "base", 0);
+    const a = commitFiles(cwd, { other: "a\nx=2\nc\n" }, "A", 1);
+    commitFiles(cwd, { "x.txt": "a\nx=2\nc\n", other: "a\nx=3\nc\n" }, "B", 2);
+    const c = commitFiles(cwd, { "x.txt": "a\nx=3\nc\n", other: "a\nx=4\nc\n" }, "C", 3);
+    const { rust } = await parity(cwd, [a, c], ["x.txt"]);
+    expect(rust.diffs).toEqual([]);
+    expect(rust.fallback.map((x) => [x.path, x.conflicted])).toEqual([["x.txt", false]]);
+  });
+
   it("a merge=text attribute is the built-in text merge: the file stays net", async () => {
     const cwd = repo("textattr");
     commitFiles(cwd, { ".gitattributes": "f merge=text\n", f: ten("l"), g: "g\n" }, "base", 0);

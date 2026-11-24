@@ -811,11 +811,16 @@ pub(crate) fn combined_diff_with_budget(
                     add_companion(&mut fallback, new.clone());
                 }
             }
-        } else if merged {
-            // A clean merge is only trusted for the built-in text driver:
-            // `union`, a custom driver… can succeed with content that is not
-            // the net effect (`ours` even leaves the step diff silent, hence
-            // `Ci`'s own paths).
+        } else {
+            crossing(&fallback)?;
+        }
+        if merged {
+            // A merge is only trusted for the built-in text driver: `union`,
+            // a custom driver… can succeed with content that is not the net
+            // effect (`ours` even leaves the step diff silent, hence `Ci`'s
+            // own paths). Every merged step, conflicted ones too: a conflict
+            // outside the filter brings no companions, and a merge-driven
+            // path inside it still merged "cleanly".
             let mut candidates: Vec<&str> = Vec::new();
             for d in &step {
                 candidates.push(&d.path);
@@ -825,14 +830,12 @@ pub(crate) fn combined_diff_with_budget(
                 candidates.extend(old.as_deref());
                 candidates.push(new);
             }
+            candidates.retain(|p| !fallback.contains_key(*p));
             candidates.sort_unstable();
             candidates.dedup();
             for path in repo.merge_driven(&candidates)? {
                 add_companion(&mut fallback, path);
             }
-            crossing(&fallback)?;
-        } else {
-            crossing(&fallback)?;
         }
         // After every step, clean ones included: a rename that moves a
         // fallback path carries its content (conflict markers included) to
@@ -1743,6 +1746,50 @@ mod tests {
             combined_diff(&sub, &hashes, Some(&filter)).unwrap(),
             filtered_root
         );
+    }
+
+    /// The review's case: with a filter, a step whose only conflict is
+    /// outside it still goes through the merge-driver check — `x.txt`
+    /// (`merge=union`, inside the filter) merges "cleanly" there with both
+    /// sides' lines, which is not the net effect.
+    #[test]
+    fn union_in_filter_falls_back_when_the_step_conflicts_outside_it() {
+        let r = TempRepo::new();
+        commit_files(
+            &r,
+            &[
+                (".gitattributes", Some("x.txt merge=union\n")),
+                ("x.txt", Some("a\nx=1\nc\n")),
+                ("other", Some("a\nx=1\nc\n")),
+            ],
+            "base",
+        );
+        let a = commit_files(&r, &[("other", Some("a\nx=2\nc\n"))], "A");
+        commit_files(
+            &r,
+            &[
+                ("x.txt", Some("a\nx=2\nc\n")),
+                ("other", Some("a\nx=3\nc\n")),
+            ],
+            "B",
+        );
+        let c = commit_files(
+            &r,
+            &[
+                ("x.txt", Some("a\nx=3\nc\n")),
+                ("other", Some("a\nx=4\nc\n")),
+            ],
+            "C",
+        );
+        let got = run(&r, &[&a, &c], Some(&["x.txt"]));
+        assert!(got.diffs.is_empty(), "net: {:?}", got.diffs);
+        let fb: Vec<(&str, bool)> = got
+            .fallback
+            .iter()
+            .map(|f| (f.path.as_str(), f.conflicted))
+            .collect();
+        assert_eq!(fb, vec![("x.txt", false)]);
+        assert!(got.steps.iter().flatten().all(|e| e.path != "x.txt"));
     }
 
     #[test]
