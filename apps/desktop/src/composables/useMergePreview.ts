@@ -16,6 +16,7 @@ import {
   previewMerge,
   previewRebase,
   previewCherryPick,
+  previewRestack,
   readGitwandrc,
 } from "../utils/backend.js";
 // Types only: erased at build. `parseGitwandrc` is a *value*, so it is
@@ -165,6 +166,132 @@ export function useMergePreview(cwd: () => string) {
     return { ...options, mergeContext };
   }
 
+  /**
+   * Turns the raw per-file rows of a simulated operation into the summary the
+   * panel renders. Shared by `computePreview` (merge / rebase / cherry-pick)
+   * and `computeRestackPreview`, so the two can never drift apart.
+   */
+  async function summarize(
+    rawFiles: Awaited<ReturnType<typeof previewMerge>>,
+    operation: PreviewOperation,
+    label: string,
+  ): Promise<void> {
+    const core = await engine();
+    const options = await buildPreviewOptions(operation);
+    const files: PreviewFileResult[] = [];
+
+    for (const raw of rawFiles) {
+      if (!raw.has_conflicts && !raw.is_add_delete) {
+        // Fichier modifié d'un seul côté → pas de conflit
+        files.push({
+          filePath: raw.file_path,
+          status: "clean",
+          totalConflicts: 0,
+          autoResolved: 0,
+          conflictTypes: [],
+          hunks: [],
+        });
+        continue;
+      }
+
+      if (raw.is_add_delete) {
+        files.push({
+          filePath: raw.file_path,
+          status: "add-delete",
+          totalConflicts: 1,
+          autoResolved: 0,
+          conflictTypes: ["add_delete"],
+          hunks: [],
+        });
+        continue;
+      }
+
+      // Conflit textuel → lancer le résolveur
+      if (raw.conflict_content) {
+        // `resolveAsync`, not `resolve`: the real apply runs the structural
+        // (tree-sitter) pass, and predicting with a weaker engine than the
+        // one that will execute is what made the preview a lower bound.
+        const result = await core.resolveAsync(raw.conflict_content, raw.file_path, options);
+        const types = [...new Set(result.hunks.map(h => h.type))];
+
+        let status: PreviewFileStatus;
+        if (result.stats.remaining === 0) {
+          status = "auto-resolved";
+        } else if (result.stats.autoResolved > 0) {
+          status = "partial";
+        } else {
+          status = "manual";
+        }
+
+        // Aperçu hunk-par-hunk : on réutilise la sortie resolve() déjà
+        // calculée (pas de second passage) pour alimenter le panel.
+        // `resolutions` porte le flag `autoResolved` par hunk ; on retombe
+        // sur `hunks` si la liste est vide.
+        const hunks: PreviewHunk[] = result.resolutions.length > 0
+          ? result.resolutions.map(r => ({
+              startLine: r.hunk.startLine,
+              type: r.hunk.type,
+              autoResolved: r.autoResolved,
+              confidenceScore: r.hunk.confidence.score,
+              confidenceLabel: r.hunk.confidence.label,
+              reason: r.resolutionReason,
+            }))
+          : result.hunks.map(h => ({
+              startLine: h.startLine,
+              type: h.type,
+              autoResolved: false,
+              confidenceScore: h.confidence.score,
+              confidenceLabel: h.confidence.label,
+              reason: h.explanation,
+            }));
+
+        files.push({
+          filePath: raw.file_path,
+          status,
+          totalConflicts: result.stats.totalConflicts,
+          autoResolved: result.stats.autoResolved,
+          conflictTypes: types,
+          hunks,
+        });
+      } else {
+        // Pas de contenu → conflit indéterminé
+        files.push({
+          filePath: raw.file_path,
+          status: "manual",
+          totalConflicts: 1,
+          autoResolved: 0,
+          conflictTypes: ["complex"],
+          hunks: [{
+          startLine: 0,
+          type: "complex",
+          autoResolved: false,
+          confidenceScore: 0,
+          confidenceLabel: "low",
+          reason: "No content to analyse: the conflict could not be simulated.",
+        }],
+        });
+      }
+    }
+
+    const conflictingFiles = files.filter(f => f.status !== "clean").length;
+    const autoResolvableFiles = files.filter(f => f.status === "auto-resolved").length;
+    const manualFiles = files.filter(f =>
+      f.status === "manual" || f.status === "add-delete" || f.status === "partial",
+    ).length;
+    const cleanFiles = files.filter(f => f.status === "clean").length;
+    const fullyAutoMergeable = conflictingFiles > 0 && manualFiles === 0;
+
+    summary.value = {
+      sourceBranch: label,
+      files,
+      conflictingFiles,
+      autoResolvableFiles,
+      manualFiles,
+      cleanFiles,
+      fullyAutoMergeable,
+    };
+  }
+
   async function computePreview(
     ref_: string,
     operation: PreviewOperation = "merge",
@@ -180,121 +307,31 @@ export function useMergePreview(cwd: () => string) {
           : operation === "cherry-pick"
             ? await previewCherryPick(cwd(), ref_)
             : await previewMerge(cwd(), ref_);
+      await summarize(rawFiles, operation, ref_);
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      loading.value = false;
+    }
+  }
 
-      const core = await engine();
-      const options = await buildPreviewOptions(operation);
-      const files: PreviewFileResult[] = [];
+  /**
+   * v3.14 — preview of restacking one layer: `git rebase --onto <onto>
+   * <upstream> <branch>`. Summarized as a rebase; `label` names it in the panel.
+   */
+  async function computeRestackPreview(spec: {
+    onto: string;
+    upstream: string;
+    branch: string;
+    label: string;
+  }): Promise<void> {
+    loading.value = true;
+    error.value = null;
+    summary.value = null;
 
-      for (const raw of rawFiles) {
-        if (!raw.has_conflicts && !raw.is_add_delete) {
-          // Fichier modifié d'un seul côté → pas de conflit
-          files.push({
-            filePath: raw.file_path,
-            status: "clean",
-            totalConflicts: 0,
-            autoResolved: 0,
-            conflictTypes: [],
-            hunks: [],
-          });
-          continue;
-        }
-
-        if (raw.is_add_delete) {
-          files.push({
-            filePath: raw.file_path,
-            status: "add-delete",
-            totalConflicts: 1,
-            autoResolved: 0,
-            conflictTypes: ["add_delete"],
-            hunks: [],
-          });
-          continue;
-        }
-
-        // Conflit textuel → lancer le résolveur
-        if (raw.conflict_content) {
-          // `resolveAsync`, not `resolve`: the real apply runs the structural
-          // (tree-sitter) pass, and predicting with a weaker engine than the
-          // one that will execute is what made the preview a lower bound.
-          const result = await core.resolveAsync(raw.conflict_content, raw.file_path, options);
-          const types = [...new Set(result.hunks.map(h => h.type))];
-
-          let status: PreviewFileStatus;
-          if (result.stats.remaining === 0) {
-            status = "auto-resolved";
-          } else if (result.stats.autoResolved > 0) {
-            status = "partial";
-          } else {
-            status = "manual";
-          }
-
-          // Aperçu hunk-par-hunk : on réutilise la sortie resolve() déjà
-          // calculée (pas de second passage) pour alimenter le panel.
-          // `resolutions` porte le flag `autoResolved` par hunk ; on retombe
-          // sur `hunks` si la liste est vide.
-          const hunks: PreviewHunk[] = result.resolutions.length > 0
-            ? result.resolutions.map(r => ({
-                startLine: r.hunk.startLine,
-                type: r.hunk.type,
-                autoResolved: r.autoResolved,
-                confidenceScore: r.hunk.confidence.score,
-                confidenceLabel: r.hunk.confidence.label,
-                reason: r.resolutionReason,
-              }))
-            : result.hunks.map(h => ({
-                startLine: h.startLine,
-                type: h.type,
-                autoResolved: false,
-                confidenceScore: h.confidence.score,
-                confidenceLabel: h.confidence.label,
-                reason: h.explanation,
-              }));
-
-          files.push({
-            filePath: raw.file_path,
-            status,
-            totalConflicts: result.stats.totalConflicts,
-            autoResolved: result.stats.autoResolved,
-            conflictTypes: types,
-            hunks,
-          });
-        } else {
-          // Pas de contenu → conflit indéterminé
-          files.push({
-            filePath: raw.file_path,
-            status: "manual",
-            totalConflicts: 1,
-            autoResolved: 0,
-            conflictTypes: ["complex"],
-            hunks: [{
-            startLine: 0,
-            type: "complex",
-            autoResolved: false,
-            confidenceScore: 0,
-            confidenceLabel: "low",
-            reason: "No content to analyse: the conflict could not be simulated.",
-          }],
-          });
-        }
-      }
-
-      const conflictingFiles = files.filter(f => f.status !== "clean").length;
-      const autoResolvableFiles = files.filter(f => f.status === "auto-resolved").length;
-      const manualFiles = files.filter(f =>
-        f.status === "manual" || f.status === "add-delete" || f.status === "partial",
-      ).length;
-      const cleanFiles = files.filter(f => f.status === "clean").length;
-      const fullyAutoMergeable = conflictingFiles > 0 && manualFiles === 0;
-
-      summary.value = {
-        sourceBranch: ref_,
-        files,
-        conflictingFiles,
-        autoResolvableFiles,
-        manualFiles,
-        cleanFiles,
-        fullyAutoMergeable,
-      };
+    try {
+      const rawFiles = await previewRestack(cwd(), spec.onto, spec.upstream, spec.branch);
+      await summarize(rawFiles, "rebase", spec.label);
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -386,6 +423,7 @@ export function useMergePreview(cwd: () => string) {
     conflictingFiles,
     riskLevel,
     computePreview,
+    computeRestackPreview,
     reset,
     threshold,
     estimatedAutoResolutions,

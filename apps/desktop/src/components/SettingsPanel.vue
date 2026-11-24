@@ -232,6 +232,7 @@ interface Settings {
   archivedBranches: Record<string, string[]>;
   pinnedBranchesByRepo: Record<string, string[]>;
   branchUpdatePromptSkips: Record<string, string[]>;
+  stackBridgeDismissals: Record<string, string[]>;
   inactiveBranchDays: number;
   identities: IdentityProfile[];
   activeIdentityId: string | null;
@@ -351,6 +352,7 @@ const defaultSettings: Settings = {
   archivedBranches: {},
   pinnedBranchesByRepo: {},
   branchUpdatePromptSkips: {},
+  stackBridgeDismissals: {},
   inactiveBranchDays: 30,
   identities: [],
   activeIdentityId: null,

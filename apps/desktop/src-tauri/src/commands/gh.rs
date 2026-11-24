@@ -885,6 +885,302 @@ pub(crate) async fn gh_pr_edit(
         .map_err(|e| e.to_string())?
 }
 
+// ─── Branch PR lookup and retarget (stacked branches) ───────────────────────
+
+/// Parse `gh pr list --json number,baseRefName,headRefOid,mergedAt,url,
+/// headRepositoryOwner,mergeCommit`, keeping each entry's head-owner login (empty when
+/// gh reports none).
+fn parse_gh_branch_prs(stdout: &str) -> Result<Vec<(String, BranchPr)>, String> {
+    let v: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("Failed to parse gh pr list output: {}", e))?;
+    let arr = v.as_array().ok_or("gh pr list did not return a list")?;
+    let s = |x: &serde_json::Value, k: &str| {
+        x.get(k).and_then(|y| y.as_str()).unwrap_or("").to_string()
+    };
+    Ok(arr
+        .iter()
+        .filter_map(|x| {
+            let owner = x
+                .get("headRepositoryOwner")
+                .map(|o| s(o, "login"))
+                .unwrap_or_default();
+            let merged_at = x.get("mergedAt").and_then(|y| y.as_str()).map(String::from);
+            // Only once merged: an open PR's merge commit is a test merge.
+            let merge_commit_oid = merged_at.as_ref().and_then(|_| {
+                x.get("mergeCommit")
+                    .and_then(|m| m.get("oid"))
+                    .and_then(|o| o.as_str())
+                    .filter(|o| !o.is_empty())
+                    .map(String::from)
+            });
+            Some((
+                owner,
+                BranchPr {
+                    number: x.get("number")?.as_i64()?,
+                    base: s(x, "baseRefName"),
+                    head_ref_oid: s(x, "headRefOid"),
+                    merged_at,
+                    url: s(x, "url"),
+                    merge_commit_oid,
+                },
+            ))
+        })
+        .collect())
+}
+
+/// The newest merged PR of a list (by `merged_at`, RFC 3339 so the strings
+/// order like the instants); `None` when none merged.
+pub(crate) fn newest_merged(prs: Vec<BranchPr>) -> Option<BranchPr> {
+    prs.into_iter()
+        .filter(|p| p.merged_at.is_some())
+        .max_by(|a, b| a.merged_at.cmp(&b.merged_at))
+}
+
+/// The PR `gh pr list` reports for a branch. Only PRs whose head repository
+/// belongs to `origin_owner` (case-insensitive) count: `--head` carries no
+/// owner, so a fork's same-named branch would otherwise match. An entry
+/// without an owner is dropped (fail closed). `merged` keeps the newest merged
+/// one and never falls back to an unmerged PR; `open` takes the first.
+pub(crate) fn parse_gh_branch_pr_json(
+    stdout: &str,
+    state: &str,
+    origin_owner: &str,
+) -> Result<Option<BranchPr>, String> {
+    let prs: Vec<BranchPr> = parse_gh_branch_prs(stdout)?
+        .into_iter()
+        .filter(|(owner, _)| !owner.is_empty() && owner.eq_ignore_ascii_case(origin_owner))
+        .map(|(_, p)| p)
+        .collect();
+    Ok(if state == "merged" {
+        newest_merged(prs)
+    } else {
+        prs.into_iter().next()
+    })
+}
+
+/// A branch name headed for a `gh`/REST argument: never empty, never an option.
+pub(crate) fn check_pr_base(base: &str) -> Result<(), String> {
+    if base.is_empty() {
+        return Err("base must not be empty".to_string());
+    }
+    check_branch_arg(base)
+}
+
+fn check_branch_arg(branch: &str) -> Result<(), String> {
+    if branch.starts_with('-') {
+        return Err(format!("invalid branch name: {}", branch));
+    }
+    Ok(())
+}
+
+fn check_pr_number(number: i64) -> Result<(), String> {
+    if number <= 0 {
+        return Err(format!("invalid PR number: {}", number));
+    }
+    Ok(())
+}
+
+fn check_branch_pr_args(branch: &str, state: &str) -> Result<(), String> {
+    check_branch_arg(branch)?;
+    match state {
+        "open" | "merged" => Ok(()),
+        _ => Err(format!("invalid PR state: {}", state)),
+    }
+}
+
+fn gh_branch_pr_inner(
+    cwd: String,
+    branch: String,
+    state: String,
+) -> Result<Option<BranchPr>, String> {
+    check_branch_pr_args(&branch, &state)?;
+    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+        github_api::rest_branch_pr(&cwd, &branch, &state, tok)
+    }) {
+        return r;
+    }
+    let mut cmd = gh_base_cmd(&cwd)?;
+    cmd.args([
+        "pr",
+        "list",
+        "--state",
+        &state,
+        "--head",
+        &branch,
+        "--json",
+        "number,baseRefName,headRefOid,mergedAt,url,headRepositoryOwner,mergeCommit",
+        "--limit",
+        "100",
+    ]);
+    cmd.current_dir(&cwd);
+    let output = output_with_timeout(cmd, GH_TIMEOUT)
+        .map_err(|e| format!("Failed to run gh pr list (is GitHub CLI installed?): {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh pr list failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    // `--head` has no owner: keep only the origin owner's PRs.
+    let owner = gh_origin_repo(&cwd)
+        .and_then(|r| r.nwo.split('/').next().map(String::from))
+        .filter(|o| !o.is_empty())
+        .ok_or("Could not resolve the owner of this repository's origin")?;
+    parse_gh_branch_pr_json(&String::from_utf8_lossy(&output.stdout), &state, &owner)
+}
+
+/// The GitHub PR of `branch` (`state` is `open` or `merged`), `None` when
+/// there is none. A hint source for stacks, never a source of truth.
+#[tauri::command]
+pub(crate) async fn gh_branch_pr(
+    cwd: String,
+    branch: String,
+    state: String,
+) -> Result<Option<BranchPr>, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_branch_pr_inner(cwd, branch, state))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn gh_pr_set_base_inner(cwd: String, number: i64, base: String) -> Result<(), String> {
+    check_pr_number(number)?;
+    check_pr_base(&base)?;
+    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+        github_api::rest_pr_set_base(&cwd, number, &base, tok)
+    }) {
+        return r;
+    }
+    // `gh api PATCH`, as `gh_pr_edit_inner` does, not `gh pr edit --base`.
+    let nwo = gh_base_nwo(&cwd)?;
+    let path = format!("repos/{}/pulls/{}", nwo, number);
+    gh_api_write(&cwd, "PATCH", &path, &[("base", base.as_str())])?;
+    Ok(())
+}
+
+/// Retarget PR `number` onto `base` (after its parent branch merged).
+#[tauri::command]
+pub(crate) async fn gh_pr_set_base(cwd: String, number: i64, base: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || gh_pr_set_base_inner(cwd, number, base))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod branch_pr_tests {
+    use super::*;
+
+    #[test]
+    fn parses_gh_branch_pr_json_and_keeps_the_newest_merge() {
+        let s = r#"[{"number":800,"baseRefName":"main","headRefOid":"aaa","mergedAt":"2026-11-01T00:00:00Z","url":"u1","headRepositoryOwner":{"login":"o"}},
+                   {"number":812,"baseRefName":"main","headRefOid":"bbb","mergedAt":"2026-11-20T00:00:00Z","url":"u2","headRepositoryOwner":{"login":"o"}}]"#;
+        let via_json = parse_gh_branch_pr_json(s, "merged", "o").unwrap().unwrap();
+        assert_eq!(via_json.number, 812);
+        let all: Vec<BranchPr> = parse_gh_branch_prs(s)
+            .unwrap()
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        let pr = newest_merged(all).unwrap();
+        assert_eq!((pr.number, pr.head_ref_oid.as_str()), (812, "bbb"));
+    }
+
+    /// I-2: the merge commit of a merged PR (the squash on its base).
+    #[test]
+    fn a_merged_pr_carries_its_merge_commit_an_open_one_none() {
+        let s = r#"[{"number":812,"baseRefName":"main","headRefOid":"h","mergedAt":"2026-11-20T00:00:00Z","url":"u","headRepositoryOwner":{"login":"o"},"mergeCommit":{"oid":"mmm"}}]"#;
+        let pr = parse_gh_branch_pr_json(s, "merged", "o").unwrap().unwrap();
+        assert_eq!(pr.merge_commit_oid.as_deref(), Some("mmm"));
+        let open = r#"[{"number":9,"baseRefName":"main","headRefOid":"h","mergedAt":null,"url":"u","headRepositoryOwner":{"login":"o"},"mergeCommit":{"oid":"test-merge"}}]"#;
+        let pr = parse_gh_branch_pr_json(open, "open", "o").unwrap().unwrap();
+        assert_eq!(pr.merge_commit_oid, None);
+        let missing = r#"[{"number":9,"baseRefName":"main","headRefOid":"h","mergedAt":"2026-11-20T00:00:00Z","url":"u","headRepositoryOwner":{"login":"o"},"mergeCommit":null}]"#;
+        let pr = parse_gh_branch_pr_json(missing, "merged", "o")
+            .unwrap()
+            .unwrap();
+        assert_eq!(pr.merge_commit_oid, None);
+    }
+
+    #[test]
+    fn gh_list_is_filtered_to_the_origin_owner_before_choosing() {
+        let s = r#"[{"number":1,"baseRefName":"main","headRefOid":"a","mergedAt":"2026-11-25T00:00:00Z","url":"u1","headRepositoryOwner":{"login":"alice"}},
+                   {"number":2,"baseRefName":"main","headRefOid":"b","mergedAt":"2026-11-01T00:00:00Z","url":"u2","headRepositoryOwner":{"login":"Bob"}},
+                   {"number":3,"baseRefName":"main","headRefOid":"c","mergedAt":"2026-11-30T00:00:00Z","url":"u3"},
+                   {"number":4,"baseRefName":"main","headRefOid":"d","mergedAt":"2026-11-30T00:00:00Z","url":"u4","headRepositoryOwner":{"login":""}}]"#;
+        let pr = parse_gh_branch_pr_json(s, "merged", "bob")
+            .unwrap()
+            .unwrap();
+        assert_eq!(pr.number, 2);
+        assert_eq!(parse_gh_branch_pr_json(s, "merged", "carol").unwrap(), None);
+        // Ownerless entries are dropped even when the origin owner is empty.
+        assert_eq!(parse_gh_branch_pr_json(s, "merged", "").unwrap(), None);
+    }
+
+    #[test]
+    fn merged_lookup_never_falls_back_to_an_unmerged_pr() {
+        let null = r#"[{"number":9,"baseRefName":"m","headRefOid":"c","mergedAt":null,"url":"u","headRepositoryOwner":{"login":"o"}}]"#;
+        let missing = r#"[{"number":9,"baseRefName":"m","headRefOid":"c","url":"u","headRepositoryOwner":{"login":"o"}}]"#;
+        assert_eq!(parse_gh_branch_pr_json(null, "merged", "o").unwrap(), None);
+        assert_eq!(
+            parse_gh_branch_pr_json(missing, "merged", "o").unwrap(),
+            None
+        );
+        assert_eq!(
+            parse_gh_branch_pr_json(null, "open", "o")
+                .unwrap()
+                .unwrap()
+                .number,
+            9
+        );
+    }
+
+    #[test]
+    fn set_base_rejects_non_positive_number() {
+        for (n, msg) in [(0, "invalid PR number: 0"), (-1, "invalid PR number: -1")] {
+            let err = gh_pr_set_base_inner("/nonexistent".into(), n, "main".into()).unwrap_err();
+            assert_eq!(err, msg);
+        }
+        assert!(check_pr_number(7).is_ok());
+    }
+
+    #[test]
+    fn open_pr_has_no_merge_date() {
+        let s = r#"[{"number":9,"baseRefName":"step-1","headRefOid":"c","mergedAt":null,"url":"u","headRepositoryOwner":{"login":"o"}}]"#;
+        let pr = parse_gh_branch_pr_json(s, "open", "o").unwrap().unwrap();
+        assert_eq!(
+            (pr.number, pr.base.as_str(), pr.merged_at),
+            (9, "step-1", None)
+        );
+        let all: Vec<BranchPr> = parse_gh_branch_prs(s)
+            .unwrap()
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        assert_eq!(newest_merged(all), None);
+    }
+
+    #[test]
+    fn empty_gh_list_is_none() {
+        assert_eq!(parse_gh_branch_pr_json("[]", "open", "o").unwrap(), None);
+    }
+
+    #[test]
+    fn set_base_rejects_dash_and_empty() {
+        assert_eq!(check_pr_base("").unwrap_err(), "base must not be empty");
+        assert_eq!(check_pr_base("-x").unwrap_err(), "invalid branch name: -x");
+        assert!(check_pr_base("main").is_ok());
+    }
+
+    #[test]
+    fn branch_pr_rejects_unknown_state_and_dash_branch() {
+        let err =
+            gh_branch_pr_inner("/nonexistent".into(), "b".into(), "closed".into()).unwrap_err();
+        assert_eq!(err, "invalid PR state: closed");
+        let err =
+            gh_branch_pr_inner("/nonexistent".into(), "-b".into(), "open".into()).unwrap_err();
+        assert_eq!(err, "invalid branch name: -b");
+    }
+}
+
 fn gh_dismiss_review_inner(
     cwd: String,
     number: i64,

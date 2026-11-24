@@ -136,6 +136,8 @@ export function assertOperationSucceeded(
 export interface ApplyOptions {
   runMerge?: (ref: string) => Promise<void>;
   skipFinalize?: boolean;
+  /** v3.14 restack: replaces `deps.runRebaseOnto` (`rebase --onto <onto> <upstream> <branch>`). */
+  runRebase?: (ref: string) => Promise<{ conflict: boolean }>;
 }
 
 /** Bounded so a pathological rebase reports instead of spinning forever. */
@@ -253,7 +255,7 @@ export function useApplyFromPreview(deps: ApplyDeps) {
     try {
       if (operation === "merge") await (opts.runMerge ?? deps.runMerge)(ref_);
       else if (operation === "cherry-pick") await deps.runCherryPick(ref_);
-      else await deps.runRebaseOnto(ref_);
+      else await (opts.runRebase ?? deps.runRebaseOnto)(ref_);
     } catch (e) {
       return finish({ ...base, stoppedReason: "op-failed", operationError: msg(e) });
     }

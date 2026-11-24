@@ -2,6 +2,7 @@ pub(crate) mod commands;
 pub mod git;
 pub(crate) mod process_tree;
 pub(crate) mod shell_env;
+pub(crate) mod stack;
 pub(crate) mod types;
 pub(crate) mod worktree;
 
@@ -303,6 +304,20 @@ pub fn git_operation_action_parity(
         .map(|r| serde_json::json!({ "halted": r.halted }))
 }
 
+fn parity_opt(args: &serde_json::Value, key: &str) -> Option<String> {
+    args.get(key).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn parity_merged_parents(
+    args: &serde_json::Value,
+) -> Result<Vec<crate::stack::MergedParentHint>, String> {
+    match args.get("mergedParents") {
+        None | Some(serde_json::Value::Null) => Ok(vec![]),
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| format!("invalid arg 'mergedParents': {e}")),
+    }
+}
+
 /// Collapse any success payload to a marker.
 ///
 /// A closure cannot do this job: it would be monomorphised on its first use,
@@ -524,6 +539,69 @@ pub fn command_parity(
             tauri::async_runtime::block_on(commands::read::git_config_identity(s("cwd")?))
                 .map(|(name, email)| serde_json::json!([name, email]))
         }
+        // Stacked branches. Optional `trunk`; `mergedParents` / `previewed`
+        // carry the serde shapes of `MergedParentHint` / `PreviewedRestack`.
+        "stack_status" => tauri::async_runtime::block_on(commands::stack::stack_status(
+            s("cwd")?,
+            parity_opt(&args, "trunk"),
+            parity_merged_parents(&args)?,
+        ))
+        .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
+        "stack_set_parent" => tauri::async_runtime::block_on(commands::stack::stack_set_parent(
+            s("cwd")?,
+            s("branch")?,
+            s("parent")?,
+            parity_opt(&args, "trunk"),
+        ))
+        .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
+        "stack_delete_merged_parent" => tauri::async_runtime::block_on(
+            commands::stack::stack_delete_merged_parent(s("cwd")?, s("branch")?, s("tip")?),
+        )
+        .map(parity_ok_marker),
+        "stack_unset" => {
+            tauri::async_runtime::block_on(commands::stack::stack_unset(s("cwd")?, s("branch")?))
+                .map(parity_ok_marker)
+        }
+        "stack_restack_plan" => {
+            tauri::async_runtime::block_on(commands::stack::stack_restack_plan(
+                s("cwd")?,
+                s("branch")?,
+                parity_opt(&args, "trunk"),
+                parity_merged_parents(&args)?,
+            ))
+            .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string()))
+        }
+        "git_restack" => {
+            let previewed = serde_json::from_value(
+                args.get("previewed")
+                    .cloned()
+                    .ok_or_else(|| format!("missing required arg 'previewed' for {}", command))?,
+            )
+            .map_err(|e| format!("invalid arg 'previewed': {e}"))?;
+            tauri::async_runtime::block_on(commands::stack::git_restack(
+                s("cwd")?,
+                s("branch")?,
+                parity_opt(&args, "trunk"),
+                parity_merged_parents(&args)?,
+                previewed,
+            ))
+            .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string()))
+        }
+        // Pushes to the branch's own upstream: the tests point it at a local
+        // bare origin, never a network remote.
+        "git_push_branch" => tauri::async_runtime::block_on(commands::ops::git_push_branch(
+            s("cwd")?,
+            s("branch")?,
+            s("leaseSha")?,
+        ))
+        .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
+        "preview_restack" => tauri::async_runtime::block_on(commands::read::preview_restack(
+            s("cwd")?,
+            s("onto")?,
+            s("upstream")?,
+            s("branch")?,
+        ))
+        .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())),
         other => Err(format!("command-parity does not know '{}'", other)),
     }
 }
@@ -838,6 +916,14 @@ pub fn run() {
             commands::read::git_repo_state,
             commands::ops::git_interactive_rebase,
             commands::ops::git_rebase_onto,
+            commands::ops::git_push_branch,
+            commands::stack::stack_status,
+            commands::stack::stack_set_parent,
+            commands::stack::stack_unset,
+            commands::stack::stack_delete_merged_parent,
+            commands::stack::stack_restack_plan,
+            commands::stack::git_restack,
+            commands::read::preview_restack,
             commands::ops::git_add_to_gitignore,
             commands::ops::git_discard,
             commands::read::git_show,
@@ -922,6 +1008,8 @@ pub fn run() {
             commands::gh::gh_delete_reaction,
             commands::gh::gh_pr_ready,
             commands::gh::gh_pr_edit,
+            commands::gh::gh_branch_pr,
+            commands::gh::gh_pr_set_base,
             commands::gh::gh_dismiss_review,
             commands::gh::gh_pr_review_threads,
             commands::gh::gh_pr_create_comment,
@@ -1664,6 +1752,108 @@ mod command_parity_tests {
             err.contains("git_not_a_command"),
             "error names the command: {err}"
         );
+    }
+
+    /// Reaches the command: it answers Ok, or the command's own error,
+    /// which must contain `expected` (never an argument-parsing error).
+    fn assert_reaches_command(
+        r: Result<serde_json::Value, String>,
+        what: &str,
+        expected: Option<&str>,
+    ) {
+        match (r, expected) {
+            (Ok(_), None) => {}
+            (Ok(v), Some(want)) => {
+                panic!("{what}: expected the command to err with {want:?}, got {v}")
+            }
+            (Err(e), want) => {
+                assert!(
+                    !e.contains("missing required arg") && !e.contains("invalid arg"),
+                    "{what}: argument parsing failed: {e}"
+                );
+                let want = want.unwrap_or_else(|| panic!("{what}: unexpected error: {e}"));
+                assert!(e.contains(want), "{what}: {e:?} does not contain {want:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn stack_arms_parse_their_arguments_and_reach_the_command() {
+        let repo = crate::worktree::test_support::TempRepo::new();
+        let cwd = repo.path.to_str().unwrap();
+        let sha = "0".repeat(40);
+        let r = command_parity(
+            "stack_status".into(),
+            serde_json::json!({
+                "cwd": cwd,
+                "trunk": "main",
+                "mergedParents": [{ "branch": "a", "number": 7, "head_ref_oid": sha }],
+            }),
+        );
+        assert!(r.is_ok(), "{r:?}");
+        let r = command_parity(
+            "git_restack".into(),
+            serde_json::json!({
+                "cwd": cwd,
+                "branch": "nope",
+                "mergedParents": [],
+                "previewed": {
+                    "onto_sha": sha, "upstream_sha": sha, "top_sha": sha, "moving": ["nope"],
+                },
+            }),
+        );
+        assert_reaches_command(r, "git_restack", Some("not a stacked branch: nope"));
+        let r = command_parity(
+            "stack_restack_plan".into(),
+            serde_json::json!({ "cwd": cwd, "branch": "nope" }),
+        );
+        assert_reaches_command(r, "stack_restack_plan", Some("not a stacked branch: nope"));
+        let r = command_parity(
+            "stack_set_parent".into(),
+            serde_json::json!({ "cwd": cwd, "branch": "x", "parent": "y" }),
+        );
+        assert_reaches_command(r, "stack_set_parent", Some("Unknown local branch: x"));
+        let r = command_parity(
+            "stack_unset".into(),
+            serde_json::json!({ "cwd": cwd, "branch": "x" }),
+        );
+        assert_reaches_command(r, "stack_unset", None);
+        let r = command_parity(
+            "stack_delete_merged_parent".into(),
+            serde_json::json!({ "cwd": cwd, "branch": "gone", "tip": "a".repeat(40) }),
+        );
+        assert_reaches_command(
+            r,
+            "stack_delete_merged_parent",
+            Some("gone changed since the restack: not deleted"),
+        );
+        let r = command_parity(
+            "preview_restack".into(),
+            serde_json::json!({ "cwd": cwd, "onto": "main", "upstream": "main", "branch": "main" }),
+        );
+        assert_reaches_command(r, "preview_restack", None);
+        let bad = command_parity(
+            "stack_status".into(),
+            serde_json::json!({ "cwd": cwd, "mergedParents": "oops" }),
+        );
+        assert!(bad.unwrap_err().contains("mergedParents"));
+    }
+
+    #[test]
+    fn command_parity_knows_the_stack_commands() {
+        for c in [
+            "stack_status",
+            "stack_set_parent",
+            "stack_unset",
+            "stack_delete_merged_parent",
+            "stack_restack_plan",
+            "git_restack",
+            "preview_restack",
+            "git_push_branch",
+        ] {
+            let err = command_parity(c.into(), serde_json::json!({})).unwrap_err();
+            assert!(!err.contains("does not know"), "{c}: {err}");
+        }
     }
 
     #[test]

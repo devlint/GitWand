@@ -6,6 +6,10 @@ import { getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type Git
 import PrListSidebar from "./PrListSidebar.vue";
 import ScopePicker from "./ScopePicker.vue";
 import TrackedIgnoredNotice from "./TrackedIgnoredNotice.vue";
+// Lazy: rendered only for stacked branches and bridge offers (v-if below).
+const StackBadge = defineAsyncComponent(() => import("./StackBadge.vue"));
+import { useStacks } from "../composables/useStacks";
+import { useStackActions } from "../composables/useStackActions";
 import { useI18n } from "../composables/useI18n";
 import Avatar from "./Avatar.vue";
 import { useCommitMessage } from "../composables/useCommitMessage";
@@ -31,6 +35,7 @@ import { useIssueSuggest, handleIssueKeydown, issueSuggestAt, pickIssueRow, shar
 import { repoRemotes } from "../composables/useRepoRemote";
 // Shown only while a `#` list is open (v-if): loaded then, not in the main chunk.
 const IssueSuggestList = defineAsyncComponent(() => import("./IssueSuggestList.vue"));
+// Lazy: keeps the banner (and its locale-heavy logic) out of the main chunk.
 import { issueListerFor } from "../composables/issueLister";
 import { COMMIT_SIGNATURE } from "../utils/commitSignature";
 import { loadSettings } from "../composables/useSettings";
@@ -1010,6 +1015,12 @@ function openBranchCtx(e: MouseEvent, b: GitBranch) {
 
 function closeBranchCtx() { branchCtx.value.visible = false; }
 
+// ─── Stacked branches (v3.14) ───────────────────────────
+// The branch menus with Stack on… / Unstack / Restack… are the Git Tree's and
+// the header branch selector's; these rows only show the badges.
+const { offers: stackOffers, layerOf, parentPrOf, dismissBridge } = useStacks();
+const stackActions = useStackActions();
+
 function onBranchCtxPin() {
   _pinnedApi.pin(branchCtx.value.branchName);
   closeBranchCtx();
@@ -1899,6 +1910,15 @@ function formatActivityDate(dateStr: string): string {
               <span v-if="isMergedBranch(b.name) && !b.isCurrent" class="branch-badge branch-badge--merged">{{ t('branch.merged') }}</span>
               <span v-else-if="isInactiveBranch(b)" class="branch-badge branch-badge--inactive">{{ t('branch.inactive') }}</span>
             </span>
+            <StackBadge
+              v-if="!b.isRemote && (layerOf(b.name) || stackOffers.get(b.name))"
+              :layer="layerOf(b.name)"
+              :parent-pr="parentPrOf(b.name)"
+              :offer="stackOffers.get(b.name) ?? null"
+              @restack="stackActions.restackFrom(cwd, b.name)"
+              @accept-offer="stackActions.accept(cwd, stackOffers.get(b.name)!)"
+              @dismiss-offer="dismissBridge(cwd, b.name)"
+            />
             <span class="branch-indicator" v-if="b.ahead > 0 || b.behind > 0">
               <span v-if="b.ahead > 0" class="branch-up">↑{{ b.ahead }}</span>
               <span v-if="b.behind > 0" class="branch-down">↓{{ b.behind }}</span>
@@ -1941,6 +1961,15 @@ function formatActivityDate(dateStr: string): string {
               <span v-if="isMergedBranch(b.name)" class="branch-badge branch-badge--merged">{{ t('branch.merged') }}</span>
               <span v-else-if="isInactiveBranch(b)" class="branch-badge branch-badge--inactive">{{ t('branch.inactive') }}</span>
             </span>
+            <StackBadge
+              v-if="!b.isRemote && (layerOf(b.name) || stackOffers.get(b.name))"
+              :layer="layerOf(b.name)"
+              :parent-pr="parentPrOf(b.name)"
+              :offer="stackOffers.get(b.name) ?? null"
+              @restack="stackActions.restackFrom(cwd, b.name)"
+              @accept-offer="stackActions.accept(cwd, stackOffers.get(b.name)!)"
+              @dismiss-offer="dismissBridge(cwd, b.name)"
+            />
             <button
               class="branch-ctx-trigger"
               @click.stop="openBranchCtx($event, b)"

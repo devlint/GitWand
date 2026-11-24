@@ -19,6 +19,9 @@ import { StringDecoder } from "node:string_decoder";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
 import { devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
+import { resolveBin } from "./dev-bin.mjs";
+import { devForkParentNwo, devParseGhBranchPr } from "./dev-gh-branch-pr.mjs";
+import { devGitRestack, devPushBlock, devStackDeleteMergedParent, devStackRestackPlan, devStackSetParent, devStackStatus, devStackUnset, devValidateBranchName } from "./dev-stack-service.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -203,21 +206,6 @@ function repoRelativePath(cwd, root, path, guarded) {
   }
   if (!parts.length) parts = relative(root, guarded).split(sep).filter(Boolean);
   return parts.join("/");
-}
-
-/** Resolve the full path to a CLI binary, checking Homebrew paths on macOS. */
-function resolveBin(name) {
-  // Try common macOS Homebrew locations first
-  const candidates = [
-    `/opt/homebrew/bin/${name}`,
-    `/usr/local/bin/${name}`,
-    `/usr/bin/${name}`,
-    name, // fallback: rely on PATH
-  ];
-  for (const c of candidates) {
-    try { if (existsSync(c)) return c; } catch { /* ignore */ }
-  }
-  return name;
 }
 
 const GH = resolveBin("gh");
@@ -1530,6 +1518,91 @@ function devBuild3WayPreview(cwd, ancestor, oursRef, theirsRef) {
   return results;
 }
 
+/** `force_with_lease_arg` (commands/ops.rs): the remote branch must still
+ *  sit exactly on `sha`, a full hex object name; the branch is free of what
+ *  git forbids in ref names and of a leading `-`. */
+function devForceWithLeaseArg(branch, sha) {
+  const s = String(sha ?? "");
+  if (!/^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(s)) throw new Error("invalid lease sha");
+  const b = String(branch);
+  const branchOk =
+    b !== "" && !/^[-/]/.test(b) && !/[/.]$/.test(b) && !b.includes("..") && !b.includes("//") &&
+    !b.includes("@{") && !/[\p{Cc}\p{White_Space}~^:?*[\\]/u.test(b);
+  if (!branchOk) throw new Error("invalid lease branch");
+  return `--force-with-lease=refs/heads/${b}:${s}`;
+}
+
+/** `gh_fork_parent` (commands/gh.rs) answers, by origin, for ten minutes. */
+const devForkParentCache = new Map();
+
+/** `gh_base_repo` (commands/gh.rs): the repo PRs are listed from and act on —
+ *  origin's fork parent when origin is a fork, else origin; null without a
+ *  github.com origin (gh chooses). A failed fork lookup is an error, never a
+ *  guess: a PR number sent to the wrong repo names another pull request. */
+function devGhBaseNwo(cwd) {
+  const origin = getRepoNwo(cwd);
+  if (!origin) return null;
+  const hit = devForkParentCache.get(origin);
+  if (hit && Date.now() - hit.at < 600_000) return hit.parent ?? origin;
+  const r = spawnSync(GH, ["repo", "view", origin, "--json", "isFork,parent"], {
+    cwd, encoding: "utf-8", env: { ...process.env, GH_HOST: "github.com" }, timeout: 20_000,
+  });
+  if (r.error) throw new Error(`Failed to run gh repo view (is GitHub CLI installed?): ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`gh repo view ${origin} failed: ${(r.stderr || "").trim()}`);
+  let v;
+  try { v = JSON.parse(r.stdout || ""); }
+  catch (e) { throw new Error(`Failed to parse gh repo view output: ${e.message}`); }
+  const parent = devForkParentNwo(v);
+  devForkParentCache.set(origin, { parent, at: Date.now() });
+  return parent ?? origin;
+}
+
+/** `gh_api_failure` (commands/gh.rs): GitHub's own message when gh relayed a
+ *  JSON answer with an HTTP status, else `<what>: <stderr>`. */
+function devGhApiFailure(what, stderr, stdout) {
+  let answer = null;
+  try { answer = JSON.parse(stdout.trim()); } catch { /* not JSON */ }
+  const m = stderr.lastIndexOf("(HTTP ");
+  const code = m >= 0 ? Number.parseInt(stderr.slice(m + 6).split(")")[0].trim(), 10) : NaN;
+  if (answer && typeof answer === "object" && "message" in answer && Number.isInteger(code)) {
+    return devGithubError(code, answer);
+  }
+  return `${what}: ${stderr.trim()}`;
+}
+
+/**
+ * The replay core shared by `/api/preview-rebase` and `/api/preview-restack`
+ * — `replay_preview` in commands/read.rs. Replays each commit of
+ * `upstreamSha..tipSha` (oldest first) onto `ontoSha`: ancestor = the commit's
+ * parent, ours = onto, theirs = the commit. Root commits have no parent to
+ * diff against and are skipped. One entry per file, keeping the strongest
+ * conflict signal (add/delete > conflicted > clean), conflicts first, then
+ * by path. Throws the Rust error text.
+ */
+function devReplayPreview(cwd, ontoSha, upstreamSha, tipSha) {
+  const rl = spawnSync(GIT, ["rev-list", "--reverse", `${upstreamSha}..${tipSha}`], { cwd, encoding: "utf-8" });
+  if (rl.error) throw new Error(`rev-list failed: ${rl.error.message}`);
+  if (rl.status !== 0) throw new Error(`rev-list failed: ${(rl.stderr || "").trim()}`);
+  const commits = (rl.stdout || "").split("\n").map((l) => l.trim()).filter(Boolean);
+
+  const all = [];
+  for (const commit of commits) {
+    let parent;
+    try { parent = devRevParseVerify(cwd, `${commit}^`); } catch { continue; }
+    all.push(...devBuild3WayPreview(cwd, parent, ontoSha, commit));
+  }
+
+  const score = (p) => (p.is_add_delete ? 2 : p.has_conflicts ? 1 : 0);
+  const byFile = new Map();
+  for (const p of all) {
+    const existing = byFile.get(p.file_path);
+    if (!existing || score(p) > score(existing)) byFile.set(p.file_path, p);
+  }
+  const results = [...byFile.values()];
+  results.sort((a, b) => (Number(b.has_conflicts) - Number(a.has_conflicts)) || (a.file_path < b.file_path ? -1 : a.file_path > b.file_path ? 1 : 0));
+  return results;
+}
+
 function parseFileLog(raw) {
   const entries = [];
   for (const block of raw.split("---END---")) {
@@ -2669,33 +2742,28 @@ async function handleRequest(req, res) {
         if (!mergeBase) {
           return jsonResponse(req, res, { error: `No common ancestor between HEAD and ${onto}` }, 400);
         }
+        return jsonResponse(req, res, devReplayPreview(resolvedCwd, ontoSha, mergeBase, headSha));
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 400);
+      }
+    }
 
-        const rl = spawnSync(GIT, ["rev-list", "--reverse", `${mergeBase}..${headSha}`], { cwd: resolvedCwd, encoding: "utf-8" });
-        if (rl.status !== 0) {
-          return jsonResponse(req, res, { error: `rev-list failed: ${(rl.stderr || "").trim()}` }, 400);
+    // POST /api/preview-restack  { cwd, onto, upstream, branch }  → FileMergePreview[]
+    // Mirrors `preview_restack` (commands/read.rs): only the layer's own
+    // commits, `upstream..branch`, replayed onto `onto`.
+    if (url.pathname === "/api/preview-restack" && req.method === "POST") {
+      const { cwd, onto, upstream, branch } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const resolvedCwd = resolve(cwd);
+      try {
+        for (const r of [onto, upstream, branch]) {
+          if (typeof r !== "string") throw new Error("Missing onto, upstream or branch");
+          if (r.startsWith("-")) throw new Error(`invalid ref: ${r}`);
         }
-        const commits = (rl.stdout || "").split("\n").map((l) => l.trim()).filter(Boolean);
-
-        // Replay each commit: ours = onto, theirs = commit. Root commits have
-        // no parent to diff against and are skipped, as in Rust.
-        const all = [];
-        for (const commit of commits) {
-          let parent;
-          try { parent = devRevParseVerify(resolvedCwd, `${commit}^`); } catch { continue; }
-          all.push(...devBuild3WayPreview(resolvedCwd, parent, ontoSha, commit));
-        }
-
-        // Deduplicate per file, keeping the strongest conflict signal:
-        // is_add_delete (2) > has_conflicts (1) > clean (0).
-        const score = (p) => (p.is_add_delete ? 2 : p.has_conflicts ? 1 : 0);
-        const byFile = new Map();
-        for (const p of all) {
-          const existing = byFile.get(p.file_path);
-          if (!existing || score(p) > score(existing)) byFile.set(p.file_path, p);
-        }
-        const results = [...byFile.values()];
-        results.sort((a, b) => (Number(b.has_conflicts) - Number(a.has_conflicts)) || (a.file_path < b.file_path ? -1 : a.file_path > b.file_path ? 1 : 0));
-        return jsonResponse(req, res, results);
+        const ontoSha = devRevParseVerify(resolvedCwd, onto);
+        const upstreamSha = devRevParseVerify(resolvedCwd, upstream);
+        const tipSha = devRevParseVerify(resolvedCwd, branch);
+        return jsonResponse(req, res, devReplayPreview(resolvedCwd, ontoSha, upstreamSha, tipSha));
       } catch (e) {
         return jsonResponse(req, res, { error: e.message }, 400);
       }
@@ -3998,15 +4066,9 @@ async function handleRequest(req, res) {
             return jsonResponse(req, res, { success: false, message: "lease_branch and lease_sha must be given together" });
           }
           if (hasBranch) {
-            // Mirrors force_with_lease_arg() in src-tauri/src/commands/ops.rs.
-            const shaOk = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(String(leaseSha));
-            const b = String(leaseBranch);
-            const branchOk =
-              b !== "" && !/^[-/]/.test(b) && !/[/.]$/.test(b) && !b.includes("..") && !b.includes("//") &&
-              !b.includes("@{") && !/[\u0000-\u0020\u007f~^:?*[\\]/.test(b);
-            if (!shaOk) return jsonResponse(req, res, { success: false, message: "invalid lease sha" });
-            if (!branchOk) return jsonResponse(req, res, { success: false, message: "invalid lease branch" });
-            args.push(`--force-with-lease=refs/heads/${b}:${leaseSha}`);
+            // force_with_lease_arg() in src-tauri/src/commands/ops.rs.
+            try { args.push(devForceWithLeaseArg(leaseBranch, leaseSha)); }
+            catch (e) { return jsonResponse(req, res, { success: false, message: e.message }); }
           } else {
             args.push("--force-with-lease");
           }
@@ -4300,6 +4362,71 @@ async function handleRequest(req, res) {
         return jsonResponse(req, res, { state: "clean", hasConflict: false, operationHead: null, targetBranch: null, step: 0, total: 0 });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // ── Stacked branches (v3.14.0) ──────────────────────────────────────────
+    // The logic lives in dev-stack-service.mjs, the mirror of
+    // src-tauri/src/stack/. Bodies carry the wrappers' camelCase argument
+    // names; results and nested arguments are in serde's snake_case, as
+    // Tauri sends them. Errors → `{ error }`, 400.
+    const STACK_ROUTES = {
+      "/api/stack-status": (b) => devStackStatus(b.cwd, b.configuredTrunk, b.mergedParents),
+      "/api/stack-set-parent": (b) => devStackSetParent(b.cwd, b.branch, b.parent, b.configuredTrunk),
+      "/api/stack-unset": (b) => devStackUnset(b.cwd, b.branch),
+      "/api/stack-delete-merged-parent": (b) => devStackDeleteMergedParent(b.cwd, b.branch, b.tip),
+      "/api/stack-restack-plan": (b) => devStackRestackPlan(b.cwd, b.branch, b.configuredTrunk, b.mergedParents),
+      "/api/git-restack": (b) => devGitRestack(b.cwd, b.branch, b.configuredTrunk, b.mergedParents, b.previewed),
+    };
+    if (Object.hasOwn(STACK_ROUTES, url.pathname) && req.method === "POST") {
+      const body = await readBody(req);
+      if (typeof body.cwd !== "string" || !body.cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        return jsonResponse(req, res, STACK_ROUTES[url.pathname]({ ...body, cwd: resolve(body.cwd) }) ?? null);
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 400);
+      }
+    }
+
+    // POST /api/git-push-branch  { cwd, branch, leaseSha }  -> { success, message }
+    // Mirrors `git_push_branch` (commands/ops.rs): force-push one local branch
+    // to its configured upstream under `--force-with-lease`, without checking
+    // it out. Refusals are errors (400); a push git rejects is `success: false`.
+    if (url.pathname === "/api/git-push-branch" && req.method === "POST") {
+      const { cwd, branch, leaseSha } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const resolvedCwd = resolve(cwd);
+      try {
+        devValidateBranchName(branch);
+        const config = (v) => {
+          const k = `branch.${branch}.${v}`;
+          const r = spawnSync(GIT, ["config", "--get", k], { cwd: resolvedCwd, encoding: "utf-8" });
+          if (r.error) throw new Error(`Failed to read ${k}: ${r.error.message}`);
+          // Exit 1: not set. Anything else cannot be evaluated, which must not
+          // read as "no upstream".
+          if (r.status === 0) return (r.stdout || "").trim() || null;
+          if (r.status === 1) return null;
+          throw new Error(`git config ${k}: ${(r.stderr || "").trim()}`);
+        };
+        const remote = config("remote");
+        const merge = config("merge");
+        if (remote === null || merge === null) throw new Error(`${branch} has no upstream`);
+        if (remote.startsWith("-")) throw new Error(`invalid remote: ${remote}`);
+        if (!merge.startsWith("refs/heads/")) throw new Error(`${branch} has no upstream branch under refs/heads/`);
+        const remoteBranch = merge.slice("refs/heads/".length);
+        // C-1: never onto a local branch or a remote branch of another name.
+        const block = devPushBlock(branch, remote, merge);
+        if (block !== null) throw new Error(block);
+        const lease = devForceWithLeaseArg(remoteBranch, leaseSha);
+        const refspec = `refs/heads/${branch}:refs/heads/${remoteBranch}`;
+        const r = spawnSync(GIT, ["push", lease, remote, refspec], { cwd: resolvedCwd, encoding: "utf-8" });
+        if (r.error) throw new Error(`Failed to run git push: ${r.error.message}`);
+        const stderr = (r.stderr || "").trim();
+        const stdout = (r.stdout || "").trim();
+        const success = r.status === 0;
+        return jsonResponse(req, res, { success, message: success && stdout ? stdout : stderr });
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 400);
       }
     }
 
@@ -7336,6 +7463,70 @@ async function handleRequest(req, res) {
         return jsonResponse(req, res, { ok: true });
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-branch-pr  { cwd, branch, state }  -> BranchPr | null
+    // Mirrors `gh_branch_pr` (commands/gh.rs) on its gh CLI path: the same
+    // argument checks, `gh pr list --head`, then only the PRs whose head repo
+    // belongs to origin's owner (`--head` has no owner), and `merged` never
+    // falls back to an unmerged PR. PRs are listed from the base repo (the
+    // fork parent when origin is a fork), as `gh_base_cmd` does; github.com
+    // origins only, like every dev-server gh route.
+    if (url.pathname === "/api/gh-branch-pr" && req.method === "POST") {
+      const { cwd, branch, state } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const resolvedCwd = resolve(cwd);
+      try {
+        if (typeof branch !== "string" || branch.startsWith("-")) throw new Error(`invalid branch name: ${branch}`);
+        if (state !== "open" && state !== "merged") throw new Error(`invalid PR state: ${state}`);
+        const nwo = getRepoNwo(resolvedCwd);
+        const baseNwo = devGhBaseNwo(resolvedCwd);
+        const r = spawnSync(GH, [
+          "pr", "list", "--state", state, "--head", branch,
+          "--json", "number,baseRefName,headRefOid,mergedAt,url,headRepositoryOwner,mergeCommit",
+          "--limit", "100",
+        ], { cwd: resolvedCwd, encoding: "utf-8", env: ghRepoEnv(baseNwo), timeout: 20_000 });
+        if (r.error) throw new Error(`Failed to run gh pr list (is GitHub CLI installed?): ${r.error.message}`);
+        if (r.status !== 0) throw new Error(`gh pr list failed: ${r.stderr || ""}`);
+        const owner = nwo ? nwo.split("/")[0] : "";
+        if (!owner) throw new Error("Could not resolve the owner of this repository's origin");
+        return jsonResponse(req, res, devParseGhBranchPr(r.stdout || "", state, owner));
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 400);
+      }
+    }
+
+    // POST /api/gh-pr-set-base  { cwd, number, base }  -> null
+    // Mirrors `gh_pr_set_base` (commands/gh.rs) on its gh CLI path:
+    // `gh api -X PATCH repos/<nwo>/pulls/<n> -f base=<base>`, <nwo> being the
+    // base repo (`gh_base_nwo`: the fork parent when origin is a fork), else
+    // the repo gh itself picks.
+    if (url.pathname === "/api/gh-pr-set-base" && req.method === "POST") {
+      const { cwd, number, base } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const resolvedCwd = resolve(cwd);
+      try {
+        if (!Number.isSafeInteger(number) || number <= 0) throw new Error(`invalid PR number: ${number}`);
+        if (typeof base !== "string" || base === "") throw new Error("base must not be empty");
+        if (base.startsWith("-")) throw new Error(`invalid branch name: ${base}`);
+        let nwo = devGhBaseNwo(resolvedCwd);
+        const env = nwo ? { ...process.env, GH_HOST: "github.com" } : process.env;
+        if (!nwo) {
+          const v = spawnSync(GH, ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], {
+            cwd: resolvedCwd, encoding: "utf-8", timeout: 20_000,
+          });
+          nwo = v.status === 0 ? (v.stdout || "").trim() : "";
+          if (!nwo) throw new Error("Could not resolve the GitHub owner/repo of this repository");
+        }
+        const r = spawnSync(GH, ["api", "-X", "PATCH", `repos/${nwo}/pulls/${number}`, "-f", `base=${base}`], {
+          cwd: resolvedCwd, encoding: "utf-8", env,
+        });
+        if (r.error) throw new Error(`gh api write: ${r.error.message}`);
+        if (r.status !== 0) throw new Error(devGhApiFailure("gh api PATCH", r.stderr || "", r.stdout || ""));
+        return jsonResponse(req, res, null);
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 400);
       }
     }
 

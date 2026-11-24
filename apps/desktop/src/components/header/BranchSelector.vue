@@ -48,10 +48,31 @@ import { useBranchPrSearch } from "../../composables/useBranchPrSearch";
 const MergePreviewPanel = defineAsyncComponent(() => import("../MergePreviewPanel.vue"));
 import BaseModal from "../BaseModal.vue";
 import BranchRowActions from "./BranchRowActions.vue";
+// Lazy: rendered only for stacked branches and bridge offers (v-if below).
+const StackBadge = defineAsyncComponent(() => import("../StackBadge.vue"));
+import { useStacks } from "../../composables/useStacks";
+import { lazyStackView, useStackActions, type StackMenuItems } from "../../composables/useStackActions";
+// Lazy: mounted only while a branch row's right-click menu is open (v-if below).
+// A failed chunk load closes the menu and reports through the stack error channel.
+const StackBranchMenu = lazyStackView(() => import("../StackBranchMenu.vue"), () => {
+  stackMenu.value = null;
+});
 // Lazy too — only mounted inside the v-if'd create-branch modal.
 const BranchNameField = defineAsyncComponent(() => import("../BranchNameField.vue"));
 
 const { t } = useI18n();
+
+const { offers: stackOffers, layerOf, dismissBridge } = useStacks();
+const stackActions = useStackActions();
+
+/** Right-click menu of a local / pinned row: its stack items (v3.14). */
+const stackMenu = ref<{ branch: string; items: StackMenuItems; x: number; y: number } | null>(null);
+function openStackMenu(e: MouseEvent, branch: string) {
+  e.preventDefault();
+  const items = stackActions.menuFor(branch);
+  stackMenu.value =
+    items.stackOn || items.unstack || items.restack ? { branch, items, x: e.clientX, y: e.clientY } : null;
+}
 
 const props = defineProps<{
   branchDisplay: string;
@@ -583,7 +604,9 @@ function onDocClick(e: MouseEvent) {
   // popover open while it's up — the modal owns its own backdrop dismissal.
   if (showCreate.value) return;
   const target = e.target as HTMLElement | null;
-  if (!target?.closest(".branch-popover-wrapper")) {
+  // A row's stack menu also teleports to <body>: its item closes the popover
+  // itself (`picked`), after it has read what it needs.
+  if (!target?.closest(".branch-popover-wrapper") && !target?.closest(".stack-branch-menu")) {
     closePopover();
   }
 }
@@ -760,6 +783,7 @@ onUnmounted(() => {
               class="bp-item"
               :class="{ 'bp-item--current': branch.isCurrent }"
               @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
+              @contextmenu="openStackMenu($event, branch.name)"
             >
               <span v-if="branch.isCurrent" class="bp-current-trait"></span>
               <Avatar
@@ -774,6 +798,14 @@ onUnmounted(() => {
                 class="bp-pr-badge"
                 :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, false)!.number, prSearch.prFor(branch.name, false)!.title)"
               >#{{ prSearch.prFor(branch.name, false)!.number }}</span></span>
+              <StackBadge
+                v-if="layerOf(branch.name) || stackOffers.get(branch.name)"
+                :layer="layerOf(branch.name)"
+                :offer="stackOffers.get(branch.name) ?? null"
+                @restack="stackActions.restackFrom(cwd, branch.name)"
+                @accept-offer="stackActions.accept(cwd, stackOffers.get(branch.name)!)"
+                @dismiss-offer="dismissBridge(cwd, branch.name)"
+              />
               <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
                 <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                 <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
@@ -807,6 +839,7 @@ onUnmounted(() => {
                 class="bp-item"
                 :class="{ 'bp-item--current': branch.isCurrent }"
                 @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
+                @contextmenu="openStackMenu($event, branch.name)"
               >
                 <span v-if="branch.isCurrent" class="bp-current-trait"></span>
                 <Avatar
@@ -827,6 +860,14 @@ onUnmounted(() => {
                   class="bp-pr-badge"
                   :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, false)!.number, prSearch.prFor(branch.name, false)!.title)"
                 >#{{ prSearch.prFor(branch.name, false)!.number }}</span></span>
+                <StackBadge
+                  v-if="layerOf(branch.name) || stackOffers.get(branch.name)"
+                  :layer="layerOf(branch.name)"
+                  :offer="stackOffers.get(branch.name) ?? null"
+                  @restack="stackActions.restackFrom(cwd, branch.name)"
+                  @accept-offer="stackActions.accept(cwd, stackOffers.get(branch.name)!)"
+                  @dismiss-offer="dismissBridge(cwd, branch.name)"
+                />
                 <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
                   <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                   <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
@@ -1062,6 +1103,17 @@ onUnmounted(() => {
         </div>
       </template>
     </BaseModal>
+
+    <StackBranchMenu
+      v-if="stackMenu"
+      :cwd="cwd"
+      :branch="stackMenu.branch"
+      :items="stackMenu.items"
+      :x="stackMenu.x"
+      :y="stackMenu.y"
+      @close="stackMenu = null"
+      @picked="closePopover"
+    />
   </div>
 </template>
 

@@ -21,6 +21,7 @@ pub(crate) mod render_fallback;
 pub(crate) mod scratch;
 pub(crate) mod secrets;
 pub(crate) mod snapshots;
+pub(crate) mod stack;
 pub(crate) mod telemetry;
 pub(crate) mod terminal;
 pub(crate) mod tracked_ignored;

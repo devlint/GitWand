@@ -1,0 +1,693 @@
+/**
+ * v3.14 — Stacked branches: the frontend orchestration (spec §5, §6).
+ *
+ *   refresh      → merged-parent hints from GitHub (cached 60 s per
+ *                  repo+parent, D6), then `stack_status`. A finalized restack
+ *                  in the report is handled here (retarget, push offer,
+ *                  delete offer), then one more refresh settles the next
+ *                  pending record (the backend settles one per call).
+ *   bridge       → open PRs whose base is another local branch are offered
+ *                  as stack layers (D13: dismissals persisted per repo).
+ *   restack flow → fetch (D18) → plan → preview → apply through the host
+ *                  (App.vue runs the v3.11 apply with a custom rebase runner).
+ *   after        → retarget the child PR (moment 2, GitHub, D19), offer to
+ *                  push the moved layers under leases read before the restack
+ *                  (D10), offer to delete the merged parent.
+ *
+ * `createStacks(deps)` is the testable core; `useStacks()` is the
+ * module-level singleton bound to the real backend.
+ *
+ * Only the core (report, context, banner, bridge offers, refresh, stack
+ * edits) is in the main chunk. Hints, the restack flow and what follows a
+ * restack live in `useStacksFlow.ts`, imported on first use; the `Stacks`
+ * methods that need it await that import.
+ */
+import { computed, ref, type ComputedRef, type Ref } from "vue";
+import {
+  gitFetch,
+  gitPushBranch,
+  stackRestackPlan,
+  stackDeleteMergedParent,
+  stackSetParent,
+  stackStatus,
+  stackUnset,
+  type DeleteOffer,
+  type FinalizedRestack,
+  type MergedParentHint,
+  type PendingError,
+  type PreviewedRestack,
+  type RestackPlan,
+  type RestackRefusal,
+  type StackLayerStatus,
+  type StackReport,
+} from "../utils/backend";
+import { ghBranchPr, ghPrSetBase } from "../utils/backend-pr";
+import type { ApplyOutcome } from "./useApplyFromPreview";
+import type { StacksFlow } from "./useStacksFlow";
+import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
+import { t } from "./useI18n";
+
+export interface StacksDeps {
+  status: typeof stackStatus;
+  setParent: typeof stackSetParent;
+  unset: typeof stackUnset;
+  plan: typeof stackRestackPlan;
+  fetch: (cwd: string) => Promise<{ success: boolean; message: string }>;
+  branchPr: typeof ghBranchPr;
+  setPrBase: typeof ghPrSetBase;
+  pushBranch: typeof gitPushBranch;
+  /** Compare-and-swap delete of the merged parent at its verified tip. */
+  deleteMergedParent: typeof stackDeleteMergedParent;
+  /** ForgeName of the active repo; "github" enables hints and the retarget. */
+  forge: () => string | null;
+  /** settings.defaultBranch */
+  trunkSetting: () => string | null;
+  dismissed: (cwd: string) => string[];
+  dismiss: (cwd: string, branch: string) => void;
+  now: () => number;
+}
+
+export type RestackPhase =
+  | "idle"
+  | "fetching"
+  | "planning"
+  | "refused"
+  | "preview"
+  | "applying"
+  | "residual"
+  | "done"
+  | "error";
+
+export interface RestackFlow {
+  phase: RestackPhase;
+  cwd: string | null;
+  /** The layer `startRestack` was asked for (the dialog's title before a plan exists). */
+  branch: string | null;
+  plan: RestackPlan | null;
+  refusal: RestackRefusal | null;
+  fetchWarning: string | null;
+  outcome: ApplyOutcome | null;
+  error: string | null;
+}
+
+export interface StackBannerModel {
+  layer: StackLayerStatus;
+  kind: "parent_moved" | "parent_merged" | "parent_behind" | "parent_missing" | "base_lost";
+  /**
+   * `parent_merged`: where the parent's work went, as the restack targets
+   * it (M-2) — the parent's own stack parent when that is not the trunk,
+   * else the trunk. Null for the other kinds.
+   */
+  mergedInto: string | null;
+}
+
+export interface AfterRestack {
+  /** The repo the restack ran in: show it only while that repo is open. */
+  cwd: string;
+  /** That repo's trunk when the restack was finalized: a retried retarget uses it (T11). */
+  trunk: string | null;
+  finalized: FinalizedRestack;
+  retarget: {
+    state: "none" | "done" | "failed" | "manual";
+    number: number | null;
+    base: string | null;
+    error: string | null;
+  };
+  deleteOffer: DeleteOffer | null;
+  push: { pushable: { branch: string; lease: string }[]; skipped: PushSkip[]; noLeases: boolean };
+}
+
+/**
+ * A branch the restack moved that the push offer leaves out, and why:
+ * no upstream; its tracking ref is gone; `blocked` by the backend's
+ * `push_block` (`detail` holds its words); `not_in_stack`, a non-stack
+ * branch `--update-refs` moved too.
+ */
+export interface PushSkip {
+  branch: string;
+  reason: "no_upstream" | "gone" | "blocked" | "not_in_stack";
+  detail: string | null;
+}
+
+export interface BridgeOffer {
+  branch: string;
+  parent: string;
+  pr: number;
+}
+
+export interface PushResult {
+  branch: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface RestackHost {
+  apply(
+    cwd: string,
+    plan: RestackPlan,
+    previewed: PreviewedRestack,
+    hints: MergedParentHint[],
+    estimated: number,
+  ): Promise<ApplyOutcome>;
+  /** `run` pushes the layers of `after` (the restack offered), whatever the banner shows by then. */
+  offerPush(after: AfterRestack, run: () => Promise<PushResult[]>): void;
+  notify(message: string): void;
+}
+
+export interface StacksContext {
+  cwd: string | null;
+  /** ForgeName of the repo (`RemoteInfo.provider`); "github" enables hints and the retarget. */
+  forge: string | null;
+  currentBranch: string | null;
+  localBranches: string[];
+  prs: { branch: string; base: string; number: number; state: string }[];
+}
+
+export interface Stacks {
+  report: Ref<StackReport | null>;
+  /** Why the last refresh of the open repo failed; null once one succeeds (I-3). */
+  statusError: Ref<string | null>;
+  flow: Ref<RestackFlow>;
+  after: Ref<AfterRestack | null>;
+  /** What App.vue last passed to `setContext`. */
+  context: ComputedRef<StacksContext>;
+  /**
+   * The report's `pending_errors`: pending restack records that could not be
+   * settled, one per top. Their chains have no actionable layer, so the
+   * banner offers Unstack of that top, never Preview.
+   */
+  pendingErrors: ComputedRef<PendingError[]>;
+  /** `branch`'s stack holds a stuck record: nothing in it can be restacked. */
+  isBlocked(branch: string): boolean;
+  banner: ComputedRef<StackBannerModel | null>;
+  offers: ComputedRef<Map<string, BridgeOffer>>;
+  setContext(ctx: StacksContext): void;
+  refresh(cwd: string): Promise<void>;
+  layerOf(branch: string): StackLayerStatus | null;
+  /** The trunk: the report's, else the Settings default branch before the first report; null when unknown. */
+  trunk(): string | null;
+  /** The PR of `branch`'s stack parent (M-8): its open PR in the context, else the merged one the report names. */
+  parentPrOf(branch: string): number | null;
+  actionableFor(branch: string): StackLayerStatus | null;
+  stackOnCandidates(branch: string): string[];
+  stackOn(cwd: string, branch: string, parent: string): Promise<void>;
+  unstack(cwd: string, branch: string): Promise<void>;
+  acceptBridge(cwd: string, offer: BridgeOffer): Promise<void>;
+  dismissBridge(cwd: string, branch: string): void;
+  startRestack(cwd: string, branch: string): Promise<void>;
+  applyRestack(estimated: number): Promise<void>;
+  closeRestack(): void;
+  later(): void;
+  retryRetarget(): Promise<void>;
+  deleteMergedParent(): Promise<void>;
+  pushMoved(): Promise<PushResult[]>;
+  /** The banner's ✕: forget the after-restack block. */
+  dismissAfter(): void;
+}
+
+const message = (e: unknown) => String((e as { message?: string })?.message ?? e);
+
+/** The flow of a closed (or never opened) restack dialog. */
+export const idleFlow = (): RestackFlow => ({
+  phase: "idle",
+  cwd: null,
+  branch: null,
+  plan: null,
+  refusal: null,
+  fetchWarning: null,
+  outcome: null,
+  error: null,
+});
+
+/** Attempts at handling one finalization (wave 4, M3). */
+const MAX_ATTEMPTS = 3;
+
+let host: RestackHost | null = null;
+
+/** App.vue registers how a restack is applied, pushed and announced; null unregisters. */
+export function registerRestackHost(h: RestackHost | null): void {
+  host = h;
+}
+
+/** The registered host, if any (useStackActions sends its errors to `notify`). */
+export function restackHost(): RestackHost | null {
+  return host;
+}
+
+/**
+ * What `createStacks` shares with the lazily loaded `useStacksFlow`. The
+ * mutable fields live in `state` so both modules see the same values.
+ */
+export interface StacksCore {
+  deps: StacksDeps;
+  report: Ref<StackReport | null>;
+  flow: Ref<RestackFlow>;
+  after: Ref<AfterRestack | null>;
+  ctx: Ref<StacksContext>;
+  state: {
+    /** Hints of the last refresh, reused by the plan and the run. */
+    lastHints: MergedParentHint[];
+    /** The plan of the last applied restack: its `remote_sha`s are the push leases (D10). */
+    lastPlan: { cwd: string; plan: RestackPlan } | null;
+    /** Invalidates an in-progress `startRestack` / `applyRestack` on close. */
+    flowGen: number;
+  };
+  layerOf(branch: string): StackLayerStatus | null;
+  refresh(cwd: string): Promise<void>;
+  stackOn(cwd: string, branch: string, parent: string): Promise<void>;
+}
+
+// ─── The lazily loaded flow module (Task 13 review, I-2) ──
+
+let flowModule: typeof import("./useStacksFlow") | null = null;
+
+/** Loads the restack flow module; once loaded, flow calls start synchronously. */
+export async function preloadStacksFlow(): Promise<void> {
+  flowModule ??= await import("./useStacksFlow");
+}
+
+export function createStacks(deps: StacksDeps): Stacks {
+  const report = ref<StackReport | null>(null);
+  const statusError = ref<string | null>(null);
+  const flow = ref<RestackFlow>(idleFlow());
+  const after = ref<AfterRestack | null>(null);
+  const ctx = ref<StacksContext>({ cwd: null, forge: null, currentBranch: null, localBranches: [], prs: [] });
+  /** The layer `later()` hid, as it was then. */
+  const hidden = ref<{ branch: string; state: string; parent_tip: string | null } | null>(null);
+  /** Bumped by `dismissBridge`: `deps.dismissed` is not reactive. */
+  const dismissRev = ref(0);
+  const state: StacksCore["state"] = { lastHints: [], lastPlan: null, flowGen: 0 };
+  /** Per cwd, the last finalization handled: an identical one is not handled twice in a row. */
+  const lastFinalized = new Map<string, string>();
+  /** Per cwd, a finalization whose after-restack handling failed, to retry. */
+  const unhandled = new Map<
+    string,
+    {
+      key: string;
+      finalized: FinalizedRestack;
+      trunk: string | null;
+      /** The plan captured when it was first seen: its push leases. */
+      plan: RestackPlan | null;
+      /** Its last handling ran (false: the module that handles it did not load). */
+      ran: boolean;
+      attempts: number;
+    }
+  >();
+
+  const core: StacksCore = { deps, report, flow, after, ctx, state, layerOf, refresh, stackOn };
+  let flowApi: StacksFlow | null = null;
+
+  /** Runs `fn` on this store's flow API, loading the module first if needed. */
+  function withFlow<T>(fn: (f: StacksFlow) => Promise<T>): Promise<T> {
+    if (!flowApi && flowModule) flowApi = flowModule.createStacksFlow(core);
+    if (flowApi) return fn(flowApi);
+    return preloadStacksFlow().then(() => {
+      flowApi ??= flowModule!.createStacksFlow(core);
+      return fn(flowApi);
+    });
+  }
+
+  // ─── Layers ─────────────────────────────────────────────
+
+  function layerOf(branch: string): StackLayerStatus | null {
+    return report.value?.layers.find((l) => l.branch === branch) ?? null;
+  }
+
+  /** `branch`'s layer, then its parent's layer, and so on down (cycle-safe). */
+  function chainDown(branch: string): StackLayerStatus[] {
+    const out: StackLayerStatus[] = [];
+    const seen = new Set<string>();
+    let l = layerOf(branch);
+    while (l && !seen.has(l.branch)) {
+      seen.add(l.branch);
+      out.push(l);
+      l = layerOf(l.parent);
+    }
+    return out;
+  }
+
+  /** Branches below `branch` through stack parents (the last one may not be a layer). */
+  function ancestorsOf(branch: string): Set<string> {
+    const out = new Set<string>();
+    for (const l of chainDown(branch)) out.add(l.parent);
+    return out;
+  }
+
+  function hasStackedChild(branch: string, except?: string): boolean {
+    return (report.value?.layers ?? []).some((l) => l.parent === branch && l.branch !== except);
+  }
+
+  function parentPrOf(branch: string): number | null {
+    const l = layerOf(branch);
+    if (!l) return null;
+    const open = ctx.value.prs.find((p) => p.branch === l.parent && p.state.toLowerCase() === "open");
+    return open?.number ?? l.merged_pr ?? null;
+  }
+
+  function actionableFor(branch: string): StackLayerStatus | null {
+    return chainDown(branch).find((l) => l.actionable) ?? null;
+  }
+
+  function trunk(): string | null {
+    return report.value?.trunk ?? deps.trunkSetting();
+  }
+
+  function stackOnCandidates(branch: string): string[] {
+    const t = trunk();
+    return ctx.value.localBranches.filter(
+      (b) => b !== branch && b !== t && !hasStackedChild(b, branch) && !ancestorsOf(b).has(branch),
+    );
+  }
+
+  const pendingErrors = computed<PendingError[]>(() => report.value?.pending_errors ?? []);
+
+  function isBlocked(branch: string): boolean {
+    const top = layerOf(branch)?.top;
+    return !!top && pendingErrors.value.some((e) => e.top === top);
+  }
+
+  const banner = computed<StackBannerModel | null>(() => {
+    const current = ctx.value.currentBranch;
+    if (!current) return null;
+    let lowest: StackLayerStatus | null = null;
+    for (const l of chainDown(current)) if (l.state !== "up_to_date") lowest = l;
+    if (!lowest) return null;
+    const h = hidden.value;
+    if (h && h.branch === lowest.branch && h.state === lowest.state && h.parent_tip === lowest.parent_tip) {
+      return null;
+    }
+    const kind: StackBannerModel["kind"] =
+      lowest.state === "out_of_date"
+        ? lowest.parent_behind_upstream > 0
+          ? "parent_behind"
+          : "parent_moved"
+        : lowest.state === "up_to_date"
+          ? "parent_moved" // unreachable: filtered above
+          : lowest.state;
+    return { layer: lowest, kind, mergedInto: kind === "parent_merged" ? mergedInto(lowest) : null };
+  });
+
+  /** Where `l`'s merged parent went: its stacked grandparent, else the trunk. */
+  function mergedInto(l: StackLayerStatus): string | null {
+    const trunk = report.value?.trunk ?? null;
+    const grand = layerOf(l.parent)?.parent ?? null;
+    return grand && grand !== trunk ? grand : trunk;
+  }
+
+  function later(): void {
+    const b = banner.value;
+    if (b) hidden.value = { branch: b.layer.branch, state: b.layer.state, parent_tip: b.layer.parent_tip };
+  }
+
+  const offers = computed(() => {
+    void dismissRev.value;
+    const out = new Map<string, BridgeOffer>();
+    const r = report.value;
+    const cwd = ctx.value.cwd;
+    if (!r || !r.trunk || !cwd) return out;
+    const local = new Set(ctx.value.localBranches);
+    const dismissed = new Set(deps.dismissed(cwd));
+    // One offer per base (accepting it takes the base): the lowest PR number.
+    const bases = new Set<string>();
+    const prs = [...ctx.value.prs].sort((a, b) => a.number - b.number);
+    for (const pr of prs) {
+      if (pr.state.toLowerCase() !== "open") continue;
+      if (out.has(pr.branch) || bases.has(pr.base)) continue;
+      if (!local.has(pr.branch) || !local.has(pr.base)) continue;
+      if (pr.base === r.trunk || pr.base === pr.branch) continue;
+      if (layerOf(pr.branch)) continue;
+      if (hasStackedChild(pr.base)) continue;
+      if (ancestorsOf(pr.base).has(pr.branch)) continue;
+      if (dismissed.has(pr.branch)) continue;
+      out.set(pr.branch, { branch: pr.branch, parent: pr.base, pr: pr.number });
+      bases.add(pr.base);
+    }
+    return out;
+  });
+
+  function setContext(next: StacksContext): void {
+    if (next.cwd !== ctx.value.cwd) {
+      report.value = null;
+      statusError.value = null;
+      hidden.value = null;
+      state.lastHints = [];
+    }
+    ctx.value = next;
+  }
+
+  // ─── Refresh ────────────────────────────────────────────
+
+  /** Merged-parent hints (D6): GitHub only, so other forges never load the flow module. */
+  function hintsFor(cwd: string, parents: string[]): Promise<MergedParentHint[]> {
+    if (deps.forge() !== "github" || parents.length === 0) return Promise.resolve([]);
+    // A hint is never a requirement: when the flow module cannot load, the
+    // refresh goes on without hints, as it does when a lookup fails (T13).
+    return withFlow((f) => f.hintsFor(cwd, parents)).catch((e) => {
+      console.warn("[stacks] merged-parent hints unavailable:", message(e));
+      return [];
+    });
+  }
+
+  /** Distinct stack parents other than the trunk. */
+  function parentsIn(r: StackReport | null): string[] {
+    if (!r) return [];
+    return [...new Set(r.layers.map((l) => l.parent))].filter((p) => p !== r.trunk);
+  }
+
+  async function doRefresh(cwd: string): Promise<void> {
+    const prev = ctx.value.cwd === cwd ? report.value : null;
+    const known = parentsIn(prev);
+    let hints = await hintsFor(cwd, known);
+    let r = await deps.status(cwd, deps.trunkSetting(), hints);
+    // First sight of some parents (repo just opened, new layer): look them
+    // up now rather than one refresh late, unless the report settled a
+    // restack — the refresh scheduled for it carries the hints.
+    if (!r.finalized) {
+      const fresh = parentsIn(r).filter((p) => !known.includes(p));
+      const extra = await hintsFor(cwd, fresh);
+      if (extra.length) {
+        hints = [...hints, ...extra];
+        r = await deps.status(cwd, deps.trunkSetting(), hints);
+      }
+    }
+    // Repo switched meanwhile: the report is not shown, but a finalization
+    // in it is handled all the same (the backend already cleared its record).
+    if (ctx.value.cwd === null || ctx.value.cwd === cwd) {
+      report.value = r;
+      statusError.value = null;
+      state.lastHints = hints;
+    }
+    // The backend clears a record as it reports it finalized, so a report
+    // never carries a finalization twice: one whose handling failed is
+    // retried from memory (wave 3, item 7), at most MAX_ATTEMPTS times in all
+    // (wave 4, M3), always with the plan captured when it was first seen,
+    // before anything that can fail (wave 5, item 4).
+    let kept = unhandled.get(cwd) ?? null;
+    const f = r.finalized ?? kept?.finalized ?? null;
+    if (!f) {
+      lastFinalized.delete(cwd);
+      return;
+    }
+    const key = JSON.stringify([f.moment, f.bottom, f.moved]);
+    if (kept && kept.key !== key) {
+      // A newer finalization replaces the kept one: its offer is lost (wave 5, item 3).
+      notify(lostNotice(kept.finalized.bottom, kept.ran));
+      unhandled.delete(cwd);
+      kept = null;
+    }
+    const trunk = kept ? kept.trunk : r.trunk;
+    // The same finalization twice in a row would be a backend that failed to
+    // clear its record: do not retarget or offer again, and stop the chain.
+    if (lastFinalized.get(cwd) === key) {
+      unhandled.delete(cwd);
+      return;
+    }
+    const plan = kept ? kept.plan : takePlan(cwd, f);
+    let ran = false;
+    try {
+      await withFlow((fl) => {
+        ran = true;
+        return fl.onFinalized(cwd, f, trunk, fl.pushOfferFor(plan, f));
+      });
+    } catch (e) {
+      // The status worked: a failure handling what followed the restack is
+      // not a status error (wave 2, item 2). The report stays; the host says
+      // what failed.
+      const attempts = (kept?.attempts ?? 0) + 1;
+      if (attempts >= MAX_ATTEMPTS) {
+        unhandled.delete(cwd);
+        lastFinalized.set(cwd, key);
+        notify(lostNotice(f.bottom, ran));
+      } else {
+        unhandled.set(cwd, { key, finalized: f, trunk, plan, attempts, ran });
+        notify(message(e));
+      }
+      return;
+    }
+    unhandled.delete(cwd);
+    lastFinalized.set(cwd, key);
+    // The backend settles one record per call: look for the next one.
+    void refresh(cwd);
+  }
+
+  /**
+   * What a dropped finalization lost: only its push offer when its handling
+   * ran (the retarget and delete are already shown), all of it when the
+   * module that handles it never loaded (wave 6, item 3).
+   */
+  function lostNotice(bottom: string, ran: boolean): string {
+    return t(ran ? "stacks.after.offersLost" : "stacks.after.handlingLost", bottom);
+  }
+
+  /** The plan kept when `f`'s restack was applied (consumed), or null (D10). */
+  function takePlan(cwd: string, f: FinalizedRestack): RestackPlan | null {
+    const mem = state.lastPlan;
+    if (!mem || mem.cwd !== cwd || mem.plan.bottom !== f.bottom) return null;
+    state.lastPlan = null;
+    return mem.plan;
+  }
+
+  function notify(m: string): void {
+    const h = restackHost();
+    if (h) h.notify(m);
+    else console.warn("[stacks]", m);
+  }
+
+  let inFlight: Promise<void> | null = null;
+  let queued: { cwd: string; done: Promise<void> } | null = null;
+
+  /** One refresh in flight, at most one queued (the latest cwd wins). Never rejects. */
+  function refresh(cwd: string): Promise<void> {
+    if (inFlight) {
+      if (queued) {
+        queued.cwd = cwd;
+        return queued.done;
+      }
+      const q = { cwd, done: Promise.resolve() };
+      q.done = inFlight.then(() => {
+        queued = null;
+        return refresh(q.cwd);
+      });
+      queued = q;
+      return q.done;
+    }
+    const run = doRefresh(cwd)
+      .catch((e) => {
+        console.warn("[stacks] refresh failed:", message(e));
+        // Shown by the banner, for the repo open now only (I-3).
+        if (ctx.value.cwd === null || ctx.value.cwd === cwd) statusError.value = message(e);
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+    inFlight = run;
+    return run;
+  }
+
+  // ─── Small synchronous actions ──────────────────────────
+
+  function dismissAfter(): void {
+    after.value = null;
+  }
+
+  function closeRestack(): void {
+    state.flowGen++;
+    flow.value = idleFlow();
+  }
+
+  // ─── Stack edits ────────────────────────────────────────
+
+  async function stackOn(cwd: string, branch: string, parent: string): Promise<void> {
+    await deps.setParent(cwd, branch, parent, deps.trunkSetting());
+    await refresh(cwd);
+  }
+
+  async function unstack(cwd: string, branch: string): Promise<void> {
+    await deps.unset(cwd, branch);
+    await refresh(cwd);
+  }
+
+  function dismissBridge(cwd: string, branch: string): void {
+    deps.dismiss(cwd, branch);
+    dismissRev.value++;
+  }
+
+  return {
+    report,
+    statusError,
+    flow,
+    after,
+    context: computed(() => ctx.value),
+    pendingErrors,
+    isBlocked,
+    banner,
+    offers,
+    setContext,
+    refresh,
+    layerOf,
+    trunk,
+    parentPrOf,
+    actionableFor,
+    stackOnCandidates,
+    stackOn,
+    unstack,
+    acceptBridge: (cwd, offer) => withFlow((f) => f.acceptBridge(cwd, offer)),
+    dismissBridge,
+    startRestack: (cwd, branch) => withFlow((f) => f.startRestack(cwd, branch)),
+    applyRestack: (estimated) => withFlow((f) => f.applyRestack(estimated)),
+    closeRestack,
+    later,
+    retryRetarget: () => withFlow((f) => f.retryRetarget()),
+    deleteMergedParent: () => withFlow((f) => f.deleteMergedParent()),
+    pushMoved: () => withFlow((f) => f.pushMoved()),
+    dismissAfter,
+  };
+}
+
+// ─── Singleton bound to the real backend ──────────────────
+
+let singleton: Stacks | null = null;
+
+/** Tests only: install a store built with `createStacks` fakes (null resets). */
+export function __setStacksForTest(s: Stacks | null): void {
+  singleton = s;
+}
+
+export function useStacks(): Stacks {
+  if (singleton) return singleton;
+  let ctxForge: string | null = null;
+  const s = createStacks({
+    status: stackStatus,
+    setParent: stackSetParent,
+    unset: stackUnset,
+    plan: stackRestackPlan,
+    fetch: async (cwd) => {
+      const r = await gitFetch(cwd);
+      return { success: r.success, message: r.message };
+    },
+    branchPr: ghBranchPr,
+    setPrBase: ghPrSetBase,
+    pushBranch: gitPushBranch,
+    deleteMergedParent: stackDeleteMergedParent,
+    // Supplied by App.vue through setContext; unknown → treated as not GitHub.
+    forge: () => ctxForge,
+    trunkSetting: () => loadSettings().defaultBranch || null,
+    dismissed: (cwd) => loadSettings().stackBridgeDismissals?.[normaliseCwd(cwd)] ?? [],
+    dismiss: (cwd, branch) => {
+      const settings = loadSettings();
+      const key = normaliseCwd(cwd);
+      const list = settings.stackBridgeDismissals?.[key] ?? [];
+      if (list.includes(branch)) return;
+      settings.stackBridgeDismissals = { ...settings.stackBridgeDismissals, [key]: [...list, branch] };
+      saveSettings(settings);
+    },
+    now: () => Date.now(),
+  });
+  const setContext = s.setContext;
+  s.setContext = (ctx) => {
+    ctxForge = ctx.forge;
+    setContext(ctx);
+  };
+  singleton = s;
+  return s;
+}

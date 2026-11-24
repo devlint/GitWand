@@ -482,3 +482,168 @@ export function fixtureListRepoDir() {
   if (process.platform !== "win32") symlinkSync(tmpdir(), join(cwd, "link-out"));
   return cwd;
 }
+
+// ─── Stacked branches fixtures (v3.14.0) ───────────────────────────────────
+
+/**
+ * A stack in one of the states the stack commands classify:
+ *
+ *   main <- step-1 (a.txt) <- step-2 (b.txt) <- step-3 (c.txt) [<- step-4 (d.txt)]
+ *
+ * step-2 and above are declared layers (step-1 sits on the trunk, which is
+ * not a stack). The metadata is written with plain `git config`, so neither
+ * backend builds its own fixture. `kind`:
+ *
+ * - `moved`: step-1 gained a commit, step-2 is out of date (moment 1);
+ * - `conflict`: same, but that commit adds a `b.txt` of its own, so
+ *   replaying step-2 onto it conflicts;
+ * - `occupied`: `moved`, with step-3 checked out in a linked worktree at
+ *   `<cwd>-wt` and `main` checked out here;
+ * - `squashed` / `merge-commit`: step-1 merged into `origin/main` (bare
+ *   origin at `<cwd>-origin.git`) by a squash or a merge commit, local main
+ *   left behind (moment 2);
+ * - `empty`: step-2 has no commit of its own (it sits at step-1's old tip),
+ *   then step-1 moves: step-2 is an empty layer the rebase cannot move;
+ * - `dropped`: step-2 was squash-merged into step-1 (its PR targeted
+ *   step-1), so with a hint for step-2 it is being dropped by step-3;
+ * - `behind`: `moved`, and step-1's upstream `origin/step-1` has one commit
+ *   the local step-1 lacks;
+ * - `four`: four layers, up to date (step-4 on step-3);
+ * - `broken`: `four`, then step-3 gains a commit (step-4 no longer contains
+ *   it) and step-1 moves: restacking step-2 stops at step-3.
+ *
+ * Every commit has a fixed date, so the shas match from one call to the next
+ * and across the two backends. Each call returns a fresh repo: status may
+ * self-heal and restack rewrites, so each side gets its own.
+ */
+export function fixtureStack(kind) {
+  const cwd = mkTempRepo(`gw-stack-${kind}-`);
+  const git = (args, index) =>
+    execFileSync("git", ["-C", cwd, ...args], {
+      encoding: "utf-8",
+      env: index === undefined ? process.env : { ...process.env, ...commitEnv(index) },
+    }).trim();
+  const declare = (layer, parent) => {
+    git(["config", `branch.${layer}.gitwandParent`, parent]);
+    git(["config", `branch.${layer}.gitwandStackBase`, git(["merge-base", layer, parent])]);
+  };
+  const addOrigin = () => {
+    const bare = `${cwd}-origin.git`;
+    execFileSync("git", ["clone", "--quiet", "--bare", cwd, bare]);
+    git(["remote", "add", "origin", bare]);
+    git(["fetch", "--quiet", "origin"]);
+    git(["remote", "set-head", "origin", "main"]);
+  };
+  const four = kind === "four" || kind === "broken" || kind === "four-empty";
+  // "four-empty": step-2 and step-3 have no commit of their own, so a
+  // non-bottom layer (step-3) sits at the restack's upstream too (T8).
+
+  commitFile(cwd, "README.md", "# Stack\n", "initial commit", 0);
+  git(["checkout", "--quiet", "-b", "step-1"]);
+  commitFile(cwd, "a.txt", "1\n", "s1", 1);
+  git(["checkout", "--quiet", "-b", "step-2"]);
+  if (kind !== "empty" && kind !== "four-empty") commitFile(cwd, "b.txt", "2\n", "s2", 2);
+  git(["checkout", "--quiet", "-b", "step-3"]);
+  if (kind !== "four-empty") commitFile(cwd, "c.txt", "3\n", "s3", 3);
+  if (four) {
+    git(["checkout", "--quiet", "-b", "step-4"]);
+    commitFile(cwd, "d.txt", "4\n", "s4", 4);
+  }
+  declare("step-2", "step-1");
+  declare("step-3", "step-2");
+  if (four) declare("step-4", "step-3");
+  const moveStep1 = (file, content, subject) => {
+    git(["checkout", "--quiet", "step-1"]);
+    commitFile(cwd, file, content, subject, 5);
+  };
+
+  switch (kind) {
+    case "moved":
+    case "occupied":
+    case "conflict":
+    case "empty":
+      if (kind === "conflict") moveStep1("b.txt", "not 2\n", "s1 adds b");
+      else moveStep1("a2.txt", "more\n", "s1 more");
+      git(["checkout", "--quiet", kind === "occupied" ? "main" : "step-3"]);
+      if (kind === "occupied") git(["worktree", "add", "--quiet", `${cwd}-wt`, "step-3"]);
+      break;
+    case "behind":
+      moveStep1("a2.txt", "more\n", "s1 more");
+      addOrigin();
+      git(["branch", "--quiet", "--set-upstream-to=origin/step-1", "step-1"]);
+      commitFile(cwd, "a3.txt", "remote\n", "s1 on origin", 6);
+      git(["push", "--quiet", "origin", "step-1"]);
+      git(["reset", "--quiet", "--hard", "HEAD~1"]);
+      git(["checkout", "--quiet", "step-3"]);
+      break;
+    case "squashed":
+    case "amended":
+    case "merge-commit":
+    case "merge-commit-grew":
+      addOrigin();
+      git(["checkout", "--quiet", "main"]);
+      if (kind === "squashed" || kind === "amended") {
+        git(["merge", "--quiet", "--squash", "step-1"]);
+        git(["commit", "--quiet", "-m", "step 1 (squash)"], 5);
+      } else {
+        git(["merge", "--quiet", "--no-ff", "-m", "Merge step-1", "step-1"], 5);
+      }
+      git(["push", "--quiet", "origin", "main"]);
+      git(["reset", "--quiet", "--hard", "HEAD~1"]);
+      // I-1: step-1 gets a commit after its merge, so it is not merged.
+      if (kind === "merge-commit-grew") moveStep1("a2.txt", "after\n", "s1 after merge");
+      // step-1 amended after step-2 branched (same sha on every fixture): the
+      // merged PR's head is the amended tip, not step-2's recorded base.
+      if (kind === "amended") {
+        git(["checkout", "--quiet", "step-1"]);
+        git(["commit", "--quiet", "--amend", "-m", "s1 (amended)"], 7);
+      }
+      git(["checkout", "--quiet", "step-3"]);
+      break;
+    case "dropped":
+      git(["checkout", "--quiet", "step-1"]);
+      git(["merge", "--quiet", "--squash", "step-2"]);
+      git(["commit", "--quiet", "-m", "step 2 (squash)"], 5);
+      git(["checkout", "--quiet", "step-3"]);
+      break;
+    case "four":
+      // step-2's PR (based on step-1) squash-merged and pulled into step-1:
+      // the target of step-3's moment 2 contains the merged work (I-2).
+      git(["checkout", "--quiet", "step-1"]);
+      git(["merge", "--quiet", "--squash", "step-2"]);
+      git(["commit", "--quiet", "-m", "step 2 (squash)"], 6);
+      git(["checkout", "--quiet", "step-4"]);
+      break;
+    case "ff":
+      // Wave 3, item 1: step-1 fast-forwarded onto step-2 (all its commits).
+      git(["checkout", "--quiet", "step-1"]);
+      git(["merge", "--quiet", "--ff-only", "step-2"]);
+      git(["checkout", "--quiet", "step-3"]);
+      break;
+    case "retargeted":
+      // Wave 2, item 5: step-2's PR retargeted to main and squash-merged
+      // there; step-1 is up to date with its upstream but lacks the work.
+      addOrigin();
+      git(["push", "--quiet", "-u", "origin", "step-1"]);
+      git(["checkout", "--quiet", "main"]);
+      git(["merge", "--quiet", "--squash", "step-2"]);
+      git(["commit", "--quiet", "-m", "step 2 (squash into main)"], 5);
+      git(["push", "--quiet", "origin", "main"]);
+      git(["reset", "--quiet", "--hard", "HEAD~1"]);
+      git(["checkout", "--quiet", "step-3"]);
+      break;
+    case "four-empty":
+      moveStep1("a2.txt", "more\n", "s1 more");
+      git(["checkout", "--quiet", "step-4"]);
+      break;
+    case "broken":
+      git(["checkout", "--quiet", "step-3"]);
+      commitFile(cwd, "c2.txt", "more\n", "s3 more", 6);
+      moveStep1("a2.txt", "more\n", "s1 more");
+      git(["checkout", "--quiet", "step-3"]);
+      break;
+    default:
+      throw new Error(`unknown stack fixture: ${kind}`);
+  }
+  return cwd;
+}

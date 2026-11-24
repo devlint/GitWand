@@ -2041,6 +2041,90 @@ pub(crate) fn rest_pr_edit(
     Ok(())
 }
 
+/// Map one REST pull-request object to a [`BranchPr`] (`None` without a
+/// number). `merged_at` is `null` for an open or closed-unmerged PR.
+pub(crate) fn branch_pr_from_rest_json(v: &serde_json::Value) -> Option<crate::types::BranchPr> {
+    let number = v.get("number")?.as_i64()?;
+    let merged_at = v
+        .get("merged_at")
+        .and_then(|x| x.as_str())
+        .map(String::from);
+    // Only once merged: an open PR's `merge_commit_sha` is a test merge.
+    let merge_commit_oid = merged_at
+        .as_ref()
+        .map(|_| js(v, "merge_commit_sha"))
+        .filter(|o| !o.is_empty());
+    Some(crate::types::BranchPr {
+        number,
+        base: jnested(v, "base", "ref"),
+        head_ref_oid: jnested(v, "head", "sha"),
+        merged_at,
+        url: js(v, "html_url"),
+        merge_commit_oid,
+    })
+}
+
+/// The PR list URL for `branch` pushed by `owner`, in the base repo `repo`.
+/// A merged PR is a closed one, so `merged` lists `closed` (100 per page: the
+/// merged PR can sit behind many closed ones).
+fn branch_pr_url(repo: &str, owner: &str, branch: &str, state: &str) -> String {
+    format!(
+        "{}/repos/{}/pulls?state={}&head={}&per_page=100",
+        API_BASE,
+        repo,
+        if state == "merged" { "closed" } else { "open" },
+        enc_nwo(&format!("{}:{}", owner, branch)),
+    )
+}
+
+/// The PR of `branch` in the base repo (the fork's parent for a fork), by REST.
+/// `merged` lists closed PRs and keeps the newest merged one; `open` takes the
+/// first. The head filter names the `origin` owner: that is where the branch
+/// is pushed.
+pub(crate) fn rest_branch_pr(
+    cwd: &str,
+    branch: &str,
+    state: &str,
+    token: &str,
+) -> Result<Option<crate::types::BranchPr>, String> {
+    let merged = state == "merged";
+    let (owner, _) = owner_repo(cwd)?;
+    let repo = base_owner_repo(cwd, token)?;
+    let url = branch_pr_url(&repo, &owner, branch, state);
+    let list = api_json("GET", &url, token, None)?;
+    let prs: Vec<crate::types::BranchPr> = list
+        .as_array()
+        .map(|a| a.iter().filter_map(branch_pr_from_rest_json).collect())
+        .unwrap_or_default();
+    Ok(if merged {
+        super::gh::newest_merged(prs)
+    } else {
+        prs.into_iter().next()
+    })
+}
+
+/// The PATCH payload that retargets a PR.
+pub(crate) fn set_base_payload(base: &str) -> Result<serde_json::Value, String> {
+    super::gh::check_pr_base(base)?;
+    Ok(serde_json::json!({ "base": base }))
+}
+
+/// Retarget PR `number` of the base repo onto `base`. Same repo resolution as
+/// `rest_pr_edit`: the number comes from the base repo's list.
+pub(crate) fn rest_pr_set_base(
+    cwd: &str,
+    number: i64,
+    base: &str,
+    token: &str,
+) -> Result<(), String> {
+    let payload = set_base_payload(base)?;
+    // An automatic write: never fall back to origin when the fork lookup fails.
+    let repo = base_owner_repo(cwd, token)?;
+    let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
+    api_json("PATCH", &url, token, Some(&payload.to_string()))?;
+    Ok(())
+}
+
 /// GraphQL equivalent of `gh pr merge --auto`, for the configured-token path.
 ///
 /// `enablePullRequestAutoMerge` takes the PR's node id, resolved the same way
@@ -2714,6 +2798,50 @@ pub(crate) fn rest_pr_attachment_urls(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rest_json_maps_head_sha_and_base_ref() {
+        let v = json!({"number":812,"base":{"ref":"step-1"},"head":{"sha":"bbb","ref":"step-2"},"merged_at":null,"html_url":"u"});
+        let pr = branch_pr_from_rest_json(&v).unwrap();
+        assert_eq!((pr.base.as_str(), pr.merged_at), ("step-1", None));
+        assert_eq!((pr.head_ref_oid.as_str(), pr.url.as_str()), ("bbb", "u"));
+    }
+
+    /// I-2: `merge_commit_sha` counts only once merged (an open PR's is a
+    /// test merge).
+    #[test]
+    fn rest_json_keeps_the_merge_commit_of_a_merged_pr_only() {
+        let merged = json!({"number":812,"base":{"ref":"main"},"head":{"sha":"h"},"merged_at":"2026-11-20T00:00:00Z","merge_commit_sha":"mmm","html_url":"u"});
+        let pr = branch_pr_from_rest_json(&merged).unwrap();
+        assert_eq!(pr.merge_commit_oid.as_deref(), Some("mmm"));
+        let open = json!({"number":9,"base":{"ref":"main"},"head":{"sha":"h"},"merged_at":null,"merge_commit_sha":"test","html_url":"u"});
+        assert_eq!(
+            branch_pr_from_rest_json(&open).unwrap().merge_commit_oid,
+            None
+        );
+    }
+
+    #[test]
+    fn branch_pr_url_names_the_origin_owner_and_encodes_the_head() {
+        assert_eq!(
+            branch_pr_url("up/repo", "me", "feat/x y", "merged"),
+            "https://api.github.com/repos/up/repo/pulls?state=closed&head=me%3Afeat/x%20y&per_page=100"
+        );
+        assert!(branch_pr_url("o/r", "me", "b", "open").contains("state=open&"));
+    }
+
+    #[test]
+    fn set_base_payload_rejects_dash_and_empty() {
+        assert_eq!(set_base_payload("").unwrap_err(), "base must not be empty");
+        assert_eq!(
+            set_base_payload("-x").unwrap_err(),
+            "invalid branch name: -x"
+        );
+        assert_eq!(
+            set_base_payload("main").unwrap(),
+            serde_json::json!({"base":"main"})
+        );
+    }
+
     #[test]
     fn api_error_keeps_validation_details() {
         let body = r#"{"message":"Validation Failed","errors":[{"resource":"Issue","field":"assignees","code":"invalid"},{"message":"milestone not found"}]}"#;

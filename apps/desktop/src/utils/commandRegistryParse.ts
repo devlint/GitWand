@@ -62,6 +62,10 @@ export function findInvokedCommands(source: string): {
  * A `case` label counts only when it sits inside the block of a dispatcher
  * whose prefix it starts with: a label the guard can never let through is
  * unreachable, and counting it would let an entry name a dead route.
+ *
+ * A third style is a route table, `const T = { "/api/…": (b) => … }`, served
+ * by `Object.hasOwn(T, url.pathname)` (the stacked-branches routes). Its keys
+ * count only when such a dispatch on that same table exists.
  */
 export function findDevServerRoutes(source: string): string[] {
   const routes = new Set<string>();
@@ -75,6 +79,14 @@ export function findDevServerRoutes(source: string): string[] {
     const block = blockAfter(source, d.index! + d[0].length);
     for (const c of block.matchAll(/case "(\/api\/[a-z0-9-]+)"/g)) {
       if (c[1]!.startsWith(prefix)) routes.add(c[1]!);
+    }
+  }
+  for (const t of source.matchAll(/const ([A-Za-z_$][\w$]*) = \{/g)) {
+    const name = t[1]!;
+    if (!source.includes(`Object.hasOwn(${name}, url.pathname)`)) continue;
+    const block = blockAfter(source, t.index!);
+    for (const k of block.matchAll(/^\s*"(\/api\/[a-z0-9-]+)":/gm)) {
+      routes.add(k[1]!);
     }
   }
   return [...routes].sort();

@@ -1996,11 +1996,26 @@ pub(crate) async fn preview_rebase(
         return Err(format!("No common ancestor between HEAD and {}", onto));
     }
 
-    // Get commits oldest-first: merge_base..HEAD
-    let rev_range = format!("{}..{}", merge_base, head_sha);
-    let commits_out = hidden_cmd(&git)
+    replay_preview(&git, &cwd, &onto_sha, &merge_base, &head_sha)
+}
+
+/// The replay core shared by `preview_rebase` and `preview_restack`: replay
+/// each commit of `upstream_sha..tip_sha` (oldest first) onto `onto_sha`,
+/// ancestor = the commit's parent, ours = onto, theirs = the commit. Entries
+/// are deduplicated per file (the one with the most conflict signal wins) and
+/// sorted conflicts first, then by path.
+pub(crate) fn replay_preview(
+    git: &str,
+    cwd: &str,
+    onto_sha: &str,
+    upstream_sha: &str,
+    tip_sha: &str,
+) -> Result<Vec<FileMergePreview>, String> {
+    // Get commits oldest-first: upstream..tip
+    let rev_range = format!("{}..{}", upstream_sha, tip_sha);
+    let commits_out = hidden_cmd(git)
         .args(["rev-list", "--reverse", &rev_range])
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .output()
         .map_err(|e| format!("rev-list failed: {}", e))?;
     if !commits_out.status.success() {
@@ -2022,11 +2037,11 @@ pub(crate) async fn preview_rebase(
     let mut all_previews: Vec<FileMergePreview> = Vec::new();
     for commit in &commits {
         let parent_spec = format!("{}^", commit);
-        let parent = match rev_parse_verify(&git, &cwd, &parent_spec) {
+        let parent = match rev_parse_verify(git, cwd, &parent_spec) {
             Ok(p) => p,
             Err(_) => continue, // root commit — skip (no parent to diff against)
         };
-        let mut per_commit = build_3way_preview(&git, &cwd, &parent, &onto_sha, commit)?;
+        let mut per_commit = build_3way_preview(git, cwd, &parent, onto_sha, commit)?;
         all_previews.append(&mut per_commit);
     }
 
@@ -2071,6 +2086,28 @@ pub(crate) async fn preview_rebase(
     });
 
     Ok(results)
+}
+
+/// Preview a restack: replay only `upstream..branch` onto `onto` — the layer's
+/// own commits, never the merged parent's (which a plain `preview_rebase`
+/// from the merge-base would replay and report as phantom conflicts).
+#[tauri::command]
+pub(crate) async fn preview_restack(
+    cwd: String,
+    onto: String,
+    upstream: String,
+    branch: String,
+) -> Result<Vec<FileMergePreview>, String> {
+    for r in [&onto, &upstream, &branch] {
+        if r.starts_with('-') {
+            return Err(format!("invalid ref: {r}"));
+        }
+    }
+    let git = git_binary();
+    let onto_sha = rev_parse_verify(&git, &cwd, &onto)?;
+    let upstream_sha = rev_parse_verify(&git, &cwd, &upstream)?;
+    let tip_sha = rev_parse_verify(&git, &cwd, &branch)?;
+    replay_preview(&git, &cwd, &onto_sha, &upstream_sha, &tip_sha)
 }
 
 /// Simulate cherry-picking `commit` onto HEAD without modifying the working tree.
@@ -2952,6 +2989,135 @@ mod predictor_tests {
         assert!(
             rev_parse_verify(&git, repo.cwd(), &parent_spec).is_err(),
             "root commit parent must not resolve"
+        );
+    }
+
+    /// The two-commit fixture of `preview_rebase_two_commit_stack_reports_conflict`,
+    /// with one extra file per side so the Vec has a conflicting entry, a
+    /// deduplicated one and clean ones on both sides. HEAD is on `feature`.
+    fn two_commit_stack_fixture() -> TempRepo {
+        let repo = TempRepo::new();
+        repo.write("shared.txt", "line1\nline2\nline3\n");
+        repo.commit_all("base");
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        repo.write("shared.txt", "line1\nFEATURE-A\nline3\n");
+        repo.write("feature.txt", "f\n");
+        repo.commit_all("feature commit 1");
+        repo.write("shared.txt", "line1\nFEATURE-B\nline3\n");
+        repo.commit_all("feature commit 2");
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("shared.txt", "line1\nMAIN\nline3\n");
+        repo.write("main.txt", "m\n");
+        repo.commit_all("main edit");
+        repo.git(&["checkout", "-q", "feature"]);
+        repo
+    }
+
+    /// `preview_rebase`'s output on this fixture, recorded before its replay
+    /// loop was extracted into `replay_preview` (Task 4 of the stacked-branches
+    /// plan). The extraction must not change a byte of it.
+    const PREVIEW_REBASE_BEFORE_EXTRACTION: &str = r#"[{"file_path":"shared.txt","conflict_content":"line1\n<<<<<<< ours\nMAIN\n||||||| base\nline2\n=======\nFEATURE-A\n>>>>>>> theirs\nline3\n","has_conflicts":true,"is_add_delete":false},{"file_path":"feature.txt","conflict_content":"","has_conflicts":false,"is_add_delete":false},{"file_path":"main.txt","conflict_content":"","has_conflicts":false,"is_add_delete":false}]"#;
+
+    #[test]
+    fn preview_rebase_output_is_unchanged_by_the_extraction() {
+        let repo = two_commit_stack_fixture();
+        let before: serde_json::Value =
+            serde_json::from_str(PREVIEW_REBASE_BEFORE_EXTRACTION).unwrap();
+        let after =
+            tauri::async_runtime::block_on(preview_rebase(repo.cwd().into(), "main".into()))
+                .unwrap();
+        assert_eq!(serde_json::to_value(&after).unwrap(), before);
+        // The shared core, called the way `preview_rebase` calls it.
+        let git = git_binary();
+        let onto = ref_sha(&repo, "main");
+        let head = repo.head_sha();
+        let base = merge_base(&repo, "HEAD", "main");
+        let direct = replay_preview(&git, repo.cwd(), &onto, &base, &head).unwrap();
+        assert_eq!(serde_json::to_value(&direct).unwrap(), before);
+    }
+
+    // ── restack ───────────────────────────────────────────────
+
+    use crate::worktree::test_support::TempRepo as StackRepo;
+
+    /// main <- step-1 (two commits on a.txt) <- step-2 (b.txt) <- step-3
+    /// (c.txt); step-1 squash-merged on origin/main, local main left behind.
+    /// Returns the old step-1 tip.
+    fn squashed_stack() -> (StackRepo, String) {
+        let r = StackRepo::new();
+        r.add_bare_origin();
+        r.git(&["checkout", "-q", "-b", "step-1"]);
+        r.commit("a.txt", "1\n", "s1");
+        let old_tip = r.commit("a.txt", "1\n2\n", "s1 second");
+        r.git(&["checkout", "-q", "-b", "step-2"]);
+        r.commit("b.txt", "2\n", "s2");
+        r.git(&["checkout", "-q", "-b", "step-3"]);
+        r.commit("c.txt", "3\n", "s3");
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&["merge", "-q", "--squash", "step-1"]);
+        r.git(&["commit", "-q", "-m", "step 1 (squash)"]);
+        r.git(&["push", "-q", "origin", "main"]);
+        r.git(&["reset", "-q", "--hard", "HEAD~1"]);
+        r.git(&["checkout", "-q", "step-3"]);
+        (r, old_tip)
+    }
+
+    fn restack(
+        r: &StackRepo,
+        onto: &str,
+        upstream: &str,
+        branch: &str,
+    ) -> Result<Vec<FileMergePreview>, String> {
+        tauri::async_runtime::block_on(preview_restack(
+            r.path.to_str().unwrap().into(),
+            onto.into(),
+            upstream.into(),
+            branch.into(),
+        ))
+    }
+
+    #[test]
+    fn preview_restack_replays_only_the_layers_commits() {
+        let (r, old_tip) = squashed_stack();
+        // A plain rebase would replay step-1's first commit onto the squash
+        // and conflict on a.txt.
+        let plain = tauri::async_runtime::block_on(preview_rebase(
+            r.path.to_str().unwrap().into(),
+            "origin/main".into(),
+        ))
+        .unwrap();
+        assert!(plain
+            .iter()
+            .any(|p| p.file_path == "a.txt" && (p.has_conflicts || p.is_add_delete)));
+        let v = restack(&r, "origin/main", &old_tip, "step-3").unwrap();
+        let mut files: Vec<&str> = v.iter().map(|p| p.file_path.as_str()).collect();
+        files.sort();
+        assert!(!files.contains(&"a.txt"), "{files:?}");
+        assert!(
+            files.contains(&"b.txt") && files.contains(&"c.txt"),
+            "{files:?}"
+        );
+        assert!(v.iter().all(|p| !p.has_conflicts && !p.is_add_delete));
+    }
+
+    #[test]
+    fn preview_restack_refuses_option_like_and_unknown_refs() {
+        let (r, old_tip) = squashed_stack();
+        assert_eq!(
+            restack(&r, "--exec=x", &old_tip, "step-3").err().unwrap(),
+            "invalid ref: --exec=x"
+        );
+        assert_eq!(
+            restack(&r, "origin/main", "-x", "step-3").err().unwrap(),
+            "invalid ref: -x"
+        );
+        assert_eq!(
+            restack(&r, "origin/main", &old_tip, "-b").err().unwrap(),
+            "invalid ref: -b"
+        );
+        assert_eq!(
+            restack(&r, "origin/main", &old_tip, "nope").err().unwrap(),
+            "Unknown or invalid ref: nope"
         );
     }
 }
