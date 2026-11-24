@@ -365,11 +365,15 @@ impl<'a> Repo<'a> {
     }
 
     /// Blockers of each of `paths` at one step: the commits outside the
-    /// selection that touch it between the replay base and `Ci^`, newest
-    /// first, at most `MAX_BLOCKERS` — what `rev-list --full-history Ci^
-    /// --not <base> -- <path>` lists once the `selected` hashes are dropped.
-    /// The ancestors of an earlier selected commit stay in the walk: their
-    /// changes are not in the replayed tree, only the selected ones are. One `git log` walk per argv-sized pathspec batch, never
+    /// selection that touch it on either side between the replay base and
+    /// `Ci^`, newest first, at most `MAX_BLOCKERS` — what `rev-list
+    /// --full-history Ci^...<base> -- <path>` lists once the `selected`
+    /// hashes are dropped. `Ci^ --not <base>`: changes `Ci` was written on
+    /// that the replay lacks. `<base> --not Ci^`: changes the replay starts
+    /// from that `Ci` never saw — with selected commits on two branches, an
+    /// unselected commit under the oldest one is in the base and can be the
+    /// cause. The ancestors of an earlier selected commit stay in the walk:
+    /// their changes are not in the replayed tree, only the selected ones are. One `git log` walk per argv-sized pathspec batch, never
     /// one spawn per path. The walk is not bounded: with several paths, any
     /// `--max-count` could stop before an older blocker of a quieter path.
     /// `--full-history` keeps each path's answer independent of the other
@@ -407,12 +411,14 @@ impl<'a> Repo<'a> {
                 "--name-only",
                 "-z",
                 "--format=%x00%x01%H",
-                parent,
-                "--not",
             ]);
-            if let Some(b) = base {
-                cmd.arg(b);
-            }
+            // `Ci^...<base>`: the union of `Ci^ --not <base>` and
+            // `<base> --not Ci^`, in one date-ordered walk (newest first).
+            // Both object ids come from git (`rev-parse`), never from input.
+            match base {
+                Some(b) => cmd.arg(format!("{parent}...{b}")),
+                None => cmd.arg(parent),
+            };
             cmd.arg("--").args(&batch);
             cmd.env("GIT_LITERAL_PATHSPECS", "1");
             let commits = parse_log_names(&self.stdout(cmd, "log")?)?;
@@ -1178,6 +1184,53 @@ mod tests {
         assert_eq!(got.fallback[0].path, "f");
         assert!(got.fallback[0].blockers.is_empty());
         assert_eq!(got.fallback[0].per_commit.len(), 2);
+    }
+
+    /// One commit from `(path, content)` pairs at a fixed date (unix
+    /// seconds, author and committer alike).
+    fn commit_files_at(r: &TempRepo, files: &[(&str, Option<&str>)], msg: &str, ts: i64) -> String {
+        for (path, content) in files {
+            match content {
+                Some(c) => r.write(path, c),
+                None => std::fs::remove_file(r.path.join(path)).unwrap(),
+            }
+        }
+        r.git(&["add", "-A"]);
+        let date = format!("{ts} +0000");
+        let out = std::process::Command::new(crate::git::git_binary())
+            .args(["commit", "-q", "-m", msg])
+            .env("GIT_COMMITTER_DATE", &date)
+            .env("GIT_AUTHOR_DATE", &date)
+            .current_dir(&r.path)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        r.git(&["rev-parse", "HEAD"])
+    }
+
+    /// Selected commits on two branches: the replay base is the parent of
+    /// the oldest one (Y^ = U), already holding U's change to `f`. X's
+    /// conflict on `f` comes from U, an unselected commit that is in the
+    /// base but not under X^ — it is named, never "between selected commits".
+    #[test]
+    fn blocker_already_in_the_replay_base_is_named() {
+        let r = TempRepo::new();
+        commit_files_at(&r, &[("f", Some("x=1\n"))], "M", 1_000_000_000);
+        r.git(&["checkout", "-q", "-b", "b2"]);
+        let u = commit_files_at(&r, &[("f", Some("x=2\n"))], "U", 1_000_001_000);
+        let y = commit_files_at(&r, &[("g", Some("g\n"))], "Y", 1_000_002_000);
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&["checkout", "-q", "-b", "b1"]);
+        let x = commit_files_at(&r, &[("f", Some("x=3\n"))], "X", 1_000_003_000);
+        let got = run(&r, &[&x, &y], None);
+        assert_eq!(got.base, Some(u.clone()));
+        let f = got.fallback.iter().find(|f| f.path == "f").unwrap();
+        assert!(f.conflicted);
+        assert_eq!(f.blockers, vec![u]);
     }
 
     #[test]

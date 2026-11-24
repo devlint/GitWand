@@ -148,6 +148,25 @@ describe("parity: git-combined-diff", () => {
     expect(p.blockers).toEqual([b1]);
   });
 
+  // replay.rs `blocker_already_in_the_replay_base_is_named`: selected commits
+  // on two branches; U (unselected) is in the replay base (Y^) but not under
+  // X^, and X's conflict on `f` comes from it.
+  it("a blocker already in the replay base is named", async () => {
+    const cwd = repo("baseblocker");
+    commitFiles(cwd, { f: "x=1\n" }, "M", 0);
+    git(cwd, ["checkout", "-q", "-b", "b2"]);
+    const u = commitFiles(cwd, { f: "x=2\n" }, "U", 1);
+    const y = commitFiles(cwd, { g: "g\n" }, "Y", 2);
+    git(cwd, ["checkout", "-q", "main"]);
+    git(cwd, ["checkout", "-q", "-b", "b1"]);
+    const x = commitFiles(cwd, { f: "x=3\n" }, "X", 3);
+    const { rust } = await parity(cwd, [x, y]);
+    expect(rust.base).toBe(u);
+    const f = rust.fallback.find((e) => e.path === "f");
+    expect(f.conflicted).toBe(true);
+    expect(f.blockers).toEqual([u]);
+  });
+
   it("a merge=union attribute sends the file to the fallback as a companion", async () => {
     const cwd = repo("union");
     commitFiles(cwd, { ".gitattributes": "f merge=union\n", f: "a\nx=1\nc\n", g: "g\n" }, "base", 0);

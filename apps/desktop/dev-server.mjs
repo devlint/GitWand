@@ -1512,8 +1512,8 @@ class CombinedRepo {
 
   /**
    * replay.rs `blockers`: per path of `paths`, the commits outside the
-   * selection touching it (`--full-history`) between the replay base and
-   * `parent`, newest first, at most 5 — one unbounded `git log` walk per
+   * selection touching it (`--full-history`) on either side between the
+   * replay base and `parent` (`parent...base`), newest first, at most 5 — one unbounded `git log` walk per
    * argv-sized pathspec batch, the `selected` hashes dropped afterwards (an
    * earlier selected commit's ancestors stay: their changes are not in the
    * replayed tree). A merge counts when it changed the path itself.
@@ -1529,9 +1529,10 @@ class CombinedRepo {
         "-c", "log.follow=false",
         "log", "--no-color", "--no-show-signature", "--no-renames", "--no-relative",
         "--ignore-submodules=none", "--full-history", "--root", "--diff-merges=combined",
-        "--name-only", "-z", "--format=%x00%x01%H", parent, "--not",
+        "--name-only", "-z", "--format=%x00%x01%H",
+        // `Ci^...<base>`: both sides, in one date-ordered walk.
+        base !== null ? `${parent}...${base}` : parent,
       ];
-      if (base !== null) args.push(base);
       args.push("--", ...batch);
       const commits = combinedParseLogNames(await this.stdout(args, "log", { env: { GIT_LITERAL_PATHSPECS: "1" } }));
       for (const path of batch) {
