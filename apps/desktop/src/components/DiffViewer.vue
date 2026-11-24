@@ -2,6 +2,7 @@
 import { ref, computed, defineAsyncComponent, nextTick, watch, onMounted, onUnmounted, inject } from "vue";
 import { TOGGLE_GIT_TREE_KEY } from "../composables/branchPickerBridge";
 import type { GitDiff, DiffLine } from "../utils/backend";
+import { lineKeyFor } from "../utils/diffLineKey";
 import { useI18n } from "../composables/useI18n";
 import { useTheme } from "../composables/useTheme";
 import type { DiffMode } from "../utils/diffMode";
@@ -148,19 +149,11 @@ function confirmHunkEdit() {
  *  — LEFT/RIGHT on the same line number never merge. */
 const findingsByLine = computed(() => annotationsByLine(props.findings.map(fromFinding)));
 
-/** Which `${side}:${line}` key a diff line is anchored at. Deleted lines
- *  only have an old-side line number (LEFT); added/context lines are keyed
- *  on the new-side line number (RIGHT) — matching the "new-file line
- *  number" convention `usePrPreReview`'s prompt asks the model for. */
-function lineKeyFor(dl: DiffLine): string {
-  return dl.type === "delete" ? `LEFT:${dl.oldLineNo}` : `RIGHT:${dl.newLineNo}`;
-}
-
 /** Findings anchored on this diff line, or `[]` for a line with none — an
  *  orphan finding (line not present in this diff) simply never matches any
  *  key, so it renders nothing rather than throwing. */
 function findingsForLine(dl: DiffLine): LineAnnotation[] {
-  return findingsByLine.value.get(lineKeyFor(dl)) ?? [];
+  return findingsByLine.value.get(lineKeyFor(dl) ?? "") ?? [];
 }
 
 const FINDING_SEVERITY_LABEL_KEY: Record<string, "commitReview.severityRisk" | "commitReview.severitySuggestion" | "commitReview.severityNit"> = {
@@ -788,7 +781,7 @@ function onDiffScroll() {
                     `diff-line--${il.line.type}`,
                     { 'diff-line--selected': selectable && isLineSelected(hunkIdx, il.origIdx) },
                   ]"
-                  :data-line-key="lineKeyFor(il.line)"
+                  :data-line-key="lineKeyFor(il.line) ?? undefined"
                 >
                   <td v-if="selectable" class="line-check">
                     <input
