@@ -6,6 +6,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createApp, h, nextTick, ref, type App } from "vue";
 import CombinedDiffBody from "../CombinedDiffBody.vue";
+import { buildCombinedEntries } from "../../utils/combinedAttribution";
 import type { CombinedDiff, GitDiff } from "../../utils/backend";
 
 vi.mock("../../composables/useI18n", () => ({
@@ -37,7 +38,7 @@ async function mount(p: SummaryProps) {
     render: () =>
       h(CombinedDiffBody, {
         request: { hashes: commits.map((c) => c.hash) }, diffMode: "inline",
-        data, loading: false, error: null,
+        data, entries: buildCombinedEntries(data), loading: false, error: null,
         summary: null, summarizing: false, summaryError: false, ...p,
         onSummarize: () => { emittedSummarize++; },
       }),

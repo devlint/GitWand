@@ -27,7 +27,7 @@ const emit = defineEmits<{
   "update:diffMode": [mode: DiffMode];
 }>();
 
-const { data, loading, error, reload } = useCombinedDiff(toRef(props, "cwd"), toRef(props, "request"));
+const { data, entries, loading, error, reload } = useCombinedDiff(toRef(props, "cwd"), toRef(props, "request"));
 
 const { available, summary, loading: summarizing, error: summaryErr, generate, reset } = useCombinedSummary();
 // A new/reloaded diff makes a previous summary stale.
@@ -54,6 +54,7 @@ function jumpToCommit(hash: string) {
     :request="request"
     :diff-mode="diffMode"
     :data="data"
+    :entries="entries"
     :loading="loading"
     :error="error"
     :ai-available="available"

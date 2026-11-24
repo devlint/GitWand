@@ -6,6 +6,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createApp, h, nextTick, ref, type App } from "vue";
 import CombinedDiffBody from "../CombinedDiffBody.vue";
+import { buildCombinedEntries } from "../../utils/combinedAttribution";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,6 +58,7 @@ async function mount(c: CombinedDiff | Error, request = { hashes: [H1, H2, H3] }
       h(CombinedDiffBody, {
         request, diffMode: "inline",
         data: c instanceof Error ? null : c,
+        entries: c instanceof Error ? [] : buildCombinedEntries(c),
         loading: false,
         error: c instanceof Error ? c.message : null,
         aiAvailable: false, summary: null, summarizing: false, summaryError: false,
@@ -134,7 +136,7 @@ describe("CombinedDiffBody", () => {
     document.body.appendChild(container);
     app = createApp({
       render: () => h(CombinedDiffBody, {
-        request: { hashes: [H1, H2] }, diffMode: "inline", data: null, loading: true, error: null,
+        request: { hashes: [H1, H2] }, diffMode: "inline", data: null, entries: [], loading: true, error: null,
         aiAvailable: false, summary: null, summarizing: false, summaryError: false,
       }),
     });

@@ -11,7 +11,7 @@ import CommitDiffViewer from "./CommitDiffViewer.vue";
 import { useI18n } from "../composables/useI18n";
 import type { CombinedRequest } from "../composables/useCombinedDiff";
 import { formatBytes } from "../composables/useFilePreview";
-import { buildCombinedEntries } from "../utils/combinedAttribution";
+import type { CombinedEntry } from "../utils/combinedAttribution";
 import { commitColor } from "../utils/commitColors";
 import { COMBINED_CANCELLED, combinedErrorMessage } from "../utils/combinedError";
 import "../assets/combined-palette.css";
@@ -24,6 +24,8 @@ const props = defineProps<{
   request: CombinedRequest;
   diffMode: DiffMode;
   data: CombinedDiff | null;
+  /** `data`'s entries with their attribution (`useCombinedDiff`). */
+  entries: CombinedEntry[];
   loading: boolean;
   /** The backend's raw error, localized here. */
   error: string | null;
@@ -42,11 +44,9 @@ const emit = defineEmits<{
   summarize: [];
 }>();
 
-const entries = computed(() => (props.data ? buildCombinedEntries(props.data) : []));
-
 const commits = computed(() => props.data?.commits ?? []);
-const diffs = computed(() => entries.value.map((e) => e.diff));
-const attribution = computed(() => entries.value.map((e) => e.attribution));
+const diffs = computed(() => props.entries.map((e) => e.diff));
+const attribution = computed(() => props.entries.map((e) => e.attribution));
 
 function shortOf(hash: string): string {
   return commits.value.find((c) => c.hash === hash)?.shortHash ?? hash.slice(0, 7);
@@ -71,7 +71,7 @@ const fileNotes = computed<(string | null)[]>(() => {
   // are cut (or not) on their own.
   const key = (path: string, commit: string | null) => `${commit ?? ""}\0${path}`;
   const omitted = new Set((props.data?.budgetOmitted ?? []).map((o) => key(o.path, o.commit)));
-  return entries.value.map((e) => {
+  return props.entries.map((e) => {
     const first = !seen.has(e.diff.path);
     seen.add(e.diff.path);
     const banner = e.fallback && first ? fallbackNote(e.diff.path, e.fallback) : null;
@@ -85,7 +85,7 @@ const fileNotes = computed<(string | null)[]>(() => {
   });
 });
 
-const fileCount = computed(() => new Set(entries.value.map((e) => e.diff.path)).size);
+const fileCount = computed(() => new Set(props.entries.map((e) => e.diff.path)).size);
 const limitedTo = computed(() => props.request.paths?.join(", ") ?? "");
 
 /** `n file(s)`: the number's place is the locale's (`{0}`). */
