@@ -109,4 +109,47 @@ describe("useCombinedDiff", () => {
     expect(c.data.value).toBeNull();
     expect(calls).toBe(1);
   });
+  it("a remount with the same repo and request reuses the last result (no replay)", async () => {
+    let calls = 0;
+    const fetcher = async () => { calls++; return combined("c1"); };
+    const first = useCombinedDiff(ref("/r"), ref({ hashes: ["a", "b"], paths: ["x"] }), fetcher);
+    await flush();
+    expect(first.data.value?.commits[0].shortHash).toBe("c1");
+    const again = useCombinedDiff(ref("/r"), ref({ hashes: ["a", "b"], paths: ["x"] }), fetcher);
+    expect(again.loading.value).toBe(false);
+    expect(again.data.value?.commits[0].shortHash).toBe("c1");
+    await flush();
+    expect(calls).toBe(1);
+  });
+
+  it("reload, another request or another repo fetches again", async () => {
+    let calls = 0;
+    const fetcher = async () => { calls++; return combined(`c${calls}`); };
+    const c = useCombinedDiff(ref("/r"), ref({ hashes: ["a", "b"] }), fetcher);
+    await flush();
+    c.reload();
+    await flush();
+    expect(calls).toBe(2);
+    expect(c.data.value?.commits[0].shortHash).toBe("c2");
+    useCombinedDiff(ref("/r"), ref({ hashes: ["a", "c"] }), fetcher);
+    await flush();
+    expect(calls).toBe(3);
+    useCombinedDiff(ref("/other"), ref({ hashes: ["a", "c"] }), fetcher);
+    await flush();
+    expect(calls).toBe(4);
+    // Switching repo dropped the cache of the first one.
+    useCombinedDiff(ref("/r"), ref({ hashes: ["a", "c"] }), fetcher);
+    await flush();
+    expect(calls).toBe(5);
+  });
+
+  it("an error is not cached", async () => {
+    let calls = 0;
+    const fetcher = async () => { calls++; throw new Error("boom"); };
+    useCombinedDiff(ref("/r"), ref({ hashes: ["e", "f"] }), fetcher);
+    await flush();
+    useCombinedDiff(ref("/r"), ref({ hashes: ["e", "f"] }), fetcher);
+    await flush();
+    expect(calls).toBe(2);
+  });
 });

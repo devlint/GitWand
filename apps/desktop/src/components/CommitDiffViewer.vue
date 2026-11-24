@@ -15,6 +15,7 @@ import type { DiffSelection } from "../utils/issuePrefill";
 import type { FileAttribution } from "../utils/combinedAttribution";
 import { lineKeyFor } from "../utils/diffLineKey";
 import { commitColor } from "../utils/commitColors";
+import "../assets/combined-palette.css";
 
 const { t } = useI18n();
 
@@ -51,6 +52,13 @@ function lineCommitIdx(fileIdx: number, line: DiffLine | null | undefined): numb
   if (!line) return undefined;
   const key = lineKeyFor(line);
   return key === null ? undefined : props.attribution?.[fileIdx]?.lineCommit.get(key);
+}
+
+/** Side-by-side: the line a pair's gutter marker stands for — the added
+ *  line, else the deleted one, else the context line. */
+function sbsAttrLine(pair: SbsPair): DiffLine | null {
+  if (pair.right?.type === "add") return pair.right;
+  return pair.left?.type === "delete" ? pair.left : pair.right;
 }
 
 function markerStyle(idx: number | undefined) {
@@ -505,7 +513,7 @@ function onContentScroll(e: Event) {
 </script>
 
 <template>
-  <div class="commit-diff-viewer">
+  <div class="commit-diff-viewer combined-palette">
     <!-- Commit card -->
     <div class="cdv-commit-card" v-if="commitInfo">
       <!-- Row 1: avatar + subject + hash -->
@@ -701,8 +709,8 @@ function onContentScroll(e: Event) {
                       <span
                         v-if="attribution"
                         class="cdv-attr-marker"
-                        :style="markerStyle(lineCommitIdx(fileIdx - 1, pair.right?.type === 'add' ? pair.right : (pair.left?.type === 'delete' ? pair.left : pair.right)))"
-                        :title="markerTitle(lineCommitIdx(fileIdx - 1, pair.right?.type === 'add' ? pair.right : (pair.left?.type === 'delete' ? pair.left : pair.right)))"
+                        :style="markerStyle(lineCommitIdx(fileIdx - 1, sbsAttrLine(pair)))"
+                        :title="markerTitle(lineCommitIdx(fileIdx - 1, sbsAttrLine(pair)))"
                       ></span>
                     </td>
                     <td
@@ -1027,29 +1035,7 @@ function onContentScroll(e: Event) {
 .cdv-issue-btn:hover { background: var(--color-accent-hover); }
 
 /* ─── Combined-diff attribution ───────────────────────── */
-/* 8 commit colours, ≥ 3:1 against the diff backgrounds in both themes
-   (context / added / deleted rows). Dark is the default theme. */
-.commit-diff-viewer {
-  --combined-c0: #a78bfa;
-  --combined-c1: #f472b6;
-  --combined-c2: #f87171;
-  --combined-c3: #fb923c;
-  --combined-c4: #facc15;
-  --combined-c5: #4ade80;
-  --combined-c6: #22d3ee;
-  --combined-c7: #60a5fa;
-}
-:global([data-theme="light"]) .commit-diff-viewer {
-  --combined-c0: #7c3aed;
-  --combined-c1: #db2777;
-  --combined-c2: #dc2626;
-  --combined-c3: #c2410c;
-  --combined-c4: #a16207;
-  --combined-c5: #15803d;
-  --combined-c6: #0e7490;
-  --combined-c7: #2563eb;
-}
-
+/* Commit colours: assets/combined-palette.css (`.combined-palette`). */
 td.cdv-attr-marker {
   width: 3px;
   min-width: 3px;

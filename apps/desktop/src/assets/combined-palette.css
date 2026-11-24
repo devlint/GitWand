@@ -1,0 +1,28 @@
+/*
+ * Combined diffs: the 8 commit colours (`commitColor()` in
+ * utils/commitColors.ts), ≥ 3:1 against the diff backgrounds in both themes
+ * (context / added / deleted rows). Defined once, on `.combined-palette`,
+ * which both `CombinedDiffView` (header chips, file list) and
+ * `CommitDiffViewer` (gutter markers, hunk chips) carry. Dark is the default
+ * theme.
+ */
+.combined-palette {
+  --combined-c0: #a78bfa;
+  --combined-c1: #f472b6;
+  --combined-c2: #f87171;
+  --combined-c3: #fb923c;
+  --combined-c4: #facc15;
+  --combined-c5: #4ade80;
+  --combined-c6: #22d3ee;
+  --combined-c7: #60a5fa;
+}
+[data-theme="light"] .combined-palette {
+  --combined-c0: #7c3aed;
+  --combined-c1: #db2777;
+  --combined-c2: #dc2626;
+  --combined-c3: #c2410c;
+  --combined-c4: #a16207;
+  --combined-c5: #15803d;
+  --combined-c6: #0e7490;
+  --combined-c7: #2563eb;
+}

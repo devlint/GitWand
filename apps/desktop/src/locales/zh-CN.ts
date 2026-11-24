@@ -3233,6 +3233,10 @@ const zhCN: Locale = {
     tooLarge: "文件过大，无法显示（{0}）",
     summarize: "总结这 {0} 个提交",
     summaryError: "无法生成摘要。",
+    perCommitCount: "{0} 逐个提交显示",
+    fallbackSummary: "逐个提交显示：{0}，缺少 {1} 无法合并。",
+    fallbackSummaryBetween: "逐个提交显示：{0}，所选提交之间存在冲突。",
+    fallbackSummaryOther: "逐个提交显示：{0}，无法合并。",
   },
 };
 

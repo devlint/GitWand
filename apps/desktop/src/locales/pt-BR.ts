@@ -3223,6 +3223,10 @@ const ptBR: Locale = {
     tooLarge: "Arquivo grande demais para exibir ({0})",
     summarize: "Resumir estes {0} commits",
     summaryError: "Não foi possível gerar o resumo.",
+    perCommitCount: "{0} commit a commit",
+    fallbackSummary: "Exibidos commit a commit: {0}, não combináveis sem {1}.",
+    fallbackSummaryBetween: "Exibidos commit a commit: {0}, em conflito entre os commits selecionados.",
+    fallbackSummaryOther: "Exibidos commit a commit: {0}, não puderam ser combinados.",
   },
 };
 

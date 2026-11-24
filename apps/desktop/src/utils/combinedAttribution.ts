@@ -139,7 +139,10 @@ export function buildCombinedEntries(c: CombinedDiff): CombinedEntry[] {
       const hunkCommits: number[][] = [];
       for (const h of p.diff.hunks) {
         if (idx >= 0) {
+          // Only the lines the commit wrote: context lines are not its own,
+          // and the section chip already names the commit.
           for (const l of h.lines) {
+            if (l.type !== "add" && l.type !== "delete") continue;
             const key = lineKeyFor(l);
             if (key !== null) lineCommit.set(key, idx);
           }

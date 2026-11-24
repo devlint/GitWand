@@ -3268,6 +3268,10 @@ const en = {
     tooLarge: "File too large to display ({0})",
     summarize: "Summarize these {0} commits",
     summaryError: "Could not generate the summary.",
+    perCommitCount: "{0} commit by commit",
+    fallbackSummary: "Shown commit by commit: {0}, not combinable without {1}.",
+    fallbackSummaryBetween: "Shown commit by commit: {0}, in conflict between the selected commits.",
+    fallbackSummaryOther: "Shown commit by commit: {0}, could not be combined.",
   },
 } as const;
 

@@ -137,6 +137,24 @@ describe("buildCombinedEntries", () => {
     expect(entries[1].fallback).toEqual({ blockers: ["b"], conflicted: true });
   });
 
+  it("fallback_sections_attribute_changed_lines_only", () => {
+    const ctx: DiffLine = { type: "context", content: "c", oldLineNo: 1, newLineNo: 1 };
+    const entries = buildCombinedEntries(
+      combined(1, [], [], [{
+        path: "g",
+        perCommit: [{ hash: "h0", diff: file("g", [hunk(1, 2, 1, 2, [ctx, del(2), add(2)])]) }],
+        blockers: [],
+        conflicted: false,
+      }]),
+    );
+    const a = entries[0].attribution;
+    expect(a.sectionCommit).toBe(0);
+    expect(a.lineCommit.get(lineKeyFor(ctx)!)).toBeUndefined();
+    expect(a.lineCommit.get("LEFT:2")).toBe(0);
+    expect(a.lineCommit.get("RIGHT:2")).toBe(0);
+    expect(a.lineCommit.size).toBe(2);
+  });
+
   it("hunkless_file_is_ignored", () => {
     const e = buildCombinedEntries(combined(2, [file("bin", [])], [[file("bin", [])], []]));
     expect(e[0].attribution.lineCommit.size).toBe(0);

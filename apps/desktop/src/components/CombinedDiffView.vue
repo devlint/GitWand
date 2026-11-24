@@ -12,6 +12,7 @@ import { useCombinedDiff, type CombinedRequest } from "../composables/useCombine
 import { useCombinedSummary, type CombinedSummaryDeps } from "../composables/useCombinedSummary";
 import { formatBytes } from "../composables/useFilePreview";
 import { commitColor } from "../utils/commitColors";
+import "../assets/combined-palette.css";
 import type { getCombinedDiff } from "../utils/backend";
 import type { DiffMode } from "../utils/diffMode";
 
@@ -43,7 +44,7 @@ const { available: aiAvailable, summary, loading: summarizing, error: summaryErr
 // A new/reloaded diff makes a previous summary stale.
 watch(data, () => resetSummary());
 function summarize() {
-  if (data.value) void generate(data.value, locale?.value ?? "en");
+  if (data.value) void generate(data.value, locale.value);
 }
 
 const commits = computed(() => data.value?.commits ?? []);
@@ -76,10 +77,15 @@ const fileNotes = computed<(string | null)[]>(() => {
 const fileCount = computed(() => new Set(entries.value.map((e) => e.diff.path)).size);
 const limitedTo = computed(() => props.request.paths?.join(", ") ?? "");
 
+/** `n file(s)`, with the header's own words. */
+const filesLabel = (n: number) => `${n} ${n === 1 ? t("header.file") : t("header.files")}`;
+
+/** `+N −M` of the net diff only: a fallback file's per-commit sections are
+ *  not net, and a line two commits change would count twice. */
 const stats = computed(() => {
   let adds = 0;
   let dels = 0;
-  for (const d of diffs.value) {
+  for (const d of data.value?.diffs ?? []) {
     for (const h of d.hunks) {
       for (const l of h.lines) {
         if (l.type === "add") adds++;
@@ -88,6 +94,22 @@ const stats = computed(() => {
     }
   }
   return { adds, dels };
+});
+
+const fallbackCount = computed(() => data.value?.fallback.length ?? 0);
+
+/** One line under the header when files fell back (spec §5.5). */
+const fallbackSummary = computed(() => {
+  const fb = data.value?.fallback ?? [];
+  if (fb.length === 0) return null;
+  const files = filesLabel(fb.length);
+  const blockers = [...new Set(fb.flatMap((f) => (f.conflicted ? f.blockers : [])))].map(shortOf);
+  if (blockers.length > 0) {
+    const shown = blockers.length > 3 ? [...blockers.slice(0, 3), "…"] : blockers;
+    return t("combined.fallbackSummary", files, shown.join(", "));
+  }
+  if (fb.some((f) => f.conflicted)) return t("combined.fallbackSummaryBetween", files);
+  return t("combined.fallbackSummaryOther", files);
 });
 
 // ─── Own file list ────────────────────────────────────────
@@ -116,7 +138,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
 </script>
 
 <template>
-  <div ref="root" class="cmb">
+  <div ref="root" class="cmb combined-palette">
     <header class="cmb-header">
       <div class="cmb-chips">
         <button
@@ -134,9 +156,10 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
       <div class="cmb-meta">
         <span v-if="request.paths?.length" class="cmb-limited mono">{{ t("combined.limitedTo", limitedTo) }}</span>
         <span v-if="data" class="cmb-counts">
-          {{ fileCount }} {{ fileCount === 1 ? t("header.file") : t("header.files") }}
+          {{ filesLabel(fileCount) }}
           <span class="cmb-add" v-if="stats.adds > 0">+{{ stats.adds }}</span>
           <span class="cmb-del" v-if="stats.dels > 0">&minus;{{ stats.dels }}</span>
+          <span v-if="fallbackCount > 0" class="cmb-percommit">{{ t("combined.perCommitCount", fallbackCount) }}</span>
         </span>
         <button
           v-if="aiAvailable && data && commits.length > 0"
@@ -170,6 +193,8 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
         </button>
       </div>
     </header>
+
+    <div v-if="fallbackSummary && !loading" class="cmb-fallback" role="note">{{ fallbackSummary }}</div>
 
     <div v-if="summary || summaryErr" class="cmb-summary" :class="{ 'cmb-summary--error': summaryErr }" :role="summaryErr ? 'alert' : 'status'">
       <template v-if="summaryErr">{{ t("combined.summaryError") }}</template>
@@ -242,6 +267,11 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
 .cmb-limited { padding: 2px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm, 6px); }
 .cmb-add { color: var(--color-success, #3fb950); margin-left: 4px; }
 .cmb-del { color: var(--color-danger, #f85149); margin-left: 4px; }
+.cmb-percommit { margin-left: 6px; }
+.cmb-fallback {
+  padding: 6px var(--space-4, 12px); border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary); color: var(--color-text-muted); font-size: var(--font-size-sm, 12px);
+}
 .cmb-mode, .cmb-close {
   display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm, 6px);

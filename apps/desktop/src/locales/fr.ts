@@ -3233,6 +3233,10 @@ const fr: Locale = {
     tooLarge: "Fichier trop volumineux pour être affiché ({0})",
     summarize: "Résumer ces {0} commits",
     summaryError: "Impossible de générer le résumé.",
+    perCommitCount: "{0} commit par commit",
+    fallbackSummary: "Affichés commit par commit : {0}, non combinables sans {1}.",
+    fallbackSummaryBetween: "Affichés commit par commit : {0}, en conflit entre les commits sélectionnés.",
+    fallbackSummaryOther: "Affichés commit par commit : {0}, non combinables.",
   },
 };
 

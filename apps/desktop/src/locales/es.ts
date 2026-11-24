@@ -3223,6 +3223,10 @@ const es: Locale = {
     tooLarge: "Archivo demasiado grande para mostrarlo ({0})",
     summarize: "Resumir estos {0} commits",
     summaryError: "No se pudo generar el resumen.",
+    perCommitCount: "{0} commit a commit",
+    fallbackSummary: "Mostrados commit a commit: {0}, no combinables sin {1}.",
+    fallbackSummaryBetween: "Mostrados commit a commit: {0}, en conflicto entre los commits seleccionados.",
+    fallbackSummaryOther: "Mostrados commit a commit: {0}, no se pudieron combinar.",
   },
 };
 
