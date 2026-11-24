@@ -27,10 +27,11 @@ _Inspired by GitBlade. A comparison primitive we lack: one aggregated diff acros
 **Today's baseline** — `getGitFileDiff(from, to)` and `folderDiff(refA, refB)` compare exactly two points; `CommitGraph.vue` is single-select; file history / split commit / fork point don't cover "these 3 commits together".
 
 - **Multi-select in the Git Tree** — `⌘`-click / `⇧`-click commit selection, selection chip ("3 commits selected → Combined diff")
-- **`combined_diff` Tauri command** — Rust-side aggregation of the selected commits' patches into one virtual diff (per-file hunk merge, conflict-free since same-history)
+- **`combined_diff` Tauri command** — Rust-side aggregation of the selected commits' patches into one virtual diff (replays the picked commits onto their common base with `git merge-tree` over synthetic commits, git ≥ 2.38, so the result is the net change; a file that does not replay cleanly falls back per file to a plain base-to-tip diff flagged `conflicted`, with the blocking commits named)
 - **Combined viewer** — standard DiffViewer rendering + per-hunk commit attribution (gutter badge → jump to commit)
-- **Entry points** — Git Tree context menu, file history ("combine these versions"), PR review (subset of commits)
+- **Entry points** — Git Tree context menu, file history ("combine these versions", limited to the file's paths, renames included)
 - **Optional AI summary** — "what these N commits do together" (what/why/affected areas) via `useAIProvider`, reusing the v3.5.0 PR-summary prompt
+- **Follow-up: PR review entry point** (subset of a PR's commits) — needs a PR commit list per forge and a fetch of `pull/N/head`
 
 ---
 

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Combined diffs.** Select several commits in the Git Tree, even non-consecutive, and review them as one change.
+  - **Selection.** `⌘`/`Ctrl`-click toggles a commit, `⇧`-click selects a range; a chip shows the count and opens the combined diff (also in the context menu); `Esc` clears, `Enter` opens.
+  - **Net result.** The commits are replayed onto their common base with `git merge-tree` (git 2.38 or later), so the diff is what they change together, not a sum of patches. A file that does not replay cleanly falls back to a plain base-to-tip diff, flagged as conflicted, with the commits that block it named; files over 5 MB are left out.
+  - **Attribution.** Each line carries the commit that wrote it (gutter marker, jump to that commit).
+  - **AI summary.** Optional summary of what the commits do together; only commit subjects and per-path counts are sent.
+  - **From a file's history.** Combine several versions of a file; the diff is limited to that file's paths, renames included.
+
+### Changed
+
+- **The desktop main-bundle budget is raised from 980 KB to 983 KB** for the combined-diff wrappers and strings; the view itself is a lazy chunk.
+
 ## [3.14.0] - 2026-11-24
 
 ### Added
