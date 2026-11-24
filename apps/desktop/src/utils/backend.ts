@@ -1652,6 +1652,30 @@ export interface CombinedDiff {
   truncated: boolean;
 }
 
+/** The Rust `CombinedDiff` payload: its `GitDiff`s keep snake_case hunks. */
+export type RawCombinedDiff = Omit<CombinedDiff, "diffs" | "steps" | "fallback"> & {
+  diffs: RawGitDiff[];
+  steps: RawGitDiff[][];
+  fallback: Array<Omit<CombinedFallbackFile, "perCommit"> & { perCommit: { hash: string; diff: RawGitDiff }[] }>;
+};
+
+/** Maps every `GitDiff` of the Rust payload with `mapRawGitDiff`. */
+export function mapRawCombinedDiff(raw: RawCombinedDiff): CombinedDiff {
+  return {
+    base: raw.base,
+    commits: raw.commits,
+    diffs: raw.diffs.map(mapRawGitDiff),
+    steps: raw.steps.map((step) => step.map(mapRawGitDiff)),
+    fallback: raw.fallback.map((f) => ({
+      path: f.path,
+      conflicted: f.conflicted,
+      perCommit: f.perCommit.map((p) => ({ hash: p.hash, diff: mapRawGitDiff(p.diff) })),
+      blockers: f.blockers,
+    })),
+    truncated: raw.truncated,
+  };
+}
+
 /**
  * Combined diff of 2 to 50 commits (any order), optionally limited to
  * `paths`. Throws the backend's message (invalid hash, bounds, unknown
@@ -1659,26 +1683,7 @@ export interface CombinedDiff {
  */
 export async function getCombinedDiff(cwd: string, hashes: string[], paths?: string[]): Promise<CombinedDiff> {
   if (isTauri()) {
-    const raw = await tauriInvoke<
-      Omit<CombinedDiff, "diffs" | "steps" | "fallback"> & {
-        diffs: RawGitDiff[];
-        steps: RawGitDiff[][];
-        fallback: Array<Omit<CombinedFallbackFile, "perCommit"> & { perCommit: { hash: string; diff: RawGitDiff }[] }>;
-      }
-    >("git_combined_diff", { cwd, hashes, paths });
-    return {
-      base: raw.base,
-      commits: raw.commits,
-      diffs: raw.diffs.map(mapRawGitDiff),
-      steps: raw.steps.map((step) => step.map(mapRawGitDiff)),
-      fallback: raw.fallback.map((f) => ({
-        path: f.path,
-        conflicted: f.conflicted,
-        perCommit: f.perCommit.map((p) => ({ hash: p.hash, diff: mapRawGitDiff(p.diff) })),
-        blockers: f.blockers,
-      })),
-      truncated: raw.truncated,
-    };
+    return mapRawCombinedDiff(await tauriInvoke<RawCombinedDiff>("git_combined_diff", { cwd, hashes, paths }));
   }
 
   const res = await devFetch(`${DEV_SERVER}/api/git-combined-diff`, {
