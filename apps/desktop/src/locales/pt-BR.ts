@@ -3228,6 +3228,7 @@ const ptBR: Locale = {
     fallbackSummaryBetween: "Exibidos commit a commit: {0}, em conflito entre os commits selecionados.",
     fallbackSummaryOther: "Exibidos commit a commit: {0}, não puderam ser combinados.",
     payloadTruncated: "Grande demais: algumas etapas ou arquivos foram omitidos.",
+    colorsRepeat: "As cores se repetem após 8 commits: veja o hash curto.",
     errGit: "Requer git 2.38+ (encontrado {0}).",
     errMin: "Selecione pelo menos 2 commits.",
     errHash: "Hash de commit inválido: {0}",

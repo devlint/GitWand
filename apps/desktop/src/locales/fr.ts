@@ -3238,6 +3238,7 @@ const fr: Locale = {
     fallbackSummaryBetween: "Affichés commit par commit : {0}, en conflit entre les commits sélectionnés.",
     fallbackSummaryOther: "Affichés commit par commit : {0}, non combinables.",
     payloadTruncated: "Trop volumineux : des étapes ou fichiers sont omis.",
+    colorsRepeat: "Couleurs répétées au-delà de 8 commits : voir le hash court.",
     errGit: "Nécessite git 2.38+ ({0} installé).",
     errMin: "Sélectionnez au moins 2 commits.",
     errHash: "Hash de commit invalide : {0}",

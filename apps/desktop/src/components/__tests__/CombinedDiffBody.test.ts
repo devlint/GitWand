@@ -207,6 +207,16 @@ describe("CombinedDiffBody", () => {
     expect(notes[0]).toContain("combined.tooLarge");
   });
 
+  it("notes that colours repeat past 8 commits, and only then", async () => {
+    const nine = Array.from({ length: 9 }, (_, i) => ({ hash: String(i).repeat(40), shortHash: String(i).repeat(7), subject: `s${i}`, author: "a", date: "d" }));
+    await mount(combined({ commits: nine, steps: nine.map(() => []) }));
+    expect(q(".cmb-colors-repeat")!.textContent).toBe("combined.colorsRepeat");
+    app?.unmount();
+    container?.remove();
+    await mount(combined({ commits: nine.slice(0, 8), steps: nine.slice(0, 8).map(() => []) }));
+    expect(q(".cmb-colors-repeat")).toBeNull();
+  });
+
   it("the close button emits close", async () => {
     const { emitted } = await mount(combined());
     q(".cmb-close")!.click();

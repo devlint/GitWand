@@ -3273,6 +3273,7 @@ const en = {
     fallbackSummaryBetween: "Shown commit by commit: {0}, in conflict between the selected commits.",
     fallbackSummaryOther: "Shown commit by commit: {0}, could not be combined.",
     payloadTruncated: "Too large: some steps or files are omitted.",
+    colorsRepeat: "Colors repeat past 8 commits: check the short hash.",
     errGit: "Needs git 2.38+ (found {0}).",
     errMin: "Select at least 2 commits.",
     errHash: "Invalid commit hash: {0}",

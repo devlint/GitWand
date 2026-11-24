@@ -3238,6 +3238,7 @@ const zhCN: Locale = {
     fallbackSummaryBetween: "逐个提交显示：{0}，所选提交之间存在冲突。",
     fallbackSummaryOther: "逐个提交显示：{0}，无法合并。",
     payloadTruncated: "内容过大：已省略部分步骤或文件。",
+    colorsRepeat: "超过 8 个提交时颜色会重复：请看短哈希。",
     errGit: "需要 git 2.38+（当前 {0}）。",
     errMin: "请至少选择 2 个提交。",
     errHash: "无效的提交哈希：{0}",

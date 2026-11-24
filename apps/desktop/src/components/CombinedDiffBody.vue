@@ -181,6 +181,8 @@ const errorText = computed(() => (props.error ? combinedErrorMessage(props.error
 
     <div v-if="fallbackSummary && !loading" class="cmb-fallback" role="note">{{ fallbackSummary }}</div>
     <div v-if="data?.truncated && !loading" class="cmb-fallback cmb-truncated" role="note">{{ t("combined.payloadTruncated") }}</div>
+    <!-- 8 colours (`commitColors.ts`): past 8 commits they repeat; markers and chips carry the short hash. -->
+    <div v-if="commits.length > 8 && !loading" class="cmb-fallback cmb-colors-repeat" role="note">{{ t("combined.colorsRepeat") }}</div>
 
     <div v-if="summary || summaryError" class="cmb-summary" :class="{ 'cmb-summary--error': summaryError }" :role="summaryError ? 'alert' : 'status'">
       <template v-if="summaryError">{{ t("combined.summaryError") }}</template>

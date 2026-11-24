@@ -132,6 +132,25 @@ describe("CommitDiffViewer — attribution", () => {
     expect(jumps).toEqual([H1]);
   });
 
+  it("past 8 commits a colour repeats, but the marker title and the hunk chip name the short hash", async () => {
+    const nine = Array.from({ length: 9 }, (_, i) => ({ hash: String(i).repeat(40), shortHash: `${i}`.repeat(7), subject: `s${i}` }));
+    const attr: FileAttribution[] = [
+      { lineCommit: new Map([["RIGHT:2", 8], ["LEFT:2", 0]]), hunkCommits: [[0, 8]] },
+      { lineCommit: new Map(), hunkCommits: [[]] },
+    ];
+    mount({ attribution: attr, attributionCommits: nine });
+    await nextTick();
+    const rows = document.querySelectorAll(".cdv-hunk")[0].querySelectorAll("tr.cdv-line");
+    const ninth = rows[2].querySelector<HTMLElement>(".cdv-attr-marker")!;
+    const first = rows[1].querySelector<HTMLElement>(".cdv-attr-marker")!;
+    expect(ninth.getAttribute("style")).toContain("var(--combined-c0)");
+    expect(first.getAttribute("style")).toContain("var(--combined-c0)");
+    expect(ninth.getAttribute("title")).toContain("8888888");
+    expect(first.getAttribute("title")).toContain("0000000");
+    const chips = document.querySelectorAll(".cdv-hunk")[0].querySelectorAll<HTMLElement>(".cdv-hunk-header .cdv-attr-chip");
+    expect([...chips].map((c) => c.textContent?.trim())).toEqual(["0000000", "8888888"]);
+  });
+
   it("shows the section commit chip on a fallback file header", async () => {
     mount(FULL);
     await nextTick();

@@ -3228,6 +3228,7 @@ const es: Locale = {
     fallbackSummaryBetween: "Mostrados commit a commit: {0}, en conflicto entre los commits seleccionados.",
     fallbackSummaryOther: "Mostrados commit a commit: {0}, no se pudieron combinar.",
     payloadTruncated: "Demasiado grande: se omiten pasos o archivos.",
+    colorsRepeat: "Los colores se repiten tras 8 commits: mira el hash corto.",
     errGit: "Requiere git 2.38+ (encontrado {0}).",
     errMin: "Selecciona al menos 2 commits.",
     errHash: "Hash de commit no válido: {0}",
