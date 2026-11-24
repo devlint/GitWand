@@ -195,6 +195,21 @@ describe("parity: git-combined-diff", () => {
     expect(all.rust.fallback.map((f) => f.path)).toEqual(["README", "X"]);
   });
 
+  // replay.rs `a_repeat_conflict_still_brings_companions`.
+  it("a step that conflicts again on a fallback path still brings its companions", async () => {
+    const cwd = repo("repeat");
+    const f = (x, y) => `a\nx=${x}\nb\nc\nd\ne\ny=${y}\nz\n`;
+    commitFiles(cwd, { f: f(1, 1) }, "base", 0);
+    const a = commitFiles(cwd, { f: f(2, 1) }, "A", 1);
+    commitFiles(cwd, { f: f(3, 1) }, "B", 2);
+    const c = commitFiles(cwd, { f: f(4, 1) }, "C", 3);
+    commitFiles(cwd, { f: f(4, 2) }, "D", 4);
+    const e = commitFiles(cwd, { f: f(4, 3), g: "g\n" }, "E", 5);
+    const { rust } = await parity(cwd, [a, c, e]);
+    expect(rust.fallback.map((x) => x.path)).toEqual(["f", "g"]);
+    expect(rust.diffs).toEqual([]);
+  });
+
   // replay.rs `out_of_filter_conflict_renamed_into_the_filter_falls_back`.
   it("an out-of-filter conflict renamed into the filter falls back there", async () => {
     const cwd = repo("filterrename");

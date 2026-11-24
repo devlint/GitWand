@@ -1672,6 +1672,7 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
     if (conflicted !== null) {
       // (a) conflicted, blockers computed later; out-of-filter paths kept
       //     (never shown) for their in-filter rename partners.
+      const direct = conflicted.some((p) => repo.inPaths(p));
       for (const path of conflicted) {
         if (fallback.get(path)?.conflicted) continue;
         fallback.set(path, { conflicted: true, source: [i, path] });
@@ -1679,9 +1680,9 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
       await crossing();
       combinedJoinPairs(fallback, pairs);
       // (b), (c) companions — only when the conflict reaches the filter.
-      const reaches = [...fallback.entries()].some(
-        ([p, f]) => f.conflicted && f.source !== null && f.source[0] === i && repo.inPaths(p),
-      );
+      const reaches =
+        direct ||
+        [...fallback.entries()].some(([p, f]) => f.conflicted && f.source !== null && f.source[0] === i && repo.inPaths(p));
       if (reaches) {
         for (const d of step) {
           combinedAddCompanion(fallback, d.path);

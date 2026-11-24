@@ -735,6 +735,7 @@ pub(crate) fn combined_diff_with_budget(
             // (a) What `merge-tree` reports: conflicted, blockers computed
             //     later. Paths outside the filter are kept too (never shown):
             //     only their rename partners inside it matter.
+            let direct = conflicted.iter().any(|p| repo.in_paths(p));
             for path in conflicted {
                 if fallback.get(&path).is_some_and(|f| f.conflicted) {
                     continue;
@@ -755,9 +756,10 @@ pub(crate) fn combined_diff_with_budget(
             // itself touch falls back too — only when the conflict reaches
             // the filter (a conflicted path in it, or the rename partner of
             // one): a conflict elsewhere cannot corrupt what is shown.
-            let reaches = fallback.iter().any(|(p, f)| {
-                f.conflicted && f.source.as_ref().is_some_and(|s| s.0 == i) && repo.in_paths(p)
-            });
+            let reaches = direct
+                || fallback.iter().any(|(p, f)| {
+                    f.conflicted && f.source.as_ref().is_some_and(|s| s.0 == i) && repo.in_paths(p)
+                });
             if reaches {
                 for d in &step {
                     add_companion(&mut fallback, d.path.clone());
@@ -1227,6 +1229,24 @@ mod tests {
         let all = run(&r, &[&a, &c], None);
         let fb: Vec<&str> = all.fallback.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(fb, vec!["README", "X"]);
+    }
+
+    /// A step whose only conflict is a path already conflicted earlier still
+    /// sends its companions to the fallback.
+    #[test]
+    fn a_repeat_conflict_still_brings_companions() {
+        let r = TempRepo::new();
+        let f = |x: u32, y: u32| format!("a\nx={x}\nb\nc\nd\ne\ny={y}\nz\n");
+        commit_files(&r, &[("f", Some(&f(1, 1)))], "base");
+        let a = commit_files(&r, &[("f", Some(&f(2, 1)))], "A");
+        commit_files(&r, &[("f", Some(&f(3, 1)))], "B");
+        let c = commit_files(&r, &[("f", Some(&f(4, 1)))], "C");
+        commit_files(&r, &[("f", Some(&f(4, 2)))], "D");
+        let e = commit_files(&r, &[("f", Some(&f(4, 3))), ("g", Some("g\n"))], "E");
+        let got = run(&r, &[&a, &c, &e], None);
+        let fb: Vec<&str> = got.fallback.iter().map(|x| x.path.as_str()).collect();
+        assert_eq!(fb, vec!["f", "g"]);
+        assert!(got.diffs.is_empty(), "{:?}", paths_of(&got.diffs));
     }
 
     /// An out-of-filter conflicted path that a later selected commit renames
