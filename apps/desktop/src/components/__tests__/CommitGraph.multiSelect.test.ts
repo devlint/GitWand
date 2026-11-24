@@ -419,6 +419,16 @@ describe("CommitGraph — multi-selection", () => {
     outside.remove();
   });
 
+  it("a jump to a commit from the combined view (App sets the anchor) drives the next Shift-click", async () => {
+    mount({ selectedHash: full("ddd4444") });
+    await nextTick();
+    // App.vue `onCombinedSelectCommit`: the anchor follows the jumped-to commit.
+    useCommitSelection(ref(cwd)).setAnchor(full("ddd4444"));
+    await click(1, { shiftKey: true });
+    const multi = rows().map((r) => r.classList.contains("cg-row--multi"));
+    expect(multi).toEqual([false, true, true, true, false]);
+  });
+
   it("click, shift, cmd, shift keeps following the last anchor", async () => {
     mount({ selectedHash: full("bbb2222") });
     await click(1);

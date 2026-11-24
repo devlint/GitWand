@@ -214,6 +214,7 @@ import { githubProvider } from "./composables/forge/useForge";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
+import { useCommitSelection } from "./composables/useCommitSelection";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
 import { planDiscard, selectDiscardEntries, summarizeDiscard } from "./utils/discardPlan";
@@ -4928,6 +4929,13 @@ function onGraphSelectCommit(hash: string) {
   selectCommit(hash);
 }
 
+/** Combined view → jump to one of its commits: also the Git Tree's ⇧-range
+ *  anchor, as a plain click on that row would make it (the selection stays). */
+function onCombinedSelectCommit(hash: string) {
+  if (repoFolderPath.value) useCommitSelection(ref(repoFolderPath.value)).setAnchor(hash);
+  onGraphSelectCommit(hash);
+}
+
 /** Dashboard → click a recent commit: open the Git Tree on that commit. */
 function onDashboardSelectCommit(hash: string) {
   onViewModeChange("graph");
@@ -5160,7 +5168,7 @@ onUnmounted(() => {
                 <CombinedDiffView v-else-if="viewMode === 'graph' && combinedRequest && repoFolderPath"
                   :cwd="repoFolderPath" :request="combinedRequest" :diff-mode="diffMode"
                   @update:diff-mode="onDiffModeChange" @close="combinedRequest = null"
-                  @select-commit="onGraphSelectCommit" />
+                  @select-commit="onCombinedSelectCommit" />
 
                 <!-- A clicked file replaces the graph with its diff (X to return). -->
                 <div v-else-if="viewMode === 'graph' && graphFileIdx !== null && selectedCommitHash" class="graph-diff-full">
