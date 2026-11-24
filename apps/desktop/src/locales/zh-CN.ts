@@ -3221,6 +3221,7 @@ const zhCN: Locale = {
     ctxOpen: "{0} 个提交的合并差异",
     clear: "清除选择",
     tooMany: "提交过多（最多 {0} 个）",
+    historyButton: "合并差异（{0}）",
     jumpToCommit: "跳转到提交 {0}",
     fallbackBlocked: "{0} 无法在不含 {1} 的情况下合并：按提交逐个显示。",
     fallbackBetween: "{0} 在所选提交之间存在冲突：按提交逐个显示。",

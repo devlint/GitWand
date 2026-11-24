@@ -3256,6 +3256,7 @@ const en = {
     ctxOpen: "Combined diff of {0} commits",
     clear: "Clear selection",
     tooMany: "Too many commits (max {0})",
+    historyButton: "Combined diff ({0})",
     jumpToCommit: "Jump to commit {0}",
     fallbackBlocked: "{0} could not be combined without {1}: shown commit by commit.",
     fallbackBetween: "{0} conflicts between the selected commits: shown commit by commit.",

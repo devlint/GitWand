@@ -3221,6 +3221,7 @@ const fr: Locale = {
     ctxOpen: "Diff combiné de {0} commits",
     clear: "Effacer la sélection",
     tooMany: "Trop de commits (max {0})",
+    historyButton: "Diff combiné ({0})",
     jumpToCommit: "Aller au commit {0}",
     fallbackBlocked: "{0} n'a pas pu être combiné sans {1} : affiché commit par commit.",
     fallbackBetween: "{0} est en conflit entre les commits sélectionnés : affiché commit par commit.",

@@ -3211,6 +3211,7 @@ const es: Locale = {
     ctxOpen: "Diff combinado de {0} commits",
     clear: "Borrar la selección",
     tooMany: "Demasiados commits (máx. {0})",
+    historyButton: "Diff combinado ({0})",
     jumpToCommit: "Ir al commit {0}",
     fallbackBlocked: "{0} no se pudo combinar sin {1}: se muestra commit por commit.",
     fallbackBetween: "{0} tiene conflictos entre los commits seleccionados: se muestra commit por commit.",

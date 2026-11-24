@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, toRef } from "vue";
 import type { BlameLine, FileLogEntry, GitDiff } from "../utils/backend";
+import type { CombinedRequest } from "../composables/useCombinedDiff";
+import { useCommitSelection, COMBINE_MAX } from "../composables/useCommitSelection";
+import { isToggleModifier } from "../utils/platform";
 import Avatar from "./Avatar.vue";
 import { getGitBlame, getGitFileLog, getGitFileLogPickaxe, getGitFileLogRange, getGitFileDiff, type BlameAlgorithm, type PickaxeMode } from "../utils/backend";
 import { loadSettings } from "../composables/useSettings";
@@ -57,11 +60,15 @@ function closeBlameExplain() {
 const props = defineProps<{
   filePath: string;
   cwd: string;
+  /** Test seams: default to the real backend wrappers. */
+  blameFetcher?: typeof getGitBlame;
+  logFetcher?: typeof getGitFileLog;
 }>();
 
 const emit = defineEmits<{
   close: [];
   "select-commit": [hash: string];
+  "open-combined": [req: CombinedRequest];
 }>();
 
 // ─── State ──────────────────────────────────────────────
@@ -203,8 +210,8 @@ watch(
     error.value = null;
     try {
       const [blame, log] = await Promise.all([
-        getGitBlame(props.cwd, path, blameAlgo.value),
-        getGitFileLog(props.cwd, path),
+        (props.blameFetcher ?? getGitBlame)(props.cwd, path, blameAlgo.value),
+        (props.logFetcher ?? getGitFileLog)(props.cwd, path),
       ]);
       if (!lists.isCurrent(token)) return;
       blameLines.value = blame;
@@ -217,6 +224,36 @@ watch(
   },
   { immediate: true },
 );
+
+// ─── Combined diff (multi-select in the Log tab) ─────────
+// Keyed by repo + file so it never mixes with the Git Tree selection.
+const selectionKey = computed(() => `${props.cwd}::file:${props.filePath}`);
+const selection = useCommitSelection(selectionKey);
+const selectedSet = computed(() => new Set(selection.selected.value));
+const tooMany = computed(() => selection.selected.value.length > COMBINE_MAX);
+
+// Drop selected versions that left the displayed list (new filter, new file).
+watch(displayedLog, (log) => selection.prune(log.map((e) => e.hashFull)));
+
+function onLogEntryClick(e: MouseEvent, hash: string) {
+  if (isToggleModifier(e)) {
+    selection.toggle(hash, null);
+  } else if (e.shiftKey) {
+    selection.range(hash, displayedLog.value.map((x) => x.hashFull));
+  } else {
+    selection.setAnchor(hash);
+    emit("select-commit", hash);
+  }
+}
+
+function openCombined() {
+  if (!selection.canCombine.value) return;
+  const chosen = displayedLog.value.filter((x) => selectedSet.value.has(x.hashFull));
+  // Each entry's name at that commit (renames); entries without one (range
+  // results, merges) fall back to the current name.
+  const paths = [...new Set(chosen.map((x) => x.path ?? props.filePath))];
+  emit("open-combined", { hashes: chosen.map((x) => x.hashFull), paths });
+}
 
 // ─── Helpers ────────────────────────────────────────────
 function fileName(path: string): string {
@@ -481,6 +518,16 @@ function shortHash(hash: string): string {
         <button class="fhv-compare-clear" @click="compare.reset()">{{ t('common.cancel') }}</button>
       </div>
 
+      <div v-if="selection.selected.value.length >= 2" class="fhv-combine-bar">
+        <button
+          class="fhv-combine-btn"
+          :disabled="!selection.canCombine.value"
+          :title="tooMany ? t('combined.tooMany', COMBINE_MAX) : undefined"
+          @click="openCombined"
+        >{{ t('combined.historyButton', selection.selected.value.length) }}</button>
+        <button class="fhv-compare-clear" @click="selection.clear()">{{ t('common.cancel') }}</button>
+      </div>
+
       <div
         v-for="entry in displayedLog"
         :key="entry.hashFull"
@@ -488,11 +535,12 @@ function shortHash(hash: string): string {
         :class="{
           'fhv-log-entry--from': isSelectedForCompare(entry.hashFull) === 'from',
           'fhv-log-entry--to': isSelectedForCompare(entry.hashFull) === 'to',
+          'fhv-log-entry--multi': selectedSet.has(entry.hashFull),
         }"
       >
         <div class="fhv-log-top">
           <Avatar class="fhv-log-avatar" :name="entry.author" />
-          <div class="fhv-log-info" @click="emit('select-commit', entry.hashFull)">
+          <div class="fhv-log-info" @click="onLogEntryClick($event, entry.hashFull)">
             <div class="fhv-log-message">{{ entry.message }}</div>
             <div class="fhv-log-meta muted">
               <span>{{ entry.author }}</span>
@@ -1054,6 +1102,27 @@ function shortHash(hash: string): string {
   color: var(--color-text);
   background: var(--color-bg-tertiary);
 }
+
+.fhv-log-entry--multi {
+  background: var(--color-bg-hover);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+.fhv-combine-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+}
+.fhv-combine-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: var(--color-text-on-accent, #fff);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.fhv-combine-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .fhv-compare-btn {
   display: flex;

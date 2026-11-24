@@ -3211,6 +3211,7 @@ const ptBR: Locale = {
     ctxOpen: "Diff combinado de {0} commits",
     clear: "Limpar a seleção",
     tooMany: "Commits demais (máx. {0})",
+    historyButton: "Diff combinado ({0})",
     jumpToCommit: "Ir para o commit {0}",
     fallbackBlocked: "{0} não pôde ser combinado sem {1}: exibido commit a commit.",
     fallbackBetween: "{0} tem conflito entre os commits selecionados: exibido commit a commit.",

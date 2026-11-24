@@ -5138,7 +5138,8 @@ onUnmounted(() => {
                     <div v-else-if="mergeEditorPending" class="view__merge-pending" role="status">{{ t("common.loading") }}</div>
                     <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
                       :cwd="repoFolderPath" @close="closeFileHistory"
-                      @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }" />
+                      @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }"
+                      @open-combined="(req) => { closeFileHistory(); onViewModeChange('graph'); combinedRequest = req; }" />
                     <!--
                       Image files (PNG, JPEG, WebP, GIF, SVG) get the ImageDiffViewer
                       branch; the line-based DiffViewer would hit its "binary file"
