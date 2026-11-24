@@ -63,6 +63,20 @@ export function buildSummaryPrompt(
   files: SummaryFileEntry[],
   commitTitles: string[],
 ): string {
+  return buildSummaryPromptFromCounts(
+    files.map((f) => {
+      const { additions, deletions } = countChanges(f.raw);
+      return { path: f.path, added: additions, deleted: deletions };
+    }),
+    commitTitles,
+  );
+}
+
+/** Same prompt from precomputed per-file counts (callers that already hold parsed diffs). */
+export function buildSummaryPromptFromCounts(
+  files: { path: string; added: number; deleted: number }[],
+  commitTitles: string[],
+): string {
   const parts: string[] = [];
   parts.push("Commits:");
   if (commitTitles.length) {
@@ -72,10 +86,7 @@ export function buildSummaryPrompt(
   }
   parts.push("");
   parts.push("Files touched:");
-  for (const f of files) {
-    const { additions, deletions } = countChanges(f.raw);
-    parts.push(`- ${f.path} (+${additions}/-${deletions})`);
-  }
+  for (const f of files) parts.push(`- ${f.path} (+${f.added}/-${f.deleted})`);
   return parts.join("\n");
 }
 

@@ -3230,6 +3230,8 @@ const zhCN: Locale = {
     retry: "重试",
     loading: "正在合并 {0} 个提交…",
     tooLarge: "文件过大，无法显示（{0}）",
+    summarize: "总结这 {0} 个提交",
+    summaryError: "无法生成摘要。",
   },
 };
 

@@ -5,16 +5,17 @@
  * fallback notes, and `CommitDiffViewer` for the body with line attribution.
  * Loading lives in `useCombinedDiff`.
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, toRef } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, toRef, watch } from "vue";
 import CommitDiffViewer from "./CommitDiffViewer.vue";
 import { useI18n } from "../composables/useI18n";
 import { useCombinedDiff, type CombinedRequest } from "../composables/useCombinedDiff";
+import { useCombinedSummary, type CombinedSummaryDeps } from "../composables/useCombinedSummary";
 import { formatBytes } from "../composables/useFilePreview";
 import { commitColor } from "../utils/commitColors";
 import type { getCombinedDiff } from "../utils/backend";
 import type { DiffMode } from "../utils/diffMode";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const props = defineProps<{
   cwd: string;
@@ -22,6 +23,8 @@ const props = defineProps<{
   diffMode: DiffMode;
   /** Tests inject a fake; defaults to the backend call. */
   fetcher?: typeof getCombinedDiff;
+  /** Tests inject fakes; defaults to the AI provider. */
+  summaryDeps?: CombinedSummaryDeps;
 }>();
 
 const emit = defineEmits<{
@@ -35,6 +38,13 @@ const { data, entries, loading, error, reload } = useCombinedDiff(
   toRef(props, "request"),
   props.fetcher,
 );
+
+const { available: aiAvailable, summary, loading: summarizing, error: summaryErr, generate } = useCombinedSummary(props.summaryDeps);
+// A new/reloaded diff makes a previous summary stale.
+watch(data, () => { summary.value = null; });
+function summarize() {
+  if (data.value) void generate(data.value, locale?.value ?? "en");
+}
 
 const commits = computed(() => data.value?.commits ?? []);
 const diffs = computed(() => entries.value.map((e) => e.diff));
@@ -129,6 +139,13 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
           <span class="cmb-del" v-if="stats.dels > 0">&minus;{{ stats.dels }}</span>
         </span>
         <button
+          v-if="aiAvailable && data && commits.length > 0"
+          class="cmb-summarize"
+          :disabled="summarizing"
+          :aria-busy="summarizing"
+          @click="summarize"
+        >{{ t("combined.summarize", commits.length) }}</button>
+        <button
           class="cmb-mode"
           :class="{ 'cmb-mode--active': diffMode === 'inline' }"
           :title="t('diff.modeInline')"
@@ -153,6 +170,11 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
         </button>
       </div>
     </header>
+
+    <div v-if="summary || summaryErr" class="cmb-summary" :class="{ 'cmb-summary--error': summaryErr }" :role="summaryErr ? 'alert' : 'status'">
+      <template v-if="summaryErr">{{ t("combined.summaryError") }}</template>
+      <template v-else>{{ summary }}</template>
+    </div>
 
     <div v-if="loading" class="cmb-state cmb-loading">{{ t("combined.loading", request.hashes.length) }}</div>
     <div v-else-if="error" class="cmb-state cmb-error" role="alert">
@@ -226,6 +248,19 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
   background: var(--color-bg-secondary); color: var(--color-text-muted); cursor: pointer;
 }
 .cmb-mode:hover, .cmb-close:hover { background: var(--color-bg-hover, rgba(127, 127, 127, 0.12)); color: var(--color-text); }
+.cmb-summarize {
+  padding: 4px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg-secondary); color: var(--color-text); font-size: var(--font-size-sm, 12px); cursor: pointer;
+}
+.cmb-summarize:hover:not(:disabled) { background: var(--color-bg-hover, rgba(127, 127, 127, 0.12)); }
+.cmb-summarize:disabled { opacity: 0.6; cursor: progress; }
+.cmb-summarize:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.cmb-summary {
+  padding: var(--space-3, 8px) var(--space-4, 12px); border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary); color: var(--color-text); font-size: var(--font-size-sm, 12px);
+  white-space: pre-wrap; max-height: 160px; overflow-y: auto;
+}
+.cmb-summary--error { color: var(--color-danger, #f85149); }
 .cmb-mode--active { color: var(--color-accent); border-color: var(--color-accent); }
 .cmb-state { padding: var(--space-5, 16px); color: var(--color-text-muted); display: flex; align-items: center; gap: 10px; }
 .cmb-error { color: var(--color-danger, #f85149); }

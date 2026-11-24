@@ -3220,6 +3220,8 @@ const es: Locale = {
     retry: "Reintentar",
     loading: "Combinando {0} commits…",
     tooLarge: "Archivo demasiado grande para mostrarlo ({0})",
+    summarize: "Resumir estos {0} commits",
+    summaryError: "No se pudo generar el resumen.",
   },
 };
 

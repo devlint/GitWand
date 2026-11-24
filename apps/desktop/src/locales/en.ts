@@ -3265,6 +3265,8 @@ const en = {
     retry: "Retry",
     loading: "Combining {0} commits…",
     tooLarge: "File too large to display ({0})",
+    summarize: "Summarize these {0} commits",
+    summaryError: "Could not generate the summary.",
   },
 } as const;
 

@@ -3220,6 +3220,8 @@ const ptBR: Locale = {
     retry: "Tentar novamente",
     loading: "Combinando {0} commits…",
     tooLarge: "Arquivo grande demais para exibir ({0})",
+    summarize: "Resumir estes {0} commits",
+    summaryError: "Não foi possível gerar o resumo.",
   },
 };
 
