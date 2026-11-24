@@ -95,14 +95,19 @@ function pendingToConfig(p) {
     p.original,
     p.top_sha,
     p.merged_parent ?? "-",
+    p.worktree,
   ].join(" ");
 }
 
-/** `PendingRestack::parse`: the 8-field record, or null. */
+/** A worktree id in the record: non-empty, even-length, lowercase hex. */
+const isWorktreeHex = (s) => s.length > 0 && s.length % 2 === 0 && /^[0-9a-f]+$/.test(s);
+
+/** `PendingRestack::parse`: the 9-field record, or null. */
 function pendingParse(s) {
   const parts = s.split(" ");
-  if (parts.length !== 8) return null;
-  const [moment, onto, oldBase, bottom, newParent, original, topSha, mergedParent] = parts;
+  if (parts.length !== 9) return null;
+  const [moment, onto, oldBase, bottom, newParent, original, topSha, mergedParent, worktree] = parts;
+  if (worktree !== "-" && !isWorktreeHex(worktree)) return null;
   if (moment !== "parent_moved" && moment !== "parent_merged") return null;
   if (!isSha(onto) || !isSha(oldBase) || !isSha(topSha) || bottom === "" || original === "" || mergedParent === "") {
     return null;
@@ -116,6 +121,7 @@ function pendingParse(s) {
     original,
     top_sha: topSha,
     merged_parent: mergedParent !== "-" ? mergedParent : null,
+    worktree,
   };
 }
 
@@ -563,10 +569,26 @@ function settlePending(repo, hints) {
   const s = newSettled();
   if ([...all.values()].every((m) => m.pending === null)) return s;
   const holders = branchHolders(repo);
+  let here = null;
+  try {
+    here = worktreeId(repo);
+  } catch {
+    here = null;
+  }
   for (const m of all.values()) {
     const p = m.pending;
     if (!p) continue;
     const top = m.branch;
+    // Another worktree's restack: its own refresh settles it (review pass 2).
+    if (here !== null && here !== p.worktree) {
+      let owner = false;
+      try {
+        owner = worktreeExists(repo, p.worktree);
+      } catch {
+        owner = false;
+      }
+      if (owner) continue;
+    }
     if (holders.some((h) => h.rebasing && h.branch === top)) {
       s.waiting = true;
       continue;
@@ -1159,6 +1181,7 @@ function runRestack(repo, configuredTrunk, layer, hints, previewed, version) {
     original,
     top_sha: topSha,
     merged_parent: merged ? p.parent : null,
+    worktree: worktreeId(repo),
   });
 
   // `--update-refs` never moves the branch checked out in the worktree it
@@ -1167,8 +1190,14 @@ function runRestack(repo, configuredTrunk, layer, hints, previewed, version) {
   // the rebase moves every ref; finalize switches back to `original`.
   const back = original !== p.top && moving.includes(original) ? original : null;
   if (back !== null) {
-    const d = run(repo, ["switch", "--detach", "--quiet"]);
-    if (!ok(d)) fail(rebaseFailed(repo, p.top, null, trimmed(d.stderr)));
+    let msg = null;
+    try {
+      const d = run(repo, ["switch", "--detach", "--quiet"]);
+      if (!ok(d)) msg = trimmed(d.stderr);
+    } catch (e) {
+      msg = e.message;
+    }
+    if (msg !== null) fail(rebaseFailed(repo, p.top, null, msg));
   }
 
   const r = spawnSync(GIT, ["rebase", "--update-refs", "--onto", p.onto_sha, p.upstream_sha, p.top], {
@@ -1193,15 +1222,41 @@ function runRestack(repo, configuredTrunk, layer, hints, previewed, version) {
     return { conflict: true };
   }
   // Halted without those words (an untracked file a pick would overwrite):
-  // still a rebase in progress, which the rebase banner takes over.
-  let halted = false;
-  try {
-    halted = rebasingHere(repo);
-  } catch {
-    halted = false;
-  }
-  if (halted) return { conflict: true };
+  // a pick is still to do, which the rebase banner takes over. A rebase
+  // left with nothing to do (a ref git could not update) is a failure.
+  if (haltedOnAPick(repo)) return { conflict: true };
   fail(rebaseFailed(repo, p.top, back, stderr === "" ? stdout : stderr));
+}
+
+/** `halted_on_a_pick`: a rebase in progress here with a command still to do. */
+function haltedOnAPick(repo) {
+  try {
+    const p = runOk(repo, ["rev-parse", "--git-path", "rebase-merge/git-rebase-todo"]);
+    const todo = readFileSync(isAbsolute(p) ? p : join(repo, p), "utf-8");
+    return todo.split("\n").some((l) => {
+      const t = l.trim();
+      return t !== "" && !t.startsWith("#");
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** `worktree_id`: `-` for the main worktree, else its id in lowercase hex. */
+function worktreeId(repo) {
+  const [dir, common] = lines(runOk(repo, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]));
+  if (dir === undefined || common === undefined) fail("unexpected rev-parse output");
+  if (dir === common) return "-";
+  const id = dir.split("/").filter(Boolean).pop() ?? fail(`unexpected git dir: ${dir}`);
+  return Buffer.from(id, "utf-8").toString("hex");
+}
+
+/** `worktree_exists`: the worktree a record names still exists. */
+function worktreeExists(repo, id) {
+  if (id === "-") return true;
+  const name = Buffer.from(id, "hex").toString("utf-8");
+  const common = runOk(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  return existsSync(join(common, "worktrees", name));
 }
 
 /** A HEAD left detached at `original`'s tip (a run that could not switch

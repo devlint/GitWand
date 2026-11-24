@@ -80,10 +80,10 @@ fn moment_str(m: Moment) -> &'static str {
 }
 
 impl PendingRestack {
-    /// `<moment> <onto> <old_base> <bottom> <new_parent|-> <original> <top_sha> <merged_parent|->`
+    /// `<moment> <onto> <old_base> <bottom> <new_parent|-> <original> <top_sha> <merged_parent|-> <worktree>`
     pub fn to_config(&self) -> String {
         format!(
-            "{} {} {} {} {} {} {} {}",
+            "{} {} {} {} {} {} {} {} {}",
             moment_str(self.moment),
             self.onto,
             self.old_base,
@@ -91,13 +91,14 @@ impl PendingRestack {
             self.new_parent.as_deref().unwrap_or("-"),
             self.original,
             self.top_sha,
-            self.merged_parent.as_deref().unwrap_or("-")
+            self.merged_parent.as_deref().unwrap_or("-"),
+            self.worktree
         )
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         let parts: Vec<&str> = s.split(' ').collect();
-        let [moment, onto, old_base, bottom, new_parent, original, top_sha, merged_parent] =
+        let [moment, onto, old_base, bottom, new_parent, original, top_sha, merged_parent, worktree] =
             parts.as_slice()
         else {
             return None;
@@ -113,6 +114,7 @@ impl PendingRestack {
             || bottom.is_empty()
             || original.is_empty()
             || merged_parent.is_empty()
+            || !(*worktree == "-" || is_worktree_hex(worktree))
         {
             return None;
         }
@@ -125,8 +127,17 @@ impl PendingRestack {
             original: (*original).to_string(),
             top_sha: (*top_sha).to_string(),
             merged_parent: (*merged_parent != "-").then(|| (*merged_parent).to_string()),
+            worktree: (*worktree).to_string(),
         })
     }
+}
+
+/// A worktree id in the record: non-empty, even-length, lowercase hex.
+fn is_worktree_hex(s: &str) -> bool {
+    !s.is_empty()
+        && s.len().is_multiple_of(2)
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Every declared layer, keyed by branch name. Branches lacking a
@@ -467,6 +478,7 @@ mod tests {
             original: "step-1".into(),
             top_sha: "c".repeat(40),
             merged_parent: None,
+            worktree: "-".into(),
         };
         set_pending(&r.path, "step-2", &p).unwrap();
         let m = set_parent(&r.path, Some("main"), "step-2", "step-1").unwrap();
@@ -579,17 +591,29 @@ mod tests {
             original: "step-3".into(),
             top_sha: "c".repeat(40),
             merged_parent: Some("step-1".into()),
+            worktree: "-".into(),
         };
         assert_eq!(
             p.to_config(),
             format!(
-                "parent_merged {} {} step-2 - step-3 {} step-1",
+                "parent_merged {} {} step-2 - step-3 {} step-1 -",
                 "a".repeat(40),
                 "b".repeat(40),
                 "c".repeat(40)
             )
         );
-        assert_eq!(PendingRestack::parse(&p.to_config()), Some(p));
+        assert_eq!(PendingRestack::parse(&p.to_config()), Some(p.clone()));
+        // A linked worktree's id, in hex ("wt 1").
+        let linked = PendingRestack {
+            worktree: "77742031".into(),
+            ..p.clone()
+        };
+        assert_eq!(PendingRestack::parse(&linked.to_config()), Some(linked));
+        // The 8-field form (before the worktree) and a non-hex id: malformed.
+        let eight = p.to_config().trim_end_matches(" -").to_string();
+        assert_eq!(PendingRestack::parse(&eight), None);
+        let bad = format!("{} wt", eight);
+        assert_eq!(PendingRestack::parse(&bad), None);
         assert_eq!(PendingRestack::parse("parent_moved abc"), None);
         // The 6-field form (never released) is malformed.
         let six = format!(
@@ -614,6 +638,7 @@ mod tests {
             original: "step-1".into(),
             top_sha: "c".repeat(40),
             merged_parent: None,
+            worktree: "-".into(),
         };
         set_pending(&r.path, "step-2", &p).unwrap();
         assert_eq!(read_all(&r.path).unwrap()["step-2"].pending, Some(p));

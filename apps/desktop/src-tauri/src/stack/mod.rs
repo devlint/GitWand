@@ -58,6 +58,10 @@ pub struct PendingRestack {
     pub top_sha: String,
     /// Moment 2: the bottom's parent at run time; `None` for moment 1.
     pub merged_parent: Option<String>,
+    /// The worktree the restack ran in: `-` for the main one, else its id
+    /// (`.git/worktrees/<id>`) in hex. Only that worktree settles the record
+    /// while it exists (review pass 2: another could not switch it back).
+    pub worktree: String,
 }
 
 #[derive(Deserialize, Clone, PartialEq, Eq, Debug)]

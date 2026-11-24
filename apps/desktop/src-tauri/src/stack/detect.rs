@@ -6,7 +6,7 @@ use super::guard::{branch_holders, git_version, supports_update_refs};
 use super::meta::{
     clear_malformed_pending, clear_pending, read_all, set_base, trunk, validate_branch_name,
 };
-use super::restack::{finalize, reattach, switch_back};
+use super::restack::{finalize, reattach, switch_back, worktree_exists, worktree_id};
 use super::{
     FinalizedRestack, LayerState, LayerStatus, MergeSignal, MergedParentHint, PendingError,
     PendingRestack, StackMeta, StackReport,
@@ -260,9 +260,17 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
         return Ok(s);
     }
     let holders = branch_holders(repo)?;
+    let here = worktree_id(repo).ok();
     for m in all.values() {
         let Some(p) = &m.pending else { continue };
         let top = m.branch.as_str();
+        // Another worktree's restack: its own refresh settles it, so it is
+        // switched back where it ran (review pass 2). Unless it is gone.
+        if here.as_deref().is_some_and(|h| h != p.worktree)
+            && worktree_exists(repo, &p.worktree).unwrap_or(false)
+        {
+            continue;
+        }
         if holders.iter().any(|h| h.rebasing && h.branch == top) {
             s.waiting = true;
             continue;

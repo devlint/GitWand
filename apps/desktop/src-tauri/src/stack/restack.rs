@@ -712,6 +712,7 @@ pub(crate) fn run(
         original,
         top_sha,
         merged_parent: merged.then(|| p.parent.clone()),
+        worktree: worktree_id(repo)?,
     };
     let original = record.original.clone();
     set_pending(repo, &p.top, &record)?;
@@ -722,9 +723,12 @@ pub(crate) fn run(
     // the rebase moves every ref; `finalize` switches back to `original`.
     let detached = original != p.top && moving.contains(&original.as_str());
     if detached {
-        let out = exec(repo, &["switch", "--detach", "--quiet"])?;
-        if !out.status.success() {
-            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let msg = match exec(repo, &["switch", "--detach", "--quiet"]) {
+            Ok(out) if out.status.success() => None,
+            Ok(out) => Some(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+            Err(e) => Some(e),
+        };
+        if let Some(msg) = msg {
             return Err(rebase_failed(repo, &p.top, None, msg));
         }
     }
@@ -763,12 +767,84 @@ pub(crate) fn run(
         return Ok(RestackRun { conflict: true });
     }
     // Halted without those words (an untracked file a pick would overwrite):
-    // still a rebase in progress, which the rebase banner takes over.
-    if matches!(rebasing_here(repo), Ok(true)) {
+    // a pick is still to do, which the rebase banner takes over. A rebase
+    // left with nothing to do (a ref git could not update) is a failure:
+    // `--continue` cannot help, and git's words must reach the user.
+    if halted_on_a_pick(repo) {
         return Ok(RestackRun { conflict: true });
     }
     let msg = if stderr.is_empty() { stdout } else { stderr };
     Err(rebase_failed(repo, &p.top, back, msg))
+}
+
+/// A rebase in progress here with a command still to do.
+fn halted_on_a_pick(repo: &Path) -> bool {
+    let Ok(p) = run_ok(
+        repo,
+        &["rev-parse", "--git-path", "rebase-merge/git-rebase-todo"],
+    ) else {
+        return false;
+    };
+    let p = Path::new(&p);
+    let p = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        repo.join(p)
+    };
+    std::fs::read_to_string(p).is_ok_and(|todo| {
+        todo.lines()
+            .map(str::trim)
+            .any(|l| !l.is_empty() && !l.starts_with('#'))
+    })
+}
+
+/// The worktree `repo` is: `-` for the main one, else its id (the name of
+/// its `.git/worktrees/<id>` directory) in lowercase hex, so the record stays
+/// space-separated.
+pub(crate) fn worktree_id(repo: &Path) -> Result<String, String> {
+    let out = run_ok(
+        repo,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+            "--git-common-dir",
+        ],
+    )?;
+    let mut lines = out.lines();
+    let (Some(dir), Some(common)) = (lines.next(), lines.next()) else {
+        return Err(format!("unexpected rev-parse output: {out}"));
+    };
+    if dir == common {
+        return Ok("-".into());
+    }
+    let id = Path::new(dir)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("unexpected git dir: {dir}"))?;
+    Ok(id.bytes().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The worktree a record names still exists (the main one always does).
+pub(crate) fn worktree_exists(repo: &Path, id: &str) -> Result<bool, String> {
+    if id == "-" {
+        return Ok(true);
+    }
+    let bytes: Option<Vec<u8>> = (0..id.len())
+        .step_by(2)
+        .map(|i| {
+            id.get(i..i + 2)
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+        })
+        .collect();
+    let Some(name) = bytes.and_then(|b| String::from_utf8(b).ok()) else {
+        return Ok(false);
+    };
+    let common = run_ok(
+        repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    Ok(Path::new(&common).join("worktrees").join(name).is_dir())
 }
 
 /// A HEAD left detached at `original`'s tip (a run that could not switch
@@ -2309,6 +2385,49 @@ mod tests {
         assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]), "step-2");
     }
 
+    /// Review pass 2, item 2: the record belongs to the worktree the restack
+    /// ran in. Another worktree's refresh leaves it (it could not switch that
+    /// worktree back); the owner's refresh settles it and switches back.
+    #[test]
+    fn only_the_restacking_worktree_settles_its_record() {
+        let r = TempRepo::new();
+        conflicting_moment_one(&r);
+        r.git(&["checkout", "-q", "main"]);
+        let wt = r.sandbox.join("wt");
+        r.git(&["worktree", "add", "-q", wt.to_str().unwrap(), "step-2"]);
+        let p = plan(&wt, Some("main"), "step-2", &[], V).unwrap();
+        assert!(
+            run(&wt, Some("main"), "step-2", &[], &previewed(&p), V)
+                .unwrap()
+                .conflict
+        );
+        git_at(&wt, &["rebase", "--abort"]);
+        // The main worktree's refresh leaves the linked worktree's record.
+        status(&r.path, Some("main"), &[]).unwrap();
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_some());
+        // Its own refresh clears it and puts it back on step-2.
+        status(&wt, Some("main"), &[]).unwrap();
+        assert!(cfg_opt(&r, "branch.step-3.gitwandRestack").is_none());
+        assert_eq!(git_at(&wt, &["symbolic-ref", "--short", "HEAD"]), "step-2");
+    }
+
+    /// Review pass 2, item 1: a ref git could not update leaves a rebase
+    /// directory with nothing left to do; `--continue` cannot help. That is
+    /// a failure with git's words, not a halt.
+    #[test]
+    fn a_failed_ref_update_is_an_error_not_a_halt() {
+        let r = TempRepo::new();
+        moved_stack(&r);
+        r.git(&["checkout", "-q", "step-2"]);
+        let lock = r.path.join(".git/refs/heads/step-2.lock");
+        std::fs::write(&lock, "").unwrap();
+        let p = plan(&r.path, Some("main"), "step-2", &[], V).unwrap();
+        let e = run(&r.path, Some("main"), "step-2", &[], &previewed(&p), V).unwrap_err();
+        std::fs::remove_file(&lock).unwrap();
+        assert!(e.starts_with("git rebase failed:"), "{e}");
+        assert!(e.contains("refs/heads/step-2"), "{e}");
+    }
+
     /// Review of the QA fix, item 2: a rebase halted by an untracked file a
     /// pick would overwrite prints neither "CONFLICT" nor "could not apply",
     /// yet is in progress: a halt (the rebase banner takes over), not a failure.
@@ -2339,6 +2458,7 @@ mod tests {
             original: "step-2".into(),
             top_sha: p.top_sha.clone(),
             merged_parent: None,
+            worktree: "-".into(),
         };
         crate::stack::meta::set_pending(&r.path, "step-3", &record).unwrap();
         r.git(&["checkout", "-q", "--detach", "step-2"]);
@@ -2362,6 +2482,7 @@ mod tests {
             original: "step-1".into(),
             top_sha: p.top_sha.clone(),
             merged_parent: None,
+            worktree: "-".into(),
         };
         crate::stack::meta::set_pending(&r.path, "step-3", &record).unwrap();
         let wt = r.sandbox.join("wt");
@@ -2459,6 +2580,7 @@ mod tests {
             original: "step-3".into(),
             top_sha: p.top_sha.clone(),
             merged_parent: None,
+            worktree: "-".into(),
         };
         crate::stack::meta::set_pending(&r.path, "step-3", &record).unwrap();
         let s = status(&r.path, Some("main"), &[]).unwrap();
@@ -2591,6 +2713,7 @@ mod tests {
             original: "step-3".into(),
             top_sha: "e".repeat(40),
             merged_parent: None,
+            worktree: "-".into(),
         };
         crate::stack::meta::set_pending(&r.path, "step-3", &record).unwrap();
         let s = status(&r.path, Some("main"), &[]).unwrap();
@@ -2771,6 +2894,7 @@ mod tests {
             original: "step-3".into(),
             top_sha: px.top_sha.clone(),
             merged_parent: None,
+            worktree: "-".into(),
         };
         crate::stack::meta::set_pending(&r.path, "x-2", &record).unwrap();
         r.git(&[

@@ -491,6 +491,49 @@ describe("parity: stacked branches", () => {
     expect(stateOf(rustCwd).rebasing).toBe(true);
   }, 60_000);
 
+  // Review pass 2: a ref git could not update leaves nothing to continue.
+  it("a failed ref update is the same error, not a halt", async () => {
+    const { rustCwd, nodeCwd } = twoFixtures("moved", (cwd) => git(cwd, ["checkout", "-q", "step-2"]));
+    const rp = plan.rust(rustCwd, "step-2");
+    const np = await plan.node(dev, nodeCwd, "step-2");
+    for (const cwd of [rustCwd, nodeCwd]) writeFileSync(join(cwd, ".git/refs/heads/step-2.lock"), "");
+    const r = rust("git_restack", {
+      cwd: rustCwd, branch: "step-2", trunk: "main", mergedParents: [], previewed: previewedOf(rp.value),
+    });
+    const n = await node(dev, "/api/git-restack", {
+      cwd: nodeCwd, branch: "step-2", configuredTrunk: "main", mergedParents: [], previewed: previewedOf(np.value),
+    });
+    expect(r.ok).toBe(false);
+    expect(n.ok).toBe(false);
+    expect(r.error).toMatch(/^git rebase failed:.*refs\/heads\/step-2/s);
+    const own = (e, cwd) => e.split(cwd).join("<cwd>");
+    expect(own(n.error, nodeCwd)).toBe(own(r.error, rustCwd));
+  }, 60_000);
+
+  // Review pass 2: only the worktree a restack ran in settles its record.
+  it("another worktree leaves the record to the one that restacked", async () => {
+    const { rustCwd, nodeCwd } = twoFixtures("conflict", (cwd) => git(cwd, ["checkout", "-q", "main"]));
+    const wt = (cwd) => `${cwd}-wt`;
+    for (const cwd of [rustCwd, nodeCwd]) git(cwd, ["worktree", "add", "-q", wt(cwd), "step-2"]);
+    const rp = plan.rust(wt(rustCwd), "step-2");
+    const np = await plan.node(dev, wt(nodeCwd), "step-2");
+    const rr = rust("git_restack", {
+      cwd: wt(rustCwd), branch: "step-2", trunk: "main", mergedParents: [], previewed: previewedOf(rp.value),
+    });
+    const nr = await node(dev, "/api/git-restack", {
+      cwd: wt(nodeCwd), branch: "step-2", configuredTrunk: "main", mergedParents: [], previewed: previewedOf(np.value),
+    });
+    expectSame(rr, nr, "git_restack in the linked worktree");
+    for (const cwd of [rustCwd, nodeCwd]) git(wt(cwd), ["rebase", "--abort"]);
+    expectSame(status.rust(rustCwd), await status.node(dev, nodeCwd), "main worktree status");
+    for (const cwd of [rustCwd, nodeCwd]) expect(stateOf(cwd).keys).toContain("gitwandrestack");
+    expectSame(status.rust(wt(rustCwd)), await status.node(dev, wt(nodeCwd)), "owner status");
+    for (const cwd of [rustCwd, nodeCwd]) {
+      expect(stateOf(cwd).keys).not.toContain("gitwandrestack");
+      expect(git(wt(cwd), ["branch", "--show-current"])).toBe("step-2");
+    }
+  }, 60_000);
+
   it("an abort started on a lower layer returns to it", async () => {
     const onStep2 = (cwd) => git(cwd, ["checkout", "-q", "step-2"]);
     const { rustCwd, nodeCwd, before } = await restackBoth(dev, "conflict", "step-2", [], onStep2);
@@ -798,7 +841,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
     // finalize cannot walk the stack, the record stays and blocks it.
     const stuck = (cwd) => {
       const mainSha = git(cwd, ["rev-parse", "main"]);
-      const record = ["parent_moved", mainSha, mainSha, "step-3", "-", "step-3", "0".repeat(40), "-"].join(" ");
+      const record = ["parent_moved", mainSha, mainSha, "step-3", "-", "step-3", "0".repeat(40), "-", "-"].join(" ");
       git(cwd, ["config", "branch.step-2.gitwandRestack", record]);
     };
     const e = twoFixtures("moved", stuck);
@@ -833,7 +876,7 @@ describe("parity: stacked branches, the paths that rewrite branches", () => {
       git(cwd, ["config", "branch.other-2.gitwandParent", "other-1"]);
       git(cwd, ["config", "branch.other-2.gitwandStackBase", git(cwd, ["rev-parse", "main"])]);
       const mainSha = git(cwd, ["rev-parse", "main"]);
-      const record = ["parent_moved", mainSha, mainSha, "step-3", "-", "step-3", "0".repeat(40), "-"].join(" ");
+      const record = ["parent_moved", mainSha, mainSha, "step-3", "-", "step-3", "0".repeat(40), "-", "-"].join(" ");
       git(cwd, ["config", "branch.step-2.gitwandRestack", record]);
     };
     const e = twoFixtures("moved", prep);
