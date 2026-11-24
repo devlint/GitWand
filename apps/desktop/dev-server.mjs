@@ -1615,14 +1615,31 @@ function combinedTouches(d, set) {
   return set.has(d.path) || (d.oldPath !== undefined && set.has(d.oldPath));
 }
 
-/** replay.rs `combined_diff`. */
-async function devCombinedDiff(cwd, hashesIn, pathsIn) {
+/** replay.rs `toplevel`: the working tree's toplevel of the repository `cwd` is in. */
+async function combinedToplevel(cwd) {
+  let out;
+  try {
+    out = await gitSpawnInput(["rev-parse", "--show-toplevel"], cwd);
+  } catch (e) {
+    throw new Error(`Failed to run git rev-parse: ${e.message}`);
+  }
+  if (out.code !== 0) throw new Error(`git rev-parse failed: ${out.stderr.trim()}`);
+  const top = out.stdout.endsWith("\n") ? out.stdout.slice(0, -1) : out.stdout;
+  if (top === "") throw new Error("git rev-parse failed: no working tree");
+  return top;
+}
+
+/** replay.rs `combined_diff`. `pathsIn`: repository-root-relative. */
+async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
   const version = await combinedGitVersion();
   if (!(version !== null && (version[0] > 2 || (version[0] === 2 && version[1] >= 38)))) {
     const found = version !== null ? `${version[0]}.${version[1]}` : "unknown";
     throw new Error(`Combined diffs need git 2.38 or later (found ${found}).`);
   }
   const hashes = combinedValidateHashes(hashesIn);
+  // Every command runs from the toplevel (replay.rs): `check-attr --stdin`
+  // and pathspecs are cwd-relative, printed names and `paths` root-relative.
+  const cwd = await combinedToplevel(cwdIn);
   const commits = await combinedResolveAndOrder(cwd, hashes);
   const core = await loadDevCore();
   const repo = new CombinedRepo(cwd, pathsIn && pathsIn.length > 0 ? pathsIn : null, core);

@@ -47,7 +47,12 @@ struct Replayed {
 }
 
 struct Repo<'a> {
+    /// The repository's toplevel: every command of the replay runs there,
+    /// so `paths` (root-relative) and the names git prints agree.
     cwd: &'a str,
+    /// The directory the caller opened: the key of the shared repo guard,
+    /// as every other command takes it.
+    lock: &'a str,
     /// `None` = whole repository.
     paths: Option<&'a [String]>,
     empty_tree: Option<String>,
@@ -321,7 +326,7 @@ impl<'a> Repo<'a> {
         // repo guard so a checkout cannot rewrite it mid-read. Held for this
         // spawn only — the rest of the replay reads objects by id and runs
         // unlocked (see `git_combined_diff`).
-        let _repo = repo_lock::read(self.cwd);
+        let _repo = repo_lock::read(self.lock);
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("Failed to run git check-attr: {e}"))?;
@@ -599,8 +604,32 @@ fn check_names(diffs: &[GitDiff], listed: &[(Option<String>, String)]) -> Result
     }
 }
 
-/// The combined diff of `hashes` (any order), optionally limited to `paths`,
-/// within the production payload budget.
+/// The working tree's toplevel of the repository `cwd` is in (`cwd` itself
+/// for a repository opened at its root).
+fn toplevel(cwd: &str) -> Result<String, String> {
+    let out = git_cmd()
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("Failed to run git rev-parse: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git rev-parse failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let top = stdout.strip_suffix('\n').unwrap_or(&stdout);
+    if top.is_empty() {
+        return Err("git rev-parse failed: no working tree".to_string());
+    }
+    Ok(top.to_string())
+}
+
+/// The combined diff of `hashes` (any order), optionally limited to `paths`
+/// (repository-root-relative, as `git log` reports names), within the
+/// production payload budget.
 pub(crate) fn combined_diff(
     cwd: &str,
     hashes: &[String],
@@ -628,9 +657,16 @@ pub(crate) fn combined_diff_with_budget(
         ));
     }
     let hashes = validate_hashes(hashes)?;
+    // Every command runs from the toplevel: `check-attr --stdin` reads its
+    // paths relative to the cwd and pathspecs are cwd-relative, while the
+    // names git prints (`--no-relative`) and `paths` are root-relative.
+    let lock = cwd;
+    let toplevel = toplevel(cwd)?;
+    let cwd = toplevel.as_str();
     let commits = resolve_and_order(cwd, &hashes)?;
     let mut repo = Repo {
         cwd,
+        lock,
         paths: paths.filter(|p| !p.is_empty()),
         empty_tree: None,
     };
@@ -716,6 +752,7 @@ pub(crate) fn combined_diff_with_budget(
             }
             let whole = Repo {
                 cwd,
+                lock,
                 paths: None,
                 empty_tree: None,
             };
@@ -815,6 +852,7 @@ pub(crate) fn combined_diff_with_budget(
     if repo.paths.is_some() && fallback.keys().any(|p| !repo.in_paths(p)) {
         let whole = Repo {
             cwd,
+            lock,
             paths: None,
             empty_tree: None,
         };
@@ -879,6 +917,7 @@ pub(crate) fn combined_diff_with_budget(
     if !fallback.is_empty() {
         let whole = Repo {
             cwd,
+            lock,
             paths: None,
             empty_tree: repo.empty_tree.clone(),
         };
@@ -900,6 +939,7 @@ pub(crate) fn combined_diff_with_budget(
             for batch in pathspec_batches(units, PATHSPEC_BATCH_BYTES) {
                 let part = Repo {
                     cwd,
+                    lock,
                     paths: Some(&batch),
                     empty_tree: None,
                 };
@@ -1663,6 +1703,46 @@ mod tests {
         assert_eq!(paths_of(&got.diffs), vec!["f"]);
         assert!(got.fallback.is_empty());
         assert_eq!(paths_of(&got.steps[1]), vec!["f"]);
+    }
+
+    /// A repository opened from a subdirectory: every git command runs from
+    /// the toplevel, `paths` are root-relative (as the file log reports
+    /// them), and `/sub/x.txt merge=union` in the root `.gitattributes`
+    /// applies — the result is the one of the toplevel.
+    #[test]
+    fn subdirectory_cwd_reads_from_the_toplevel() {
+        let r = TempRepo::new();
+        commit_files(
+            &r,
+            &[
+                (".gitattributes", Some("/sub/x.txt merge=union\n")),
+                ("sub/x.txt", Some("a\nx=1\nc\n")),
+                ("sub/g", Some("g\n")),
+            ],
+            "base",
+        );
+        let a = commit_files(&r, &[("sub/g", Some("g2\n"))], "A");
+        commit_files(&r, &[("sub/x.txt", Some("a\nx=2\nc\n"))], "B");
+        let c = commit_files(&r, &[("sub/x.txt", Some("a\nx=3\nc\n"))], "C");
+        let sub = r.path.join("sub").to_string_lossy().to_string();
+        let hashes = vec![a.clone(), c.clone()];
+        let from_root = run(&r, &[&a, &c], None);
+        assert_eq!(paths_of(&from_root.diffs), vec!["sub/g"]);
+        let fb: Vec<&str> = from_root.fallback.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(fb, vec!["sub/x.txt"]);
+        assert_eq!(combined_diff(&sub, &hashes, None).unwrap(), from_root);
+        let filter = vec!["sub/x.txt".to_string()];
+        let filtered_root = combined_diff(&cwd(&r), &hashes, Some(&filter)).unwrap();
+        let fb: Vec<&str> = filtered_root
+            .fallback
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect();
+        assert_eq!(fb, vec!["sub/x.txt"]);
+        assert_eq!(
+            combined_diff(&sub, &hashes, Some(&filter)).unwrap(),
+            filtered_root
+        );
     }
 
     #[test]

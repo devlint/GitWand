@@ -141,6 +141,25 @@ describe("parity: git-combined-diff", () => {
     expect(rust.fallback.map((x) => [x.path, x.conflicted])).toEqual([["f", false]]);
   });
 
+  // replay.rs `subdirectory_cwd_reads_from_the_toplevel`: opened from `sub/`,
+  // every command runs from the toplevel; `/sub/x.txt merge=union` applies and
+  // root-relative `paths` match.
+  it("a repository opened from a subdirectory replays from its toplevel", async () => {
+    const cwd = repo("subdir");
+    commitFiles(cwd, { ".gitattributes": "/sub/x.txt merge=union\n", "sub/x.txt": "a\nx=1\nc\n", "sub/g": "g\n" }, "base", 0);
+    const a = commitFiles(cwd, { "sub/g": "g2\n" }, "A", 1);
+    commitFiles(cwd, { "sub/x.txt": "a\nx=2\nc\n" }, "B", 2);
+    const c = commitFiles(cwd, { "sub/x.txt": "a\nx=3\nc\n" }, "C", 3);
+    const sub = join(cwd, "sub");
+    const fromRoot = await parity(cwd, [a, c]);
+    const { rust } = await parity(sub, [a, c]);
+    expect(rust).toEqual(fromRoot.rust);
+    expect(rust.diffs.map((d) => d.path)).toEqual(["sub/g"]);
+    expect(rust.fallback.map((x) => x.path)).toEqual(["sub/x.txt"]);
+    const filtered = await parity(sub, [a, c], ["sub/x.txt"]);
+    expect(filtered.rust.fallback.map((x) => x.path)).toEqual(["sub/x.txt"]);
+  });
+
   it("a merge=text attribute is the built-in text merge: the file stays net", async () => {
     const cwd = repo("textattr");
     commitFiles(cwd, { ".gitattributes": "f merge=text\n", f: ten("l"), g: "g\n" }, "base", 0);
