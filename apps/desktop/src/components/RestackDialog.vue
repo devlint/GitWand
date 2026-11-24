@@ -58,7 +58,8 @@ watch(
       onto: p.onto_sha,
       upstream: p.upstream_sha,
       branch: p.top,
-      label: p.top,
+      // The preview chip reads "← <label>": what the stack is replayed onto.
+      label: p.onto_ref,
     });
   },
   { immediate: true },

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * StackBanner — v3.14 stacked branches (spec §6, D12). Sits above the commit
- * panel and renders `useStacks()`:
+ * StackBanner — v3.14 stacked branches (spec §6, D12). A strip at the top of
+ * every view (App.vue, under the rebase banner) that renders `useStacks()`:
  *
  *   restack mode → the current branch's lowest layer that needs attention,
  *                  with Preview restack / Later (Unstack when no restack can
@@ -161,11 +161,13 @@ function unstack(branch: string | null) {
 .stack-banner {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--color-border);
+  padding: var(--space-2) var(--space-6);
+  border-left: 3px solid var(--color-accent);
+  border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: 1.4;
 }
 .stack-banner__row {
@@ -178,7 +180,8 @@ function unstack(branch: string | null) {
   color: var(--color-warning, var(--color-text));
 }
 .stack-banner__text {
-  flex: 1 1 100%;
+  flex: 1 1 16rem;
+  min-width: 0;
   color: var(--color-text);
 }
 .stack-banner__after {
@@ -189,12 +192,12 @@ function unstack(branch: string | null) {
   padding-right: var(--space-5);
 }
 .stack-banner__btn {
-  padding: 2px var(--space-2);
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg);
   color: var(--color-text);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   cursor: pointer;
 }
 .stack-banner__btn:hover {

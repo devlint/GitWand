@@ -36,7 +36,6 @@ import { repoRemotes } from "../composables/useRepoRemote";
 // Shown only while a `#` list is open (v-if): loaded then, not in the main chunk.
 const IssueSuggestList = defineAsyncComponent(() => import("./IssueSuggestList.vue"));
 // Lazy: keeps the banner (and its locale-heavy logic) out of the main chunk.
-const StackBanner = defineAsyncComponent(() => import("./StackBanner.vue"));
 import { issueListerFor } from "../composables/issueLister";
 import { COMMIT_SIGNATURE } from "../utils/commitSignature";
 import { loadSettings } from "../composables/useSettings";
@@ -1553,9 +1552,6 @@ function formatActivityDate(dateStr: string): string {
       </div>
 
     </div>
-
-    <!-- v3.14 — stacked branches: restack / after-restack banner (renders nothing when idle) -->
-    <StackBanner />
 
     <!-- Commit panel — fixed at bottom, always visible in changes view -->
     <div class="commit-panel" v-if="showPane('commit', 'changes')">

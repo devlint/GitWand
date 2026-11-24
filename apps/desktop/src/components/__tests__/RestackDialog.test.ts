@@ -153,7 +153,9 @@ describe("RestackDialog", () => {
     expect(body()).toContain("Moves step-2 onto the new tip of step-1.");
     expect(body()).toContain("Fetch failed (offline). Restacking onto the local step-1.");
     expect(body()).toContain("step-2tag-along(not in the stack)");
-    expect(computeRestackPreview).toHaveBeenCalledWith({ onto: "onto", upstream: "up", branch: "step-3", label: "step-3" });
+    // GitHub QA: the chip reads "← <what the stack is restacked onto>", not
+    // "← step-3" (the top), which read as the branch merging into itself.
+    expect(computeRestackPreview).toHaveBeenCalledWith({ onto: "onto", upstream: "up", branch: "step-3", label: "refs/heads/step-1" });
     expect(footerButtons()).toContain("Cancel");
   });
 

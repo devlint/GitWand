@@ -45,6 +45,9 @@ const FolderPicker = defineAsyncComponent(() => import("./components/FolderPicke
 const MergeSuccessModal = defineAsyncComponent(() => import("./components/MergeSuccessModal.vue"));
 const RebaseEditor = defineAsyncComponent(() => import("./components/RebaseEditor.vue"));
 const RebaseProgressBanner = defineAsyncComponent(() => import("./components/RebaseProgressBanner.vue"));
+// v3.14: stack banner, top of every view (GitHub QA: in the sidebar it was
+// only seen with the file panel open).
+const StackBanner = defineAsyncComponent(() => import("./components/StackBanner.vue"));
 const StashManager = defineAsyncComponent(() => import("./components/StashManager.vue"));
 const TimeMachinePanel = defineAsyncComponent(() => import("./components/TimeMachinePanel.vue"));
 import UndoToast from "./components/UndoToast.vue";
@@ -5051,6 +5054,9 @@ onUnmounted(() => {
               :pending-split="pendingSplitAtHalt !== null"
               @split="onRebaseBannerSplit"
               @auto-resolve="onRebaseBannerAutoResolve" />
+
+            <!-- v3.14 — stacked branches: restack / after-restack banner (renders nothing when idle) -->
+            <StackBanner v-if="repoFolderPath" />
 
 
             <!-- ── Dashboard view: full-bleed, no side panel ── -->
