@@ -22,7 +22,8 @@ export interface FileAttribution {
 export interface CombinedEntry {
   diff: GitDiff;
   attribution: FileAttribution;
-  fallback?: { blockers: string[]; conflicted: boolean };
+  /** On a fallback section: its file's banner data and the section's commit. */
+  fallback?: { blockers: string[]; conflicted: boolean; commit: string };
 }
 
 type Seg = { kind: "base"; start: number; len: number } | { kind: "commit"; idx: number; len: number };
@@ -181,7 +182,7 @@ export function buildCombinedEntries(c: CombinedDiff): CombinedEntry[] {
       entries.push({
         diff: p.diff,
         attribution: { lineCommit, hunkCommits, ...(idx >= 0 ? { sectionCommit: idx } : {}) },
-        fallback: { blockers: fb.blockers, conflicted: fb.conflicted },
+        fallback: { blockers: fb.blockers, conflicted: fb.conflicted, commit: p.hash },
       });
     }
   }

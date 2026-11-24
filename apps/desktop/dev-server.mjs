@@ -1159,16 +1159,19 @@ function combinedTruncatedNames(diffs, steps) {
  * linked by renames), heaviest first, ties by smallest name; (b) then make the
  * net / per-commit entries whose lines weigh most header-only, ties in payload
  * order. Entries with no line are never made header-only. Mutates; returns
- * `{ truncated, omitted }` — whether it cut anything, and the paths of the
- * entries (b) made header-only, sorted, unique (`BudgetCut`).
+ * `{ truncated, omitted }` — whether it cut anything, and the entries (b)
+ * made header-only as `{ path, commit }` (commit: the per-commit section's
+ * hash, null for a net entry), sorted by path then net first then commit,
+ * unique (`BudgetCut`, `CombinedBudgetOmitted`).
  */
 function combinedApplyBudget(diffs, steps, fallback, budget) {
   const entries = [...diffs, ...fallback.flatMap((f) => f.perCommit.map((p) => p.diff))];
+  const commits = [...diffs.map(() => null), ...fallback.flatMap((f) => f.perCommit.map((p) => p.hash))];
   let total = entries.reduce((n, d) => n + combinedWeight(d), 0) +
     steps.flat().reduce((n, d) => n + combinedWeight(d), 0);
   if (total <= budget) return { truncated: false, omitted: [] };
   let cut = false;
-  const omitted = new Set();
+  const omitted = new Map();
 
   // (a) Files = names linked by renames; each file's root is its smallest name.
   const parent = new Map();
@@ -1215,12 +1218,15 @@ function combinedApplyBudget(diffs, steps, fallback, budget) {
       if (total <= budget) break;
       entries[i].hunks = [];
       entries[i].truncatedFromBytes = n;
-      omitted.add(entries[i].path);
+      omitted.set(`${entries[i].path}\0${commits[i] ?? ""}`, { path: entries[i].path, commit: commits[i] });
       total -= n;
       cut = true;
     }
   }
-  return { truncated: cut, omitted: [...omitted].sort(cmpCodePoints) };
+  const byEntry = (a, b) =>
+    cmpCodePoints(a.path, b.path) ||
+    (a.commit === b.commit ? 0 : a.commit === null ? -1 : b.commit === null ? 1 : cmpCodePoints(a.commit, b.commit));
+  return { truncated: cut, omitted: [...omitted.values()].sort(byEntry) };
 }
 
 /** `git version 2.39.3 (Apple Git-146)` → `[2, 39]` (`stack::guard`). */

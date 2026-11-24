@@ -6,7 +6,7 @@
 //! Mirrored by `combinedApplyBudget` in `dev-server.mjs`: same constants, same
 //! size measure, same order, same tie-breaks (parity-tested).
 
-use crate::types::{CombinedFallbackFile, GitDiff};
+use crate::types::{CombinedBudgetOmitted, CombinedFallbackFile, GitDiff};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// 16 MB of estimated payload over `diffs`, `steps` and the fallback's
@@ -66,10 +66,11 @@ pub(crate) fn root(parent: &mut BTreeMap<String, String>, name: &str) -> String 
 pub(crate) struct BudgetCut {
     /// Anything was cut (steps and/or entries).
     pub truncated: bool,
-    /// Paths with an entry made header-only by step (b), sorted, unique —
-    /// unlike an entry over the parser's 5 MB per-file cap, its
+    /// The entries made header-only by step (b) — net (`commit: None`) or
+    /// the per-commit section of a fallback file — sorted, unique. Unlike an
+    /// entry over the parser's 5 MB per-file cap, their
     /// `truncated_from_bytes` is an estimated weight, not the file's size.
-    pub omitted: Vec<String>,
+    pub omitted: Vec<CombinedBudgetOmitted>,
 }
 
 /// Brings the payload under `budget` bytes.
@@ -102,7 +103,7 @@ pub(crate) fn apply_budget(
         return BudgetCut::default();
     }
     let mut cut = false;
-    let mut omitted: BTreeSet<String> = BTreeSet::new();
+    let mut omitted: BTreeSet<CombinedBudgetOmitted> = BTreeSet::new();
 
     // (a) Group step entries into files (names linked by renames).
     let mut parent: BTreeMap<String, String> = BTreeMap::new();
@@ -142,19 +143,21 @@ pub(crate) fn apply_budget(
 
     // (b) Header-only entries, largest first.
     if total > budget {
-        let mut entries: Vec<&mut GitDiff> = diffs
+        // Each entry with the commit of its fallback section (None: net).
+        let mut entries: Vec<(&mut GitDiff, Option<&str>)> = diffs
             .iter_mut()
+            .map(|d| (d, None))
             .chain(
                 fallback
                     .iter_mut()
                     .flat_map(|f| f.per_commit.iter_mut())
-                    .map(|p| &mut p.diff),
+                    .map(|p| (&mut p.diff, Some(p.hash.as_str()))),
             )
             .collect();
         let mut by_size: Vec<(usize, usize)> = entries
             .iter()
             .enumerate()
-            .map(|(i, d)| (i, lines_weight(d)))
+            .map(|(i, (d, _))| (i, lines_weight(d)))
             .filter(|(_, s)| *s > 0)
             .collect();
         by_size.sort_by_key(|e| std::cmp::Reverse(e.1));
@@ -162,10 +165,13 @@ pub(crate) fn apply_budget(
             if total <= budget {
                 break;
             }
-            let d = &mut entries[i];
+            let (d, commit) = &mut entries[i];
             d.hunks.clear();
             d.truncated_from_bytes = Some(s as u64);
-            omitted.insert(d.path.clone());
+            omitted.insert(CombinedBudgetOmitted {
+                path: d.path.clone(),
+                commit: commit.map(str::to_string),
+            });
             total -= s;
             cut = true;
         }
@@ -179,7 +185,21 @@ pub(crate) fn apply_budget(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{CombinedFallbackCommitDiff, DiffHunk, DiffLine};
+    use crate::types::{CombinedBudgetOmitted, CombinedFallbackCommitDiff, DiffHunk, DiffLine};
+
+    fn net(path: &str) -> CombinedBudgetOmitted {
+        CombinedBudgetOmitted {
+            path: path.to_string(),
+            commit: None,
+        }
+    }
+
+    fn section(path: &str, commit: &str) -> CombinedBudgetOmitted {
+        CombinedBudgetOmitted {
+            path: path.to_string(),
+            commit: Some(commit.to_string()),
+        }
+    }
 
     /// An entry of `lines` hunk lines of `bytes` bytes each.
     fn lines_entry(path: &str, old: Option<&str>, lines: usize, bytes: usize) -> GitDiff {
@@ -241,7 +261,7 @@ mod tests {
             apply_budget(&mut diffs, &mut [], &mut [], 10_000),
             BudgetCut {
                 truncated: true,
-                omitted: vec!["a".to_string()]
+                omitted: vec![net("a")]
             }
         );
         assert!(diffs[0].hunks.is_empty());
@@ -318,7 +338,7 @@ mod tests {
         let budget = total - w(10) - (64 + 40);
         let cut = apply_budget(&mut diffs, &mut steps, &mut fallback, budget);
         assert!(cut.truncated);
-        assert_eq!(cut.omitted, vec!["b".to_string()]);
+        assert_eq!(cut.omitted, vec![net("b")]);
         assert!(steps[0].is_empty());
         assert!(diffs[1].hunks.is_empty());
         assert_eq!(diffs[1].truncated_from_bytes, Some(64 + 40));
@@ -343,11 +363,45 @@ mod tests {
         }];
         let cut = apply_budget(&mut diffs, &mut [], &mut fallback, w(10) + w(30) - 1);
         assert!(cut.truncated);
-        assert_eq!(cut.omitted, vec!["c".to_string()]);
+        assert_eq!(cut.omitted, vec![section("c", "h")]);
         assert_eq!(
             fallback[0].per_commit[0].diff.truncated_from_bytes,
             Some(64 + 30)
         );
         assert!(diffs[0].truncated_from_bytes.is_none());
+    }
+
+    /// Two per-commit sections of one fallback path: only the one cut is
+    /// listed, by its commit — the other keeps its lines and no note.
+    #[test]
+    fn omitted_entries_name_the_per_commit_section() {
+        let mut diffs = vec![entry("c", None, 5)];
+        let mut fallback = vec![CombinedFallbackFile {
+            path: "c".to_string(),
+            conflicted: true,
+            per_commit: vec![
+                CombinedFallbackCommitDiff {
+                    hash: "h1".to_string(),
+                    diff: entry("c", None, 40),
+                },
+                CombinedFallbackCommitDiff {
+                    hash: "h2".to_string(),
+                    diff: entry("c", None, 10),
+                },
+            ],
+            blockers: Vec::new(),
+        }];
+        let total = w(5) + w(40) + w(10);
+        let cut = apply_budget(&mut diffs, &mut [], &mut fallback, total - 1);
+        assert_eq!(cut.omitted, vec![section("c", "h1")]);
+        assert!(fallback[0].per_commit[1]
+            .diff
+            .truncated_from_bytes
+            .is_none());
+        assert!(diffs[0].truncated_from_bytes.is_none());
+
+        // Net and section entries of one path, all cut: net first.
+        let cut = apply_budget(&mut diffs, &mut [], &mut fallback, 0);
+        assert_eq!(cut.omitted, vec![net("c"), section("c", "h2")]);
     }
 }

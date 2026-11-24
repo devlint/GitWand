@@ -1980,7 +1980,12 @@ mod tests {
         assert!(zero.truncated);
         assert!(zero.steps.iter().all(|s| s.is_empty()));
         assert_eq!(paths_of(&zero.diffs), vec!["large.txt", "small.txt"]);
-        assert_eq!(zero.budget_omitted, vec!["large.txt", "small.txt"]);
+        let omitted: Vec<(&str, Option<&str>)> = zero
+            .budget_omitted
+            .iter()
+            .map(|o| (o.path.as_str(), o.commit.as_deref()))
+            .collect();
+        assert_eq!(omitted, vec![("large.txt", None), ("small.txt", None)]);
         for d in &zero.diffs {
             assert!(d.hunks.is_empty());
             assert!(d.truncated_from_bytes.unwrap() > 0);

@@ -156,12 +156,35 @@ describe("CombinedDiffBody", () => {
     await mount(combined({
       truncated: true,
       diffs: [file("a.txt", [], { truncatedFromBytes: 4_000 })],
-      budgetOmitted: ["a.txt"],
+      budgetOmitted: [{ path: "a.txt", commit: null }],
     }));
     const note = q(".cdv-file-note")!.textContent!;
     expect(note).toContain("combined.omittedForSize");
     expect(note).not.toContain("combined.tooLarge");
     expect(note).not.toContain("4");
+  });
+
+  it("labels a fallback section by its own commit's budget cut, not by its path", async () => {
+    // Two sections of c.txt: the budget cut H1's; H3's is over the 5 MB cap.
+    await mount(combined({
+      truncated: true,
+      diffs: [],
+      steps: [[], [], []],
+      fallback: [{
+        path: "c.txt", conflicted: false, blockers: [],
+        perCommit: [
+          { hash: H1, diff: file("c.txt", [], { truncatedFromBytes: 4_000 }) },
+          { hash: H3, diff: file("c.txt", [], { truncatedFromBytes: 9_000_000 }) },
+        ],
+      }],
+      budgetOmitted: [{ path: "c.txt", commit: H1 }],
+    }));
+    const notes = qa(".cdv-file-note").map((n) => n.textContent!);
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toContain("combined.omittedForSize");
+    expect(notes[0]).not.toContain("combined.tooLarge");
+    expect(notes[1]).toContain("combined.tooLarge");
+    expect(notes[1]).not.toContain("combined.omittedForSize");
   });
 
   it("lists the files in its own list", async () => {

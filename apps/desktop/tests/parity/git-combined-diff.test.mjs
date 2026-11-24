@@ -463,7 +463,7 @@ describe("parity: git-combined-diff", () => {
         if (budget === "0") {
           expect(rust.steps.flat()).toEqual([]);
           expect(rust.diffs.every((d) => d.hunks.length === 0 && d.truncatedFromBytes > 0)).toBe(true);
-          expect(rust.budgetOmitted).toEqual(rust.diffs.map((d) => d.path).sort());
+          expect(rust.budgetOmitted).toEqual(rust.diffs.map((d) => ({ path: d.path, commit: null })).sort((x, y) => (x.path < y.path ? -1 : 1)));
           expect(rust.budgetOmitted.length).toBeGreaterThan(0);
         } else {
           expect(rust.steps.flat().map((d) => d.path)).toEqual(["small.txt"]);
@@ -497,7 +497,32 @@ describe("parity: git-combined-diff", () => {
       const many = rust.diffs.find((d) => d.path === "many.txt");
       expect(many.hunks).toEqual([]);
       expect(many.truncatedFromBytes).toBe(3000 * 65);
-      expect(rust.budgetOmitted).toEqual(["many.txt"]);
+      expect(rust.budgetOmitted).toEqual([{ path: "many.txt", commit: null }]);
+    } finally {
+      await small.stop();
+    }
+  }, 30_000);
+
+  // budget.rs `omitted_entries_name_the_per_commit_section`: a cut fallback
+  // section is listed by its commit, a net entry with a null commit.
+  it("budget-omitted entries name their per-commit section on both sides", async () => {
+    const cwd = repo("budgetsections");
+    commitFiles(cwd, { f: "a\nx=1\nc\n", g: "g\n" }, "base", 0);
+    const a = commitFiles(cwd, { f: "a\nx=2\nc\n", g: "g2\n" }, "A", 1);
+    commitFiles(cwd, { f: "a\nx=3\nc\n" }, "B", 2);
+    const c = commitFiles(cwd, { f: "a\nx=4\nc\ne\n" }, "C", 3);
+    const env = { GITWAND_COMBINED_BUDGET_BYTES: "0" };
+    const small = await startDevServer({ env });
+    try {
+      const args = { cwd, hashes: [a, c] };
+      const { rust } = await assertParity(small, {
+        command: COMMAND, args, httpPath: HTTP_PATH, method: "POST", body: args, probeEnv: env,
+      });
+      expect(rust.budgetOmitted).toEqual([
+        { path: "f", commit: a < c ? a : c },
+        { path: "f", commit: a < c ? c : a },
+        { path: "g", commit: null },
+      ]);
     } finally {
       await small.stop();
     }

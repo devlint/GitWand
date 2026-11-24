@@ -67,7 +67,10 @@ function fallbackNote(path: string, fb: { blockers: string[]; conflicted: boolea
  */
 const fileNotes = computed<(string | null)[]>(() => {
   const seen = new Set<string>();
-  const omitted = new Set(props.data?.budgetOmitted ?? []);
+  // Keyed by entry: a path's net entry and each of its per-commit sections
+  // are cut (or not) on their own.
+  const key = (path: string, commit: string | null) => `${commit ?? ""}\0${path}`;
+  const omitted = new Set((props.data?.budgetOmitted ?? []).map((o) => key(o.path, o.commit)));
   return entries.value.map((e) => {
     const first = !seen.has(e.diff.path);
     seen.add(e.diff.path);
@@ -75,7 +78,7 @@ const fileNotes = computed<(string | null)[]>(() => {
     const big =
       e.diff.truncatedFromBytes === undefined
         ? null
-        : omitted.has(e.diff.path)
+        : omitted.has(key(e.diff.path, e.fallback?.commit ?? null))
           ? t("combined.omittedForSize")
           : t("combined.tooLarge", formatBytes(e.diff.truncatedFromBytes));
     return banner && big ? `${banner} ${big}` : (banner ?? big);

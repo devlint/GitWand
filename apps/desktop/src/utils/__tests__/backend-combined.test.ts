@@ -75,7 +75,7 @@ describe("mapRawCombinedDiff", () => {
         { path: "f", conflicted: true, perCommit: [{ hash: commit.hash, diff: RAW_DIFF }], blockers: ["b".repeat(40)] },
       ],
       truncated: true,
-      budgetOmitted: ["f"],
+      budgetOmitted: [{ path: "f", commit: commit.hash }],
     });
     expect(got).toEqual({
       base: null,
@@ -84,7 +84,7 @@ describe("mapRawCombinedDiff", () => {
       steps: [[MAPPED], []],
       fallback: [{ path: "f", conflicted: true, perCommit: [{ hash: commit.hash, diff: MAPPED }], blockers: ["b".repeat(40)] }],
       truncated: true,
-      budgetOmitted: ["f"],
+      budgetOmitted: [{ path: "f", commit: commit.hash }],
     });
   });
 

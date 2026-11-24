@@ -166,10 +166,21 @@ pub struct CombinedDiff {
     /// entries of some files (no attribution for them) and/or entries made
     /// header-only.
     pub truncated: bool,
-    /// Paths with an entry the budget made header-only (sorted, unique): its
+    /// The entries the budget made header-only (sorted, unique): their
     /// `truncated_from_bytes` is an estimated payload weight, not a file
     /// size over the per-file cap.
-    pub budget_omitted: Vec<String>,
+    pub budget_omitted: Vec<CombinedBudgetOmitted>,
+}
+
+/// One entry made header-only by the payload budget: a net entry
+/// (`commit: None`) or the per-commit fallback section of `commit` — one
+/// path can have both, and only some of them cut. Sorted by path, then net
+/// entry first, then commit hash.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinedBudgetOmitted {
+    pub path: String,
+    pub commit: Option<String>,
 }
 
 // ─── Branch PR lookup ──────────────────────────────────────────────

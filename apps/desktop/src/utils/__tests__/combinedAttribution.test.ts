@@ -241,7 +241,7 @@ describe("buildCombinedEntries", () => {
     expect(entries[0].attribution.lineCommit.get("RIGHT:1")).toBe(2);
     expect(entries[0].attribution.lineCommit.get("LEFT:1")).toBe(2);
     expect(entries[1].attribution.sectionCommit).toBe(0);
-    expect(entries[1].fallback).toEqual({ blockers: ["b"], conflicted: true });
+    expect(entries[1].fallback).toEqual({ blockers: ["b"], conflicted: true, commit: "h0" });
   });
 
   it("fallback_sections_attribute_changed_lines_only", () => {

@@ -1651,11 +1651,21 @@ export interface CombinedDiff {
   /** The 16 MB payload budget cut steps (no markers) or entries (header-only). */
   truncated: boolean;
   /**
-   * Paths with an entry the budget made header-only (sorted, unique): their
+   * The entries the budget made header-only (sorted, unique): their
    * `truncatedFromBytes` is an estimated payload weight, not a file size over
    * the 5 MB per-file cap.
    */
-  budgetOmitted: string[];
+  budgetOmitted: CombinedBudgetOmitted[];
+}
+
+/**
+ * An entry the payload budget made header-only: a net entry (`commit: null`)
+ * or the per-commit fallback section of `commit` — one path can have both,
+ * only some of them cut.
+ */
+export interface CombinedBudgetOmitted {
+  path: string;
+  commit: string | null;
 }
 
 /** The Rust `CombinedDiff` payload: its `GitDiff`s keep snake_case hunks. */
@@ -1679,7 +1689,7 @@ export function mapRawCombinedDiff(raw: RawCombinedDiff): CombinedDiff {
       blockers: f.blockers,
     })),
     truncated: raw.truncated,
-    budgetOmitted: raw.budgetOmitted,
+    budgetOmitted: raw.budgetOmitted.map((o) => ({ path: o.path, commit: o.commit })),
   };
 }
 
