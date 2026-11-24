@@ -23,7 +23,7 @@ fn size(d: &GitDiff) -> usize {
 }
 
 /// Union-find root of `name`, path-compressed.
-fn root(parent: &mut BTreeMap<String, String>, name: &str) -> String {
+pub(crate) fn root(parent: &mut BTreeMap<String, String>, name: &str) -> String {
     let mut cur = name.to_string();
     loop {
         let next = parent

@@ -10,7 +10,7 @@
 //! writes are unreachable objects (trees from `merge-tree`, the synthetic
 //! commits, the empty tree), which `git gc` collects.
 
-use super::budget::{apply_budget, COMBINED_BUDGET_BYTES};
+use super::budget::{apply_budget, root, COMBINED_BUDGET_BYTES};
 use super::order::resolve_and_order;
 use super::{supports_combined_diff, validate_hashes};
 use crate::commands::read::parse_multi_file_diff_capped;
@@ -430,6 +430,35 @@ fn add_companion(fallback: &mut FallbackSet, path: String) {
     fallback.entry(path).or_default();
 }
 
+/// Every name of a file with a truncated entry, in the net diff or in any
+/// step — a file being all the names its entries link by renames (union-find,
+/// as `budget::apply_budget` groups step entries).
+fn truncated_names(diffs: &[GitDiff], steps: &[Vec<GitDiff>]) -> HashSet<String> {
+    let mut parent: BTreeMap<String, String> = BTreeMap::new();
+    let all = || diffs.iter().chain(steps.iter().flatten());
+    for d in all() {
+        let a = root(&mut parent, &d.path);
+        if let Some(old) = &d.old_path {
+            let b = root(&mut parent, old);
+            if a != b {
+                parent.insert(b, a);
+            }
+        }
+    }
+    let seeds: HashSet<String> = all()
+        .filter(|d| d.truncated_from_bytes.is_some())
+        .map(|d| root(&mut parent, &d.path))
+        .collect();
+    if seeds.is_empty() {
+        return HashSet::new();
+    }
+    let names: Vec<String> = parent.keys().cloned().collect();
+    names
+        .into_iter()
+        .filter(|n| seeds.contains(&root(&mut parent, n)))
+        .collect()
+}
+
 fn rename_pairs(diffs: &[GitDiff]) -> Vec<(String, String)> {
     diffs
         .iter()
@@ -641,13 +670,11 @@ pub(crate) fn combined_diff_with_budget(
     diffs.retain(|d| !touches(d, &fallback));
 
     // 5. Steps: no fallback file, and no file with a truncated net diff or a
-    //    truncated entry in any step: its attribution would be partial.
-    let truncated: HashSet<String> = diffs
-        .iter()
-        .chain(steps.iter().flatten())
-        .filter(|d| d.truncated_from_bytes.is_some())
-        .flat_map(|d| std::iter::once(d.path.clone()).chain(d.old_path.clone()))
-        .collect();
+    //    truncated entry in any step: its attribution would be partial. A
+    //    file is every name its entries link by renames (as the budget
+    //    groups them), so a truncated step under an earlier name drops the
+    //    later names' steps too.
+    let truncated = truncated_names(&diffs, &steps);
     let steps: Vec<Vec<GitDiff>> = steps
         .into_iter()
         .map(|step| {
@@ -1153,6 +1180,41 @@ mod tests {
         assert!(got.diffs.iter().all(|e| e.path != "big.txt"));
         assert!(got.steps.iter().flatten().all(|e| e.path != "big.txt"));
         assert_eq!(paths_of(&got.steps[2]), vec!["t.txt"]);
+    }
+
+    /// A truncated step under an earlier name drops the later names too: A
+    /// adds a > 5 MB block to `p` (truncated), B renames `p` → `q`, C and D
+    /// each remove half of it (under the cap). The net diff is a small
+    /// `p` → `q` rename; `q`'s steps alone would attribute against an
+    /// intermediate file.
+    #[test]
+    fn truncated_step_drops_every_name_of_a_renamed_file() {
+        let r = TempRepo::new();
+        let head: String = (0..20).map(|i| format!("keep {i}\n")).collect();
+        commit_files(&r, &[("p", Some(&head)), ("g", Some("g\n"))], "base");
+        let half1: String = (0..175_000).map(|i| format!("block one {i}\n")).collect();
+        let half2: String = (0..175_000).map(|i| format!("block two {i}\n")).collect();
+        assert!(half1.len() + half2.len() > crate::types::DIFF_TRUNCATE_BYTES);
+        // Each half's `-U0` section (one `+`/`-` per line) stays under the cap.
+        assert!(half2.len() + 175_000 < crate::types::DIFF_TRUNCATE_BYTES);
+        let a = commit_files(&r, &[("p", Some(&format!("{head}{half1}{half2}")))], "A");
+        r.git(&["mv", "p", "q"]);
+        r.git(&["commit", "-q", "-m", "B"]);
+        let b = r.git(&["rev-parse", "HEAD"]);
+        let c = commit_files(&r, &[("q", Some(&format!("{head}{half2}")))], "C");
+        let d = commit_files(&r, &[("q", Some(&format!("{head}end\n")))], "D");
+        let got = run(&r, &[&a, &b, &c, &d], None);
+        let net = got.diffs.iter().find(|e| e.path == "q").unwrap();
+        assert_eq!(net.old_path.as_deref(), Some("p"));
+        assert!(net.truncated_from_bytes.is_none());
+        assert!(
+            got.steps
+                .iter()
+                .flatten()
+                .all(|e| e.path != "p" && e.path != "q"),
+            "{:?}",
+            got.steps.iter().map(|s| paths_of(s)).collect::<Vec<_>>()
+        );
     }
 
     /// Repo where `f` carries the `merge` attribute `driver`; B (unselected)

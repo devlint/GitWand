@@ -181,6 +181,26 @@ describe("parity: git-combined-diff", () => {
     expect(rust.steps.flat().map((x) => x.path)).toEqual(["t.txt"]);
   }, 60_000);
 
+  // A truncated step under an earlier name (`p`) drops the steps of every
+  // name the file takes later (`q`), through the renames of the steps and
+  // of the net diff: C and D each stay under the cap, the net is small.
+  it("a truncated step drops every name of a renamed file", async () => {
+    const cwd = repo("bigrename");
+    const head = Array.from({ length: 20 }, (_, i) => `keep ${i}\n`).join("");
+    const half1 = Array.from({ length: 175_000 }, (_, i) => `block one ${i}\n`).join("");
+    const half2 = Array.from({ length: 175_000 }, (_, i) => `block two ${i}\n`).join("");
+    commitFiles(cwd, { p: head, g: "g\n" }, "base", 0);
+    const a = commitFiles(cwd, { p: head + half1 + half2 }, "A", 1);
+    const b = commitFiles(cwd, { p: null, q: head + half1 + half2 }, "B", 2);
+    const c = commitFiles(cwd, { q: head + half2 }, "C", 3);
+    const d = commitFiles(cwd, { q: `${head}end\n` }, "D", 4);
+    const { rust } = await parity(cwd, [a, b, c, d]);
+    const net = rust.diffs.find((x) => x.path === "q");
+    expect(net.oldPath).toBe("p");
+    expect(net.truncatedFromBytes).toBeUndefined();
+    expect(rust.steps.flat().map((x) => x.path)).toEqual([]);
+  }, 60_000);
+
   // Names a split on ` b/` misreads and names git C-quotes: A `1→2`, B
   // `2→3` (unselected), C deletes. Each falls back under its real name with
   // its blocker; none reaches the net view.

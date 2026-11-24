@@ -1116,6 +1116,34 @@ function combinedSize(d) {
 }
 
 /**
+ * replay.rs `truncated_names`: every name of a file with a truncated entry, in
+ * the net diff or any step — a file being all the names its entries link by
+ * renames (union-find, as `combinedApplyBudget` groups step entries).
+ */
+function combinedTruncatedNames(diffs, steps) {
+  const parent = new Map();
+  const root = (name) => {
+    let r = name;
+    while (parent.has(r) && parent.get(r) !== r) r = parent.get(r);
+    parent.set(name, r);
+    return r;
+  };
+  const all = [...diffs, ...steps.flat()];
+  for (const d of all) {
+    const a = root(d.path);
+    if (d.oldPath !== undefined) {
+      const b = root(d.oldPath);
+      if (a !== b) parent.set(b, a);
+    }
+  }
+  const seeds = new Set(all.filter((d) => d.truncatedFromBytes !== undefined).map((d) => root(d.path)));
+  const names = new Set();
+  if (seeds.size === 0) return names;
+  for (const n of [...parent.keys()]) if (seeds.has(root(n))) names.add(n);
+  return names;
+}
+
+/**
  * budget.rs `apply_budget`: (a) drop the step entries of whole files (names
  * linked by renames), largest first, ties by smallest name; (b) then make the
  * largest net / per-commit entries header-only, ties in payload order.
@@ -1591,13 +1619,9 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
   combinedJoinPairs(fallback, combinedRenamePairs(diffs));
   diffs = diffs.filter((d) => !combinedTouches(d, fallback));
 
-  // 5. Steps: no fallback file, no file with any truncated entry.
-  const truncated = new Set();
-  for (const d of [...diffs, ...steps.flat()]) {
-    if (d.truncatedFromBytes === undefined) continue;
-    truncated.add(d.path);
-    if (d.oldPath !== undefined) truncated.add(d.oldPath);
-  }
+  // 5. Steps: no fallback file, no file with any truncated entry — a file
+  //    being every name its entries link by renames (replay.rs).
+  const truncated = combinedTruncatedNames(diffs, steps);
   const keptSteps = steps.map((step) =>
     step.filter(
       (d) =>
