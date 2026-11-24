@@ -179,6 +179,62 @@ describe("parity: git-combined-diff", () => {
     expect(filtered.rust.diffs.map((x) => x.path)).toEqual(["g"]);
   });
 
+  // replay.rs `out_of_filter_conflict_leaves_in_filter_files_net`: a conflict
+  // on README, outside the filter, leaves the clean in-filter X net.
+  it("a conflict outside the paths filter leaves in-filter files net", async () => {
+    const cwd = repo("filterconflict");
+    commitFiles(cwd, { X: ten("l"), README: "a\nx=1\nc\n" }, "base", 0);
+    const x1 = ten("l").replace("l1\n", "A1\n");
+    const a = commitFiles(cwd, { X: x1, README: "a\nx=2\nc\n" }, "A", 1);
+    commitFiles(cwd, { README: "a\nx=3\nc\n" }, "B", 2);
+    const c = commitFiles(cwd, { X: x1.replace("l10\n", "C10\n"), README: "a\nx=4\nc\n" }, "C", 3);
+    const { rust } = await parity(cwd, [a, c], ["X"]);
+    expect(rust.diffs.map((d) => d.path)).toEqual(["X"]);
+    expect(rust.fallback).toEqual([]);
+    const all = await parity(cwd, [a, c]);
+    expect(all.rust.fallback.map((f) => f.path)).toEqual(["README", "X"]);
+  });
+
+  // replay.rs `out_of_filter_conflict_renamed_into_the_filter_falls_back`.
+  it("an out-of-filter conflict renamed into the filter falls back there", async () => {
+    const cwd = repo("filterrename");
+    commitFiles(cwd, { README: ten("l"), g: "g\n" }, "base", 0);
+    const a = commitFiles(cwd, { README: ten("l").replace("l5\n", "A\n") }, "A", 1);
+    const b = commitFiles(cwd, { README: ten("l").replace("l5\n", "B\n") }, "B", 2);
+    const c = commitFiles(cwd, { README: ten("l").replace("l5\n", "C\n") }, "C", 3);
+    git(cwd, ["mv", "README", "X"]);
+    execFileSync("git", ["-C", cwd, "commit", "-q", "-m", "D"], { env: commitEnv(4) });
+    const d = git(cwd, ["rev-parse", "HEAD"]);
+    const { rust } = await parity(cwd, [a, c, d], ["X"]);
+    expect(rust.diffs).toEqual([]);
+    expect(rust.fallback.map((f) => [f.path, f.conflicted, f.blockers])).toEqual([["X", true, [b]]]);
+  });
+
+  // replay.rs `batched_blockers_match_the_per_path_query` and
+  // `blockers_of_many_conflicts_span_batches`: one walk per batch, the newest
+  // five per path, every path of several batches answered.
+  it("blockers come from batched walks, newest five per path", async () => {
+    const cwd = repo("blockers");
+    const v = (n) => `a\nx=${n}\nc\n`;
+    const long = Array.from({ length: 40 }, (_, i) => `dir/${String(i).padStart(3, "0")}${"n".repeat(250)}`);
+    const all = (content) => Object.fromEntries(long.map((n) => [n, content]));
+    commitFiles(cwd, { p: v(1), q: v(1), ...all(v(1)) }, "base", 0);
+    const a = commitFiles(cwd, { p: v(2), q: v(2), ...all(v(2)) }, "A", 1);
+    commitFiles(cwd, { p: v(3), ...all(v(3)) }, "U1", 2);
+    commitFiles(cwd, { q: v(3) }, "U2", 3);
+    commitFiles(cwd, { p: v(4), q: v(4) }, "U3", 4);
+    for (let n = 5; n < 10; n++) commitFiles(cwd, { p: v(n) }, `U${n}`, n);
+    const c = commitFiles(cwd, { p: "a\nx=10\nc\ne\n", q: "a\nx=10\nc\ne\n", ...all(v(10)) }, "C", 10);
+    const { rust } = await parity(cwd, [a, c]);
+    const perPath = (path) =>
+      git(cwd, ["rev-list", "--max-count", "5", `${c}^`, "--not", `${a}^`, a, "--", path]).split("\n");
+    const byPath = Object.fromEntries(rust.fallback.map((f) => [f.path, f.blockers]));
+    expect(byPath.p).toEqual(perPath("p"));
+    expect(byPath.p).toHaveLength(5);
+    expect(byPath.q).toEqual(perPath("q"));
+    for (const n of long) expect(byPath[n]).toEqual(perPath(n));
+  }, 60_000);
+
   it("a file over 5 MB is truncated and leaves every step", async () => {
     const cwd = repo("big");
     commitFiles(cwd, { keep: "k\n" }, "base", 0);

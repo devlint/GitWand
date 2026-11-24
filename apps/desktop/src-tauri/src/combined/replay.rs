@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::process::{Command, Output, Stdio};
 
 /// Most blockers named per fallback file.
-const MAX_BLOCKERS: &str = "5";
+const MAX_BLOCKERS: usize = 5;
 
 /// Fixed identity for the synthetic commits: they never depend on the user's
 /// config and are deterministic (same inputs → same object ids).
@@ -102,10 +102,7 @@ impl<'a> Repo<'a> {
     fn in_paths(&self, path: &str) -> bool {
         match self.paths {
             None => true,
-            Some(paths) => paths.iter().any(|q| {
-                let q = q.trim_end_matches('/');
-                path == q || path.strip_prefix(q).is_some_and(|r| r.starts_with('/'))
-            }),
+            Some(paths) => paths.iter().any(|q| covers(q, path)),
         }
     }
 
@@ -362,30 +359,103 @@ impl<'a> Repo<'a> {
         Ok(out)
     }
 
-    /// Commits outside the selection that touch `path` between the replay
-    /// base / earlier selected commits and `Ci^`, at most `MAX_BLOCKERS`.
+    /// Blockers of each of `paths` at one step: the commits outside the
+    /// selection that touch it between the replay base / earlier selected
+    /// commits and `Ci^`, newest first, at most `MAX_BLOCKERS` — what
+    /// `rev-list --full-history --max-count 5 Ci^ --not <base> <earlier> --
+    /// <path>` lists. One `git log` walk per argv-sized pathspec batch, never
+    /// one spawn per path. The walk is not bounded: with several paths, any
+    /// `--max-count` could stop before an older blocker of a quieter path.
+    /// `--full-history` keeps each path's answer independent of the other
+    /// paths of its batch (default history simplification is not).
     fn blockers(
         &self,
         parent: &str,
         base: Option<&str>,
         earlier: &[&str],
-        path: &str,
-    ) -> Result<Vec<String>, String> {
-        let mut cmd = self.git();
-        cmd.args(["rev-list", "--max-count", MAX_BLOCKERS, parent, "--not"]);
-        if let Some(b) = base {
-            cmd.arg(b);
+        paths: &[String],
+    ) -> Result<HashMap<String, Vec<String>>, String> {
+        let mut found: HashMap<String, Vec<String>> = HashMap::new();
+        let units: Vec<Vec<String>> = paths.iter().map(|p| vec![p.clone()]).collect();
+        for batch in pathspec_batches(units, PATHSPEC_BATCH_BYTES) {
+            let mut cmd = self.git();
+            cmd.args([
+                "-c",
+                "log.follow=false",
+                "log",
+                "--no-color",
+                "--no-show-signature",
+                "--no-renames",
+                "--no-relative",
+                "--ignore-submodules=none",
+                "--full-history",
+                "--root",
+                "--diff-merges=combined",
+                "--name-only",
+                "-z",
+                "--format=%x00%H",
+                parent,
+                "--not",
+            ]);
+            if let Some(b) = base {
+                cmd.arg(b);
+            }
+            cmd.args(earlier);
+            cmd.arg("--").args(&batch);
+            cmd.env("GIT_LITERAL_PATHSPECS", "1");
+            let commits = parse_log_names(&self.stdout(cmd, "log")?)?;
+            for path in &batch {
+                let list: Vec<String> = commits
+                    .iter()
+                    .filter(|(_, names)| names.iter().any(|n| covers(path, n)))
+                    .take(MAX_BLOCKERS)
+                    .map(|(h, _)| h.clone())
+                    .collect();
+                found.insert(path.clone(), list);
+            }
         }
-        cmd.args(earlier);
-        cmd.args(["--", path]);
-        cmd.env("GIT_LITERAL_PATHSPECS", "1");
-        Ok(self
-            .stdout(cmd, "rev-list")?
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect())
+        Ok(found)
     }
+}
+
+/// Whether the literal pathspec `spec` matches `path`: the path itself or a
+/// path under it.
+fn covers(spec: &str, path: &str) -> bool {
+    let spec = spec.trim_end_matches('/');
+    path == spec || path.strip_prefix(spec).is_some_and(|r| r.starts_with('/'))
+}
+
+/// `git log --format=%x00%H --name-only -z` → `(hash, names)` in walk order.
+/// The stream is `\0<hash>\0\n<name>\0<name>\0…`, records separated by an
+/// extra NUL: a hash is the first field after an empty one (a name is never
+/// empty), the first name of a record carries the `\n` that ends the header.
+fn parse_log_names(out: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+    let mut commits: Vec<(String, Vec<String>)> = Vec::new();
+    let mut after_empty = true;
+    let mut first_name = false;
+    for field in out.split('\0') {
+        if field.is_empty() {
+            after_empty = true;
+            continue;
+        }
+        if after_empty {
+            if !field.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(format!("Unexpected git log output: {field}"));
+            }
+            commits.push((field.to_string(), Vec::new()));
+            first_name = true;
+        } else if let Some((_, names)) = commits.last_mut() {
+            let name = if first_name {
+                field.strip_prefix('\n').unwrap_or(field)
+            } else {
+                field
+            };
+            names.push(name.to_string());
+            first_name = false;
+        }
+        after_empty = false;
+    }
+    Ok(commits)
 }
 
 /// Most pathspec bytes (each name plus its NUL) per git command in the
@@ -422,15 +492,18 @@ struct Fb {
     /// Reported conflicted by `merge-tree`, or the other half of a rename
     /// pair with such a path.
     conflicted: bool,
-    /// Only computed for conflicted paths.
-    blockers: Vec<String>,
+    /// For a conflicted path: the replay step that reported the conflict and
+    /// the path `merge-tree` named there (this one, or its rename partner).
+    /// Blockers are computed from it once the replay is done, batched per
+    /// step, and only for the paths shown.
+    source: Option<(usize, String)>,
 }
 
 type FallbackSet = BTreeMap<String, Fb>;
 
 /// Rename pairs with one side in the fallback bring the other side in, until
 /// nothing changes. A conflicted side makes its partner conflicted too, with
-/// the same blockers.
+/// the same blockers (the same `source`).
 fn join_pairs(fallback: &mut FallbackSet, pairs: &[(String, String)]) {
     loop {
         let mut joined = false;
@@ -626,39 +699,78 @@ pub(crate) fn combined_diff_with_budget(
         } else {
             Vec::new()
         };
+        // Rename pairs of this step: the step diff and `Ci` itself (the side
+        // `merge-tree` followed). With a filter, also the pairs that cross it
+        // (one name outside), once the fallback holds an out-of-filter path:
+        // a conflicted path outside the filter can still pass its content —
+        // conflict markers included — to an in-filter name.
+        let mut pairs = rename_pairs(&step);
+        pairs.extend(
+            ci_changes
+                .iter()
+                .filter_map(|(old, new)| old.clone().map(|o| (o, new.clone()))),
+        );
+        let mut crossing = |fallback: &FallbackSet| -> Result<(), String> {
+            if repo.paths.is_none() || !fallback.keys().any(|p| !repo.in_paths(p)) {
+                return Ok(());
+            }
+            let whole = Repo {
+                cwd,
+                paths: None,
+                empty_tree: None,
+            };
+            let mut listed = whole.touched(&acc, &result)?;
+            if merged {
+                listed.extend(whole.touched(&parent_tree, &c.tree)?);
+            }
+            pairs.extend(
+                listed
+                    .into_iter()
+                    .filter_map(|(old, new)| old.map(|o| (o, new)))
+                    .filter(|(o, n)| repo.in_paths(o) != repo.in_paths(n)),
+            );
+            Ok(())
+        };
         if let Some(conflicted) = conflicted {
-            // (a) What `merge-tree` reports: conflicted, with blockers.
-            let earlier: Vec<&str> = replayed[..i].iter().map(|r| r.hash.as_str()).collect();
-            for path in conflicted.into_iter().filter(|p| repo.in_paths(p)) {
+            // (a) What `merge-tree` reports: conflicted, blockers computed
+            //     later. Paths outside the filter are kept too (never shown):
+            //     only their rename partners inside it matter.
+            for path in conflicted {
                 if fallback.get(&path).is_some_and(|f| f.conflicted) {
                     continue;
                 }
-                let blockers = match &c.parent {
-                    Some(p) => repo.blockers(p, base.as_deref(), &earlier, &path)?,
-                    None => Vec::new(),
-                };
+                let source = Some((i, path.clone()));
                 fallback.insert(
                     path,
                     Fb {
                         conflicted: true,
-                        blockers,
+                        source,
                     },
                 );
             }
+            crossing(&fallback)?;
+            join_pairs(&mut fallback, &pairs);
             // (b), (c) Companions: `--name-only` misses paths a conflict
             // moves (`f` → `f~<oid>`), so everything this step and `Ci`
-            // itself touch falls back too.
-            for d in &step {
-                add_companion(&mut fallback, d.path.clone());
-                if let Some(old) = &d.old_path {
-                    add_companion(&mut fallback, old.clone());
+            // itself touch falls back too — only when the conflict reaches
+            // the filter (a conflicted path in it, or the rename partner of
+            // one): a conflict elsewhere cannot corrupt what is shown.
+            let reaches = fallback.iter().any(|(p, f)| {
+                f.conflicted && f.source.as_ref().is_some_and(|s| s.0 == i) && repo.in_paths(p)
+            });
+            if reaches {
+                for d in &step {
+                    add_companion(&mut fallback, d.path.clone());
+                    if let Some(old) = &d.old_path {
+                        add_companion(&mut fallback, old.clone());
+                    }
                 }
-            }
-            for (old, new) in &ci_changes {
-                if let Some(old) = old {
-                    add_companion(&mut fallback, old.clone());
+                for (old, new) in &ci_changes {
+                    if let Some(old) = old {
+                        add_companion(&mut fallback, old.clone());
+                    }
+                    add_companion(&mut fallback, new.clone());
                 }
-                add_companion(&mut fallback, new.clone());
             }
         } else if merged {
             // A clean merge is only trusted for the built-in text driver:
@@ -679,28 +791,61 @@ pub(crate) fn combined_diff_with_budget(
             for path in repo.merge_driven(&candidates)? {
                 add_companion(&mut fallback, path);
             }
+            crossing(&fallback)?;
+        } else {
+            crossing(&fallback)?;
         }
         // After every step, clean ones included: a rename that moves a
         // fallback path carries its content (conflict markers included) to
-        // the new path, which must join the fallback. Renames come from the
-        // step diff and from `Ci` itself (the side `merge-tree` followed).
+        // the new path, which must join the fallback.
         if !fallback.is_empty() {
-            let mut pairs = rename_pairs(&step);
-            pairs.extend(
-                ci_changes
-                    .iter()
-                    .filter_map(|(old, new)| old.clone().map(|o| (o, new.clone()))),
-            );
             join_pairs(&mut fallback, &pairs);
         }
         steps.push(step);
         acc = result;
     }
 
-    // 3. Net diff. A rename pair touching the fallback goes there whole.
+    // 3. Net diff. A rename pair touching the fallback goes there whole —
+    //    with a filter, a pair crossing it too (see the replay). Then only
+    //    the fallback paths inside the filter remain.
     let mut diffs = repo.diff(&base_tree, &acc, false)?;
-    join_pairs(&mut fallback, &rename_pairs(&diffs));
+    let mut pairs = rename_pairs(&diffs);
+    if repo.paths.is_some() && fallback.keys().any(|p| !repo.in_paths(p)) {
+        let whole = Repo {
+            cwd,
+            paths: None,
+            empty_tree: None,
+        };
+        pairs.extend(
+            whole
+                .touched(&base_tree, &acc)?
+                .into_iter()
+                .filter_map(|(old, new)| old.map(|o| (o, new)))
+                .filter(|(o, n)| repo.in_paths(o) != repo.in_paths(n)),
+        );
+    }
+    join_pairs(&mut fallback, &pairs);
+    fallback.retain(|p, _| repo.in_paths(p));
     diffs.retain(|d| !touches(d, &fallback));
+
+    // Blockers of the conflicted paths shown: one batched walk per step.
+    let mut sources: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
+    for fb in fallback.values() {
+        if let Some((i, path)) = &fb.source {
+            sources.entry(*i).or_default().insert(path.clone());
+        }
+    }
+    let mut blockers: HashMap<(usize, String), Vec<String>> = HashMap::new();
+    for (i, paths) in sources {
+        let Some(parent) = &replayed[i].parent else {
+            continue;
+        };
+        let earlier: Vec<&str> = replayed[..i].iter().map(|r| r.hash.as_str()).collect();
+        let paths: Vec<String> = paths.into_iter().collect();
+        for (path, list) in repo.blockers(parent, base.as_deref(), &earlier, &paths)? {
+            blockers.insert((i, path), list);
+        }
+    }
 
     // 5. Steps: no fallback file, and no file with a truncated net diff or a
     //    truncated entry in any step: its attribution would be partial. A
@@ -782,11 +927,15 @@ pub(crate) fn combined_diff_with_budget(
         .into_iter()
         .filter_map(|(path, fb)| {
             let per_commit = per_path.remove(&path)?;
+            let blockers = fb
+                .source
+                .and_then(|s| blockers.get(&s).cloned())
+                .unwrap_or_default();
             Some(CombinedFallbackFile {
                 path,
                 conflicted: fb.conflicted,
                 per_commit,
-                blockers: fb.blockers,
+                blockers,
             })
         })
         .collect();
@@ -1041,6 +1190,169 @@ mod tests {
         assert_eq!(fb, vec!["f"]);
         for p in &got.fallback[0].per_commit {
             assert_eq!(p.diff.path, "f");
+        }
+    }
+
+    /// The review's case: a conflict on `README` (outside the filter) must
+    /// not send the in-filter `X`, which merges cleanly, to the fallback.
+    #[test]
+    fn out_of_filter_conflict_leaves_in_filter_files_net() {
+        let r = TempRepo::new();
+        commit_files(
+            &r,
+            &[("X", Some(&ten("l"))), ("README", Some("a\nx=1\nc\n"))],
+            "base",
+        );
+        let x1 = ten("l").replacen("l1\n", "A1\n", 1);
+        let a = commit_files(
+            &r,
+            &[("X", Some(&x1)), ("README", Some("a\nx=2\nc\n"))],
+            "A",
+        );
+        commit_files(&r, &[("README", Some("a\nx=3\nc\n"))], "B");
+        let c = commit_files(
+            &r,
+            &[
+                ("X", Some(&x1.replacen("l10\n", "C10\n", 1))),
+                ("README", Some("a\nx=4\nc\n")),
+            ],
+            "C",
+        );
+        let got = run(&r, &[&a, &c], Some(&["X"]));
+        assert_eq!(paths_of(&got.diffs), vec!["X"]);
+        assert_eq!(lines(&got.diffs[0], "add"), vec!["A1", "C10"]);
+        assert!(got.fallback.is_empty(), "{:?}", got.fallback);
+        assert_eq!(paths_of(&got.steps[1]), vec!["X"]);
+        // Unfiltered, `README` conflicts and `X` is its companion.
+        let all = run(&r, &[&a, &c], None);
+        let fb: Vec<&str> = all.fallback.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(fb, vec!["README", "X"]);
+    }
+
+    /// An out-of-filter conflicted path that a later selected commit renames
+    /// into the filter carries its conflict markers there: the in-filter name
+    /// falls back, conflicted, with the blocker of the conflict.
+    #[test]
+    fn out_of_filter_conflict_renamed_into_the_filter_falls_back() {
+        let r = TempRepo::new();
+        commit_files(
+            &r,
+            &[("README", Some(&ten("l"))), ("g", Some("g\n"))],
+            "base",
+        );
+        let a = commit_files(
+            &r,
+            &[("README", Some(&ten("l").replacen("l5\n", "A\n", 1)))],
+            "A",
+        );
+        let b = commit_files(
+            &r,
+            &[("README", Some(&ten("l").replacen("l5\n", "B\n", 1)))],
+            "B",
+        );
+        let c = commit_files(
+            &r,
+            &[("README", Some(&ten("l").replacen("l5\n", "C\n", 1)))],
+            "C",
+        );
+        r.git(&["mv", "README", "X"]);
+        r.git(&["commit", "-q", "-m", "D"]);
+        let d = r.git(&["rev-parse", "HEAD"]);
+        let got = run(&r, &[&a, &c, &d], Some(&["X"]));
+        for e in got.diffs.iter().chain(got.steps.iter().flatten()) {
+            assert_ne!(e.path, "X", "X leaks: {e:?}");
+        }
+        let fb: Vec<&str> = got.fallback.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(fb, vec!["X"]);
+        assert!(got.fallback[0].conflicted);
+        assert_eq!(got.fallback[0].blockers, vec![b]);
+        assert!(got.fallback[0].per_commit.iter().any(|p| p.hash == d));
+    }
+
+    /// Blockers come from one batched walk per step; per path they are what
+    /// `rev-list --max-count 5 Ci^ --not <base> <earlier> -- <path>` lists,
+    /// newest first.
+    #[test]
+    fn batched_blockers_match_the_per_path_query() {
+        let r = TempRepo::new();
+        let v = |n: u32| format!("a\nx={n}\nc\n");
+        commit_files(&r, &[("p", Some(&v(1))), ("q", Some(&v(1)))], "base");
+        let a = commit_files(&r, &[("p", Some(&v(2))), ("q", Some(&v(2)))], "A");
+        commit_files(&r, &[("p", Some(&v(3)))], "U1");
+        commit_files(&r, &[("q", Some(&v(3)))], "U2");
+        commit_files(&r, &[("p", Some(&v(4))), ("q", Some(&v(4)))], "U3");
+        for n in 5..10 {
+            commit_files(&r, &[("p", Some(&v(n)))], &format!("U{n}"));
+        }
+        commit_files(&r, &[("other", Some("o\n"))], "U10");
+        let c = commit_files(
+            &r,
+            &[
+                ("p", Some("a\nx=10\nc\ne\n")),
+                ("q", Some("a\nx=10\nc\ne\n")),
+            ],
+            "C",
+        );
+        let got = run(&r, &[&a, &c], None);
+        let per_path = |path: &str| -> Vec<String> {
+            r.git(&[
+                "rev-list",
+                "--max-count",
+                "5",
+                &format!("{c}^"),
+                "--not",
+                &format!("{a}^"),
+                &a,
+                "--",
+                path,
+            ])
+            .lines()
+            .map(str::to_string)
+            .collect()
+        };
+        let fb = |path: &str| got.fallback.iter().find(|f| f.path == path).unwrap();
+        assert_eq!(fb("p").blockers, per_path("p"));
+        assert_eq!(fb("p").blockers.len(), 5);
+        assert_eq!(fb("q").blockers, per_path("q"));
+        assert_eq!(fb("q").blockers.len(), 2);
+    }
+
+    /// The `git log -z --name-only` stream as git 2.5x writes it: a merge
+    /// with no combined names, a name starting with a newline.
+    #[test]
+    fn parse_log_names_reads_records() {
+        let out = "\0f7\0\n\nweird\0b\0\0bb\0\0\078\0\nb\0\0b7\0\na\0b\0";
+        let got = parse_log_names(out).unwrap();
+        let want: Vec<(String, Vec<String>)> = vec![
+            ("f7".into(), vec!["\nweird".into(), "b".into()]),
+            ("bb".into(), vec![]),
+            ("78".into(), vec!["b".into()]),
+            ("b7".into(), vec!["a".into(), "b".into()]),
+        ];
+        assert_eq!(got, want);
+        assert!(parse_log_names("\0not-a-hash\0").is_err());
+    }
+
+    /// Conflicts on more path bytes than one argv batch: every path still
+    /// gets its blocker, through several batched walks.
+    #[test]
+    fn blockers_of_many_conflicts_span_batches() {
+        let r = TempRepo::new();
+        let names: Vec<String> = (0..40)
+            .map(|i| format!("dir/{i:03}{}", "n".repeat(250)))
+            .collect();
+        let set = |v: &'static str| -> Vec<(&str, Option<&str>)> {
+            names.iter().map(|n| (n.as_str(), Some(v))).collect()
+        };
+        commit_files(&r, &set("a\nx=1\nc\n"), "base");
+        let a = commit_files(&r, &set("a\nx=2\nc\n"), "A");
+        let b = commit_files(&r, &set("a\nx=3\nc\n"), "B");
+        let c = commit_files(&r, &set("a\nx=4\nc\n"), "C");
+        let got = run(&r, &[&a, &c], None);
+        assert_eq!(got.fallback.len(), names.len());
+        for f in &got.fallback {
+            assert!(f.conflicted);
+            assert_eq!(f.blockers, vec![b.clone()], "{}", f.path);
         }
     }
 

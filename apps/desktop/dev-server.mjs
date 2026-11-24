@@ -1373,10 +1373,7 @@ class CombinedRepo {
 
   inPaths(path) {
     if (this.paths === null) return true;
-    return this.paths.some((raw) => {
-      const q = raw.replace(/\/+$/, "");
-      return path === q || (path.startsWith(q) && path.slice(q.length).startsWith("/"));
-    });
+    return this.paths.some((q) => combinedCovers(q, path));
   }
 
   async emptyTree() {
@@ -1492,13 +1489,61 @@ class CombinedRepo {
     return out;
   }
 
-  async blockers(parent, base, earlier, path) {
-    const args = ["rev-list", "--max-count", "5", parent, "--not"];
-    if (base !== null) args.push(base);
-    args.push(...earlier, "--", path);
-    const out = await this.stdout(args, "rev-list", { env: { GIT_LITERAL_PATHSPECS: "1" } });
-    return rustLines(out).map((l) => l.trim()).filter((l) => l !== "");
+  /**
+   * replay.rs `blockers`: per path of `paths`, the commits outside the
+   * selection touching it (`--full-history`), newest first, at most 5 — one
+   * unbounded `git log` walk per argv-sized pathspec batch.
+   */
+  async blockers(parent, base, earlier, paths) {
+    const found = new Map();
+    for (const batch of combinedPathspecBatches(paths.map((p) => [p]), COMBINED_PATHSPEC_BATCH_BYTES)) {
+      const args = [
+        "-c", "log.follow=false",
+        "log", "--no-color", "--no-show-signature", "--no-renames", "--no-relative",
+        "--ignore-submodules=none", "--full-history", "--root", "--diff-merges=combined",
+        "--name-only", "-z", "--format=%x00%H", parent, "--not",
+      ];
+      if (base !== null) args.push(base);
+      args.push(...earlier, "--", ...batch);
+      const commits = combinedParseLogNames(await this.stdout(args, "log", { env: { GIT_LITERAL_PATHSPECS: "1" } }));
+      for (const path of batch) {
+        found.set(
+          path,
+          commits.filter(([, names]) => names.some((n) => combinedCovers(path, n))).slice(0, 5).map(([h]) => h),
+        );
+      }
+    }
+    return found;
   }
+}
+
+/** replay.rs `covers`: the literal pathspec `spec` matches `path` or a path under it. */
+function combinedCovers(spec, path) {
+  const q = spec.replace(/\/+$/, "");
+  return path === q || (path.startsWith(q) && path.slice(q.length).startsWith("/"));
+}
+
+/** replay.rs `parse_log_names`: `[hash, names]` in walk order. */
+function combinedParseLogNames(out) {
+  const commits = [];
+  let afterEmpty = true;
+  let firstName = false;
+  for (const field of out.split("\0")) {
+    if (field === "") {
+      afterEmpty = true;
+      continue;
+    }
+    if (afterEmpty) {
+      if (!/^[0-9a-fA-F]+$/.test(field)) throw new Error(`Unexpected git log output: ${field}`);
+      commits.push([field, []]);
+      firstName = true;
+    } else if (commits.length > 0) {
+      commits[commits.length - 1][1].push(firstName && field.startsWith("\n") ? field.slice(1) : field);
+      firstName = false;
+    }
+    afterEmpty = false;
+  }
+  return commits;
 }
 
 /**
@@ -1524,7 +1569,10 @@ function combinedCheckNames(diffs, listed) {
   }
 }
 
-/** replay.rs `join_pairs`. `fallback`: Map path → `{ conflicted, blockers }`. */
+/**
+ * replay.rs `join_pairs`. `fallback`: Map path → `{ conflicted, source }`,
+ * `source` = `[step, conflicted path]` (blockers computed after the replay).
+ */
 function combinedJoinPairs(fallback, pairs) {
   for (;;) {
     let joined = false;
@@ -1534,7 +1582,7 @@ function combinedJoinPairs(fallback, pairs) {
         if (src === undefined) continue;
         const dst = fallback.get(to);
         if (dst === undefined || (src.conflicted && !dst.conflicted)) {
-          fallback.set(to, { conflicted: src.conflicted, blockers: [...src.blockers] });
+          fallback.set(to, { conflicted: src.conflicted, source: src.source });
           joined = true;
         }
       }
@@ -1544,7 +1592,7 @@ function combinedJoinPairs(fallback, pairs) {
 }
 
 function combinedAddCompanion(fallback, path) {
-  if (!fallback.has(path)) fallback.set(path, { conflicted: false, blockers: [] });
+  if (!fallback.has(path)) fallback.set(path, { conflicted: false, source: null });
 }
 
 function combinedRenamePairs(diffs) {
@@ -1596,22 +1644,41 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
     const [result, conflicted] = merged ? await repo.merge(parentTree, acc, c.tree) : [c.tree, null];
     const step = await repo.diff(acc, result, true);
     const ciChanges = merged ? await repo.touched(parentTree, c.tree) : [];
+    // Rename pairs of this step (step diff, `Ci` itself); with a filter, also
+    // the pairs crossing it once the fallback holds an out-of-filter path.
+    const pairs = combinedRenamePairs(step);
+    for (const [old, path] of ciChanges) if (old !== null) pairs.push([old, path]);
+    const crossing = async () => {
+      if (repo.paths === null || ![...fallback.keys()].some((p) => !repo.inPaths(p))) return;
+      const whole = new CombinedRepo(cwd, null, core);
+      const listed = await whole.touched(acc, result);
+      if (merged) listed.push(...(await whole.touched(parentTree, c.tree)));
+      for (const [old, path] of listed) {
+        if (old !== null && repo.inPaths(old) !== repo.inPaths(path)) pairs.push([old, path]);
+      }
+    };
     if (conflicted !== null) {
-      // (a) conflicted, with blockers.
-      const earlier = replayed.slice(0, i).map((r) => r.hash);
-      for (const path of conflicted.filter((p) => repo.inPaths(p))) {
+      // (a) conflicted, blockers computed later; out-of-filter paths kept
+      //     (never shown) for their in-filter rename partners.
+      for (const path of conflicted) {
         if (fallback.get(path)?.conflicted) continue;
-        const blockers = c.parent !== null ? await repo.blockers(c.parent, base, earlier, path) : [];
-        fallback.set(path, { conflicted: true, blockers });
+        fallback.set(path, { conflicted: true, source: [i, path] });
       }
-      // (b), (c) companions.
-      for (const d of step) {
-        combinedAddCompanion(fallback, d.path);
-        if (d.oldPath !== undefined) combinedAddCompanion(fallback, d.oldPath);
-      }
-      for (const [old, path] of ciChanges) {
-        if (old !== null) combinedAddCompanion(fallback, old);
-        combinedAddCompanion(fallback, path);
+      await crossing();
+      combinedJoinPairs(fallback, pairs);
+      // (b), (c) companions — only when the conflict reaches the filter.
+      const reaches = [...fallback.entries()].some(
+        ([p, f]) => f.conflicted && f.source !== null && f.source[0] === i && repo.inPaths(p),
+      );
+      if (reaches) {
+        for (const d of step) {
+          combinedAddCompanion(fallback, d.path);
+          if (d.oldPath !== undefined) combinedAddCompanion(fallback, d.oldPath);
+        }
+        for (const [old, path] of ciChanges) {
+          if (old !== null) combinedAddCompanion(fallback, old);
+          combinedAddCompanion(fallback, path);
+        }
       }
     } else if (merged) {
       // A clean merge is only trusted for the built-in text driver.
@@ -1626,21 +1693,45 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
       }
       const unique = [...new Set(candidates)].sort(cmpCodePoints);
       for (const path of await repo.mergeDriven(unique)) combinedAddCompanion(fallback, path);
+      await crossing();
+    } else {
+      await crossing();
     }
     // After every step: the fallback set is closed under renames.
-    if (fallback.size > 0) {
-      const pairs = combinedRenamePairs(step);
-      for (const [old, path] of ciChanges) if (old !== null) pairs.push([old, path]);
-      combinedJoinPairs(fallback, pairs);
-    }
+    if (fallback.size > 0) combinedJoinPairs(fallback, pairs);
     steps.push(step);
     acc = result;
   }
 
-  // 3. Net diff. A rename pair touching the fallback goes there whole.
+  // 3. Net diff. A rename pair touching the fallback goes there whole (with a
+  //    filter, a pair crossing it too); then only in-filter fallback paths stay.
   let diffs = await repo.diff(baseTree, acc, false);
-  combinedJoinPairs(fallback, combinedRenamePairs(diffs));
+  const netPairs = combinedRenamePairs(diffs);
+  if (repo.paths !== null && [...fallback.keys()].some((p) => !repo.inPaths(p))) {
+    for (const [old, path] of await new CombinedRepo(cwd, null, core).touched(baseTree, acc)) {
+      if (old !== null && repo.inPaths(old) !== repo.inPaths(path)) netPairs.push([old, path]);
+    }
+  }
+  combinedJoinPairs(fallback, netPairs);
+  for (const p of [...fallback.keys()]) if (!repo.inPaths(p)) fallback.delete(p);
   diffs = diffs.filter((d) => !combinedTouches(d, fallback));
+
+  // Blockers of the conflicted paths shown: one batched walk per step.
+  const sources = new Map();
+  for (const fb of fallback.values()) {
+    if (fb.source === null) continue;
+    const [i, path] = fb.source;
+    if (!sources.has(i)) sources.set(i, new Set());
+    sources.get(i).add(path);
+  }
+  const blockers = new Map();
+  for (const [i, paths] of sources) {
+    const parent = replayed[i].parent;
+    if (parent === null) continue;
+    const earlier = replayed.slice(0, i).map((r) => r.hash);
+    const found = await repo.blockers(parent, base, earlier, [...paths].sort(cmpCodePoints));
+    for (const [path, list] of found) blockers.set(`${i}\0${path}`, list);
+  }
 
   // 5. Steps: no fallback file, no file with any truncated entry — a file
   //    being every name its entries link by renames (replay.rs).
@@ -1686,7 +1777,8 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
   for (const [path, fb] of [...fallback.entries()].sort(([a], [b]) => cmpCodePoints(a, b))) {
     const perCommit = perPath.get(path);
     if (perCommit === undefined) continue;
-    fallbackOut.push({ path, conflicted: fb.conflicted, perCommit, blockers: fb.blockers });
+    const list = fb.source !== null ? blockers.get(`${fb.source[0]}\0${fb.source[1]}`) : undefined;
+    fallbackOut.push({ path, conflicted: fb.conflicted, perCommit, blockers: list ?? [] });
   }
 
   // 6. Total payload budget: steps first, then header-only entries.
