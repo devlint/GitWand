@@ -183,6 +183,19 @@ describe("CommitGraph — multi-selection", () => {
     expect(document.querySelector(".commit-ctx-menu")?.textContent).not.toContain("combined.ctxOpen");
   });
 
+  it("context menu on a row outside the multi-selection keeps the selection", async () => {
+    const { emitted } = mount();
+    await click(1, { ctrlKey: true });
+    expect(chip()?.textContent).toContain("combined.chip:2");
+    rows()[3].dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    await nextTick();
+    expect(useCommitSelection(ref(cwd)).selected.value).toEqual([full("aaa1111"), full("bbb2222")]);
+    expect(chip()?.textContent).toContain("combined.chip:2");
+    expect(emitted["select-commit"]).toBeUndefined();
+    // The menu acts on the right-clicked row, with no combined entry.
+    expect(document.querySelector(".commit-ctx-menu")?.textContent).not.toContain("combined.ctxOpen");
+  });
+
   it("a reload that drops a selected commit prunes it", async () => {
     const log = shallowRef(commits);
     const { emitted } = mount();

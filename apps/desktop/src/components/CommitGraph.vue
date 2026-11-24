@@ -229,9 +229,11 @@ function openCommitContextMenu(e: MouseEvent, entry: GitLogEntry, idx: number, b
   if (entry.hashFull === "WIP") return;
   e.preventDefault();
   e.stopPropagation();
-  // Select the commit first — unless it belongs to a multi-selection, which the
-  // menu then acts on (the selection and the right rail stay as they are).
-  if (!(multiSet.value.size >= 2 && multiSet.value.has(entry.hashFull))) {
+  // Without a multi-selection, select the commit first (as before v3.15).
+  // With one, a right-click never changes it: on a member the menu acts on
+  // the selection, on any other row on that row only (`ctxMenu.entry`); the
+  // selection and the right rail stay as they are.
+  if (multiSet.value.size < 2) {
     selection.clear();
     emit("select-commit", entry.hashFull);
   }
