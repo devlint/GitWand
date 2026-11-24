@@ -1132,10 +1132,10 @@ function combinedWeight(d) {
 
 /**
  * replay.rs `truncated_names`: every name of a file with a truncated entry, in
- * the net diff or any step — a file being all the names its entries link by
+ * the net diff or any step, or with an opaque step entry (`opaque`) — a file being all the names its entries link by
  * renames (union-find, as `combinedApplyBudget` groups step entries).
  */
-function combinedTruncatedNames(diffs, steps) {
+function combinedTruncatedNames(diffs, steps, opaque) {
   const parent = new Map();
   const root = (name) => {
     let r = name;
@@ -1152,6 +1152,7 @@ function combinedTruncatedNames(diffs, steps) {
     }
   }
   const seeds = new Set(all.filter((d) => d.truncatedFromBytes !== undefined).map((d) => root(d.path)));
+  for (const name of opaque) seeds.add(root(name));
   const names = new Set();
   if (seeds.size === 0) return names;
   for (const n of [...parent.keys()]) if (seeds.has(root(n))) names.add(n);
@@ -1467,10 +1468,15 @@ class CombinedRepo {
 
   /** replay.rs `diff`: the patch, its names checked against `touched`. */
   async diff(a, b, unified0) {
-    return this.diffListed(a, b, unified0, await this.touched(a, b));
+    return (await this.diffListed(a, b, unified0, await this.touched(a, b)))[0];
   }
 
-  /** replay.rs `diff_listed`. */
+  /** replay.rs `step_diff`: `[diffs, opaque names]` of a replay step. */
+  async stepDiff(a, b) {
+    return this.diffListed(a, b, true, await this.touched(a, b));
+  }
+
+  /** replay.rs `diff_listed`: `[diffs, opaque names]`. */
   async diffListed(a, b, unified0, listed) {
     const args = ["diff-tree", "-r", "-p", "-M", "--no-color", "--no-ext-diff", "--no-relative"];
     if (unified0) args.push("-U0");
@@ -1478,7 +1484,7 @@ class CombinedRepo {
     const out = await this.stdout(args, "diff-tree", { env: { GIT_LITERAL_PATHSPECS: "1" } });
     const diffs = devParseMultiFileDiff(this.core, out, DIFF_TRUNCATE_BYTES);
     combinedCheckNames(diffs, listed);
-    return diffs;
+    return [diffs, combinedOpaqueNames(this.core, out)];
   }
 
   /** `[old path of a rename | null, path]` per change. */
@@ -1556,6 +1562,29 @@ class CombinedRepo {
     }
     return found;
   }
+}
+
+/**
+ * replay.rs `opaque_names`: names (new and old) of the sections with no hunk
+ * whose blobs differ (an `index` header) — binary changes. A pure rename or a
+ * mode change keeps its blob. Each such section is parsed alone.
+ */
+function combinedOpaqueNames(core, out) {
+  const sections = [];
+  for (const line of rustLines(out)) {
+    if (line.startsWith("diff --git ")) sections.push([line]);
+    else if (sections.length > 0) sections[sections.length - 1].push(line);
+  }
+  const names = [];
+  for (const section of sections) {
+    const headers = section.slice(1);
+    if (headers.some((l) => l.startsWith("@@")) || !headers.some((l) => l.startsWith("index "))) continue;
+    for (const d of devParseMultiFileDiff(core, section.join("\n"))) {
+      if (d.oldPath !== undefined) names.push(d.oldPath);
+      names.push(d.path);
+    }
+  }
+  return names;
 }
 
 /** replay.rs `covers`: the literal pathspec `spec` matches `path` or a path under it. */
@@ -1778,12 +1807,15 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
   let acc = baseTree;
   const fallback = new Map();
   const steps = [];
+  // Names of the opaque (binary) step entries: their file loses every step.
+  const opaque = [];
   for (let i = 0; i < replayed.length; i++) {
     const c = replayed[i];
     const parentTree = c.parentTree ?? (await repo.emptyTree());
     const merged = acc !== parentTree;
     const [result, conflicted] = merged ? await repo.merge(parentTree, acc, c.tree) : [c.tree, null];
-    const step = await repo.diff(acc, result, true);
+    const [step, stepOpaque] = await repo.stepDiff(acc, result);
+    opaque.push(...stepOpaque);
     const ciChanges = merged ? await repo.touched(parentTree, c.tree) : [];
     // Rename pairs of this step (step diff, `Ci` itself); with a filter, also
     // the pairs crossing it once the fallback holds an out-of-filter path.
@@ -1876,9 +1908,9 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
     for (const [path, list] of found) blockers.set(`${i}\0${path}`, list);
   }
 
-  // 5. Steps: no fallback file, no file with any truncated entry — a file
+  // 5. Steps: no fallback file, no file with any truncated or opaque entry — a file
   //    being every name its entries link by renames (replay.rs).
-  const truncated = combinedTruncatedNames(diffs, steps);
+  const truncated = combinedTruncatedNames(diffs, steps, opaque);
   const keptSteps = steps.map((step) =>
     step.filter(
       (d) =>

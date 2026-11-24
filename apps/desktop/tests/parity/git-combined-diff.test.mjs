@@ -366,6 +366,24 @@ describe("parity: git-combined-diff", () => {
     expect(rust.steps.flat().map((x) => x.path)).toEqual(["t.txt"]);
   }, 60_000);
 
+  // replay.rs `binary_step_drops_every_step_of_that_file`: text → binary →
+  // text; the binary entries carry no hunk, so `f` loses every step. A pure
+  // rename and a mode change (same blob) keep theirs.
+  it("a binary step drops every step of that file", async () => {
+    const cwd = repo("binarystep");
+    commitFiles(cwd, { f: ten("l"), g: "g\n", m: "m\n" }, "base", 0);
+    const a = commitFiles(cwd, { f: "bin\0ary\n" }, "A", 1);
+    const b = commitFiles(cwd, { f: ten("l").replace("l3\n", "B3\n") }, "B", 2);
+    const c = commitFiles(cwd, { g: "g2\n" }, "C", 3);
+    git(cwd, ["mv", "g", "g2"]);
+    git(cwd, ["update-index", "--chmod=+x", "m"]);
+    execFileSync("git", ["-C", cwd, "commit", "-q", "-m", "D"], { env: commitEnv(4) });
+    const d = git(cwd, ["rev-parse", "HEAD"]);
+    const { rust } = await parity(cwd, [a, b, c, d]);
+    expect(rust.diffs.find((x) => x.path === "f").hunks.length).toBeGreaterThan(0);
+    expect(rust.steps.map((s) => s.map((x) => x.path).sort())).toEqual([[], [], ["g"], ["g2", "m"]]);
+  });
+
   // A truncated step under an earlier name (`p`) drops the steps of every
   // name the file takes later (`q`), through the renames of the steps and
   // of the net diff: C and D each stay under the cap, the net is small.

@@ -243,7 +243,14 @@ impl<'a> Repo<'a> {
     /// truncation threshold, its file names checked against `touched`.
     fn diff(&self, a: &str, b: &str, unified0: bool) -> Result<Vec<GitDiff>, String> {
         let listed = self.touched(a, b)?;
-        self.diff_listed(a, b, unified0, &listed)
+        Ok(self.diff_listed(a, b, unified0, &listed)?.0)
+    }
+
+    /// [`Repo::diff`] of a replay step, with the names of its opaque entries
+    /// (see [`opaque_names`]).
+    fn step_diff(&self, a: &str, b: &str) -> Result<(Vec<GitDiff>, Vec<String>), String> {
+        let listed = self.touched(a, b)?;
+        self.diff_listed(a, b, true, &listed)
     }
 
     /// [`Repo::diff`] when `listed` (the `touched(a, b)` of the same trees)
@@ -257,7 +264,7 @@ impl<'a> Repo<'a> {
         b: &str,
         unified0: bool,
         listed: &[(Option<String>, String)],
-    ) -> Result<Vec<GitDiff>, String> {
+    ) -> Result<(Vec<GitDiff>, Vec<String>), String> {
         let mut cmd = self.git();
         cmd.args([
             "diff-tree",
@@ -276,7 +283,7 @@ impl<'a> Repo<'a> {
         let out = self.stdout(cmd, "diff-tree")?;
         let diffs = parse_multi_file_diff_capped(&out, Some(DIFF_TRUNCATE_BYTES));
         check_names(&diffs, listed)?;
-        Ok(diffs)
+        Ok((diffs, opaque_names(&out)))
     }
 
     /// Every change of a tree diff within `paths`, as `(old path of a
@@ -575,9 +582,14 @@ fn add_companion(fallback: &mut FallbackSet, path: String) {
 }
 
 /// Every name of a file with a truncated entry, in the net diff or in any
-/// step — a file being all the names its entries link by renames (union-find,
-/// as `budget::apply_budget` groups step entries).
-fn truncated_names(diffs: &[GitDiff], steps: &[Vec<GitDiff>]) -> HashSet<String> {
+/// step, or with an opaque step entry (`opaque`: see [`opaque_names`]) — a
+/// file being all the names its entries link by renames (union-find, as
+/// `budget::apply_budget` groups step entries).
+fn truncated_names(
+    diffs: &[GitDiff],
+    steps: &[Vec<GitDiff>],
+    opaque: &[String],
+) -> HashSet<String> {
     let mut parent: BTreeMap<String, String> = BTreeMap::new();
     let all = || diffs.iter().chain(steps.iter().flatten());
     for d in all() {
@@ -589,10 +601,13 @@ fn truncated_names(diffs: &[GitDiff], steps: &[Vec<GitDiff>]) -> HashSet<String>
             }
         }
     }
-    let seeds: HashSet<String> = all()
+    let mut seeds: HashSet<String> = all()
         .filter(|d| d.truncated_from_bytes.is_some())
         .map(|d| root(&mut parent, &d.path))
         .collect();
+    for name in opaque {
+        seeds.insert(root(&mut parent, name));
+    }
     if seeds.is_empty() {
         return HashSet::new();
     }
@@ -601,6 +616,36 @@ fn truncated_names(diffs: &[GitDiff], steps: &[Vec<GitDiff>]) -> HashSet<String>
         .into_iter()
         .filter(|n| seeds.contains(&root(&mut parent, n)))
         .collect()
+}
+
+/// Names (new and old) of the opaque entries of a `diff-tree -p` output: a
+/// section with no hunk whose blobs differ (an `index` header) — a binary
+/// change, whose lines no hunk describes. A pure rename or a mode change
+/// keeps its blob (no `index` line) and is not opaque. Each such section is
+/// parsed alone, by the same parser as the whole output.
+fn opaque_names(out: &str) -> Vec<String> {
+    let mut sections: Vec<Vec<&str>> = Vec::new();
+    for line in out.lines() {
+        if line.starts_with("diff --git ") {
+            sections.push(vec![line]);
+        } else if let Some(section) = sections.last_mut() {
+            section.push(line);
+        }
+    }
+    let mut names = Vec::new();
+    for section in sections {
+        let headers = &section[1..];
+        if headers.iter().any(|l| l.starts_with("@@"))
+            || !headers.iter().any(|l| l.starts_with("index "))
+        {
+            continue;
+        }
+        for d in parse_multi_file_diff_capped(&section.join("\n"), None) {
+            names.extend(d.old_path);
+            names.push(d.path);
+        }
+    }
+    names
 }
 
 fn rename_pairs(diffs: &[GitDiff]) -> Vec<(String, String)> {
@@ -804,6 +849,8 @@ pub(crate) fn combined_diff_with_budget(
     let mut acc = base_tree.clone();
     let mut fallback: FallbackSet = BTreeMap::new();
     let mut steps: Vec<Vec<GitDiff>> = Vec::with_capacity(replayed.len());
+    // Names of the opaque (binary) step entries: their file loses every step.
+    let mut opaque: Vec<String> = Vec::new();
     for (i, c) in replayed.iter().enumerate() {
         let parent_tree = match &c.parent_tree {
             Some(t) => t.clone(),
@@ -815,7 +862,8 @@ pub(crate) fn combined_diff_with_budget(
         } else {
             (c.tree.clone(), None)
         };
-        let step = repo.diff(&acc, &result, true)?;
+        let (step, step_opaque) = repo.step_diff(&acc, &result)?;
+        opaque.extend(step_opaque);
         // What `Ci` itself changes. On the fast path it is the step diff.
         let ci_changes = if merged {
             repo.touched(&parent_tree, &c.tree)?
@@ -977,12 +1025,13 @@ pub(crate) fn combined_diff_with_budget(
         }
     }
 
-    // 5. Steps: no fallback file, and no file with a truncated net diff or a
-    //    truncated entry in any step: its attribution would be partial. A
+    // 5. Steps: no fallback file, and no file with a truncated net diff, a
+    //    truncated entry in any step or an opaque (binary) step entry: its
+    //    attribution would be partial or wrong. A
     //    file is every name its entries link by renames (as the budget
     //    groups them), so a truncated step under an earlier name drops the
     //    later names' steps too.
-    let truncated = truncated_names(&diffs, &steps);
+    let truncated = truncated_names(&diffs, &steps, &opaque);
     let steps: Vec<Vec<GitDiff>> = steps
         .into_iter()
         .map(|step| {
@@ -1823,6 +1872,41 @@ mod tests {
             "{:?}",
             got.steps.iter().map(|s| paths_of(s)).collect::<Vec<_>>()
         );
+    }
+
+    /// A binary step entry (no hunks, content changed) says nothing of the
+    /// lines it replaced: text → binary → text leaves a net text diff whose
+    /// lines no step entry can place. Every step entry of that file goes, as
+    /// for a truncated one; a pure rename and a mode change (same blob) stay.
+    #[test]
+    fn binary_step_drops_every_step_of_that_file() {
+        let r = TempRepo::new();
+        commit_files(
+            &r,
+            &[
+                ("f", Some(&ten("l"))),
+                ("g", Some("g\n")),
+                ("m", Some("m\n")),
+            ],
+            "base",
+        );
+        let a = commit_files(&r, &[("f", Some("bin\0ary\n"))], "A");
+        let b = commit_files(&r, &[("f", Some(&ten("l").replace("l3\n", "B3\n")))], "B");
+        let c = commit_files(&r, &[("g", Some("g2\n"))], "C");
+        r.git(&["mv", "g", "g2"]);
+        r.git(&["update-index", "--chmod=+x", "m"]);
+        r.git(&["commit", "-q", "-m", "D"]);
+        let d = r.git(&["rev-parse", "HEAD"]);
+        let got = run(&r, &[&a, &b, &c, &d], None);
+        let net = got.diffs.iter().find(|e| e.path == "f").unwrap();
+        assert!(!net.hunks.is_empty());
+        assert!(
+            got.steps.iter().flatten().all(|e| e.path != "f"),
+            "{:?}",
+            got.steps.iter().map(|s| paths_of(s)).collect::<Vec<_>>()
+        );
+        assert_eq!(paths_of(&got.steps[2]), vec!["g"]);
+        assert_eq!(paths_of(&got.steps[3]), vec!["g2", "m"]);
     }
 
     /// Repo where `f` carries the `merge` attribute `driver`; B (unselected)

@@ -267,6 +267,24 @@ describe("buildCombinedEntries", () => {
     expect(e[0].attribution.lineCommit.size).toBe(0);
     expect(e[0].attribution.hunkCommits).toEqual([]);
   });
+
+  it("hunkless_step_entry_that_is_not_a_pure_rename_makes_the_path_unattributable", () => {
+    // text → binary (no hunk) → text: the model cannot know which lines the
+    // binary step replaced, so the net lines get no marker rather than a wrong one.
+    const e = buildCombinedEntries(
+      combined(
+        3,
+        [file("f", [hunk(3, 1, 3, 1, [del(3), add(3)])])],
+        [
+          [file("f", [])],
+          [file("f", [])],
+          [file("f", [hunk(3, 1, 3, 1, [del(3), add(3)])])],
+        ],
+      ),
+    )[0];
+    expect(e.attribution.lineCommit.size).toBe(0);
+    expect(e.attribution.hunkCommits).toEqual([[]]);
+  });
 });
 
 describe("lineKeyFor", () => {
