@@ -93,6 +93,7 @@ describe("getCombinedDiff", () => {
       fallback: [
         { path: "f", conflicted: true, perCommit: [{ hash: commit.hash, diff: RAW_DIFF }], blockers: ["b".repeat(40)] },
       ],
+      truncated: true,
     });
     const got = await getCombinedDiff("/r", ["aaaaaaa", "bbbbbbb"], ["f"]);
     expect(tauriInvoke).toHaveBeenCalledWith("git_combined_diff", {
@@ -106,6 +107,7 @@ describe("getCombinedDiff", () => {
       diffs: [MAPPED],
       steps: [[MAPPED], []],
       fallback: [{ path: "f", conflicted: true, perCommit: [{ hash: commit.hash, diff: MAPPED }], blockers: ["b".repeat(40)] }],
+      truncated: true,
     });
   });
 
@@ -119,7 +121,7 @@ describe("getCombinedDiff", () => {
   });
 
   it("returns the dev-server payload as is", async () => {
-    const payload = { base: "c".repeat(40), commits: [commit], diffs: [MAPPED], steps: [[MAPPED]], fallback: [] };
+    const payload = { base: "c".repeat(40), commits: [commit], diffs: [MAPPED], steps: [[MAPPED]], fallback: [], truncated: false };
     devFetch.mockResolvedValue({ ok: true, status: 200, json: async () => payload });
     expect(await getCombinedDiff("/r", ["aaaaaaa", "bbbbbbb"])).toEqual(payload);
   });

@@ -162,6 +162,10 @@ pub struct CombinedDiff {
     pub diffs: Vec<GitDiff>,
     pub steps: Vec<Vec<GitDiff>>,
     pub fallback: Vec<CombinedFallbackFile>,
+    /// The total payload budget (`combined/budget.rs`) cut something: step
+    /// entries of some files (no attribution for them) and/or entries made
+    /// header-only.
+    pub truncated: bool,
 }
 
 // ─── Branch PR lookup ──────────────────────────────────────────────

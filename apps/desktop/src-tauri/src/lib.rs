@@ -245,12 +245,21 @@ pub fn git_show_parity(cwd: String, hash: String) -> Result<Vec<types::GitDiff>,
     tauri::async_runtime::block_on(commands::read::git_show(cwd, hash))
 }
 
+/// `budget` overrides the 16 MB payload budget so the parity suite can
+/// exercise the cut with small repos; `None` = the production constant. Only
+/// the probe calls this — the Tauri command itself has no override.
 pub fn git_combined_diff_parity(
     cwd: String,
     hashes: Vec<String>,
     paths: Option<Vec<String>>,
+    budget: Option<usize>,
 ) -> Result<types::CombinedDiff, String> {
-    tauri::async_runtime::block_on(commands::combined::git_combined_diff(cwd, hashes, paths))
+    match budget {
+        None => tauri::async_runtime::block_on(commands::combined::git_combined_diff(
+            cwd, hashes, paths,
+        )),
+        Some(b) => combined::replay::combined_diff_with_budget(&cwd, &hashes, paths.as_deref(), b),
+    }
 }
 
 pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {

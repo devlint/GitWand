@@ -20,7 +20,7 @@ const file = (path: string): GitDiff => ({
   hunks: [{ header: "@@ -0,0 +1,1 @@", oldStart: 0, oldCount: 0, newStart: 1, newCount: 1, lines: [{ type: "add", content: "x", newLineNo: 1 }] }],
 });
 const commits = ["1", "2"].map((n) => ({ hash: n.repeat(40), shortHash: n.repeat(7), subject: `s${n}`, author: "a", date: "d" }));
-const data: CombinedDiff = { base: "b", commits, diffs: [file("a.txt")], steps: [[file("a.txt")], []], fallback: [] };
+const data: CombinedDiff = { base: "b", commits, diffs: [file("a.txt")], steps: [[file("a.txt")], []], fallback: [], truncated: false };
 
 Element.prototype.scrollIntoView = vi.fn();
 let app: App | null = null;

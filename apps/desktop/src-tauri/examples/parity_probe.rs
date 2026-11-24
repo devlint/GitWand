@@ -162,7 +162,24 @@ fn main() -> ExitCode {
                 eprintln!("missing required arg: hashes");
                 return ExitCode::from(2);
             };
-            to_json(git_combined_diff_parity(cwd, hashes, strings("paths")))
+            // Test-only override of the payload budget, read by this probe
+            // and by dev-server.mjs alike (never by the shipped app).
+            let budget = match std::env::var("GITWAND_COMBINED_BUDGET_BYTES") {
+                Ok(v) => match v.parse::<usize>() {
+                    Ok(n) => Some(n),
+                    Err(_) => {
+                        eprintln!("invalid GITWAND_COMBINED_BUDGET_BYTES: {v}");
+                        return ExitCode::from(2);
+                    }
+                },
+                Err(_) => None,
+            };
+            to_json(git_combined_diff_parity(
+                cwd,
+                hashes,
+                strings("paths"),
+                budget,
+            ))
         }
         "git-log" => {
             let cwd = match must_str("cwd") {

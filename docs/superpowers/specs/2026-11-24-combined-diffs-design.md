@@ -82,6 +82,7 @@ Algorithm (all through `Command::new(git).args([...])`):
 3. `combined` = `git diff-tree -r -p -M --no-color --no-ext-diff <base tree> <final tree>` (respecting `paths`), parsed with `parse_multi_file_diff`. Any entry whose `path` or `oldPath` is in the fallback set is dropped **and both its paths join the fallback set** (a rename pairing must not leak half a conflict into the net view).
 4. For each fallback path touched by at least one selected commit: its per-commit diffs (`git show -m --first-parent --format= <Ci> -- <path>` for each selected commit that touches it, parsed the same way). Fallback paths no selected commit touches (conflict artefacts like `f~<oid>`) are dropped from the output.
 5. Step diffs are also filtered to drop fallback files (their lines are attributed by the per-commit view), and every step entry of a file whose net entry or any step entry is truncated (> 5 MB, `truncatedFromBytes`): no partial attribution.
+6. **Total payload budget (16 MB of hunk line content over `diffs`, `steps` and the fallback's `perCommit`)** — the per-file 5 MB cap does not bound `steps` × N. Over budget: (a) drop the step entries of whole files (names linked by renames), largest first, ties by smallest name — those files lose their markers, never get wrong ones; (b) if still over, make the largest net / per-commit entries header-only with `truncatedFromBytes`, largest first. `truncated: true` on the result when either happened; the view shows a one-line note. Same constant and order in `dev-server.mjs` (parity-tested through the test-only `GITWAND_COMBINED_BUDGET_BYTES`, read by the parity probe and the dev server, never by the shipped app).
 
 Return type (serde camelCase, mirrored in `backend.ts`):
 
@@ -92,6 +93,7 @@ interface CombinedDiff {
   diffs: GitDiff[];                // net diff, fallback files removed
   steps: GitDiff[][];              // steps[i] = -U0 diff of commit i's replay, fallback files removed
   fallback: CombinedFallbackFile[];
+  truncated: boolean;              // the 16 MB payload budget cut something (step 6)
 }
 interface CombinedCommit { hash: string; shortHash: string; subject: string; author: string; date: string }
 interface CombinedFallbackFile {

@@ -233,6 +233,42 @@ describe("parity: git-combined-diff", () => {
     expect(rust.fallback.every((f) => f.perCommit.length > 0)).toBe(true);
   }, 120_000);
 
+  // The 16 MB total budget, shrunk through the test hook read by both the
+  // probe and the dev server: same files lose their steps, same entries go
+  // header-only, same `truncated` flag.
+  it("the payload budget cuts the same steps and entries on both sides", async () => {
+    const cwd = repo("budget");
+    commitFiles(cwd, { keep: "k\n" }, "base", 0);
+    const a = commitFiles(cwd, { "small.txt": "s\n", "old.txt": ten("o") }, "A", 1);
+    commitFiles(cwd, { keep: "k2\n" }, "B", 2);
+    git(cwd, ["mv", "old.txt", "new.txt"]);
+    const c = commitFiles(cwd, { "large.txt": ten("large line "), "new.txt": ten("o").replace("o3\n", "C3\n") }, "C", 3);
+    // 290 bytes in all. At 150: large.txt (121) then the old.txt→new.txt
+    // file (25, one file through the rename) lose their steps → 144, under.
+    // At 0: every step goes, then every entry turns header-only.
+    for (const budget of ["150", "0"]) {
+      const env = { GITWAND_COMBINED_BUDGET_BYTES: budget };
+      const small = await startDevServer({ env });
+      try {
+        const args = { cwd, hashes: [a, c] };
+        const { rust } = await assertParity(small, {
+          command: COMMAND, args, httpPath: HTTP_PATH, method: "POST", body: args, probeEnv: env,
+        });
+        expect(rust.truncated).toBe(true);
+        if (budget === "0") {
+          expect(rust.steps.flat()).toEqual([]);
+          expect(rust.diffs.every((d) => d.hunks.length === 0 && d.truncatedFromBytes > 0)).toBe(true);
+        } else {
+          expect(rust.steps.flat().map((d) => d.path)).toEqual(["small.txt"]);
+        }
+      } finally {
+        await small.stop();
+      }
+    }
+    const { rust } = await parity(cwd, [a, c]);
+    expect(rust.truncated).toBe(false);
+  }, 30_000);
+
   it("invalid input fails with the same message on both sides", async () => {
     const cwd = repo("errors");
     const a = commitFiles(cwd, { f: "1\n" }, "A", 0);

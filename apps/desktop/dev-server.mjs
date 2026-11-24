@@ -1095,6 +1095,91 @@ const COMBINED_MAX_COMMITS = 50;
 /** Input refused before or while resolving it: the route answers 400. */
 class CombinedInputError extends Error {}
 
+/** Mirrors `COMBINED_BUDGET_BYTES` in src-tauri/src/combined/budget.rs. */
+const COMBINED_BUDGET_BYTES = 16 * 1024 * 1024;
+
+/**
+ * The payload budget in force. `GITWAND_COMBINED_BUDGET_BYTES` is a test hook
+ * (the parity suite sets it, on this dev server and on the Rust probe, to cut
+ * small repos): the shipped app has no such override.
+ */
+function combinedBudget() {
+  const v = process.env.GITWAND_COMBINED_BUDGET_BYTES;
+  return v !== undefined && /^\d+$/.test(v) ? Number(v) : COMBINED_BUDGET_BYTES;
+}
+
+/** budget.rs `size`: bytes of hunk line content (UTF-8). */
+function combinedSize(d) {
+  let n = 0;
+  for (const h of d.hunks) for (const l of h.lines) n += Buffer.byteLength(l.content, "utf8");
+  return n;
+}
+
+/**
+ * budget.rs `apply_budget`: (a) drop the step entries of whole files (names
+ * linked by renames), largest first, ties by smallest name; (b) then make the
+ * largest net / per-commit entries header-only, ties in payload order.
+ * Weightless entries are never cut. Mutates; returns whether it cut anything.
+ */
+function combinedApplyBudget(diffs, steps, fallback, budget) {
+  const entries = [...diffs, ...fallback.flatMap((f) => f.perCommit.map((p) => p.diff))];
+  let total = entries.reduce((n, d) => n + combinedSize(d), 0) +
+    steps.flat().reduce((n, d) => n + combinedSize(d), 0);
+  if (total <= budget) return false;
+  let cut = false;
+
+  // (a) Files = names linked by renames; each file's root is its smallest name.
+  const parent = new Map();
+  const root = (name) => {
+    let r = name;
+    while (parent.has(r) && parent.get(r) !== r) r = parent.get(r);
+    parent.set(name, r);
+    return r;
+  };
+  for (const d of steps.flat()) {
+    const a = root(d.path);
+    if (d.oldPath !== undefined) {
+      const b = root(d.oldPath);
+      if (a !== b) {
+        const [lo, hi] = cmpCodePoints(a, b) < 0 ? [a, b] : [b, a];
+        parent.set(hi, lo);
+      }
+    }
+  }
+  const groups = new Map();
+  for (const d of steps.flat()) {
+    const r = root(d.path);
+    groups.set(r, (groups.get(r) ?? 0) + combinedSize(d));
+  }
+  const order = [...groups.entries()]
+    .filter(([, n]) => n > 0)
+    .sort(([a], [b]) => cmpCodePoints(a, b))
+    .sort(([, x], [, y]) => y - x);
+  const dropped = new Set();
+  for (const [name, n] of order) {
+    if (total <= budget) break;
+    total -= n;
+    dropped.add(name);
+    cut = true;
+  }
+  if (dropped.size > 0) {
+    for (let i = 0; i < steps.length; i++) steps[i] = steps[i].filter((d) => !dropped.has(root(d.path)));
+  }
+
+  // (b) Header-only entries, largest first.
+  if (total > budget) {
+    const bySize = entries.map((d, i) => [i, combinedSize(d)]).filter(([, n]) => n > 0).sort(([, x], [, y]) => y - x);
+    for (const [i, n] of bySize) {
+      if (total <= budget) break;
+      entries[i].hunks = [];
+      entries[i].truncatedFromBytes = n;
+      total -= n;
+      cut = true;
+    }
+  }
+  return cut;
+}
+
 /** `git version 2.39.3 (Apple Git-146)` → `[2, 39]` (`stack::guard`). */
 async function combinedGitVersion() {
   let out;
@@ -1552,7 +1637,9 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
     fallbackOut.push({ path, conflicted: fb.conflicted, perCommit, blockers: fb.blockers });
   }
 
-  return { base, commits, diffs, steps: keptSteps, fallback: fallbackOut };
+  // 6. Total payload budget: steps first, then header-only entries.
+  const cut = combinedApplyBudget(diffs, keptSteps, fallbackOut, combinedBudget());
+  return { base, commits, diffs, steps: keptSteps, fallback: fallbackOut, truncated: cut };
 }
 
 /**

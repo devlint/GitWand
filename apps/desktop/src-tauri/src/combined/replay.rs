@@ -10,6 +10,7 @@
 //! writes are unreachable objects (trees from `merge-tree`, the synthetic
 //! commits, the empty tree), which `git gc` collects.
 
+use super::budget::{apply_budget, COMBINED_BUDGET_BYTES};
 use super::order::resolve_and_order;
 use super::{supports_combined_diff, validate_hashes};
 use crate::commands::read::parse_multi_file_diff_capped;
@@ -463,11 +464,24 @@ fn check_names(diffs: &[GitDiff], listed: &[(Option<String>, String)]) -> Result
     }
 }
 
-/// The combined diff of `hashes` (any order), optionally limited to `paths`.
+/// The combined diff of `hashes` (any order), optionally limited to `paths`,
+/// within the production payload budget.
 pub(crate) fn combined_diff(
     cwd: &str,
     hashes: &[String],
     paths: Option<&[String]>,
+) -> Result<CombinedDiff, String> {
+    combined_diff_with_budget(cwd, hashes, paths, COMBINED_BUDGET_BYTES)
+}
+
+/// [`combined_diff`] with an explicit payload budget. Only tests and the
+/// parity probe pass anything but `COMBINED_BUDGET_BYTES`: the Tauri command
+/// has no way to change it.
+pub(crate) fn combined_diff_with_budget(
+    cwd: &str,
+    hashes: &[String],
+    paths: Option<&[String]>,
+    budget: usize,
 ) -> Result<CombinedDiff, String> {
     let version = git_version();
     if !supports_combined_diff(version) {
@@ -690,7 +704,7 @@ pub(crate) fn combined_diff(
         }
     }
     // Fallback paths no selected commit touches are conflict artefacts.
-    let fallback: Vec<CombinedFallbackFile> = fallback
+    let mut fallback: Vec<CombinedFallbackFile> = fallback
         .into_iter()
         .filter_map(|(path, fb)| {
             let per_commit = per_path.remove(&path)?;
@@ -703,12 +717,17 @@ pub(crate) fn combined_diff(
         })
         .collect();
 
+    // 6. Total payload budget: steps first, then header-only entries.
+    let mut steps = steps;
+    let truncated = apply_budget(&mut diffs, &mut steps, &mut fallback, budget);
+
     Ok(CombinedDiff {
         base,
         commits,
         diffs,
         steps,
         fallback,
+        truncated,
     })
 }
 
@@ -1209,6 +1228,58 @@ mod tests {
         assert!(got.steps.iter().flatten().all(|d| d.path != "big.txt"));
         let t = got.diffs.iter().find(|d| d.path == "t.txt").unwrap();
         assert!(t.truncated_from_bytes.is_none());
+    }
+
+    /// Bytes of hunk line content, as the budget counts them.
+    fn weight(c: &CombinedDiff) -> usize {
+        let w = |d: &GitDiff| -> usize {
+            d.hunks
+                .iter()
+                .flat_map(|h| h.lines.iter())
+                .map(|l| l.content.len())
+                .sum()
+        };
+        c.diffs.iter().map(w).sum::<usize>()
+            + c.steps.iter().flatten().map(w).sum::<usize>()
+            + c.fallback
+                .iter()
+                .flat_map(|f| f.per_commit.iter())
+                .map(|p| w(&p.diff))
+                .sum::<usize>()
+    }
+
+    /// The total budget: under it nothing changes; just over it the largest
+    /// file loses its steps only; at zero every step goes and every entry
+    /// becomes header-only.
+    #[test]
+    fn payload_budget_cuts_steps_then_entries() {
+        let r = TempRepo::new();
+        commit_files(&r, &[("keep", Some("k\n"))], "base");
+        let a = commit_files(&r, &[("small.txt", Some("s\n"))], "A");
+        commit_files(&r, &[("keep", Some("k2\n"))], "B");
+        let c = commit_files(&r, &[("large.txt", Some(&ten("large line ")))], "C");
+        let hashes = vec![a.clone(), c.clone()];
+        let full = combined_diff_with_budget(&cwd(&r), &hashes, None, usize::MAX).unwrap();
+        assert!(!full.truncated);
+        let total = weight(&full);
+        let same = combined_diff_with_budget(&cwd(&r), &hashes, None, total).unwrap();
+        assert_eq!(same, full);
+
+        let cut = combined_diff_with_budget(&cwd(&r), &hashes, None, total - 1).unwrap();
+        assert!(cut.truncated);
+        assert_eq!(cut.diffs, full.diffs);
+        assert_eq!(paths_of(&cut.steps.concat()), vec!["small.txt"]);
+
+        let zero = combined_diff_with_budget(&cwd(&r), &hashes, None, 0).unwrap();
+        assert!(zero.truncated);
+        assert!(zero.steps.iter().all(|s| s.is_empty()));
+        assert_eq!(paths_of(&zero.diffs), vec!["large.txt", "small.txt"]);
+        for d in &zero.diffs {
+            assert!(d.hunks.is_empty());
+            assert!(d.truncated_from_bytes.unwrap() > 0);
+        }
+        // Production uses the 16 MB constant.
+        assert!(!run(&r, &[&a, &c], None).truncated);
     }
 
     #[test]

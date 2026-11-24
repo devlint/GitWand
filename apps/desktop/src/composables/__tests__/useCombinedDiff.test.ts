@@ -14,6 +14,7 @@ const combined = (tag: string): CombinedDiff => ({
   diffs: [{ path: `${tag}.txt`, hunks: [], status: "modified" } as unknown as GitDiff],
   steps: [[]],
   fallback: [],
+  truncated: false,
 });
 
 function deferred<T>() {

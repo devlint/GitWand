@@ -2,6 +2,7 @@
 //! input validation, the git version guard and the topological ordering; the
 //! command itself builds on them.
 
+pub(crate) mod budget;
 pub(crate) mod order;
 pub(crate) mod replay;
 

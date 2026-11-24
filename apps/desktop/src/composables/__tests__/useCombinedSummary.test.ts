@@ -26,7 +26,7 @@ const commits = ["one", "two"].map((subject, i) => ({
 }));
 const data = (over: Partial<CombinedDiff> = {}): CombinedDiff => ({
   base: "b", commits, diffs: [diff("a.ts", 3, 1), diff("big.bin", 0, 0, { truncatedFromBytes: 9_000_000 })],
-  steps: [], fallback: [], ...over,
+  steps: [], fallback: [], truncated: false, ...over,
 });
 
 describe("buildSummaryPromptFromCounts", () => {

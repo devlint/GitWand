@@ -1648,6 +1648,8 @@ export interface CombinedDiff {
   /** `steps[i]` = `-U0` diff of commit i's replay, fallback files removed. */
   steps: GitDiff[][];
   fallback: CombinedFallbackFile[];
+  /** The 16 MB payload budget cut steps (no markers) or entries (header-only). */
+  truncated: boolean;
 }
 
 /**
@@ -1675,6 +1677,7 @@ export async function getCombinedDiff(cwd: string, hashes: string[], paths?: str
         perCommit: f.perCommit.map((p) => ({ hash: p.hash, diff: mapRawGitDiff(p.diff) })),
         blockers: f.blockers,
       })),
+      truncated: raw.truncated,
     };
   }
 
