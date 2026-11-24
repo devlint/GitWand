@@ -2,8 +2,8 @@
  * The combined diff's backend errors, in the user's language. Both backends
  * answer the same English strings (`combined/mod.rs`, `combined/replay.rs`,
  * `devCombinedDiff`); a known one maps to its `combined.err*` key with its
- * argument, anything else is shown as is. Imported by `CombinedDiffView`
- * only, so it stays in that lazy chunk.
+ * argument, anything else is shown as is. Imported by the combined view and
+ * `useCombinedDiff` only, so it stays in that lazy chunk.
  */
 import { COMBINE_MAX } from "../composables/useCommitSelection";
 import type { LocaleKey } from "../locales";
@@ -16,6 +16,12 @@ const PATTERNS: [RegExp, LocaleKey][] = [
   [/^Unknown commit: (.*)$/s, "combined.errUnknown"],
   [/^Combined diffs do not support the file name: (.*)$/s, "combined.errName"],
 ];
+
+/** A rejection's text, verbatim: an `Error`'s message, or the string Tauri's
+ *  `invoke` rejects with. */
+export function rawErrorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 export function combinedErrorMessage(raw: string, t: T): string {
   if (raw === "Select at least 2 commits.") return t("combined.errMin");

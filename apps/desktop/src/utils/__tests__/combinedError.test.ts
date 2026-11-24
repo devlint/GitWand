@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { combinedErrorMessage } from "../combinedError";
+import { combinedErrorMessage, rawErrorText } from "../combinedError";
 
 const t = (key: string, ...args: unknown[]) => (args.length ? `${key}:${args.join(",")}` : key);
 
@@ -23,5 +23,14 @@ describe("combinedErrorMessage", () => {
     expect(combinedErrorMessage("git merge-tree failed: boom", t)).toBe("git merge-tree failed: boom");
     expect(combinedErrorMessage("Error: Unknown commit: x", t)).toBe("Error: Unknown commit: x");
     expect(combinedErrorMessage("Select at least 2 commits. Really", t)).toBe("Select at least 2 commits. Really");
+  });
+});
+
+describe("rawErrorText", () => {
+  it("takes an Error's message verbatim", () => {
+    expect(rawErrorText(new Error("Unknown commit: abc1234"))).toBe("Unknown commit: abc1234");
+  });
+  it("keeps a string rejection (Tauri invoke rejects with one) verbatim", () => {
+    expect(rawErrorText("Unknown commit: abc1234")).toBe("Unknown commit: abc1234");
   });
 });

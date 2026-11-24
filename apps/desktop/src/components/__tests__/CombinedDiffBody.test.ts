@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 /**
- * CombinedDiffView.vue — header chips, fallback banners, own file list,
- * error / empty states, Esc. The fetcher is injected (no backend mock).
+ * CombinedDiffBody.vue — header chips, fallback banners, own file list,
+ * error / empty states, Esc. Rendered from props: no backend involved.
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createApp, h, nextTick, ref, type App } from "vue";
-import CombinedDiffView from "../CombinedDiffView.vue";
+import CombinedDiffBody from "../CombinedDiffBody.vue";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,22 +49,26 @@ let app: App | null = null;
 let container: HTMLElement | null = null;
 
 async function mount(c: CombinedDiff | Error, request = { hashes: [H1, H2, H3] } as { hashes: string[]; paths?: string[] }) {
-  const emitted: Record<string, unknown[][]> = { close: [], "select-commit": [], "update:diffMode": [] };
-  const fetcher = vi.fn(async () => { if (c instanceof Error) throw c; return c; });
+  const emitted: Record<string, unknown[][]> = { close: [], "select-commit": [], "update:diffMode": [], retry: [] };
   container = document.createElement("div");
   document.body.appendChild(container);
   app = createApp({
     render: () =>
-      h(CombinedDiffView, {
-        cwd: "/r", request, diffMode: "inline", fetcher,
+      h(CombinedDiffBody, {
+        request, diffMode: "inline",
+        data: c instanceof Error ? null : c,
+        loading: false,
+        error: c instanceof Error ? c.message : null,
+        aiAvailable: false, summary: null, summarizing: false, summaryError: false,
         onClose: (...a: unknown[]) => emitted.close.push(a),
         "onSelect-commit": (...a: unknown[]) => emitted["select-commit"].push(a),
         "onUpdate:diffMode": (...a: unknown[]) => emitted["update:diffMode"].push(a),
+        onRetry: (...a: unknown[]) => emitted.retry.push(a),
       }),
   });
   app.mount(container);
-  for (let i = 0; i < 6; i++) { await Promise.resolve(); await nextTick(); }
-  return { emitted, fetcher };
+  for (let i = 0; i < 3; i++) { await Promise.resolve(); await nextTick(); }
+  return { emitted };
 }
 
 afterEach(() => {
@@ -78,7 +82,7 @@ afterEach(() => {
 const q = (sel: string) => container!.querySelector(sel) as HTMLElement | null;
 const qa = (sel: string) => Array.from(container!.querySelectorAll(sel)) as HTMLElement[];
 
-describe("CombinedDiffView", () => {
+describe("CombinedDiffBody", () => {
   it("renders one chip per commit in replay order; a click selects that commit", async () => {
     const { emitted } = await mount(combined());
     const chips = qa(".cmb-chip");
@@ -117,12 +121,25 @@ describe("CombinedDiffView", () => {
     expect(q(".cmb-limited")!.textContent).toContain("combined.limitedTo:a.txt, old/a.txt");
   });
 
-  it("renders the error message and a retry that refetches", async () => {
-    const { fetcher } = await mount(new Error("Unknown commit: abc1234"));
+  it("renders the localized error message and a retry button", async () => {
+    const { emitted } = await mount(new Error("Unknown commit: abc1234"));
     expect(q(".cmb-error")!.textContent).toContain("combined.errUnknown:abc1234");
     q(".cmb-retry")!.click();
-    for (let i = 0; i < 4; i++) { await Promise.resolve(); await nextTick(); }
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(emitted.retry).toHaveLength(1);
+  });
+
+  it("shows the loading state with the commit count", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    app = createApp({
+      render: () => h(CombinedDiffBody, {
+        request: { hashes: [H1, H2] }, diffMode: "inline", data: null, loading: true, error: null,
+        aiAvailable: false, summary: null, summarizing: false, summaryError: false,
+      }),
+    });
+    app.mount(container);
+    await nextTick();
+    expect(q(".cmb-loading")!.textContent).toBe("combined.loading:2");
   });
 
   it("renders the empty state when nothing nets out", async () => {

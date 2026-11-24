@@ -3,18 +3,16 @@
  * carries commit subjects and `path (+a/-d)` only — never hunk text. The
  * result is not persisted; errors are exposed for inline display.
  */
-import { ref, type ComputedRef, type Ref } from "vue";
+import { ref } from "vue";
 import { useAIProvider } from "./useAIProvider";
 import { localeToAiLanguage } from "./prAiLocale";
 import { buildSummaryPromptFromCounts } from "./usePrSummary";
 import type { CombinedDiff, GitDiff } from "../utils/backend";
+import { rawErrorText } from "../utils/combinedError";
+import { latestOnly } from "../utils/latestOnly";
 
-export interface CombinedSummaryDeps {
-  rawPrompt: (system: string, user: string) => Promise<string>;
-  isAvailable: Ref<boolean> | ComputedRef<boolean>;
-}
-
-function buildSystemPrompt(locale: string, n: number): string {
+/** The system prompt: the reply language and the commit count. */
+export function buildCombinedSystemPrompt(locale: string, n: number): string {
   const lang = localeToAiLanguage(locale);
   return `You write a short summary of what ${n} commits do when taken
 together, for a reviewer who hasn't looked at the diff yet.
@@ -63,18 +61,17 @@ export function buildCombinedUserPrompt(c: CombinedDiff): string {
   return buildSummaryPromptFromCounts([...byPath.values()], c.commits.map((k) => k.subject));
 }
 
-export function useCombinedSummary(deps?: CombinedSummaryDeps) {
+export function useCombinedSummary() {
   // Resolved at call time, not module load.
-  const ai = deps ?? useAIProvider();
+  const ai = useAIProvider();
   const summary = ref<string | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
-
-  let gen = 0;
+  const guard = latestOnly();
 
   /** Drop any in-flight request and clear the result (the selection changed). */
   function reset() {
-    gen++;
+    guard.cancel();
     summary.value = null;
     error.value = null;
     loading.value = false;
@@ -82,20 +79,16 @@ export function useCombinedSummary(deps?: CombinedSummaryDeps) {
 
   async function generate(c: CombinedDiff, locale: string): Promise<void> {
     if (loading.value) return;
-    const my = ++gen;
     loading.value = true;
     error.value = null;
     summary.value = null;
-    try {
-      const raw = await ai.rawPrompt(buildSystemPrompt(locale, c.commits.length), buildCombinedUserPrompt(c));
-      if (my !== gen) return;
-      summary.value = raw.trim();
-    } catch (e) {
-      if (my !== gen) return;
-      error.value = e instanceof Error ? e.message : String(e);
-    } finally {
-      if (my === gen) loading.value = false;
-    }
+    const r = await guard.settle(
+      ai.rawPrompt(buildCombinedSystemPrompt(locale, c.commits.length), buildCombinedUserPrompt(c)),
+    );
+    if (r.stale) return;
+    loading.value = false;
+    if (r.ok) summary.value = r.value.trim();
+    else error.value = rawErrorText(r.error);
   }
 
   return { available: ai.isAvailable, summary, loading, error, generate, reset };

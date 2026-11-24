@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 /**
- * CombinedDiffView.vue — AI summary button: shown only when the provider is
- * available, loading state, result block, inline error. Fakes injected.
+ * CombinedDiffBody.vue — AI summary button: shown only when the provider is
+ * available, loading state, result block, inline error. From props alone.
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createApp, h, nextTick, ref, type App } from "vue";
-import CombinedDiffView from "../CombinedDiffView.vue";
+import CombinedDiffBody from "../CombinedDiffBody.vue";
 import type { CombinedDiff, GitDiff } from "../../utils/backend";
 
 vi.mock("../../composables/useI18n", () => ({
@@ -26,49 +26,59 @@ Element.prototype.scrollIntoView = vi.fn();
 let app: App | null = null;
 let container: HTMLElement | null = null;
 
-async function mount(deps: { rawPrompt: (s: string, u: string) => Promise<string>; available: boolean }) {
+type SummaryProps = { aiAvailable: boolean; summary?: string | null; summarizing?: boolean; summaryError?: boolean };
+let emittedSummarize = 0;
+
+async function mount(p: SummaryProps) {
+  emittedSummarize = 0;
   container = document.createElement("div");
   document.body.appendChild(container);
   app = createApp({
     render: () =>
-      h(CombinedDiffView, {
-        cwd: "/r", request: { hashes: commits.map((c) => c.hash) }, diffMode: "inline",
-        fetcher: async () => data,
-        summaryDeps: { rawPrompt: deps.rawPrompt, isAvailable: ref(deps.available) },
+      h(CombinedDiffBody, {
+        request: { hashes: commits.map((c) => c.hash) }, diffMode: "inline",
+        data, loading: false, error: null,
+        summary: null, summarizing: false, summaryError: false, ...p,
+        onSummarize: () => { emittedSummarize++; },
       }),
   });
   app.mount(container);
-  for (let i = 0; i < 6; i++) { await Promise.resolve(); await nextTick(); }
+  for (let i = 0; i < 3; i++) { await Promise.resolve(); await nextTick(); }
 }
-const flush = async () => { for (let i = 0; i < 6; i++) { await Promise.resolve(); await nextTick(); } };
 const q = (s: string) => container!.querySelector(s) as HTMLElement | null;
 
 afterEach(() => { app?.unmount(); container?.remove(); app = null; container = null; document.body.innerHTML = ""; });
 
-describe("CombinedDiffView AI summary", () => {
+describe("CombinedDiffBody AI summary", () => {
   it("hides the button when no provider is available", async () => {
-    await mount({ rawPrompt: async () => "", available: false });
+    await mount({ aiAvailable: false });
     expect(q(".cmb-summarize")).toBeNull();
   });
 
-  it("shows loading, then the result block", async () => {
-    let resolve!: (v: string) => void;
-    await mount({ rawPrompt: () => new Promise((r) => { resolve = r; }), available: true });
+  it("the button asks for a summary of the N commits", async () => {
+    await mount({ aiAvailable: true });
     const btn = q(".cmb-summarize") as HTMLButtonElement;
     expect(btn.textContent).toBe("combined.summarize:2");
+    expect(btn.disabled).toBe(false);
     btn.click();
-    await flush();
+    expect(emittedSummarize).toBe(1);
+  });
+
+  it("disables the button while summarizing", async () => {
+    await mount({ aiAvailable: true, summarizing: true });
     expect((q(".cmb-summarize") as HTMLButtonElement).disabled).toBe(true);
-    resolve("What: stuff");
-    await flush();
+    expect(q(".cmb-summarize")!.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("shows the result block", async () => {
+    await mount({ aiAvailable: true, summary: "What: stuff" });
     expect(q(".cmb-summary")?.textContent?.trim()).toBe("What: stuff");
-    expect((q(".cmb-summarize") as HTMLButtonElement).disabled).toBe(false);
+    expect(q(".cmb-summary")!.getAttribute("role")).toBe("status");
   });
 
   it("shows the error inline on failure", async () => {
-    await mount({ rawPrompt: async () => { throw new Error("boom"); }, available: true });
-    (q(".cmb-summarize") as HTMLButtonElement).click();
-    await flush();
+    await mount({ aiAvailable: true, summaryError: true });
     expect(q(".cmb-summary--error")?.textContent?.trim()).toBe("combined.summaryError");
+    expect(q(".cmb-summary")!.getAttribute("role")).toBe("alert");
   });
 });

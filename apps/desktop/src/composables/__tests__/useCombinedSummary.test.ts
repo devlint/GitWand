@@ -1,11 +1,10 @@
 /**
- * useCombinedSummary — user prompt carries subjects + per-file counts only
- * (never hunk text), errors surface, `available` mirrors the provider.
- * Fakes are injected; nothing is mocked.
+ * useCombinedSummary's prompts — the user prompt carries subjects + per-file
+ * counts only (never hunk text). Stale replies are `latestOnly`'s
+ * (utils/__tests__/latestOnly.test.ts); the provider call is not faked.
  */
 import { describe, it, expect } from "vitest";
-import { ref } from "vue";
-import { useCombinedSummary, buildCombinedUserPrompt } from "../useCombinedSummary";
+import { buildCombinedSystemPrompt, buildCombinedUserPrompt } from "../useCombinedSummary";
 import { buildSummaryPrompt, buildSummaryPromptFromCounts } from "../usePrSummary";
 import type { CombinedDiff, GitDiff } from "../../utils/backend";
 
@@ -58,52 +57,10 @@ describe("buildCombinedUserPrompt", () => {
   });
 });
 
-describe("useCombinedSummary", () => {
-  it("sends the system + user prompts and stores the trimmed result", async () => {
-    const calls: [string, string][] = [];
-    const s = useCombinedSummary({ rawPrompt: async (a, b) => { calls.push([a, b]); return "  done \n"; }, isAvailable: ref(true) });
-    await s.generate(data(), "fr");
-    expect(s.summary.value).toBe("done");
-    expect(s.error.value).toBeNull();
-    expect(s.loading.value).toBe(false);
-    expect(calls[0][0]).toContain("French");
-    expect(calls[0][1]).not.toContain(SECRET);
-  });
-  it("sets error on provider failure and keeps no summary", async () => {
-    const s = useCombinedSummary({ rawPrompt: async () => { throw new Error("boom"); }, isAvailable: ref(true) });
-    await s.generate(data(), "en");
-    expect(s.error.value).toBe("boom");
-    expect(s.summary.value).toBeNull();
-    expect(s.loading.value).toBe(false);
-  });
-  it("available mirrors isAvailable", () => {
-    const av = ref(false);
-    const s = useCombinedSummary({ rawPrompt: async () => "", isAvailable: av });
-    expect(s.available.value).toBe(false);
-    av.value = true;
-    expect(s.available.value).toBe(true);
-  });
-
-  it("reset drops a late result and releases loading for a new generate", async () => {
-    const pending: ((v: string) => void)[] = [];
-    const s = useCombinedSummary({ rawPrompt: () => new Promise<string>((r) => { pending.push(r); }), isAvailable: ref(true) });
-    const first = s.generate(data(), "en");
-    s.reset();
-    expect(s.loading.value).toBe(false);
-    const second = s.generate(data(), "en");
-    pending[0]("old");
-    await first;
-    expect(s.summary.value).toBeNull();
-    expect(s.loading.value).toBe(true);
-    pending[1]("new");
-    await second;
-    expect(s.summary.value).toBe("new");
-    expect(s.loading.value).toBe(false);
-  });
-  it("reset clears an earlier error", async () => {
-    const s = useCombinedSummary({ rawPrompt: async () => { throw new Error("boom"); }, isAvailable: ref(true) });
-    await s.generate(data(), "en");
-    s.reset();
-    expect(s.error.value).toBeNull();
+describe("buildCombinedSystemPrompt", () => {
+  it("asks for the user's language and names the commit count", () => {
+    const p = buildCombinedSystemPrompt("fr", 3);
+    expect(p).toContain("French");
+    expect(p).toContain("3 commits");
   });
 });
