@@ -94,7 +94,11 @@ function replay(c: CombinedDiff): Map<string, Model> {
         models.delete(f.oldPath);
         models.set(f.path, moved ?? freshModel(false));
       } else if (f.status === "added") {
-        models.set(f.path, freshModel(true));
+        // Re-added after an earlier step deleted it: the new content starts
+        // empty, but the base lines it lost keep their deleter.
+        const prev = models.get(f.path);
+        if (prev) prev.segs = [];
+        else models.set(f.path, freshModel(true));
       } else if (!models.has(f.path)) {
         models.set(f.path, freshModel(false));
       }

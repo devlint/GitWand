@@ -15,7 +15,7 @@ function file(path: string, hunks: DiffHunk[], extra: Partial<GitDiff> = {}): Gi
 const commits = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ hash: `h${i}`, shortHash: `h${i}`, subject: `c${i}`, author: "a", date: "d" }));
 function combined(n: number, diffs: GitDiff[], steps: GitDiff[][], fallback: CombinedDiff["fallback"] = []): CombinedDiff {
-  return { base: "base", commits: commits(n), diffs, steps, fallback };
+  return { base: "base", commits: commits(n), diffs, steps, fallback, truncated: false };
 }
 
 describe("buildCombinedEntries", () => {
@@ -43,6 +43,26 @@ describe("buildCombinedEntries", () => {
     expect(e.attribution.lineCommit.get("RIGHT:13")).toBe(0);
     expect(e.attribution.lineCommit.get("RIGHT:2")).toBe(1);
     expect(e.attribution.lineCommit.get("RIGHT:4")).toBe(1);
+  });
+
+  it("file_deleted_then_re_added_keeps_its_deleter", () => {
+    // Commit 0 deletes f (3 base lines), commit 2 adds it back (2 lines):
+    // net, f is modified — its `-` lines are commit 0's, its `+` commit 2's.
+    const e = buildCombinedEntries(
+      combined(
+        3,
+        [file("f", [hunk(1, 3, 1, 2, [del(1), del(2), del(3), add(1), add(2)])])],
+        [
+          [file("f", [hunk(1, 3, 0, 0, [del(1), del(2), del(3)])], { status: "deleted" })],
+          [file("g", [hunk(0, 0, 1, 1, [add(1)])], { status: "added" })],
+          [file("f", [hunk(0, 0, 1, 2, [add(1), add(2)])], { status: "added" })],
+        ],
+      ),
+    )[0];
+    for (const k of ["LEFT:1", "LEFT:2", "LEFT:3"]) expect(e.attribution.lineCommit.get(k)).toBe(0);
+    expect(e.attribution.lineCommit.get("RIGHT:1")).toBe(2);
+    expect(e.attribution.lineCommit.get("RIGHT:2")).toBe(2);
+    expect(e.attribution.hunkCommits).toEqual([[0, 2]]);
   });
 
   it("deleted_base_line_attributed_to_deleter", () => {
