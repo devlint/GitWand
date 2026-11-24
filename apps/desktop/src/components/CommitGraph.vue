@@ -316,7 +316,9 @@ function onBranchDblClick(branch: { name: string, type: string }) {
   emit('checkout-branch', name, branch.type === 'remote');
 }
 
-function onRowDblClick(entry: GitLogEntry) {
+function onRowDblClick(e: MouseEvent, entry: GitLogEntry) {
+  // Two quick modifier clicks build a multi-selection: never a checkout.
+  if (isToggleModifier(e) || e.shiftKey) return;
   if (entry.hashFull === 'WIP') return;
   if (isCurrent(entry)) return;
   const refs = commitRefs(entry);
@@ -1964,7 +1966,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
            }"
           @mousedown="preventShiftSelect"
           @click="onRowClick($event, vc.index)"
-          @dblclick="onRowDblClick(vc.entry)"
+          @dblclick="onRowDblClick($event, vc.entry)"
           @contextmenu="vc.entry.hashFull === 'WIP' ? openWipContextMenu($event) : openCommitContextMenu($event, vc.entry, vc.index)"
         >
           <template v-if="vc.entry.hashFull === 'WIP'">

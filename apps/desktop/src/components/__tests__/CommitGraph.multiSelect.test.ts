@@ -141,6 +141,24 @@ describe("CommitGraph — multi-selection", () => {
     expect(emitted["select-commit"]).toEqual([[full("eee5555")]]);
   });
 
+  it.each([
+    ["non-mac", false, [{ ctrlKey: true }, { shiftKey: true }]],
+    ["mac", true, [{ metaKey: true }, { shiftKey: true }]],
+  ] as const)("%s: a double click with a toggle/range modifier never checks out; a plain one still does", async (_label, mac, modifiers) => {
+    platform.mac = mac;
+    const withBranch = commits.map((c, i) => (i === 2 ? { ...c, refs: "feature" } : c));
+    const { emitted } = mount({ commits: withBranch, onCheckoutBranch: (...a: unknown[]) => {
+      (emitted["checkout-branch"] ??= []).push(a);
+    } });
+    await nextTick();
+    for (const init of modifiers) {
+      rows()[2].dispatchEvent(new MouseEvent("dblclick", { bubbles: true, ...init }));
+    }
+    expect(emitted["checkout-branch"]).toBeUndefined();
+    rows()[2].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(emitted["checkout-branch"]).toEqual([["feature", false]]);
+  });
+
   it("the chip's clear button empties the selection", async () => {
     mount();
     await click(1, { ctrlKey: true });
