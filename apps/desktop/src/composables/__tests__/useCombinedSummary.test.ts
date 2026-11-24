@@ -42,7 +42,8 @@ describe("buildCombinedUserPrompt", () => {
     expect(p).toContain("- one");
     expect(p).toContain("- two");
     expect(p).toContain("a.ts (+3/-1)");
-    expect(p).toContain("big.bin (+0/-0)");
+    expect(p).toContain("- big.bin (too large to count)");
+    expect(p).not.toContain("big.bin (+");
     expect(p).not.toContain(SECRET);
   });
   it("lists fallback files apart, without counts: per-commit counts do not add up to a net", () => {
@@ -61,6 +62,12 @@ describe("buildCombinedUserPrompt", () => {
     expect(apart).toBe("- f.ts\n- g.ts");
     expect(p).not.toMatch(/f\.ts \(|g\.ts \(/);
     expect(p).not.toContain(SECRET);
+  });
+
+  it("files too large to count stay in the net list, after the counted ones", () => {
+    const p = buildCombinedUserPrompt(data());
+    const files = p.split("Files touched:\n")[1];
+    expect(files).toBe("- a.ts (+3/-1)\n- big.bin (too large to count)");
   });
 
   it("has no fallback section when nothing fell back", () => {

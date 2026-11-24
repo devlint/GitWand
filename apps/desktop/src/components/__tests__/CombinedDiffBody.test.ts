@@ -294,7 +294,29 @@ describe("CombinedDiffBody", () => {
       ] }],
     }));
     expect(q(".cmb-add")!.textContent).toBe("+2");
-    expect(q(".cmb-percommit")!.textContent).toBe("combined.perCommitCount:1");
+    expect(q(".cmb-percommit")!.textContent).toBe("combined.perCommitFilesSingular:1");
+  });
+
+  it("the commit-by-commit count reads as a file count, plural past one", async () => {
+    const fb = (path: string) => ({ path, conflicted: true, blockers: [], perCommit: [{ hash: H1, diff: file(path) }] });
+    await mount(combined({ fallback: [fb("c.txt"), fb("d.txt")] }));
+    expect(q(".cmb-percommit")!.textContent).toBe("combined.perCommitFilesPlural:2");
+  });
+
+  it("a net file too large to count marks the counts as a lower bound, never +0", async () => {
+    await mount(combined({
+      diffs: [file("a.txt", [add(1), add(2)]), file("big.bin", [], { truncatedFromBytes: 9_000_000 })],
+    }));
+    expect(q(".cmb-add")!.textContent).toBe("≥+2");
+    app?.unmount();
+    container?.remove();
+    await mount(combined({ diffs: [file("big.bin", [], { truncatedFromBytes: 9_000_000 })] }));
+    expect(q(".cmb-add")).toBeNull();
+    expect(q(".cmb-del")).toBeNull();
+    app?.unmount();
+    container?.remove();
+    await mount(combined({ diffs: [file("a.txt", [add(1)])] }));
+    expect(q(".cmb-add")!.textContent).toBe("+1");
   });
 
   it("no commit-by-commit count and no summary line without fallback", async () => {

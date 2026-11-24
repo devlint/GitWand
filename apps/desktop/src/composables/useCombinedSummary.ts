@@ -1,7 +1,7 @@
 /**
  * Optional AI summary of what N commits do together (spec §5.5). The prompt
- * carries commit subjects, `path (+a/-d)` for the net diff and bare paths for
- * fallback files — never hunk text. The result is not persisted; errors are
+ * carries commit subjects, `path (+a/-d)` for the net diff (`path (too large
+ * to count)` for a header-only entry) and bare paths for fallback files — never hunk text. The result is not persisted; errors are
  * exposed for inline display.
  */
 import { ref } from "vue";
@@ -19,8 +19,9 @@ export function buildCombinedSystemPrompt(locale: string, n: number): string {
 together, for a reviewer who hasn't looked at the diff yet.
 
 You will receive the commit subjects (in replay order) and a per-file index
-(path + change counts) of everything they touch; files that could not be
-combined are listed apart, without counts.
+(path + change counts) of everything they touch; files too large to count
+are marked so, and files that could not be combined are listed apart,
+without counts.
 
 Produce a concise summary in ${lang}, structured as three short sections:
 - What: what the commits do together, in plain language.
@@ -49,13 +50,22 @@ function countDiff(d: GitDiff): { added: number; deleted: number } {
 }
 
 /**
- * Net diffs with their counts; a truncated file has no hunks and is listed
- * with 0/0, never an invented count. Fallback files follow on their own line
- * without counts: their per-commit diffs do not add up to a net change.
+ * Net diffs with their counts. A header-only entry (`truncatedFromBytes`:
+ * over the per-file cap, or cut by the payload budget) has no hunks: it is
+ * listed after the counted files, marked "(too large to count)", never as
+ * +0/-0. Fallback files follow on their own line without counts: their
+ * per-commit diffs do not add up to a net change.
  */
 export function buildCombinedUserPrompt(c: CombinedDiff): string {
-  const net = c.diffs.map((d) => ({ path: d.path, ...countDiff(d) }));
-  const prompt = buildSummaryPromptFromCounts(net, c.commits.map((k) => k.subject));
+  const counted = c.diffs.filter((d) => d.truncatedFromBytes === undefined);
+  const uncounted = c.diffs.filter((d) => d.truncatedFromBytes !== undefined);
+  const net = counted.map((d) => ({ path: d.path, ...countDiff(d) }));
+  // The file index is the last section of the shared prompt: the uncounted
+  // files extend it.
+  const prompt = [
+    buildSummaryPromptFromCounts(net, c.commits.map((k) => k.subject)),
+    ...uncounted.map((d) => `- ${d.path} (too large to count)`),
+  ].join("\n");
   const apart = [...new Set(c.fallback.map((f) => f.path))];
   if (apart.length === 0) return prompt;
   return [prompt, "", "Files shown commit by commit (not combinable):", ...apart.map((p) => `- ${p}`)].join("\n");

@@ -92,11 +92,18 @@ const limitedTo = computed(() => props.request.paths?.join(", ") ?? "");
 const filesLabel = (n: number) => t(n === 1 ? "combined.filesSingular" : "combined.filesPlural", n);
 
 /** `+N −M` of the net diff only: a fallback file's per-commit sections are
- *  not net, and a line two commits change would count twice. */
+ *  not net, and a line two commits change would count twice. A header-only
+ *  entry (`truncatedFromBytes`) has no lines to count: when one is present
+ *  the counts are a lower bound, shown `≥`. */
 const stats = computed(() => {
   let adds = 0;
   let dels = 0;
+  let uncounted = false;
   for (const d of props.data?.diffs ?? []) {
+    if (d.truncatedFromBytes !== undefined) {
+      uncounted = true;
+      continue;
+    }
     for (const h of d.hunks) {
       for (const l of h.lines) {
         if (l.type === "add") adds++;
@@ -104,7 +111,7 @@ const stats = computed(() => {
       }
     }
   }
-  return { adds, dels };
+  return { adds, dels, atLeast: uncounted ? "≥" : "" };
 });
 
 const fallbackCount = computed(() => props.data?.fallback.length ?? 0);
@@ -156,9 +163,11 @@ const errorText = computed(() => (props.error ? combinedErrorMessage(props.error
         <span v-if="request.paths?.length" class="cmb-limited mono">{{ t("combined.limitedTo", limitedTo) }}</span>
         <span v-if="data" class="cmb-counts">
           {{ filesLabel(fileCount) }}
-          <span class="cmb-add" v-if="stats.adds > 0">+{{ stats.adds }}</span>
-          <span class="cmb-del" v-if="stats.dels > 0">&minus;{{ stats.dels }}</span>
-          <span v-if="fallbackCount > 0" class="cmb-percommit">{{ t("combined.perCommitCount", fallbackCount) }}</span>
+          <span class="cmb-add" v-if="stats.adds > 0">{{ stats.atLeast }}+{{ stats.adds }}</span>
+          <span class="cmb-del" v-if="stats.dels > 0">{{ stats.atLeast }}&minus;{{ stats.dels }}</span>
+          <span v-if="fallbackCount > 0" class="cmb-percommit">{{
+            t(fallbackCount === 1 ? "combined.perCommitFilesSingular" : "combined.perCommitFilesPlural", fallbackCount)
+          }}</span>
         </span>
         <button
           v-if="aiAvailable && data && commits.length > 0"
