@@ -1271,7 +1271,15 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
 /// commands cannot drift in hunk shaping or line classification. Splitting
 /// there is safe: every hunk line carries a `+`/`-`/` ` prefix (or is `""`),
 /// so none can start with `diff --git `.
-fn parse_multi_file_diff(stdout: &str) -> Vec<GitDiff> {
+pub(crate) fn parse_multi_file_diff(stdout: &str) -> Vec<GitDiff> {
+    parse_multi_file_diff_capped(stdout, None)
+}
+
+/// [`parse_multi_file_diff`] with a per-file size cap: a file section longer
+/// than `cap` bytes keeps its header (path, status, rename) but no hunks, and
+/// reports its size in `truncated_from_bytes` — the same contract as
+/// `git_diff`'s `DIFF_TRUNCATE_BYTES` cut, so a huge file never crosses IPC.
+pub(crate) fn parse_multi_file_diff_capped(stdout: &str, cap: Option<usize>) -> Vec<GitDiff> {
     let mut sections: Vec<Vec<&str>> = Vec::new();
     for line in stdout.lines() {
         if line.starts_with("diff --git ") {
@@ -1307,17 +1315,21 @@ fn parse_multi_file_diff(stdout: &str) -> Vec<GitDiff> {
             }
         }
 
-        let (hunks, _) = parse_diff_hunks(&section.join("\n"));
+        // Bytes of the section as git printed it (one `\n` per line).
+        let size: usize = section.iter().map(|l| l.len() + 1).sum();
+        let (hunks, truncated_from_bytes) = match cap {
+            Some(cap) if size > cap => (Vec::new(), Some(size as u64)),
+            _ => (parse_diff_hunks(&section.join("\n")).0, None),
+        };
         diffs.push(GitDiff {
             path,
             hunks,
             status,
             old_path,
-            // P2.4 — multi-file commit diff parsing has no per-file cap (the
-            // caller is `git_show`, not the polled `git_diff` that
-            // `pollStatus` re-fires). Truncation is only meaningful for the
-            // per-file diff command.
-            truncated_from_bytes: None,
+            // P2.4 — `git_show` passes no cap (it is not the polled
+            // `git_diff` that `pollStatus` re-fires); `git_combined_diff`
+            // caps each file at `DIFF_TRUNCATE_BYTES`.
+            truncated_from_bytes,
             // Directory entries only reach the single-file `git_diff`.
             is_directory: None,
             new_files: None,

@@ -121,7 +121,7 @@ pub struct GitDiff {
 }
 
 // ─── Combined diff ─────────────────────────────────────────────────
-// Constructed by `git_combined_diff` (next task).
+// Built by `git_combined_diff` (`combined/replay.rs`).
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -136,7 +136,6 @@ pub struct CombinedCommit {
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct CombinedFallbackCommitDiff {
     pub hash: String,
     pub diff: GitDiff,
@@ -144,7 +143,6 @@ pub struct CombinedFallbackCommitDiff {
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct CombinedFallbackFile {
     pub path: String,
     pub per_commit: Vec<CombinedFallbackCommitDiff>,
@@ -153,7 +151,6 @@ pub struct CombinedFallbackFile {
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct CombinedDiff {
     pub base: Option<String>,
     pub commits: Vec<CombinedCommit>,

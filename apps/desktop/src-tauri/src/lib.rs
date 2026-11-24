@@ -1,5 +1,3 @@
-// Consumed by `git_combined_diff` (added in the next task).
-#[allow(dead_code)]
 pub(crate) mod combined;
 pub(crate) mod commands;
 pub mod git;
@@ -245,6 +243,14 @@ pub fn git_diff_parity(cwd: String, path: String, staged: bool) -> Result<types:
 /// reasoning as `git_diff_parity`.
 pub fn git_show_parity(cwd: String, hash: String) -> Result<Vec<types::GitDiff>, String> {
     tauri::async_runtime::block_on(commands::read::git_show(cwd, hash))
+}
+
+pub fn git_combined_diff_parity(
+    cwd: String,
+    hashes: Vec<String>,
+    paths: Option<Vec<String>>,
+) -> Result<types::CombinedDiff, String> {
+    tauri::async_runtime::block_on(commands::combined::git_combined_diff(cwd, hashes, paths))
 }
 
 pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
@@ -930,6 +936,7 @@ pub fn run() {
             commands::ops::git_add_to_gitignore,
             commands::ops::git_discard,
             commands::read::git_show,
+            commands::combined::git_combined_diff,
             commands::ops::git_branches,
             commands::ops::git_create_branch,
             commands::ops::git_switch_branch,

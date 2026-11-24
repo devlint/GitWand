@@ -3,6 +3,7 @@
 //! command itself builds on them.
 
 pub(crate) mod order;
+pub(crate) mod replay;
 
 pub(crate) const MIN_COMMITS: usize = 2;
 pub(crate) const MAX_COMMITS: usize = 50;
