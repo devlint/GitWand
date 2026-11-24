@@ -7,14 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-11-24
+
 ### Added
 
 - **Stacked branches.** *Stack on…* records which branch a branch sits on (parent and base, in local git config: `branch.<b>.gitwandParent` / `gitwandStackBase`); stacks are linear. An open GitHub PR whose base is another local branch suggests *Stack on…*.
   - **Detection.** GitWand notices when the parent gets new commits or is merged. On GitHub a merge is read from the PR, squash merges included; elsewhere git detects merge commits, rebase merges and single-commit squashes. A parent with no commits of its own is never read as merged.
-  - **Restack.** One click restacks the whole stack above the affected layer in a single `git rebase --onto … --update-refs`, after a conflict preview that lists every branch that will move, including branches outside the stack. Before a merged-parent restack GitWand fetches and lands onto `origin/<trunk>`; a failed fetch refuses it.
+  - **Where it shows.** A banner at the top of every view says when a layer needs a restack, and the branch selector badges each layer (*out of date*, *parent merged*) with a *Restack* button.
+  - **Restack.** One click restacks the whole stack above the affected layer in a single `git rebase --onto … --update-refs`, after a conflict preview that lists every branch that will move, including branches outside the stack. It works from whichever layer you are on: that branch moves too, and you end up back on it. Before a merged-parent restack GitWand fetches and lands onto `origin/<trunk>`; a failed fetch refuses it.
   - **Refusals, with the reason.** A layer checked out or being rebased in another worktree, a dirty tree, a detached HEAD, git older than 2.38, a parent behind its remote. A merged-parent restack also refuses a target that does not contain the merged work yet: the PR's merge commit is checked when GitHub gives one (so a fork whose merge landed upstream is caught); otherwise git itself must find the parent's commits in the target, so a parent whose PR was retargeted and merged elsewhere is caught too.
   - **Halted restacks.** A restack that halts on conflicts finishes like a clean one once the rebase is continued from the usual banner; an abort changes nothing.
-  - **After every restack,** GitWand offers to push the moved branches (force-with-lease on the remote position read before the restack, never automatic) and says why any is left out. A branch whose upstream is a local branch or a remote branch of another name is never pushed: that would land it on the other branch.
+  - **After every restack,** GitWand offers to push the moved branches (force-with-lease on the remote position read before the restack, never automatic; the offer stays until used or dismissed) and says why any is left out. A branch whose upstream is a local branch or a remote branch of another name is never pushed: that would land it on the other branch.
   - **After a merged parent,** the child's GitHub PR is retargeted automatically, and GitWand offers to delete the merged local branch, only when it still points where it was merged from and is not checked out; a commit added after the offer makes the delete fail instead of losing it.
   - **Unfinished restacks.** A restack GitWand could not finish is shown per branch, with *Unstack* as the way out.
 
@@ -1777,7 +1780,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.13.3...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.14.0...HEAD
+[3.14.0]: https://github.com/devlint/GitWand/compare/v3.13.3...v3.14.0
 [3.13.3]: https://github.com/devlint/GitWand/compare/v3.13.2...v3.13.3
 [3.13.2]: https://github.com/devlint/GitWand/compare/v3.13.1...v3.13.2
 [3.13.1]: https://github.com/devlint/GitWand/compare/v3.13.0...v3.13.1

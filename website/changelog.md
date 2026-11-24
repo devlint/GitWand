@@ -5,6 +5,20 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.14.0 — November 2026
+
+### Stacked branches, restacked for you
+
+Stacking means opening step 2 on top of step 1 while step 1 is still in review, then rebasing step 2 by hand twice: when step 1 gets a fix, and when it is squash-merged. GitWand now does both.
+
+*Stack on…*, from the right-click on a branch in the Git Tree or the branch selector, records which branch a branch sits on, in the repository's local git config. If a branch already has an open GitHub pull request based on another local branch, the branch selector suggests the stack for you. Stacks are linear: one child per branch.
+
+When a parent gets new commits, or its pull request is merged, a banner at the top of every view says so and offers a restack, and the branch selector marks each layer. GitHub tells GitWand about merges, squash merges included. Elsewhere, git's own signals are used: merge commits, rebase merges and single-commit squashes. The restack shows its conflict preview first, with every branch that will move, then replays the whole stack in one `git rebase --update-refs`, from whichever layer you are on, and puts you back on it. After a merge, it fetches and lands on `origin/main` without the parent's commits, and only once the merged work is actually there.
+
+What follows a merge is done too. The next pull request is retargeted on GitHub, so it shows only its own commits. GitWand offers to push the moved branches, with a lease on where they were, never on its own. And it offers to delete the merged branch locally, only if nothing was added to it since.
+
+When a restack cannot run, it says why: a layer open in another worktree, uncommitted changes, git older than 2.38, a parent behind its remote, or merged work that has not reached `main` yet. A conflict hands over to the usual rebase banner, and aborting leaves everything as it was.
+
 ## v3.13.3 — November 2026
 
 ### File GitHub issues without leaving GitWand

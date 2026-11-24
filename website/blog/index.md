@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/gitwand-mcp-setup" class="blog-card">
+    <div class="blog-meta">November 24, 2026 · 9 min read</div>
+    <h2 class="blog-title">Connecting GitWand MCP to your agent: Claude Code, Claude Desktop, Cursor, VS Code, Codex</h2>
+    <p class="blog-excerpt">One stdio server, five config formats. The exact block for each client, checked against its own documentation in November 2026, including VS Code's move away from <code>.vscode/mcp.json</code> and Codex's TOML. Then a three-step test that proves the server sees the right repository, because <strong>a wrong working directory answers "No conflicted files." without any error</strong>, the failures that actually happen (<code>npx</code> not found, Node too old, a 10-second startup timeout), and the eight tools the agent gets.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/parallel-ai-agents-git-worktrees" class="blog-card">
     <div class="blog-meta">November 17, 2026 · 11 min read</div>
     <h2 class="blog-title">Running several AI agents in parallel with git worktree, without them stepping on each other</h2>

@@ -10,32 +10,13 @@ _Ordered by priority, last verified 2026-10-10 (v3.12.1 shipped 2026-10-10 with 
 
 | Version | Codename | Why now |
 |---------|----------|---------|
-| **v3.14.0** | Stacked Branches | Native stacked PRs, sequenced after v3.11 (leans on preview→apply) |
 | **v3.15.0** | Combined Diffs | Multi-commit, non-contiguous aggregated diff |
 | **v3.16.0** | Agent Workspaces II — Agents & parallel work | Live agent status, in-app permission requests, agent picker, worktrees view, cross-worktree conflict prediction, merged-PR cleanup — GitKraken 12.x, VS Code 1.141 and Conductor shipped parts of it |
 | **v3.17.0** | Voice Input | Experimental — local dictation via embedded Whisper |
-| **v3.18.0** | Stacked Branches II | What v3.14 deferred — Stacks tab and sidebar banner, Submit stack, stale-head merge guard, Archived Branches hint, GitLab / Azure retarget, tree-shaped stacks, restack for git < 2.38 |
+| **v3.18.0** | Stacked Branches II | What v3.14 deferred — Stacks tab, Submit stack, stale-head merge guard, Archived Branches hint, GitLab / Azure retarget, tree-shaped stacks, restack for git < 2.38 |
 | **v4.0.0** (candidate) | Blast Radius | Code-graph impact before merge — the code-intelligence headline |
 
-_v3.13.3 (create GitHub issues from GitWand and from the MCP server, issue references in commit messages, the Git advent calendar), v3.13.2 (`gh` calls target `origin` or its fork parent, not an `upstream` remote), v3.13.1 (live CI tab that knows which commit its checks ran on, Linux Git Tree reload loop, concurrent pushes serialized, GitHub orgs with OAuth restrictions through `gh`, MCP preview and write-tool fixes), v3.13.0 (Agent Workspaces I: worktree lifecycle hooks, real merge-back, removal with teardown and snapshot, restore as worktree), v3.12.5 (Git Tree follows ref moves, imports and Dockerfile resolvers stop keeping both sides), v3.12.4 (Windows build no longer needs the VC++ runtime), v3.12.3 (reset `--keep`, opt-in auto fast-forward, tracked-but-ignored warning, diffs that keep `--`/`++` lines, file history compare across renames, PR comment actions, in-house Markdown, GPU rendering on Linux), v3.12.2 (AI context for PRs and release notes, AI branch creation, AI language and model fixes), v3.12.1 (merge-back no longer loses data, security hardening, full-screen Settings, WIP as a Git Tree row, per-project identity), v3.12.0 (built-in terminal renderer, WIP in the Git Tree), v3.11.2 (Finder-like folder navigation), v3.11.1 (History-aware LLM fallback) and v3.11.0 (Merge preview-to-apply) shipped; see [Shipped](#shipped) below and the full detail in [CHANGELOG.md](./CHANGELOG.md)._
-
----
-
-### v3.14.0 — Stacked Branches (native)
-
-_A differentiating feature: stacked PRs workflow without an external CLI (Graphite, ghstack…). Sequenced after v3.11.0 on purpose: Restack leans on the conflict preview → apply flow._
-
-The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/step-3`), each with its own PR targeting the previous one.
-
-**Declaring a stack** — "Stack on…" records the parent and the base of a branch; an open GitHub PR whose base is another local branch suggests it. Stacks are linear
-
-**Restack** — Automatic detection when the parent has moved or been merged; one-click "Restack" button (one `git rebase --onto … --update-refs` for the whole stack above the affected layer); conflict preview before execution (v3.11.0 preview-to-apply), listing every branch that will move
-
-**Merged-PR detection** (from the 2026-10-08 changelog scan, Tower 17 / Windows 14) — "is this layer merged?" cannot rely on `git_branch_merged` (`read.rs`, `git branch --merged`): a squash- or rebase-merged PR leaves no ancestry, so the layer is never seen as merged and the retarget never fires. On GitHub, ask the forge (`gh_branch_pr`: merged PR whose head is this branch); elsewhere, git detects merge commits, rebase merges and single-commit squashes
-
-**GitHub retarget** — After a merged parent, the child's PR is retargeted automatically; GitWand then offers to push the moved branches (force-with-lease, never automatic) and to delete the merged local branch
-
-**Implementation** — Metadata in local git config (`branch.<b>.gitwandParent` / `gitwandStackBase`); no external CLI dependency
+_v3.14.0 (stacked branches: declare a stack, restack after a parent change or a squash merge, GitHub retarget), v3.13.3 (create GitHub issues from GitWand and from the MCP server, issue references in commit messages, the Git advent calendar), v3.13.2 (`gh` calls target `origin` or its fork parent, not an `upstream` remote), v3.13.1 (live CI tab that knows which commit its checks ran on, Linux Git Tree reload loop, concurrent pushes serialized, GitHub orgs with OAuth restrictions through `gh`, MCP preview and write-tool fixes), v3.13.0 (Agent Workspaces I: worktree lifecycle hooks, real merge-back, removal with teardown and snapshot, restore as worktree), v3.12.5 (Git Tree follows ref moves, imports and Dockerfile resolvers stop keeping both sides), v3.12.4 (Windows build no longer needs the VC++ runtime), v3.12.3 (reset `--keep`, opt-in auto fast-forward, tracked-but-ignored warning, diffs that keep `--`/`++` lines, file history compare across renames, PR comment actions, in-house Markdown, GPU rendering on Linux), v3.12.2 (AI context for PRs and release notes, AI branch creation, AI language and model fixes), v3.12.1 (merge-back no longer loses data, security hardening, full-screen Settings, WIP as a Git Tree row, per-project identity), v3.12.0 (built-in terminal renderer, WIP in the Git Tree), v3.11.2 (Finder-like folder navigation), v3.11.1 (History-aware LLM fallback) and v3.11.0 (Merge preview-to-apply) shipped; see [Shipped](#shipped) below and the full detail in [CHANGELOG.md](./CHANGELOG.md)._
 
 ---
 
@@ -110,7 +91,7 @@ _Second half of Agent Workspaces (split 2026-10-10), on top of the v3.13.0 lifec
 
 _What v3.14.0 deliberately left out: the stack UI extras and the forge work around it._
 
-- **Stacks tab in Today**, **sidebar stack banner** and the `⌘⇧S` shortcut from the commit area
+- **Stacks tab in Today** and the `⌘⇧S` shortcut from the commit area (v3.14 shows a stack banner at the top of every view)
 - **Submit stack**: creates or updates the PR of each layer
 - **Stale-head guard** (from the 2026-10-08 scan, Conductor 0.89) — a layer is merged only if the PR's head is still the commit reviewed locally: pass the expected `sha` to the forge merge endpoint (`rest_merge_pr` sends only `merge_method` today; GitHub refuses with 409 on mismatch, GitLab has the same parameter). Applies to every in-app PR merge, not only stacks
 - **Archived Branches "merged" hint**: a one-click Archive on branches whose PR is merged (the v3.14 merged-PR signal feeds the v2.12 Archived Branches)
@@ -288,6 +269,7 @@ Positioning: neither "yet another Git GUI" nor an IDE. A first-class Git navigat
 
 | Version | Highlights |
 |---------|-----------|
+| **v3.14.0** | **Stacked branches** (#310) — *Stack on…* records a branch's parent in local git config, suggested from a GitHub PR based on another local branch · detects a parent that moved or was merged (GitHub PR, squash merges included; git's own signals elsewhere) · one restack for the whole stack (`git rebase --update-refs`) after a conflict preview, from whichever layer you are on · after a merged parent the next PR is retargeted on GitHub and the merged branch can be deleted locally · a push offer for the moved layers (force-with-lease, never automatic) · refusals that name their reason (worktree, dirty tree, git < 2.38, merged work missing) |
 | **v3.13.3** | **Create GitHub issues without leaving GitWand** (#301, #304–#309) — a "New issue" window (toolbar, ⌘K, ⌘⇧I) targeting `origin` or its fork parent · from a commit, from selected diff lines (with a permalink) or from a bad resolution, which can go to GitWand's own repository after a secrets scan · `#` in the commit message lists open issues · issue templates and issue forms · MCP `gitwand_create_issue` (preview by default, one create per preview, secrets scan) · **Git advent calendar** (#297) — `gitwand advent` and gitwand.app/advent, 24 little-known git commands in December · GitHub attachments show in pull requests, private repositories included (#303, #302) · large AI prompts no longer sent empty with curl 7.x (#304) |
 | **v3.13.2** | **`gh` no longer targets an `upstream` remote** (#300, #298) — without a token, every `gh` call names its repository (the fork parent, else `origin`), so the pull request list and Create PR stop hitting an unrelated `upstream` · merging still deletes the local branch · SSH aliases, any SSH user and GitHub Enterprise `origin`s resolved as `gh` does |
 | **v3.13.1** | **The CI tab follows a running CI** (#295) — re-fetched every 15 s while a check runs, the pull request reloaded once when the last one finishes, failed fetches reported as errors instead of "no checks" · **it knows which commit its checks ran on** (#296) — checks from a previous commit are named and followed for up to ten minutes after a push, the merge banner unchanged · Linux Git Tree no longer reloads in a loop (#292, #287) · concurrent pushes serialized, publishing a branch no longer fails with "reference already exists" (#291) · GitHub orgs with OAuth App restrictions go through `gh` (#294) · MCP: rebase/cherry-pick previews resolve, YAML/TOML checked, an empty resolution removes the block (#293) |

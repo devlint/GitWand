@@ -361,6 +361,7 @@ export default defineConfig({
           text: 'Blog',
           items: [
             { text: 'All articles', link: '/blog/' },
+            { text: 'Connecting GitWand MCP to your agent', link: '/blog/gitwand-mcp-setup' },
             { text: 'Parallel AI agents with worktrees', link: '/blog/parallel-ai-agents-git-worktrees' },
             { text: 'Lockfile conflicts, per ecosystem', link: '/blog/lockfile-conflicts-by-ecosystem' },
             { text: 'AI agents and conflicts: the rules', link: '/blog/ai-agent-conflict-rules' },
