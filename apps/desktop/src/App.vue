@@ -102,6 +102,7 @@ import { COMMIT_SIGNATURE, withoutSignature } from "./utils/commitSignature";
 import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
+import { escLayer, combinedEscAllowed } from "./utils/combinedEsc";
 import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
 import { useResolutionSelection, contentStamp } from "./composables/useResolutionSelection";
 import { getPendingSplitForHash, resolvePendingSplit } from "./composables/useInteractiveRebase";
@@ -4080,26 +4081,20 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
   // Each closes one thing and marks the key handled, so a diff's line
   // selection (#301) stays when Escape was meant for this.
-  if (showCommandLog.value) {
-    e.preventDefault();
-    showCommandLog.value = false;
-    return;
-  }
-  if (showHelp.value) {
-    e.preventDefault();
-    showHelp.value = false;
-    return;
-  }
-  if (pendingSwitchBranch.value) {
-    e.preventDefault();
-    cancelSwitchStash();
-    return;
-  }
-  if (showStash.value) {
-    e.preventDefault();
-    showStash.value = false;
-    return;
-  }
+  const layer = escLayer({
+    commandLog: showCommandLog.value,
+    help: showHelp.value,
+    switchStash: !!pendingSwitchBranch.value,
+    stash: showStash.value,
+    combined: !!combinedRequest.value && combinedEscAllowed(e),
+  });
+  if (!layer) return;
+  e.preventDefault();
+  if (layer === "commandLog") showCommandLog.value = false;
+  else if (layer === "help") showHelp.value = false;
+  else if (layer === "switchStash") cancelSwitchStash();
+  else if (layer === "stash") showStash.value = false;
+  else combinedRequest.value = null;
 }
 onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
 onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
@@ -4927,6 +4922,7 @@ const graphScrollIdx = ref<number | null>(null);
 function onGraphSelectCommit(hash: string) {
   // Picking a commit while the WIP is selected leaves the WIP mode.
   if (viewMode.value === "changes") viewMode.value = "graph";
+  combinedRequest.value = null;
   graphFileIdx.value = null;
   graphScrollIdx.value = null;
   selectCommit(hash);
@@ -5164,7 +5160,7 @@ onUnmounted(() => {
                 <CombinedDiffView v-else-if="viewMode === 'graph' && combinedRequest && repoFolderPath"
                   :cwd="repoFolderPath" :request="combinedRequest" :diff-mode="diffMode"
                   @update:diff-mode="onDiffModeChange" @close="combinedRequest = null"
-                  @select-commit="(h: string) => { combinedRequest = null; onGraphSelectCommit(h); }" />
+                  @select-commit="onGraphSelectCommit" />
 
                 <!-- A clicked file replaces the graph with its diff (X to return). -->
                 <div v-else-if="viewMode === 'graph' && graphFileIdx !== null && selectedCommitHash" class="graph-diff-full">

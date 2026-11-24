@@ -3237,6 +3237,12 @@ const zhCN: Locale = {
     fallbackSummary: "逐个提交显示：{0}，缺少 {1} 无法合并。",
     fallbackSummaryBetween: "逐个提交显示：{0}，所选提交之间存在冲突。",
     fallbackSummaryOther: "逐个提交显示：{0}，无法合并。",
+    payloadTruncated: "内容过大：已省略部分步骤或文件。",
+    errGit: "需要 git 2.38+（当前 {0}）。",
+    errMin: "请至少选择 2 个提交。",
+    errHash: "无效的提交哈希：{0}",
+    errUnknown: "未知提交：{0}",
+    errName: "不支持的文件名：{0}",
   },
 };
 

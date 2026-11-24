@@ -3272,6 +3272,12 @@ const en = {
     fallbackSummary: "Shown commit by commit: {0}, not combinable without {1}.",
     fallbackSummaryBetween: "Shown commit by commit: {0}, in conflict between the selected commits.",
     fallbackSummaryOther: "Shown commit by commit: {0}, could not be combined.",
+    payloadTruncated: "Too large: some steps or files are omitted.",
+    errGit: "Needs git 2.38+ (found {0}).",
+    errMin: "Select at least 2 commits.",
+    errHash: "Invalid commit hash: {0}",
+    errUnknown: "Unknown commit: {0}",
+    errName: "Unsupported file name: {0}",
   },
 } as const;
 

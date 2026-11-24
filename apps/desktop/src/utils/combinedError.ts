@@ -1,0 +1,28 @@
+/**
+ * The combined diff's backend errors, in the user's language. Both backends
+ * answer the same English strings (`combined/mod.rs`, `combined/replay.rs`,
+ * `devCombinedDiff`); a known one maps to its `combined.err*` key with its
+ * argument, anything else is shown as is. Imported by `CombinedDiffView`
+ * only, so it stays in that lazy chunk.
+ */
+import { COMBINE_MAX } from "../composables/useCommitSelection";
+import type { LocaleKey } from "../locales";
+
+type T = (key: LocaleKey, ...args: Array<string | number>) => string;
+
+const PATTERNS: [RegExp, LocaleKey][] = [
+  [/^Combined diffs need git 2\.38 or later \(found (.+)\)\.$/s, "combined.errGit"],
+  [/^Invalid commit hash: (.*)$/s, "combined.errHash"],
+  [/^Unknown commit: (.*)$/s, "combined.errUnknown"],
+  [/^Combined diffs do not support the file name: (.*)$/s, "combined.errName"],
+];
+
+export function combinedErrorMessage(raw: string, t: T): string {
+  if (raw === "Select at least 2 commits.") return t("combined.errMin");
+  if (raw === `Select at most ${COMBINE_MAX} commits.`) return t("combined.tooMany", COMBINE_MAX);
+  for (const [re, key] of PATTERNS) {
+    const m = re.exec(raw);
+    if (m) return t(key, m[1]);
+  }
+  return raw;
+}

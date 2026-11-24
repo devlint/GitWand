@@ -5,13 +5,14 @@
  * fallback notes, and `CommitDiffViewer` for the body with line attribution.
  * Loading lives in `useCombinedDiff`.
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, toRef, watch } from "vue";
+import { computed, nextTick, ref, toRef, watch } from "vue";
 import CommitDiffViewer from "./CommitDiffViewer.vue";
 import { useI18n } from "../composables/useI18n";
 import { useCombinedDiff, type CombinedRequest } from "../composables/useCombinedDiff";
 import { useCombinedSummary, type CombinedSummaryDeps } from "../composables/useCombinedSummary";
 import { formatBytes } from "../composables/useFilePreview";
 import { commitColor } from "../utils/commitColors";
+import { combinedErrorMessage } from "../utils/combinedError";
 import "../assets/combined-palette.css";
 import type { getCombinedDiff } from "../utils/backend";
 import type { DiffMode } from "../utils/diffMode";
@@ -121,24 +122,15 @@ function openFile(idx: number) {
   nextTick(() => { scrollIdx.value = null; });
 }
 
-// ─── Esc closes (same guards as the graph's selection keys) ──
-const root = ref<HTMLElement | null>(null);
-function onKey(e: KeyboardEvent) {
-  if (e.key !== "Escape" || e.defaultPrevented) return;
-  const el = e.target as HTMLElement | null;
-  if (el && el !== document.body && el !== document.documentElement && el.nodeType === 1) {
-    if (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
-    if (!root.value?.contains(el)) return;
-  }
-  if (document.querySelector('[aria-modal="true"]')) return;
-  emit("close");
-}
-onMounted(() => document.addEventListener("keydown", onKey));
-onUnmounted(() => document.removeEventListener("keydown", onKey));
+// Esc is App's: `onGlobalKeydown` closes this view after any panel on top
+// of it (`utils/combinedEsc.ts`).
+
+/** The backend's message in the user's language (unknown ones as is). */
+const errorText = computed(() => (error.value ? combinedErrorMessage(error.value, t) : ""));
 </script>
 
 <template>
-  <div ref="root" class="cmb combined-palette">
+  <div class="cmb combined-palette">
     <header class="cmb-header">
       <div class="cmb-chips">
         <button
@@ -195,6 +187,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
     </header>
 
     <div v-if="fallbackSummary && !loading" class="cmb-fallback" role="note">{{ fallbackSummary }}</div>
+    <div v-if="data?.truncated && !loading" class="cmb-fallback cmb-truncated" role="note">{{ t("combined.payloadTruncated") }}</div>
 
     <div v-if="summary || summaryErr" class="cmb-summary" :class="{ 'cmb-summary--error': summaryErr }" :role="summaryErr ? 'alert' : 'status'">
       <template v-if="summaryErr">{{ t("combined.summaryError") }}</template>
@@ -203,7 +196,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
 
     <div v-if="loading" class="cmb-state cmb-loading">{{ t("combined.loading", request.hashes.length) }}</div>
     <div v-else-if="error" class="cmb-state cmb-error" role="alert">
-      <span class="cmb-error-text">{{ error }}</span>
+      <span class="cmb-error-text">{{ errorText }}</span>
       <button class="cmb-retry" @click="reload()">{{ t("combined.retry") }}</button>
     </div>
     <div v-else-if="data && entries.length === 0" class="cmb-state cmb-empty">{{ t("combined.empty") }}</div>

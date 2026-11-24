@@ -38,7 +38,7 @@ const commits = [
 function combined(over: Partial<CombinedDiff> = {}): CombinedDiff {
   return {
     base: "b", commits, diffs: [file("a.txt"), file("b.txt")], steps: [[file("a.txt")], [file("b.txt")], []],
-    fallback: [], ...over,
+    fallback: [], truncated: false, ...over,
   };
 }
 
@@ -119,7 +119,7 @@ describe("CombinedDiffView", () => {
 
   it("renders the error message and a retry that refetches", async () => {
     const { fetcher } = await mount(new Error("Unknown commit: abc1234"));
-    expect(q(".cmb-error")!.textContent).toContain("Unknown commit: abc1234");
+    expect(q(".cmb-error")!.textContent).toContain("combined.errUnknown:abc1234");
     q(".cmb-retry")!.click();
     for (let i = 0; i < 4; i++) { await Promise.resolve(); await nextTick(); }
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -145,33 +145,27 @@ describe("CombinedDiffView", () => {
     expect(qa(".cmb-file")[1].classList.contains("cmb-file--active")).toBe(true);
   });
 
-  it("Esc emits close; ignored in fields and under a modal", async () => {
-    const { emitted } = await mount(combined());
-    const input = document.createElement("input");
-    document.body.appendChild(input);
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(emitted.close).toHaveLength(0);
-    const modal = document.createElement("div");
-    modal.setAttribute("aria-modal", "true");
-    document.body.appendChild(modal);
-    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(emitted.close).toHaveLength(0);
-    modal.remove();
-    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(emitted.close).toHaveLength(1);
+  it("an unknown backend error is shown as is", async () => {
+    await mount(new Error("git merge-tree failed: boom"));
+    expect(q(".cmb-error-text")!.textContent).toBe("git merge-tree failed: boom");
   });
 
-  it("Esc closes from the bare page (document, html, body) and from inside the view", async () => {
+  it("leaves Esc to App's global handler: no listener of its own", async () => {
     const { emitted } = await mount(combined());
     const ev = () => new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
     document.dispatchEvent(ev());
-    document.documentElement.dispatchEvent(ev());
+    document.body.dispatchEvent(ev());
     q(".cmb-chip")!.dispatchEvent(ev());
-    expect(emitted.close).toHaveLength(3);
-    const outside = document.createElement("button");
-    document.body.appendChild(outside);
-    outside.dispatchEvent(ev());
-    expect(emitted.close).toHaveLength(3);
+    expect(emitted.close).toHaveLength(0);
+  });
+
+  it("notes a payload the budget cut, and only then", async () => {
+    await mount(combined({ truncated: true }));
+    expect(q(".cmb-truncated")!.textContent).toBe("combined.payloadTruncated");
+    app?.unmount();
+    container?.remove();
+    await mount(combined());
+    expect(q(".cmb-truncated")).toBeNull();
   });
 
   it("counts unique paths, not fallback sections", async () => {

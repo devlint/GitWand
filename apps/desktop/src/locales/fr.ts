@@ -3237,6 +3237,12 @@ const fr: Locale = {
     fallbackSummary: "Affichés commit par commit : {0}, non combinables sans {1}.",
     fallbackSummaryBetween: "Affichés commit par commit : {0}, en conflit entre les commits sélectionnés.",
     fallbackSummaryOther: "Affichés commit par commit : {0}, non combinables.",
+    payloadTruncated: "Trop volumineux : des étapes ou fichiers sont omis.",
+    errGit: "Nécessite git 2.38+ ({0} installé).",
+    errMin: "Sélectionnez au moins 2 commits.",
+    errHash: "Hash de commit invalide : {0}",
+    errUnknown: "Commit inconnu : {0}",
+    errName: "Nom de fichier non pris en charge : {0}",
   },
 };
 

@@ -3227,6 +3227,12 @@ const ptBR: Locale = {
     fallbackSummary: "Exibidos commit a commit: {0}, não combináveis sem {1}.",
     fallbackSummaryBetween: "Exibidos commit a commit: {0}, em conflito entre os commits selecionados.",
     fallbackSummaryOther: "Exibidos commit a commit: {0}, não puderam ser combinados.",
+    payloadTruncated: "Grande demais: algumas etapas ou arquivos foram omitidos.",
+    errGit: "Requer git 2.38+ (encontrado {0}).",
+    errMin: "Selecione pelo menos 2 commits.",
+    errHash: "Hash de commit inválido: {0}",
+    errUnknown: "Commit desconhecido: {0}",
+    errName: "Nome de arquivo não suportado: {0}",
   },
 };
 
