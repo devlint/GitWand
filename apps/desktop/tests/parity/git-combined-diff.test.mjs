@@ -238,9 +238,9 @@ describe("parity: git-combined-diff", () => {
 
   // A conflicting commit that also adds 1 400 long paths: they all fall back
   // as companions, ~1.1 MB of names — more than an argv holds on macOS
-  // (1 MB) and Windows (32 KB). The per-commit diffs diff the commit whole
-  // instead of listing them.
-  it("thousands of long fallback paths stay off the command line", async () => {
+  // (1 MB) and Windows (32 KB). The per-commit diffs list them in pathspec
+  // batches of a few KB, the same batches on both sides.
+  it("thousands of long fallback paths are diffed in argv-sized batches", async () => {
     const cwd = repo("argv");
     const dir = ["d".repeat(200), "e".repeat(200), "f".repeat(200)].join("/");
     const names = Array.from({ length: 1400 }, (_, i) => `${dir}/${String(i).padStart(5, "0")}${"n".repeat(190)}`);
@@ -252,6 +252,21 @@ describe("parity: git-combined-diff", () => {
     expect(rust.fallback).toHaveLength(names.length + 1);
     expect(rust.fallback.every((f) => f.perCommit.length > 0)).toBe(true);
   }, 120_000);
+
+  // replay.rs `fallback_diffs_go_in_pathspec_batches`: 120 names of ~250
+  // bytes plus a rename span several 7 KB batches; the rename keeps its pair.
+  it("a rename among many fallback paths keeps its pair across batches", async () => {
+    const cwd = repo("batches");
+    const names = Array.from({ length: 120 }, (_, i) => `dir/${String(i).padStart(5, "0")}${"n".repeat(240)}`);
+    commitFiles(cwd, { "c.txt": "1\n", "old.txt": ten("o") }, "base", 0);
+    const a = commitFiles(cwd, { "c.txt": "2\n" }, "A", 1);
+    commitFiles(cwd, { "c.txt": "3\n" }, "B", 2);
+    git(cwd, ["mv", "old.txt", "new.txt"]);
+    const c = commitFiles(cwd, { ...Object.fromEntries(names.map((n) => [n, "x\n"])), "c.txt": "4\n" }, "C", 3);
+    const { rust } = await parity(cwd, [a, c]);
+    expect(rust.fallback).toHaveLength(names.length + 2);
+    expect(rust.fallback.find((f) => f.path === "new.txt").perCommit[0].diff.oldPath).toBe("old.txt");
+  }, 60_000);
 
   // The 16 MB total budget, shrunk through the test hook read by both the
   // probe and the dev server: same files lose their steps, same entries go

@@ -1319,6 +1319,29 @@ const COMBINED_GIT_PINS = [
   "-c", "diff.renameLimit=7000",
 ];
 
+/** replay.rs `PATHSPEC_BATCH_BYTES`: the argv stays under 8 KB. */
+const COMBINED_PATHSPEC_BATCH_BYTES = 7 * 1024;
+
+/** replay.rs `pathspec_batches`: units (a name, or a rename's two names) never
+ *  split, at most `max` UTF-8 bytes (name + NUL each) per batch, in order. */
+function combinedPathspecBatches(units, max) {
+  const batches = [];
+  let cur = [];
+  let size = 0;
+  for (const unit of units) {
+    const n = unit.reduce((a, p) => a + Buffer.byteLength(p, "utf8") + 1, 0);
+    if (cur.length > 0 && size + n > max) {
+      batches.push(cur);
+      cur = [];
+      size = 0;
+    }
+    size += n;
+    cur.push(...unit);
+  }
+  if (cur.length > 0) batches.push(cur);
+  return batches;
+}
+
 /** replay.rs `Repo`. */
 class CombinedRepo {
   constructor(cwd, paths, core) {
@@ -1631,25 +1654,30 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
     ),
   );
 
-  // 4. Per-commit diffs of the fallback files, in replay order. Each commit
-  //    is diffed whole and filtered here: the fallback can hold more paths
-  //    than an argv holds (32 KB on Windows).
+  // 4. Per-commit diffs of the fallback files, in replay order. Only the
+  //    fallback's names are diffed (never the whole commit), as pathspecs in
+  //    argv-sized batches; a rename's two names share a batch (replay.rs).
   const perPath = new Map();
   if (fallback.size > 0) {
     const whole = new CombinedRepo(cwd, null, core);
     for (const c of replayed) {
       const parentTree = c.parentTree ?? (await repo.emptyTree());
       const listed = await whole.touched(parentTree, c.tree);
-      if (!listed.some(([old, path]) => fallback.has(path) || (old !== null && fallback.has(old)))) continue;
-      for (const d of await whole.diffListed(parentTree, c.tree, false, listed)) {
-        const owner = fallback.has(d.path)
-          ? d.path
-          : d.oldPath !== undefined && fallback.has(d.oldPath)
-            ? d.oldPath
-            : null;
-        if (owner === null) continue;
-        if (!perPath.has(owner)) perPath.set(owner, []);
-        perPath.get(owner).push({ hash: c.hash, diff: d });
+      const units = listed
+        .filter(([old, path]) => fallback.has(path) || (old !== null && fallback.has(old)))
+        .map(([old, path]) => (old !== null ? [old, path] : [path]));
+      for (const batch of combinedPathspecBatches(units, COMBINED_PATHSPEC_BATCH_BYTES)) {
+        // `diff` re-lists the batch with `-z`: the name cross-check runs per batch.
+        for (const d of await new CombinedRepo(cwd, batch, core).diff(parentTree, c.tree, false)) {
+          const owner = fallback.has(d.path)
+            ? d.path
+            : d.oldPath !== undefined && fallback.has(d.oldPath)
+              ? d.oldPath
+              : null;
+          if (owner === null) continue;
+          if (!perPath.has(owner)) perPath.set(owner, []);
+          perPath.get(owner).push({ hash: c.hash, diff: d });
+        }
       }
     }
   }

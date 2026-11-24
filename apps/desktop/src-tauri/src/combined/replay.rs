@@ -388,6 +388,34 @@ impl<'a> Repo<'a> {
     }
 }
 
+/// Most pathspec bytes (each name plus its NUL) per git command in the
+/// per-commit fallback diffs. With the pinned `-c` flags, the subcommand
+/// flags and two object ids, the whole argv stays under 8 KB, well below the
+/// smallest platform limit (32 KB on Windows).
+const PATHSPEC_BATCH_BYTES: usize = 7 * 1024;
+
+/// Groups `units` (a name, or the two names of a rename) into batches of at
+/// most `max` bytes, in order. A unit is never split; one larger than `max`
+/// goes alone.
+fn pathspec_batches(units: Vec<Vec<String>>, max: usize) -> Vec<Vec<String>> {
+    let mut batches: Vec<Vec<String>> = Vec::new();
+    let mut cur: Vec<String> = Vec::new();
+    let mut size = 0;
+    for unit in units {
+        let n: usize = unit.iter().map(|p| p.len() + 1).sum();
+        if !cur.is_empty() && size + n > max {
+            batches.push(std::mem::take(&mut cur));
+            size = 0;
+        }
+        size += n;
+        cur.extend(unit);
+    }
+    if !cur.is_empty() {
+        batches.push(cur);
+    }
+    batches
+}
+
 /// A path in the fallback set.
 #[derive(Clone, Default)]
 struct Fb {
@@ -695,9 +723,11 @@ pub(crate) fn combined_diff_with_budget(
 
     // 4. Per-commit diffs of the fallback files, in replay order. A rename
     //    entry belongs to its new path; to its old one only when the new path
-    //    is not itself in fallback. Each commit is diffed whole and filtered
-    //    here: the fallback can hold thousands of paths, more than an argv
-    //    holds (32 KB on Windows).
+    //    is not itself in fallback. Only the fallback's names are diffed —
+    //    never the whole commit, which can be huge — given as pathspecs in
+    //    batches small enough for any argv (the fallback can hold thousands
+    //    of paths; Windows caps a command line at 32 KB). A rename's two
+    //    names share a batch so `-M` still pairs them.
     let mut per_path: BTreeMap<String, Vec<CombinedFallbackCommitDiff>> = BTreeMap::new();
     if !fallback.is_empty() {
         let whole = Repo {
@@ -710,27 +740,39 @@ pub(crate) fn combined_diff_with_budget(
                 Some(t) => t.clone(),
                 None => repo.empty_tree()?,
             };
+            // Names only (`-z`), cheap even for a huge commit.
             let listed = whole.touched(&parent_tree, &c.tree)?;
-            let relevant = listed.iter().any(|(old, new)| {
-                fallback.contains_key(new) || old.as_ref().is_some_and(|o| fallback.contains_key(o))
-            });
-            if !relevant {
-                continue;
-            }
-            for d in whole.diff_listed(&parent_tree, &c.tree, false, &listed)? {
-                let owner = if fallback.contains_key(&d.path) {
-                    Some(d.path.clone())
-                } else {
-                    d.old_path.clone().filter(|p| fallback.contains_key(p))
+            let units: Vec<Vec<String>> = listed
+                .into_iter()
+                .filter(|(old, new)| {
+                    fallback.contains_key(new)
+                        || old.as_ref().is_some_and(|o| fallback.contains_key(o))
+                })
+                .map(|(old, new)| old.into_iter().chain(std::iter::once(new)).collect())
+                .collect();
+            for batch in pathspec_batches(units, PATHSPEC_BATCH_BYTES) {
+                let part = Repo {
+                    cwd,
+                    paths: Some(&batch),
+                    empty_tree: None,
                 };
-                if let Some(owner) = owner {
-                    per_path
-                        .entry(owner)
-                        .or_default()
-                        .push(CombinedFallbackCommitDiff {
-                            hash: c.hash.clone(),
-                            diff: d,
-                        });
+                // `diff` re-lists the batch with `-z`: the name cross-check
+                // runs per batch.
+                for d in part.diff(&parent_tree, &c.tree, false)? {
+                    let owner = if fallback.contains_key(&d.path) {
+                        Some(d.path.clone())
+                    } else {
+                        d.old_path.clone().filter(|p| fallback.contains_key(p))
+                    };
+                    if let Some(owner) = owner {
+                        per_path
+                            .entry(owner)
+                            .or_default()
+                            .push(CombinedFallbackCommitDiff {
+                                hash: c.hash.clone(),
+                                diff: d,
+                            });
+                    }
                 }
             }
         }
@@ -1488,7 +1530,7 @@ mod tests {
     /// A conflicting commit that also touches thousands of long paths: they
     /// all join the fallback as companions, more bytes than an argv holds
     /// (1 MB on macOS, 2 MB on Linux, 32 KB on Windows). The per-commit diffs
-    /// must not list them on the command line.
+    /// list them in small pathspec batches, never all at once.
     #[test]
     fn thousands_of_fallback_paths_fit() {
         let r = TempRepo::new();
@@ -1506,5 +1548,59 @@ mod tests {
         let got = run(&r, &[&a, &c], None);
         assert_eq!(got.fallback.len(), names.len() + 1);
         assert!(got.fallback.iter().all(|f| !f.per_commit.is_empty()));
+    }
+
+    #[test]
+    fn pathspec_batches_stay_under_the_argv_budget() {
+        let long = |i: usize| format!("{i:04}{}", "p".repeat(300));
+        let mut units: Vec<Vec<String>> = (0..60).map(|i| vec![long(i)]).collect();
+        // A rename pair is one unit: never split across two batches.
+        units.insert(17, vec![long(900), long(901)]);
+        // A unit larger than the budget goes alone.
+        units.push(vec!["x".repeat(PATHSPEC_BATCH_BYTES + 10)]);
+        let batches = pathspec_batches(units.clone(), PATHSPEC_BATCH_BYTES);
+        assert!(batches.len() > 3, "spans several batches");
+        for b in &batches {
+            let bytes: usize = b.iter().map(|p| p.len() + 1).sum();
+            assert!(bytes <= PATHSPEC_BATCH_BYTES || b.len() == 1, "{bytes}");
+            assert!(!b.is_empty());
+        }
+        let flat: Vec<String> = batches.concat();
+        assert_eq!(flat, units.concat());
+        assert!(batches
+            .iter()
+            .any(|b| b.contains(&long(900)) && b.contains(&long(901))));
+    }
+
+    /// The per-commit diffs of the fallback list the fallback paths in
+    /// batches: a rename spanning many batches keeps its pair, a file of the
+    /// same commit outside the fallback is never diffed.
+    #[test]
+    fn fallback_diffs_go_in_pathspec_batches() {
+        let r = TempRepo::new();
+        let names: Vec<String> = (0..120)
+            .map(|i| format!("dir/{i:05}{}", "n".repeat(240)))
+            .collect();
+        commit_files(
+            &r,
+            &[("c.txt", Some("1\n")), ("old.txt", Some(&ten("o")))],
+            "base",
+        );
+        let a = commit_files(&r, &[("c.txt", Some("2\n"))], "A");
+        commit_files(&r, &[("c.txt", Some("3\n"))], "B");
+        r.git(&["mv", "old.txt", "new.txt"]);
+        let mut files: Vec<(&str, Option<&str>)> =
+            names.iter().map(|n| (n.as_str(), Some("x\n"))).collect();
+        files.push(("c.txt", Some("4\n")));
+        let c = commit_files(&r, &files, "C");
+        let got = run(&r, &[&a, &c], None);
+        // `old.txt` owns no entry: the rename belongs to `new.txt`.
+        assert_eq!(got.fallback.len(), names.len() + 2);
+        assert!(got.fallback.iter().all(|f| !f.per_commit.is_empty()));
+        let renamed = got.fallback.iter().find(|f| f.path == "new.txt").unwrap();
+        assert_eq!(
+            renamed.per_commit[0].diff.old_path.as_deref(),
+            Some("old.txt")
+        );
     }
 }
