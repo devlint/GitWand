@@ -157,6 +157,40 @@ describe("buildCombinedEntries", () => {
     expect(e.attribution.hunkCommits).toEqual([[0]]);
   });
 
+  it("path_taken_by_another_lineage_after_a_rename_away_gets_no_delete_marker", () => {
+    // Commit 0 renames p -> x, commit 1 renames q -> p and deletes q's line 2.
+    // Net, p is modified against p's base: its `-` lines are p's base lines,
+    // the model at p counts q's. Only the lines commit 1 wrote keep a marker.
+    const e = buildCombinedEntries(
+      combined(
+        2,
+        [file("p", [hunk(2, 1, 2, 1, [del(2), add(2)])])],
+        [
+          [file("x", [], { status: "renamed", oldPath: "p" })],
+          [file("p", [hunk(2, 1, 2, 1, [del(2), add(2)])], { status: "renamed", oldPath: "q" })],
+        ],
+      ),
+    ).find((x) => x.diff.path === "p")!;
+    expect(e.attribution.lineCommit.has("LEFT:2")).toBe(false);
+    expect(e.attribution.lineCommit.get("RIGHT:2")).toBe(1);
+    expect(e.attribution.hunkCommits).toEqual([[1]]);
+  });
+
+  it("net_rename_paired_with_another_source_than_the_steps_gets_no_delete_marker", () => {
+    // Net, b pairs with a; the replay renamed c -> b. Net `-` lines count
+    // a's base lines, the model c's: no delete marker, added lines kept.
+    const e = buildCombinedEntries(
+      combined(
+        1,
+        [file("b", [hunk(2, 1, 2, 1, [del(2), add(2)])], { status: "renamed", oldPath: "a" })],
+        [[file("b", [hunk(2, 1, 2, 1, [del(2), add(2)])], { status: "renamed", oldPath: "c" })]],
+      ),
+    )[0];
+    expect(e.attribution.lineCommit.has("LEFT:2")).toBe(false);
+    expect(e.attribution.lineCommit.get("RIGHT:2")).toBe(0);
+    expect(e.attribution.hunkCommits).toEqual([[0]]);
+  });
+
   it("added_file_starts_empty", () => {
     const e = buildCombinedEntries(
       combined(

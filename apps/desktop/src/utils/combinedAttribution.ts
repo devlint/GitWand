@@ -130,12 +130,19 @@ function attributeNet(diff: GitDiff, model: Model | undefined): FileAttribution 
   const lineCommit = new Map<string, number>();
   const hunkCommits: number[][] = [];
   if (model?.unattributable) return { lineCommit, hunkCommits: diff.hunks.map(() => []) };
+  // The net `-` lines count the lines of the net entry's base file; the
+  // model's `deletedBy` counts those of its own lineage's. When they differ
+  // (the path was renamed away and another file took it, or the net diff
+  // pairs a rename with another source than the replay), no delete line is
+  // attributed. Added lines stay: the model's commit runs are positions in
+  // the final file, whatever its lineage.
+  const deleters = model?.baseOrigin === (diff.oldPath ?? diff.path) ? model.deletedBy : undefined;
   for (const h of diff.hunks) {
     const set = new Set<number>();
     for (const l of h.lines) {
       let idx: number | undefined;
       if (l.type === "add" && l.newLineNo != null && model) idx = originAt(model.segs, l.newLineNo - 1);
-      else if (l.type === "delete" && l.oldLineNo != null && model) idx = model.deletedBy.get(l.oldLineNo);
+      else if (l.type === "delete" && l.oldLineNo != null) idx = deleters?.get(l.oldLineNo);
       if (idx === undefined) continue;
       const key = lineKeyFor(l);
       if (key === null) continue;
