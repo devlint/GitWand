@@ -7,8 +7,8 @@
 import { describe, it, expect, afterEach, beforeAll, vi } from "vitest";
 import { createApp, h, nextTick, ref, type App } from "vue";
 import CommitDiffViewer from "../CommitDiffViewer.vue";
-import type { GitDiff } from "../../utils/backend";
-import type { FileAttribution } from "../../utils/combinedAttribution";
+import type { CombinedDiff, DiffLine, GitDiff } from "../../utils/backend";
+import { buildCombinedEntries, type FileAttribution } from "../../utils/combinedAttribution";
 import { commitColor } from "../../utils/commitColors";
 
 vi.mock("../../composables/useI18n", () => ({
@@ -215,6 +215,73 @@ describe("CommitDiffViewer — attribution", () => {
     const add = markersOf(rows.length - 1);
     expect(add.length).toBe(1);
     expect(add[0].getAttribute("style")).toContain("var(--combined-c1)");
+  });
+
+  // QA: a fallback section's deleted lines, and a net deletion attributed
+  // through the replay's `deletedBy`, carry their commit's marker like the
+  // added ones — inline on the row, side by side on the gutter's left half.
+  // Payload shaped like the backend's (nulls on the absent side).
+  const fbSection = (hash: string, lines: DiffLine[]): GitDiff => ({
+    path: "f",
+    hunks: [{ header: "@@ -1,4 +1,3 @@", oldStart: 1, oldCount: 4, newStart: 1, newCount: 3, lines }],
+  });
+  const C = (n: number, content: string): DiffLine => ({ type: "context", content, oldLineNo: n, newLineNo: n });
+  const D = (n: number, content: string): DiffLine => ({ type: "delete", content, oldLineNo: n, newLineNo: null } as unknown as DiffLine);
+  const A = (n: number, content: string): DiffLine => ({ type: "add", content, oldLineNo: null, newLineNo: n } as unknown as DiffLine);
+  const COMBINED: CombinedDiff = {
+    base: "base",
+    commits: COMMITS.map((c) => ({ ...c, author: "t", date: "d" })),
+    diffs: [{
+      path: "g",
+      hunks: [{ header: "@@ -2,1 +1,0 @@", oldStart: 2, oldCount: 1, newStart: 1, newCount: 0, lines: [D(2, "gone")] }],
+    }],
+    steps: [[], [{ path: "g", hunks: [{ header: "@@ -2,1 +1,0 @@", oldStart: 2, oldCount: 1, newStart: 1, newCount: 0, lines: [D(2, "gone")] }] }]],
+    fallback: [{
+      path: "f",
+      conflicted: true,
+      blockers: [],
+      perCommit: [{ hash: H1, diff: fbSection(H1, [C(1, "a"), D(2, "B2"), A(2, "B3"), C(3, "c"), D(4, "d")]) }],
+    }],
+    truncated: false,
+    budgetOmitted: [],
+  } as unknown as CombinedDiff;
+  const fromEntries = () => {
+    const entries = buildCombinedEntries(COMBINED);
+    return { diffs: entries.map((e) => e.diff), attribution: entries.map((e) => e.attribution), attributionCommits: COMMITS };
+  };
+
+  it("inline: a net deletion and a fallback section's deletions show their commit's marker", async () => {
+    mount(fromEntries());
+    await nextTick();
+    const hunks = document.querySelectorAll(".cdv-hunk");
+    const marker = (hunk: Element, row: number) =>
+      hunk.querySelectorAll("tr.cdv-line")[row].querySelector<HTMLElement>(".cdv-attr-marker")!;
+    // Net view: `gone` was deleted by commit 1 (deletedBy).
+    expect(marker(hunks[0], 0).getAttribute("style")).toContain("var(--combined-c1)");
+    expect(marker(hunks[0], 0).getAttribute("title")).toContain("bbbbbbb");
+    // Fallback section of commit 1: both its deletions and its addition.
+    for (const row of [1, 2, 4]) expect(marker(hunks[1], row).getAttribute("style")).toContain("var(--combined-c1)");
+    expect(marker(hunks[1], 0).getAttribute("style") ?? "").not.toContain("--combined-c");
+  });
+
+  it("side-by-side: the deletions of a fallback section and of the net view mark the gutter's left half", async () => {
+    mount(fromEntries(), "side-by-side");
+    await nextTick();
+    const hunks = document.querySelectorAll(".cdv-hunk");
+    const markers = (hunk: Element, row: number) =>
+      [...hunk.querySelectorAll("tr.cdv-line")[row].querySelectorAll<HTMLElement>("td.cdv-sbs-gutter .cdv-attr-marker")];
+    const net = markers(hunks[0], 0);
+    expect(net.length).toBe(1);
+    expect(net[0].classList.contains("cdv-attr-marker--old")).toBe(true);
+    expect(net[0].getAttribute("style")).toContain("var(--combined-c1)");
+    // Row 1 pairs B2 / B3; row 3 is the unpaired deletion of `d`.
+    const paired = markers(hunks[1], 1);
+    expect(paired.map((m) => m.classList.contains("cdv-attr-marker--old"))).toEqual([true, false]);
+    for (const m of paired) expect(m.getAttribute("style")).toContain("var(--combined-c1)");
+    const lone = markers(hunks[1], 3);
+    expect(lone.length).toBe(1);
+    expect(lone[0].classList.contains("cdv-attr-marker--old")).toBe(true);
+    expect(lone[0].getAttribute("style")).toContain("var(--combined-c1)");
   });
 
   it("commitColor cycles through 8 variables", () => {

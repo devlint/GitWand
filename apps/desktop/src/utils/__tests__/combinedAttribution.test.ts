@@ -262,6 +262,32 @@ describe("buildCombinedEntries", () => {
     expect(a.lineCommit.size).toBe(2);
   });
 
+  it("fallback_and_net_deletions_get_their_commit (QA: delete rows carried no marker)", () => {
+    // Backend-shaped lines: the absent side is null, not undefined.
+    const D = (n: number): DiffLine => ({ type: "delete", content: "x", oldLineNo: n, newLineNo: null }) as unknown as DiffLine;
+    const A = (n: number): DiffLine => ({ type: "add", content: "x", oldLineNo: null, newLineNo: n }) as unknown as DiffLine;
+    const ctx = (n: number): DiffLine => ({ type: "context", content: "c", oldLineNo: n, newLineNo: n });
+    const [net, section] = buildCombinedEntries(
+      combined(
+        2,
+        [file("g", [hunk(2, 1, 1, 0, [D(2)])])],
+        [[], [file("g", [hunk(2, 1, 1, 0, [D(2)])])]],
+        [{
+          path: "f",
+          perCommit: [{ hash: "h1", diff: file("f", [hunk(1, 4, 1, 3, [ctx(1), D(2), A(2), ctx(3), D(4)])]) }],
+          blockers: [],
+          conflicted: true,
+        }],
+      ),
+    );
+    expect(net.attribution.lineCommit.get("LEFT:2")).toBe(1);
+    expect(net.attribution.hunkCommits).toEqual([[1]]);
+    expect(section.attribution.lineCommit.get("LEFT:2")).toBe(1);
+    expect(section.attribution.lineCommit.get("LEFT:4")).toBe(1);
+    expect(section.attribution.lineCommit.get("RIGHT:2")).toBe(1);
+    expect(section.attribution.lineCommit.size).toBe(3);
+  });
+
   it("hunkless_file_is_ignored", () => {
     const e = buildCombinedEntries(combined(2, [file("bin", [])], [[file("bin", [])], []]));
     expect(e[0].attribution.lineCommit.size).toBe(0);
