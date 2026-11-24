@@ -109,8 +109,11 @@ describe("createRestackHost", () => {
       after({ pushable: [{ branch: "step-2", lease: "a" }, { branch: "step-3", lease: "b" }], skipped: [{ branch: "x", reason: "no_upstream", detail: null }], noLeases: false }),
       run,
     );
-    const [title, detail, , extras] = toast.mock.calls[0];
+    const [title, detail, ms, extras] = toast.mock.calls[0];
     expect([title, detail]).toEqual(["2 restacked branches can be pushed.", "Not pushed (no upstream): x"]);
+    // GitHub QA: a 10 s offer was gone before the user got to it, and nothing
+    // else offers the push. It stays until pushed or dismissed.
+    expect(ms).toBe(0);
     expect(extras.action.label).toBe("Push");
     expect(run).not.toHaveBeenCalled();
     extras.action.run();
@@ -118,6 +121,12 @@ describe("createRestackHost", () => {
     expect(run).toHaveBeenCalledTimes(1);
     // A failure keeps the result on screen (sticky: 0 ms).
     expect(toast.mock.calls[1]).toEqual(["Pushed 1 of 2.", "step-3: stale info", 0]);
+  });
+
+  it("offers one branch in the singular", () => {
+    const { host, toast } = setup();
+    host.offerPush(after({ pushable: [{ branch: "step-3", lease: "a" }], skipped: [], noLeases: false }), vi.fn());
+    expect(toast.mock.calls[0][0]).toBe("1 restacked branch can be pushed.");
   });
 
   it("a fully successful push is a short toast", async () => {

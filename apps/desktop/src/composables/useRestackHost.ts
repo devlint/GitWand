@@ -67,7 +67,11 @@ export function createRestackHost(deps: RestackHostDeps): RestackHost {
         deps.toast(t("stacks.dialog.done"), skippedDetail, OFFER_MS, { key: PUSH_KEY });
         return;
       }
-      deps.toast(t("stacks.push.offer", pushable.length), skippedDetail, OFFER_MS, {
+      // Sticky: the push is offered nowhere else (GitHub QA, a 10 s offer
+      // was gone before the user reached it).
+      const offer =
+        pushable.length === 1 ? t("stacks.push.offerOne") : t("stacks.push.offer", pushable.length);
+      deps.toast(offer, skippedDetail, 0, {
         key: PUSH_KEY,
         action: {
           label: t("stacks.push.action"),

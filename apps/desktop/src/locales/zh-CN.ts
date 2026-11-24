@@ -663,6 +663,7 @@ const zhCN: Locale = {
     },
     push: {
       offer: "可以推送 {0} 个已重新堆叠的分支。",
+      offerOne: "可以推送 1 个已重新堆叠的分支。",
       action: "推送",
       skipped: "未推送（无上游）：{0}",
       skippedGone: "未推送（远程分支已不存在）：{0}",

@@ -664,6 +664,7 @@ const ptBR: Locale = {
     },
     push: {
       offer: "{0} branches reempilhados podem ser enviados.",
+      offerOne: "1 branch reempilhado pode ser enviado.",
       action: "Enviar",
       skipped: "Não enviados (sem upstream): {0}",
       skippedGone: "Não enviados (o branch remoto não existe mais): {0}",
