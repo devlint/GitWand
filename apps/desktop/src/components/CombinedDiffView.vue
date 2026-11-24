@@ -10,6 +10,7 @@ import CombinedDiffBody from "./CombinedDiffBody.vue";
 import { useI18n } from "../composables/useI18n";
 import { useCombinedDiff, type CombinedRequest } from "../composables/useCombinedDiff";
 import { useCombinedSummary } from "../composables/useCombinedSummary";
+import { useCommitSelection } from "../composables/useCommitSelection";
 import type { DiffMode } from "../utils/diffMode";
 
 const { locale } = useI18n();
@@ -35,6 +36,15 @@ function summarize() {
   if (data.value) void generate(data.value, locale.value);
 }
 
+// A jump to one of its commits also makes it the Git Tree's ⇧-range anchor,
+// as a plain click on that row would (the multi-selection stays). Set here,
+// in this lazy chunk, so the selection code stays out of the main bundle.
+const graphSelection = useCommitSelection(toRef(props, "cwd"));
+function jumpToCommit(hash: string) {
+  graphSelection.setAnchor(hash);
+  emit("select-commit", hash);
+}
+
 // Esc is App's: `onGlobalKeydown` closes this view after any panel on top
 // of it (`utils/combinedEsc.ts`).
 </script>
@@ -51,7 +61,7 @@ function summarize() {
     :summarizing="summarizing"
     :summary-error="!!summaryErr"
     @close="emit('close')"
-    @select-commit="emit('select-commit', $event)"
+    @select-commit="jumpToCommit"
     @update:diff-mode="emit('update:diffMode', $event)"
     @retry="reload()"
     @summarize="summarize"

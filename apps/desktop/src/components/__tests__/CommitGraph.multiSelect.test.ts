@@ -298,7 +298,7 @@ describe("CommitGraph — multi-selection", () => {
       mountFiltered(log, filters);
       await click(3, { ctrlKey: true });
       await click(1, { ctrlKey: true });
-      filters.value = { logBranchFilter: "all", logAuthorFilter: "all", ...filter };
+      filters.value = Object.assign({ logBranchFilter: "all", logAuthorFilter: "all" }, filter);
       log.value = commits.slice(0, 3);
       await nextTick();
       await nextTick();
@@ -419,10 +419,10 @@ describe("CommitGraph — multi-selection", () => {
     outside.remove();
   });
 
-  it("a jump to a commit from the combined view (App sets the anchor) drives the next Shift-click", async () => {
+  it("a jump to a commit from the combined view (it sets the anchor) drives the next Shift-click", async () => {
     mount({ selectedHash: full("ddd4444") });
     await nextTick();
-    // App.vue `onCombinedSelectCommit`: the anchor follows the jumped-to commit.
+    // CombinedDiffView `jumpToCommit`: the anchor follows the jumped-to commit.
     useCommitSelection(ref(cwd)).setAnchor(full("ddd4444"));
     await click(1, { shiftKey: true });
     const multi = rows().map((r) => r.classList.contains("cg-row--multi"));
