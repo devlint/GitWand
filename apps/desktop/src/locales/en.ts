@@ -3251,6 +3251,11 @@ const en = {
     decisionRiskWarning: "{0} unresolved risk-level finding(s). Vouch only if you have looked at them.",
   },
   combined: {
+    chip: "{0} commits selected",
+    open: "Combined diff",
+    ctxOpen: "Combined diff of {0} commits",
+    clear: "Clear selection",
+    tooMany: "Too many commits (max {0})",
     jumpToCommit: "Jump to commit {0}",
   },
 } as const;

@@ -3206,6 +3206,11 @@ const es: Locale = {
     decisionRiskWarning: "{0} hallazgo(s) de riesgo sin resolver. Avala solo si ya los revisaste.",
   },
   combined: {
+    chip: "{0} commits seleccionados",
+    open: "Diff combinado",
+    ctxOpen: "Diff combinado de {0} commits",
+    clear: "Borrar la selección",
+    tooMany: "Demasiados commits (máx. {0})",
     jumpToCommit: "Ir al commit {0}",
   },
 };

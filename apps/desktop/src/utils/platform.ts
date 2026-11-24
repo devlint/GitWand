@@ -10,3 +10,8 @@ export function platformName(): "macOS" | "Windows" | "Linux" | "unknown" {
   const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
   return /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "unknown";
 }
+
+/** The "toggle" click modifier: Cmd on macOS, Ctrl elsewhere (Ctrl-click is a context-menu gesture on mac). */
+export function isToggleModifier(e: { metaKey: boolean; ctrlKey: boolean }): boolean {
+  return IS_MAC ? e.metaKey : e.ctrlKey;
+}

@@ -3206,6 +3206,11 @@ const ptBR: Locale = {
     decisionRiskWarning: "{0} achado(s) de nível de risco não resolvido(s). Ateste somente se já os revisou.",
   },
   combined: {
+    chip: "{0} commits selecionados",
+    open: "Diff combinado",
+    ctxOpen: "Diff combinado de {0} commits",
+    clear: "Limpar a seleção",
+    tooMany: "Commits demais (máx. {0})",
     jumpToCommit: "Ir para o commit {0}",
   },
 };

@@ -3216,6 +3216,11 @@ const fr: Locale = {
     decisionRiskWarning: "{0} constat(s) de niveau risque non résolu(s). Validez uniquement si vous les avez examinés.",
   },
   combined: {
+    chip: "{0} commits sélectionnés",
+    open: "Diff combiné",
+    ctxOpen: "Diff combiné de {0} commits",
+    clear: "Effacer la sélection",
+    tooMany: "Trop de commits (max {0})",
     jumpToCommit: "Aller au commit {0}",
   },
 };

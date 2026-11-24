@@ -3216,6 +3216,11 @@ const zhCN: Locale = {
     decisionRiskWarning: "有 {0} 项未解决的风险级发现。仅在您已查看过之后再担保。",
   },
   combined: {
+    chip: "已选择 {0} 个提交",
+    open: "合并差异",
+    ctxOpen: "{0} 个提交的合并差异",
+    clear: "清除选择",
+    tooMany: "提交过多（最多 {0} 个）",
     jumpToCommit: "跳转到提交 {0}",
   },
 };

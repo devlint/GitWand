@@ -17,6 +17,8 @@ import { useTheme } from "../composables/useTheme";
 import { useStacks } from "../composables/useStacks";
 import { stackMenuFor, type StackMenuItems } from "../composables/useStackActions";
 import { clampMenuToWindow } from "../utils/contextMenu";
+import { useCommitSelection, COMBINE_MAX } from "../composables/useCommitSelection";
+import { isToggleModifier } from "../utils/platform";
 
 defineOptions({ inheritAttrs: false });
 
@@ -91,6 +93,8 @@ type CommitEvent =
 
 const emit = defineEmits<{
   "select-commit": [hash: string];
+  /** Open the combined diff of a multi-selection (hashes in graph row order). */
+  "open-combined": [hashes: string[]];
   "change-view": [mode: "changes" | "history"];
   "edit-commit": [entry: GitLogEntry];
   "split-commit": [entry: GitLogEntry];
@@ -224,8 +228,12 @@ function openCommitContextMenu(e: MouseEvent, entry: GitLogEntry, idx: number, b
   if (entry.hashFull === "WIP") return;
   e.preventDefault();
   e.stopPropagation();
-  // Select the commit first
-  emit("select-commit", entry.hashFull);
+  // Select the commit first — unless it belongs to a multi-selection, which the
+  // menu then acts on (the selection and the right rail stay as they are).
+  if (!(multiSet.value.size >= 2 && multiSet.value.has(entry.hashFull))) {
+    selection.clear();
+    emit("select-commit", entry.hashFull);
+  }
   const tag = branchType === "tag" ? branchName : undefined;
 
   // Identify if this is a stash commit
@@ -527,6 +535,12 @@ const isCtxEntryHead = computed(() => {
   return isCurrent(entry);
 });
 
+/** The menu was opened on a row of a multi-selection of 2+ commits. */
+const ctxInMulti = computed(() => {
+  const e = ctxMenu.value.entry;
+  return ctxMenu.value.visible && !!e && orderedSelection.value.length >= 2 && multiSet.value.has(e.hashFull);
+});
+
 onMounted(() => {
   window.addEventListener("click", closeCommitContextMenu);
   window.addEventListener("click", closeWipContextMenu);
@@ -541,7 +555,15 @@ onUnmounted(() => {
 });
 
 function onCtxKey(e: KeyboardEvent) {
-  if (e.key === "Escape") { closeCommitContextMenu(); closeWipContextMenu(); }
+  if (e.key === "Escape") {
+    // A first Esc closes an open menu; the multi-selection goes on the next one.
+    if (ctxMenu.value.visible || wipCtxMenu.value.visible) { closeCommitContextMenu(); closeWipContextMenu(); return; }
+    if (selection.selected.value.length > 0) selection.clear();
+  } else if (e.key === "Enter" && selection.canCombine.value) {
+    const t = e.target as HTMLElement | null;
+    if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(t.tagName))) return;
+    openCombined();
+  }
 }
 
 // ─── WIP context menu ────────────────────────────────
@@ -764,6 +786,46 @@ const renderedCommits = computed(() => {
   if (prNumberQuery.value !== null) return displayCommits.value.filter(commitMatchesPrQuery);
   return filterCommitsLocal(displayCommits.value, searchQuery.value);
 });
+
+// ─── Multi-selection for the combined diff (v3.15) ───
+const selection = useCommitSelection(computed(() => props.cwd ?? ""));
+const multiSet = computed(() => new Set(selection.selected.value));
+/** WIP and stash rows never join a multi-selection. */
+function isJoinable(entry: GitLogEntry | undefined): entry is GitLogEntry {
+  if (!entry || entry.hashFull === "WIP") return false;
+  return !commitRefs(entry).some((r) => r.type === "stash");
+}
+/** Rows as the graph lists them now (filters/search applied), joinable ones only. */
+const joinableOrder = computed(() =>
+  renderedCommits.value.filter(isJoinable).map((e) => e.hashFull),
+);
+/** The selection in graph row order, whatever the click order was. */
+const orderedSelection = computed(() => {
+  const set = multiSet.value;
+  return joinableOrder.value.filter((h) => set.has(h));
+});
+const tooMany = computed(() => orderedSelection.value.length > COMBINE_MAX);
+
+function openCombined() {
+  if (!selection.canCombine.value || orderedSelection.value.length < 2) return;
+  emit("open-combined", [...orderedSelection.value]);
+}
+
+/** Row click: plain = single selection (unchanged), Cmd/Ctrl = toggle, Shift = range. */
+function onRowClick(e: MouseEvent, index: number) {
+  const entry = renderedCommits.value[index];
+  if (!entry) return;
+  if (entry.hashFull === "WIP") { emit("change-view", "changes"); return; }
+  if (isJoinable(entry) && (isToggleModifier(e) || e.shiftKey)) {
+    const cur = props.selectedHash ?? null;
+    const current = cur && joinableOrder.value.includes(cur) ? cur : null;
+    if (e.shiftKey) selection.range(entry.hashFull, joinableOrder.value, current);
+    else selection.toggle(entry.hashFull, current);
+    return;
+  }
+  selection.clear();
+  emit("select-commit", entry.hashFull);
+}
 
 const matchedIndices = computed<number[]>(() => {
   const q = searchQuery.value.trim();
@@ -1667,7 +1729,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           class="cg-row-tint"
           v-bind="bandRect(node)"
           :style="{ fill: bandFill(node) }"
-          @click="node.hash === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', node.hash)"
+          @click="onRowClick($event, node.index)"
           @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         />
         <!-- Selected / current / search highlight over the row tint band,
@@ -1739,7 +1801,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           v-for="node in visibleNodes"
           :key="'n' + node.index"
           class="cg-node"
-          @click="node.hash === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', node.hash)"
+          @click="onRowClick($event, node.index)"
           @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         >
           <!-- WIP Node: dashed circle -->
@@ -1841,6 +1903,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           class="cg-row"
           :class="{
             'cg-row--selected': vc.entry.hashFull === selectedHash,
+            'cg-row--multi': multiSet.has(vc.entry.hashFull),
             'cg-row--current': isCurrent(vc.entry),
             'cg-row--wip': vc.entry.hashFull === 'WIP',
             'cg-row--hover': vc.index === hoveredIndex,
@@ -1849,7 +1912,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
              top: vc.index * ROW_H + 'px',
              height: ROW_H + 'px',
              '--cg-row-hl': commitRowHighlight(vc.index)
-           }"          @click="vc.entry.hashFull === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', vc.entry.hashFull)"          @dblclick="onRowDblClick(vc.entry)"
+           }"          @click="onRowClick($event, vc.index)"          @dblclick="onRowDblClick(vc.entry)"
           @contextmenu="vc.entry.hashFull === 'WIP' ? openWipContextMenu($event) : openCommitContextMenu($event, vc.entry, vc.index)"
         >
           <template v-if="vc.entry.hashFull === 'WIP'">
@@ -1935,6 +1998,23 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         </div>
       </div>
     </div>
+    <!-- Multi-selection chip (v3.15): pinned at the bottom of the graph -->
+    <div v-if="orderedSelection.length >= 2" class="cg-multi-chip" role="status">
+      <span class="cg-multi-chip__label">{{ tooMany ? t('combined.tooMany', COMBINE_MAX) : t('combined.chip', orderedSelection.length) }}</span>
+      <button
+        type="button"
+        class="cg-multi-chip__open"
+        :disabled="!selection.canCombine.value"
+        @click.stop="openCombined"
+      >{{ t('combined.open') }}</button>
+      <button
+        type="button"
+        class="cg-multi-chip__clear"
+        :aria-label="t('combined.clear')"
+        v-tooltip="t('combined.clear')"
+        @click.stop="selection.clear()"
+      >&times;</button>
+    </div>
     <!-- Load-more indicator: overlaid bottom-right so it never reflows the graph.
          Must NOT live inside .cg-scroll (flex row) — as a flex child it becomes
          a phantom right column that shifts the whole tree when it appears. -->
@@ -1956,6 +2036,22 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       @click.stop
       @contextmenu.prevent
     >
+      <!-- Combined diff of the multi-selection (v3.15) — first entry -->
+      <template v-if="ctxInMulti">
+        <li
+          class="commit-ctx-menu-item"
+          :class="{ 'commit-ctx-menu-item--disabled': !selection.canCombine.value }"
+          role="menuitem"
+          :title="tooMany ? t('combined.tooMany', COMBINE_MAX) : undefined"
+          @click="selection.canCombine.value && (openCombined(), closeCommitContextMenu())"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 3h10M3 8h10M3 13h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          <span>{{ t('combined.ctxOpen', orderedSelection.length) }}</span>
+        </li>
+        <li class="commit-ctx-menu-sep" role="separator"></li>
+      </template>
       <!-- Stash actions (v2.12) — shown ONLY for stash commits -->
       <template v-if="ctxMenu.clickedBranchType === 'stash' && ctxMenu.clickedStashIndex !== undefined">
         <li
@@ -2865,6 +2961,56 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
    shadow (not a gradient layer) so it animates. */
 .cg-row--hover:not(.cg-row--selected):not(.cg-row--current)::after {
   box-shadow: inset 0 0 0 100vmax var(--cg-hover-wash);
+}
+
+/* Multi-selection (combined diff): distinct from the single selected row. */
+.cg-row--multi::after {
+  background-color: color-mix(in srgb, var(--color-accent), transparent 78%);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.cg-multi-chip {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: var(--font-size-sm, 12px);
+  color: var(--color-text);
+}
+.cg-multi-chip__open {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-text, #fff);
+  font: inherit;
+  cursor: pointer;
+}
+.cg-multi-chip__open:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.cg-multi-chip__clear {
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted, inherit);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cg-multi-chip__clear:hover {
+  background: var(--color-bg-hover, rgba(128, 128, 128, 0.2));
 }
 
 .cg-row-tint {
