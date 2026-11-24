@@ -820,9 +820,14 @@ function isJoinable(entry: GitLogEntry | undefined): entry is GitLogEntry {
 const joinableOrder = computed(() =>
   renderedCommits.value.filter(isJoinable).map((e) => e.hashFull),
 );
-/** The whole loaded log, unfiltered, joinable rows only. */
+/**
+ * The whole loaded log, unfiltered, joinable rows only — computed only while
+ * a multi-selection exists: `isJoinable` parses every row's refs, which a
+ * refresh with nothing selected must not pay for. Empty otherwise, which the
+ * prune watcher below reads as "nothing to prune".
+ */
 const logOrder = computed(() =>
-  displayCommits.value.filter(isJoinable).map((e) => e.hashFull),
+  multiSet.value.size === 0 ? [] : displayCommits.value.filter(isJoinable).map((e) => e.hashFull),
 );
 /**
  * THE selection list: selected hashes in the loaded log (full log order),
@@ -1477,8 +1482,9 @@ const unfilteredLog = () =>
   (props.logBranchFilter ?? "all") === "all" &&
   (props.logAuthorFilter ?? "all") === "all" &&
   !activeScope.value;
+// `logOrder` is empty while nothing is selected: no refs parsed, no prune.
 watch([logOrder, () => props.hasMore], ([order, more]) => {
-  if (multiSet.value.size > 0 && order.length > 0 && !more && unfilteredLog()) selection.prune(order);
+  if (order.length > 0 && !more && unfilteredLog()) selection.prune(order);
 });
 
 watch(() => visibleRange.value.last, (last) => {
