@@ -346,10 +346,11 @@ describe("parity: git-combined-diff", () => {
     commitFiles(cwd, { keep: "k2\n" }, "B", 2);
     git(cwd, ["mv", "old.txt", "new.txt"]);
     const c = commitFiles(cwd, { "large.txt": ten("large line "), "new.txt": ten("o").replace("o3\n", "C3\n") }, "C", 3);
-    // 290 bytes in all. At 150: large.txt (121) then the old.txt→new.txt
-    // file (25, one file through the rename) lose their steps → 144, under.
-    // At 0: every step goes, then every entry turns header-only.
-    for (const budget of ["150", "0"]) {
+    // Weights count 256 bytes per entry and 64 per line on top of content:
+    // 4 699 in all. At 3 000: the old.txt→new.txt file (1 305, one file
+    // through the rename) then large.txt (1 017) lose their steps → 2 377,
+    // under. At 0: every step goes, then every entry turns header-only.
+    for (const budget of ["3000", "0"]) {
       const env = { GITWAND_COMBINED_BUDGET_BYTES: budget };
       const small = await startDevServer({ env });
       try {
@@ -370,6 +371,30 @@ describe("parity: git-combined-diff", () => {
     }
     const { rust } = await parity(cwd, [a, c]);
     expect(rust.truncated).toBe(false);
+  }, 30_000);
+
+  // budget.rs `many_short_lines_trigger_the_budget`: 3 000 one-byte lines are
+  // 6 KB of content but ~200 KB of payload; a 100 KB budget cuts them.
+  it("many short lines count their per-line overhead on both sides", async () => {
+    const cwd = repo("shortlines");
+    commitFiles(cwd, { keep: "k\n" }, "base", 0);
+    const a = commitFiles(cwd, { "many.txt": "x\n".repeat(3000) }, "A", 1);
+    commitFiles(cwd, { keep: "k2\n" }, "B", 2);
+    const c = commitFiles(cwd, { "t.txt": "t\n" }, "C", 3);
+    const env = { GITWAND_COMBINED_BUDGET_BYTES: "100000" };
+    const small = await startDevServer({ env });
+    try {
+      const args = { cwd, hashes: [a, c] };
+      const { rust } = await assertParity(small, {
+        command: COMMAND, args, httpPath: HTTP_PATH, method: "POST", body: args, probeEnv: env,
+      });
+      expect(rust.truncated).toBe(true);
+      const many = rust.diffs.find((d) => d.path === "many.txt");
+      expect(many.hunks).toEqual([]);
+      expect(many.truncatedFromBytes).toBe(3000 * 65);
+    } finally {
+      await small.stop();
+    }
   }, 30_000);
 
   it("invalid input fails with the same message on both sides", async () => {

@@ -1675,15 +1675,9 @@ mod tests {
         assert!(t.truncated_from_bytes.is_none());
     }
 
-    /// Bytes of hunk line content, as the budget counts them.
+    /// The payload weight, as the budget counts it.
     fn weight(c: &CombinedDiff) -> usize {
-        let w = |d: &GitDiff| -> usize {
-            d.hunks
-                .iter()
-                .flat_map(|h| h.lines.iter())
-                .map(|l| l.content.len())
-                .sum()
-        };
+        let w = super::super::budget::weight;
         c.diffs.iter().map(w).sum::<usize>()
             + c.steps.iter().flatten().map(w).sum::<usize>()
             + c.fallback

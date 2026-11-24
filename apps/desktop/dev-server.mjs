@@ -1108,11 +1108,22 @@ function combinedBudget() {
   return v !== undefined && /^\d+$/.test(v) ? Number(v) : COMBINED_BUDGET_BYTES;
 }
 
-/** budget.rs `size`: bytes of hunk line content (UTF-8). */
-function combinedSize(d) {
+/** Mirrors `LINE_OVERHEAD_BYTES` / `FILE_OVERHEAD_BYTES` in budget.rs. */
+const COMBINED_LINE_OVERHEAD_BYTES = 64;
+const COMBINED_FILE_OVERHEAD_BYTES = 256;
+
+/** budget.rs `lines_weight`: content bytes (UTF-8) + the per-line overhead. */
+function combinedLinesWeight(d) {
   let n = 0;
-  for (const h of d.hunks) for (const l of h.lines) n += Buffer.byteLength(l.content, "utf8");
+  for (const h of d.hunks) {
+    for (const l of h.lines) n += Buffer.byteLength(l.content, "utf8") + COMBINED_LINE_OVERHEAD_BYTES;
+  }
   return n;
+}
+
+/** budget.rs `weight`: the per-file overhead + the lines. */
+function combinedWeight(d) {
+  return COMBINED_FILE_OVERHEAD_BYTES + combinedLinesWeight(d);
 }
 
 /**
@@ -1145,14 +1156,15 @@ function combinedTruncatedNames(diffs, steps) {
 
 /**
  * budget.rs `apply_budget`: (a) drop the step entries of whole files (names
- * linked by renames), largest first, ties by smallest name; (b) then make the
- * largest net / per-commit entries header-only, ties in payload order.
- * Weightless entries are never cut. Mutates; returns whether it cut anything.
+ * linked by renames), heaviest first, ties by smallest name; (b) then make the
+ * net / per-commit entries whose lines weigh most header-only, ties in payload
+ * order. Entries with no line are never made header-only. Mutates; returns
+ * whether it cut anything.
  */
 function combinedApplyBudget(diffs, steps, fallback, budget) {
   const entries = [...diffs, ...fallback.flatMap((f) => f.perCommit.map((p) => p.diff))];
-  let total = entries.reduce((n, d) => n + combinedSize(d), 0) +
-    steps.flat().reduce((n, d) => n + combinedSize(d), 0);
+  let total = entries.reduce((n, d) => n + combinedWeight(d), 0) +
+    steps.flat().reduce((n, d) => n + combinedWeight(d), 0);
   if (total <= budget) return false;
   let cut = false;
 
@@ -1177,7 +1189,7 @@ function combinedApplyBudget(diffs, steps, fallback, budget) {
   const groups = new Map();
   for (const d of steps.flat()) {
     const r = root(d.path);
-    groups.set(r, (groups.get(r) ?? 0) + combinedSize(d));
+    groups.set(r, (groups.get(r) ?? 0) + combinedWeight(d));
   }
   const order = [...groups.entries()]
     .filter(([, n]) => n > 0)
@@ -1196,7 +1208,7 @@ function combinedApplyBudget(diffs, steps, fallback, budget) {
 
   // (b) Header-only entries, largest first.
   if (total > budget) {
-    const bySize = entries.map((d, i) => [i, combinedSize(d)]).filter(([, n]) => n > 0).sort(([, x], [, y]) => y - x);
+    const bySize = entries.map((d, i) => [i, combinedLinesWeight(d)]).filter(([, n]) => n > 0).sort(([, x], [, y]) => y - x);
     for (const [i, n] of bySize) {
       if (total <= budget) break;
       entries[i].hunks = [];

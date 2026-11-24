@@ -3,23 +3,40 @@
 //! the diff parser bounds one entry, not `steps` × N commits, so the whole
 //! answer is bounded here too.
 //!
-//! Mirrored by `combinedApplyBudget` in `dev-server.mjs`: same constant, same
+//! Mirrored by `combinedApplyBudget` in `dev-server.mjs`: same constants, same
 //! size measure, same order, same tie-breaks (parity-tested).
 
 use crate::types::{CombinedFallbackFile, GitDiff};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// 16 MB of hunk line content over `diffs`, `steps` and the fallback's
+/// 16 MB of estimated payload over `diffs`, `steps` and the fallback's
 /// per-commit diffs.
 pub(crate) const COMBINED_BUDGET_BYTES: usize = 16 * 1024 * 1024;
 
-/// What an entry weighs: the bytes of its hunk lines' content (UTF-8).
-fn size(d: &GitDiff) -> usize {
+/// Serialized overhead counted per hunk line on top of its content: the JSON
+/// keys and values of `type`, line numbers, quotes and separators (about
+/// 60 bytes as serde writes a `DiffLine`). Without it, many short lines —
+/// a minified file, a long list — would weigh a fraction of their payload.
+pub(crate) const LINE_OVERHEAD_BYTES: usize = 64;
+
+/// Serialized overhead counted per entry (`GitDiff`): path, status, hunk
+/// headers and the object around them.
+pub(crate) const FILE_OVERHEAD_BYTES: usize = 256;
+
+/// What an entry's hunk lines weigh: content bytes (UTF-8) plus
+/// `LINE_OVERHEAD_BYTES` each. What a header-only cut saves.
+fn lines_weight(d: &GitDiff) -> usize {
     d.hunks
         .iter()
         .flat_map(|h| h.lines.iter())
-        .map(|l| l.content.len())
+        .map(|l| l.content.len() + LINE_OVERHEAD_BYTES)
         .sum()
+}
+
+/// What an entry weighs in the payload: `FILE_OVERHEAD_BYTES` plus its
+/// lines. What dropping a step entry saves.
+pub(crate) fn weight(d: &GitDiff) -> usize {
+    FILE_OVERHEAD_BYTES + lines_weight(d)
 }
 
 /// Union-find root of `name`, path-compressed.
@@ -50,24 +67,25 @@ pub(crate) fn root(parent: &mut BTreeMap<String, String>, name: &str) -> String 
 ///     its step entries link by renames, so a file loses all its steps or
 ///     none (partial steps would attribute lines wrongly; no steps just means
 ///     no markers). Largest file first, ties by smallest name.
-/// (b) Then, if still over, the largest net or per-commit entries become
-///     header-only with `truncated_from_bytes` set to the bytes dropped.
-///     Ties keep payload order (net diffs, then fallback files and their
-///     commits in order).
+/// (b) Then, if still over, the entries whose lines weigh most (net or
+///     per-commit) become header-only with `truncated_from_bytes` set to the
+///     weight dropped (always > 0). Ties keep payload order (net diffs, then
+///     fallback files and their commits in order).
 ///
-/// Entries that weigh nothing are never cut: cutting them saves nothing.
+/// Weights are estimates of the serialized payload (`weight`). An entry with
+/// no hunk line is never made header-only: that saves nothing.
 pub(crate) fn apply_budget(
     diffs: &mut [GitDiff],
     steps: &mut [Vec<GitDiff>],
     fallback: &mut [CombinedFallbackFile],
     budget: usize,
 ) -> bool {
-    let mut total: usize = diffs.iter().map(size).sum::<usize>()
-        + steps.iter().flatten().map(size).sum::<usize>()
+    let mut total: usize = diffs.iter().map(weight).sum::<usize>()
+        + steps.iter().flatten().map(weight).sum::<usize>()
         + fallback
             .iter()
             .flat_map(|f| f.per_commit.iter())
-            .map(|p| size(&p.diff))
+            .map(|p| weight(&p.diff))
             .sum::<usize>();
     if total <= budget {
         return false;
@@ -90,7 +108,7 @@ pub(crate) fn apply_budget(
     let mut groups: BTreeMap<String, usize> = BTreeMap::new();
     for d in steps.iter().flatten() {
         let r = root(&mut parent, &d.path);
-        *groups.entry(r).or_default() += size(d);
+        *groups.entry(r).or_default() += weight(d);
     }
     let mut order: Vec<(String, usize)> = groups.into_iter().filter(|(_, s)| *s > 0).collect();
     // Stable: equal sizes keep the BTreeMap (name) order.
@@ -124,7 +142,7 @@ pub(crate) fn apply_budget(
         let mut by_size: Vec<(usize, usize)> = entries
             .iter()
             .enumerate()
-            .map(|(i, d)| (i, size(d)))
+            .map(|(i, d)| (i, lines_weight(d)))
             .filter(|(_, s)| *s > 0)
             .collect();
         by_size.sort_by_key(|e| std::cmp::Reverse(e.1));
@@ -147,8 +165,8 @@ mod tests {
     use super::*;
     use crate::types::{CombinedFallbackCommitDiff, DiffHunk, DiffLine};
 
-    /// An entry whose hunk lines weigh `bytes`.
-    fn entry(path: &str, old: Option<&str>, bytes: usize) -> GitDiff {
+    /// An entry of `lines` hunk lines of `bytes` bytes each.
+    fn lines_entry(path: &str, old: Option<&str>, lines: usize, bytes: usize) -> GitDiff {
         GitDiff {
             path: path.to_string(),
             hunks: vec![DiffHunk {
@@ -156,13 +174,15 @@ mod tests {
                 old_start: 0,
                 old_count: 0,
                 new_start: 1,
-                new_count: 1,
-                lines: vec![DiffLine {
-                    r#type: "add".to_string(),
-                    content: "x".repeat(bytes),
-                    old_line_no: None,
-                    new_line_no: Some(1),
-                }],
+                new_count: lines as i32,
+                lines: (0..lines)
+                    .map(|i| DiffLine {
+                        r#type: "add".to_string(),
+                        content: "x".repeat(bytes),
+                        old_line_no: None,
+                        new_line_no: Some(i as i32 + 1),
+                    })
+                    .collect(),
             }],
             status: old.map(|_| "renamed".to_string()),
             old_path: old.map(str::to_string),
@@ -173,8 +193,37 @@ mod tests {
         }
     }
 
+    /// An entry of one hunk line of `bytes` bytes.
+    fn entry(path: &str, old: Option<&str>, bytes: usize) -> GitDiff {
+        lines_entry(path, old, 1, bytes)
+    }
+
+    /// What `entry(_, _, bytes)` weighs.
+    fn w(bytes: usize) -> usize {
+        FILE_OVERHEAD_BYTES + LINE_OVERHEAD_BYTES + bytes
+    }
+
     fn names(step: &[GitDiff]) -> Vec<&str> {
         step.iter().map(|d| d.path.as_str()).collect()
+    }
+
+    #[test]
+    fn weight_counts_file_and_line_overhead() {
+        assert_eq!(weight(&entry("a", None, 10)), 256 + 64 + 10);
+        assert_eq!(weight(&lines_entry("a", None, 3, 2)), 256 + 3 * (64 + 2));
+        let mut empty = entry("a", None, 0);
+        empty.hunks.clear();
+        assert_eq!(weight(&empty), 256);
+    }
+
+    /// The review's case: a thousand one-byte lines weigh 1 KB of content
+    /// but 65 KB of payload — the budget must see the 65 KB.
+    #[test]
+    fn many_short_lines_trigger_the_budget() {
+        let mut diffs = vec![lines_entry("a", None, 1000, 1)];
+        assert!(apply_budget(&mut diffs, &mut [], &mut [], 10_000));
+        assert!(diffs[0].hunks.is_empty());
+        assert_eq!(diffs[0].truncated_from_bytes, Some(1000 * 65));
     }
 
     #[test]
@@ -182,7 +231,7 @@ mod tests {
         let mut diffs = vec![entry("a", None, 10)];
         let mut steps = vec![vec![entry("a", None, 10)]];
         let before = (diffs.clone(), steps.clone());
-        assert!(!apply_budget(&mut diffs, &mut steps, &mut [], 20));
+        assert!(!apply_budget(&mut diffs, &mut steps, &mut [], 2 * w(10)));
         assert_eq!((diffs, steps), before);
     }
 
@@ -190,11 +239,17 @@ mod tests {
     fn steps_go_first_largest_file_first() {
         let mut diffs = vec![entry("a", None, 10), entry("b", None, 10)];
         let mut steps = vec![
-            vec![entry("a", None, 10), entry("b", None, 30)],
+            vec![entry("a", None, 10), entry("b", None, 1000)],
             vec![entry("a", None, 10)],
         ];
-        // 20 + 50 = 70; budget 45: dropping b (30) is enough.
-        assert!(apply_budget(&mut diffs, &mut steps, &mut [], 45));
+        // Files: a = 2 × w(10), b = w(1000), the larger; dropping b is enough.
+        let total = 4 * w(10) + w(1000);
+        assert!(apply_budget(
+            &mut diffs,
+            &mut steps,
+            &mut [],
+            total - w(1000)
+        ));
         assert_eq!(names(&steps[0]), vec!["a"]);
         assert_eq!(names(&steps[1]), vec!["a"]);
         assert!(diffs.iter().all(|d| d.truncated_from_bytes.is_none()));
@@ -207,8 +262,14 @@ mod tests {
             vec![entry("p", None, 20), entry("q", None, 25)],
             vec![entry("p2", Some("p"), 20)],
         ];
-        // p+p2 weigh 40 as one file, q 25: total 5 + 65 = 70, budget 40.
-        assert!(apply_budget(&mut diffs, &mut steps, &mut [], 40));
+        // p+p2 weigh 2 × w(20) as one file, more than q.
+        let total = w(5) + 2 * w(20) + w(25);
+        assert!(apply_budget(
+            &mut diffs,
+            &mut steps,
+            &mut [],
+            total - 2 * w(20)
+        ));
         assert_eq!(names(&steps[0]), vec!["q"]);
         assert!(steps[1].is_empty());
     }
@@ -216,7 +277,7 @@ mod tests {
     #[test]
     fn equal_sizes_drop_the_smallest_name_first() {
         let mut steps = vec![vec![entry("b", None, 10), entry("a", None, 10)]];
-        assert!(apply_budget(&mut [], &mut steps, &mut [], 15));
+        assert!(apply_budget(&mut [], &mut steps, &mut [], w(10) + 10));
         assert_eq!(names(&steps[0]), vec!["b"]);
     }
 
@@ -233,11 +294,14 @@ mod tests {
             }],
             blockers: Vec::new(),
         }];
-        // 10 + 40 + 10 + 30 = 90; budget 45: steps (10) go, then b (40).
-        assert!(apply_budget(&mut diffs, &mut steps, &mut fallback, 45));
+        // Steps go, then b's lines (64 + 40, the most): header-only keeps
+        // the file overhead.
+        let total = w(10) + w(40) + w(10) + w(30);
+        let budget = total - w(10) - (64 + 40);
+        assert!(apply_budget(&mut diffs, &mut steps, &mut fallback, budget));
         assert!(steps[0].is_empty());
         assert!(diffs[1].hunks.is_empty());
-        assert_eq!(diffs[1].truncated_from_bytes, Some(40));
+        assert_eq!(diffs[1].truncated_from_bytes, Some(64 + 40));
         assert!(diffs[0].truncated_from_bytes.is_none());
         assert!(fallback[0].per_commit[0]
             .diff
@@ -257,10 +321,15 @@ mod tests {
             }],
             blockers: Vec::new(),
         }];
-        assert!(apply_budget(&mut diffs, &mut [], &mut fallback, 20));
+        assert!(apply_budget(
+            &mut diffs,
+            &mut [],
+            &mut fallback,
+            w(10) + w(30) - 1
+        ));
         assert_eq!(
             fallback[0].per_commit[0].diff.truncated_from_bytes,
-            Some(30)
+            Some(64 + 30)
         );
         assert!(diffs[0].truncated_from_bytes.is_none());
     }
