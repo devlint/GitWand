@@ -263,6 +263,64 @@ describe("CommitGraph — multi-selection", () => {
     expect(chip()?.textContent).toContain("combined.chip:2");
   });
 
+  /** Mount on a reactive log + filter props (complete log: hasMore false). */
+  function mountFiltered(log: { value: GitLogEntry[] }, filters: { value: Record<string, unknown> }) {
+    cwd = `/repo/multi-${n++}`;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    app = createApp({
+      setup: () => () =>
+        h(CommitGraph, { commits: log.value, hasMore: false, cwd, selectedHash: full("aaa1111"), ...filters.value }),
+    });
+    app.mount(container);
+  }
+
+  for (const [label, filter] of [
+    ["branch", { logBranchFilter: "current" }],
+    ["author", { logAuthorFilter: "mine" }],
+  ] as const) {
+    it(`a complete log narrowed by the ${label} filter keeps a selected commit it hides`, async () => {
+      const log = shallowRef(commits);
+      const filters = shallowRef<Record<string, unknown>>({ logBranchFilter: "all", logAuthorFilter: "all" });
+      mountFiltered(log, filters);
+      await click(3, { ctrlKey: true });
+      await click(1, { ctrlKey: true });
+      filters.value = { logBranchFilter: "all", logAuthorFilter: "all", ...filter };
+      log.value = commits.slice(0, 3);
+      await nextTick();
+      await nextTick();
+      expect(useCommitSelection(ref(cwd)).selected.value).toContain(full("ddd4444"));
+      expect(chip()?.textContent).toContain("combined.chip:3");
+      // Back to "all": the filtered log is still shown until the reload lands.
+      filters.value = { logBranchFilter: "all", logAuthorFilter: "all" };
+      await nextTick();
+      await nextTick();
+      expect(useCommitSelection(ref(cwd)).selected.value).toContain(full("ddd4444"));
+      log.value = commits;
+      await nextTick();
+      expect(useCommitSelection(ref(cwd)).selected.value).toContain(full("ddd4444"));
+    });
+  }
+
+  it("a complete log narrowed by a monorepo scope keeps a selected commit it hides", async () => {
+    const { useWorkspaceScope } = await import("../../composables/useWorkspaceScope");
+    const log = shallowRef(commits);
+    const filters = shallowRef<Record<string, unknown>>({});
+    mountFiltered(log, filters);
+    await click(3, { ctrlKey: true });
+    await click(1, { ctrlKey: true });
+    const scope = useWorkspaceScope().activeScope;
+    scope.value = "packages/core";
+    try {
+      log.value = commits.slice(0, 3);
+      await nextTick();
+      await nextTick();
+      expect(useCommitSelection(ref(cwd)).selected.value).toContain(full("ddd4444"));
+    } finally {
+      scope.value = null;
+    }
+  });
+
   it("a transient empty log (reload) keeps the selection", async () => {
     const log = shallowRef(commits);
     app = null;

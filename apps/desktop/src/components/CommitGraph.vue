@@ -1464,9 +1464,17 @@ const visibleRange = computed(() => {
 
 // A reload that drops a commit (rebase, amend) prunes it from the selection —
 // only once the whole log is loaded: a shorter reload with more pages may just
-// stop before a selected commit. An empty log is a reload in progress.
+// stop before a selected commit. An empty log is a reload in progress. And
+// only on the unfiltered log (the canonical view of `useGitRepo`): a branch,
+// author or monorepo-scope filter hides commits that still exist. The filter
+// is read, not watched: it flips back to "all" before the unfiltered log
+// arrives, and the log still shown then is the filtered one.
+const unfilteredLog = () =>
+  (props.logBranchFilter ?? "all") === "all" &&
+  (props.logAuthorFilter ?? "all") === "all" &&
+  !activeScope.value;
 watch([logOrder, () => props.hasMore], ([order, more]) => {
-  if (multiSet.value.size > 0 && order.length > 0 && !more) selection.prune(order);
+  if (multiSet.value.size > 0 && order.length > 0 && !more && unfilteredLog()) selection.prune(order);
 });
 
 watch(() => visibleRange.value.last, (last) => {
