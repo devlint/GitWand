@@ -580,6 +580,8 @@ function onCtxKey(e: KeyboardEvent) {
     if (ctxMenu.value.visible || wipCtxMenu.value.visible) { closeCommitContextMenu(); closeWipContextMenu(); return; }
     if (selectionKeyAllowed(e) && multiSet.value.size > 0) selection.clear();
   } else if (e.key === "Enter" && canCombine.value && selectionKeyAllowed(e)) {
+    // Enter in an open menu is the menu's, not the selection's.
+    if (ctxMenu.value.visible || wipCtxMenu.value.visible) return;
     const t = e.target as HTMLElement | null;
     if (t && ["BUTTON", "A"].includes(t.tagName)) return;
     openCombined();

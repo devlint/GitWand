@@ -193,6 +193,16 @@ describe("CommitGraph — multi-selection", () => {
     expect(emitted["select-commit"]).toBeUndefined();
   });
 
+  it("Enter while a context menu is open does not open the combined diff", async () => {
+    const { emitted } = mount();
+    await click(1, { ctrlKey: true });
+    rows()[1].dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    await nextTick();
+    expect(document.querySelector(".commit-ctx-menu")).not.toBeNull();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    expect(emitted["open-combined"]).toBeUndefined();
+  });
+
   it("context menu on a single row has no combined entry", async () => {
     mount();
     await nextTick();
