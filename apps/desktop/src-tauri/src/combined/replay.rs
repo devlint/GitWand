@@ -14,7 +14,7 @@ use super::budget::{apply_budget, root, COMBINED_BUDGET_BYTES};
 use super::order::resolve_and_order;
 use super::{supports_combined_diff, validate_hashes};
 use crate::commands::read::parse_multi_file_diff_capped;
-use crate::git::git_cmd;
+use crate::git::{git_cmd, repo_lock};
 use crate::stack::guard::git_version;
 use crate::types::{
     CombinedDiff, CombinedFallbackCommitDiff, CombinedFallbackFile, GitDiff, DIFF_TRUNCATE_BYTES,
@@ -320,6 +320,11 @@ impl<'a> Repo<'a> {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // The only read of the worktree (`.gitattributes`): under the shared
+        // repo guard so a checkout cannot rewrite it mid-read. Held for this
+        // spawn only — the rest of the replay reads objects by id and runs
+        // unlocked (see `git_combined_diff`).
+        let _repo = repo_lock::read(self.cwd);
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("Failed to run git check-attr: {e}"))?;
