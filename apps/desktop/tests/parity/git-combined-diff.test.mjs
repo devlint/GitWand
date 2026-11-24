@@ -547,6 +547,55 @@ describe("parity: git-combined-diff", () => {
     }
   }, 30_000);
 
+  /** One commit built in the index only, names as bytes (`update-index -z --index-info`). */
+  function commitIndex(cwd, files, message, index) {
+    const parts = [];
+    for (const [name, content] of files) {
+      const blob = execFileSync("git", ["-C", cwd, "hash-object", "-w", "--stdin"], { input: content }).toString().trim();
+      parts.push(Buffer.from(`100644 ${blob}\t`), name, Buffer.from([0]));
+    }
+    execFileSync("git", ["-C", cwd, "update-index", "-z", "--index-info"], { input: Buffer.concat(parts) });
+    execFileSync("git", ["-C", cwd, "commit", "-q", "-m", message], { env: commitEnv(index) });
+    return git(cwd, ["rev-parse", "HEAD"]);
+  }
+
+  // replay.rs `non_utf8_*`: a name that is not UTF-8 is refused with the same
+  // escaped message, whether it first shows up in a tree diff or in
+  // `merge-tree`'s conflicted list. Built in the index: no filesystem has to
+  // accept the name.
+  it("a file name that is not UTF-8 is refused the same way on both sides", async () => {
+    const expectError = async (cwd, hashes, message) => {
+      const probe = runProbe(COMMAND, { cwd, hashes });
+      expect(probe.ok).toBe(false);
+      expect(probe.error).toBe(message);
+      const res = await dev.fetch(HTTP_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cwd, hashes }),
+      });
+      expect(res.status).toBe(500);
+      expect((await res.json()).error).toBe(message);
+    };
+    // A truncated 3-byte sequence, a lone continuation byte, an overlong
+    // encoding and a surrogate, around valid text.
+    const odd = Buffer.from([0x61, 0xe2, 0x82, 0x62, 0x80, 0x63, 0xc0, 0xaf, 0xc3, 0xa9, 0xed, 0xa0, 0x80]);
+    const clean = repo("nonutf8clean");
+    const f1 = ten("l").replace("l1\n", "A1\n");
+    commitIndex(clean, [[odd, ten("l")], [Buffer.from("g"), "g\n"]], "base", 0);
+    const a = commitIndex(clean, [[odd, f1]], "A", 1);
+    commitIndex(clean, [[Buffer.from("g"), "g2\n"]], "B", 2);
+    const c = commitIndex(clean, [[odd, f1.replace("l10\n", "C10\n")]], "C", 3);
+    await expectError(clean, [a, c], "Combined diffs do not support the file name: a\\xe2\\x82b\\x80c\\xc0\\xafé\\xed\\xa0\\x80");
+
+    const latin1 = Buffer.from("caf\xe9.txt", "latin1");
+    const conflict = repo("nonutf8conflict");
+    commitIndex(conflict, [[latin1, "x=1\n"], [Buffer.from("f"), "1\n"]], "base", 0);
+    const a2 = commitIndex(conflict, [[Buffer.from("f"), "2\n"]], "A", 1);
+    commitIndex(conflict, [[latin1, "x=2\n"]], "B", 2);
+    const c2 = commitIndex(conflict, [[latin1, "x=3\n"]], "C", 3);
+    await expectError(conflict, [a2, c2], "Combined diffs do not support the file name: caf\\xe9.txt");
+  });
+
   it("invalid input fails with the same message on both sides", async () => {
     const cwd = repo("errors");
     const a = commitFiles(cwd, { f: "1\n" }, "A", 0);

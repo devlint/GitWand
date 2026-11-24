@@ -214,8 +214,13 @@ impl<'a> Repo<'a> {
             ));
         }
         // `<tree>\0<path>\0…<path>\0\0<messages>`: paths end at the first
-        // empty field.
-        let stdout = String::from_utf8_lossy(&out.stdout);
+        // empty field. Only that part is checked: the messages are not read.
+        let end = out
+            .stdout
+            .windows(2)
+            .position(|w| w == b"\0\0")
+            .unwrap_or(out.stdout.len());
+        let stdout = utf8_names(&out.stdout[..end])?;
         let mut fields = stdout.split('\0');
         let tree = fields.next().unwrap_or("").trim().to_string();
         if tree.is_empty() {
@@ -288,7 +293,14 @@ impl<'a> Repo<'a> {
             b,
         ]);
         self.pathspec(&mut cmd);
-        let out = self.stdout(cmd, "diff-tree")?;
+        let out = self.output(cmd, "diff-tree")?;
+        if !out.status.success() {
+            return Err(format!(
+                "git diff-tree failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        let out = utf8_names(&out.stdout)?;
         let mut changes = Vec::new();
         let mut fields = out.split('\0').filter(|f| !f.is_empty());
         while let Some(status) = fields.next() {
@@ -599,6 +611,36 @@ fn rename_pairs(diffs: &[GitDiff]) -> Vec<(String, String)> {
 
 fn touches(d: &GitDiff, set: &FallbackSet) -> bool {
     set.contains_key(&d.path) || d.old_path.as_ref().is_some_and(|p| set.contains_key(p))
+}
+
+/// `bytes` (NUL-separated file names, as `-z` prints them) as text. A name
+/// that is not valid UTF-8 cannot be carried: decoded lossily it would match
+/// nothing — not the patch's names, not the fallback — and vanish from both
+/// views. The first such name is refused, its invalid bytes shown as `\xNN`.
+fn utf8_names(bytes: &[u8]) -> Result<&str, String> {
+    std::str::from_utf8(bytes).map_err(|_| {
+        let name = bytes
+            .split(|b| *b == 0)
+            .find(|f| std::str::from_utf8(f).is_err())
+            .unwrap_or(bytes);
+        format!(
+            "Combined diffs do not support the file name: {}",
+            escape_invalid_utf8(name)
+        )
+    })
+}
+
+/// `bytes` with every byte outside a valid UTF-8 sequence written `\xNN`
+/// (lowercase hex), the valid text kept as is.
+fn escape_invalid_utf8(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for chunk in bytes.utf8_chunks() {
+        out.push_str(chunk.valid());
+        for b in chunk.invalid() {
+            out.push_str(&format!("\\x{b:02x}"));
+        }
+    }
+    out
 }
 
 /// Every name the parsed patch carries (`path`, `old_path`) must be one the
@@ -2150,6 +2192,92 @@ mod tests {
             assert_eq!(lines(d, "add"), vec!["A1", "C10"], "{}", d.path);
         }
         assert_eq!(paths_of(&got.steps[1]), want);
+    }
+
+    /// One commit built in the index only (`update-index --index-info -z`),
+    /// so a file name need not be valid UTF-8, nor be accepted by the
+    /// filesystem (APFS refuses invalid UTF-8): `(name bytes, content)`.
+    fn commit_index(r: &TempRepo, files: &[(&[u8], &str)], msg: &str) -> String {
+        use std::io::Write;
+        let mut info: Vec<u8> = Vec::new();
+        for (name, content) in files {
+            let mut child = std::process::Command::new(crate::git::git_binary())
+                .args(["hash-object", "-w", "--stdin"])
+                .current_dir(&r.path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(content.as_bytes())
+                .unwrap();
+            let out = child.wait_with_output().unwrap();
+            let blob = String::from_utf8(out.stdout).unwrap();
+            info.extend_from_slice(format!("100644 {}\t", blob.trim()).as_bytes());
+            info.extend_from_slice(name);
+            info.push(0);
+        }
+        let mut child = std::process::Command::new(crate::git::git_binary())
+            .args(["update-index", "-z", "--index-info"])
+            .current_dir(&r.path)
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(&info).unwrap();
+        assert!(child.wait().unwrap().success());
+        r.git(&["commit", "-q", "-m", msg]);
+        r.git(&["rev-parse", "HEAD"])
+    }
+
+    const LATIN1: &[u8] = b"caf\xe9.txt";
+    const LATIN1_ERR: &str = "Combined diffs do not support the file name: caf\\xe9.txt";
+
+    fn combined_err(r: &TempRepo, hashes: &[&String]) -> String {
+        let hashes: Vec<String> = hashes.iter().map(|h| h.to_string()).collect();
+        combined_diff(&cwd(r), &hashes, None).unwrap_err()
+    }
+
+    /// A name that is not UTF-8 would be decoded lossily (`caf\u{FFFD}.txt`)
+    /// and then match nothing: silently gone from net and fallback alike.
+    /// The replay refuses it, the invalid bytes shown as `\xNN`.
+    #[test]
+    fn non_utf8_name_in_a_clean_replay_is_refused() {
+        let r = TempRepo::new();
+        let f1 = ten("l").replacen("l1\n", "A1\n", 1);
+        commit_index(&r, &[(LATIN1, &ten("l")), (b"g", "g\n")], "base");
+        let a = commit_index(&r, &[(LATIN1, &f1)], "A");
+        commit_index(&r, &[(b"g", "g2\n")], "B");
+        let c = commit_index(&r, &[(LATIN1, &f1.replacen("l10\n", "C10\n", 1))], "C");
+        assert_eq!(combined_err(&r, &[&a, &c]), LATIN1_ERR);
+    }
+
+    /// The name first reaches the replay in `merge-tree`'s conflicted list:
+    /// A never touches it, B (unselected) and C change the same line.
+    #[test]
+    fn non_utf8_conflicted_name_is_refused() {
+        let r = TempRepo::new();
+        commit_index(&r, &[(LATIN1, "x=1\n"), (b"f", "1\n")], "base");
+        let a = commit_index(&r, &[(b"f", "2\n")], "A");
+        commit_index(&r, &[(LATIN1, "x=2\n")], "B");
+        let c = commit_index(&r, &[(LATIN1, "x=3\n")], "C");
+        assert_eq!(combined_err(&r, &[&a, &c]), LATIN1_ERR);
+    }
+
+    /// Invalid bytes are escaped one by one; the valid text around them,
+    /// multi-byte characters included, is kept.
+    #[test]
+    fn escape_invalid_utf8_escapes_only_the_invalid_bytes() {
+        assert_eq!(escape_invalid_utf8(b"caf\xe9.txt"), "caf\\xe9.txt");
+        assert_eq!(escape_invalid_utf8("é/ok".as_bytes()), "é/ok");
+        // A truncated 3-byte sequence, a lone continuation byte, an overlong
+        // encoding and a surrogate.
+        assert_eq!(
+            escape_invalid_utf8(b"a\xe2\x82b\x80c\xc0\xafd\xed\xa0\x80"),
+            "a\\xe2\\x82b\\x80c\\xc0\\xafd\\xed\\xa0\\x80"
+        );
     }
 
     #[test]

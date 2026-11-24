@@ -16,6 +16,7 @@ import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
+import { isUtf8 } from "node:buffer";
 import { devTrustStatus, devTrustSet, mainWorktreeRoot } from "./dev-worktree-trust.mjs";
 import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
 import { devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
@@ -1066,9 +1067,11 @@ function gitSpawnInput(args, cwd, { input, env } = {}) {
     child.stderr.on("data", (chunk) => stderrChunks.push(chunk));
     child.on("error", (err) => reject(err));
     child.on("close", (code) => {
+      const stdoutBytes = Buffer.concat(stdoutChunks);
       resolvePromise({
         code,
-        stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+        stdout: stdoutBytes.toString("utf-8"),
+        stdoutBytes,
         stderr: Buffer.concat(stderrChunks).toString("utf-8"),
       });
     });
@@ -1446,7 +1449,10 @@ class CombinedRepo {
       "merge-tree",
     );
     if (out.code !== 0 && out.code !== 1) throw new Error(`git merge-tree failed: ${out.stderr.trim()}`);
-    const fields = out.stdout.split("\0");
+    // Only the tree and the paths (up to the first empty field) are checked:
+    // the messages are not read.
+    const end = out.stdoutBytes.indexOf("\0\0");
+    const fields = combinedUtf8Names(end === -1 ? out.stdoutBytes : out.stdoutBytes.subarray(0, end)).split("\0");
     const tree = (fields[0] ?? "").trim();
     if (tree === "") throw new Error("git merge-tree returned no tree");
     if (out.code === 0) return [tree, null];
@@ -1476,11 +1482,13 @@ class CombinedRepo {
 
   /** `[old path of a rename | null, path]` per change. */
   async touched(a, b) {
-    const out = await this.stdout(
+    const res = await this.output(
       ["diff-tree", "-r", "-M", "--name-status", "-z", "--no-relative", a, b, ...this.pathspec()],
       "diff-tree",
       { env: { GIT_LITERAL_PATHSPECS: "1" } },
     );
+    if (res.code !== 0) throw new Error(`git diff-tree failed: ${res.stderr.trim()}`);
+    const out = combinedUtf8Names(res.stdoutBytes);
     const fields = out.split("\0").filter((f) => f !== "");
     const changes = [];
     for (let i = 0; i < fields.length; ) {
@@ -1581,6 +1589,63 @@ function combinedParseLogNames(out) {
     commits.push([hash, names]);
   }
   return commits;
+}
+
+/**
+ * replay.rs `utf8_names`: NUL-separated names as text; the first name that is
+ * not valid UTF-8 is refused (decoded lossily it would vanish from both
+ * views), its invalid bytes shown as `\xNN`.
+ */
+function combinedUtf8Names(bytes) {
+  if (isUtf8(bytes)) return bytes.toString("utf-8");
+  let name = bytes;
+  for (let start = 0; start <= bytes.length; ) {
+    let end = bytes.indexOf(0, start);
+    if (end === -1) end = bytes.length;
+    const field = bytes.subarray(start, end);
+    if (!isUtf8(field)) {
+      name = field;
+      break;
+    }
+    start = end + 1;
+  }
+  throw new Error(`Combined diffs do not support the file name: ${combinedEscapeInvalidUtf8(name)}`);
+}
+
+/** Length of the valid UTF-8 sequence starting at `b[i]` (Unicode table 3-7), 0 if none. */
+function combinedUtf8SeqLen(b, i) {
+  const c = b[i];
+  if (c < 0x80) return 1;
+  let n;
+  let lo = 0x80;
+  let hi = 0xbf;
+  if (c >= 0xc2 && c <= 0xdf) n = 2;
+  else if (c === 0xe0) [n, lo] = [3, 0xa0];
+  else if (c === 0xed) [n, hi] = [3, 0x9f];
+  else if (c >= 0xe1 && c <= 0xef) n = 3;
+  else if (c === 0xf0) [n, lo] = [4, 0x90];
+  else if (c === 0xf4) [n, hi] = [4, 0x8f];
+  else if (c >= 0xf1 && c <= 0xf3) n = 4;
+  else return 0;
+  if (i + n > b.length || b[i + 1] < lo || b[i + 1] > hi) return 0;
+  for (let k = 2; k < n; k++) if (b[i + k] < 0x80 || b[i + k] > 0xbf) return 0;
+  return n;
+}
+
+/** replay.rs `escape_invalid_utf8`: each byte outside a valid sequence as `\xNN`. */
+function combinedEscapeInvalidUtf8(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; ) {
+    const n = combinedUtf8SeqLen(bytes, i);
+    if (n > 0) {
+      out += bytes.subarray(i, i + n).toString("utf-8");
+      i += n;
+    } else {
+      out += `\\x${bytes[i].toString(16).padStart(2, "0")}`;
+      i += 1;
+    }
+  }
+  return out;
 }
 
 /**
