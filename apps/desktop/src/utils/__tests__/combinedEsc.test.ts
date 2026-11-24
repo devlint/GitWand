@@ -52,15 +52,42 @@ describe("combinedEscAllowed", () => {
     expect(combinedEscAllowed(esc(v.querySelector("button")!))).toBe(true);
   });
 
-  it("leaves Esc alone: already handled, typed in a field, outside the view, under a modal", () => {
+  it("takes Esc from a non-editable control outside the view (the dock button just clicked)", () => {
+    view();
+    const dock = document.createElement("nav");
+    const btn = document.createElement("button");
+    btn.className = "dock-btn";
+    dock.appendChild(btn);
+    const link = document.createElement("a");
+    link.href = "#";
+    dock.appendChild(link);
+    document.body.appendChild(dock);
+    expect(combinedEscAllowed(esc(btn))).toBe(true);
+    expect(combinedEscAllowed(esc(link))).toBe(true);
+  });
+
+  it("leaves Esc alone: already handled, typed in a field (in or out of the view), under a modal or an open menu", () => {
     const v = view();
     expect(combinedEscAllowed(esc(v.querySelector("button")!, true))).toBe(false);
     const input = document.createElement("input");
     v.appendChild(input);
     expect(combinedEscAllowed(esc(input))).toBe(false);
-    const outside = document.createElement("button");
-    document.body.appendChild(outside);
-    expect(combinedEscAllowed(esc(outside))).toBe(false);
+    const outsideField = document.createElement("textarea");
+    document.body.appendChild(outsideField);
+    expect(combinedEscAllowed(esc(outsideField))).toBe(false);
+    const term = document.createElement("div");
+    term.className = "xterm";
+    const termInput = document.createElement("div");
+    term.appendChild(termInput);
+    document.body.appendChild(term);
+    expect(combinedEscAllowed(esc(termInput))).toBe(false);
+    // A context menu (dock, graph) closes on this Esc; the view stays.
+    const menu = document.createElement("ul");
+    menu.setAttribute("role", "menu");
+    document.body.appendChild(menu);
+    expect(combinedEscAllowed(esc(document.body))).toBe(false);
+    expect(combinedEscAllowed(esc(v.querySelector("button")!))).toBe(false);
+    menu.remove();
     const modal = document.createElement("div");
     modal.setAttribute("aria-modal", "true");
     document.body.appendChild(modal);
