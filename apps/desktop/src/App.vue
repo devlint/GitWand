@@ -5192,7 +5192,7 @@ onUnmounted(() => {
                   @set-log-branch-filter="setLogBranchFilter"
                   @set-log-author-filter="setLogAuthorFilter"
                   @select-commit="onGraphSelectCommit"
-                  @open-combined="(h: string[]) => { graphFileIdx = null; combinedRequest = { hashes: h }; }"
+                  @open-combined="(h: string[]) => { onViewModeChange('graph'); graphFileIdx = null; combinedRequest = { hashes: h }; }"
                   @change-view="onViewModeChange"
                   @edit-commit="handleEditCommit"
                   @split-commit="handleSplitCommitRequest"
