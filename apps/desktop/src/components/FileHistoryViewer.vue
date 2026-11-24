@@ -234,8 +234,11 @@ const selection = useCommitSelection(selectionKey);
 const selectedSet = computed(() => new Set(selection.selected.value));
 const tooMany = computed(() => selection.selected.value.length > COMBINE_MAX);
 
-// Drop selected versions that left the displayed list (new filter, new file).
-watch(displayedLog, (log) => selection.prune(log.map((e) => e.hashFull)));
+// Drop selected versions that left the displayed list (new filter, new file),
+// once it is loaded: an empty or loading list says nothing about them.
+watch([displayedLog, loading], ([log, busy]) => {
+  if (!busy && log.length > 0) selection.prune(log.map((e) => e.hashFull));
+});
 
 function onLogEntryClick(e: MouseEvent, hash: string) {
   if (isToggleModifier(e)) {
@@ -243,6 +246,8 @@ function onLogEntryClick(e: MouseEvent, hash: string) {
   } else if (e.shiftKey) {
     selection.range(hash, displayedLog.value.map((x) => x.hashFull));
   } else {
+    // Like the Git Tree: a plain click ends the multi-selection.
+    selection.clear();
     selection.setAnchor(hash);
     emit("select-commit", hash);
   }

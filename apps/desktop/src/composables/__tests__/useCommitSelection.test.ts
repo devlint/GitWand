@@ -16,6 +16,34 @@ describe("useCommitSelection", () => {
     expect(s.selected.value).toEqual(["a"]);
   });
 
+  it("never re-seeds a commit the user removed: X, ⌘Y, ⌘X, ⌘Y, ⌘Z → [Z]", () => {
+    const s = useCommitSelection(fresh());
+    s.clear();
+    s.setAnchor("X");
+    s.toggle("Y", "X");
+    expect(s.selected.value).toEqual(["X", "Y"]);
+    s.toggle("X", "X");
+    s.toggle("Y", "X");
+    expect(s.selected.value).toEqual([]);
+    s.toggle("Z", "X");
+    expect(s.selected.value).toEqual(["Z"]);
+  });
+
+  it("a plain click (clear / setAnchor) seeds the next toggle again; a range counts as seeded", () => {
+    const s = useCommitSelection(fresh());
+    s.toggle("Y", "X");
+    s.clear();
+    s.setAnchor("W");
+    s.toggle("Y", "W");
+    expect(s.selected.value).toEqual(["W", "Y"]);
+    s.clear();
+    s.range("b", ["a", "b"], "a");
+    s.toggle("a", "a");
+    s.toggle("b", "a");
+    s.toggle("c", "a");
+    expect(s.selected.value).toEqual(["c"]);
+  });
+
   it("toggle works without a current commit and toggles off", () => {
     const s = useCommitSelection(fresh());
     s.toggle("a", null);

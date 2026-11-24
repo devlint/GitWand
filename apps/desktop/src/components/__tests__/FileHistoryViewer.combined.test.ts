@@ -131,6 +131,29 @@ describe("FileHistoryViewer combined", () => {
     expect([...req.paths].sort()).toEqual(["new.txt", "old.txt"]);
   });
 
+  it("a plain click clears the selection: it does not come back on reopen", async () => {
+    await mount(LOG, null, [], true, "/r-plain");
+    await click(infos()[0], { metaKey: true, ctrlKey: true });
+    await click(infos()[1], { metaKey: true, ctrlKey: true });
+    expect(combineBtn()).not.toBeNull();
+    await click(infos()[2]);
+    expect(combineBtn()).toBeNull();
+    app?.unmount(); container?.remove();
+    await mount(LOG, null, [], true, "/r-plain");
+    expect(combineBtn()).toBeNull();
+  });
+
+  it("an empty list does not prune the selection", async () => {
+    await mount(LOG, null, [], true, "/r-empty");
+    await click(infos()[0], { metaKey: true, ctrlKey: true });
+    await click(infos()[1], { metaKey: true, ctrlKey: true });
+    app?.unmount(); container?.remove();
+    await mount([], null, [], true, "/r-empty");
+    app?.unmount(); container?.remove();
+    await mount(LOG, null, [], true, "/r-empty");
+    expect(combineBtn()?.textContent).toContain("combined.historyButton:2");
+  });
+
   it("disables the button over the 50-version limit", async () => {
     const many = Array.from({ length: 51 }, (_, i) => ({ ...entry("a"), hashFull: String(i).padStart(40, "0"), hash: String(i).padStart(7, "0") }));
     await mount(many);

@@ -12,12 +12,16 @@ export const COMBINE_MAX = 50;
 interface SelectionState {
   list: string[];
   anchor: string | null;
+  /** The first toggle since the last plain click (clear / setAnchor) has
+   *  seeded the list with the current commit — never again until the next
+   *  plain click, so a commit the user removed does not come back. */
+  seeded: boolean;
 }
 
 const states = reactive<Record<string, SelectionState>>({});
 
 function stateFor(path: string): SelectionState {
-  return (states[path] ??= { list: [], anchor: null });
+  return (states[path] ??= { list: [], anchor: null, seeded: false });
 }
 
 export function useCommitSelection(repoPath: Ref<string>): {
@@ -38,10 +42,12 @@ export function useCommitSelection(repoPath: Ref<string>): {
     () => selected.value.length >= 2 && selected.value.length <= COMBINE_MAX,
   );
 
-  /** `current` (the plain-clicked commit) becomes the first member on the first toggle. */
+  /** `current` (the plain-clicked commit) becomes the first member on the
+   *  first toggle after a plain click. */
   function toggle(hash: string, current: string | null) {
     const s = stateFor(repoPath.value);
-    if (s.list.length === 0 && current) s.list.push(current);
+    if (!s.seeded && s.list.length === 0 && current) s.list.push(current);
+    s.seeded = true;
     const i = s.list.indexOf(hash);
     if (i >= 0) {
       s.list.splice(i, 1);
@@ -62,6 +68,7 @@ export function useCommitSelection(repoPath: Ref<string>): {
     if (from < 0) from = visibleOrder.indexOf(current ?? "");
     const [a, b] = from < 0 ? [to, to] : [Math.min(from, to), Math.max(from, to)];
     s.list = visibleOrder.slice(a, b + 1);
+    s.seeded = true;
     s.anchor = visibleOrder[from < 0 ? to : from];
   }
 
@@ -70,10 +77,13 @@ export function useCommitSelection(repoPath: Ref<string>): {
     if (!s) return;
     s.list = [];
     s.anchor = null;
+    s.seeded = false;
   }
 
   function setAnchor(hash: string | null) {
-    stateFor(repoPath.value).anchor = hash;
+    const s = stateFor(repoPath.value);
+    s.anchor = hash;
+    s.seeded = false;
   }
 
   function prune(existing: Iterable<string>) {
