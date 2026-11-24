@@ -162,6 +162,14 @@ describe("CombinedDiffBody", () => {
     expect(qa(".cmb-file")[1].classList.contains("cmb-file--active")).toBe(true);
   });
 
+  it("keeps a path's own left-to-right order inside the right-truncating box", async () => {
+    await mount(combined({ diffs: [file(".env.local)")], steps: [[], [], []] }));
+    const box = q(".cmb-file-path")!;
+    const inner = box.querySelector("bdi[dir='ltr']");
+    expect(inner?.textContent).toBe(".env.local)");
+    expect(box.textContent).toBe(".env.local)");
+  });
+
   it("an unknown backend error is shown as is", async () => {
     await mount(new Error("git merge-tree failed: boom"));
     expect(q(".cmb-error-text")!.textContent).toBe("git merge-tree failed: boom");

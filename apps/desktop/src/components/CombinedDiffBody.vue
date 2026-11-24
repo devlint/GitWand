@@ -211,7 +211,9 @@ const errorText = computed(() => (props.error ? combinedErrorMessage(props.error
             :style="{ background: commitColor(e.attribution.sectionCommit) }"
             aria-hidden="true"
           />
-          <span class="cmb-file-path mono">{{ e.diff.path }}</span>
+          <!-- rtl box: the ellipsis cuts the start of a long path; the inner
+               ltr bdi keeps its leading/trailing punctuation in place. -->
+          <span class="cmb-file-path mono"><bdi dir="ltr">{{ e.diff.path }}</bdi></span>
         </button>
       </nav>
       <CommitDiffViewer
