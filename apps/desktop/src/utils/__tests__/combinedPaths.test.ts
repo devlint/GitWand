@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { combinedPathsFor } from "../combinedPaths";
-import type { FileLogEntry } from "../backend";
+import type { FileLineageEntry, FileLogEntry } from "../backend";
 
 const H = (c: string) => c.repeat(40);
 const entry = (c: string, path?: string): FileLogEntry => ({
@@ -16,40 +16,44 @@ const entry = (c: string, path?: string): FileLogEntry => ({
 /** Range results and merges carry no `path`. */
 const strip = (x: FileLogEntry): FileLogEntry => ({ hashFull: x.hashFull, hash: x.hash, author: x.author, date: x.date, message: x.message, body: "" });
 const sorted = (a: string[]) => [...a].sort();
+/** The full lineage (`getGitFileLineage`) of a log. */
+const lin = (log: FileLogEntry[]): FileLineageEntry[] =>
+  log.map((x) => ({ hash: x.hashFull, ...(x.path ? { path: x.path } : {}) }));
+const paths = (sel: FileLogEntry[], log: FileLogEntry[], file: string) => combinedPathsFor(sel, lin(log), file);
 
 // c is the newest; b and a predate a rename old.txt -> new.txt
 const LOG = [entry("c", "new.txt"), entry("b", "old.txt"), entry("a", "old.txt")];
 
 describe("combinedPathsFor", () => {
   it("the union of the selected versions' names (rename)", () => {
-    expect(sorted(combinedPathsFor([LOG[0], LOG[1]], LOG, "new.txt"))).toEqual(["new.txt", "old.txt"]);
+    expect(sorted(paths([LOG[0], LOG[1]], LOG, "new.txt"))).toEqual(["new.txt", "old.txt"]);
   });
 
   it("pre-rename entries without a path resolve their name through the full log", () => {
-    expect(sorted(combinedPathsFor([strip(LOG[1]), strip(LOG[2])], LOG, "new.txt"))).toEqual(["new.txt", "old.txt"]);
+    expect(sorted(paths([strip(LOG[1]), strip(LOG[2])], LOG, "new.txt"))).toEqual(["new.txt", "old.txt"]);
   });
 
   it("a rename commit plus a later one carries the pre-rename name too", () => {
     const log = [entry("d", "new.txt"), entry("c", "new.txt"), entry("b", "old.txt")];
-    expect(sorted(combinedPathsFor([log[0], log[1]], log, "new.txt"))).toEqual(["new.txt", "old.txt"]);
+    expect(sorted(paths([log[0], log[1]], log, "new.txt"))).toEqual(["new.txt", "old.txt"]);
   });
 
   it("every name between the oldest and newest selected versions", () => {
     const log = [entry("d", "c.txt"), entry("c", "b.txt"), entry("b", "a.txt"), entry("a", "a.txt")];
-    expect(sorted(combinedPathsFor([log[0], log[2]], log, "c.txt"))).toEqual(["a.txt", "b.txt", "c.txt"]);
+    expect(sorted(paths([log[0], log[2]], log, "c.txt"))).toEqual(["a.txt", "b.txt", "c.txt"]);
   });
 
   it("an entry unnamed and unknown to the full log gets the whole lineage", () => {
-    expect(sorted(combinedPathsFor([LOG[0], strip(entry("z"))], LOG, "new.txt"))).toEqual(["new.txt", "old.txt"]);
+    expect(sorted(paths([LOG[0], strip(entry("z"))], LOG, "new.txt"))).toEqual(["new.txt", "old.txt"]);
   });
 
   it("always includes the viewed file's own name", () => {
-    expect(combinedPathsFor([], [], "f.txt")).toEqual(["f.txt"]);
+    expect(paths([], [], "f.txt")).toEqual(["f.txt"]);
   });
 
   it("names a file without renames once", () => {
     const log = [entry("b", "f.txt"), entry("a", "f.txt")];
-    expect(combinedPathsFor(log, log, "f.txt")).toEqual(["f.txt"]);
+    expect(paths(log, log, "f.txt")).toEqual(["f.txt"]);
   });
   // The viewer loads 50 entries; the lineage is computed from the complete
   // history (fetched at open time), so these must hold past that depth.
@@ -61,14 +65,14 @@ describe("combinedPathsFor", () => {
   it("a rename beyond the first 50 entries is found in the full log", () => {
     const log = deep(80, 69); // entry 69 is the rename commit, 70+ predate it
     const picked = [strip(log[65]), strip(log[75])]; // range results: no path
-    expect(sorted(combinedPathsFor(picked, log, "new.txt"))).toEqual(["new.txt", "old.txt"]);
+    expect(sorted(paths(picked, log, "new.txt"))).toEqual(["new.txt", "old.txt"]);
     // With only the first page, that name is out of reach.
-    expect(combinedPathsFor(picked, log.slice(0, 50), "new.txt")).toEqual(["new.txt"]);
+    expect(paths(picked, log.slice(0, 50), "new.txt")).toEqual(["new.txt"]);
   });
 
   it("a rename commit as the 50th entry still pairs with the name before it", () => {
     const log = deep(60, 49);
-    expect(sorted(combinedPathsFor([log[0], log[49]], log, "new.txt"))).toEqual(["new.txt", "old.txt"]);
-    expect(combinedPathsFor([log[0], log[49]], log.slice(0, 50), "new.txt")).toEqual(["new.txt"]);
+    expect(sorted(paths([log[0], log[49]], log, "new.txt"))).toEqual(["new.txt", "old.txt"]);
+    expect(paths([log[0], log[49]], log.slice(0, 50), "new.txt")).toEqual(["new.txt"]);
   });
 });

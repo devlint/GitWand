@@ -2,20 +2,15 @@
  * The names to give git for a combined diff opened from a file's history
  * (v3.15). Pure; used by `FileHistoryViewer`.
  */
-import type { FileLogEntry } from "./backend";
-
-/**
- * The `count` that asks `getGitFileLog` for a file's whole `--follow`
- * history: unbounded in practice. The lineage below must see every rename.
- */
-export const FULL_FILE_LOG = 1_000_000;
+import type { FileLineageEntry, FileLogEntry } from "./backend";
 
 /**
  * `selected`: the chosen versions; `fullLog`: the file's complete, unfiltered
- * `--follow` log (`FULL_FILE_LOG` entries), newest first; `filePath`: the viewed file.
+ * `--follow` lineage (`getGitFileLineage`), newest first; `filePath`: the
+ * viewed file. The lineage must see every rename, hence the whole history.
  *
  * Range results and merges carry no `path`: it is resolved by hash from the
- * full log; an entry still unnamed gets every name the file has had (a
+ * lineage; an entry still unnamed gets every name the file has had (a
  * superset within this file's lineage is correct, a missing name is not).
  * Rename pairing: every name between the oldest and newest selected entries,
  * plus the name of the entry just before the oldest — always added: when the
@@ -24,10 +19,10 @@ export const FULL_FILE_LOG = 1_000_000;
  */
 export function combinedPathsFor(
   selected: readonly FileLogEntry[],
-  fullLog: readonly FileLogEntry[],
+  fullLog: readonly FileLineageEntry[],
   filePath: string,
 ): string[] {
-  const known = new Map(fullLog.map((x) => [x.hashFull, x.path]));
+  const known = new Map(fullLog.map((x) => [x.hash, x.path]));
   const lineage = [...new Set([filePath, ...fullLog.flatMap((x) => (x.path ? [x.path] : []))])];
   const names = new Set<string>([filePath]);
   for (const x of selected) {
@@ -35,7 +30,7 @@ export function combinedPathsFor(
     if (p) names.add(p);
     else lineage.forEach((n) => names.add(n));
   }
-  const idx = selected.map((x) => fullLog.findIndex((f) => f.hashFull === x.hashFull)).filter((i) => i >= 0);
+  const idx = selected.map((x) => fullLog.findIndex((f) => f.hash === x.hashFull)).filter((i) => i >= 0);
   if (idx.length) {
     const newest = Math.min(...idx);
     const oldest = Math.max(...idx);

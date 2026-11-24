@@ -33,6 +33,11 @@ export function hasSelectionState(path: string): boolean {
   return path in states;
 }
 
+/** Drops `path`'s selection state (a key the caller no longer shows). */
+export function forgetSelection(path: string): void {
+  delete states[path];
+}
+
 /**
  * The selection as the graph acts on it: selected hashes present in the
  * loaded log, in log order, then those not loaded (beyond the loaded depth),

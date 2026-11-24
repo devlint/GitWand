@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { computed, effectScope, ref } from "vue";
-import type { FileLogEntry } from "../../utils/backend";
+import { computed, effectScope, nextTick, ref } from "vue";
+import type { FileLineageEntry, FileLogEntry } from "../../utils/backend";
 import type { CombinedRequest } from "../useCombinedDiff";
 import { useCommitSelection, hasSelectionState } from "../useCommitSelection";
 import { useFileHistoryCombine } from "../useFileHistoryCombine";
@@ -16,7 +16,7 @@ const e = (hashFull: string, path?: string): FileLogEntry => ({
 });
 
 let n = 0;
-function setup(loadFullLog: (cwd: string, path: string) => Promise<FileLogEntry[]>) {
+function setup(loadLineage: (cwd: string, path: string) => Promise<FileLineageEntry[]>) {
   const cwd = ref(`/repo-combine-${n++}`);
   const filePath = ref("b.txt");
   const key = computed(() => `${cwd.value}::file:${filePath.value}`);
@@ -26,14 +26,25 @@ function setup(loadFullLog: (cwd: string, path: string) => Promise<FileLogEntry[
   const { selection, combine } = scope.run(() => {
     const selection = useCommitSelection(key);
     const combine = useFileHistoryCombine({
-      cwd, filePath, selection, displayedLog, loadFullLog, onOpen: (r) => opened.push(r),
+      cwd, filePath, selectionKey: key, selection, displayedLog, loadLineage, onOpen: (r) => opened.push(r),
     });
     return { selection, combine };
   })!;
   return { cwd, filePath, key, selection, combine, opened, scope };
 }
 
-const fullLog = [e("c3", "b.txt"), e("c2", "b.txt"), e("c1", "a.txt"), e("c0", "a.txt")];
+const fullLog: FileLineageEntry[] = [
+  { hash: "c3", path: "b.txt" },
+  { hash: "c2", path: "b.txt" },
+  { hash: "c1", path: "a.txt" },
+  { hash: "c0", path: "a.txt" },
+];
+
+function pendingLoad() {
+  let resolve!: (v: FileLineageEntry[]) => void;
+  const load = () => new Promise<FileLineageEntry[]>((r) => (resolve = r));
+  return { load, resolve: (v: FileLineageEntry[]) => resolve(v) };
+}
 
 describe("useFileHistoryCombine", () => {
   it("opens with the lineage's names and clears the selection", async () => {
@@ -48,17 +59,58 @@ describe("useFileHistoryCombine", () => {
   });
 
   it("drops a reply for a file the viewer no longer shows", async () => {
-    let resolve!: (v: FileLogEntry[]) => void;
-    const t = setup(() => new Promise((r) => (resolve = r)));
+    const p = pendingLoad();
+    const t = setup(p.load);
     t.selection.toggle("c3", null);
     t.selection.toggle("c2", null);
     const pending = t.combine.open();
-    const oldKey = t.key.value;
     t.filePath.value = "other.txt";
-    resolve(fullLog);
+    p.resolve(fullLog);
     await pending;
     expect(t.opened).toEqual([]);
-    expect(hasSelectionState(oldKey)).toBe(true);
+    t.scope.stop();
+  });
+
+  it("forgets the previous file's selection when the viewer shows another file", async () => {
+    const t = setup(async () => fullLog);
+    t.selection.toggle("c3", null);
+    t.selection.toggle("c2", null);
+    const oldKey = t.key.value;
+    t.filePath.value = "other.txt";
+    await nextTick();
+    expect(hasSelectionState(oldKey)).toBe(false);
+    t.filePath.value = "b.txt";
+    await nextTick();
+    expect(t.selection.selected.value).toEqual([]);
+    t.scope.stop();
+  });
+
+  it("a selection changed during the load opens as it is now, and stays", async () => {
+    const p = pendingLoad();
+    const t = setup(p.load);
+    t.selection.toggle("c3", null);
+    t.selection.toggle("c2", null);
+    const pending = t.combine.open();
+    t.selection.toggle("c1", null);
+    p.resolve(fullLog);
+    await pending;
+    expect(t.opened).toEqual([{ hashes: ["c3", "c2", "c1"], paths: ["b.txt", "a.txt"] }]);
+    expect(t.selection.selected.value).toEqual(["c3", "c2", "c1"]);
+    t.scope.stop();
+  });
+
+  it("a selection that fell below two during the load opens nothing", async () => {
+    const p = pendingLoad();
+    const t = setup(p.load);
+    t.selection.toggle("c3", null);
+    t.selection.toggle("c2", null);
+    const pending = t.combine.open();
+    t.selection.toggle("c2", null);
+    p.resolve(fullLog);
+    await pending;
+    expect(t.opened).toEqual([]);
+    expect(t.selection.selected.value).toEqual(["c3"]);
+    expect(t.combine.busy.value).toBe(false);
     t.scope.stop();
   });
 

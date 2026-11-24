@@ -5,10 +5,9 @@ import type { CombinedRequest } from "../composables/useCombinedDiff";
 import { useCommitSelection, COMBINE_MAX } from "../composables/useCommitSelection";
 import { isToggleModifier } from "../utils/platform";
 import { preventShiftSelect } from "../composables/useLineRange";
-import { FULL_FILE_LOG } from "../utils/combinedPaths";
 import { useFileHistoryCombine } from "../composables/useFileHistoryCombine";
 import Avatar from "./Avatar.vue";
-import { getGitBlame, getGitFileLog, getGitFileLogPickaxe, getGitFileLogRange, getGitFileDiff, type BlameAlgorithm, type PickaxeMode } from "../utils/backend";
+import { getGitBlame, getGitFileLineage, getGitFileLog, getGitFileLogPickaxe, getGitFileLogRange, getGitFileDiff, type BlameAlgorithm, type PickaxeMode } from "../utils/backend";
 import { loadSettings } from "../composables/useSettings";
 import { useI18n } from "../composables/useI18n";
 import { detectLanguage, highlightLine } from "../utils/highlight";
@@ -251,14 +250,16 @@ function onLogEntryClick(e: MouseEvent, hash: string) {
   }
 }
 
-// Opening it (full `--follow` log, names, stale-reply guard) and clearing
-// the selection afterwards or when the viewer goes: `useFileHistoryCombine`.
+// Opening it (full `--follow` lineage, names, stale-reply guard) and clearing
+// the selection afterwards, on another file or when the viewer goes:
+// `useFileHistoryCombine`.
 const combine = useFileHistoryCombine({
   cwd: toRef(props, "cwd"),
   filePath: toRef(props, "filePath"),
+  selectionKey,
   selection,
   displayedLog,
-  loadFullLog: (cwd, path) => getGitFileLog(cwd, path, FULL_FILE_LOG),
+  loadLineage: getGitFileLineage,
   onOpen: (req) => emit("open-combined", req),
 });
 const { busy: combineBusy, error: combineError, open: openCombined } = combine;
