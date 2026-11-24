@@ -71,6 +71,28 @@ describe("parity: git-show", () => {
     }
   });
 
+  // Both backends split git's output like Rust's `str::lines()`: a CRLF
+  // file's lines lose their `\r`, on both sides.
+  it("a CRLF file parses like Rust's lines()", async () => {
+    const cwd = mkTempRepo("gw-parity-show-crlf-");
+    commitFile(cwd, "w.txt", "a\r\nb\r\n", "w", 0);
+    writeFileSync(join(cwd, "w.txt"), "a\r\nB\r\n");
+    execFileSync("git", ["-C", cwd, "commit", "-q", "-am", "edit"]);
+
+    const { rust, node } = await assertParity(dev, {
+      command: "git-show",
+      args: { cwd, hash: "HEAD" },
+      httpPath: `/api/git-show?cwd=${encodeURIComponent(cwd)}&hash=HEAD`,
+    });
+    for (const side of [rust, node]) {
+      expect(side[0].hunks[0].lines.map((l) => [l.type, l.content])).toEqual([
+        ["context", "a"],
+        ["delete", "b"],
+        ["add", "B"],
+      ]);
+    }
+  });
+
   // `diff.suppressBlankEmpty=true` prints a blank context line as "": inside
   // a hunk (counts left on both sides) it is a context line.
   it("counts a suppressed blank context line, and the next file still parses", async () => {

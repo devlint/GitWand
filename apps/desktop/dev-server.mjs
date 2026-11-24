@@ -330,6 +330,60 @@ function devParseDiffHunks(core, text) {
   return { hunks, status };
 }
 
+/** Rust `str::lines()`: split on `\n`, drop one trailing empty line, strip `\r`. */
+function rustLines(s) {
+  const parts = s.split("\n");
+  if (parts.length && parts[parts.length - 1] === "") parts.pop();
+  return parts.map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));
+}
+
+/**
+ * The dev-server twin of Rust's `parse_multi_file_diff_capped`
+ * (commands/read.rs) — the one multi-file parser, shared by `/api/git-show`
+ * (no cap, like `git_show`) and the combined diff (`DIFF_TRUNCATE_BYTES`).
+ * Splits git's output like Rust's `str::lines()`, one section per
+ * `diff --git` line (no hunk line can start with one), reads the extended
+ * headers before the first hunk, and parses the hunks with
+ * `devParseDiffHunks`. A section longer than `cap` bytes keeps its header
+ * (path, status, oldPath) but no hunks, and reports `truncatedFromBytes`.
+ */
+function devParseMultiFileDiff(core, stdout, cap = null) {
+  const sections = [];
+  for (const line of rustLines(stdout)) {
+    if (line.startsWith("diff --git ")) sections.push([line]);
+    else if (sections.length > 0) sections[sections.length - 1].push(line);
+  }
+  const diffs = [];
+  for (const section of sections) {
+    const parts = section[0].split(" b/");
+    if (parts.length < 2) continue;
+    let status = null;
+    let oldPath = null;
+    for (const line of section.slice(1)) {
+      if (line.startsWith("@@")) break;
+      if (line.startsWith("new file mode")) status = "added";
+      else if (line.startsWith("deleted file mode")) status = "deleted";
+      else if (line.startsWith("rename from ")) {
+        status = "renamed";
+        oldPath = line.substring("rename from ".length);
+      } else if (line.startsWith("rename to ") && status === null) status = "renamed";
+    }
+    // `status` matters downstream: patchBuilder needs /dev/null for an added
+    // or deleted file, or `git apply --cached` fails during a commit split.
+    // Bytes of the section as git printed it (one `\n` per line).
+    const size = section.reduce((n, l) => n + Buffer.byteLength(l, "utf-8") + 1, 0);
+    const truncated = cap !== null && size > cap;
+    diffs.push({
+      path: parts[1],
+      hunks: truncated ? [] : devParseDiffHunks(core, section.join("\n")).hunks,
+      ...(status !== null ? { status } : {}),
+      ...(oldPath !== null ? { oldPath } : {}),
+      ...(truncated ? { truncatedFromBytes: size } : {}),
+    });
+  }
+  return diffs;
+}
+
 /** Per-directory cap of `list_repo_dir` — mirrors MAX_REPO_DIR_ENTRIES in files.rs. */
 const MAX_REPO_DIR_ENTRIES = 5000;
 
@@ -955,18 +1009,6 @@ const COMBINED_MAX_COMMITS = 50;
 /** Input refused before or while resolving it: the route answers 400. */
 class CombinedInputError extends Error {}
 
-/** Rust `str::lines()`: split on `\n`, drop one trailing empty line, strip `\r`. */
-function rustLines(s) {
-  const parts = s.split("\n");
-  if (parts.length && parts[parts.length - 1] === "") parts.pop();
-  return parts.map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));
-}
-
-/** Rust `String` ordering (bytes), for every `BTreeMap`. */
-function byteCmp(a, b) {
-  return Buffer.compare(Buffer.from(a, "utf-8"), Buffer.from(b, "utf-8"));
-}
-
 /** `git version 2.39.3 (Apple Git-146)` → `[2, 39]` (`stack::guard`). */
 async function combinedGitVersion() {
   let out;
@@ -1058,42 +1100,6 @@ async function combinedResolveAndOrder(cwd, hashes) {
     result = [...layer.map(([, c]) => ({ ...c })), ...result];
   }
   return result;
-}
-
-/** read.rs `parse_multi_file_diff_capped`, hunks parsed by `devParseDiffHunks`. */
-function combinedParseMultiFileDiff(core, stdout, cap) {
-  const sections = [];
-  for (const line of rustLines(stdout)) {
-    if (line.startsWith("diff --git ")) sections.push([line]);
-    else if (sections.length > 0) sections[sections.length - 1].push(line);
-  }
-  const diffs = [];
-  for (const section of sections) {
-    const parts = section[0].split(" b/");
-    if (parts.length < 2) continue;
-    let status = null;
-    let oldPath = null;
-    for (const line of section.slice(1)) {
-      if (line.startsWith("@@")) break;
-      if (line.startsWith("new file mode")) status = "added";
-      else if (line.startsWith("deleted file mode")) status = "deleted";
-      else if (line.startsWith("rename from ")) {
-        status = "renamed";
-        oldPath = line.substring("rename from ".length);
-      } else if (line.startsWith("rename to ") && status === null) status = "renamed";
-    }
-    // Bytes of the section as git printed it (one `\n` per line).
-    const size = section.reduce((n, l) => n + Buffer.byteLength(l, "utf-8") + 1, 0);
-    const truncated = cap !== null && size > cap;
-    diffs.push({
-      path: parts[1],
-      hunks: truncated ? [] : devParseDiffHunks(core, section.join("\n")).hunks,
-      ...(status !== null ? { status } : {}),
-      ...(oldPath !== null ? { oldPath } : {}),
-      ...(truncated ? { truncatedFromBytes: size } : {}),
-    });
-  }
-  return diffs;
 }
 
 /** Fixed identity for the synthetic commits (replay.rs `SYNTHETIC_ENV`). */
@@ -1217,7 +1223,7 @@ class CombinedRepo {
     if (unified0) args.push("-U0");
     args.push(a, b, ...this.pathspec(extra));
     const out = await this.stdout(args, "diff-tree", { env: { GIT_LITERAL_PATHSPECS: "1" } });
-    return combinedParseMultiFileDiff(this.core, out, DIFF_TRUNCATE_BYTES);
+    return devParseMultiFileDiff(this.core, out, DIFF_TRUNCATE_BYTES);
   }
 
   /** `[old path of a rename | null, path]` per change. */
@@ -1365,7 +1371,7 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
         if (old !== null) candidates.push(old);
         candidates.push(path);
       }
-      const unique = [...new Set(candidates)].sort(byteCmp);
+      const unique = [...new Set(candidates)].sort(cmpCodePoints);
       for (const path of await repo.mergeDriven(unique)) combinedAddCompanion(fallback, path);
     }
     // After every step: the fallback set is closed under renames.
@@ -1402,7 +1408,7 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
   // 4. Per-commit diffs of the fallback files, in replay order.
   const perPath = new Map();
   if (fallback.size > 0) {
-    const fbPaths = [...fallback.keys()].sort(byteCmp);
+    const fbPaths = [...fallback.keys()].sort(cmpCodePoints);
     const whole = new CombinedRepo(cwd, null, core);
     for (const c of replayed) {
       const parentTree = c.parentTree ?? (await repo.emptyTree());
@@ -1420,7 +1426,7 @@ async function devCombinedDiff(cwd, hashesIn, pathsIn) {
   }
   // Fallback paths no selected commit touches are conflict artefacts.
   const fallbackOut = [];
-  for (const [path, fb] of [...fallback.entries()].sort(([a], [b]) => byteCmp(a, b))) {
+  for (const [path, fb] of [...fallback.entries()].sort(([a], [b]) => cmpCodePoints(a, b))) {
     const perCommit = perPath.get(path);
     if (perCommit === undefined) continue;
     fallbackOut.push({ path, conflicted: fb.conflicted, perCommit, blockers: fb.blockers });
@@ -5300,45 +5306,8 @@ async function handleRequest(req, res) {
           resolvedCwd,
         );
 
-        // Mirrors Rust's `parse_multi_file_diff`: split on `diff --git` lines
-        // (no hunk line can start with one — each carries a +/-/space prefix
-        // or is ""), then parse each file section with devParseDiffHunks, the
-        // same parser as /api/git-diff.
-        const sections = [];
-        for (const line of stdout.split("\n")) {
-          if (line.startsWith("diff --git ")) sections.push([line]);
-          else if (sections.length > 0) sections[sections.length - 1].push(line);
-        }
-
-        const core = await loadDevCore();
-        const diffs = [];
-        for (const section of sections) {
-          const parts = section[0].split(" b/");
-          if (parts.length < 2) continue;
-          // File-level extended headers, only before the first hunk — see Rust
-          // `git_show`. The frontend's patchBuilder needs to know whether a
-          // file was added (uses /dev/null as source) or deleted (uses
-          // /dev/null as target) or the `git apply --cached` during a split
-          // will fail.
-          let status = null;
-          let oldPath = null;
-          for (const line of section.slice(1)) {
-            if (line.startsWith("@@")) break;
-            if (line.startsWith("new file mode")) status = "added";
-            else if (line.startsWith("deleted file mode")) status = "deleted";
-            else if (line.startsWith("rename from ")) {
-              status = "renamed";
-              oldPath = line.substring("rename from ".length);
-            } else if (line.startsWith("rename to ") && !status) status = "renamed";
-          }
-          const { hunks } = devParseDiffHunks(core, section.join("\n"));
-          diffs.push({
-            path: parts[1],
-            hunks,
-            ...(status ? { status } : {}),
-            ...(oldPath ? { oldPath } : {}),
-          });
-        }
+        // Rust's `git_show` parses with `parse_multi_file_diff`, no cap.
+        const diffs = devParseMultiFileDiff(await loadDevCore(), stdout);
 
         return jsonResponse(req, res, diffs);
       } catch (err) {
