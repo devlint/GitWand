@@ -54,11 +54,19 @@ function lineCommitIdx(fileIdx: number, line: DiffLine | null | undefined): numb
   return key === null ? undefined : props.attribution?.[fileIdx]?.lineCommit.get(key);
 }
 
-/** Side-by-side: the line a pair's gutter marker stands for — the added
- *  line, else the deleted one, else the context line. */
-function sbsAttrLine(pair: SbsPair): DiffLine | null {
-  if (pair.right?.type === "add") return pair.right;
-  return pair.left?.type === "delete" ? pair.left : pair.right;
+/**
+ * Side-by-side: the gutter between the columns carries one marker per
+ * side — the left half for the deleted line's commit, the right half for
+ * the added (or context) line's. A side with nothing attributed leaves the
+ * other the whole gutter; a pair with neither keeps one empty marker.
+ */
+function sbsMarkers(fileIdx: number, pair: SbsPair): { side: "old" | "new"; idx: number | undefined }[] {
+  const old = pair.left?.type === "delete" ? lineCommitIdx(fileIdx, pair.left) : undefined;
+  const neu = lineCommitIdx(fileIdx, pair.right);
+  const out: { side: "old" | "new"; idx: number | undefined }[] = [];
+  if (commitAt(old)) out.push({ side: "old", idx: old });
+  if (commitAt(neu) || out.length === 0) out.push({ side: "new", idx: neu });
+  return out;
 }
 
 function markerStyle(idx: number | undefined) {
@@ -706,12 +714,16 @@ function onContentScroll(e: Event) {
                       <span v-html="pair.leftHtml || '\u00a0'"></span>
                     </td>
                     <td class="cdv-sbs-gutter">
-                      <span
-                        v-if="attribution"
-                        class="cdv-attr-marker"
-                        :style="markerStyle(lineCommitIdx(fileIdx - 1, sbsAttrLine(pair)))"
-                        :title="markerTitle(lineCommitIdx(fileIdx - 1, sbsAttrLine(pair)))"
-                      ></span>
+                      <span v-if="attribution" class="cdv-attr-split">
+                        <span
+                          v-for="m in sbsMarkers(fileIdx - 1, pair)"
+                          :key="m.side"
+                          class="cdv-attr-marker"
+                          :class="`cdv-attr-marker--${m.side}`"
+                          :style="markerStyle(m.idx)"
+                          :title="markerTitle(m.idx)"
+                        ></span>
+                      </span>
                     </td>
                     <td
                       class="cdv-line-no mono"
@@ -1041,12 +1053,14 @@ td.cdv-attr-marker {
   min-width: 3px;
   padding: 0;
 }
-.cdv-sbs-gutter > .cdv-attr-marker {
-  display: block;
+/* Side-by-side: old side's marker on the left half, new side's on the right. */
+.cdv-attr-split {
+  display: flex;
   width: 100%;
   height: 100%;
   min-height: 1.5em;
 }
+.cdv-attr-split > .cdv-attr-marker { flex: 1; }
 
 .cdv-attr-chips {
   display: inline-flex;

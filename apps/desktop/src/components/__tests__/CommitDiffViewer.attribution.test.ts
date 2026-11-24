@@ -175,10 +175,46 @@ describe("CommitDiffViewer — attribution", () => {
     mount(FULL, "side-by-side");
     await nextTick();
     const rows = document.querySelectorAll(".cdv-hunk")[0].querySelectorAll("tr.cdv-line");
-    const marker = rows[1].querySelector<HTMLElement>("td.cdv-sbs-gutter .cdv-attr-marker, td.cdv-sbs-gutter.cdv-attr-marker")!;
-    expect(marker).toBeTruthy();
-    expect(marker.getAttribute("style")).toContain("var(--combined-c1)");
+    // A paired delete/add: both commits, the deletion's on the left half.
+    const markers = rows[1].querySelectorAll<HTMLElement>("td.cdv-sbs-gutter .cdv-attr-marker");
+    expect(markers.length).toBe(2);
+    expect(markers[0].classList.contains("cdv-attr-marker--old")).toBe(true);
+    expect(markers[0].getAttribute("style")).toContain("var(--combined-c0)");
+    expect(markers[0].getAttribute("title")).toContain("aaaaaaa");
+    expect(markers[1].classList.contains("cdv-attr-marker--new")).toBe(true);
+    expect(markers[1].getAttribute("style")).toContain("var(--combined-c1)");
+    expect(markers[1].getAttribute("title")).toContain("bbbbbbb");
     expect(rows[1].querySelectorAll("td").length).toBe(7);
+    // A context pair keeps one (uncoloured) marker.
+    const ctx = rows[0].querySelectorAll<HTMLElement>("td.cdv-sbs-gutter .cdv-attr-marker");
+    expect(ctx.length).toBe(1);
+    expect(ctx[0].getAttribute("style") ?? "").not.toContain("--combined-c");
+  });
+
+  it("side-by-side: an unpaired deletion or addition gets the whole gutter", async () => {
+    const diffs: GitDiff[] = [{
+      path: "src/c.ts",
+      hunks: [{
+        header: "@@ -1,2 +1,2 @@", oldStart: 1, oldCount: 2, newStart: 1, newCount: 2,
+        lines: [
+          { type: "delete", content: "gone", oldLineNo: 1 },
+          { type: "context", content: "k", oldLineNo: 2, newLineNo: 1 },
+          { type: "add", content: "new", newLineNo: 2 },
+        ],
+      }],
+    } as unknown as GitDiff];
+    const attr: FileAttribution[] = [{ lineCommit: new Map([["LEFT:1", 0], ["RIGHT:2", 1]]), hunkCommits: [[0, 1]] }];
+    mount({ diffs, attribution: attr, attributionCommits: COMMITS }, "side-by-side");
+    await nextTick();
+    const rows = document.querySelectorAll(".cdv-hunk")[0].querySelectorAll("tr.cdv-line");
+    const markersOf = (i: number) => [...rows[i].querySelectorAll<HTMLElement>("td.cdv-sbs-gutter .cdv-attr-marker")];
+    const del = markersOf(0);
+    expect(del.length).toBe(1);
+    expect(del[0].classList.contains("cdv-attr-marker--old")).toBe(true);
+    expect(del[0].getAttribute("style")).toContain("var(--combined-c0)");
+    const add = markersOf(rows.length - 1);
+    expect(add.length).toBe(1);
+    expect(add[0].getAttribute("style")).toContain("var(--combined-c1)");
   });
 
   it("commitColor cycles through 8 variables", () => {
