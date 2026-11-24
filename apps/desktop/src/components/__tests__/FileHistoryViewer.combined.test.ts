@@ -32,7 +32,7 @@ async function flush() {
 
 let seq = 0;
 // Selection state is module-scoped: a fresh repo path per test keeps them apart.
-async function mount(log: FileLogEntry[] = LOG, cwd = `/r${++seq}`) {
+async function mount(log: FileLogEntry[] = LOG, range: FileLogEntry[] | null = null, blame: unknown[] = [], openLog = true, cwd = `/r${++seq}`) {
   const emitted: Record<string, unknown[][]> = { "select-commit": [], "open-combined": [], close: [] };
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -40,7 +40,8 @@ async function mount(log: FileLogEntry[] = LOG, cwd = `/r${++seq}`) {
     render: () =>
       h(FileHistoryViewer, {
         cwd, filePath: "new.txt",
-        blameFetcher: async () => [],
+        blameFetcher: async () => blame as never,
+        rangeFetcher: async () => range ?? [],
         logFetcher: async () => log,
         "onSelect-commit": (...a: unknown[]) => emitted["select-commit"].push(a),
         "onOpen-combined": (...a: unknown[]) => emitted["open-combined"].push(a),
@@ -49,7 +50,7 @@ async function mount(log: FileLogEntry[] = LOG, cwd = `/r${++seq}`) {
   });
   app.mount(container);
   await flush();
-  container.querySelectorAll<HTMLElement>(".fhv-tab")[1].click();
+  if (openLog) container.querySelectorAll<HTMLElement>(".fhv-tab")[1].click();
   await flush();
   return emitted;
 }
@@ -98,5 +99,44 @@ describe("FileHistoryViewer combined", () => {
     await click(infos()[0], { metaKey: true, ctrlKey: true });
     await click(infos()[2], { shiftKey: true });
     expect(combineBtn()?.textContent).toContain("combined.historyButton:3");
+  });
+
+  it("range-mode selection of pre-rename commits resolves names via the full log", async () => {
+    const strip = (x: FileLogEntry): FileLogEntry => ({ hashFull: x.hashFull, hash: x.hash, author: x.author, date: x.date, message: x.message, body: "" });
+    const blameLine = { hash: "ccccccc", hashFull: H("c"), finalLine: 1, origLine: 1, author: "Dev", authorDate: "0", summary: "s", content: "x" };
+    const e = await mount(LOG, [strip(LOG[1]), strip(LOG[2])], [blameLine], false);
+    container!.querySelectorAll<HTMLElement>(".fhv-tab")[0].click();
+    await flush();
+    container!.querySelector<HTMLElement>(".fhv-blame-range-btn")!.click();
+    await flush();
+    container!.querySelectorAll<HTMLElement>(".fhv-tab")[1].click();
+    await flush();
+    await click(infos()[0], { metaKey: true, ctrlKey: true });
+    await click(infos()[1], { metaKey: true, ctrlKey: true });
+    combineBtn()!.click();
+    await flush();
+    const req = e["open-combined"][0][0] as { hashes: string[]; paths: string[] };
+    expect(req.hashes).toEqual([H("b"), H("a")]);
+    expect([...req.paths].sort()).toEqual(["new.txt", "old.txt"]);
+  });
+
+  it("a rename commit plus a later one carries the pre-rename name too", async () => {
+    // d (new) and c (new, the rename commit) are selected; b is still old.txt.
+    const e = await mount([entry("d", "new.txt"), entry("c", "new.txt"), entry("b", "old.txt")]);
+    await click(infos()[0], { metaKey: true, ctrlKey: true });
+    await click(infos()[1], { metaKey: true, ctrlKey: true });
+    combineBtn()!.click();
+    await flush();
+    const req = e["open-combined"][0][0] as { paths: string[] };
+    expect([...req.paths].sort()).toEqual(["new.txt", "old.txt"]);
+  });
+
+  it("disables the button over the 50-version limit", async () => {
+    const many = Array.from({ length: 51 }, (_, i) => ({ ...entry("a"), hashFull: String(i).padStart(40, "0"), hash: String(i).padStart(7, "0") }));
+    await mount(many);
+    await click(infos()[0], { metaKey: true, ctrlKey: true });
+    await click(infos()[50], { shiftKey: true });
+    expect(combineBtn()?.disabled).toBe(true);
+    expect(combineBtn()?.title).toContain("combined.tooMany");
   });
 });

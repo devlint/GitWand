@@ -63,6 +63,7 @@ const props = defineProps<{
   /** Test seams: default to the real backend wrappers. */
   blameFetcher?: typeof getGitBlame;
   logFetcher?: typeof getGitFileLog;
+  rangeFetcher?: typeof getGitFileLogRange;
 }>();
 
 const emit = defineEmits<{
@@ -88,7 +89,7 @@ const blameAlgo = ref<BlameAlgorithm>(loadSettings().blameAlgorithm ?? "histogra
 const lists = useFileHistoryLists({
   cwd: toRef(props, "cwd"),
   filePath: toRef(props, "filePath"),
-  loaders: { getPickaxe: getGitFileLogPickaxe, getRange: getGitFileLogRange },
+  loaders: { getPickaxe: getGitFileLogPickaxe, getRange: (...a) => (props.rangeFetcher ?? getGitFileLogRange)(...a) },
 });
 const {
   fileLog,
@@ -249,9 +250,30 @@ function onLogEntryClick(e: MouseEvent, hash: string) {
 function openCombined() {
   if (!selection.canCombine.value) return;
   const chosen = displayedLog.value.filter((x) => selectedSet.value.has(x.hashFull));
-  // Each entry's name at that commit (renames); entries without one (range
-  // results, merges) fall back to the current name.
-  const paths = [...new Set(chosen.map((x) => x.path ?? props.filePath))];
+  // Names to give git. Range results and merges carry no `path`: resolve it by
+  // hash from the unfiltered --follow log; an entry still unnamed gets every
+  // name the file has had (a superset within this file's lineage is correct,
+  // a missing name is not). Rename pairing: every name between the oldest and
+  // newest selected entries, plus the name just before the oldest when that
+  // entry is itself a rename commit, so `-M` can pair it instead of an add.
+  const full = fileLog.value;
+  const known = new Map(full.map((x) => [x.hashFull, x.path]));
+  const lineage = [...new Set([props.filePath, ...full.flatMap((x) => (x.path ? [x.path] : []))])];
+  const names = new Set<string>([props.filePath]);
+  for (const x of chosen) {
+    const p = x.path ?? known.get(x.hashFull);
+    if (p) names.add(p);
+    else lineage.forEach((n) => names.add(n));
+  }
+  const idx = chosen.map((x) => full.findIndex((f) => f.hashFull === x.hashFull)).filter((i) => i >= 0);
+  if (idx.length) {
+    const newest = Math.min(...idx);
+    const oldest = Math.max(...idx);
+    for (let i = newest; i <= oldest; i++) if (full[i].path) names.add(full[i].path!);
+    const before = full[oldest + 1]?.path;
+    if (before) names.add(before);
+  }
+  const paths = [...names];
   emit("open-combined", { hashes: chosen.map((x) => x.hashFull), paths });
 }
 
