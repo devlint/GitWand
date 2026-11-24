@@ -1506,11 +1506,13 @@ class CombinedRepo {
 
   /**
    * replay.rs `blockers`: per path of `paths`, the commits outside the
-   * selection touching it (`--full-history`), newest first, at most 5 — one
-   * unbounded `git log` walk per argv-sized pathspec batch. A merge counts
-   * when it changed the path itself (its combined diff names it).
+   * selection touching it (`--full-history`) between the replay base and
+   * `parent`, newest first, at most 5 — one unbounded `git log` walk per
+   * argv-sized pathspec batch, the `selected` hashes dropped afterwards (an
+   * earlier selected commit's ancestors stay: their changes are not in the
+   * replayed tree). A merge counts when it changed the path itself.
    */
-  async blockers(parent, base, earlier, paths) {
+  async blockers(parent, base, selected, paths) {
     // A printed name is a path or under one: none starts with the record
     // marker unless a path does (see `combinedParseLogNames`).
     const marked = paths.find((p) => p.startsWith(COMBINED_LOG_RECORD_MARK));
@@ -1524,12 +1526,15 @@ class CombinedRepo {
         "--name-only", "-z", "--format=%x00%x01%H", parent, "--not",
       ];
       if (base !== null) args.push(base);
-      args.push(...earlier, "--", ...batch);
+      args.push("--", ...batch);
       const commits = combinedParseLogNames(await this.stdout(args, "log", { env: { GIT_LITERAL_PATHSPECS: "1" } }));
       for (const path of batch) {
         found.set(
           path,
-          commits.filter(([, names]) => names.some((n) => combinedCovers(path, n))).slice(0, 5).map(([h]) => h),
+          commits
+            .filter(([h, names]) => !selected.has(h) && names.some((n) => combinedCovers(path, n)))
+            .slice(0, 5)
+            .map(([h]) => h),
         );
       }
     }
@@ -1769,11 +1774,11 @@ async function devCombinedDiff(cwdIn, hashesIn, pathsIn) {
     sources.get(i).add(path);
   }
   const blockers = new Map();
+  const chosen = new Set(replayed.map((r) => r.hash));
   for (const [i, paths] of sources) {
     const parent = replayed[i].parent;
     if (parent === null) continue;
-    const earlier = replayed.slice(0, i).map((r) => r.hash);
-    const found = await repo.blockers(parent, base, earlier, [...paths].sort(cmpCodePoints));
+    const found = await repo.blockers(parent, base, chosen, [...paths].sort(cmpCodePoints));
     for (const [path, list] of found) blockers.set(`${i}\0${path}`, list);
   }
 

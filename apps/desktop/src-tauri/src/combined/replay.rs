@@ -365,10 +365,11 @@ impl<'a> Repo<'a> {
     }
 
     /// Blockers of each of `paths` at one step: the commits outside the
-    /// selection that touch it between the replay base / earlier selected
-    /// commits and `Ci^`, newest first, at most `MAX_BLOCKERS` — what
-    /// `rev-list --full-history --max-count 5 Ci^ --not <base> <earlier> --
-    /// <path>` lists. One `git log` walk per argv-sized pathspec batch, never
+    /// selection that touch it between the replay base and `Ci^`, newest
+    /// first, at most `MAX_BLOCKERS` — what `rev-list --full-history Ci^
+    /// --not <base> -- <path>` lists once the `selected` hashes are dropped.
+    /// The ancestors of an earlier selected commit stay in the walk: their
+    /// changes are not in the replayed tree, only the selected ones are. One `git log` walk per argv-sized pathspec batch, never
     /// one spawn per path. The walk is not bounded: with several paths, any
     /// `--max-count` could stop before an older blocker of a quieter path.
     /// `--full-history` keeps each path's answer independent of the other
@@ -379,7 +380,7 @@ impl<'a> Repo<'a> {
         &self,
         parent: &str,
         base: Option<&str>,
-        earlier: &[&str],
+        selected: &HashSet<&str>,
         paths: &[String],
     ) -> Result<HashMap<String, Vec<String>>, String> {
         // A name `git log` prints is a path or under one: none starts with
@@ -412,14 +413,15 @@ impl<'a> Repo<'a> {
             if let Some(b) = base {
                 cmd.arg(b);
             }
-            cmd.args(earlier);
             cmd.arg("--").args(&batch);
             cmd.env("GIT_LITERAL_PATHSPECS", "1");
             let commits = parse_log_names(&self.stdout(cmd, "log")?)?;
             for path in &batch {
                 let list: Vec<String> = commits
                     .iter()
-                    .filter(|(_, names)| names.iter().any(|n| covers(path, n)))
+                    .filter(|(h, names)| {
+                        !selected.contains(h.as_str()) && names.iter().any(|n| covers(path, n))
+                    })
                     .take(MAX_BLOCKERS)
                     .map(|(h, _)| h.clone())
                     .collect();
@@ -891,13 +893,13 @@ pub(crate) fn combined_diff_with_budget(
         }
     }
     let mut blockers: HashMap<(usize, String), Vec<String>> = HashMap::new();
+    let chosen: HashSet<&str> = replayed.iter().map(|r| r.hash.as_str()).collect();
     for (i, paths) in sources {
         let Some(parent) = &replayed[i].parent else {
             continue;
         };
-        let earlier: Vec<&str> = replayed[..i].iter().map(|r| r.hash.as_str()).collect();
         let paths: Vec<String> = paths.into_iter().collect();
-        for (path, list) in repo.blockers(parent, base.as_deref(), &earlier, &paths)? {
+        for (path, list) in repo.blockers(parent, base.as_deref(), &chosen, &paths)? {
             blockers.insert((i, path), list);
         }
     }
@@ -1142,6 +1144,24 @@ mod tests {
         assert_eq!(per, vec![a.as_str(), c.as_str()]);
         assert_eq!(got.fallback[0].blockers, vec![b]);
         assert!(got.steps.iter().flatten().all(|d| d.path != "f"));
+    }
+
+    /// A blocker before an earlier selected commit still counts: B1's change
+    /// to `p` is not in the replayed tree (only C1 and C2 are), so C3's
+    /// conflict on `p` names B1 — never "between selected commits".
+    #[test]
+    fn blocker_behind_an_earlier_selected_commit_is_named() {
+        let r = TempRepo::new();
+        commit_files(&r, &[("p", Some("a\nx=1\nc\n"))], "base");
+        let c1 = commit_files(&r, &[("p", Some("a\nx=2\nc\n"))], "C1");
+        let b1 = commit_files(&r, &[("p", Some("a\nx=3\nc\n"))], "B1");
+        let c2 = commit_files(&r, &[("q", Some("q\n"))], "C2");
+        commit_files(&r, &[("o", Some("o\n"))], "B2");
+        let c3 = commit_files(&r, &[("p", Some("a\nx=4\nc\ne\n"))], "C3");
+        let got = run(&r, &[&c1, &c2, &c3], None);
+        let f = got.fallback.iter().find(|f| f.path == "p").unwrap();
+        assert!(f.conflicted);
+        assert_eq!(f.blockers, vec![b1]);
     }
 
     #[test]
@@ -1432,7 +1452,12 @@ mod tests {
             empty_tree: None,
         };
         let err = repo
-            .blockers(&head, None, &[], &["ok".to_string(), "\x01x".to_string()])
+            .blockers(
+                &head,
+                None,
+                &HashSet::new(),
+                &["ok".to_string(), "\x01x".to_string()],
+            )
             .unwrap_err();
         assert_eq!(err, "Combined diffs do not support the file name: \x01x");
     }

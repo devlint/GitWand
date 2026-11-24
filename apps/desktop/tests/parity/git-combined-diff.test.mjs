@@ -132,6 +132,22 @@ describe("parity: git-combined-diff", () => {
     expect(rust.steps.flat()).toEqual([]);
   });
 
+  // replay.rs `blocker_behind_an_earlier_selected_commit_is_named`: B1 sits
+  // behind C2 but its change is not in the replayed tree.
+  it("a blocker behind an earlier selected commit is still named", async () => {
+    const cwd = repo("earlierblocker");
+    commitFiles(cwd, { p: "a\nx=1\nc\n" }, "base", 0);
+    const c1 = commitFiles(cwd, { p: "a\nx=2\nc\n" }, "C1", 1);
+    const b1 = commitFiles(cwd, { p: "a\nx=3\nc\n" }, "B1", 2);
+    const c2 = commitFiles(cwd, { q: "q\n" }, "C2", 3);
+    commitFiles(cwd, { o: "o\n" }, "B2", 4);
+    const c3 = commitFiles(cwd, { p: "a\nx=4\nc\ne\n" }, "C3", 5);
+    const { rust } = await parity(cwd, [c1, c2, c3]);
+    const p = rust.fallback.find((f) => f.path === "p");
+    expect(p.conflicted).toBe(true);
+    expect(p.blockers).toEqual([b1]);
+  });
+
   it("a merge=union attribute sends the file to the fallback as a companion", async () => {
     const cwd = repo("union");
     commitFiles(cwd, { ".gitattributes": "f merge=union\n", f: "a\nx=1\nc\n", g: "g\n" }, "base", 0);
