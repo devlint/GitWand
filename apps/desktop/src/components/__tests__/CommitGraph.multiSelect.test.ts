@@ -287,6 +287,39 @@ describe("CommitGraph — multi-selection", () => {
     expect(emitted["open-combined"][0][0]).toEqual([full("aaa1111"), full("bbb2222"), full("ddd4444")]);
   });
 
+  it("an amend-like reload with more pages prunes a selected commit it had loaded", async () => {
+    const log = shallowRef(commits);
+    const more = ref(true);
+    mountReactive(log, more);
+    await click(2, { ctrlKey: true }); // seeds aaa, adds ccc
+    await click(1, { ctrlKey: true }); // bbb
+    expect(chip()?.textContent).toContain("combined.chip:3");
+    // ccc amended: a new commit takes its place, the old one stays resolvable
+    // (reflog) but is no longer in the log, and more pages remain.
+    const amended = { ...commits[2], hash: "ccc9999", hashFull: full("ccc9999") };
+    log.value = [commits[0], commits[1], amended, commits[3], commits[4]];
+    await nextTick();
+    await nextTick();
+    expect(useCommitSelection(ref(cwd)).selected.value).toEqual([full("aaa1111"), full("bbb2222")]);
+    expect(chip()?.textContent).toContain("combined.chip:2");
+  });
+
+  it("a reload with more pages keeps a selected commit that was never loaded", async () => {
+    const log = shallowRef(commits.slice(0, 3));
+    const more = ref(true);
+    mountReactive(log, more);
+    await click(1, { ctrlKey: true }); // seeds aaa, adds bbb
+    // A commit beyond the loaded depth (e.g. a jump from elsewhere).
+    useCommitSelection(ref(cwd)).toggle(full("fff6666"), null);
+    await nextTick();
+    const amended = { ...commits[2], hash: "ccc9999", hashFull: full("ccc9999") };
+    log.value = [commits[0], commits[1], amended];
+    await nextTick();
+    await nextTick();
+    expect(useCommitSelection(ref(cwd)).selected.value).toContain(full("fff6666"));
+    expect(chip()?.textContent).toContain("combined.chip:3");
+  });
+
   it("a complete log without a selected commit prunes it", async () => {
     const log = shallowRef(commits);
     const more = ref(true);

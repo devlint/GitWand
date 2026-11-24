@@ -1473,20 +1473,41 @@ const visibleRange = computed(() => {
   return { first, last };
 });
 
-// A reload that drops a commit (rebase, amend) prunes it from the selection —
-// only once the whole log is loaded: a shorter reload with more pages may just
-// stop before a selected commit. An empty log is a reload in progress. And
-// only on the unfiltered log (the canonical view of `useGitRepo`): a branch,
-// author or monorepo-scope filter hides commits that still exist. The filter
-// is read, not watched: it flips back to "all" before the unfiltered log
-// arrives, and the log still shown then is the filtered one.
+// A reload that drops a commit (rebase, amend) prunes it from the selection.
+// With the whole log loaded, any selected commit absent from it goes. With
+// more pages, only one the previous log had loaded (index < its length) and
+// that a reload at least that deep no longer lists (an amended commit stays
+// resolvable through the reflog, so absence from the log is the signal); a
+// commit beyond the loaded depth is kept — a shorter reload may just stop
+// before it. An empty log is a reload in progress. And only on the
+// unfiltered log (the canonical view of `useGitRepo`), before and after: a
+// branch, author or monorepo-scope filter hides commits that still exist.
+// The filter is read, not watched: it flips back to "all" before the
+// unfiltered log arrives, and the log still shown then is the filtered one.
 const unfilteredLog = () =>
   (props.logBranchFilter ?? "all") === "all" &&
   (props.logAuthorFilter ?? "all") === "all" &&
   !activeScope.value;
 // `logOrder` is empty while nothing is selected: no refs parsed, no prune.
+let prevOrder: string[] | null = null;
 watch([logOrder, () => props.hasMore], ([order, more]) => {
-  if (order.length > 0 && !more && unfilteredLog()) selection.prune(order);
+  if (order.length === 0) return;
+  if (!unfilteredLog()) {
+    prevOrder = null;
+    return;
+  }
+  if (!more) selection.prune(order);
+  else if (prevOrder) {
+    const before = new Map(prevOrder.map((h, i) => [h, i]));
+    const now = new Set(order);
+    const gone = (h: string) => {
+      const i = before.get(h);
+      return i !== undefined && i < order.length && !now.has(h);
+    };
+    const held = [...selection.selected.value, ...(selection.anchor.value ? [selection.anchor.value] : [])];
+    if (held.some(gone)) selection.prune([...order, ...held.filter((h) => !gone(h))]);
+  }
+  prevOrder = order;
 });
 
 watch(() => visibleRange.value.last, (last) => {
