@@ -45,15 +45,26 @@ describe("buildCombinedUserPrompt", () => {
     expect(p).toContain("big.bin (+0/-0)");
     expect(p).not.toContain(SECRET);
   });
-  it("includes fallback per-commit diffs, summed by path", () => {
+  it("lists fallback files apart, without counts: per-commit counts do not add up to a net", () => {
     const p = buildCombinedUserPrompt(data({
-      fallback: [{ path: "f.ts", conflicted: true, blockers: [], perCommit: [
-        { hash: commits[0].hash, diff: diff("f.ts", 2, 0) },
-        { hash: commits[1].hash, diff: diff("f.ts", 1, 1) },
-      ] }],
+      fallback: [
+        { path: "f.ts", conflicted: true, blockers: [], perCommit: [
+          { hash: commits[0].hash, diff: diff("f.ts", 2, 0) },
+          { hash: commits[1].hash, diff: diff("f.ts", 1, 1) },
+        ] },
+        { path: "g.ts", conflicted: false, blockers: [], perCommit: [{ hash: commits[1].hash, diff: diff("g.ts", 4, 0) }] },
+      ],
     }));
-    expect(p).toContain("f.ts (+3/-1)");
+    const [net, apart] = p.split("Files shown commit by commit (not combinable):\n");
+    expect(net).toContain("a.ts (+3/-1)");
+    expect(net).not.toContain("f.ts");
+    expect(apart).toBe("- f.ts\n- g.ts");
+    expect(p).not.toMatch(/f\.ts \(|g\.ts \(/);
     expect(p).not.toContain(SECRET);
+  });
+
+  it("has no fallback section when nothing fell back", () => {
+    expect(buildCombinedUserPrompt(data())).not.toContain("commit by commit");
   });
 });
 

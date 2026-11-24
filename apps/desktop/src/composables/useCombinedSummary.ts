@@ -1,7 +1,8 @@
 /**
  * Optional AI summary of what N commits do together (spec §5.5). The prompt
- * carries commit subjects and `path (+a/-d)` only — never hunk text. The
- * result is not persisted; errors are exposed for inline display.
+ * carries commit subjects, `path (+a/-d)` for the net diff and bare paths for
+ * fallback files — never hunk text. The result is not persisted; errors are
+ * exposed for inline display.
  */
 import { ref } from "vue";
 import { useAIProvider } from "./useAIProvider";
@@ -18,7 +19,8 @@ export function buildCombinedSystemPrompt(locale: string, n: number): string {
 together, for a reviewer who hasn't looked at the diff yet.
 
 You will receive the commit subjects (in replay order) and a per-file index
-(path + change counts) of everything they touch.
+(path + change counts) of everything they touch; files that could not be
+combined are listed apart, without counts.
 
 Produce a concise summary in ${lang}, structured as three short sections:
 - What: what the commits do together, in plain language.
@@ -46,19 +48,17 @@ function countDiff(d: GitDiff): { added: number; deleted: number } {
   return { added, deleted };
 }
 
-/** Net diffs + fallback per-commit diffs, summed by path. A truncated file has
- *  no hunks: it is listed with 0/0, never an invented count. */
+/**
+ * Net diffs with their counts; a truncated file has no hunks and is listed
+ * with 0/0, never an invented count. Fallback files follow on their own line
+ * without counts: their per-commit diffs do not add up to a net change.
+ */
 export function buildCombinedUserPrompt(c: CombinedDiff): string {
-  const byPath = new Map<string, { path: string; added: number; deleted: number }>();
-  const all = [...c.diffs, ...c.fallback.flatMap((f) => f.perCommit.map((p) => p.diff))];
-  for (const d of all) {
-    const n = countDiff(d);
-    const cur = byPath.get(d.path) ?? { path: d.path, added: 0, deleted: 0 };
-    cur.added += n.added;
-    cur.deleted += n.deleted;
-    byPath.set(d.path, cur);
-  }
-  return buildSummaryPromptFromCounts([...byPath.values()], c.commits.map((k) => k.subject));
+  const net = c.diffs.map((d) => ({ path: d.path, ...countDiff(d) }));
+  const prompt = buildSummaryPromptFromCounts(net, c.commits.map((k) => k.subject));
+  const apart = [...new Set(c.fallback.map((f) => f.path))];
+  if (apart.length === 0) return prompt;
+  return [prompt, "", "Files shown commit by commit (not combinable):", ...apart.map((p) => `- ${p}`)].join("\n");
 }
 
 export function useCombinedSummary() {
