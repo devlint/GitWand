@@ -270,7 +270,7 @@ fn settle_pending(repo: &Path, hints: &[MergedParentHint]) -> Result<Settled, St
         // checked the top out since (review pass 4).
         // An id that cannot be read here (it was read by the run) falls back
         // to the switch's own guards: HEAD on the top, or detached at `original`.
-        let mine = here.as_deref().is_none_or(|h| h == p.worktree);
+        let mine = !matches!(here.as_deref(), Some(h) if h != p.worktree);
         if holders.iter().any(|h| h.rebasing && h.branch == top) {
             s.waiting = true;
             continue;

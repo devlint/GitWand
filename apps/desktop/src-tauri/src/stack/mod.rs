@@ -60,7 +60,8 @@ pub struct PendingRestack {
     pub merged_parent: Option<String>,
     /// The worktree the restack ran in: `-` for the main one, else its id
     /// (`.git/worktrees/<id>`) in hex. Any worktree settles the record; only
-    /// this one switches branches (back from the top, or a reattach).
+    /// this one (or one that cannot read its own id) switches branches, back
+    /// from the top or a reattach, each under its own guards.
     pub worktree: String,
 }
 
