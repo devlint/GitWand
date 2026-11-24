@@ -907,6 +907,529 @@ function truncateDiffOutput(raw) {
 }
 
 /**
+ * `gitSpawn` that never rejects on the exit code: resolves `{ code, stdout,
+ * stderr }` (`code` null when git died on a signal — Rust's `code()` is
+ * `None`). `input`, when given, is written to stdin; otherwise stdin is
+ * closed, as Rust's `Stdio::null()`. `env` adds to the inherited environment.
+ * Rejects only when git cannot be spawned.
+ */
+function gitSpawnInput(args, cwd, { input, env } = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(GIT, args, {
+      cwd,
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      ...(env ? { env: { ...process.env, ...env } } : {}),
+    });
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    child.stdout.on("data", (chunk) => stdoutChunks.push(chunk));
+    child.stderr.on("data", (chunk) => stderrChunks.push(chunk));
+    child.on("error", (err) => reject(err));
+    child.on("close", (code) => {
+      resolvePromise({
+        code,
+        stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+        stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+      });
+    });
+    if (input !== undefined) {
+      // A child that exits without reading closes the pipe: its exit code is
+      // the answer, not this write's error.
+      child.stdin.on("error", () => {});
+      child.stdin.end(input);
+    }
+  });
+}
+
+// ─── Combined diff (v3.15) ──────────────────────────────────────────────────
+//
+// Mirror of `src-tauri/src/combined/` (mod.rs, order.rs, replay.rs) and of
+// `parse_multi_file_diff_capped` (commands/read.rs), function by function, with
+// the same git arguments, the same error strings and the same output — but in
+// the TS shape (`GitDiff` hunks in camelCase, as `/api/git-show` answers).
+// `tests/parity/git-combined-diff.test.mjs` compares the two.
+
+const COMBINED_MIN_COMMITS = 2;
+const COMBINED_MAX_COMMITS = 50;
+
+/** Input refused before or while resolving it: the route answers 400. */
+class CombinedInputError extends Error {}
+
+/** Rust `str::lines()`: split on `\n`, drop one trailing empty line, strip `\r`. */
+function rustLines(s) {
+  const parts = s.split("\n");
+  if (parts.length && parts[parts.length - 1] === "") parts.pop();
+  return parts.map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));
+}
+
+/** Rust `String` ordering (bytes), for every `BTreeMap`. */
+function byteCmp(a, b) {
+  return Buffer.compare(Buffer.from(a, "utf-8"), Buffer.from(b, "utf-8"));
+}
+
+/** `git version 2.39.3 (Apple Git-146)` → `[2, 39]` (`stack::guard`). */
+async function combinedGitVersion() {
+  let out;
+  try {
+    out = await gitSpawnInput(["--version"], process.cwd());
+  } catch {
+    return null;
+  }
+  if (out.code !== 0) return null;
+  const t = out.stdout.trim();
+  if (!t.startsWith("git version ")) return null;
+  const nums = t.slice("git version ".length).split(".");
+  const num = (s) => (s !== undefined && /^\d+$/.test(s) ? Number(s) : null);
+  const major = num(nums[0]);
+  const minor = num(nums[1]);
+  return major === null || minor === null ? null : [major, minor];
+}
+
+/** mod.rs `validate_hashes`. */
+function combinedValidateHashes(hashes) {
+  const out = [];
+  for (const h of hashes) {
+    if (!(h.length >= 7 && h.length <= 64 && /^[0-9a-fA-F]+$/.test(h))) {
+      throw new CombinedInputError(`Invalid commit hash: ${h}`);
+    }
+    if (!out.includes(h)) out.push(h);
+  }
+  if (out.length < COMBINED_MIN_COMMITS) throw new CombinedInputError("Select at least 2 commits.");
+  if (out.length > COMBINED_MAX_COMMITS) throw new CombinedInputError("Select at most 50 commits.");
+  return out;
+}
+
+/** order.rs `run`: `git_cmd()` with no pins. */
+async function combinedOrderRun(cwd, args) {
+  try {
+    return await gitSpawnInput(args, cwd);
+  } catch (e) {
+    throw new Error(`git: ${e.message}`);
+  }
+}
+
+/** order.rs `resolve_and_order`: full hashes, ancestors first. */
+async function combinedResolveAndOrder(cwd, hashes) {
+  const remaining = [];
+  for (const h of hashes) {
+    const out = await combinedOrderRun(cwd, ["rev-parse", "--verify", "--end-of-options", `${h}^{commit}`]);
+    if (out.code !== 0) throw new CombinedInputError(`Unknown commit: ${h}`);
+    const full = out.stdout.trim();
+    if (!remaining.includes(full)) remaining.push(full);
+  }
+  if (remaining.length < COMBINED_MIN_COMMITS) throw new CombinedInputError("Select at least 2 commits.");
+  if (remaining.length > COMBINED_MAX_COMMITS) throw new CombinedInputError("Select at most 50 commits.");
+
+  // `describe`
+  const log = await combinedOrderRun(cwd, [
+    "log",
+    "--no-walk=unsorted",
+    "--no-show-signature",
+    "--format=%H%x00%ct%x00%h%x00%s%x00%an%x00%aI",
+    "--end-of-options",
+    ...remaining,
+  ]);
+  if (log.code !== 0) throw new Error(`git log failed: ${log.stderr.trim()}`);
+  const meta = new Map();
+  for (const line of rustLines(log.stdout)) {
+    const f = line.split("\0");
+    if (f.length !== 6) continue;
+    const ts = /^[+-]?\d+$/.test(f[1]) ? Number(f[1]) : 0;
+    meta.set(f[0], [ts, { hash: f[0], shortHash: f[2], subject: f[3], author: f[4], date: f[5] }]);
+  }
+  const missing = remaining.find((h) => !meta.has(h));
+  if (missing !== undefined) throw new Error(`Could not read commit metadata: ${missing}`);
+
+  let result = [];
+  let rest = [...remaining];
+  while (rest.length > 0) {
+    let tips;
+    if (rest.length === 1) {
+      tips = [...rest];
+    } else {
+      const out = await combinedOrderRun(cwd, ["merge-base", "--independent", ...rest]);
+      if (out.code !== 0) throw new Error(`git merge-base failed: ${out.stderr.trim()}`);
+      tips = rustLines(out.stdout).map((l) => l.trim()).filter((l) => l !== "");
+    }
+    if (tips.length === 0) throw new Error("Could not order the selected commits.");
+    rest = rest.filter((h) => !tips.includes(h));
+    const layer = tips.filter((h) => meta.has(h)).map((h) => meta.get(h));
+    layer.sort((a, b) => a[0] - b[0]); // stable, like `sort_by_key`
+    result = [...layer.map(([, c]) => ({ ...c })), ...result];
+  }
+  return result;
+}
+
+/** read.rs `parse_multi_file_diff_capped`, hunks parsed by `devParseDiffHunks`. */
+function combinedParseMultiFileDiff(core, stdout, cap) {
+  const sections = [];
+  for (const line of rustLines(stdout)) {
+    if (line.startsWith("diff --git ")) sections.push([line]);
+    else if (sections.length > 0) sections[sections.length - 1].push(line);
+  }
+  const diffs = [];
+  for (const section of sections) {
+    const parts = section[0].split(" b/");
+    if (parts.length < 2) continue;
+    let status = null;
+    let oldPath = null;
+    for (const line of section.slice(1)) {
+      if (line.startsWith("@@")) break;
+      if (line.startsWith("new file mode")) status = "added";
+      else if (line.startsWith("deleted file mode")) status = "deleted";
+      else if (line.startsWith("rename from ")) {
+        status = "renamed";
+        oldPath = line.substring("rename from ".length);
+      } else if (line.startsWith("rename to ") && status === null) status = "renamed";
+    }
+    // Bytes of the section as git printed it (one `\n` per line).
+    const size = section.reduce((n, l) => n + Buffer.byteLength(l, "utf-8") + 1, 0);
+    const truncated = cap !== null && size > cap;
+    diffs.push({
+      path: parts[1],
+      hunks: truncated ? [] : devParseDiffHunks(core, section.join("\n")).hunks,
+      ...(status !== null ? { status } : {}),
+      ...(oldPath !== null ? { oldPath } : {}),
+      ...(truncated ? { truncatedFromBytes: size } : {}),
+    });
+  }
+  return diffs;
+}
+
+/** Fixed identity for the synthetic commits (replay.rs `SYNTHETIC_ENV`). */
+const COMBINED_SYNTHETIC_ENV = {
+  GIT_AUTHOR_NAME: "GitWand",
+  GIT_AUTHOR_EMAIL: "combined-diff@gitwand.local",
+  GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
+  GIT_COMMITTER_NAME: "GitWand",
+  GIT_COMMITTER_EMAIL: "combined-diff@gitwand.local",
+  GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
+};
+
+/** Pins of replay.rs `Repo::git()`. */
+const COMBINED_GIT_PINS = [
+  "-c", "diff.noprefix=false",
+  "-c", "diff.mnemonicPrefix=false",
+  "-c", "core.quotePath=false",
+  "-c", "diff.renameLimit=7000",
+];
+
+/** replay.rs `Repo`. */
+class CombinedRepo {
+  constructor(cwd, paths, core) {
+    this.cwd = cwd;
+    /** null = whole repository. */
+    this.paths = paths;
+    this.core = core;
+    this.emptyTreeId = null;
+  }
+
+  async output(args, what, opts = {}) {
+    try {
+      return await gitSpawnInput([...COMBINED_GIT_PINS, ...args], this.cwd, opts);
+    } catch (e) {
+      throw new Error(`Failed to run git ${what}: ${e.message}`);
+    }
+  }
+
+  async stdout(args, what, opts = {}) {
+    const out = await this.output(args, what, opts);
+    if (out.code !== 0) throw new Error(`git ${what} failed: ${out.stderr.trim()}`);
+    return out.stdout;
+  }
+
+  /** `-- <paths> <extra>` (literal pathspecs). */
+  pathspec(extra) {
+    return ["--", ...(this.paths ?? []), ...extra];
+  }
+
+  inPaths(path) {
+    if (this.paths === null) return true;
+    return this.paths.some((raw) => {
+      const q = raw.replace(/\/+$/, "");
+      return path === q || (path.startsWith(q) && path.slice(q.length).startsWith("/"));
+    });
+  }
+
+  async emptyTree() {
+    if (this.emptyTreeId !== null) return this.emptyTreeId;
+    this.emptyTreeId = (await this.stdout(["hash-object", "-t", "tree", "-w", "--stdin"], "hash-object")).trim();
+    return this.emptyTreeId;
+  }
+
+  /** `hash → [tree, first parent | null]`. */
+  async treesAndParents(hashes) {
+    const out = await this.stdout(
+      ["log", "--no-walk=unsorted", "--no-show-signature", "--no-color", "--format=%H%x00%T%x00%P", "--end-of-options", ...hashes],
+      "log",
+    );
+    const map = new Map();
+    for (const line of rustLines(out)) {
+      const f = line.split("\0");
+      if (f.length !== 3) continue;
+      const parent = f[2].split(" ").find((p) => p !== "") ?? null;
+      map.set(f[0], [f[1], parent]);
+    }
+    for (const h of hashes) {
+      if (!map.has(h)) throw new Error(`Could not read commit metadata: ${h}`);
+    }
+    return map;
+  }
+
+  async commitTree(tree, parent) {
+    const args = ["-c", "commit.gpgSign=false", "commit-tree", tree];
+    if (parent !== null) args.push("-p", parent);
+    args.push("-m", "GitWand combined diff");
+    return (await this.stdout(args, "commit-tree", { env: COMBINED_SYNTHETIC_ENV })).trim();
+  }
+
+  /** `[result tree, conflicted paths | null]`. */
+  async merge(base, ours, theirs) {
+    const p = await this.commitTree(base, null);
+    const b1 = await this.commitTree(ours, p);
+    const b2 = await this.commitTree(theirs, p);
+    const out = await this.output(
+      [
+        "-c", "merge.renames=true",
+        "-c", "merge.directoryRenames=conflict",
+        "-c", "merge.renameLimit=7000",
+        "-c", "merge.renormalize=false",
+        "-c", "merge.default=text",
+        "merge-tree", "--write-tree", "--name-only", "-z", b1, b2,
+      ],
+      "merge-tree",
+    );
+    if (out.code !== 0 && out.code !== 1) throw new Error(`git merge-tree failed: ${out.stderr.trim()}`);
+    const fields = out.stdout.split("\0");
+    const tree = (fields[0] ?? "").trim();
+    if (tree === "") throw new Error("git merge-tree returned no tree");
+    if (out.code === 0) return [tree, null];
+    const paths = [];
+    for (const f of fields.slice(1)) {
+      if (f === "") break;
+      if (!paths.includes(f)) paths.push(f);
+    }
+    return [tree, paths];
+  }
+
+  async diff(a, b, unified0, extra) {
+    const args = ["diff-tree", "-r", "-p", "-M", "--no-color", "--no-ext-diff", "--no-relative"];
+    if (unified0) args.push("-U0");
+    args.push(a, b, ...this.pathspec(extra));
+    const out = await this.stdout(args, "diff-tree", { env: { GIT_LITERAL_PATHSPECS: "1" } });
+    return combinedParseMultiFileDiff(this.core, out, DIFF_TRUNCATE_BYTES);
+  }
+
+  /** `[old path of a rename | null, path]` per change. */
+  async touched(a, b) {
+    const out = await this.stdout(
+      ["diff-tree", "-r", "-M", "--name-status", "-z", "--no-relative", a, b, ...this.pathspec([])],
+      "diff-tree",
+      { env: { GIT_LITERAL_PATHSPECS: "1" } },
+    );
+    const fields = out.split("\0").filter((f) => f !== "");
+    const changes = [];
+    for (let i = 0; i < fields.length; ) {
+      const status = fields[i++];
+      const first = i < fields.length ? fields[i++] : null;
+      if (status.startsWith("R") || status.startsWith("C")) {
+        if (i < fields.length) changes.push([first, fields[i++]]);
+      } else if (first !== null) {
+        changes.push([null, first]);
+      }
+    }
+    return changes;
+  }
+
+  /** Paths whose `merge` attribute is neither `unspecified` nor `set`. */
+  async mergeDriven(paths) {
+    const out = new Set();
+    if (paths.length === 0) return out;
+    const stdout = await this.stdout(["check-attr", "--stdin", "-z", "merge"], "check-attr", {
+      input: paths.map((p) => `${p}\0`).join(""),
+    });
+    const fields = stdout.split("\0");
+    for (let i = 0; i + 3 <= fields.length; i += 3) {
+      const value = fields[i + 2];
+      if (value !== "unspecified" && value !== "set") out.add(fields[i]);
+    }
+    return out;
+  }
+
+  async blockers(parent, base, earlier, path) {
+    const args = ["rev-list", "--max-count", "5", parent, "--not"];
+    if (base !== null) args.push(base);
+    args.push(...earlier, "--", path);
+    const out = await this.stdout(args, "rev-list", { env: { GIT_LITERAL_PATHSPECS: "1" } });
+    return rustLines(out).map((l) => l.trim()).filter((l) => l !== "");
+  }
+}
+
+/** replay.rs `join_pairs`. `fallback`: Map path → `{ conflicted, blockers }`. */
+function combinedJoinPairs(fallback, pairs) {
+  for (;;) {
+    let joined = false;
+    for (const [a, b] of pairs) {
+      for (const [from, to] of [[a, b], [b, a]]) {
+        const src = fallback.get(from);
+        if (src === undefined) continue;
+        const dst = fallback.get(to);
+        if (dst === undefined || (src.conflicted && !dst.conflicted)) {
+          fallback.set(to, { conflicted: src.conflicted, blockers: [...src.blockers] });
+          joined = true;
+        }
+      }
+    }
+    if (!joined) return;
+  }
+}
+
+function combinedAddCompanion(fallback, path) {
+  if (!fallback.has(path)) fallback.set(path, { conflicted: false, blockers: [] });
+}
+
+function combinedRenamePairs(diffs) {
+  return diffs.filter((d) => d.oldPath !== undefined).map((d) => [d.oldPath, d.path]);
+}
+
+function combinedTouches(d, set) {
+  return set.has(d.path) || (d.oldPath !== undefined && set.has(d.oldPath));
+}
+
+/** replay.rs `combined_diff`. */
+async function devCombinedDiff(cwd, hashesIn, pathsIn) {
+  const version = await combinedGitVersion();
+  if (!(version !== null && (version[0] > 2 || (version[0] === 2 && version[1] >= 38)))) {
+    const found = version !== null ? `${version[0]}.${version[1]}` : "unknown";
+    throw new Error(`Combined diffs need git 2.38 or later (found ${found}).`);
+  }
+  const hashes = combinedValidateHashes(hashesIn);
+  const commits = await combinedResolveAndOrder(cwd, hashes);
+  const core = await loadDevCore();
+  const repo = new CombinedRepo(cwd, pathsIn && pathsIn.length > 0 ? pathsIn : null, core);
+
+  // 1. Trees and first parents of the selection and of those parents.
+  const selected = commits.map((c) => c.hash);
+  const meta = await repo.treesAndParents(selected);
+  const parents = [];
+  for (const h of selected) {
+    const p = meta.get(h)[1];
+    if (p !== null && !parents.includes(p) && !meta.has(p)) parents.push(p);
+  }
+  const parentMeta = parents.length === 0 ? new Map() : await repo.treesAndParents(parents);
+  const treeOf = (h) => (meta.get(h) ?? parentMeta.get(h))?.[0] ?? "";
+  const replayed = selected.map((h) => {
+    const [tree, parent] = meta.get(h);
+    return { hash: h, tree, parent, parentTree: parent !== null ? treeOf(parent) : null };
+  });
+
+  const base = replayed[0].parent;
+  const baseTree = replayed[0].parentTree ?? (await repo.emptyTree());
+
+  // 2. Replay, recording each step and growing the fallback set.
+  let acc = baseTree;
+  const fallback = new Map();
+  const steps = [];
+  for (let i = 0; i < replayed.length; i++) {
+    const c = replayed[i];
+    const parentTree = c.parentTree ?? (await repo.emptyTree());
+    const merged = acc !== parentTree;
+    const [result, conflicted] = merged ? await repo.merge(parentTree, acc, c.tree) : [c.tree, null];
+    const step = await repo.diff(acc, result, true, []);
+    const ciChanges = merged ? await repo.touched(parentTree, c.tree) : [];
+    if (conflicted !== null) {
+      // (a) conflicted, with blockers.
+      const earlier = replayed.slice(0, i).map((r) => r.hash);
+      for (const path of conflicted.filter((p) => repo.inPaths(p))) {
+        if (fallback.get(path)?.conflicted) continue;
+        const blockers = c.parent !== null ? await repo.blockers(c.parent, base, earlier, path) : [];
+        fallback.set(path, { conflicted: true, blockers });
+      }
+      // (b), (c) companions.
+      for (const d of step) {
+        combinedAddCompanion(fallback, d.path);
+        if (d.oldPath !== undefined) combinedAddCompanion(fallback, d.oldPath);
+      }
+      for (const [old, path] of ciChanges) {
+        if (old !== null) combinedAddCompanion(fallback, old);
+        combinedAddCompanion(fallback, path);
+      }
+    } else if (merged) {
+      // A clean merge is only trusted for the built-in text driver.
+      const candidates = [];
+      for (const d of step) {
+        candidates.push(d.path);
+        if (d.oldPath !== undefined) candidates.push(d.oldPath);
+      }
+      for (const [old, path] of ciChanges) {
+        if (old !== null) candidates.push(old);
+        candidates.push(path);
+      }
+      const unique = [...new Set(candidates)].sort(byteCmp);
+      for (const path of await repo.mergeDriven(unique)) combinedAddCompanion(fallback, path);
+    }
+    // After every step: the fallback set is closed under renames.
+    if (fallback.size > 0) {
+      const pairs = combinedRenamePairs(step);
+      for (const [old, path] of ciChanges) if (old !== null) pairs.push([old, path]);
+      combinedJoinPairs(fallback, pairs);
+    }
+    steps.push(step);
+    acc = result;
+  }
+
+  // 3. Net diff. A rename pair touching the fallback goes there whole.
+  let diffs = await repo.diff(baseTree, acc, false, []);
+  combinedJoinPairs(fallback, combinedRenamePairs(diffs));
+  diffs = diffs.filter((d) => !combinedTouches(d, fallback));
+
+  // 5. Steps: no fallback file, no file with any truncated entry.
+  const truncated = new Set();
+  for (const d of [...diffs, ...steps.flat()]) {
+    if (d.truncatedFromBytes === undefined) continue;
+    truncated.add(d.path);
+    if (d.oldPath !== undefined) truncated.add(d.oldPath);
+  }
+  const keptSteps = steps.map((step) =>
+    step.filter(
+      (d) =>
+        !combinedTouches(d, fallback) &&
+        !truncated.has(d.path) &&
+        !(d.oldPath !== undefined && truncated.has(d.oldPath)),
+    ),
+  );
+
+  // 4. Per-commit diffs of the fallback files, in replay order.
+  const perPath = new Map();
+  if (fallback.size > 0) {
+    const fbPaths = [...fallback.keys()].sort(byteCmp);
+    const whole = new CombinedRepo(cwd, null, core);
+    for (const c of replayed) {
+      const parentTree = c.parentTree ?? (await repo.emptyTree());
+      for (const d of await whole.diff(parentTree, c.tree, false, fbPaths)) {
+        const owner = fallback.has(d.path)
+          ? d.path
+          : d.oldPath !== undefined && fallback.has(d.oldPath)
+            ? d.oldPath
+            : null;
+        if (owner === null) continue;
+        if (!perPath.has(owner)) perPath.set(owner, []);
+        perPath.get(owner).push({ hash: c.hash, diff: d });
+      }
+    }
+  }
+  // Fallback paths no selected commit touches are conflict artefacts.
+  const fallbackOut = [];
+  for (const [path, fb] of [...fallback.entries()].sort(([a], [b]) => byteCmp(a, b))) {
+    const perCommit = perPath.get(path);
+    if (perCommit === undefined) continue;
+    fallbackOut.push({ path, conflicted: fb.conflicted, perCommit, blockers: fb.blockers });
+  }
+
+  return { base, commits, diffs, steps: keptSteps, fallback: fallbackOut };
+}
+
+/**
  * Resolve the repo's mainline branch name — mirrors `resolve_default_branch`
  * in `src-tauri/src/git/cmd.rs`. Shared by the git-branches, git-branch-top-
  * authors, and git-branch-merged routes below (#136).
@@ -4820,6 +5343,22 @@ async function handleRequest(req, res) {
         return jsonResponse(req, res, diffs);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/git-combined-diff  { cwd, hashes, paths? }  → CombinedDiff
+    // Mirrors `git_combined_diff` (commands/combined.rs + combined/): see
+    // `devCombinedDiff`. Refused input → 400, any other failure → 500.
+    if (url.pathname === "/api/git-combined-diff" && req.method === "POST") {
+      const { cwd, hashes, paths } = await readBody(req);
+      const strings = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+      if (typeof cwd !== "string" || !cwd || !strings(hashes) || (paths != null && !strings(paths))) {
+        return jsonResponse(req, res, { error: "Missing cwd or hashes" }, 400);
+      }
+      try {
+        return jsonResponse(req, res, await devCombinedDiff(resolve(cwd), hashes, paths ?? null));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, err instanceof CombinedInputError ? 400 : 500);
       }
     }
 

@@ -174,6 +174,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   git_checkout_commit: { route: "/api/git-checkout-commit" },
   git_cherry_pick: { route: "/api/git-cherry-pick" },
   git_clone: { route: "/api/git-clone" },
+  git_combined_diff: { route: "/api/git-combined-diff" },
   git_commit: { route: "/api/git-commit" },
   git_commit_submodule_changes: { route: "/api/git-commit-submodule-changes" },
   git_create_branch: { route: "/api/git-create-branch" },

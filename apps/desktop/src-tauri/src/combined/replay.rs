@@ -304,9 +304,38 @@ impl<'a> Repo<'a> {
         if paths.is_empty() {
             return Ok(out);
         }
+        // Paths go through stdin (NUL-terminated): a large step can list more
+        // paths than an argv holds.
         let mut cmd = self.git();
-        cmd.args(["check-attr", "-z", "merge", "--"]).args(paths);
-        let stdout = self.stdout(cmd, "check-attr")?;
+        cmd.args(["check-attr", "--stdin", "-z", "merge"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to run git check-attr: {e}"))?;
+        let input: Vec<u8> = paths
+            .iter()
+            .flat_map(|p| p.bytes().chain(std::iter::once(0)))
+            .collect();
+        let mut stdin = child.stdin.take().expect("stdin was piped");
+        // Written on its own thread: git answers while it reads, so a large
+        // input must not wait for stdout to be drained.
+        let writer = std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = stdin.write_all(&input);
+        });
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to run git check-attr: {e}"))?;
+        let _ = writer.join();
+        if !output.status.success() {
+            return Err(format!(
+                "git check-attr failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         // `-z`: `<path>\0merge\0<value>\0` per path.
         let fields: Vec<&str> = stdout.split('\0').collect();
         for chunk in fields.chunks(3) {

@@ -1552,52 +1552,141 @@ export async function gitInteractiveRebase(
 /**
  * Get the diff(s) for a specific commit.
  */
+/** A `GitDiff` as serde emits it: hunk fields in snake_case. */
+export interface RawGitDiff {
+  path: string;
+  hunks: Array<{
+    header: string;
+    old_start: number;
+    old_count: number;
+    new_start: number;
+    new_count: number;
+    lines: Array<{
+      type: string;
+      content: string;
+      old_line_no?: number | null;
+      new_line_no?: number | null;
+    }>;
+  }>;
+  status?: string;
+  oldPath?: string;
+  truncatedFromBytes?: number;
+}
+
+/** Maps a Rust `GitDiff` (snake_case hunks) to the frontend `GitDiff`. */
+export function mapRawGitDiff(d: RawGitDiff): GitDiff {
+  return {
+    path: d.path,
+    hunks: d.hunks.map((h) => ({
+      header: h.header,
+      oldStart: h.old_start,
+      oldCount: h.old_count,
+      newStart: h.new_start,
+      newCount: h.new_count,
+      lines: h.lines.map((l) => ({
+        type: l.type as "context" | "add" | "delete",
+        content: l.content,
+        // serde emits `null` for a side the line is not on.
+        oldLineNo: l.old_line_no as number | undefined,
+        newLineNo: l.new_line_no as number | undefined,
+      })),
+    })),
+    status: d.status as GitDiff["status"],
+    oldPath: d.oldPath,
+    ...(d.truncatedFromBytes !== undefined ? { truncatedFromBytes: d.truncatedFromBytes } : {}),
+  };
+}
+
 export async function getGitShow(cwd: string, hash: string): Promise<GitDiff[]> {
   if (isTauri()) {
-    const raw = await tauriInvoke<
-      Array<{
-        path: string;
-        hunks: Array<{
-          header: string;
-          old_start: number;
-          old_count: number;
-          new_start: number;
-          new_count: number;
-          lines: Array<{
-            type: string;
-            content: string;
-            old_line_no?: number;
-            new_line_no?: number;
-          }>;
-        }>;
-        status?: string;
-        oldPath?: string;
-      }>
-    >("git_show", { cwd, hash });
-
-    return raw.map((d) => ({
-      path: d.path,
-      hunks: d.hunks.map((h) => ({
-        header: h.header,
-        oldStart: h.old_start,
-        oldCount: h.old_count,
-        newStart: h.new_start,
-        newCount: h.new_count,
-        lines: h.lines.map((l) => ({
-          type: l.type as "context" | "add" | "delete",
-          content: l.content,
-          oldLineNo: l.old_line_no,
-          newLineNo: l.new_line_no,
-        })),
-      })),
-      status: d.status as GitDiff["status"],
-      oldPath: d.oldPath,
-    }));
+    const raw = await tauriInvoke<RawGitDiff[]>("git_show", { cwd, hash });
+    return raw.map(mapRawGitDiff);
   }
 
   const qs = `?cwd=${encodeURIComponent(cwd)}&hash=${encodeURIComponent(hash)}`;
   const res = await devFetch(`${DEV_SERVER}/api/git-show${qs}`);
   if (!res.ok) throw new Error(`Failed to get commit diff: ${res.status}`);
+  return res.json();
+}
+
+// ─── Combined diff (v3.15) ───────────────────────────────────
+
+/** A selected commit, in replay order. */
+export interface CombinedCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  /** Author date, strict ISO 8601. */
+  date: string;
+}
+
+/** A file the replay could not merge: shown commit by commit. */
+export interface CombinedFallbackFile {
+  path: string;
+  /**
+   * `merge-tree` reported it (or its rename partner). `false` = a companion
+   * that falls back conservatively: never describe it as a conflict.
+   */
+  conflicted: boolean;
+  /** Replay order. */
+  perCommit: { hash: string; diff: GitDiff }[];
+  /**
+   * Full hashes, at most 5; only for conflicted files. Conflicted with no
+   * blocker = a conflict between selected commits.
+   */
+  blockers: string[];
+}
+
+export interface CombinedDiff {
+  /** Full hash of the replay base; `null` = the empty tree. */
+  base: string | null;
+  /** Replay order (ancestors first). */
+  commits: CombinedCommit[];
+  /** Net diff, fallback files removed. */
+  diffs: GitDiff[];
+  /** `steps[i]` = `-U0` diff of commit i's replay, fallback files removed. */
+  steps: GitDiff[][];
+  fallback: CombinedFallbackFile[];
+}
+
+/**
+ * Combined diff of 2 to 50 commits (any order), optionally limited to
+ * `paths`. Throws the backend's message (invalid hash, bounds, unknown
+ * commit, git too old) so the view can show it.
+ */
+export async function getCombinedDiff(cwd: string, hashes: string[], paths?: string[]): Promise<CombinedDiff> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<
+      Omit<CombinedDiff, "diffs" | "steps" | "fallback"> & {
+        diffs: RawGitDiff[];
+        steps: RawGitDiff[][];
+        fallback: Array<Omit<CombinedFallbackFile, "perCommit"> & { perCommit: { hash: string; diff: RawGitDiff }[] }>;
+      }
+    >("git_combined_diff", { cwd, hashes, paths });
+    return {
+      base: raw.base,
+      commits: raw.commits,
+      diffs: raw.diffs.map(mapRawGitDiff),
+      steps: raw.steps.map((step) => step.map(mapRawGitDiff)),
+      fallback: raw.fallback.map((f) => ({
+        path: f.path,
+        conflicted: f.conflicted,
+        perCommit: f.perCommit.map((p) => ({ hash: p.hash, diff: mapRawGitDiff(p.diff) })),
+        blockers: f.blockers,
+      })),
+    };
+  }
+
+  const res = await devFetch(`${DEV_SERVER}/api/git-combined-diff`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(paths === undefined ? { cwd, hashes } : { cwd, hashes, paths }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Failed to get combined diff: ${res.status}`);
+  }
   return res.json();
 }
 
