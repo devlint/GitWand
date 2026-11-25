@@ -6935,8 +6935,9 @@ async function handleRequest(req, res) {
         // the base repo, whose PRs the detail requests reviewers on.
         const base = await devRestBaseNwo(resolve(cwd), token);
         if (!base) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        const target = url.searchParams.get("repo");
         const origin = getRepoNwo(resolve(cwd));
+        // "origin": the create form's default target (`ORIGIN_TARGET`).
+        const target = url.searchParams.get("repo") === "origin" ? origin : url.searchParams.get("repo");
         const same = (a, b) => a && b && a.toLowerCase() === b.toLowerCase();
         if (target && !same(target, origin) && !same(target, base)) {
           return jsonResponse(req, res, { error: `${target} is neither this repository nor its parent` }, 400);

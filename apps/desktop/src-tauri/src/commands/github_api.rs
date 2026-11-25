@@ -916,19 +916,21 @@ fn merged_prs_page(
             break;
         }
     }
-    // Only the numbers the slice keeps are read as pull requests.
-    numbers
-        .iter()
-        .skip(skip)
-        .take(count)
-        .map(|num| {
+    // Only the numbers the slice keeps are read as pull requests, in
+    // parallel; one that cannot be read is left out rather than failing the
+    // page.
+    let wanted: Vec<i64> = numbers.into_iter().skip(skip).take(count).collect();
+    Ok(wanted
+        .par_iter()
+        .filter_map(|num| {
             api_json_cached(
                 &format!("{}/repos/{}/pulls/{}", API_BASE, repo, num),
                 token,
                 None,
             )
+            .ok()
         })
-        .collect()
+        .collect())
 }
 
 /// How `rest_list_prs` pages through `offset + limit` PRs: `(per_page,
@@ -2154,8 +2156,8 @@ pub(crate) fn rest_pr_ready(cwd: &str, number: i64, token: &str) -> Result<(), S
 ///
 /// The PR number refers to the list the user is looking at, and `rest_list_prs`
 /// lists the *base* repo (the upstream for a fork). Resolve the repo the same
-/// way — going through `get_pr_json` (origin first) would patch the fork's own
-/// PR of the same number.
+/// way as every PR action (`get_pr_json`): the base repo, never origin, which
+/// would patch the fork's own PR of the same number.
 pub(crate) fn rest_pr_edit(
     cwd: &str,
     number: i64,
@@ -2399,13 +2401,16 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
         };
         let ff = ancestor(&local_ref, &fetched)?;
         // The PR head recorded at the last checkout. `pr-<n>` ahead of a PR
-        // that has not moved since is local work (commits, a merge of main):
-        // checked out as it is. Ahead of a PR whose head moved back is the PR
-        // rewound: treated as diverged below. No record (a checkout before
-        // this): local work.
+        // that has not moved back since is local work (commits, a merge of
+        // main, commits pushed to the PR meanwhile): checked out as it is.
+        // Ahead of a PR whose head moved back is the PR rewound: treated as
+        // diverged below. No record (a checkout before this): local work.
         let recorded = git(&["config", "--get", &head_key])?;
         let recorded = String::from_utf8_lossy(&recorded.stdout).trim().to_string();
-        let unchanged = recorded.is_empty() || recorded == fetched;
+        // A PR that moved forward (the recorded head is an ancestor of the
+        // fetched one) has not been rewound either.
+        let unchanged =
+            recorded.is_empty() || recorded == fetched || ancestor(&recorded, &fetched)?;
         if !ff && unchanged && ancestor(fetched.as_str(), &local_ref)? {
             let checkout = git(&["checkout", &local])?;
             return if checkout.status.success() {
@@ -3690,6 +3695,20 @@ mod checkout_pr_head_tests {
         assert!(err.contains("rewound"), "{err}");
         assert_eq!(repo.git(&["rev-parse", "pr-7"]), pr2);
         assert_eq!(git_at(&bare, &["rev-parse", "refs/pull/7/head"]), head);
+    }
+
+    /// The user pushed part of their pr-7 work to the PR: the PR moved
+    /// forward, pr-7 is still ahead of it — local work, not a rewind.
+    #[test]
+    fn a_pr_that_only_moved_forward_is_not_a_rewind() {
+        let (repo, _bare, _head) = with_pr7();
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        let a = repo.commit("a.txt", "a\n", "A");
+        let b = repo.commit("b.txt", "b\n", "B");
+        repo.git(&["push", "-q", "origin", &format!("{a}:refs/pull/7/head")]);
+        repo.git(&["checkout", "-q", "main"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), b);
     }
 
     /// The user's own commits on `pr-7` (ahead of the PR): checked out as

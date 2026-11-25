@@ -358,7 +358,7 @@ fn gh_create_pr_inner(
     draft: bool,
     reviewers: Option<Vec<String>>,
 ) -> Result<PullRequest, String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    let create = |tok: &str| {
         github_api::rest_create_pr(
             &cwd,
             title.clone(),
@@ -369,7 +369,19 @@ fn gh_create_pr_inner(
             reviewers.clone(),
             tok,
         )
-    }) {
+    };
+    // Into another repo (the fork's parent): an OAuth App refusal is that
+    // repo's organization's, remembered for it, not for the fork's own calls.
+    let rest = match base_repo.as_deref().filter(|r| !r.is_empty()) {
+        Some(parent) => github_api::with_rest_other_repo_using(
+            &cwd,
+            parent,
+            github_api::settings_github_token().as_deref(),
+            create,
+        ),
+        None => github_api::with_rest(&cwd, create),
+    };
+    if let Some(r) = rest {
         return r;
     }
     let mut args = vec![
@@ -525,6 +537,10 @@ pub(crate) async fn gh_create_pr(
     .map_err(|e| e.to_string())?
 }
 
+/// `repo` value naming origin without knowing its `owner/name` (the PR create
+/// form when its fork targets are not known). Not a valid `owner/name`.
+const ORIGIN_TARGET: &str = "origin";
+
 /// The repo whose assignees are the reviewer candidates: `target` when it is
 /// `origin` or the base repo (the PR create form's two fork targets), else
 /// the base repo — where the PR detail requests reviewers
@@ -536,6 +552,8 @@ fn reviewer_candidates_repo(
 ) -> Result<String, String> {
     match target {
         None => Ok(base.to_string()),
+        // The create form with no target picked: `createPr` creates on origin.
+        Some(ORIGIN_TARGET) => Ok(origin.to_string()),
         Some(t) if t.eq_ignore_ascii_case(origin) || t.eq_ignore_ascii_case(base) => {
             Ok(t.to_string())
         }
@@ -556,10 +574,14 @@ fn gh_list_reviewer_candidates_inner(
         // base repo, keyed like every PR call (`with_rest_pr`).
         let wants_origin = repo
             .as_deref()
-            .is_some_and(|r| r.eq_ignore_ascii_case(&origin.nwo));
+            .is_some_and(|r| r == ORIGIN_TARGET || r.eq_ignore_ascii_case(&origin.nwo));
         let list = |tok: &str| {
-            let base = github_api::base_owner_repo(&cwd, tok)?;
-            let nwo = reviewer_candidates_repo(repo.as_deref(), &origin.nwo, &base)?;
+            let nwo = if wants_origin {
+                origin.nwo.clone()
+            } else {
+                let base = github_api::base_owner_repo(&cwd, tok)?;
+                reviewer_candidates_repo(repo.as_deref(), &origin.nwo, &base)?
+            };
             super::gh_issues::rest_pages(&format!("repos/{}/assignees", nwo), tok, 3)
         };
         let rest = if wants_origin {
@@ -580,11 +602,15 @@ fn gh_reviewer_candidates_via_view(
     cwd: &str,
     repo: Option<&str>,
 ) -> Result<Vec<ReviewerCandidate>, String> {
-    let base = gh_base_nwo(cwd)?;
-    let origin = gh_origin_repo(cwd)
-        .map(|o| o.nwo)
-        .unwrap_or_else(|| base.clone());
-    let nwo = reviewer_candidates_repo(repo, &origin, &base)?;
+    let origin = gh_origin_repo(cwd).map(|o| o.nwo);
+    let nwo = match (repo, origin.as_deref()) {
+        // Origin itself: no fork lookup needed.
+        (Some(r), Some(o)) if r == ORIGIN_TARGET || r.eq_ignore_ascii_case(o) => o.to_string(),
+        _ => {
+            let base = gh_base_nwo(cwd)?;
+            reviewer_candidates_repo(repo, origin.as_deref().unwrap_or(&base), &base)?
+        }
+    };
     let output = gh_api_cmd(cwd)
         .args(["api", "--paginate", &format!("repos/{}/assignees", nwo)])
         .current_dir(cwd)
@@ -639,6 +665,10 @@ mod reviewer_candidates_repo_tests {
             "UP/p"
         );
         assert!(reviewer_candidates_repo(Some("other/x"), "me/p", "up/p").is_err());
+        assert_eq!(
+            reviewer_candidates_repo(Some("origin"), "me/p", "up/p").unwrap(),
+            "me/p"
+        );
     }
 }
 

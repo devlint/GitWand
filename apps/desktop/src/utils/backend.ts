@@ -3889,9 +3889,9 @@ export async function ghIssueComments(cwd: string, number: number): Promise<Issu
   return raw as IssueComment[];
 }
 
-/** Add a comment to an issue; returns the created comment. */
-/** `pr`: `number` is a pull request from the PR list (a Launchpad nudge),
- *  commented in the repo the PR lives in (the fork's parent on a fork). */
+/** Add a comment to an issue; returns the created comment. `pr`: `number` is
+ *  a pull request from the PR list (a Launchpad nudge), commented in the repo
+ *  the PR lives in (the fork's parent on a fork). */
 export async function ghIssueAddComment(
   cwd: string,
   number: number,
