@@ -385,20 +385,28 @@ async function rankByActivity(cwd: string, candidates: ReviewerCandidate[]): Pro
     .sort((a, b) => score(b) - score(a) || a.login.localeCompare(b.login));
 }
 
-onMounted(async () => {
+/** Candidates from the repo the PR will be created in: on a fork, the target
+ *  picked above (the fork or its parent) — reviewers are requested there. */
+let candidatesSeq = 0;
+async function loadReviewerCandidates() {
   if (!props.cwd) return;
+  const seq = ++candidatesSeq;
+  const target = p.newPrBaseRepo.value.trim() || undefined;
   reviewerCandidatesLoading.value = true;
   try {
     const provider = await forgeForRepo(props.cwd);
-    const candidates = await provider.listReviewerCandidates(props.cwd);
-    reviewerCandidates.value = await rankByActivity(props.cwd, candidates);
+    const candidates = await provider.listReviewerCandidates(props.cwd, target);
+    const ranked = await rankByActivity(props.cwd, candidates);
+    if (seq === candidatesSeq) reviewerCandidates.value = ranked;
   } catch {
     // Silently ignore — autocomplete is optional, manual typing still works.
-    reviewerCandidates.value = [];
+    if (seq === candidatesSeq) reviewerCandidates.value = [];
   } finally {
-    reviewerCandidatesLoading.value = false;
+    if (seq === candidatesSeq) reviewerCandidatesLoading.value = false;
   }
-});
+}
+onMounted(loadReviewerCandidates);
+watch(() => p.newPrBaseRepo.value, () => void loadReviewerCandidates());
 
 const filteredCandidates = computed<ReviewerCandidate[]>(() => {
   const q = reviewerInput.value.trim().replace(/^@/, "").toLowerCase();

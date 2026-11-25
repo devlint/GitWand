@@ -176,8 +176,9 @@ export interface ForgeProvider {
   /** Login de l'utilisateur courant (pour filtrage Assigned to me). */
   getCurrentUser(cwd: string): Promise<string>;
 
-  /** Utilisateurs pouvant être reviewers sur ce repo. */
-  listReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]>;
+  /** Utilisateurs pouvant être reviewers sur ce repo. `repo` (GitHub, sur un
+   *  fork) : la cible choisie à la création d'une PR — le fork ou son parent. */
+  listReviewerCandidates(cwd: string, repo?: string): Promise<ReviewerCandidate[]>;
 
   /**
    * Server-side branch names (heads) of the repo. Optional: forges implement

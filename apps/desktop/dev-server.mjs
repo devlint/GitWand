@@ -6442,33 +6442,53 @@ async function handleRequest(req, res) {
         // every per-PR route then resolves in the parent.
         const nwo = await devRestBaseNwo(resolve(cwd), token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo from git remote origin" }, 400);
-        // `rest_list_prs` / `list_page_plan`: an unfiltered state starts at
-        // the page holding `offset`; `merged` reads full pages from page 1.
+        // `list_page_plan`: start at the page holding `offset`.
         const merged = state === "merged";
-        const keep = (pr) => !merged || pr.merged_at != null;
-        // `list_page_plan`: merged reads full pages from page 1.
-        const pageSize = merged ? 100 : perPage;
-        const firstPage = merged ? 1 : Math.floor(offset / pageSize) + 1;
-        const skipped = merged ? 0 : (firstPage - 1) * pageSize;
+        const firstPage = Math.floor(offset / perPage) + 1;
+        const skipped = (firstPage - 1) * perPage;
         let fetched = [];
-        for (let page = firstPage; page < firstPage + 10; page++) {
-          const resp = await githubFetch(
-            `/repos/${nwo}/pulls?state=${apiState}&per_page=${pageSize}&page=${page}&sort=updated&direction=desc`,
-            token,
-          );
-          if (!resp.ok) {
-            const text = await resp.text();
-            return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+        if (merged) {
+          // `merged_prs_page`: the search API pages merged PRs directly; each
+          // number is then read as a pull request.
+          const numbers = [];
+          for (let page = firstPage; ; page++) {
+            const resp = await githubFetch(
+              `/search/issues?q=${encodeURIComponent(`repo:${nwo} type:pr is:merged`)}&sort=updated&order=desc&per_page=${perPage}&page=${page}`,
+              token,
+            );
+            if (!resp.ok) {
+              const text = await resp.text();
+              return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+            }
+            const items = (await resp.json())?.items ?? [];
+            numbers.push(...items.map((i) => i.number));
+            if (items.length < perPage || skipped + numbers.length >= limit + offset) break;
           }
-          const chunk = (await resp.json()) ?? [];
-          fetched = fetched.concat(chunk);
-          if (chunk.length < pageSize) break;
-          if (skipped + fetched.filter(keep).length >= limit + offset) break;
+          for (const n of numbers.slice(0, limit + offset - skipped)) {
+            const resp = await githubFetch(`/repos/${nwo}/pulls/${n}`, token);
+            if (!resp.ok) {
+              const text = await resp.text();
+              return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+            }
+            fetched.push(await resp.json());
+          }
+        } else {
+          for (let page = firstPage; page < firstPage + 10; page++) {
+            const resp = await githubFetch(
+              `/repos/${nwo}/pulls?state=${apiState}&per_page=${perPage}&page=${page}&sort=updated&direction=desc`,
+              token,
+            );
+            if (!resp.ok) {
+              const text = await resp.text();
+              return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+            }
+            const chunk = (await resp.json()) ?? [];
+            fetched = fetched.concat(chunk);
+            if (chunk.length < perPage || skipped + fetched.length >= limit + offset) break;
+          }
         }
-        // Past the page cap, merged returns what it found (`rest_list_prs`).
-        const kept = fetched.filter(keep);
         const from = Math.max(0, offset - skipped);
-        const raw = kept.slice(from, from + limit);
+        const raw = fetched.slice(from, from + limit);
         const prs = raw.map((pr) => ({
           number: pr.number,
           title: pr.title,
@@ -6908,10 +6928,18 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        // `gh_list_reviewer_candidates`: the base repo's assignees (the fork
-        // parent's), the repo its PRs request reviewers on.
-        const nwo = await devRestBaseNwo(resolve(cwd), token);
-        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        // `gh_list_reviewer_candidates` / `reviewer_candidates_repo`: the
+        // target named by the create form (origin or the base repo), else
+        // the base repo, whose PRs the detail requests reviewers on.
+        const base = await devRestBaseNwo(resolve(cwd), token);
+        if (!base) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const target = url.searchParams.get("repo");
+        const origin = getRepoNwo(resolve(cwd));
+        const same = (a, b) => a && b && a.toLowerCase() === b.toLowerCase();
+        if (target && !same(target, origin) && !same(target, base)) {
+          return jsonResponse(req, res, { error: `${target} is neither this repository nor its parent` }, 400);
+        }
+        const nwo = target || base;
         // Up to 3 pages of 100, read like the Rust `api_get_pages` (an error
         // page fails the call instead of returning partial data).
         const items = await devGithubPages(`/repos/${nwo}/assignees`, "", token, 3);
@@ -9459,10 +9487,20 @@ async function handleRequest(req, res) {
             // CI flips, review requests and new comments. Mirror of the Rust
             // change in `commands/workspace.rs`. This runs on the background
             // Launchpad poller (~60 s), so the extra cost is acceptable.
-            const raw = execSync(
-              "gh pr list --state open --json number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,labels,assignees,reviewRequests,reviewDecision,mergeStateStatus,statusCheckRollup,comments --limit 10",
-              { cwd: repo.path, encoding: "utf-8" }
+            // The base repo (`gh_base_cmd`, like `workspace_list_prs_all`):
+            // the numbers the nudge then comments on resolve there (#262).
+            const r = spawnSync(
+              GH,
+              [
+                "pr", "list", "--state", "open",
+                "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,labels,assignees,reviewRequests,reviewDecision,mergeStateStatus,statusCheckRollup,comments",
+                "--limit", "10",
+              ],
+              { cwd: repo.path, encoding: "utf-8", env: ghRepoEnv(devGhBaseNwo(repo.path)) },
             );
+            if (r.error) throw r.error;
+            if (r.status !== 0) throw new Error((r.stderr || "gh pr list failed").trim());
+            const raw = r.stdout;
             const ghPrs = JSON.parse(raw || "[]");
             const prs = ghPrs.map(pr => ({
               number: pr.number,

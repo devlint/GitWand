@@ -871,16 +871,62 @@ pub(crate) fn rest_current_user(token: &str) -> Result<String, String> {
     Ok(login)
 }
 
+/// Up to `count` merged pull requests of `repo`, most recently updated first,
+/// from search-API pages of `per_page` starting at `first_page`, each read as
+/// a pull-request object.
+fn merged_prs_page(
+    repo: &str,
+    per_page: usize,
+    first_page: usize,
+    count: usize,
+    token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut numbers: Vec<i64> = Vec::new();
+    for n in first_page.. {
+        let v = api_json_cached(
+            &format!(
+                "{}/search/issues?q=repo:{}+type:pr+is:merged&sort=updated&order=desc&per_page={}&page={}",
+                API_BASE,
+                enc_nwo(repo),
+                per_page,
+                n
+            ),
+            token,
+            None,
+        )?;
+        let items = v
+            .get("items")
+            .and_then(|i| i.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let short = items.len() < per_page;
+        numbers.extend(
+            items
+                .iter()
+                .filter_map(|i| i.get("number").and_then(|x| x.as_i64())),
+        );
+        if short || numbers.len() >= count {
+            break;
+        }
+    }
+    numbers.truncate(count);
+    numbers
+        .iter()
+        .map(|num| {
+            api_json_cached(
+                &format!("{}/repos/{}/pulls/{}", API_BASE, repo, num),
+                token,
+                None,
+            )
+        })
+        .collect()
+}
+
 /// How `rest_list_prs` pages through `offset + limit` PRs: `(per_page,
 /// first_page, PRs on the pages skipped before it)`. Up to 100, one page of
-/// exactly that size (as before); past 100, pages of 100. An unfiltered state
-/// starts at the page holding `offset`; `merged` (closed PRs, filtered) reads
-/// pages of 100 from the first one.
-fn list_page_plan(offset: usize, limit: usize, merged: bool) -> (usize, usize, usize) {
-    if merged {
-        // Merged PRs can be rare among closed ones: always full pages.
-        return (100, 1, 0);
-    }
+/// exactly that size (as before); past 100, pages of 100, starting at the
+/// page holding `offset` (the search API pages merged PRs the same way).
+fn list_page_plan(offset: usize, limit: usize) -> (usize, usize, usize) {
     let per_page = (offset + limit).clamp(1, 100);
     let first_page = offset / per_page + 1;
     (per_page, first_page, (first_page - 1) * per_page)
@@ -919,9 +965,20 @@ pub(crate) fn rest_list_prs(
     // offset 100 and stopped "load more" there.
     let want = (page + off) as usize;
     let merged = state == "merged";
-    let (per_page, first_page, skip_in_pages) = list_page_plan(off as usize, page as usize, merged);
+    let (per_page, first_page, skip_in_pages) = list_page_plan(off as usize, page as usize);
     let mut raw: Vec<serde_json::Value> = Vec::new();
+    if merged {
+        // Merged PRs come from the search API (`is:merged`, like the count),
+        // which pages them directly: closed pages filtered client-side hit a
+        // page cap, then an empty page that ended "load more". Each number is
+        // then read as a pull request (the enrichment below reads the same
+        // URL, so the ETag cache answers it).
+        raw = merged_prs_page(&base, per_page, first_page, want - skip_in_pages, token)?;
+    }
     for n in first_page..first_page + LIST_PRS_MAX_PAGES {
+        if merged {
+            break;
+        }
         let chunk: Vec<serde_json::Value> = api_json_cached(
             &format!(
                 "{}/repos/{}/pulls?state={}&per_page={}&page={}&sort=updated&direction=desc",
@@ -942,9 +999,6 @@ pub(crate) fn rest_list_prs(
             break;
         }
     }
-    // `merged` past the page cap (1 000 closed PRs read) returns the merged
-    // ones found so far: a short list, not an error.
-
     let mut prs: Vec<PullRequest> = raw.iter().filter(|pr| keep(pr)).map(json_to_pr).collect();
     let skip = (off as usize).saturating_sub(skip_in_pages).min(prs.len());
     prs.drain(..skip);
@@ -2262,25 +2316,6 @@ pub(crate) fn rest_checkout_pr(cwd: &str, number: i64, token: &str) -> Result<()
     checkout_pr_head(cwd, &fetch_target, number)
 }
 
-/// Whether every commit `local_ref` has beyond `FETCH_HEAD` was authored by
-/// the repo's `user.email` (local work on the PR branch), as opposed to
-/// commits the PR's author dropped from the PR.
-fn extra_commits_are_mine(
-    git: &impl Fn(&[&str]) -> Result<std::process::Output, String>,
-    local_ref: &str,
-) -> Result<bool, String> {
-    let me = String::from_utf8_lossy(&git(&["config", "user.email"])?.stdout)
-        .trim()
-        .to_lowercase();
-    if me.is_empty() {
-        return Ok(false);
-    }
-    let range = format!("FETCH_HEAD..{}", local_ref);
-    let authors = git(&["log", "--format=%ae", &range])?;
-    let authors = String::from_utf8_lossy(&authors.stdout);
-    Ok(authors.lines().all(|a| a.trim().to_lowercase() == me))
-}
-
 /// Fetch `pull/<number>/head` from `fetch_target` and check it out as the
 /// local branch `pr-<number>`. The fetch lands in `FETCH_HEAD`, then the
 /// branch is created there or moved forward to it; it is never rewritten. A
@@ -2310,6 +2345,20 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
     }
     let local = format!("pr-{}", number);
     let local_ref = format!("refs/heads/{}", local);
+    // `branch.pr-<n>.gitwandPrHead`: the PR head this branch was last checked
+    // out at (config, not a ref: nothing extra in the Git Tree).
+    let head_key = format!("branch.{}.gitwandPrHead", local);
+    let fetched = String::from_utf8_lossy(&git(&["rev-parse", "FETCH_HEAD"])?.stdout)
+        .trim()
+        .to_string();
+    let record = || -> Result<(), String> {
+        let out = git(&["config", &head_key, &fetched])?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(fail("git config", &out))
+        }
+    };
     let exists = git(&["show-ref", "--verify", "--quiet", &local_ref])?
         .status
         .success();
@@ -2320,13 +2369,18 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
                 .success())
         };
         let ff = ancestor(&local_ref, "FETCH_HEAD")?;
-        if !ff && ancestor("FETCH_HEAD", &local_ref)? && extra_commits_are_mine(&git, &local_ref)? {
-            // `pr-<n>` is ahead of the PR with the user's own commits: it is
-            // checked out as it is. Ahead with someone else's commits is the
-            // PR rewound by its author: treated as diverged below.
+        // The PR head recorded at the last checkout. `pr-<n>` ahead of a PR
+        // that has not moved since is local work (commits, a merge of main):
+        // checked out as it is. Ahead of a PR whose head moved back is the PR
+        // rewound: treated as diverged below. No record (a checkout before
+        // this): local work.
+        let recorded = git(&["config", "--get", &head_key])?;
+        let recorded = String::from_utf8_lossy(&recorded.stdout).trim().to_string();
+        let unchanged = recorded.is_empty() || recorded == fetched;
+        if !ff && unchanged && ancestor("FETCH_HEAD", &local_ref)? {
             let checkout = git(&["checkout", &local])?;
             return if checkout.status.success() {
-                Ok(())
+                record()
             } else {
                 Err(fail(&format!("git checkout {}", local), &checkout))
             };
@@ -2344,7 +2398,7 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
         if on_it {
             let merge = git(&["merge", "--ff-only", "-q", "FETCH_HEAD"])?;
             return if merge.status.success() {
-                Ok(())
+                record()
             } else {
                 Err(fail("git merge --ff-only", &merge))
             };
@@ -2355,7 +2409,7 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
         }
         let checkout = git(&["checkout", &local])?;
         return if checkout.status.success() {
-            Ok(())
+            record()
         } else {
             Err(fail(&format!("git checkout {}", local), &checkout))
         };
@@ -2364,7 +2418,7 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
     if !checkout.status.success() {
         return Err(fail(&format!("git checkout -b {}", local), &checkout));
     }
-    Ok(())
+    record()
 }
 
 // ─── Reactions ──────────────────────────────────────────────────────────────
@@ -3462,22 +3516,16 @@ mod list_page_plan_tests {
 
     #[test]
     fn small_windows_are_one_page_from_the_start() {
-        assert_eq!(list_page_plan(0, 10, false), (10, 1, 0));
-        assert_eq!(list_page_plan(40, 10, false), (50, 1, 0));
+        assert_eq!(list_page_plan(0, 10), (10, 1, 0));
+        assert_eq!(list_page_plan(40, 10), (50, 1, 0));
     }
 
     /// Past 100: pages of 100, starting at the one holding `offset`, so
     /// "load more" never hits a wall or an empty page.
     #[test]
     fn past_100_it_starts_at_the_offsets_page() {
-        assert_eq!(list_page_plan(100, 10, false), (100, 2, 100));
-        assert_eq!(list_page_plan(1_250, 50, false), (100, 13, 1_200));
-    }
-
-    #[test]
-    fn merged_reads_full_pages_from_the_first_one() {
-        assert_eq!(list_page_plan(250, 50, true), (100, 1, 0));
-        assert_eq!(list_page_plan(0, 10, true), (100, 1, 0));
+        assert_eq!(list_page_plan(100, 10), (100, 2, 100));
+        assert_eq!(list_page_plan(1_250, 50), (100, 13, 1_200));
     }
 }
 
@@ -3588,21 +3636,14 @@ mod checkout_pr_head_tests {
         assert_eq!(repo.git(&["symbolic-ref", "--short", "HEAD"]), "main");
     }
 
-    /// The PR rewound by its author (pr-7 ahead with the author's commit):
-    /// refused like a divergence, pr-7 left as it is.
+    /// The PR rewound (by anyone, its author or the user as maintainer):
+    /// pr-7 ahead of a PR head that moved back is refused like a divergence,
+    /// pr-7 left as it is.
     #[test]
-    fn refuses_a_pr_rewound_by_its_author() {
+    fn refuses_a_rewound_pr() {
         let (repo, bare, head) = with_pr7();
         repo.git(&["checkout", "-q", "-b", "next", &head]);
-        repo.git(&[
-            "-c",
-            "user.email=author@example.com",
-            "commit",
-            "-q",
-            "--allow-empty",
-            "-m",
-            "pr 2",
-        ]);
+        repo.git(&["commit", "-q", "--allow-empty", "-m", "pr 2"]);
         let pr2 = repo.git(&["rev-parse", "HEAD"]);
         repo.git(&["push", "-q", "origin", "next:refs/pull/7/head"]);
         repo.git(&["checkout", "-q", "main"]);
@@ -3636,6 +3677,15 @@ mod checkout_pr_head_tests {
         // Already on it: still fine.
         checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
         assert_eq!(repo.git(&["rev-parse", "HEAD"]), mine);
+        // A merge of main on top (others' commits): still local work.
+        repo.git(&["checkout", "-q", "main"]);
+        repo.commit("main.txt", "x\n", "main moves");
+        repo.git(&["checkout", "-q", "pr-7"]);
+        repo.git(&["merge", "-q", "--no-edit", "main"]);
+        let merged = repo.git(&["rev-parse", "HEAD"]);
+        repo.git(&["checkout", "-q", "main"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), merged);
     }
 }
 

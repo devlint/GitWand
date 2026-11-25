@@ -525,28 +525,55 @@ pub(crate) async fn gh_create_pr(
     .map_err(|e| e.to_string())?
 }
 
-fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
+/// The repo whose assignees are the reviewer candidates: `target` when it is
+/// `origin` or the base repo (the PR create form's two fork targets), else
+/// the base repo — where the PR detail requests reviewers
+/// (`rest_request_reviewers`). Any other `target` is refused.
+fn reviewer_candidates_repo(
+    target: Option<&str>,
+    origin: &str,
+    base: &str,
+) -> Result<String, String> {
+    match target {
+        None => Ok(base.to_string()),
+        Some(t) if t.eq_ignore_ascii_case(origin) || t.eq_ignore_ascii_case(base) => {
+            Ok(t.to_string())
+        }
+        Some(t) => Err(format!("{t} is neither this repository nor its parent")),
+    }
+}
+
+fn gh_list_reviewer_candidates_inner(
+    cwd: String,
+    repo: Option<String>,
+) -> Result<Vec<ReviewerCandidate>, String> {
     // Users with push access — the set GitHub allows as reviewers. With the
-    // Settings token: the base repo's (the fork parent's), over REST. Without:
-    // the same repo through `gh`.
-    if gh_origin_repo(&cwd).is_some() {
-        // The base repo's (the fork parent's): the candidates are requested
-        // on its PRs (`rest_request_reviewers`), and a fork's own assignees
-        // are rarely its parent's maintainers.
+    // Settings token over REST; without, through `gh`. On a fork, the PR
+    // create form names its target (the fork or its parent); the PR detail
+    // names none: the base repo, whose PRs it requests reviewers on.
+    if let Some(origin) = gh_origin_repo(&cwd) {
         if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
             let base = github_api::base_owner_repo(&cwd, tok)?;
-            super::gh_issues::rest_pages(&format!("repos/{}/assignees", base), tok, 3)
+            let nwo = reviewer_candidates_repo(repo.as_deref(), &origin.nwo, &base)?;
+            super::gh_issues::rest_pages(&format!("repos/{}/assignees", nwo), tok, 3)
         }) {
             return r.map(|items| super::gh_issues::assignees_from(&items));
         }
     }
-    gh_reviewer_candidates_via_view(&cwd)
+    gh_reviewer_candidates_via_view(&cwd, repo.as_deref())
 }
 
-/// Reviewer candidates over `gh`, from the base repo (`gh_base_nwo`).
-fn gh_reviewer_candidates_via_view(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
-    // The base repo, as the REST path and every PR command (#262).
-    let nwo = gh_base_nwo(cwd)?;
+/// Reviewer candidates over `gh` (`reviewer_candidates_repo`, base repo by
+/// default).
+fn gh_reviewer_candidates_via_view(
+    cwd: &str,
+    repo: Option<&str>,
+) -> Result<Vec<ReviewerCandidate>, String> {
+    let base = gh_base_nwo(cwd)?;
+    let origin = gh_origin_repo(cwd)
+        .map(|o| o.nwo)
+        .unwrap_or_else(|| base.clone());
+    let nwo = reviewer_candidates_repo(repo, &origin, &base)?;
     let output = gh_api_cmd(cwd)
         .args(["api", "--paginate", &format!("repos/{}/assignees", nwo)])
         .current_dir(cwd)
@@ -575,10 +602,33 @@ fn gh_reviewer_candidates_via_view(cwd: &str) -> Result<Vec<ReviewerCandidate>, 
 #[tauri::command]
 pub(crate) async fn gh_list_reviewer_candidates(
     cwd: String,
+    repo: Option<String>,
 ) -> Result<Vec<ReviewerCandidate>, String> {
-    tauri::async_runtime::spawn_blocking(move || gh_list_reviewer_candidates_inner(cwd))
+    tauri::async_runtime::spawn_blocking(move || gh_list_reviewer_candidates_inner(cwd, repo))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod reviewer_candidates_repo_tests {
+    use super::reviewer_candidates_repo;
+
+    #[test]
+    fn the_target_is_origin_or_the_base_repo_only() {
+        assert_eq!(
+            reviewer_candidates_repo(None, "me/p", "up/p").unwrap(),
+            "up/p"
+        );
+        assert_eq!(
+            reviewer_candidates_repo(Some("me/p"), "me/p", "up/p").unwrap(),
+            "me/p"
+        );
+        assert_eq!(
+            reviewer_candidates_repo(Some("UP/p"), "me/p", "up/p").unwrap(),
+            "UP/p"
+        );
+        assert!(reviewer_candidates_repo(Some("other/x"), "me/p", "up/p").is_err());
+    }
 }
 
 fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {

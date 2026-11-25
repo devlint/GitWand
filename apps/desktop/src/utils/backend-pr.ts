@@ -465,11 +465,11 @@ export interface ReviewerCandidate {
  * List candidate reviewers for the current repo (requires `gh` CLI).
  * Returns assignees from `gh api /repos/:owner/:repo/assignees` — i.e. users with push access.
  */
-export async function ghListReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
+export async function ghListReviewerCandidates(cwd: string, repo?: string): Promise<ReviewerCandidate[]> {
   if (isTauri()) {
     const raw = await tauriInvoke<
       Array<{ login: string; name?: string | null; avatar_url?: string | null }>
-    >("gh_list_reviewer_candidates", { cwd }, IPC_TIMEOUT.NETWORK); // up to 3 pages over the network
+    >("gh_list_reviewer_candidates", { cwd, repo: repo ?? null }, IPC_TIMEOUT.NETWORK); // up to 3 pages over the network
     return raw.map((u) => ({
       login: u.login,
       name: u.name ?? null,
@@ -477,7 +477,8 @@ export async function ghListReviewerCandidates(cwd: string): Promise<ReviewerCan
     }));
   }
   // Browser dev mode — call dev server (uses GitHub REST API directly)
-  const res = await devFetch(`${DEV_SERVER}/api/gh-reviewer-candidates?cwd=${encodeURIComponent(cwd)}`);
+  const repoParam = repo ? `&repo=${encodeURIComponent(repo)}` : "";
+  const res = await devFetch(`${DEV_SERVER}/api/gh-reviewer-candidates?cwd=${encodeURIComponent(cwd)}${repoParam}`);
   if (!res.ok) return [];
   const raw = await res.json();
   if (!Array.isArray(raw)) return [];
