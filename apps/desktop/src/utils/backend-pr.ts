@@ -201,14 +201,15 @@ export async function ghListPrs(
       autoMerge: pr.autoMerge ?? CLOSED_AUTO_MERGE,
     }));
   }
-  // Browser dev mode — call dev server. The dev-server endpoint doesn't
-  // accept limit/offset yet; we slice client-side from the (already
-  // capped) REST response. The Tauri path is what most users hit.
-  const res = await devFetch(`${DEV_SERVER}/api/gh-list-prs?cwd=${encodeURIComponent(cwd)}&state=${state}`);
+  // Browser dev mode — the dev-server pages like `rest_list_prs` (one page of
+  // limit + offset, sliced server-side).
+  const res = await devFetch(
+    `${DEV_SERVER}/api/gh-list-prs?cwd=${encodeURIComponent(cwd)}&state=${state}&limit=${limit}&offset=${offset}`,
+  );
   if (!res.ok) throw new Error(`gh pr list failed: ${res.status}`);
   const raw = await res.json();
   if (raw.error) throw new Error(raw.error);
-  const sliced = (raw as any[]).slice(offset, offset + limit);
+  const sliced = raw as any[];
   return sliced.map((pr: any) => ({
     number: pr.number,
     title: pr.title,

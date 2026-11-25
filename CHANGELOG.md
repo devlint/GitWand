@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **On a fork, PR actions act on the PR you see.** The PR list shows the fork parent's pull requests, but PR reads (detail, review threads, comments, reviews) and comment/review writes looked the number up on `origin` first: when the fork had its own PR with the same number, they read or wrote that one. They now ask the base repo first and fall back to `origin` only for a PR that exists only there, or when the token cannot read the base repo (an organization's SAML enforcement). When the fork itself cannot be looked up, the action stops with that error instead of guessing `origin`. Under `pnpm dev:web`, the PR list, count and per-PR routes follow the same repo, and editing or deleting a review comment sends the PR number, so dev QA on a fork exercises what ships.
+- **On a fork, PR actions act on the PR you see.** The PR list shows the fork parent's pull requests, but PR reads (detail, review threads, comments, reviews, checkout) and comment/review writes looked the number up on `origin` first: when the fork had its own PR with the same number, they read or wrote that one. They now use the base repo, where every number the app shows comes from, as the `gh` commands already did; when the fork itself cannot be looked up, the action stops with that error instead of guessing `origin`. Under `pnpm dev:web`, the PR list (now paged like the desktop one), count and per-PR routes follow the same repo, and editing or deleting a review comment sends the PR number, so dev QA on a fork exercises what ships.
 
 ## [3.14.0] - 2026-11-24
 

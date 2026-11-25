@@ -1082,61 +1082,35 @@ pub(crate) fn diff_numstat(cwd: &str, head: &str, base: &str) -> (i64, i64) {
     (adds, dels)
 }
 
-/// The repos a PR number is looked up in, in order. The numbers the app shows
-/// come from the base repo's list (`rest_list_prs`, `rest_branch_pr`): for a
-/// fork, its parent. Asking `origin` first would act on the fork's own
-/// same-numbered PR (#262). `origin` stays as a fallback for a PR that only
-/// exists on the fork.
-fn pr_lookup_order(origin: &str, fork_info: &ForkInfo) -> Vec<String> {
-    let base = base_repo_of(fork_info);
-    if base != origin {
-        vec![base, origin.to_string()]
-    } else {
-        vec![origin.to_string()]
-    }
-}
-
-/// Whether a failed PR lookup in one repo moves on to the next: the PR is
-/// not there (404, 410) or that repo cannot be read by this token (451, or a
-/// 403 such as an org's SAML enforcement). A rate-limit 403 is the answer:
-/// the next repo would hit the same limit.
-fn pr_lookup_moves_on(status: i32, body: &str) -> bool {
-    match status {
-        404 | 410 | 451 => true,
-        403 => !body.to_ascii_lowercase().contains("rate limit"),
-        _ => false,
-    }
-}
-
-/// Fetch a PR object from the repo its number comes from (`pr_lookup_order`:
-/// the base repo, then `origin`). Returns the `owner/repo` the PR lives in
-/// alongside its JSON, so callers issue follow-up requests against the right
-/// repo — every PR read and comment/review write goes through here.
+/// Fetch PR `number` from the base repo — the fork parent for a fork, else
+/// `origin` — and return that `owner/repo` alongside its JSON, so callers
+/// issue follow-up requests against the same repo. Every PR read and
+/// comment/review write goes through here.
+///
+/// Every number the app shows comes from the base repo: the PR list
+/// (`rest_list_prs`), a branch's PR (`rest_branch_pr`), a created PR. Asking
+/// `origin` would read, or write on, the fork's own same-numbered PR (#262),
+/// so it is not asked at all — as the `gh` commands, which name the base repo
+/// (`gh_base_repo`, #300). A failed fork lookup is an error, never a guess,
+/// and every other refusal (an OAuth App restriction included) reaches
+/// `rest_attempt` as is.
 fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_json::Value), String> {
-    let (owner, repo) = owner_repo(cwd)?;
-    let origin = format!("{}/{}", owner, repo);
-    // A failed fork lookup is an error, not a guess: asking origin alone would
-    // read, or write a comment on, the fork's own same-numbered PR.
-    let fork_info = rest_fork_info(cwd, token)?;
-    let mut first_error: Option<String> = None;
-    for repo in pr_lookup_order(&origin, &fork_info) {
-        // Conditional: the live CI tab reads the PR's head on every poll.
-        let (st, body) = get_cached_raw(
-            &format!("{}/repos/{}/pulls/{}", API_BASE, repo, number),
-            token,
-            None,
-        )?;
-        if st < 400 {
-            let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
-            return Ok((repo, v));
-        }
-        let err = format!("{} (fetching PR #{})", map_api_error(st, &body), number);
-        if !pr_lookup_moves_on(st, &body) {
-            return Err(err);
-        }
-        first_error.get_or_insert(err);
+    let repo = base_repo_of(&rest_fork_info(cwd, token)?);
+    // Conditional: the live CI tab reads the PR's head on every poll.
+    let (st, body) = get_cached_raw(
+        &format!("{}/repos/{}/pulls/{}", API_BASE, repo, number),
+        token,
+        None,
+    )?;
+    if st >= 400 {
+        return Err(format!(
+            "{} (fetching PR #{})",
+            map_api_error(st, &body),
+            number
+        ));
     }
-    Err(first_error.unwrap_or_else(|| format!("PR #{} not found", number)))
+    let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
+    Ok((repo, v))
 }
 
 pub(crate) fn rest_pr_count(cwd: &str, state: &str, token: &str) -> Result<i64, String> {
@@ -1682,7 +1656,7 @@ pub(crate) fn rest_pr_reviews(
 
 /// Process-lifetime cache of a repo's fork relationship, keyed by origin
 /// `owner/repo`. The fork status of a repo doesn't change during a session, yet
-/// `base_owner_repo` resolves it on every PR-list refresh and `get_pr_json` (`pr_lookup_order`) on every PR read or write, the live CI poll included — so
+/// `base_owner_repo` resolves it on every PR-list refresh and `get_pr_json` on every PR read or write, the live CI poll included — so
 /// without this the poller spent one `GET /repos/{o}/{r}` per tick for a value
 /// that never moves (same lifetime model as `GIT_DIR_CACHE`).
 static FORK_INFO_CACHE: OnceLock<Mutex<HashMap<String, ForkInfo>>> = OnceLock::new();
@@ -2198,10 +2172,13 @@ pub(crate) fn rest_checkout_pr(cwd: &str, number: i64) -> Result<(), String> {
     // exists on the parent's refs — fetching it from `origin` (the fork) 404s.
     let (owner, repo) = owner_repo(cwd)?;
     let origin = format!("{}/{}", owner, repo);
-    let pr_repo = settings_github_token()
-        .and_then(|tok| get_pr_json(cwd, number, &tok).ok())
-        .map(|(repo, _)| repo)
-        .unwrap_or_else(|| origin.clone());
+    // With a token, the PR's repo or the lookup's error (a failed fork lookup
+    // must not check out the fork's own same-numbered PR); without one,
+    // origin, as before.
+    let pr_repo = match settings_github_token() {
+        Some(tok) => get_pr_json(cwd, number, &tok)?.0,
+        None => origin.clone(),
+    };
 
     // Fetch the PR head ref. When the PR lives in `origin` use the configured
     // remote; otherwise fetch straight from the upstream repo URL (no remote is
@@ -3230,42 +3207,6 @@ mod tests {
         let got = pr_target_repo(dir.to_str().unwrap(), Some(&fi));
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(got.unwrap(), "upstream/proj");
-    }
-
-    /// #262: a fork's PR numbers come from the parent's list, so the parent
-    /// is asked first; origin only as the fallback for a fork-only PR.
-    #[test]
-    fn pr_lookup_order_asks_the_base_repo_first() {
-        let fi = fork_info(true, "me/proj", "upstream/proj");
-        assert_eq!(
-            pr_lookup_order("me/proj", &fi),
-            ["upstream/proj", "me/proj"]
-        );
-        let plain = fork_info(false, "me/proj", "");
-        assert_eq!(pr_lookup_order("me/proj", &plain), ["me/proj"]);
-        let no_parent = fork_info(true, "me/proj", "");
-        assert_eq!(pr_lookup_order("me/proj", &no_parent), ["me/proj"]);
-    }
-
-    /// A PR missing from the base repo, or a base repo this token cannot read
-    /// (SAML, legal), moves on to origin; a rate limit or a server error is
-    /// the answer.
-    #[test]
-    fn pr_lookup_moves_on_only_when_the_repo_cannot_answer() {
-        for st in [404, 410, 451] {
-            assert!(pr_lookup_moves_on(st, ""), "{st}");
-        }
-        assert!(pr_lookup_moves_on(
-            403,
-            r#"{"message":"Resource protected by organization SAML enforcement."}"#
-        ));
-        assert!(!pr_lookup_moves_on(
-            403,
-            r#"{"message":"API rate limit exceeded for user."}"#
-        ));
-        for st in [401, 500, 502, 422] {
-            assert!(!pr_lookup_moves_on(st, ""), "{st}");
-        }
     }
 
     #[test]
