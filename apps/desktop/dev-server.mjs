@@ -6443,17 +6443,17 @@ async function handleRequest(req, res) {
         const nwo = await devRestBaseNwo(resolve(cwd), token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo from git remote origin" }, 400);
         // `rest_list_prs` / `list_page_plan`: an unfiltered state starts at
-        // the page holding `offset`; `merged` counts from page 1, and its
-        // 10-page cap is an error rather than a silent end of the list.
+        // the page holding `offset`; `merged` reads full pages from page 1.
         const merged = state === "merged";
         const keep = (pr) => !merged || pr.merged_at != null;
-        const firstPage = merged ? 1 : Math.floor(offset / perPage) + 1;
-        const skipped = merged ? 0 : (firstPage - 1) * perPage;
+        // `list_page_plan`: merged reads full pages from page 1.
+        const pageSize = merged ? 100 : perPage;
+        const firstPage = merged ? 1 : Math.floor(offset / pageSize) + 1;
+        const skipped = merged ? 0 : (firstPage - 1) * pageSize;
         let fetched = [];
-        let ended = false;
         for (let page = firstPage; page < firstPage + 10; page++) {
           const resp = await githubFetch(
-            `/repos/${nwo}/pulls?state=${apiState}&per_page=${perPage}&page=${page}&sort=updated&direction=desc`,
+            `/repos/${nwo}/pulls?state=${apiState}&per_page=${pageSize}&page=${page}&sort=updated&direction=desc`,
             token,
           );
           if (!resp.ok) {
@@ -6462,15 +6462,11 @@ async function handleRequest(req, res) {
           }
           const chunk = (await resp.json()) ?? [];
           fetched = fetched.concat(chunk);
-          if (chunk.length < perPage) { ended = true; break; }
+          if (chunk.length < pageSize) break;
           if (skipped + fetched.filter(keep).length >= limit + offset) break;
         }
+        // Past the page cap, merged returns what it found (`rest_list_prs`).
         const kept = fetched.filter(keep);
-        if (merged && !ended && kept.length < limit + offset) {
-          return jsonResponse(req, res, {
-            error: `too many closed pull requests to list merged ones past ${kept.length} (read 10 pages)`,
-          }, 500);
-        }
         const from = Math.max(0, offset - skipped);
         const raw = kept.slice(from, from + limit);
         const prs = raw.map((pr) => ({
@@ -6570,7 +6566,8 @@ async function handleRequest(req, res) {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, 0);
         // `rest_pr_count`: the base repo, like the list — and its error when
-        // the fork lookup fails (Rust propagates it; no silent 0).
+        // the fork lookup fails, as Rust returns it (`ghPrCount` shows 0 for
+        // any failure, on both backends).
         let nwo;
         try { nwo = await devRestBaseNwo(resolve(cwd), token); }
         catch (e) { return jsonResponse(req, res, { error: e.message }, 500); }
@@ -6605,7 +6602,8 @@ async function handleRequest(req, res) {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, null);
         // `rest_pr_freshness_signal`: the base repo, like the list — and its
-        // error when the fork lookup fails (no silent "no open PRs").
+        // error when the fork lookup fails, as Rust returns it
+        // (`ghPrFreshnessSignal` reads any failure as "no signal").
         let nwo;
         try { nwo = await devRestBaseNwo(resolve(cwd), token); }
         catch (e) { return jsonResponse(req, res, { error: e.message }, 500); }
@@ -7608,18 +7606,20 @@ async function handleRequest(req, res) {
         // whose same-numbered `pull/<n>/head` is another PR (#262).
         const origin = getRepoNwo(absPath);
         const remote = nwo === origin ? "origin" : `https://github.com/${nwo}.git`;
-        // Forced (`+`): a PR head is force-pushed, and a ref left by another
-        // same-numbered PR (the fork's own, before #262) is not an ancestor.
-        const fetchRes = spawnSync(GIT, ["fetch", "--quiet", remote, `+refs/pull/${prNumber}/head:refs/pr/${prNumber}`], {
+        // Scratch refs named per request: two previews of the same PR at once
+        // must not delete each other's. Forced (`+`): a PR head is
+        // force-pushed.
+        const scratch = `${prNumber}-${process.hrtime.bigint()}`;
+        const fetchRes = spawnSync(GIT, ["fetch", "--quiet", remote, `+refs/pull/${prNumber}/head:refs/pr-preview/head-${scratch}`], {
           cwd: absPath, encoding: "utf-8",
         });
         // If fetch fails (e.g., no network access to remote), fall back to using headSha directly
-        const prRef = fetchRes.status === 0 ? `refs/pr/${prNumber}` : headSha;
+        const prRef = fetchRes.status === 0 ? `refs/pr-preview/head-${scratch}` : headSha;
         // The two fetched refs are scratch: deleted once merge-tree has run,
         // so a fork's parent history does not stay in the user's repo (and in
         // every `--all` walk, the Git Tree's included).
         const dropScratchRefs = () => {
-          for (const ref of [`refs/pr/${prNumber}`, `refs/pr-base/${prNumber}`]) {
+          for (const ref of [`refs/pr-preview/head-${scratch}`, `refs/pr-preview/base-${scratch}`]) {
             spawnSync(GIT, ["update-ref", "-d", ref], { cwd: absPath, encoding: "utf-8" });
           }
         };
@@ -7633,7 +7633,7 @@ async function handleRequest(req, res) {
           // history); its fetch failing is the answer.
           const baseFetch = spawnSync(
             GIT,
-            ["fetch", "--quiet", remote, `+refs/heads/${baseBranch}:refs/pr-base/${prNumber}`],
+            ["fetch", "--quiet", remote, `+refs/heads/${baseBranch}:refs/pr-preview/base-${scratch}`],
             { cwd: absPath, encoding: "utf-8" },
           );
           if (baseFetch.status !== 0) {
@@ -7642,7 +7642,7 @@ async function handleRequest(req, res) {
               error: `Could not fetch ${baseBranch} from ${nwo}: ${(baseFetch.stderr || "").trim()}`,
             }, 500);
           }
-          baseRef = `refs/pr-base/${prNumber}`;
+          baseRef = `refs/pr-preview/base-${scratch}`;
         }
 
         // Find merge base

@@ -185,8 +185,10 @@ pub(crate) async fn workspace_prs_all(repos: Vec<WorkspaceRepo>) -> Vec<Workspac
         // `rest_list_prs` returns the same enriched `Vec<PullRequest>` the
         // notification diff consumes (CI rollup + mergeable state). Per-repo
         // errors (non-GitHub remote, network) are captured, not fatal. A repo
-        // whose organization refuses the GitWand token falls through to `gh`.
-        if let Some(r) = github_api::with_rest_using(&repo_path, rest_token.as_deref(), |tok| {
+        // whose organization refuses the GitWand token falls through to `gh`;
+        // on a fork, the parent's refusal is remembered for the parent
+        // (`with_rest_pr_using`), not for the fork's own calls.
+        if let Some(r) = github_api::with_rest_pr_using(&repo_path, rest_token.as_deref(), |tok| {
             github_api::rest_list_prs(&repo_path, "open", 10, 0, tok)
         }) {
             return match r {
