@@ -79,7 +79,7 @@ fn gh_list_prs_inner(
     offset: Option<i64>,
 ) -> Result<Vec<PullRequest>, String> {
     // Settings-managed token present → tokenless REST path (no `gh` needed).
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         let st = if state.is_empty() { "open" } else { &state };
         github_api::rest_list_prs(&cwd, st, limit.unwrap_or(10), offset.unwrap_or(0), tok)
     }) {
@@ -528,15 +528,12 @@ pub(crate) async fn gh_create_pr(
 fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
     // Users with push access — the set GitHub allows as reviewers. With the
     // Settings token: the base repo's (the fork parent's), over REST. Without:
-    // `gh repo view` names the
-    // repository, which follows `gh repo set-default` (a fork set to its
-    // parent lists the parent's maintainers), as before.
+    // the same repo through `gh`.
     if gh_origin_repo(&cwd).is_some() {
-        let token = github_api::settings_github_token();
         // The base repo's (the fork parent's): the candidates are requested
         // on its PRs (`rest_request_reviewers`), and a fork's own assignees
         // are rarely its parent's maintainers.
-        if let Some(r) = github_api::with_rest_using(&cwd, token.as_deref(), |tok| {
+        if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
             let base = github_api::base_owner_repo(&cwd, tok)?;
             super::gh_issues::rest_pages(&format!("repos/{}/assignees", base), tok, 3)
         }) {
@@ -546,22 +543,10 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
     gh_reviewer_candidates_via_view(&cwd)
 }
 
-/// Reviewer candidates over `gh`: `gh repo view` names the repository (it
-/// follows `gh repo set-default`).
+/// Reviewer candidates over `gh`, from the base repo (`gh_base_nwo`).
 fn gh_reviewer_candidates_via_view(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
-    let view = gh_repo_view_cmd(cwd, "nameWithOwner")
-        .output()
-        .map_err(|e| format!("Failed to inspect repo: {}", e))?;
-    if !view.status.success() {
-        return Err(format!(
-            "gh repo view failed: {}",
-            String::from_utf8_lossy(&view.stderr).trim()
-        ));
-    }
-    let nwo = serde_json::from_slice::<serde_json::Value>(&view.stdout)
-        .ok()
-        .and_then(|v| v.get("nameWithOwner")?.as_str().map(String::from))
-        .ok_or("gh repo view returned no repository")?;
+    // The base repo, as the REST path and every PR command (#262).
+    let nwo = gh_base_nwo(cwd)?;
     let output = gh_api_cmd(cwd)
         .args(["api", "--paginate", &format!("repos/{}/assignees", nwo)])
         .current_dir(cwd)
@@ -1243,7 +1228,7 @@ fn with_review_token<T>(
 ) -> Result<T, String> {
     match cwd {
         Some(c) => {
-            if let Some(r) = github_api::with_rest(c, &call) {
+            if let Some(r) = github_api::with_rest_pr(c, &call) {
                 return r;
             }
         }
@@ -1528,13 +1513,16 @@ fn gh_issue_add_comment_inner(
     // `pr`: `number` is a pull request from the PR list (a Launchpad nudge):
     // its conversation lives in the base repo (`get_pr_json`, #262), not in
     // origin's same-numbered issue or PR.
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
-        if pr {
+    let rest = if pr {
+        github_api::with_rest_pr(&cwd, |tok| {
             github_api::rest_pr_add_conversation_comment(&cwd, number, &body, tok)
-        } else {
+        })
+    } else {
+        github_api::with_rest(&cwd, |tok| {
             github_api::rest_issue_add_comment(&cwd, number, &body, tok)
-        }
-    }) {
+        })
+    };
+    if let Some(r) = rest {
         return r;
     }
     let nwo = gh_base_nwo(&cwd)?;
@@ -2616,7 +2604,7 @@ fn with_reaction_token<T>(
     target_type: &str,
     call: impl Fn(&str) -> Result<T, String>,
 ) -> Option<Result<T, String>> {
-    if let Some(r) = github_api::with_rest(cwd, &call) {
+    if let Some(r) = github_api::with_rest_pr(cwd, &call) {
         return Some(r);
     }
     if target_type == "review" {

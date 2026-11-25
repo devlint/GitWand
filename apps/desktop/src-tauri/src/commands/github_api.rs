@@ -269,16 +269,24 @@ pub(crate) fn with_rest_other_repo_using<T>(
 }
 
 /// [`with_rest`] for a call about one of the base repo's pull requests. On a
-/// fork whose parent is already known (`FORK_INFO_CACHE`), an OAuth App
-/// refusal comes from the parent's organization: it is remembered for the
-/// parent ([`with_rest_other_repo_using`]), and the user's own fork keeps its
-/// REST calls. Before the fork is known, as [`with_rest`].
+/// fork, an OAuth App refusal comes from the parent's organization: it is
+/// remembered for the parent ([`with_rest_other_repo_using`]), and the
+/// user's own fork keeps its REST calls. Not a fork (or no token): as
+/// [`with_rest`].
 pub(crate) fn with_rest_pr<T>(
     cwd: &str,
     call: impl FnOnce(&str) -> Result<T, String>,
 ) -> Option<Result<T, String>> {
     let token = settings_github_token();
-    match cached_fork_parent(cwd) {
+    // Not known yet: look the fork up first (a request to `origin` itself,
+    // whose organization is the user's), so the very first PR call (the
+    // list) already keys a parent's refusal on the parent.
+    let parent = cached_fork_parent(cwd).or_else(|| {
+        let tok = token_for_repo(cwd, token.clone())?;
+        rest_fork_info(cwd, &tok).ok()?;
+        cached_fork_parent(cwd)
+    });
+    match parent {
         Some(parent) => with_rest_other_repo_using(cwd, &parent, token.as_deref(), call),
         None => with_rest_using(cwd, token.as_deref(), call),
     }
@@ -838,6 +846,20 @@ pub(crate) fn rest_current_user(token: &str) -> Result<String, String> {
     Ok(login)
 }
 
+/// How `rest_list_prs` pages through `offset + limit` PRs: `(per_page,
+/// first_page, PRs on the pages skipped before it)`. Up to 100, one page of
+/// exactly that size (as before); past 100, pages of 100. An unfiltered state
+/// starts at the page holding `offset`; `merged` (closed PRs, filtered) counts
+/// from the first page.
+fn list_page_plan(offset: usize, limit: usize, merged: bool) -> (usize, usize, usize) {
+    let per_page = (offset + limit).clamp(1, 100);
+    if merged {
+        return (per_page, 1, 0);
+    }
+    let first_page = offset / per_page + 1;
+    (per_page, first_page, (first_page - 1) * per_page)
+}
+
 pub(crate) fn rest_list_prs(
     cwd: &str,
     state: &str,
@@ -845,7 +867,7 @@ pub(crate) fn rest_list_prs(
     offset: i64,
     token: &str,
 ) -> Result<Vec<PullRequest>, String> {
-    /// Pages of 100 read at most for one list call (1 000 PRs).
+    /// Pages read at most for one list call.
     const LIST_PRS_MAX_PAGES: usize = 10;
     // The base repo, or the fork lookup's error: a list built from origin
     // would show numbers every PR action then resolves in the parent (#262).
@@ -870,9 +892,11 @@ pub(crate) fn rest_list_prs(
     // kept or the list ends — a single page capped at 100 returned nothing at
     // offset 100 and stopped "load more" there.
     let want = (page + off) as usize;
-    let per_page = want.clamp(1, 100);
+    let merged = state == "merged";
+    let (per_page, first_page, skip_in_pages) = list_page_plan(off as usize, page as usize, merged);
     let mut raw: Vec<serde_json::Value> = Vec::new();
-    for n in 1..=LIST_PRS_MAX_PAGES {
+    let mut ended = false;
+    for n in first_page..first_page + LIST_PRS_MAX_PAGES {
         let chunk: Vec<serde_json::Value> = api_json_cached(
             &format!(
                 "{}/repos/{}/pulls?state={}&per_page={}&page={}&sort=updated&direction=desc",
@@ -886,16 +910,26 @@ pub(crate) fn rest_list_prs(
         .unwrap_or_default();
         let short = chunk.len() < per_page;
         raw.extend(chunk);
-        if short || raw.iter().filter(|pr| keep(pr)).count() >= want {
+        if short {
+            ended = true;
+            break;
+        }
+        if skip_in_pages + raw.iter().filter(|pr| keep(pr)).count() >= want {
             break;
         }
     }
+    let kept = raw.iter().filter(|pr| keep(pr)).count();
+    if merged && !ended && kept < want {
+        // Stopping here would read as the end of the list.
+        return Err(format!(
+            "too many closed pull requests to list merged ones past {} (read {} pages)",
+            kept, LIST_PRS_MAX_PAGES
+        ));
+    }
 
     let mut prs: Vec<PullRequest> = raw.iter().filter(|pr| keep(pr)).map(json_to_pr).collect();
-    if off > 0 {
-        let skip = (off as usize).min(prs.len());
-        prs.drain(..skip);
-    }
+    let skip = (off as usize).saturating_sub(skip_in_pages).min(prs.len());
+    prs.drain(..skip);
     prs.truncate(page as usize);
 
     // The list endpoint omits additions/deletions and returns a null/unknown
@@ -2192,10 +2226,11 @@ pub(crate) fn rest_checkout_pr(cwd: &str, number: i64, token: &str) -> Result<()
     // exists on the parent's refs — fetching it from `origin` (the fork) 404s.
     let (owner, repo) = owner_repo(cwd)?;
     let origin = format!("{}/{}", owner, repo);
-    // The PR's repo or the lookup's error: a failed fork lookup must not check
-    // out the fork's own same-numbered PR. An OAuth App refusal goes back
-    // through `with_rest` to `gh pr checkout`.
-    let pr_repo = get_pr_json(cwd, number, token)?.0;
+    // The base repo (where the list's numbers come from; cached after the
+    // first lookup, no per-PR request) or the fork lookup's error: a failed
+    // lookup must not check out the fork's own same-numbered PR. An OAuth App
+    // refusal goes back through `with_rest_pr` to `gh pr checkout`.
+    let pr_repo = base_owner_repo(cwd, token)?;
 
     // Fetch the PR head ref. When the PR lives in `origin` use the configured
     // remote; otherwise fetch straight from the upstream repo URL (no remote is
@@ -2242,12 +2277,28 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
         .status
         .success();
     if exists {
-        let ff = git(&["merge-base", "--is-ancestor", &local_ref, "FETCH_HEAD"])?;
-        if !ff.status.success() {
+        let ancestor = |a: &str, b: &str| -> Result<bool, String> {
+            Ok(git(&["merge-base", "--is-ancestor", a, b])?
+                .status
+                .success())
+        };
+        let ff = ancestor(&local_ref, "FETCH_HEAD")?;
+        if !ff && ancestor("FETCH_HEAD", &local_ref)? {
+            // `pr-<n>` is ahead of the PR (the user's own commits on it): it
+            // is checked out as it is.
+            let checkout = git(&["checkout", &local])?;
+            return if checkout.status.success() {
+                Ok(())
+            } else {
+                Err(fail(&format!("git checkout {}", local), &checkout))
+            };
+        }
+        if !ff {
             return Err(format!(
-                "the local branch {local} has commits that are not in PR #{number} \
-                 (the PR was force-pushed, or {local} belongs to another PR): rename or \
-                 delete {local}, then check the PR out again"
+                "the local branch {local} and PR #{number} have diverged (the PR was \
+                 force-pushed, or {local} was made from another PR #{number}); {local} was \
+                 left as it is: check it out to keep its commits, or rename it, then check \
+                 the PR out again"
             ));
         }
         let head = git(&["symbolic-ref", "-q", "HEAD"])?;
@@ -3368,6 +3419,30 @@ mod etag_cache_tests {
 }
 
 #[cfg(test)]
+mod list_page_plan_tests {
+    use super::list_page_plan;
+
+    #[test]
+    fn small_windows_are_one_page_from_the_start() {
+        assert_eq!(list_page_plan(0, 10, false), (10, 1, 0));
+        assert_eq!(list_page_plan(40, 10, false), (50, 1, 0));
+    }
+
+    /// Past 100: pages of 100, starting at the one holding `offset`, so
+    /// "load more" never hits a wall or an empty page.
+    #[test]
+    fn past_100_it_starts_at_the_offsets_page() {
+        assert_eq!(list_page_plan(100, 10, false), (100, 2, 100));
+        assert_eq!(list_page_plan(1_250, 50, false), (100, 13, 1_200));
+    }
+
+    #[test]
+    fn merged_counts_from_the_first_page() {
+        assert_eq!(list_page_plan(250, 50, true), (100, 1, 0));
+    }
+}
+
+#[cfg(test)]
 mod with_rest_pr_tests {
     use super::*;
     use crate::worktree::test_support::TempRepo;
@@ -3468,9 +3543,26 @@ mod checkout_pr_head_tests {
         let other = repo.commit("other.txt", "x\n", "another PR 7");
         repo.git(&["checkout", "-q", "main"]);
         let err = checkout_pr_head(cwd(&repo), "origin", 7).unwrap_err();
-        assert!(err.contains("rename or delete pr-7"), "{err}");
+        assert!(err.contains("have diverged"), "{err}");
+        assert!(err.contains("left as it is"), "{err}");
         assert_eq!(repo.git(&["rev-parse", "pr-7"]), other);
         assert_eq!(repo.git(&["symbolic-ref", "--short", "HEAD"]), "main");
+    }
+
+    /// The user's own commits on `pr-7` (ahead of the PR): checked out as
+    /// they are, never refused or rewritten.
+    #[test]
+    fn checks_out_a_branch_ahead_of_the_pr_as_it_is() {
+        let (repo, _bare, _head) = with_pr7();
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        let mine = repo.commit("mine.txt", "m\n", "my work");
+        repo.git(&["checkout", "-q", "main"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), mine);
+        assert_eq!(repo.git(&["symbolic-ref", "--short", "HEAD"]), "pr-7");
+        // Already on it: still fine.
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), mine);
     }
 }
 

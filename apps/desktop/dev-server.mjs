@@ -6442,11 +6442,16 @@ async function handleRequest(req, res) {
         // every per-PR route then resolves in the parent.
         const nwo = await devRestBaseNwo(resolve(cwd), token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo from git remote origin" }, 400);
-        // `rest_list_prs`: pages of `perPage` (100 past 100) until `offset +
-        // limit` kept PRs or the end of the list, at most 10 pages.
-        const keep = (pr) => state !== "merged" || pr.merged_at != null;
+        // `rest_list_prs` / `list_page_plan`: an unfiltered state starts at
+        // the page holding `offset`; `merged` counts from page 1, and its
+        // 10-page cap is an error rather than a silent end of the list.
+        const merged = state === "merged";
+        const keep = (pr) => !merged || pr.merged_at != null;
+        const firstPage = merged ? 1 : Math.floor(offset / perPage) + 1;
+        const skipped = merged ? 0 : (firstPage - 1) * perPage;
         let fetched = [];
-        for (let page = 1; page <= 10; page++) {
+        let ended = false;
+        for (let page = firstPage; page < firstPage + 10; page++) {
           const resp = await githubFetch(
             `/repos/${nwo}/pulls?state=${apiState}&per_page=${perPage}&page=${page}&sort=updated&direction=desc`,
             token,
@@ -6457,9 +6462,17 @@ async function handleRequest(req, res) {
           }
           const chunk = (await resp.json()) ?? [];
           fetched = fetched.concat(chunk);
-          if (chunk.length < perPage || fetched.filter(keep).length >= limit + offset) break;
+          if (chunk.length < perPage) { ended = true; break; }
+          if (skipped + fetched.filter(keep).length >= limit + offset) break;
         }
-        const raw = fetched.filter(keep).slice(offset, offset + limit);
+        const kept = fetched.filter(keep);
+        if (merged && !ended && kept.length < limit + offset) {
+          return jsonResponse(req, res, {
+            error: `too many closed pull requests to list merged ones past ${kept.length} (read 10 pages)`,
+          }, 500);
+        }
+        const from = Math.max(0, offset - skipped);
+        const raw = kept.slice(from, from + limit);
         const prs = raw.map((pr) => ({
           number: pr.number,
           title: pr.title,
@@ -7289,8 +7302,20 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        // `gh_issue_add_comment` with `pr`: the PR's repo (the base repo).
-        const nwo = pr ? await resolvePrNwo(resolve(cwd), devPrNumber(number), token) : getRepoNwo(resolve(cwd));
+        // `gh_issue_add_comment` with `pr`: the PR's repo (the base repo),
+        // after reading the PR there, as `rest_pr_add_conversation_comment`.
+        let nwo;
+        if (pr) {
+          const prNumber = devPrNumber(number);
+          if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+          nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
+          const prResp = nwo ? await githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token) : null;
+          if (prResp && !prResp.ok) {
+            return jsonResponse(req, res, { error: `GitHub API ${prResp.status} (fetching PR #${prNumber})` }, prResp.status);
+          }
+        } else {
+          nwo = getRepoNwo(resolve(cwd));
+        }
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         const resp = await fetch(`https://api.github.com/repos/${nwo}/issues/${number}/comments`, {
           method: "POST",
@@ -7590,6 +7615,14 @@ async function handleRequest(req, res) {
         });
         // If fetch fails (e.g., no network access to remote), fall back to using headSha directly
         const prRef = fetchRes.status === 0 ? `refs/pr/${prNumber}` : headSha;
+        // The two fetched refs are scratch: deleted once merge-tree has run,
+        // so a fork's parent history does not stay in the user's repo (and in
+        // every `--all` walk, the Git Tree's included).
+        const dropScratchRefs = () => {
+          for (const ref of [`refs/pr/${prNumber}`, `refs/pr-base/${prNumber}`]) {
+            spawnSync(GIT, ["update-ref", "-d", ref], { cwd: absPath, encoding: "utf-8" });
+          }
+        };
 
         // Fetch base branch too (may already be current)
         let baseRef = `origin/${baseBranch}`;
@@ -7604,6 +7637,7 @@ async function handleRequest(req, res) {
             { cwd: absPath, encoding: "utf-8" },
           );
           if (baseFetch.status !== 0) {
+            dropScratchRefs();
             return jsonResponse(req, res, {
               error: `Could not fetch ${baseBranch} from ${nwo}: ${(baseFetch.stderr || "").trim()}`,
             }, 500);
@@ -7613,11 +7647,15 @@ async function handleRequest(req, res) {
 
         // Find merge base
         const mbRes = spawnSync(GIT, ["merge-base", baseRef, prRef], { cwd: absPath, encoding: "utf-8" });
-        if (mbRes.status !== 0) return jsonResponse(req, res, { error: "Cannot find merge-base" }, 500);
+        if (mbRes.status !== 0) {
+          dropScratchRefs();
+          return jsonResponse(req, res, { error: "Cannot find merge-base" }, 500);
+        }
         const mergeBase = mbRes.stdout.trim();
 
         // Run git merge-tree (read-only)
         const mtRes = spawnSync(GIT, ["merge-tree", mergeBase, baseRef, prRef], { cwd: absPath, encoding: "utf-8" });
+        dropScratchRefs();
         const output = mtRes.stdout || "";
 
         // Parse output: lines starting with "changed in both" or conflict markers
