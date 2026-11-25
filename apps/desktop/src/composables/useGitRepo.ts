@@ -1221,6 +1221,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * exists" case that happens on a --set-upstream push with no local tracking
    * ref. Matches git's English rejection text, which is stable across versions.
    */
+  /** An error a push reported (raw, or one of its localized refusals). */
+  function isPushError(message: string | null): boolean {
+    if (!message) return false;
+    return (
+      message.startsWith("push: ") ||
+      message.startsWith(t("header.forcePushRemoteMoved")) ||
+      message.startsWith(t("header.forcePushUnmapped"))
+    );
+  }
+
   function isRefAlreadyExistsError(message: string): boolean {
     return /reference already exists/i.test(message);
   }
@@ -1277,6 +1287,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       } else {
         successMessage.value = "push-done";
         forcePushPreferred.value = false;
+        // A previous push's refusal no longer holds: drop its banner (and
+        // only that kind of error, not an unrelated one).
+        if (isPushError(error.value)) error.value = null;
       }
       // Force: push advances origin/<branch> but not local HEAD, so the log's
       // remote label must be re-pulled to move off the pre-push commit.
