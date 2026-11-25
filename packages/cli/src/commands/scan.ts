@@ -171,7 +171,11 @@ export async function cmdScan(flags: Record<string, boolean | string>): Promise<
   const cwd = repoRoot ?? process.cwd();
   const diffText = getStagedDiff(cwd);
   if (diffText === null) {
-    const message = "git not found on PATH: the staged changes could not be scanned.";
+    // On Windows a `git.cmd` / `git.bat` wrapper is not an executable git can
+    // be run as without a shell (and a shell would break the argv rule).
+    const message =
+      "git not found on PATH (on Windows, put git.exe itself on PATH: a git.cmd wrapper is not run): " +
+      "the staged changes could not be scanned.";
     if (isJson) console.log(JSON.stringify({ error: message, findings: [] }, null, 2));
     else console.error(`${c.red}${message}${c.reset}`);
     process.exitCode = 2;

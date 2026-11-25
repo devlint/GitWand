@@ -1033,6 +1033,8 @@ export async function gitPush(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cwd, setUpstream, force, leaseBranch, leaseSha }),
   });
+  // A refusal before git runs is the Rust command's `Err`: throw it.
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `git push failed (${res.status})`);
   return res.json();
 }
 
@@ -1100,14 +1102,23 @@ export async function gitFastForwardToUpstream(cwd: string): Promise<FastForward
  * pass it only for user-initiated fetches; the background poller omits it
  * so the UI never flickers on an automatic tick.
  */
-export async function gitFetch(cwd: string, onProgress?: (p: CloneProgress) => void): Promise<GitPushPullResult> {
+/** `remote`: fetch that remote instead of the default one. */
+export async function gitFetch(
+  cwd: string,
+  onProgress?: (p: CloneProgress) => void,
+  remote?: string,
+): Promise<GitPushPullResult> {
   if (isTauri()) {
     const { Channel } = await import("@tauri-apps/api/core");
     const channel = new Channel<CloneProgress>();
     if (onProgress) channel.onmessage = onProgress;
-    return tauriInvoke<GitPushPullResult>("git_fetch", { cwd, onProgress: channel }, IPC_TIMEOUT.NETWORK);
+    return tauriInvoke<GitPushPullResult>(
+      "git_fetch",
+      { cwd, onProgress: channel, remote: remote ?? null },
+      IPC_TIMEOUT.NETWORK,
+    );
   }
-  return devGitFetch(cwd, onProgress);
+  return devGitFetch(cwd, onProgress, remote);
 }
 
 /**

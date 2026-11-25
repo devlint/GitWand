@@ -466,24 +466,38 @@ fn head_branch(cwd: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Refusal when a force push's destination cannot be read.
+const UNMAPPED_PUSH_DEST: &str = "force push refused: the remote branch this push updates \
+     cannot be read (a custom fetch refspec), so it cannot be leased; force push from a terminal";
+
 /// `--force-if-includes` landed in git 2.30.
 fn supports_force_if_includes(v: Option<(u32, u32)>) -> bool {
     matches!(v, Some(v) if v >= (2, 30))
 }
 
-/// The remote branch a plain `git push` from `branch` updates, e.g. `topic`
-/// for a local `feature` tracking `origin/topic` under
-/// `push.default=upstream`. Read from `%(push)`, the remote-tracking ref of
-/// the push destination (`refs/remotes/origin/topic`), minus
-/// `refs/remotes/<%(push:remotename)>/` — `%(push:remoteref)` stays empty
-/// without an explicit push refspec. `None` when git names no destination, or
-/// one that does not map back to a branch (a non-default fetch refspec): the
-/// caller then leases the local branch name, as before.
-fn push_destination(cwd: &str, branch: &str) -> Option<String> {
+/// Where a plain `git push` from a branch goes.
+#[derive(Debug, PartialEq, Eq)]
+enum PushDest {
+    /// git names no destination (no push remote, nothing to push to yet).
+    None,
+    /// The remote branch it updates, e.g. `topic` for a local `feature`
+    /// tracking `origin/topic` under `push.default=upstream`.
+    Branch(String),
+    /// git names one, but its tracking ref does not spell the remote branch
+    /// (a non-default fetch refspec): the remote branch cannot be read.
+    Unmapped,
+}
+
+/// Read from `%(push)`, the remote-tracking ref of the push destination
+/// (`refs/remotes/origin/topic`), minus `refs/remotes/<%(push:remotename)>/`;
+/// `%(push:remoteref)` stays empty without an explicit push refspec. git has
+/// no command to map a tracking ref back through a custom fetch refspec, so
+/// only the default mapping is read.
+fn push_destination(cwd: &str, branch: &str) -> PushDest {
     let refname = format!("refs/heads/{branch}");
     // A for-each-ref pattern also matches `refs/heads/<branch>/…`: keep the
     // exact ref's line only. Ref and remote names hold no space.
-    let out = git_cmd()
+    let Ok(out) = git_cmd()
         .args([
             "for-each-ref",
             "--format=%(refname) %(push:remotename) %(push)",
@@ -491,24 +505,33 @@ fn push_destination(cwd: &str, branch: &str) -> Option<String> {
         ])
         .current_dir(cwd)
         .output()
-        .ok()?;
+    else {
+        return PushDest::None;
+    };
     if !out.status.success() {
-        return None;
+        return PushDest::None;
     }
     let prefix = format!("{refname} ");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let rest = stdout.lines().find_map(|l| l.strip_prefix(&prefix))?;
-    let (remote, tracking) = rest.split_once(' ')?;
-    if remote.is_empty() || remote.starts_with('-') {
-        return None;
+    let Some(rest) = stdout.lines().find_map(|l| l.strip_prefix(&prefix)) else {
+        return PushDest::None;
+    };
+    let Some((remote, tracking)) = rest.split_once(' ') else {
+        return PushDest::None;
+    };
+    if tracking.is_empty() {
+        return PushDest::None;
     }
-    let name = tracking
+    if remote.is_empty() || remote.starts_with('-') {
+        return PushDest::Unmapped;
+    }
+    match tracking
         .strip_prefix(&format!("refs/remotes/{remote}/"))
-        .filter(|b| !b.is_empty())?;
-    // Stripping the prefix only names the remote branch under the default
-    // mapping; a custom fetch refspec (`refs/heads/*:refs/remotes/o/heads/*`)
-    // would turn `heads/topic` into a branch that does not exist.
-    has_default_fetch_refspec(cwd, remote).then(|| name.to_string())
+        .filter(|b| !b.is_empty())
+    {
+        Some(name) if has_default_fetch_refspec(cwd, remote) => PushDest::Branch(name.to_string()),
+        _ => PushDest::Unmapped,
+    }
 }
 
 /// Whether `remote` fetches `refs/heads/*` to `refs/remotes/<remote>/*`.
@@ -555,7 +578,13 @@ pub(crate) async fn git_push(
     // which `push.default=upstream` can name differently from the local one.
     let lease_arg = match (lease_branch.as_deref(), lease_sha.as_deref()) {
         (Some(branch), Some(sha)) => Some(force_with_lease_arg(
-            &push_destination(&cwd, branch).unwrap_or_else(|| branch.to_string()),
+            &match push_destination(&cwd, branch) {
+                PushDest::Branch(dest) => dest,
+                PushDest::None => branch.to_string(),
+                // Leasing the local name would lease nothing: git pushes the
+                // other ref without force and refuses it as non-fast-forward.
+                PushDest::Unmapped => return Err(UNMAPPED_PUSH_DEST.to_string()),
+            },
             sha,
         )?),
         _ => None,
@@ -580,9 +609,12 @@ pub(crate) async fn git_push(
                 // a branch pushed under another name (`push.default=upstream`)
                 // would always be refused: no `--force-if-includes` there.
                 args.push("--force-with-lease");
-                let renamed = head_branch(&cwd)
-                    .and_then(|b| push_destination(&cwd, &b).map(|d| d != b))
-                    .unwrap_or(false);
+                // An unreadable destination may be renamed: treated as such.
+                let renamed = head_branch(&cwd).is_some_and(|b| match push_destination(&cwd, &b) {
+                    PushDest::Branch(d) => d != b,
+                    PushDest::None => false,
+                    PushDest::Unmapped => true,
+                });
                 let if_includes = supports_force_if_includes(crate::stack::guard::git_version());
                 if renamed {
                     // `push.useForceIfIncludes=true` would turn it back on.
@@ -731,13 +763,23 @@ pub(crate) async fn git_push_branch(
 pub(crate) async fn git_fetch(
     cwd: String,
     on_progress: tauri::ipc::Channel<CloneProgress>,
+    remote: Option<String>,
 ) -> Result<GitPushPullResult, String> {
+    // `remote`: fetch that one (a force push's push remote) instead of the
+    // default. A name starting with `-` would read as an option.
+    if remote
+        .as_deref()
+        .is_some_and(|r| r.is_empty() || r.starts_with('-'))
+    {
+        return Err("invalid remote".to_string());
+    }
     let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
 
     let refs_before = crate::git::libgit2::ref_fingerprint(&cwd);
     let mut child = git_cmd()
         .args(["fetch", "--prune", "--progress"])
+        .args(remote.as_deref())
         .current_dir(&cwd)
         .stderr(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
@@ -3614,7 +3656,7 @@ mod clone_fetch_channel_tests {
             .to_string();
 
         let (channel, received) = collecting_channel();
-        let result = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel))
+        let result = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel, None))
             .expect("git_fetch failed");
         assert!(result.success, "fetch should succeed: {}", result.message);
 
@@ -3715,7 +3757,7 @@ mod clone_fetch_channel_tests {
         repo.git_ok(&["fetch", "-q", "origin"]);
 
         let (channel, _) = collecting_channel();
-        let idle = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel)).unwrap();
+        let idle = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel, None)).unwrap();
         assert!(idle.success, "{}", idle.message);
         assert_eq!(
             idle.refs_changed,
@@ -3732,7 +3774,7 @@ mod clone_fetch_channel_tests {
         pusher.git_ok(&["push", "-q", "origin", "main"]);
 
         let (channel, _) = collecting_channel();
-        let moved = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel)).unwrap();
+        let moved = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel, None)).unwrap();
         assert!(moved.success, "{}", moved.message);
         assert_eq!(moved.refs_changed, Some(true), "origin/main moved");
 
@@ -3749,7 +3791,7 @@ mod clone_fetch_channel_tests {
         // silent no-op that exits 0.)
         repo.git_ok(&["remote", "add", "origin", "/no/such/path"]);
         let (channel, received) = collecting_channel();
-        let result = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel))
+        let result = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel, None))
             .expect("git_fetch command itself should not error");
         assert!(!result.success, "fetch with no remote must fail");
         assert!(!result.message.is_empty(), "failure must carry a message");
@@ -5993,6 +6035,7 @@ mod tree_conflict_tests {
         tauri::async_runtime::block_on(git_fetch(
             loser_cwd.clone(),
             tauri::ipc::Channel::new(|_| Ok(())),
+            None,
         ))
         .expect("git_fetch failed");
         let retry =
@@ -6114,8 +6157,12 @@ mod tree_conflict_tests {
         repo.commit_all("c3 local-only");
 
         // fetch → retry (non-force) must stay rejected, remote preserved.
-        tauri::async_runtime::block_on(git_fetch(repo.cwd(), tauri::ipc::Channel::new(|_| Ok(()))))
-            .unwrap();
+        tauri::async_runtime::block_on(git_fetch(
+            repo.cwd(),
+            tauri::ipc::Channel::new(|_| Ok(())),
+            None,
+        ))
+        .unwrap();
         let retry =
             tauri::async_runtime::block_on(git_push(repo.cwd(), Some(true), None, None, None))
                 .unwrap();
@@ -7328,8 +7375,8 @@ mod git_push_force_tests {
         repo.git(&["commit", "-q", "-a", "--amend", "-m", "amended"]);
         let local = repo.git(&["rev-parse", "HEAD"]);
         assert_eq!(
-            push_destination(repo.path.to_str().unwrap(), "feature").as_deref(),
-            Some("topic")
+            push_destination(repo.path.to_str().unwrap(), "feature"),
+            PushDest::Branch("topic".to_string())
         );
 
         let r = force_push(&repo, Some(("feature", &judged)));
@@ -7392,7 +7439,22 @@ mod git_push_force_tests {
         repo.git(&["fetch", "-q", "origin"]);
         repo.git(&["branch", "-q", "--set-upstream-to=origin/heads/main"]);
         repo.git(&["config", "push.default", "upstream"]);
-        assert_eq!(push_destination(repo.path.to_str().unwrap(), "main"), None);
+        assert_eq!(
+            push_destination(repo.path.to_str().unwrap(), "main"),
+            PushDest::Unmapped
+        );
+        // An explicit lease is refused rather than sent on the local name.
+        let sha = repo.git(&["rev-parse", "HEAD"]);
+        let err = tauri::async_runtime::block_on(git_push(
+            repo.path.to_str().unwrap().to_string(),
+            None,
+            Some(true),
+            Some("main".to_string()),
+            Some(sha),
+        ))
+        .err()
+        .unwrap_or_default();
+        assert!(err.contains("cannot be read"), "{err}");
     }
 
     /// A tag named like the branch makes `symbolic-ref --short` print
@@ -7415,10 +7477,13 @@ mod git_push_force_tests {
         repo.git(&["config", "branch.feat/x.remote", "origin"]);
         repo.git(&["config", "branch.feat/x.merge", "refs/heads/other"]);
         repo.git(&["config", "push.default", "upstream"]);
-        assert_eq!(push_destination(repo.path.to_str().unwrap(), "feat"), None);
         assert_eq!(
-            push_destination(repo.path.to_str().unwrap(), "feat/x").as_deref(),
-            Some("other")
+            push_destination(repo.path.to_str().unwrap(), "feat"),
+            PushDest::None
+        );
+        assert_eq!(
+            push_destination(repo.path.to_str().unwrap(), "feat/x"),
+            PushDest::Branch("other".to_string())
         );
     }
 }

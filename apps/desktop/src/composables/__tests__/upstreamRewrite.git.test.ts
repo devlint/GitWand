@@ -31,11 +31,20 @@ function gitEnv(): NodeJS.ProcessEnv {
   };
 }
 
-// Route the module's gitExec to real git.
+// Route the module's gitExec and gitFetch (the `git_fetch` command: `fetch
+// --prune [remote]`) to real git.
 vi.mock("../../utils/backend", () => ({
   gitExec: vi.fn(async (cwd: string, args: string[]) => {
     const r = spawnSync("git", args, { cwd, env: gitEnv(), encoding: "utf-8" });
     return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
+  }),
+  gitFetch: vi.fn(async (cwd: string, _onProgress: unknown, remote?: string) => {
+    const r = spawnSync("git", ["fetch", "--prune", ...(remote ? [remote] : [])], {
+      cwd,
+      env: gitEnv(),
+      encoding: "utf-8",
+    });
+    return { success: r.status === 0, message: r.stderr ?? "" };
   }),
 }));
 

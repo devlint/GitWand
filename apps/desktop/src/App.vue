@@ -113,7 +113,8 @@ import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
 import { useWorktreeHookTrust } from "./composables/useWorktreeHookTrust";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
-import { computeCheckoutPrompt, fetchPushRemote, forcePushTarget, isUpdatePromptSkipped, isUpstreamRewriteOnly, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
+import { useForcePush } from "./composables/useForcePush";
+import { computeCheckoutPrompt, isUpdatePromptSkipped, isUpstreamRewriteOnly, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
 import { useGitRepo, type ViewMode, type RepoFileEntry } from "./composables/useGitRepo";
 import { useHeaderAlign } from "./composables/useHeaderAlign";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
@@ -161,7 +162,7 @@ import {
   COMMIT_MESSAGE_SINK_KEY,
   type SettingsSectionTarget,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitFetch, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree, type SnapshotMeta } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree, type SnapshotMeta } from "./utils/backend";
 import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorktreeCreation";
 import { registerRemovalHost } from "./composables/useWorktreeRemoval";
 import { registerMergeBackHost } from "./composables/useWorktreeMergeBack";
@@ -2088,82 +2089,19 @@ async function doPublish() {
 // (main/master), or (b) the remote has diverged (behind > 0 — someone
 // else may have pushed). A clean ahead-only force push (e.g. after a
 // local rebase with no remote divergence) skips the modal.
-const forcePushConfirm = ref<{
-  branch: string;
-  behind: number;
-  protected: boolean;
-  /** The protected trunk the push would overwrite (local or remote name). */
-  protectedName: string;
-  leaseSha: string | null;
-  /** The repository the decision was made in (tabs can switch meanwhile). */
-  cwd: string;
-} | null>(null);
-
-const PROTECTED_TRUNKS = new Set(["main", "master"]);
-
-/**
- * Set from the moment a force push is triggered until its push settles (or
- * its confirmation modal takes over): a second click in that window would
- * push again on a lease the first push spends, and be refused.
- */
-let forcePushInFlight = false;
-
-/**
- * Entry point for every force-push trigger (split button + branch context
- * menu). The remote is fetched and its tip read now, not taken from the last
- * status refresh: the count the modal shows is what the push will overwrite,
- * and the push leases that exact sha, so anything pushed after this moment is
- * refused. A retry after such a refusal fetches again, so it judges the new
- * tip instead of failing on the same stale one.
- */
-async function doForcePush() {
-  const cwd = repoFolderPath.value;
-  if (!cwd || forcePushInFlight || isPushing.value) return;
-  const branch = repoStatus.value?.branch ?? "";
-  forcePushInFlight = true;
-  try {
-    await gitFetch(cwd).catch(() => null);
-    await fetchPushRemote(cwd);
-    const target = await forcePushTarget(cwd);
-    // The lease is for this repo and this branch only.
-    if (repoFolderPath.value !== cwd || (repoStatus.value?.branch ?? "") !== branch) return;
-    // A trunk is protected under its remote name too: `mine` pushed to main.
-    const protectedName = [branch, target?.branch ?? ""].find((b) => PROTECTED_TRUNKS.has(b)) ?? "";
-    const isProtected = protectedName !== "";
-    // No readable destination (never pushed): nothing known to overwrite.
-    // The upstream's count would describe another ref.
-    const behind = target ? target.behind : 0;
-    const leaseSha = target?.sha ?? null;
-    if (isProtected || behind > 0) {
-      forcePushConfirm.value = { branch, behind, protected: isProtected, protectedName, leaseSha, cwd };
-      return;
-    }
-    await handlePush(true, leaseSha);
-  } finally {
-    forcePushInFlight = false;
-  }
-}
-
-async function confirmForcePush() {
-  const pending = forcePushConfirm.value;
-  if (!pending) return;
-  // A push is running: keep the modal, the user can confirm once it is done.
-  if (forcePushInFlight || isPushing.value) return;
-  forcePushConfirm.value = null;
-  // Switched tab or checked out another branch while the modal was open: what
-  // it showed (and the lease) no longer describes the push.
-  if (repoFolderPath.value !== pending.cwd || (repoStatus.value?.branch ?? "") !== pending.branch) return;
-  forcePushInFlight = true;
-  try {
-    await handlePush(true, pending.leaseSha);
-  } finally {
-    forcePushInFlight = false;
-  }
-}
-
-function cancelForcePush() {
-  forcePushConfirm.value = null;
-}
+const {
+  forcePushConfirm,
+  requestForcePush: doForcePush,
+  confirmForcePush,
+  cancelForcePush,
+} = useForcePush({
+  folderPath: repoFolderPath,
+  currentBranch: () => repoStatus.value?.branch ?? "",
+  isPushing,
+  // The app's fetch: progress in the header, offline check, refreshed counts.
+  fetch: () => doFetch(false),
+  push: (leaseSha) => handlePush(true, leaseSha),
+});
 
 /** Dropdown "Rebase onto origin" — explicit rebase pull. */
 async function doRebaseOntoRemote() {
@@ -3921,20 +3859,27 @@ const pendingUnpushedTags = ref<string[]>([]);
 const pendingPushForce = ref(false);
 /** The force push's decided lease, kept across the unpushed-tags modal. */
 const pendingPushLease = ref<string | null>(null);
-/** The repository the pending push was started in. */
+/** The repository and branch the pending push was started on. */
 const pendingPushCwd = ref<string | null>(null);
+const pendingPushBranch = ref<string | null>(null);
 
 /**
  * The unpushed-tags modal can outlive a tab switch: a pending push started
  * in another repository is dropped rather than run here.
  */
 function dropStalePendingPush(): boolean {
-  if (pendingPushCwd.value === repoFolderPath.value) return false;
+  if (
+    pendingPushCwd.value === repoFolderPath.value &&
+    pendingPushBranch.value === (repoStatus.value?.branch ?? "")
+  ) {
+    return false;
+  }
   pushTagsConfirm.value = false;
   pendingUnpushedTags.value = [];
   pendingPushForce.value = false;
   pendingPushLease.value = null;
   pendingPushCwd.value = null;
+  pendingPushBranch.value = null;
   return true;
 }
 
@@ -3950,6 +3895,7 @@ async function handlePush(force: boolean = false, leaseSha: string | null = null
   pendingPushForce.value = force;
   pendingPushLease.value = leaseSha;
   pendingPushCwd.value = cwd;
+  pendingPushBranch.value = repoStatus.value?.branch ?? "";
   try {
     const remoteInfo = await gitRemoteInfo(cwd).catch(() => null);
     const remote = remoteInfo?.name || "origin";

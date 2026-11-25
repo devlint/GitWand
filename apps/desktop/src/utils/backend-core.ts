@@ -302,8 +302,9 @@ export async function devGitClone(
 export async function devGitFetch(
   cwd: string,
   onProgress?: (p: DevCloneProgress) => void,
+  remote?: string,
 ): Promise<{ success: boolean; message: string; conflicts?: boolean; refsChanged?: boolean }> {
-  const params = new URLSearchParams({ cwd });
+  const params = new URLSearchParams({ cwd, ...(remote !== undefined ? { remote } : {}) });
   return new Promise((resolve, reject) => {
     const es = new EventSource(`${DEV_SERVER}/api/git-fetch-stream?${params}`);
     es.onmessage = (ev) => {

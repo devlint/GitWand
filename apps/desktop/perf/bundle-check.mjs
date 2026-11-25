@@ -126,12 +126,12 @@ const BUDGETS = {
   // (1,007,247 bytes). The selection code stays lazy (CombinedDiffView sets
   // the range anchor, not App).
   //
-  // Push/show reliability fix: main measured at 988 KB (1,011,570 bytes): the
-  // decided force-push lease (`forcePushTarget` and its wiring in App.vue,
-  // eager like the rest of the push path, with its double-click guard and the
-  // fetch before judging), the `patchDiffArgs` pins and the
+  // Push/show reliability fix: main measured at 989 KB (1,012,416 bytes):
+  // the force-push decision (`useForcePush`, `forcePushTarget`, eager like
+  // the rest of the push path: fetch before judging, decided lease,
+  // double-click and tab/branch guards), the `patchDiffArgs` pins and the
   // localized refusal message.
-  main_max_kb: 988,
+  main_max_kb: 990,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked

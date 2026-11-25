@@ -2686,23 +2686,29 @@ function devPushDestination(cwd, branch) {
     ["for-each-ref", "--format=%(refname) %(push:remotename) %(push)", refname],
     { cwd, encoding: "utf-8" },
   );
-  if (r.error || r.status !== 0) return null;
+  if (r.error || r.status !== 0) return { kind: "none" };
   const line = (r.stdout || "").split("\n").find((l) => l.startsWith(`${refname} `));
-  if (line === undefined) return null;
+  if (line === undefined) return { kind: "none" };
   const rest = line.slice(refname.length + 1);
   const sp = rest.indexOf(" ");
-  if (sp <= 0) return null;
+  if (sp < 0) return { kind: "none" };
   const remote = rest.slice(0, sp);
   const tracking = rest.slice(sp + 1);
-  if (remote.startsWith("-")) return null;
+  if (tracking === "") return { kind: "none" };
+  if (remote === "" || remote.startsWith("-")) return { kind: "unmapped" };
   const prefix = `refs/remotes/${remote}/`;
-  if (!tracking.startsWith(prefix) || tracking.length === prefix.length) return null;
+  if (!tracking.startsWith(prefix) || tracking.length === prefix.length) return { kind: "unmapped" };
   // `has_default_fetch_refspec`: only the default mapping spells the branch.
   const fetch = spawnSync(GIT, ["config", "--get-all", `remote.${remote}.fetch`], { cwd, encoding: "utf-8" });
   const wanted = `refs/heads/*:refs/remotes/${remote}/*`;
   const ok = (fetch.stdout || "").split("\n").some((l) => l.trim().replace(/^\+/, "") === wanted);
-  return ok ? tracking.slice(prefix.length) : null;
+  return ok ? { kind: "branch", name: tracking.slice(prefix.length) } : { kind: "unmapped" };
 }
+
+/** ops.rs `UNMAPPED_PUSH_DEST`. */
+const UNMAPPED_PUSH_DEST =
+  "force push refused: the remote branch this push updates cannot be read (a custom fetch refspec), " +
+  "so it cannot be leased; force push from a terminal";
 
 /** `gh_fork_parent` (commands/gh.rs) answers, by origin, for ten minutes. */
 const devForkParentCache = new Map();
@@ -5252,8 +5258,9 @@ async function handleRequest(req, res) {
             // branch the push updates (`push_destination`).
             try {
               devForceWithLeaseArg(leaseBranch, leaseSha);
-              const dest = devPushDestination(resolvedCwd, String(leaseBranch)) ?? leaseBranch;
-              args.push(devForceWithLeaseArg(dest, leaseSha));
+              const dest = devPushDestination(resolvedCwd, String(leaseBranch));
+              if (dest.kind === "unmapped") return jsonResponse(req, res, { error: UNMAPPED_PUSH_DEST }, 400);
+              args.push(devForceWithLeaseArg(dest.kind === "branch" ? dest.name : leaseBranch, leaseSha));
             } catch (e) { return jsonResponse(req, res, { success: false, message: e.message }); }
           } else {
             // `git_push`: the tip must also have been integrated locally —
@@ -5266,8 +5273,9 @@ async function handleRequest(req, res) {
             });
             const headRef = head.status === 0 ? (head.stdout || "").trim() : "";
             const headName = headRef.startsWith("refs/heads/") ? headRef.slice("refs/heads/".length) : "";
-            const dest = headName ? devPushDestination(resolvedCwd, headName) : null;
-            const renamed = dest !== null && dest !== headName;
+            const dest = headName ? devPushDestination(resolvedCwd, headName) : { kind: "none" };
+            // An unreadable destination may be renamed: treated as such.
+            const renamed = dest.kind === "unmapped" || (dest.kind === "branch" && dest.name !== headName);
             const v = await combinedGitVersion();
             const hasIfIncludes = v && (v[0] > 2 || (v[0] === 2 && v[1] >= 30));
             // `push.useForceIfIncludes=true` would bring the check back: negate it.
@@ -5311,6 +5319,11 @@ async function handleRequest(req, res) {
       if (rejectCrossOrigin(req, res)) return;
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      // `git_fetch`'s `remote`: one remote instead of the default.
+      const remote = url.searchParams.get("remote");
+      if (remote !== null && (remote === "" || remote.startsWith("-"))) {
+        return jsonResponse(req, res, { error: "invalid remote" }, 400);
+      }
       const resolvedCwd = resolve(cwd);
       const sseOrigin = req.headers.origin;
       const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
@@ -5323,7 +5336,7 @@ async function handleRequest(req, res) {
       // Mirrors git_fetch's `refs_changed` (#287): compare every ref before
       // and after, so the frontend only forces a log reload when one moved.
       const refsBefore = devRefFingerprint(resolvedCwd);
-      const proc = spawn(GIT, ["fetch", "--prune", "--progress"], {
+      const proc = spawn(GIT, ["fetch", "--prune", "--progress", ...(remote !== null ? [remote] : [])], {
         cwd: resolvedCwd,
         stdio: ["ignore", "ignore", "pipe"],
       });

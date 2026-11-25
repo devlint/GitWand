@@ -11,7 +11,7 @@
  * via localStorage — same shape and lifecycle as useArchivedBranches.
  */
 
-import { gitExec } from "../utils/backend";
+import { gitExec, gitFetch } from "../utils/backend";
 import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
 
 // ─── decision ────────────────────────────────────────────────────────────────
@@ -162,7 +162,8 @@ export async function fetchPushRemote(cwd: string): Promise<void> {
     const refs = await pushRefs(cwd);
     if (!refs || !refs.pushRemote || refs.pushRemote === refs.upstreamRemote) return;
     if (refs.pushRemote.startsWith("-")) return;
-    await gitExec(cwd, ["fetch", "--quiet", "--end-of-options", refs.pushRemote]);
+    // The app's fetch command (repo lock, prune), on that remote.
+    await gitFetch(cwd, undefined, refs.pushRemote);
   } catch {
     /* best-effort */
   }
@@ -190,10 +191,15 @@ export async function forcePushTarget(
     if (count.exitCode !== 0 || !Number.isFinite(behind)) return null;
     const refs = await pushRefs(cwd);
     const prefix = refs?.pushRemote ? `refs/remotes/${refs.pushRemote}/` : null;
-    const branch =
-      prefix && refs!.pushRef.startsWith(prefix) && refs!.pushRef.length > prefix.length
-        ? refs!.pushRef.slice(prefix.length)
-        : null;
+    let branch: string | null = null;
+    if (prefix && refs!.pushRef.startsWith(prefix) && refs!.pushRef.length > prefix.length) {
+      // Only the default fetch mapping spells the remote branch (Rust
+      // `has_default_fetch_refspec`); otherwise the backend refuses the lease.
+      const fetch = await gitExec(cwd, ["config", "--get-all", `remote.${refs!.pushRemote}.fetch`]);
+      const wanted = `refs/heads/*:refs/remotes/${refs!.pushRemote}/*`;
+      const mapped = fetch.stdout.split("\n").some((l) => l.trim().replace(/^\+/, "") === wanted);
+      if (mapped) branch = refs!.pushRef.slice(prefix.length);
+    }
     return { sha, behind, branch };
   } catch {
     return null;
