@@ -871,18 +871,25 @@ pub(crate) fn rest_current_user(token: &str) -> Result<String, String> {
     Ok(login)
 }
 
-/// Up to `count` merged pull requests of `repo`, most recently updated first,
-/// from search-API pages of `per_page` starting at `first_page`, each read as
-/// a pull-request object.
+/// Merged pull requests of `repo`, most recently updated first, from
+/// search-API pages of `per_page` starting at `first_page`: `count` of them
+/// after skipping `skip`, each read as a pull-request object. Past the search
+/// API's 1 000-result window the list ends there.
 fn merged_prs_page(
     repo: &str,
     per_page: usize,
     first_page: usize,
+    skip: usize,
     count: usize,
     token: &str,
 ) -> Result<Vec<serde_json::Value>, String> {
+    /// The search API serves its first 1 000 results only (422 past them).
+    const SEARCH_WINDOW: usize = 1_000;
     let mut numbers: Vec<i64> = Vec::new();
     for n in first_page.. {
+        if (n - 1) * per_page >= SEARCH_WINDOW {
+            break;
+        }
         let v = api_json_cached(
             &format!(
                 "{}/search/issues?q=repo:{}+type:pr+is:merged&sort=updated&order=desc&per_page={}&page={}",
@@ -905,13 +912,15 @@ fn merged_prs_page(
                 .iter()
                 .filter_map(|i| i.get("number").and_then(|x| x.as_i64())),
         );
-        if short || numbers.len() >= count {
+        if short || numbers.len() >= skip + count {
             break;
         }
     }
-    numbers.truncate(count);
+    // Only the numbers the slice keeps are read as pull requests.
     numbers
         .iter()
+        .skip(skip)
+        .take(count)
         .map(|num| {
             api_json_cached(
                 &format!("{}/repos/{}/pulls/{}", API_BASE, repo, num),
@@ -973,7 +982,15 @@ pub(crate) fn rest_list_prs(
         // page cap, then an empty page that ended "load more". Each number is
         // then read as a pull request (the enrichment below reads the same
         // URL, so the ETag cache answers it).
-        raw = merged_prs_page(&base, per_page, first_page, want - skip_in_pages, token)?;
+        let local_skip = off as usize - skip_in_pages;
+        raw = merged_prs_page(
+            &base,
+            per_page,
+            first_page,
+            local_skip,
+            page as usize,
+            token,
+        )?;
     }
     for n in first_page..first_page + LIST_PRS_MAX_PAGES {
         if merged {
@@ -1000,7 +1017,12 @@ pub(crate) fn rest_list_prs(
         }
     }
     let mut prs: Vec<PullRequest> = raw.iter().filter(|pr| keep(pr)).map(json_to_pr).collect();
-    let skip = (off as usize).saturating_sub(skip_in_pages).min(prs.len());
+    // `merged` already read only its window.
+    let skip = if merged {
+        0
+    } else {
+        (off as usize).saturating_sub(skip_in_pages).min(prs.len())
+    };
     prs.drain(..skip);
     prs.truncate(page as usize);
 
@@ -2348,16 +2370,23 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
     // `branch.pr-<n>.gitwandPrHead`: the PR head this branch was last checked
     // out at (config, not a ref: nothing extra in the Git Tree).
     let head_key = format!("branch.{}.gitwandPrHead", local);
-    let fetched = String::from_utf8_lossy(&git(&["rev-parse", "FETCH_HEAD"])?.stdout)
-        .trim()
-        .to_string();
+    // Pinned right after the fetch: every later step names this sha, so a
+    // fetch run meanwhile by another tool (FETCH_HEAD rewritten) cannot move
+    // `pr-<n>` to another commit.
+    let pinned = git(&["rev-parse", "--verify", "FETCH_HEAD^{commit}"])?;
+    if !pinned.status.success() {
+        return Err(fail("git rev-parse FETCH_HEAD", &pinned));
+    }
+    let fetched = String::from_utf8_lossy(&pinned.stdout).trim().to_string();
+    // Best effort: the checkout itself has succeeded by then. A missing
+    // record only makes the next checkout read `pr-<n>` ahead as local work.
     let record = || -> Result<(), String> {
-        let out = git(&["config", &head_key, &fetched])?;
-        if out.status.success() {
-            Ok(())
-        } else {
-            Err(fail("git config", &out))
+        match git(&["config", &head_key, &fetched]) {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => eprintln!("[checkout_pr_head] {}", fail("git config", &out)),
+            Err(e) => eprintln!("[checkout_pr_head] {e}"),
         }
+        Ok(())
     };
     let exists = git(&["show-ref", "--verify", "--quiet", &local_ref])?
         .status
@@ -2368,7 +2397,7 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
                 .status
                 .success())
         };
-        let ff = ancestor(&local_ref, "FETCH_HEAD")?;
+        let ff = ancestor(&local_ref, &fetched)?;
         // The PR head recorded at the last checkout. `pr-<n>` ahead of a PR
         // that has not moved since is local work (commits, a merge of main):
         // checked out as it is. Ahead of a PR whose head moved back is the PR
@@ -2377,7 +2406,7 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
         let recorded = git(&["config", "--get", &head_key])?;
         let recorded = String::from_utf8_lossy(&recorded.stdout).trim().to_string();
         let unchanged = recorded.is_empty() || recorded == fetched;
-        if !ff && unchanged && ancestor("FETCH_HEAD", &local_ref)? {
+        if !ff && unchanged && ancestor(fetched.as_str(), &local_ref)? {
             let checkout = git(&["checkout", &local])?;
             return if checkout.status.success() {
                 record()
@@ -2396,14 +2425,14 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
         let head = git(&["symbolic-ref", "-q", "HEAD"])?;
         let on_it = String::from_utf8_lossy(&head.stdout).trim() == local_ref;
         if on_it {
-            let merge = git(&["merge", "--ff-only", "-q", "FETCH_HEAD"])?;
+            let merge = git(&["merge", "--ff-only", "-q", fetched.as_str()])?;
             return if merge.status.success() {
                 record()
             } else {
                 Err(fail("git merge --ff-only", &merge))
             };
         }
-        let mv = git(&["branch", "-f", &local, "FETCH_HEAD"])?;
+        let mv = git(&["branch", "-f", &local, fetched.as_str()])?;
         if !mv.status.success() {
             return Err(fail(&format!("git branch -f {}", local), &mv));
         }
@@ -2414,7 +2443,7 @@ fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), St
             Err(fail(&format!("git checkout {}", local), &checkout))
         };
     }
-    let checkout = git(&["checkout", "-b", &local, "FETCH_HEAD"])?;
+    let checkout = git(&["checkout", "-b", &local, fetched.as_str()])?;
     if !checkout.status.success() {
         return Err(fail(&format!("git checkout -b {}", local), &checkout));
     }

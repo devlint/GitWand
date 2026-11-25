@@ -6451,7 +6451,8 @@ async function handleRequest(req, res) {
           // `merged_prs_page`: the search API pages merged PRs directly; each
           // number is then read as a pull request.
           const numbers = [];
-          for (let page = firstPage; ; page++) {
+          // The search API serves its first 1 000 results only.
+          for (let page = firstPage; (page - 1) * perPage < 1000; page++) {
             const resp = await githubFetch(
               `/search/issues?q=${encodeURIComponent(`repo:${nwo} type:pr is:merged`)}&sort=updated&order=desc&per_page=${perPage}&page=${page}`,
               token,
@@ -6464,7 +6465,8 @@ async function handleRequest(req, res) {
             numbers.push(...items.map((i) => i.number));
             if (items.length < perPage || skipped + numbers.length >= limit + offset) break;
           }
-          for (const n of numbers.slice(0, limit + offset - skipped)) {
+          // Only the numbers the slice keeps are read as pull requests.
+          for (const n of numbers.slice(offset - skipped, offset - skipped + limit)) {
             const resp = await githubFetch(`/repos/${nwo}/pulls/${n}`, token);
             if (!resp.ok) {
               const text = await resp.text();
@@ -6487,7 +6489,7 @@ async function handleRequest(req, res) {
             if (chunk.length < perPage || skipped + fetched.length >= limit + offset) break;
           }
         }
-        const from = Math.max(0, offset - skipped);
+        const from = merged ? 0 : Math.max(0, offset - skipped);
         const raw = fetched.slice(from, from + limit);
         const prs = raw.map((pr) => ({
           number: pr.number,

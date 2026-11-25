@@ -552,11 +552,22 @@ fn gh_list_reviewer_candidates_inner(
     // create form names its target (the fork or its parent); the PR detail
     // names none: the base repo, whose PRs it requests reviewers on.
     if let Some(origin) = gh_origin_repo(&cwd) {
-        if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
+        // Origin named: a call about origin itself, keyed on `cwd`. Else the
+        // base repo, keyed like every PR call (`with_rest_pr`).
+        let wants_origin = repo
+            .as_deref()
+            .is_some_and(|r| r.eq_ignore_ascii_case(&origin.nwo));
+        let list = |tok: &str| {
             let base = github_api::base_owner_repo(&cwd, tok)?;
             let nwo = reviewer_candidates_repo(repo.as_deref(), &origin.nwo, &base)?;
             super::gh_issues::rest_pages(&format!("repos/{}/assignees", nwo), tok, 3)
-        }) {
+        };
+        let rest = if wants_origin {
+            github_api::with_rest(&cwd, list)
+        } else {
+            github_api::with_rest_pr(&cwd, list)
+        };
+        if let Some(r) = rest {
             return r.map(|items| super::gh_issues::assignees_from(&items));
         }
     }

@@ -391,7 +391,8 @@ let candidatesSeq = 0;
 async function loadReviewerCandidates() {
   if (!props.cwd) return;
   const seq = ++candidatesSeq;
-  const target = p.newPrBaseRepo.value.trim() || undefined;
+  // `createPr` creates on origin when no target is picked: so do these.
+  const target = p.newPrBaseRepo.value.trim() || p.forkInfo.value?.origin || undefined;
   reviewerCandidatesLoading.value = true;
   try {
     const provider = await forgeForRepo(props.cwd);
