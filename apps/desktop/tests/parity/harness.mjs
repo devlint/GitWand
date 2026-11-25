@@ -35,11 +35,12 @@ import { normalize } from "./normalize.mjs";
  * @param {string} opts.httpPath   path+querystring à appeler sur le dev-server
  * @param {"GET"|"POST"} [opts.method="GET"]
  * @param {object} [opts.body]     corps JSON pour POST
+ * @param {object} [opts.probeEnv] variables d'env en plus pour le probe Rust
  * @returns {Promise<{rust: any, node: any}>}  les payloads normalisés (utile pour asserts additionnels)
  */
-export async function assertParity(dev, { command, args, httpPath, method = "GET", body }) {
+export async function assertParity(dev, { command, args, httpPath, method = "GET", body, probeEnv }) {
   // ── Rust ──────────────────────────────────────────────────
-  const probeResult = runProbe(command, args);
+  const probeResult = runProbe(command, args, probeEnv);
   if (!probeResult.ok) {
     throw new Error(
       `parity-probe failed for "${command}": ${probeResult.error}\nargs: ${JSON.stringify(args)}`,

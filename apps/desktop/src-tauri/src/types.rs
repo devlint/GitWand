@@ -77,7 +77,7 @@ pub struct GitStatus {
 
 // ─── Diff types ────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct DiffLine {
     pub r#type: String,
     pub content: String,
@@ -85,7 +85,7 @@ pub struct DiffLine {
     pub new_line_no: Option<i32>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct DiffHunk {
     pub header: String,
     pub old_start: i32,
@@ -95,7 +95,7 @@ pub struct DiffHunk {
     pub lines: Vec<DiffLine>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct GitDiff {
     pub path: String,
     pub hunks: Vec<DiffHunk>,
@@ -118,6 +118,84 @@ pub struct GitDiff {
     /// panel rather than a file list that leads nowhere.
     #[serde(skip_serializing_if = "Option::is_none", rename = "nestedRepo")]
     pub nested_repo: Option<bool>,
+    /// `Some(true)` when git printed `Binary files … differ` for the file:
+    /// its content changed in a way no hunk describes. Set by
+    /// `parse_multi_file_diff_capped` only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary: Option<bool>,
+}
+
+// ─── Combined diff ─────────────────────────────────────────────────
+// Built by `git_combined_diff` (`combined/replay.rs`).
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinedCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    pub author: String,
+    /// Author date, strict ISO 8601 (`%aI`).
+    pub date: String,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinedFallbackCommitDiff {
+    pub hash: String,
+    pub diff: GitDiff,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinedFallbackFile {
+    pub path: String,
+    /// `merge-tree` reported this path conflicted (or it is the other half
+    /// of a rename pair with such a path). `false` for a companion that
+    /// falls back conservatively (touched by the conflicted commit, carried
+    /// by a rename, or under a `merge` attribute driver).
+    pub conflicted: bool,
+    pub per_commit: Vec<CombinedFallbackCommitDiff>,
+    pub blockers: Vec<String>,
+}
+
+/// One commit of a file's `--follow` history (`git_file_lineage`): its hash
+/// and the file's name there (`None` for a merge, which names nothing).
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileLineageEntry {
+    pub hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinedDiff {
+    pub base: Option<String>,
+    pub commits: Vec<CombinedCommit>,
+    pub diffs: Vec<GitDiff>,
+    pub steps: Vec<Vec<GitDiff>>,
+    pub fallback: Vec<CombinedFallbackFile>,
+    /// The total payload budget (`combined/budget.rs`) cut something: step
+    /// entries of some files (no attribution for them) and/or entries made
+    /// header-only.
+    pub truncated: bool,
+    /// The entries the budget made header-only (sorted, unique): their
+    /// `truncated_from_bytes` is an estimated payload weight, not a file
+    /// size over the per-file cap.
+    pub budget_omitted: Vec<CombinedBudgetOmitted>,
+}
+
+/// One entry made header-only by the payload budget: a net entry
+/// (`commit: None`) or the per-commit fallback section of `commit` — one
+/// path can have both, and only some of them cut. Sorted by path, then net
+/// entry first, then commit hash.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinedBudgetOmitted {
+    pub path: String,
+    pub commit: Option<String>,
 }
 
 // ─── Branch PR lookup ──────────────────────────────────────────────

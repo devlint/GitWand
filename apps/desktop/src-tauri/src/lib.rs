@@ -1,3 +1,4 @@
+pub(crate) mod combined;
 pub(crate) mod commands;
 pub mod git;
 pub(crate) mod process_tree;
@@ -242,6 +243,31 @@ pub fn git_diff_parity(cwd: String, path: String, staged: bool) -> Result<types:
 /// reasoning as `git_diff_parity`.
 pub fn git_show_parity(cwd: String, hash: String) -> Result<Vec<types::GitDiff>, String> {
     tauri::async_runtime::block_on(commands::read::git_show(cwd, hash))
+}
+
+/// `budget` overrides the 16 MB payload budget so the parity suite can
+/// exercise the cut with small repos; `None` = the production constant. Only
+/// the probe calls this — the Tauri command itself has no override.
+pub fn git_combined_diff_parity(
+    cwd: String,
+    hashes: Vec<String>,
+    paths: Option<Vec<String>>,
+    budget: Option<usize>,
+) -> Result<types::CombinedDiff, String> {
+    match budget {
+        None => tauri::async_runtime::block_on(commands::combined::git_combined_diff(
+            cwd, hashes, paths,
+        )),
+        Some(b) => combined::replay::combined_diff_with_budget(&cwd, &hashes, paths.as_deref(), b),
+    }
+}
+
+/// Parity entry point for `git_file_lineage`.
+pub fn git_file_lineage_parity(
+    cwd: String,
+    path: String,
+) -> Result<Vec<types::FileLineageEntry>, String> {
+    tauri::async_runtime::block_on(commands::combined::git_file_lineage(cwd, path))
 }
 
 pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
@@ -927,6 +953,8 @@ pub fn run() {
             commands::ops::git_add_to_gitignore,
             commands::ops::git_discard,
             commands::read::git_show,
+            commands::combined::git_combined_diff,
+            commands::combined::git_file_lineage,
             commands::ops::git_branches,
             commands::ops::git_create_branch,
             commands::ops::git_switch_branch,

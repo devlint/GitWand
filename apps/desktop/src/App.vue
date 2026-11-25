@@ -32,6 +32,7 @@ const MergeEditor = defineAsyncComponent(() => import("./components/MergeEditor.
 const DiffViewer = defineAsyncComponent(() => import("./components/DiffViewer.vue"));
 const ImageDiffViewer = defineAsyncComponent(() => import("./components/ImageDiffViewer.vue"));
 const CommitDiffViewer = defineAsyncComponent(() => import("./components/CommitDiffViewer.vue"));
+const CombinedDiffView = defineAsyncComponent(() => import("./components/CombinedDiffView.vue"));
 const FileHistoryViewer = defineAsyncComponent(() => import("./components/FileHistoryViewer.vue"));
 const CommitGraph = defineAsyncComponent(() => import("./components/CommitGraph.vue"));
 const PrDetailView = defineAsyncComponent(() => import("./components/PrDetailView.vue"));
@@ -101,6 +102,7 @@ import { COMMIT_SIGNATURE, withoutSignature } from "./utils/commitSignature";
 import { invalidateIssues, sharedIssueCache } from "./composables/useIssueSuggest";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
+import { escLayer, combinedEscAllowed } from "./utils/combinedEsc";
 import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
 import { useResolutionSelection, contentStamp } from "./composables/useResolutionSelection";
 import { getPendingSplitForHash, resolvePendingSplit } from "./composables/useInteractiveRebase";
@@ -212,6 +214,7 @@ import { githubProvider } from "./composables/forge/useForge";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
+import { clearCombinedCache } from "./utils/combinedCache";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
 import { planDiscard, selectDiscardEntries, summarizeDiscard } from "./utils/discardPlan";
@@ -4079,26 +4082,20 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
   // Each closes one thing and marks the key handled, so a diff's line
   // selection (#301) stays when Escape was meant for this.
-  if (showCommandLog.value) {
-    e.preventDefault();
-    showCommandLog.value = false;
-    return;
-  }
-  if (showHelp.value) {
-    e.preventDefault();
-    showHelp.value = false;
-    return;
-  }
-  if (pendingSwitchBranch.value) {
-    e.preventDefault();
-    cancelSwitchStash();
-    return;
-  }
-  if (showStash.value) {
-    e.preventDefault();
-    showStash.value = false;
-    return;
-  }
+  const layer = escLayer({
+    commandLog: showCommandLog.value,
+    help: showHelp.value,
+    switchStash: !!pendingSwitchBranch.value,
+    stash: showStash.value,
+    combined: !!combinedRequest.value && combinedEscAllowed(e),
+  });
+  if (!layer) return;
+  e.preventDefault();
+  if (layer === "commandLog") showCommandLog.value = false;
+  else if (layer === "help") showHelp.value = false;
+  else if (layer === "switchStash") cancelSwitchStash();
+  else if (layer === "stash") showStash.value = false;
+  else combinedRequest.value = null;
 }
 onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
 onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
@@ -4917,12 +4914,19 @@ watch(selectedCommitHash, () => {
 //   graphFileIdx === null → no file opened → show graph only, nothing highlighted
 //   graphFileIdx >= 0     → diff panel open, scrolled to that file
 const graphFileIdx = ref<number | null>(null);
+// Combined diff of the Git Tree multi-selection; replaces the graph while set.
+const combinedRequest = ref<import("./composables/useCombinedDiff").CombinedRequest | null>(null);
+// Closed, or another repo: the kept result (up to the 16 MB payload budget)
+// is dropped too.
+watch(repoFolderPath, () => { combinedRequest.value = null; clearCombinedCache(); });
+watch(combinedRequest, (req) => { if (!req) clearCombinedCache(); });
 const graphScrollIdx = ref<number | null>(null);
 
 /** Graph → select a commit: load its diffs, keep the graph, open no file. */
 function onGraphSelectCommit(hash: string) {
   // Picking a commit while the WIP is selected leaves the WIP mode.
   if (viewMode.value === "changes") viewMode.value = "graph";
+  combinedRequest.value = null;
   graphFileIdx.value = null;
   graphScrollIdx.value = null;
   selectCommit(hash);
@@ -4936,6 +4940,7 @@ function onDashboardSelectCommit(hash: string) {
 
 /** Graph → click a file in the right rail: open the diff scrolled to it. */
 function onGraphOpenFile(idx: number) {
+  combinedRequest.value = null;
   graphFileIdx.value = idx;
   graphScrollIdx.value = idx;
   nextTick(() => { graphScrollIdx.value = null; });
@@ -5133,7 +5138,8 @@ onUnmounted(() => {
                     <div v-else-if="mergeEditorPending" class="view__merge-pending" role="status">{{ t("common.loading") }}</div>
                     <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
                       :cwd="repoFolderPath" @close="closeFileHistory"
-                      @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }" />
+                      @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }"
+                      @open-combined="(req) => { closeFileHistory(); onViewModeChange('graph'); graphFileIdx = null; combinedRequest = req; }" />
                     <!--
                       Image files (PNG, JPEG, WebP, GIF, SVG) get the ImageDiffViewer
                       branch; the line-based DiffViewer would hit its "binary file"
@@ -5154,6 +5160,11 @@ onUnmounted(() => {
                       @edit-hunk="handleEditHunk" />
                   </div>
                 </div>
+
+                <CombinedDiffView v-else-if="viewMode === 'graph' && combinedRequest && repoFolderPath"
+                  :cwd="repoFolderPath" :request="combinedRequest" :diff-mode="diffMode"
+                  @update:diff-mode="onDiffModeChange" @close="combinedRequest = null"
+                  @select-commit="onGraphSelectCommit" />
 
                 <!-- A clicked file replaces the graph with its diff (X to return). -->
                 <div v-else-if="viewMode === 'graph' && graphFileIdx !== null && selectedCommitHash" class="graph-diff-full">
@@ -5185,6 +5196,7 @@ onUnmounted(() => {
                   @set-log-branch-filter="setLogBranchFilter"
                   @set-log-author-filter="setLogAuthorFilter"
                   @select-commit="onGraphSelectCommit"
+                  @open-combined="(h: string[]) => { onViewModeChange('graph'); graphFileIdx = null; combinedRequest = { hashes: h }; }"
                   @change-view="onViewModeChange"
                   @edit-commit="handleEditCommit"
                   @split-commit="handleSplitCommitRequest"

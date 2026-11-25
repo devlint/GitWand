@@ -17,6 +17,9 @@ import { useTheme } from "../composables/useTheme";
 import { useStacks } from "../composables/useStacks";
 import { stackMenuFor, type StackMenuItems } from "../composables/useStackActions";
 import { clampMenuToWindow } from "../utils/contextMenu";
+import { useCommitSelection, orderSelection, COMBINE_MAX } from "../composables/useCommitSelection";
+import { isToggleModifier } from "../utils/platform";
+import { preventShiftSelect } from "../composables/useLineRange";
 
 defineOptions({ inheritAttrs: false });
 
@@ -91,6 +94,8 @@ type CommitEvent =
 
 const emit = defineEmits<{
   "select-commit": [hash: string];
+  /** Open the combined diff of a multi-selection (hashes in graph row order). */
+  "open-combined": [hashes: string[]];
   "change-view": [mode: "changes" | "history"];
   "edit-commit": [entry: GitLogEntry];
   "split-commit": [entry: GitLogEntry];
@@ -224,8 +229,14 @@ function openCommitContextMenu(e: MouseEvent, entry: GitLogEntry, idx: number, b
   if (entry.hashFull === "WIP") return;
   e.preventDefault();
   e.stopPropagation();
-  // Select the commit first
-  emit("select-commit", entry.hashFull);
+  // Without a multi-selection, select the commit first (as before v3.15).
+  // With one, a right-click never changes it: on a member the menu acts on
+  // the selection, on any other row on that row only (`ctxMenu.entry`); the
+  // selection and the right rail stay as they are.
+  if (multiSet.value.size < 2) {
+    selection.clear();
+    emit("select-commit", entry.hashFull);
+  }
   const tag = branchType === "tag" ? branchName : undefined;
 
   // Identify if this is a stash commit
@@ -305,7 +316,9 @@ function onBranchDblClick(branch: { name: string, type: string }) {
   emit('checkout-branch', name, branch.type === 'remote');
 }
 
-function onRowDblClick(entry: GitLogEntry) {
+function onRowDblClick(e: MouseEvent, entry: GitLogEntry) {
+  // Two quick modifier clicks build a multi-selection: never a checkout.
+  if (isToggleModifier(e) || e.shiftKey) return;
   if (entry.hashFull === 'WIP') return;
   if (isCurrent(entry)) return;
   const refs = commitRefs(entry);
@@ -527,6 +540,12 @@ const isCtxEntryHead = computed(() => {
   return isCurrent(entry);
 });
 
+/** The menu was opened on a row of a multi-selection of 2+ commits. */
+const ctxInMulti = computed(() => {
+  const e = ctxMenu.value.entry;
+  return ctxMenu.value.visible && !!e && orderedSelection.value.length >= 2 && multiSet.value.has(e.hashFull);
+});
+
 onMounted(() => {
   window.addEventListener("click", closeCommitContextMenu);
   window.addEventListener("click", closeWipContextMenu);
@@ -540,8 +559,33 @@ onUnmounted(() => {
   window.removeEventListener("keydown", onCtxKey);
 });
 
+/**
+ * Esc/Enter act on the selection only for a key the graph owns: not already
+ * handled, not typed in a field, not while a modal is open, and from the
+ * graph itself or the bare page (focus on nothing).
+ */
+function selectionKeyAllowed(e: KeyboardEvent): boolean {
+  if (e.defaultPrevented) return false;
+  const t = e.target as HTMLElement | null;
+  if (t && t !== document.body && t.nodeType === 1) {
+    if (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) return false;
+    if (!cgRoot.value?.contains(t)) return false;
+  }
+  return !document.querySelector('[aria-modal="true"]');
+}
+
 function onCtxKey(e: KeyboardEvent) {
-  if (e.key === "Escape") { closeCommitContextMenu(); closeWipContextMenu(); }
+  if (e.key === "Escape") {
+    // A first Esc closes an open menu; the multi-selection goes on the next one.
+    if (ctxMenu.value.visible || wipCtxMenu.value.visible) { closeCommitContextMenu(); closeWipContextMenu(); return; }
+    if (selectionKeyAllowed(e) && multiSet.value.size > 0) selection.clear();
+  } else if (e.key === "Enter" && canCombine.value && selectionKeyAllowed(e)) {
+    // Enter in an open menu is the menu's, not the selection's.
+    if (ctxMenu.value.visible || wipCtxMenu.value.visible) return;
+    const t = e.target as HTMLElement | null;
+    if (t && ["BUTTON", "A"].includes(t.tagName)) return;
+    openCombined();
+  }
 }
 
 // ─── WIP context menu ────────────────────────────────
@@ -764,6 +808,65 @@ const renderedCommits = computed(() => {
   if (prNumberQuery.value !== null) return displayCommits.value.filter(commitMatchesPrQuery);
   return filterCommitsLocal(displayCommits.value, searchQuery.value);
 });
+
+// ─── Multi-selection for the combined diff (v3.15) ───
+const cgRoot = ref<HTMLElement | null>(null);
+const selection = useCommitSelection(computed(() => props.cwd ?? ""));
+const multiSet = computed(() => new Set(selection.selected.value));
+/** WIP and stash rows never join a multi-selection. */
+function isJoinable(entry: GitLogEntry | undefined): entry is GitLogEntry {
+  if (!entry || entry.hashFull === "WIP") return false;
+  return !commitRefs(entry).some((r) => r.type === "stash");
+}
+/** Rows as the graph lists them now (filters/search applied), joinable ones only: the ⇧ range. */
+const joinableOrder = computed(() =>
+  renderedCommits.value.filter(isJoinable).map((e) => e.hashFull),
+);
+/**
+ * The whole loaded log, unfiltered, joinable rows only — computed only while
+ * a multi-selection exists: `isJoinable` parses every row's refs, which a
+ * refresh with nothing selected must not pay for. Empty otherwise, which the
+ * prune watcher below reads as "nothing to prune".
+ */
+const logOrder = computed(() =>
+  multiSet.value.size === 0 ? [] : displayCommits.value.filter(isJoinable).map((e) => e.hashFull),
+);
+/**
+ * THE selection list: selected hashes in the loaded log (full log order),
+ * then those beyond the loaded depth (selection order). A search that only
+ * hides a selected row keeps it; chip, Enter, disabled state and the
+ * emitted hashes all read this one list.
+ */
+const orderedSelection = computed(() => orderSelection(selection.selected.value, logOrder.value));
+const tooMany = computed(() => orderedSelection.value.length > COMBINE_MAX);
+const canCombine = computed(
+  () => orderedSelection.value.length >= 2 && orderedSelection.value.length <= COMBINE_MAX,
+);
+
+function openCombined() {
+  if (!canCombine.value) return;
+  emit("open-combined", [...orderedSelection.value]);
+}
+
+/** Row click: plain = single selection (unchanged), Cmd/Ctrl = toggle, Shift = range. */
+function onRowClick(e: MouseEvent, index: number) {
+  const entry = renderedCommits.value[index];
+  if (!entry) return;
+  if (isToggleModifier(e) || e.shiftKey) {
+    // A stash or WIP row cannot join: a modifier slip on it must not wipe
+    // the multi-selection (nor open the stash or the changes view).
+    if (!isJoinable(entry)) return;
+    const cur = props.selectedHash ?? null;
+    const current = cur && joinableOrder.value.includes(cur) ? cur : null;
+    if (e.shiftKey) selection.range(entry.hashFull, joinableOrder.value, current);
+    else selection.toggle(entry.hashFull, current);
+    return;
+  }
+  if (entry.hashFull === "WIP") { emit("change-view", "changes"); return; }
+  selection.clear();
+  selection.setAnchor(entry.hashFull);
+  emit("select-commit", entry.hashFull);
+}
 
 const matchedIndices = computed<number[]>(() => {
   const q = searchQuery.value.trim();
@@ -1370,6 +1473,43 @@ const visibleRange = computed(() => {
   return { first, last };
 });
 
+// A reload that drops a commit (rebase, amend) prunes it from the selection.
+// With the whole log loaded, any selected commit absent from it goes. With
+// more pages, only one the previous log had loaded (index < its length) and
+// that a reload at least that deep no longer lists (an amended commit stays
+// resolvable through the reflog, so absence from the log is the signal); a
+// commit beyond the loaded depth is kept — a shorter reload may just stop
+// before it. An empty log is a reload in progress. And only on the
+// unfiltered log (the canonical view of `useGitRepo`), before and after: a
+// branch, author or monorepo-scope filter hides commits that still exist.
+// The filter is read, not watched: it flips back to "all" before the
+// unfiltered log arrives, and the log still shown then is the filtered one.
+const unfilteredLog = () =>
+  (props.logBranchFilter ?? "all") === "all" &&
+  (props.logAuthorFilter ?? "all") === "all" &&
+  !activeScope.value;
+// `logOrder` is empty while nothing is selected: no refs parsed, no prune.
+let prevOrder: string[] | null = null;
+watch([logOrder, () => props.hasMore], ([order, more]) => {
+  if (order.length === 0) return;
+  if (!unfilteredLog()) {
+    prevOrder = null;
+    return;
+  }
+  if (!more) selection.prune(order);
+  else if (prevOrder) {
+    const before = new Map(prevOrder.map((h, i) => [h, i]));
+    const now = new Set(order);
+    const gone = (h: string) => {
+      const i = before.get(h);
+      return i !== undefined && i < order.length && !now.has(h);
+    };
+    const held = [...selection.selected.value, ...(selection.anchor.value ? [selection.anchor.value] : [])];
+    if (held.some(gone)) selection.prune([...order, ...held.filter((h) => !gone(h))]);
+  }
+  prevOrder = order;
+});
+
 watch(() => visibleRange.value.last, (last) => {
   emit("view-anchor", renderedCommits.value[last]?.hashFull ?? null);
 });
@@ -1415,7 +1555,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 </script>
 
 <template>
-  <div class="cg" v-if="displayCommits.length > 0" v-bind="$attrs">
+  <div class="cg" ref="cgRoot" v-if="displayCommits.length > 0" v-bind="$attrs">
     <div class="cg-search-bar" ref="searchBarEl">
       <!-- Branch filter toggle -->
       <button
@@ -1667,7 +1807,8 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           class="cg-row-tint"
           v-bind="bandRect(node)"
           :style="{ fill: bandFill(node) }"
-          @click="node.hash === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', node.hash)"
+          @mousedown="preventShiftSelect"
+          @click="onRowClick($event, node.index)"
           @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         />
         <!-- Selected / current / search highlight over the row tint band,
@@ -1739,7 +1880,8 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           v-for="node in visibleNodes"
           :key="'n' + node.index"
           class="cg-node"
-          @click="node.hash === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', node.hash)"
+          @mousedown="preventShiftSelect"
+          @click="onRowClick($event, node.index)"
           @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         >
           <!-- WIP Node: dashed circle -->
@@ -1841,6 +1983,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           class="cg-row"
           :class="{
             'cg-row--selected': vc.entry.hashFull === selectedHash,
+            'cg-row--multi': multiSet.has(vc.entry.hashFull),
             'cg-row--current': isCurrent(vc.entry),
             'cg-row--wip': vc.entry.hashFull === 'WIP',
             'cg-row--hover': vc.index === hoveredIndex,
@@ -1849,7 +1992,10 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
              top: vc.index * ROW_H + 'px',
              height: ROW_H + 'px',
              '--cg-row-hl': commitRowHighlight(vc.index)
-           }"          @click="vc.entry.hashFull === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', vc.entry.hashFull)"          @dblclick="onRowDblClick(vc.entry)"
+           }"
+          @mousedown="preventShiftSelect"
+          @click="onRowClick($event, vc.index)"
+          @dblclick="onRowDblClick($event, vc.entry)"
           @contextmenu="vc.entry.hashFull === 'WIP' ? openWipContextMenu($event) : openCommitContextMenu($event, vc.entry, vc.index)"
         >
           <template v-if="vc.entry.hashFull === 'WIP'">
@@ -1935,6 +2081,23 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         </div>
       </div>
     </div>
+    <!-- Multi-selection chip (v3.15): at the bottom of the graph, above the dock -->
+    <div v-if="orderedSelection.length >= 2" class="cg-multi-chip" role="status">
+      <span class="cg-multi-chip__label">{{ tooMany ? t('combined.tooMany', COMBINE_MAX) : t('combined.chip', orderedSelection.length) }}</span>
+      <button
+        type="button"
+        class="cg-multi-chip__open"
+        :disabled="!canCombine"
+        @click.stop="openCombined"
+      >{{ t('combined.open') }}</button>
+      <button
+        type="button"
+        class="cg-multi-chip__clear"
+        :aria-label="t('combined.clear')"
+        v-tooltip="t('combined.clear')"
+        @click.stop="selection.clear()"
+      >&times;</button>
+    </div>
     <!-- Load-more indicator: overlaid bottom-right so it never reflows the graph.
          Must NOT live inside .cg-scroll (flex row) — as a flex child it becomes
          a phantom right column that shifts the whole tree when it appears. -->
@@ -1956,6 +2119,22 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       @click.stop
       @contextmenu.prevent
     >
+      <!-- Combined diff of the multi-selection (v3.15) — first entry -->
+      <template v-if="ctxInMulti">
+        <li
+          class="commit-ctx-menu-item"
+          :class="{ 'commit-ctx-menu-item--disabled': !canCombine }"
+          role="menuitem"
+          :title="tooMany ? t('combined.tooMany', COMBINE_MAX) : undefined"
+          @click="canCombine && (openCombined(), closeCommitContextMenu())"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 3h10M3 8h10M3 13h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          <span>{{ t('combined.ctxOpen', orderedSelection.length) }}</span>
+        </li>
+        <li class="commit-ctx-menu-sep" role="separator"></li>
+      </template>
       <!-- Stash actions (v2.12) — shown ONLY for stash commits -->
       <template v-if="ctxMenu.clickedBranchType === 'stash' && ctxMenu.clickedStashIndex !== undefined">
         <li
@@ -2865,6 +3044,58 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
    shadow (not a gradient layer) so it animates. */
 .cg-row--hover:not(.cg-row--selected):not(.cg-row--current)::after {
   box-shadow: inset 0 0 0 100vmax var(--cg-hover-wash);
+}
+
+/* Multi-selection (combined diff): distinct from the single selected row. */
+.cg-row--multi::after {
+  background-color: color-mix(in srgb, var(--color-accent), transparent 78%);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+/* Clears the floating AppDock like UndoToast: the dock's own offset and
+   height place it, so a change to either moves the chip with it. */
+.cg-multi-chip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--space-4, 12px) + var(--app-dock-height, 44px) + 12px);
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: var(--font-size-sm, 12px);
+  color: var(--color-text);
+}
+.cg-multi-chip__open {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-text, #fff);
+  font: inherit;
+  cursor: pointer;
+}
+.cg-multi-chip__open:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.cg-multi-chip__clear {
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted, inherit);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cg-multi-chip__clear:hover {
+  background: var(--color-bg-hover, rgba(128, 128, 128, 0.2));
 }
 
 .cg-row-tint {

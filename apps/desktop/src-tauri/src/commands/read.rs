@@ -864,6 +864,7 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
         is_directory: None,
         new_files: None,
         nested_repo: None,
+        binary: None,
     })
 }
 
@@ -947,6 +948,7 @@ fn git_diff_directory(cwd: &str, path: String) -> Result<GitDiff, String> {
         is_directory: Some(true),
         new_files: Some(if nested { Vec::new() } else { raw }),
         nested_repo: if nested { Some(true) } else { None },
+        binary: None,
     })
 }
 
@@ -1271,7 +1273,15 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
 /// commands cannot drift in hunk shaping or line classification. Splitting
 /// there is safe: every hunk line carries a `+`/`-`/` ` prefix (or is `""`),
 /// so none can start with `diff --git `.
-fn parse_multi_file_diff(stdout: &str) -> Vec<GitDiff> {
+pub(crate) fn parse_multi_file_diff(stdout: &str) -> Vec<GitDiff> {
+    parse_multi_file_diff_capped(stdout, None)
+}
+
+/// [`parse_multi_file_diff`] with a per-file size cap: a file section longer
+/// than `cap` bytes keeps its header (path, status, rename) but no hunks, and
+/// reports its size in `truncated_from_bytes` — the same contract as
+/// `git_diff`'s `DIFF_TRUNCATE_BYTES` cut, so a huge file never crosses IPC.
+pub(crate) fn parse_multi_file_diff_capped(stdout: &str, cap: Option<usize>) -> Vec<GitDiff> {
     let mut sections: Vec<Vec<&str>> = Vec::new();
     for line in stdout.lines() {
         if line.starts_with("diff --git ") {
@@ -1283,48 +1293,168 @@ fn parse_multi_file_diff(stdout: &str) -> Vec<GitDiff> {
 
     let mut diffs: Vec<GitDiff> = Vec::new();
     for section in sections {
-        // "diff --git a/path b/path"
-        let parts: Vec<&str> = section[0].split(" b/").collect();
-        if parts.len() < 2 {
-            continue;
-        }
-        let path = parts[1].to_string();
-
         // Extended headers — only before the first hunk, where they cannot be
         // confused with a hunk line.
         let mut status: Option<String> = None;
         let mut old_path: Option<String> = None;
+        let mut rename_to: Option<String> = None;
+        let mut minus: Option<String> = None;
+        let mut plus: Option<String> = None;
+        let mut binary = false;
         for line in section.iter().skip(1).take_while(|l| !l.starts_with("@@")) {
-            if line.starts_with("new file mode") {
+            if line.starts_with("Binary files ") {
+                binary = true;
+            } else if line.starts_with("new file mode") {
                 status = Some("added".to_string());
             } else if line.starts_with("deleted file mode") {
                 status = Some("deleted".to_string());
             } else if let Some(rest) = line.strip_prefix("rename from ") {
                 status = Some("renamed".to_string());
-                old_path = Some(rest.to_string());
-            } else if line.starts_with("rename to ") && status.is_none() {
-                status = Some("renamed".to_string());
+                old_path = unquote_header_name(rest);
+            } else if let Some(rest) = line.strip_prefix("rename to ") {
+                if status.is_none() {
+                    status = Some("renamed".to_string());
+                }
+                rename_to = unquote_header_name(rest);
+            } else if let Some(rest) = line.strip_prefix("copy to ") {
+                rename_to = unquote_header_name(rest);
+            } else if let Some(rest) = line.strip_prefix("--- ") {
+                minus = file_line_name(rest, "a/");
+            } else if let Some(rest) = line.strip_prefix("+++ ") {
+                plus = file_line_name(rest, "b/");
             }
         }
+        // The new name, from the least ambiguous source: `rename to`, then
+        // `+++ b/…`, `--- a/…` (one is `/dev/null` for an added or deleted
+        // file), else the two identical halves of `diff --git a/P b/P`. A
+        // name holding ` b/` or one git C-quotes defeats a split on ` b/`.
+        let Some(path) = rename_to
+            .or(plus)
+            .or(minus)
+            .or_else(|| symmetric_git_header_name(section[0]))
+        else {
+            continue;
+        };
 
-        let (hunks, _) = parse_diff_hunks(&section.join("\n"));
+        // Bytes of the section as git printed it (one `\n` per line).
+        let size: usize = section.iter().map(|l| l.len() + 1).sum();
+        let (hunks, truncated_from_bytes) = match cap {
+            Some(cap) if size > cap => (Vec::new(), Some(size as u64)),
+            _ => (parse_diff_hunks(&section.join("\n")).0, None),
+        };
         diffs.push(GitDiff {
             path,
             hunks,
             status,
             old_path,
-            // P2.4 — multi-file commit diff parsing has no per-file cap (the
-            // caller is `git_show`, not the polled `git_diff` that
-            // `pollStatus` re-fires). Truncation is only meaningful for the
-            // per-file diff command.
-            truncated_from_bytes: None,
+            // P2.4 — `git_show` passes no cap (it is not the polled
+            // `git_diff` that `pollStatus` re-fires); `git_combined_diff`
+            // caps each file at `DIFF_TRUNCATE_BYTES`.
+            truncated_from_bytes,
             // Directory entries only reach the single-file `git_diff`.
             is_directory: None,
             new_files: None,
             nested_repo: None,
+            binary: binary.then_some(true),
         });
     }
     diffs
+}
+
+/// Reads a C-quoted name (`"a/\303\251 \"x\".txt"`) at the start of `s`:
+/// the unquoted name (escapes and octal bytes decoded, UTF-8) and what
+/// follows the closing quote. `None` when `s` is not a well-formed quoted name.
+fn read_c_quoted(s: &str) -> Option<(String, &str)> {
+    let body = s.strip_prefix('"')?;
+    let bytes = body.as_bytes();
+    let mut out: Vec<u8> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => return Some((String::from_utf8_lossy(&out).into_owned(), &body[i + 1..])),
+            b'\\' => {
+                let c = *bytes.get(i + 1)?;
+                i += 2;
+                match c {
+                    b'a' => out.push(0x07),
+                    b'b' => out.push(0x08),
+                    b't' => out.push(b'\t'),
+                    b'n' => out.push(b'\n'),
+                    b'v' => out.push(0x0b),
+                    b'f' => out.push(0x0c),
+                    b'r' => out.push(b'\r'),
+                    b'"' => out.push(b'"'),
+                    b'\\' => out.push(b'\\'),
+                    b'0'..=b'3' => {
+                        let d1 = *bytes.get(i)?;
+                        let d2 = *bytes.get(i + 1)?;
+                        if !(b'0'..=b'7').contains(&d1) || !(b'0'..=b'7').contains(&d2) {
+                            return None;
+                        }
+                        out.push((c - b'0') * 64 + (d1 - b'0') * 8 + (d2 - b'0'));
+                        i += 2;
+                    }
+                    _ => return None,
+                }
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    None
+}
+
+/// A name from `rename from`/`rename to`/`copy to`: C-quoted or verbatim.
+fn unquote_header_name(s: &str) -> Option<String> {
+    if s.starts_with('"') {
+        match read_c_quoted(s)? {
+            (name, "") => Some(name),
+            _ => None,
+        }
+    } else {
+        Some(s.to_string())
+    }
+}
+
+/// The name on a `--- a/P` / `+++ b/P` line, without `prefix`. `None` for
+/// `/dev/null` or a line this parser cannot read. Git ends the line with a
+/// tab when the name holds a space; an unquoted name never holds a tab.
+fn file_line_name(s: &str, prefix: &str) -> Option<String> {
+    let name = if s.starts_with('"') {
+        match read_c_quoted(s)? {
+            (name, "" | "\t") => name,
+            _ => return None,
+        }
+    } else {
+        let s = s.strip_suffix('\t').unwrap_or(s);
+        if s == "/dev/null" {
+            return None;
+        }
+        s.to_string()
+    };
+    name.strip_prefix(prefix).map(str::to_string)
+}
+
+/// The name of `diff --git a/P b/P` when both halves name the same file —
+/// any section but a rename or a copy, whose names come from their own
+/// headers.
+fn symmetric_git_header_name(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("diff --git ")?;
+    if rest.starts_with('"') {
+        let (a, after) = read_c_quoted(rest)?;
+        let (b, end) = read_c_quoted(after.strip_prefix(' ')?)?;
+        let (a, b) = (a.strip_prefix("a/")?, b.strip_prefix("b/")?);
+        return (end.is_empty() && a == b).then(|| a.to_string());
+    }
+    // `a/P b/P`: 2·len(P) + 5 bytes.
+    let len = rest.len().checked_sub(5)?;
+    if len % 2 != 0 {
+        return None;
+    }
+    let p = rest.get(2..2 + len / 2)?;
+    (rest.starts_with("a/") && rest[2 + len / 2..] == format!(" b/{p}")).then(|| p.to_string())
 }
 
 // ─── File log (v1.9) — pickaxe + line-range ──────────────
@@ -1705,6 +1835,7 @@ pub(crate) async fn git_file_diff(
         is_directory: None,
         new_files: None,
         nested_repo: None,
+        binary: None,
     })
 }
 
@@ -4650,12 +4781,11 @@ mod file_diff_tests {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
         for (from, to) in [("--output=/tmp/pwn", a.as_str()), (a.as_str(), "-R")] {
-            let err = diff(&repo, "f.txt", from, to).err().expect("refused");
+            let err = diff(&repo, "f.txt", from, to).expect_err("refused");
             assert!(err.contains("invalid"), "{err}");
         }
         assert!(diff(&repo, "f.txt", "", &a)
-            .err()
-            .expect("refused")
+            .expect_err("refused")
             .contains("empty"));
     }
 
@@ -4676,8 +4806,7 @@ mod file_diff_tests {
             &a,
             "0000000000000000000000000000000000000bad",
         )
-        .err()
-        .expect("refused");
+        .expect_err("refused");
         assert!(err.contains("unknown revision"), "{err}");
     }
 
@@ -4842,7 +4971,7 @@ mod file_diff_tests {
         let repo = TempRepo::new();
         let a = repo.commit("dir/f.txt", Some("x\n"), "a");
         let b = repo.commit("dir/f.txt", Some("y\n"), "b");
-        let err = diff(&repo, "dir", &a, &b).err().expect("refused");
+        let err = diff(&repo, "dir", &a, &b).expect_err("refused");
         assert!(err.contains("directory"), "{err}");
     }
 
@@ -4862,8 +4991,7 @@ mod file_diff_tests {
                 from_path.map(str::to_string),
                 to_path.map(str::to_string),
             ))
-            .err()
-            .expect("refused");
+            .expect_err("refused");
             assert!(err.contains(needle), "{err}");
         }
     }
@@ -4981,7 +5109,7 @@ mod file_diff_tests {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
         let b = repo.commit("f.txt", Some("y\n"), "b");
-        let err = diff(&repo, "never.txt", &a, &b).err().expect("refused");
+        let err = diff(&repo, "never.txt", &a, &b).expect_err("refused");
         assert!(
             err.contains("never.txt not found at either commit"),
             "{err}"
@@ -4992,9 +5120,7 @@ mod file_diff_tests {
     fn a_control_character_in_a_revision_is_refused() {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
-        let err = diff(&repo, "f.txt", &format!("{a}\nHEAD"), &a)
-            .err()
-            .expect("refused");
+        let err = diff(&repo, "f.txt", &format!("{a}\nHEAD"), &a).expect_err("refused");
         assert!(err.contains("invalid fromHash"), "{err}");
     }
 
@@ -5002,9 +5128,9 @@ mod file_diff_tests {
     fn names_which_revision_is_unknown() {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
-        let err = diff(&repo, "f.txt", "nope", &a).err().expect("refused");
+        let err = diff(&repo, "f.txt", "nope", &a).expect_err("refused");
         assert_eq!(err, "unknown revision: nope");
-        let err = diff(&repo, "f.txt", &a, "nada").err().expect("refused");
+        let err = diff(&repo, "f.txt", &a, "nada").expect_err("refused");
         assert_eq!(err, "unknown revision: nada");
     }
 
@@ -5070,7 +5196,7 @@ mod file_diff_tests {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
         let b = repo.commit("f.txt", Some("y\n"), "b");
-        let err = diff(&repo, ".", &a, &b).err().expect("refused");
+        let err = diff(&repo, ".", &a, &b).expect_err("refused");
         assert!(err.contains("repository root"), "{err}");
     }
 
@@ -5168,5 +5294,128 @@ mod file_diff_tests {
             assert_eq!(d.hunks.len(), 1, "suppress={suppress}");
             assert_eq!(lines(&d), dash_lines(), "suppress={suppress}");
         }
+    }
+}
+
+/// File names in the `diff --git` sections of `parse_multi_file_diff`: a name
+/// holding ` b/` and names git C-quotes must come out exactly as git stores
+/// them — the combined diff's fallback filter matches them by name.
+#[cfg(test)]
+mod multi_file_header_tests {
+    use super::*;
+    use crate::worktree::test_support::TempRepo;
+
+    fn names(diffs: &[GitDiff]) -> Vec<(String, Option<String>, Option<String>)> {
+        diffs
+            .iter()
+            .map(|d| (d.path.clone(), d.old_path.clone(), d.status.clone()))
+            .collect()
+    }
+
+    fn n(
+        path: &str,
+        old: Option<&str>,
+        status: Option<&str>,
+    ) -> (String, Option<String>, Option<String>) {
+        (
+            path.to_string(),
+            old.map(str::to_string),
+            status.map(str::to_string),
+        )
+    }
+
+    #[test]
+    fn parses_names_with_b_slash_quotes_and_escapes() {
+        // `git show` output (core.quotePath=true, the default).
+        let raw = concat!(
+            "diff --git a/plan b/f.txt b/plan b/f.txt\n",
+            "index d00491f..0cfbf08 100644\n",
+            "--- a/plan b/f.txt\t\n",
+            "+++ b/plan b/f.txt\t\n",
+            "@@ -1 +1 @@\n",
+            "-1\n",
+            "+2\n",
+            "diff --git a/sp ace b/x b/sp ace b/x\n",
+            "new file mode 100644\n",
+            "index 0000000..e69de29\n",
+            "diff --git \"a/we\\\"ird.txt\" \"b/we\\\"ird.txt\"\n",
+            "deleted file mode 100644\n",
+            "index 587be6b..0000000\n",
+            "--- \"a/we\\\"ird.txt\"\n",
+            "+++ /dev/null\n",
+            "@@ -1 +0,0 @@\n",
+            "-x\n",
+            "diff --git \"a/back\\\\slash.txt\" \"b/ta\\tb.txt\"\n",
+            "similarity index 100%\n",
+            "rename from \"back\\\\slash.txt\"\n",
+            "rename to \"ta\\tb.txt\"\n",
+            "diff --git \"a/\\303\\251.txt\" \"b/\\303\\251.txt\"\n",
+            "index 587be6b..b77b4eb 100644\n",
+            "--- \"a/\\303\\251.txt\"\n",
+            "+++ \"b/\\303\\251.txt\"\n",
+            "@@ -1 +1,2 @@\n",
+            " x\n",
+            "+y\n",
+            "diff --git \"a/sp \\\"q\\\" b/x\" \"b/sp \\\"q\\\" b/x\"\n",
+            "new file mode 100644\n",
+            "index 0000000..587be6b\n",
+            "--- /dev/null\n",
+            "+++ \"b/sp \\\"q\\\" b/x\"\t\n",
+            "@@ -0,0 +1 @@\n",
+            "+x\n",
+        );
+        let diffs = parse_multi_file_diff(raw);
+        assert_eq!(
+            names(&diffs),
+            vec![
+                n("plan b/f.txt", None, None),
+                n("sp ace b/x", None, Some("added")),
+                n("we\"ird.txt", None, Some("deleted")),
+                n("ta\tb.txt", Some("back\\slash.txt"), Some("renamed")),
+                n("é.txt", None, None),
+                n("sp \"q\" b/x", None, Some("added")),
+            ]
+        );
+        assert_eq!(diffs[0].hunks.len(), 1);
+        assert_eq!(diffs[4].hunks.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_show_names_files_exactly() {
+        let repo = TempRepo::new();
+        repo.write("plan b/f.txt", "1\n");
+        repo.write("we\"ird.txt", "w\n");
+        repo.write("back\\slash.txt", "b\n");
+        repo.write("ta\tb.txt", "t\n");
+        repo.write("é.txt", "e\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.write("plan b/f.txt", "2\n");
+        repo.write("we\"ird.txt", "w2\n");
+        repo.write("back\\slash.txt", "b2\n");
+        repo.write("ta\tb.txt", "t2\n");
+        repo.write("é.txt", "e2\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "edit"]);
+
+        let diffs = tauri::async_runtime::block_on(git_show(
+            repo.path.to_string_lossy().to_string(),
+            "HEAD".to_string(),
+        ))
+        .expect("git show");
+        let mut paths: Vec<&str> = diffs.iter().map(|d| d.path.as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(
+            paths,
+            [
+                "back\\slash.txt",
+                "plan b/f.txt",
+                "ta\tb.txt",
+                "we\"ird.txt",
+                "é.txt"
+            ]
+        );
+        assert!(diffs.iter().all(|d| d.hunks.len() == 1));
     }
 }

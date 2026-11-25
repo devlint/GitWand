@@ -116,7 +116,16 @@ const BUDGETS = {
   // feature (post-#307 merges): the Task 13 review measured ~963 KB with all
   // stack code removed.
   // 980 still catches the engine leak above (1085 KB) with ~105 KB to spare.
-  main_max_kb: 980,
+  //
+  // v3.15 combined diffs: main measured at 982 KB (1,005,828 bytes; en strings
+  // + wiring). Combined view, selection, summary and attribution code are all
+  // lazy chunks; main only carries the `getCombinedDiff` / `mapRawGitDiff`
+  // wrappers in backend.ts, the en `combined` strings and the App.vue wiring.
+  // Review pass 3 (word-order-safe file counts, the kept result dropped when
+  // the view closes, prune limited to the unfiltered log): measured at 984 KB
+  // (1,007,247 bytes). The selection code stays lazy (CombinedDiffView sets
+  // the range anchor, not App).
+  main_max_kb: 984,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked

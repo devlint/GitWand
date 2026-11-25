@@ -33,6 +33,12 @@ Alternative : pointer sur un binaire pré-build via l'env var `PARITY_PROBE` :
 PARITY_PROBE=/path/to/parity-probe pnpm --filter @gitwand/desktop test:parity
 ```
 
+Hook de test : `GITWAND_COMBINED_BUDGET_BYTES` remplace le budget de 16 MB du
+diff combiné, lu par le probe et par `dev-server.mjs` seulement (jamais par
+l'app livrée : la commande Tauri n'a pas de paramètre de budget). La suite
+`git-combined-diff` le passe via `startDevServer({ env })` et
+`assertParity(..., { probeEnv })`.
+
 ## Exécution
 
 ```sh

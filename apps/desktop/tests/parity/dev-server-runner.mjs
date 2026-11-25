@@ -52,8 +52,11 @@ async function waitForPort(port, deadline) {
  *  - `fetch(pathAndQuery, init?)` : wrapper qui préfixe l'URL avec
  *    `http://127.0.0.1:<port>` ; retourne la Response native.
  *  - `stop()` : coupe le process et attend sa fin.
+ *
+ * `env` s'ajoute à l'environnement du dev-server (hooks de test, ex.
+ * `GITWAND_COMBINED_BUDGET_BYTES`).
  */
-export async function startDevServer() {
+export async function startDevServer({ env } = {}) {
   // On demande l'allocation d'un port libre via un listener éphémère, qu'on
   // ferme immédiatement après avoir récupéré son port. Ce n'est pas 100 %
   // race-free (un autre process pourrait réclamer ce port entre-temps) mais
@@ -76,7 +79,7 @@ export async function startDevServer() {
 
   const child = spawn("node", [DEV_SERVER, "--port", String(port)], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, NO_COLOR: "1" },
+    env: { ...process.env, NO_COLOR: "1", ...env },
   });
 
   // Collecte les logs pour diagnostic si le process meurt avant d'être prêt.

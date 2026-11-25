@@ -44,9 +44,10 @@ export function probePath() {
  *
  * `value` est le JSON décodé (ou undefined si erreur), `error` est la chaîne
  * d'erreur telle qu'émise par le probe (champ `error` du JSON, ou stderr en
- * cas d'échec d'invocation du binaire).
+ * cas d'échec d'invocation du binaire). `env` s'ajoute à l'environnement
+ * hérité (ex. `GITWAND_COMBINED_BUDGET_BYTES`, hook de test).
  */
-export function runProbe(command, args) {
+export function runProbe(command, args, env) {
   const bin = probePath();
   if (!existsSync(bin)) {
     throw new Error(
@@ -58,8 +59,12 @@ export function runProbe(command, args) {
 
   const result = spawnSync(bin, [command], {
     input: JSON.stringify(args || {}),
+    ...(env ? { env: { ...process.env, ...env } } : {}),
     encoding: "utf-8",
     timeout: 10_000,
+    // A combined diff over thousands of files answers several MB of JSON
+    // (spawnSync's default cap is 1 MB).
+    maxBuffer: 64 * 1024 * 1024,
   });
 
   if (result.error) {

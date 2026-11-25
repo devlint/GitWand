@@ -1,0 +1,364 @@
+// @vitest-environment jsdom
+/**
+ * CombinedDiffBody.vue — header chips, fallback banners, own file list,
+ * error / empty states, Esc. Rendered from props: no backend involved.
+ */
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { createApp, h, nextTick, ref, type App } from "vue";
+import CombinedDiffBody from "../CombinedDiffBody.vue";
+import { buildCombinedEntries } from "../../utils/combinedAttribution";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const paletteCss = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../assets/combined-palette.css"), "utf-8");
+import type { CombinedDiff, DiffHunk, DiffLine, GitDiff } from "../../utils/backend";
+
+vi.mock("../../composables/useI18n", () => ({
+  useI18n: () => ({
+    t: (key: string, ...args: unknown[]) => (args.length ? `${key}:${args.join(",")}` : key),
+    locale: ref("en"),
+  }),
+}));
+
+const add = (n: number, content = "x"): DiffLine => ({ type: "add", content, newLineNo: n });
+const hunk = (lines: DiffLine[]): DiffHunk => ({
+  header: "@@ -0,0 +1,1 @@", oldStart: 0, oldCount: 0, newStart: 1, newCount: lines.length, lines,
+});
+const file = (path: string, lines: DiffLine[] = [add(1)], extra: Partial<GitDiff> = {}): GitDiff =>
+  ({ path, hunks: lines.length ? [hunk(lines)] : [], ...extra });
+
+const H1 = "1".repeat(40);
+const H2 = "2".repeat(40);
+const H3 = "3".repeat(40);
+const commits = [
+  { hash: H1, shortHash: "1111111", subject: "first", author: "a", date: "d" },
+  { hash: H2, shortHash: "2222222", subject: "second", author: "a", date: "d" },
+  { hash: H3, shortHash: "3333333", subject: "third", author: "a", date: "d" },
+];
+function combined(over: Partial<CombinedDiff> = {}): CombinedDiff {
+  return {
+    base: "b", commits, diffs: [file("a.txt"), file("b.txt")], steps: [[file("a.txt")], [file("b.txt")], []],
+    fallback: [], truncated: false, budgetOmitted: [], ...over,
+  };
+}
+
+// jsdom has no layout: the viewer's scroll-to-file calls this.
+Element.prototype.scrollIntoView = vi.fn();
+
+let app: App | null = null;
+let container: HTMLElement | null = null;
+
+async function mount(c: CombinedDiff | Error, request = { hashes: [H1, H2, H3] } as { hashes: string[]; paths?: string[] }) {
+  const emitted: Record<string, unknown[][]> = { close: [], "select-commit": [], "update:diffMode": [], retry: [] };
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  app = createApp({
+    render: () =>
+      h(CombinedDiffBody, {
+        request, diffMode: "inline",
+        data: c instanceof Error ? null : c,
+        entries: c instanceof Error ? [] : buildCombinedEntries(c),
+        loading: false,
+        error: c instanceof Error ? c.message : null,
+        aiAvailable: false, summary: null, summarizing: false, summaryError: false,
+        onClose: (...a: unknown[]) => emitted.close.push(a),
+        "onSelect-commit": (...a: unknown[]) => emitted["select-commit"].push(a),
+        "onUpdate:diffMode": (...a: unknown[]) => emitted["update:diffMode"].push(a),
+        onRetry: (...a: unknown[]) => emitted.retry.push(a),
+      }),
+  });
+  app.mount(container);
+  for (let i = 0; i < 3; i++) { await Promise.resolve(); await nextTick(); }
+  return { emitted };
+}
+
+afterEach(() => {
+  app?.unmount();
+  container?.remove();
+  app = null;
+  container = null;
+  document.body.innerHTML = "";
+});
+
+const q = (sel: string) => container!.querySelector(sel) as HTMLElement | null;
+const qa = (sel: string) => Array.from(container!.querySelectorAll(sel)) as HTMLElement[];
+
+describe("CombinedDiffBody", () => {
+  it("renders one chip per commit in replay order; a click selects that commit", async () => {
+    const { emitted } = await mount(combined());
+    const chips = qa(".cmb-chip");
+    expect(chips.map((c) => c.textContent)).toEqual([
+      expect.stringContaining("1111111"), expect.stringContaining("2222222"), expect.stringContaining("3333333"),
+    ]);
+    expect(chips[1].textContent).toContain("second");
+    chips[1].click();
+    expect(emitted["select-commit"]).toEqual([[H2]]);
+  });
+
+  it("names the blockers in the fallback note when the file is conflicted", async () => {
+    await mount(combined({
+      fallback: [{ path: "c.txt", conflicted: true, blockers: [H2], perCommit: [{ hash: H1, diff: file("c.txt") }, { hash: H3, diff: file("c.txt") }] }],
+    }));
+    const notes = qa(".cdv-file-note").map((n) => n.textContent);
+    expect(notes).toEqual(["combined.fallbackBlocked:c.txt,2222222"]);
+  });
+
+  it("says conflict-between when conflicted without blockers", async () => {
+    await mount(combined({
+      fallback: [{ path: "c.txt", conflicted: true, blockers: [], perCommit: [{ hash: H1, diff: file("c.txt") }, { hash: H2, diff: file("c.txt") }] }],
+    }));
+    expect(qa(".cdv-file-note").map((n) => n.textContent)).toEqual(["combined.fallbackBetween:c.txt"]);
+  });
+
+  it("uses the companion wording for a non-conflicted fallback", async () => {
+    await mount(combined({
+      fallback: [{ path: "c.txt", conflicted: false, blockers: [], perCommit: [{ hash: H1, diff: file("c.txt") }] }],
+    }));
+    expect(qa(".cdv-file-note").map((n) => n.textContent)).toEqual(["combined.fallbackCompanion:c.txt"]);
+  });
+
+  it("shows a limited-to chip when paths are given", async () => {
+    await mount(combined(), { hashes: [H1, H2], paths: ["a.txt", "old/a.txt"] });
+    expect(q(".cmb-limited")!.textContent).toContain("combined.limitedTo:a.txt, old/a.txt");
+  });
+
+  it("renders the localized error message and a retry button", async () => {
+    const { emitted } = await mount(new Error("Unknown commit: abc1234"));
+    expect(q(".cmb-error")!.textContent).toContain("combined.errUnknown:abc1234");
+    expect(q(".cmb-error")!.getAttribute("role")).toBe("alert");
+    q(".cmb-retry")!.click();
+    expect(emitted.retry).toHaveLength(1);
+  });
+
+  it("shows the loading state with the commit count", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    app = createApp({
+      render: () => h(CombinedDiffBody, {
+        request: { hashes: [H1, H2] }, diffMode: "inline", data: null, entries: [], loading: true, error: null,
+        aiAvailable: false, summary: null, summarizing: false, summaryError: false,
+      }),
+    });
+    app.mount(container);
+    await nextTick();
+    expect(q(".cmb-loading")!.textContent).toBe("combined.loading:2");
+  });
+
+  it("renders the empty state when nothing nets out", async () => {
+    await mount(combined({ diffs: [], steps: [[], [], []] }));
+    expect(q(".cmb-empty")!.textContent).toContain("combined.empty");
+  });
+
+  it("flags a truncated file instead of an empty diff", async () => {
+    await mount(combined({ diffs: [file("big.bin", [], { truncatedFromBytes: 9_000_000 })] }));
+    expect(q(".cdv-file-note")!.textContent).toContain("combined.tooLarge");
+  });
+
+  it("says a budget-cut file is omitted for size, without its estimated weight", async () => {
+    await mount(combined({
+      truncated: true,
+      diffs: [file("a.txt", [], { truncatedFromBytes: 4_000 })],
+      budgetOmitted: [{ path: "a.txt", commit: null }],
+    }));
+    const note = q(".cdv-file-note")!.textContent!;
+    expect(note).toContain("combined.omittedForSize");
+    expect(note).not.toContain("combined.tooLarge");
+    expect(note).not.toContain("4");
+  });
+
+  it("labels a fallback section by its own commit's budget cut, not by its path", async () => {
+    // Two sections of c.txt: the budget cut H1's; H3's is over the 5 MB cap.
+    await mount(combined({
+      truncated: true,
+      diffs: [],
+      steps: [[], [], []],
+      fallback: [{
+        path: "c.txt", conflicted: false, blockers: [],
+        perCommit: [
+          { hash: H1, diff: file("c.txt", [], { truncatedFromBytes: 4_000 }) },
+          { hash: H3, diff: file("c.txt", [], { truncatedFromBytes: 9_000_000 }) },
+        ],
+      }],
+      budgetOmitted: [{ path: "c.txt", commit: H1 }],
+    }));
+    const notes = qa(".cdv-file-note").map((n) => n.textContent!);
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toContain("combined.omittedForSize");
+    expect(notes[0]).not.toContain("combined.tooLarge");
+    expect(notes[1]).toContain("combined.tooLarge");
+    expect(notes[1]).not.toContain("combined.omittedForSize");
+  });
+
+  it("lists the files in its own list", async () => {
+    await mount(combined());
+    expect(qa(".cmb-file").map((f) => f.textContent)).toEqual([
+      expect.stringContaining("a.txt"), expect.stringContaining("b.txt"),
+    ]);
+    qa(".cmb-file")[1].click();
+    await nextTick();
+    expect(qa(".cmb-file")[1].classList.contains("cmb-file--active")).toBe(true);
+  });
+
+  it("keeps a path's own left-to-right order inside the right-truncating box", async () => {
+    await mount(combined({ diffs: [file(".env.local)")], steps: [[], [], []] }));
+    const box = q(".cmb-file-path")!;
+    const inner = box.querySelector("bdi[dir='ltr']");
+    expect(inner?.textContent).toBe(".env.local)");
+    expect(box.textContent).toBe(".env.local)");
+  });
+
+  it("a replay another caller cancelled is a neutral note with Retry, not an alert", async () => {
+    const { emitted } = await mount(new Error("Combined diff cancelled."));
+    const note = q(".cmb-error")!;
+    expect(note.getAttribute("role")).toBe("status");
+    expect(note.classList.contains("cmb-error--neutral")).toBe(true);
+    expect(q(".cmb-error-text")!.textContent).toBe("combined.errCancelled");
+    q(".cmb-retry")!.click();
+    expect(emitted.retry).toHaveLength(1);
+  });
+
+  it("an unknown backend error is shown as is", async () => {
+    await mount(new Error("git merge-tree failed: boom"));
+    expect(q(".cmb-error-text")!.textContent).toBe("git merge-tree failed: boom");
+  });
+
+  it("leaves Esc to App's global handler: no listener of its own", async () => {
+    const { emitted } = await mount(combined());
+    const ev = () => new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+    document.dispatchEvent(ev());
+    document.body.dispatchEvent(ev());
+    q(".cmb-chip")!.dispatchEvent(ev());
+    expect(emitted.close).toHaveLength(0);
+  });
+
+  it("notes a payload the budget cut, and only then", async () => {
+    await mount(combined({ truncated: true }));
+    expect(q(".cmb-truncated")!.textContent).toBe("combined.payloadTruncated");
+    app?.unmount();
+    container?.remove();
+    await mount(combined());
+    expect(q(".cmb-truncated")).toBeNull();
+  });
+
+  it("counts unique paths, not fallback sections", async () => {
+    await mount(combined({
+      diffs: [file("a.txt")],
+      fallback: [{ path: "c.txt", conflicted: true, blockers: [], perCommit: [{ hash: H1, diff: file("c.txt") }, { hash: H2, diff: file("c.txt") }, { hash: H3, diff: file("c.txt") }] }],
+    }));
+    expect(q(".cmb-counts")!.textContent).toContain("combined.filesPlural:2");
+  });
+
+  it("keeps the fallback banner on the first section when a fallback file is truncated", async () => {
+    await mount(combined({
+      diffs: [],
+      fallback: [{ path: "c.txt", conflicted: true, blockers: [], perCommit: [
+        { hash: H1, diff: file("c.txt", [], { truncatedFromBytes: 9_000_000 }) },
+        { hash: H2, diff: file("c.txt") },
+      ] }],
+    }));
+    const notes = qa(".cdv-file-note").map((n) => n.textContent);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("combined.fallbackBetween:c.txt");
+    expect(notes[0]).toContain("combined.tooLarge");
+  });
+
+  it("notes that colours repeat past 8 commits, and only then", async () => {
+    const nine = Array.from({ length: 9 }, (_, i) => ({ hash: String(i).repeat(40), shortHash: String(i).repeat(7), subject: `s${i}`, author: "a", date: "d" }));
+    await mount(combined({ commits: nine, steps: nine.map(() => []) }));
+    expect(q(".cmb-colors-repeat")!.textContent).toBe("combined.colorsRepeat");
+    app?.unmount();
+    container?.remove();
+    await mount(combined({ commits: nine.slice(0, 8), steps: nine.slice(0, 8).map(() => []) }));
+    expect(q(".cmb-colors-repeat")).toBeNull();
+  });
+
+  it("the close button emits close", async () => {
+    const { emitted } = await mount(combined());
+    q(".cmb-close")!.click();
+    expect(emitted.close).toHaveLength(1);
+  });
+  it("the commit dots resolve their colour: the palette is defined on the view itself (both themes)", async () => {
+    await mount(combined({
+      fallback: [{ path: "c.txt", conflicted: false, blockers: [], perCommit: [{ hash: H2, diff: file("c.txt") }] }],
+    }));
+    expect(q(".cmb")!.classList.contains("combined-palette")).toBe(true);
+    expect(q(".commit-diff-viewer")!.classList.contains("combined-palette")).toBe(true);
+    expect(qa(".cmb-chip .cmb-chip-dot").map((d) => d.style.background)).toEqual([
+      "var(--combined-c0)", "var(--combined-c1)", "var(--combined-c2)",
+    ]);
+    expect(q(".cmb-file .cmb-chip-dot")!.style.background).toBe("var(--combined-c1)");
+    const block = (selector: string) => {
+      const at = paletteCss.indexOf(`${selector} {`);
+      expect(at, selector).toBeGreaterThanOrEqual(0);
+      return paletteCss.slice(at, paletteCss.indexOf("}", at));
+    };
+    for (const sel of [".combined-palette", '[data-theme="light"] .combined-palette']) {
+      const body = block(sel);
+      for (let i = 0; i < 8; i++) expect(body).toMatch(new RegExp(`--combined-c${i}:\\s*#[0-9a-f]{6};`));
+    }
+  });
+
+  it("counts +/- on the net diff only and the commit-by-commit files apart", async () => {
+    await mount(combined({
+      diffs: [file("a.txt", [add(1), add(2)])],
+      fallback: [{ path: "c.txt", conflicted: true, blockers: [], perCommit: [
+        { hash: H1, diff: file("c.txt", [add(1)]) }, { hash: H3, diff: file("c.txt", [add(1)]) },
+      ] }],
+    }));
+    expect(q(".cmb-add")!.textContent).toBe("+2");
+    expect(q(".cmb-percommit")!.textContent).toBe("combined.perCommitFilesSingular:1");
+  });
+
+  it("the commit-by-commit count reads as a file count, plural past one", async () => {
+    const fb = (path: string) => ({ path, conflicted: true, blockers: [], perCommit: [{ hash: H1, diff: file(path) }] });
+    await mount(combined({ fallback: [fb("c.txt"), fb("d.txt")] }));
+    expect(q(".cmb-percommit")!.textContent).toBe("combined.perCommitFilesPlural:2");
+  });
+
+  it("a net file too large to count marks the counts as a lower bound, never +0", async () => {
+    await mount(combined({
+      diffs: [file("a.txt", [add(1), add(2)]), file("big.bin", [], { truncatedFromBytes: 9_000_000 })],
+    }));
+    expect(q(".cmb-add")!.textContent).toBe("≥+2");
+    app?.unmount();
+    container?.remove();
+    await mount(combined({ diffs: [file("big.bin", [], { truncatedFromBytes: 9_000_000 })] }));
+    expect(q(".cmb-add")).toBeNull();
+    expect(q(".cmb-del")).toBeNull();
+    app?.unmount();
+    container?.remove();
+    await mount(combined({ diffs: [file("a.txt", [add(1)])] }));
+    expect(q(".cmb-add")!.textContent).toBe("+1");
+  });
+
+  it("no commit-by-commit count and no summary line without fallback", async () => {
+    await mount(combined());
+    expect(q(".cmb-percommit")).toBeNull();
+    expect(q(".cmb-fallback")).toBeNull();
+  });
+
+  it("sums up the fallback under the header with the distinct blockers", async () => {
+    await mount(combined({
+      fallback: [
+        { path: "c.txt", conflicted: true, blockers: [H2], perCommit: [{ hash: H1, diff: file("c.txt") }] },
+        { path: "d.txt", conflicted: true, blockers: [H2, "4".repeat(40)], perCommit: [{ hash: H3, diff: file("d.txt") }] },
+        { path: "e.txt", conflicted: false, blockers: [], perCommit: [{ hash: H3, diff: file("e.txt") }] },
+      ],
+    }));
+    expect(q(".cmb-fallback")!.textContent).toBe("combined.fallbackSummary:combined.filesPlural:3,2222222, 4444444");
+  });
+
+  it("the fallback summary says between-selected without blockers, and other for companions only", async () => {
+    await mount(combined({
+      fallback: [{ path: "c.txt", conflicted: true, blockers: [], perCommit: [{ hash: H1, diff: file("c.txt") }] }],
+    }));
+    expect(q(".cmb-fallback")!.textContent).toBe("combined.fallbackSummaryBetween:combined.filesSingular:1");
+    app?.unmount();
+    container?.remove();
+    await mount(combined({
+      fallback: [{ path: "u.txt", conflicted: false, blockers: [], perCommit: [{ hash: H1, diff: file("u.txt") }] }],
+    }));
+    expect(q(".cmb-fallback")!.textContent).toBe("combined.fallbackSummaryOther:combined.filesSingular:1");
+  });
+});
