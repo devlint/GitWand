@@ -1357,6 +1357,7 @@ const PATCH_CONFIG = [
   "-c", "diff.mnemonicPrefix=false",
   "-c", "diff.srcPrefix=a/",
   "-c", "diff.dstPrefix=b/",
+  "-c", "diff.submodule=short",
 ];
 
 /** git/cmd.rs `PATCH_FLAGS`: no colour codes, no external diff tool. */
@@ -4724,7 +4725,7 @@ async function handleRequest(req, res) {
           currentLines = [];
         };
 
-        const { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader, scanSecrets } =
+        const { classifyHunkLine, diffFileLineName, hunkBodyFromHeader, noHunkBody, parseHunkHeader, scanSecrets } =
           await loadDevCore();
 
         // Remaining body of the current hunk (core's hunk-body helpers, the twin of Rust's
@@ -4746,8 +4747,9 @@ async function handleRequest(req, res) {
             flush();
           } else if (line.startsWith("+++ ")) {
             const rest = line.slice("+++ ".length);
-            // `file_line_name`: trailing tab and C-quoting handled.
-            currentPath = fileLineName(rest, "b/");
+            // core's `diffFileLineName` (Rust `file_line_name`): trailing tab
+            // and C-quoting handled.
+            currentPath = diffFileLineName(rest, "b/");
           } else if (line.startsWith("@@")) {
             newLineNo = parseHunkHeader(line)?.newStart ?? 0;
             body = hunkBodyFromHeader(line);
@@ -5260,7 +5262,9 @@ async function handleRequest(req, res) {
             const dest = headName ? devPushDestination(resolvedCwd, headName) : null;
             const renamed = dest !== null && dest !== headName;
             const v = await combinedGitVersion();
-            if (!renamed && v && (v[0] > 2 || (v[0] === 2 && v[1] >= 30))) args.push("--force-if-includes");
+            const hasIfIncludes = v && (v[0] > 2 || (v[0] === 2 && v[1] >= 30));
+            // `push.useForceIfIncludes=true` would bring the check back: negate it.
+            if (hasIfIncludes) args.push(renamed ? "--no-force-if-includes" : "--force-if-includes");
           }
         }
         const r = spawnSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
@@ -5971,6 +5975,7 @@ async function handleRequest(req, res) {
           [
             ...PATCH_CONFIG,
             "-c", "log.diffMerges=first-parent",
+            "-c", "log.showRoot=true",
             "show", "-m", "--first-parent", "--format=", "--no-show-signature", "--no-textconv",
             ...PATCH_FLAGS,
             hash,

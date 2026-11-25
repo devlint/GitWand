@@ -2103,13 +2103,23 @@ const PROTECTED_TRUNKS = new Set(["main", "master"]);
  * count the modal shows is what the push will overwrite, and the push leases
  * that exact sha, so anything pushed after this moment is refused.
  */
+let forcePushChecking = false;
 async function doForcePush() {
   const cwd = repoFolderPath.value;
-  if (!cwd) return;
+  // One decision at a time: a second click while the tip is being read, or
+  // while the push runs, would push again on a lease the first one spends.
+  if (!cwd || forcePushChecking || isPushing.value) return;
   const branch = repoStatus.value?.branch ?? "";
   const isProtected = PROTECTED_TRUNKS.has(branch);
-  const target = await forcePushTarget(cwd);
-  if (repoFolderPath.value !== cwd) return;
+  forcePushChecking = true;
+  let target: Awaited<ReturnType<typeof forcePushTarget>>;
+  try {
+    target = await forcePushTarget(cwd);
+  } finally {
+    forcePushChecking = false;
+  }
+  // The lease is for this repo and this branch only.
+  if (repoFolderPath.value !== cwd || (repoStatus.value?.branch ?? "") !== branch) return;
   const behind = target ? target.behind : behindCount.value;
   const leaseSha = target?.sha ?? null;
   if (isProtected || behind > 0) {
@@ -2120,9 +2130,12 @@ async function doForcePush() {
 }
 
 async function confirmForcePush() {
-  const leaseSha = forcePushConfirm.value?.leaseSha ?? null;
+  const pending = forcePushConfirm.value;
   forcePushConfirm.value = null;
-  await handlePush(true, leaseSha);
+  // Checked out another branch while the modal was open: what it showed (and
+  // the lease) no longer describes the push.
+  if (!pending || (repoStatus.value?.branch ?? "") !== pending.branch || isPushing.value) return;
+  await handlePush(true, pending.leaseSha);
 }
 
 function cancelForcePush() {

@@ -1271,11 +1271,17 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
     // into the patch even with an empty `--format=`. `log.diffMerges`: an
     // explicit `-m` takes its mode from there (git 2.31+), so `combined` or
     // `off` would print `diff --cc` sections or nothing for a merge.
+    // `log.showRoot=false` would print nothing for a root commit.
     // `validate_revision` keeps `hash` from reading as an option (no
     // `--end-of-options`, which gits before 2.24 take for a revision).
     let output = git_cmd()
         .args(PATCH_CONFIG)
-        .args(["-c", "log.diffMerges=first-parent"])
+        .args([
+            "-c",
+            "log.diffMerges=first-parent",
+            "-c",
+            "log.showRoot=true",
+        ])
         .args([
             "show",
             "-m",
@@ -5508,13 +5514,17 @@ mod multi_file_header_tests {
         repo.write("plain.txt", "b\n");
         repo.git(&["add", "-A"]);
         repo.git(&["commit", "-q", "-m", "edit"]);
-        let show = || {
+        let show_rev = |rev: &str| {
             tauri::async_runtime::block_on(git_show(
                 repo.path.to_string_lossy().to_string(),
-                "HEAD".to_string(),
+                rev.to_string(),
             ))
             .expect("git show")
         };
+        let show = || show_rev("HEAD");
+        let root = repo.git(&["rev-list", "--max-parents=0", "HEAD"]);
+        let clean_root = serde_json::to_value(show_rev(root.trim())).unwrap();
+        assert!(!clean_root.as_array().unwrap().is_empty());
         let clean = serde_json::to_value(show()).unwrap();
         for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
             repo.git(&["config", k, v]);
@@ -5523,6 +5533,10 @@ mod multi_file_header_tests {
         repo.git(&["config", "diff.upper.textconv", "tr a-z A-Z <"]);
         let hostile = serde_json::to_value(show()).unwrap();
         assert_eq!(hostile, clean);
+        assert_eq!(
+            serde_json::to_value(show_rev(root.trim())).unwrap(),
+            clean_root
+        );
         let paths: Vec<&str> = clean
             .as_array()
             .unwrap()

@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The desktop main-bundle budget is raised from 980 KB to 984 KB** for the combined-diff wrappers and strings; the view itself is a lazy chunk. It is then raised to 988 KB for the force-push lease and its refusal message (measured at 986 KB).
+- **The desktop main-bundle budget is raised from 980 KB to 984 KB** for the combined-diff wrappers and strings; the view itself is a lazy chunk. It is then raised to 988 KB for the force-push lease and its refusal message (measured at 987 KB).
 
 ### Fixed
 

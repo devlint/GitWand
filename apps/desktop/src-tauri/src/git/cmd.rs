@@ -442,7 +442,7 @@ pub(crate) fn git_cmd() -> std::process::Command {
 /// The prefixes are pinned as config, not with `--src-prefix` /
 /// `--dst-prefix`: `git stash show -p --src-prefix=a/` prints no prefix at
 /// all (git 2.54). Older gits ignore the `srcPrefix` keys they do not know.
-pub(crate) const PATCH_CONFIG: [&str; 10] = [
+pub(crate) const PATCH_CONFIG: [&str; 12] = [
     "-c",
     "core.quotePath=false",
     "-c",
@@ -453,6 +453,10 @@ pub(crate) const PATCH_CONFIG: [&str; 10] = [
     "diff.srcPrefix=a/",
     "-c",
     "diff.dstPrefix=b/",
+    // A submodule bump stays one `-Subproject commit` / `+Subproject commit`
+    // section (`log` / `diff` would print a summary or inline its files).
+    "-c",
+    "diff.submodule=short",
 ];
 
 /// Diff options for a git call whose patch output GitWand parses: no colour
@@ -463,7 +467,7 @@ pub(crate) const PATCH_FLAGS: [&str; 2] = ["--no-color", "--no-ext-diff"];
 /// check that a command's result does not change. `log.showSignature` and
 /// `log.diffMerges` only matter to `git show`/`log`.
 #[cfg(test)]
-pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 10] = [
+pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 12] = [
     ("diff.noprefix", "true"),
     ("diff.mnemonicPrefix", "true"),
     ("diff.srcPrefix", "SRC/"),
@@ -474,6 +478,8 @@ pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 10] = [
     ("diff.external", "echo EXTERNAL"),
     ("log.showSignature", "true"),
     ("log.diffMerges", "combined"),
+    ("log.showRoot", "false"),
+    ("diff.submodule", "log"),
 ];
 
 /// Run `cmd` with a deadline, killing it if it doesn't finish in time.

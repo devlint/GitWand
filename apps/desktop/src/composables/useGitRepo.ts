@@ -1241,7 +1241,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       const publish = needsUpstream.value;
       // A force push leases the remote tip it was judged against (by the user,
       // or by the divergence probe), so it is refused if the remote moved since.
-      const leaseSha = force ? (decidedLeaseSha ?? autoForcePushSha.value) : null;
+      // A publish pushes to `origin HEAD`, not to `@{push}` (which can name
+      // another remote): no lease read from there applies.
+      const leaseSha = force && !publish ? (decidedLeaseSha ?? autoForcePushSha.value) : null;
       const leaseBranch = status.value?.branch;
       const lease = leaseSha && leaseBranch ? { branch: leaseBranch, sha: leaseSha } : undefined;
       let result = await gitPush(folderPath.value, publish, force, lease);

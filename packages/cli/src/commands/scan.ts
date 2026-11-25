@@ -53,6 +53,7 @@ function getStagedDiff(cwd: string): string {
         "-c", "diff.mnemonicPrefix=false",
         "-c", "diff.srcPrefix=a/",
         "-c", "diff.dstPrefix=b/",
+        "-c", "diff.submodule=short",
         "diff", "--cached", "--unified=0", "--no-textconv", "--no-color", "--no-ext-diff",
       ],
       { encoding: "utf-8", cwd, maxBuffer: 1024 * 1024 * 32 },

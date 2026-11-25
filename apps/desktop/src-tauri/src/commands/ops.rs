@@ -556,12 +556,17 @@ pub(crate) async fn git_push(
                 let renamed = head_branch(&cwd)
                     .and_then(|b| push_destination(&cwd, &b).map(|d| d != b))
                     .unwrap_or(false);
+                let if_includes = supports_force_if_includes(crate::stack::guard::git_version());
                 if renamed {
+                    // `push.useForceIfIncludes=true` would turn it back on.
+                    if if_includes {
+                        args.push("--no-force-if-includes");
+                    }
                     eprintln!(
                         "[git_push] pushed under another name: no --force-if-includes, \
                          the force push only checks the last fetched remote tip"
                     );
-                } else if supports_force_if_includes(crate::stack::guard::git_version()) {
+                } else if if_includes {
                     args.push("--force-if-includes");
                 } else {
                     eprintln!(
@@ -7315,6 +7320,8 @@ mod git_push_force_tests {
         repo.git(&["commit", "-q", "-a", "--amend", "-m", "amended"]);
         let local = repo.git(&["rev-parse", "HEAD"]);
 
+        // Even with the check turned on in config.
+        repo.git(&["config", "push.useForceIfIncludes", "true"]);
         let r = force_push(&repo, None);
         assert!(r.success, "{}", r.message);
         assert_eq!(git_at(&bare, &["rev-parse", "topic"]), local);
