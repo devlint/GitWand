@@ -6429,7 +6429,8 @@ async function handleRequest(req, res) {
       // `rest_list_prs`: one page of `limit + offset` (at most 100), then the
       // slice — the per-PR enrichment below runs for `limit` PRs at most, not
       // for a whole (parent) repo's list.
-      const limit = Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "", 10) || 50);
+      // `gh_list_prs`: `limit.unwrap_or(10)`.
+      const limit = Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "", 10) || 10);
       const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") ?? "", 10) || 0);
       const perPage = Math.min(100, Math.max(1, limit + offset));
       const apiState = state === "closed" || state === "merged" ? "closed" : state === "all" ? "all" : "open";
@@ -6548,8 +6549,11 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, 0);
-        // `rest_pr_count`: the base repo, like the list.
-        const nwo = await devRestBaseNwo(resolve(cwd), token);
+        // `rest_pr_count`: the base repo, like the list — and its error when
+        // the fork lookup fails (Rust propagates it; no silent 0).
+        let nwo;
+        try { nwo = await devRestBaseNwo(resolve(cwd), token); }
+        catch (e) { return jsonResponse(req, res, { error: e.message }, 500); }
         if (!nwo) return jsonResponse(req, res, 0);
         const resp = await githubFetch(`/repos/${nwo}/pulls?state=${state}&per_page=1`, token);
         if (!resp.ok) return jsonResponse(req, res, 0);
@@ -6580,8 +6584,11 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, null);
-        // `rest_pr_freshness_signal`: the base repo, like the list.
-        const nwo = await devRestBaseNwo(resolve(cwd), token);
+        // `rest_pr_freshness_signal`: the base repo, like the list — and its
+        // error when the fork lookup fails (no silent "no open PRs").
+        let nwo;
+        try { nwo = await devRestBaseNwo(resolve(cwd), token); }
+        catch (e) { return jsonResponse(req, res, { error: e.message }, 500); }
         if (!nwo) return jsonResponse(req, res, null);
         const topResp = await githubFetch(`/repos/${nwo}/pulls?state=open&per_page=1&page=1&sort=updated&direction=desc`, token);
         if (!topResp.ok) return jsonResponse(req, res, null);
@@ -7561,16 +7568,29 @@ async function handleRequest(req, res) {
         const headSha = pr.head.sha;
         const absPath = resolve(cwd);
 
-        // Fetch PR head ref so we have it locally
-        const fetchRes = spawnSync(GIT, ["fetch", "--quiet", "origin", `refs/pull/${prNumber}/head:refs/pr/${prNumber}`], {
+        // The PR's head and base come from the repo it lives in: for a fork,
+        // its parent — fetched by URL, as `rest_checkout_pr` does — not origin,
+        // whose same-numbered `pull/<n>/head` is another PR (#262).
+        const origin = getRepoNwo(absPath);
+        const remote = nwo === origin ? "origin" : `https://github.com/${nwo}.git`;
+        const fetchRes = spawnSync(GIT, ["fetch", "--quiet", remote, `refs/pull/${prNumber}/head:refs/pr/${prNumber}`], {
           cwd: absPath, encoding: "utf-8",
         });
         // If fetch fails (e.g., no network access to remote), fall back to using headSha directly
         const prRef = fetchRes.status === 0 ? `refs/pr/${prNumber}` : headSha;
 
         // Fetch base branch too (may already be current)
-        spawnSync(GIT, ["fetch", "--quiet", "origin", baseBranch], { cwd: absPath, encoding: "utf-8" });
-        const baseRef = `origin/${baseBranch}`;
+        let baseRef = `origin/${baseBranch}`;
+        if (remote === "origin") {
+          spawnSync(GIT, ["fetch", "--quiet", "origin", baseBranch], { cwd: absPath, encoding: "utf-8" });
+        } else {
+          const baseFetch = spawnSync(
+            GIT,
+            ["fetch", "--quiet", remote, `refs/heads/${baseBranch}:refs/pr-base/${prNumber}`],
+            { cwd: absPath, encoding: "utf-8" },
+          );
+          if (baseFetch.status === 0) baseRef = `refs/pr-base/${prNumber}`;
+        }
 
         // Find merge base
         const mbRes = spawnSync(GIT, ["merge-base", baseRef, prRef], { cwd: absPath, encoding: "utf-8" });

@@ -1079,8 +1079,10 @@ pub(crate) fn diff_numstat(cwd: &str, head: &str, base: &str) -> (i64, i64) {
 /// issue follow-up requests against the same repo. Every PR read and
 /// comment/review write goes through here.
 ///
-/// Every number the app shows comes from the base repo: the PR list
-/// (`rest_list_prs`), a branch's PR (`rest_branch_pr`), a created PR. Asking
+/// Every number the app acts on comes from the base repo: the PR list
+/// (`rest_list_prs`) and a branch's PR (`rest_branch_pr`); a PR created into
+/// the fork itself only shows its number in the success message (the list
+/// then reloads from the base repo). Asking
 /// `origin` would read, or write on, the fork's own same-numbered PR (#262),
 /// so it is not asked at all — as the `gh` commands, which name the base repo
 /// (`gh_base_repo`, #300). A failed fork lookup is an error, never a guess,
