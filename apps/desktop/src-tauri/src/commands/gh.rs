@@ -79,7 +79,7 @@ fn gh_list_prs_inner(
     offset: Option<i64>,
 ) -> Result<Vec<PullRequest>, String> {
     // Settings-managed token present → tokenless REST path (no `gh` needed).
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         let st = if state.is_empty() { "open" } else { &state };
         github_api::rest_list_prs(&cwd, st, limit.unwrap_or(10), offset.unwrap_or(0), tok)
     }) {
@@ -183,7 +183,8 @@ pub(crate) async fn gh_list_prs(
 }
 
 fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| github_api::rest_pr_count(&cwd, &state, tok))
+    if let Some(r) =
+        github_api::with_rest_pr(&cwd, |tok| github_api::rest_pr_count(&cwd, &state, tok))
     {
         return r;
     }
@@ -293,7 +294,7 @@ fn top_pr_from_cli_json(raw: &[serde_json::Value]) -> Option<(i64, String)> {
 
 fn gh_pr_freshness_signal_inner(cwd: String) -> Result<Option<PrFreshnessSignal>, String> {
     if let Some(r) =
-        github_api::with_rest(&cwd, |tok| github_api::rest_pr_freshness_signal(&cwd, tok))
+        github_api::with_rest_pr(&cwd, |tok| github_api::rest_pr_freshness_signal(&cwd, tok))
     {
         return r;
     }
@@ -357,7 +358,7 @@ fn gh_create_pr_inner(
     draft: bool,
     reviewers: Option<Vec<String>>,
 ) -> Result<PullRequest, String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    let create = |tok: &str| {
         github_api::rest_create_pr(
             &cwd,
             title.clone(),
@@ -368,7 +369,19 @@ fn gh_create_pr_inner(
             reviewers.clone(),
             tok,
         )
-    }) {
+    };
+    // Into another repo (the fork's parent): an OAuth App refusal is that
+    // repo's organization's, remembered for it, not for the fork's own calls.
+    let rest = match base_repo.as_deref().filter(|r| !r.is_empty()) {
+        Some(parent) => github_api::with_rest_other_repo_using(
+            &cwd,
+            parent,
+            github_api::settings_github_token().as_deref(),
+            create,
+        ),
+        None => github_api::with_rest(&cwd, create),
+    };
+    if let Some(r) = rest {
         return r;
     }
     let mut args = vec![
@@ -524,39 +537,80 @@ pub(crate) async fn gh_create_pr(
     .map_err(|e| e.to_string())?
 }
 
-fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
+/// `repo` value naming origin without knowing its `owner/name` (the PR create
+/// form when its fork targets are not known). Not a valid `owner/name`.
+const ORIGIN_TARGET: &str = "origin";
+
+/// The repo whose assignees are the reviewer candidates: `target` when it is
+/// `origin` or the base repo (the PR create form's two fork targets), else
+/// the base repo — where the PR detail requests reviewers
+/// (`rest_request_reviewers`). Any other `target` is refused.
+fn reviewer_candidates_repo(
+    target: Option<&str>,
+    origin: &str,
+    base: &str,
+) -> Result<String, String> {
+    match target {
+        None => Ok(base.to_string()),
+        // The create form with no target picked: `createPr` creates on origin.
+        Some(ORIGIN_TARGET) => Ok(origin.to_string()),
+        Some(t) if t.eq_ignore_ascii_case(origin) || t.eq_ignore_ascii_case(base) => {
+            Ok(t.to_string())
+        }
+        Some(t) => Err(format!("{t} is neither this repository nor its parent")),
+    }
+}
+
+fn gh_list_reviewer_candidates_inner(
+    cwd: String,
+    repo: Option<String>,
+) -> Result<Vec<ReviewerCandidate>, String> {
     // Users with push access — the set GitHub allows as reviewers. With the
-    // Settings token: `origin`'s, over REST. Without: `gh repo view` names the
-    // repository, which follows `gh repo set-default` (a fork set to its
-    // parent lists the parent's maintainers), as before.
+    // Settings token over REST; without, through `gh`. On a fork, the PR
+    // create form names its target (the fork or its parent); the PR detail
+    // names none: the base repo, whose PRs it requests reviewers on.
     if let Some(origin) = gh_origin_repo(&cwd) {
-        let token = github_api::settings_github_token();
-        let path = format!("repos/{}/assignees", origin.nwo);
-        if let Some(r) = github_api::with_rest_using(&cwd, token.as_deref(), |tok| {
-            super::gh_issues::rest_pages(&path, tok, 3)
-        }) {
+        // Origin named: a call about origin itself, keyed on `cwd`. Else the
+        // base repo, keyed like every PR call (`with_rest_pr`).
+        let wants_origin = repo
+            .as_deref()
+            .is_some_and(|r| r == ORIGIN_TARGET || r.eq_ignore_ascii_case(&origin.nwo));
+        let list = |tok: &str| {
+            let nwo = if wants_origin {
+                origin.nwo.clone()
+            } else {
+                let base = github_api::base_owner_repo(&cwd, tok)?;
+                reviewer_candidates_repo(repo.as_deref(), &origin.nwo, &base)?
+            };
+            super::gh_issues::rest_pages(&format!("repos/{}/assignees", nwo), tok, 3)
+        };
+        let rest = if wants_origin {
+            github_api::with_rest(&cwd, list)
+        } else {
+            github_api::with_rest_pr(&cwd, list)
+        };
+        if let Some(r) = rest {
             return r.map(|items| super::gh_issues::assignees_from(&items));
         }
     }
-    gh_reviewer_candidates_via_view(&cwd)
+    gh_reviewer_candidates_via_view(&cwd, repo.as_deref())
 }
 
-/// Reviewer candidates over `gh`: `gh repo view` names the repository (it
-/// follows `gh repo set-default`).
-fn gh_reviewer_candidates_via_view(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
-    let view = gh_repo_view_cmd(cwd, "nameWithOwner")
-        .output()
-        .map_err(|e| format!("Failed to inspect repo: {}", e))?;
-    if !view.status.success() {
-        return Err(format!(
-            "gh repo view failed: {}",
-            String::from_utf8_lossy(&view.stderr).trim()
-        ));
-    }
-    let nwo = serde_json::from_slice::<serde_json::Value>(&view.stdout)
-        .ok()
-        .and_then(|v| v.get("nameWithOwner")?.as_str().map(String::from))
-        .ok_or("gh repo view returned no repository")?;
+/// Reviewer candidates over `gh` (`reviewer_candidates_repo`, base repo by
+/// default).
+fn gh_reviewer_candidates_via_view(
+    cwd: &str,
+    repo: Option<&str>,
+) -> Result<Vec<ReviewerCandidate>, String> {
+    let origin = gh_origin_repo(cwd).map(|o| o.nwo);
+    let nwo = match (repo, origin.as_deref()) {
+        // Origin itself: no fork lookup needed.
+        (Some(r), Some(o)) if r == ORIGIN_TARGET || r.eq_ignore_ascii_case(o) => o.to_string(),
+        _ => {
+            let base = gh_base_nwo(cwd)?;
+            reviewer_candidates_repo(repo, origin.as_deref().unwrap_or(&base), &base)?
+        }
+    };
     let output = gh_api_cmd(cwd)
         .args(["api", "--paginate", &format!("repos/{}/assignees", nwo)])
         .current_dir(cwd)
@@ -585,10 +639,37 @@ fn gh_reviewer_candidates_via_view(cwd: &str) -> Result<Vec<ReviewerCandidate>, 
 #[tauri::command]
 pub(crate) async fn gh_list_reviewer_candidates(
     cwd: String,
+    repo: Option<String>,
 ) -> Result<Vec<ReviewerCandidate>, String> {
-    tauri::async_runtime::spawn_blocking(move || gh_list_reviewer_candidates_inner(cwd))
+    tauri::async_runtime::spawn_blocking(move || gh_list_reviewer_candidates_inner(cwd, repo))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod reviewer_candidates_repo_tests {
+    use super::reviewer_candidates_repo;
+
+    #[test]
+    fn the_target_is_origin_or_the_base_repo_only() {
+        assert_eq!(
+            reviewer_candidates_repo(None, "me/p", "up/p").unwrap(),
+            "up/p"
+        );
+        assert_eq!(
+            reviewer_candidates_repo(Some("me/p"), "me/p", "up/p").unwrap(),
+            "me/p"
+        );
+        assert_eq!(
+            reviewer_candidates_repo(Some("UP/p"), "me/p", "up/p").unwrap(),
+            "UP/p"
+        );
+        assert!(reviewer_candidates_repo(Some("other/x"), "me/p", "up/p").is_err());
+        assert_eq!(
+            reviewer_candidates_repo(Some("origin"), "me/p", "up/p").unwrap(),
+            "me/p"
+        );
+    }
 }
 
 fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {
@@ -682,8 +763,10 @@ fn gh_checkout_pr_inner(cwd: String, number: i64) -> Result<(), String> {
     // `github_api::rest_checkout_pr` must NOT re-lock (the RwLock is
     // non-reentrant), so the guard lives only here.
     let _repo = repo_lock::write(&cwd);
-    if github_api::rest_token_for(&cwd).is_some() {
-        return github_api::rest_checkout_pr(&cwd, number);
+    if let Some(r) =
+        github_api::with_rest_pr(&cwd, |tok| github_api::rest_checkout_pr(&cwd, number, tok))
+    {
+        return r;
     }
     let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args(["pr", "checkout", &number.to_string()]);
@@ -709,7 +792,7 @@ pub(crate) async fn gh_checkout_pr(cwd: String, number: i64) -> Result<(), Strin
 }
 
 fn gh_merge_pr_inner(cwd: String, number: i64, method: String) -> Result<(), String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_merge_pr(&cwd, number, &method, tok)
     }) {
         return r;
@@ -744,7 +827,7 @@ pub(crate) async fn gh_merge_pr(cwd: String, number: i64, method: String) -> Res
 }
 
 fn gh_enable_auto_merge_inner(cwd: String, number: i64, method: String) -> Result<(), String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_enable_auto_merge(&cwd, number, &method, tok)
     }) {
         return r;
@@ -792,7 +875,7 @@ pub(crate) async fn gh_enable_auto_merge(
 }
 
 fn gh_disable_auto_merge_inner(cwd: String, number: i64) -> Result<(), String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_disable_auto_merge(&cwd, number, tok)
     }) {
         return r;
@@ -821,7 +904,8 @@ pub(crate) async fn gh_disable_auto_merge(cwd: String, number: i64) -> Result<()
 }
 
 fn gh_pr_ready_inner(cwd: String, number: i64) -> Result<(), String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| github_api::rest_pr_ready(&cwd, number, tok))
+    if let Some(r) =
+        github_api::with_rest_pr(&cwd, |tok| github_api::rest_pr_ready(&cwd, number, tok))
     {
         return r;
     }
@@ -860,7 +944,7 @@ fn gh_pr_edit_inner(
     body: Option<String>,
 ) -> Result<(), String> {
     let fields = super::pr_edit::edit_fields(&title, &body, "body")?;
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_pr_edit(&cwd, number, &title, &body, tok)
     }) {
         return r;
@@ -994,7 +1078,7 @@ fn gh_branch_pr_inner(
     state: String,
 ) -> Result<Option<BranchPr>, String> {
     check_branch_pr_args(&branch, &state)?;
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_branch_pr(&cwd, &branch, &state, tok)
     }) {
         return r;
@@ -1045,7 +1129,7 @@ pub(crate) async fn gh_branch_pr(
 fn gh_pr_set_base_inner(cwd: String, number: i64, base: String) -> Result<(), String> {
     check_pr_number(number)?;
     check_pr_base(&base)?;
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_pr_set_base(&cwd, number, &base, tok)
     }) {
         return r;
@@ -1187,7 +1271,7 @@ fn gh_dismiss_review_inner(
     review_id: i64,
     message: String,
 ) -> Result<(), String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_dismiss_review(&cwd, number, review_id, &message, tok)
     }) {
         return r;
@@ -1235,7 +1319,7 @@ fn with_review_token<T>(
 ) -> Result<T, String> {
     match cwd {
         Some(c) => {
-            if let Some(r) = github_api::with_rest(c, &call) {
+            if let Some(r) = github_api::with_rest_pr(c, &call) {
                 return r;
             }
         }
@@ -1337,7 +1421,7 @@ pub(crate) async fn gh_set_review_thread_resolved(
 }
 
 fn gh_request_reviewers_inner(cwd: String, number: i64, logins: Vec<String>) -> Result<(), String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_request_reviewers(&cwd, number, &logins, tok)
     }) {
         return r;
@@ -1376,7 +1460,7 @@ pub(crate) async fn gh_request_reviewers(
 
 fn gh_pr_detail_inner(cwd: String, number: i64) -> Result<PullRequestDetail, String> {
     if let Some(r) =
-        github_api::with_rest(&cwd, |tok| github_api::rest_pr_detail(&cwd, number, tok))
+        github_api::with_rest_pr(&cwd, |tok| github_api::rest_pr_detail(&cwd, number, tok))
     {
         return r;
     }
@@ -1515,10 +1599,21 @@ fn gh_issue_add_comment_inner(
     cwd: String,
     number: i64,
     body: String,
+    pr: bool,
 ) -> Result<serde_json::Value, String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
-        github_api::rest_issue_add_comment(&cwd, number, &body, tok)
-    }) {
+    // `pr`: `number` is a pull request from the PR list (a Launchpad nudge):
+    // its conversation lives in the base repo (`get_pr_json`, #262), not in
+    // origin's same-numbered issue or PR.
+    let rest = if pr {
+        github_api::with_rest_pr(&cwd, |tok| {
+            github_api::rest_pr_add_conversation_comment(&cwd, number, &body, tok)
+        })
+    } else {
+        github_api::with_rest(&cwd, |tok| {
+            github_api::rest_issue_add_comment(&cwd, number, &body, tok)
+        })
+    };
+    if let Some(r) = rest {
         return r;
     }
     let nwo = gh_base_nwo(&cwd)?;
@@ -1546,10 +1641,13 @@ pub(crate) async fn gh_issue_add_comment(
     cwd: String,
     number: i64,
     body: String,
+    pr: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || gh_issue_add_comment_inner(cwd, number, body))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        gh_issue_add_comment_inner(cwd, number, body, pr.unwrap_or(false))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn gh_issue_set_state_inner(cwd: String, number: i64, state: String) -> Result<(), String> {
@@ -1593,7 +1691,7 @@ fn gh_pr_attachment_urls_inner(
     cwd: String,
     number: i64,
 ) -> Result<github_api::PrAttachmentUrls, String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_pr_attachment_urls(&cwd, number, tok)
     }) {
         return r;
@@ -2236,7 +2334,8 @@ fn github_nwo_from_pr_url(url: &str) -> Option<String> {
 }
 
 fn gh_pr_diff_inner(cwd: String, number: i64) -> Result<String, String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| github_api::rest_pr_diff(&cwd, number, tok))
+    if let Some(r) =
+        github_api::with_rest_pr(&cwd, |tok| github_api::rest_pr_diff(&cwd, number, tok))
     {
         return r;
     }
@@ -2268,7 +2367,7 @@ pub(crate) async fn gh_pr_diff(cwd: String, number: i64) -> Result<String, Strin
 
 fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> {
     if let Some(r) =
-        github_api::with_rest(&cwd, |tok| github_api::rest_pr_checks(&cwd, number, tok))
+        github_api::with_rest_pr(&cwd, |tok| github_api::rest_pr_checks(&cwd, number, tok))
     {
         return r;
     }
@@ -2370,7 +2469,7 @@ pub(crate) async fn gh_pr_checks(cwd: String, number: i64) -> Result<Vec<CICheck
 
 fn gh_pr_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
     if let Some(r) =
-        github_api::with_rest(&cwd, |tok| github_api::rest_pr_comments(&cwd, number, tok))
+        github_api::with_rest_pr(&cwd, |tok| github_api::rest_pr_comments(&cwd, number, tok))
     {
         return r;
     }
@@ -2395,7 +2494,7 @@ pub(crate) async fn gh_pr_comments(
 }
 
 fn gh_pr_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
-    if let Some(r) = github_api::with_rest(&cwd, |tok| {
+    if let Some(r) = github_api::with_rest_pr(&cwd, |tok| {
         github_api::rest_pr_issue_comments(&cwd, number, tok)
     }) {
         return r;
@@ -2422,7 +2521,7 @@ pub(crate) async fn gh_pr_issue_comments(
 
 fn gh_pr_reviews_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
     if let Some(r) =
-        github_api::with_rest(&cwd, |tok| github_api::rest_pr_reviews(&cwd, number, tok))
+        github_api::with_rest_pr(&cwd, |tok| github_api::rest_pr_reviews(&cwd, number, tok))
     {
         return r;
     }
@@ -2596,7 +2695,7 @@ fn with_reaction_token<T>(
     target_type: &str,
     call: impl Fn(&str) -> Result<T, String>,
 ) -> Option<Result<T, String>> {
-    if let Some(r) = github_api::with_rest(cwd, &call) {
+    if let Some(r) = github_api::with_rest_pr(cwd, &call) {
         return Some(r);
     }
     if target_type == "review" {

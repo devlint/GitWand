@@ -201,14 +201,15 @@ export async function ghListPrs(
       autoMerge: pr.autoMerge ?? CLOSED_AUTO_MERGE,
     }));
   }
-  // Browser dev mode — call dev server. The dev-server endpoint doesn't
-  // accept limit/offset yet; we slice client-side from the (already
-  // capped) REST response. The Tauri path is what most users hit.
-  const res = await devFetch(`${DEV_SERVER}/api/gh-list-prs?cwd=${encodeURIComponent(cwd)}&state=${state}`);
+  // Browser dev mode — the dev-server pages like `rest_list_prs` (one page of
+  // limit + offset, sliced server-side).
+  const res = await devFetch(
+    `${DEV_SERVER}/api/gh-list-prs?cwd=${encodeURIComponent(cwd)}&state=${state}&limit=${limit}&offset=${offset}`,
+  );
   if (!res.ok) throw new Error(`gh pr list failed: ${res.status}`);
   const raw = await res.json();
   if (raw.error) throw new Error(raw.error);
-  const sliced = (raw as any[]).slice(offset, offset + limit);
+  const sliced = raw as any[];
   return sliced.map((pr: any) => ({
     number: pr.number,
     title: pr.title,
@@ -464,11 +465,11 @@ export interface ReviewerCandidate {
  * List candidate reviewers for the current repo (requires `gh` CLI).
  * Returns assignees from `gh api /repos/:owner/:repo/assignees` — i.e. users with push access.
  */
-export async function ghListReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
+export async function ghListReviewerCandidates(cwd: string, repo?: string): Promise<ReviewerCandidate[]> {
   if (isTauri()) {
     const raw = await tauriInvoke<
       Array<{ login: string; name?: string | null; avatar_url?: string | null }>
-    >("gh_list_reviewer_candidates", { cwd }, IPC_TIMEOUT.NETWORK); // up to 3 pages over the network
+    >("gh_list_reviewer_candidates", { cwd, repo: repo ?? null }, IPC_TIMEOUT.NETWORK); // up to 3 pages over the network
     return raw.map((u) => ({
       login: u.login,
       name: u.name ?? null,
@@ -476,7 +477,8 @@ export async function ghListReviewerCandidates(cwd: string): Promise<ReviewerCan
     }));
   }
   // Browser dev mode — call dev server (uses GitHub REST API directly)
-  const res = await devFetch(`${DEV_SERVER}/api/gh-reviewer-candidates?cwd=${encodeURIComponent(cwd)}`);
+  const repoParam = repo ? `&repo=${encodeURIComponent(repo)}` : "";
+  const res = await devFetch(`${DEV_SERVER}/api/gh-reviewer-candidates?cwd=${encodeURIComponent(cwd)}${repoParam}`);
   if (!res.ok) return [];
   const raw = await res.json();
   if (!Array.isArray(raw)) return [];
@@ -1088,10 +1090,11 @@ export async function ghPrUpdateComment(
     await tauriInvoke("gh_pr_update_comment", { cwd, number: prNumber, commentId, body });
     return;
   }
+  // The PR number locates the repo, as on desktop (the fork's parent).
   const res = await devFetch(`${DEV_SERVER}/api/gh-pr-comment?id=${commentId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, body }),
+    body: JSON.stringify({ cwd, body, number: prNumber ?? null }),
   });
   if (!res.ok) throw new Error(`update comment failed: ${res.status}`);
 }
@@ -1103,8 +1106,9 @@ export async function ghPrDeleteComment(cwd: string, commentId: number, prNumber
     await tauriInvoke("gh_pr_delete_comment", { cwd, number: prNumber, commentId });
     return;
   }
-  const res = await fetch(
-    `${DEV_SERVER}/api/gh-pr-comment?cwd=${encodeURIComponent(cwd)}&id=${commentId}`,
+  const num = prNumber != null ? `&number=${prNumber}` : "";
+  const res = await devFetch(
+    `${DEV_SERVER}/api/gh-pr-comment?cwd=${encodeURIComponent(cwd)}&id=${commentId}${num}`,
     { method: "DELETE" },
   );
   if (!res.ok) throw new Error(`delete comment failed: ${res.status}`);

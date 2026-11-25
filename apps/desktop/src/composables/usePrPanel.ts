@@ -357,12 +357,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   // ─── Background prefetch (badge path) ───────────────────────────────────
   // Bigger than PAGE_SIZE so the naive offset+limit Rust pagination
-  // (gh_list_prs_inner / rest_list_prs re-fetch offset+limit items from
-  // scratch on every call) issues only a handful of background round trips
+  // (gh_list_prs_inner re-fetches offset+limit items from scratch on every
+  // call; rest_list_prs reads from the page holding the offset) issues only
+  // a handful of background round trips
   // instead of one per 10 PRs.
   const BG_PAGE = 100;
-  // Ceiling on the automatic background drain — matches the dev-server REST
-  // route's existing 3x100-page cap. Beyond this the badge path just has
+  // Ceiling on the automatic background drain (both backends page past 100:
+  // `list_page_plan` in commands/github_api.rs, mirrored by the dev-server).
+  // Beyond this the badge path just has
   // partial coverage for that repo; ensurePrsLoaded() keeps retrying on
   // future calls rather than falsely treating an incomplete list as done.
   const PREFETCH_CEILING = 300;

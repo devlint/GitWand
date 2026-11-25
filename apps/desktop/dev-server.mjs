@@ -22,6 +22,7 @@ import { devStopProcessesIn } from "./dev-worktree-processes.mjs";
 import { devResolveIssueTarget, devIssuePayload, devAssigneesFrom, devGithubError, devLabelsFrom, devMilestonesFrom, devCreateFailure, devGitwandReport, devTemplateFiles, MAY_HAVE_BEEN_CREATED } from "./dev-issues.mjs";
 import { resolveBin } from "./dev-bin.mjs";
 import { devForkParentNwo, devParseGhBranchPr } from "./dev-gh-branch-pr.mjs";
+import { devPrNumber } from "./dev-pr-repo.mjs";
 import { devGitRestack, devPushBlock, devStackDeleteMergedParent, devStackRestackPlan, devStackSetParent, devStackStatus, devStackUnset, devValidateBranchName } from "./dev-stack-service.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
@@ -2298,15 +2299,12 @@ function getRepoNwo(cwd) {
 }
 
 /** The repo a `gh` command about PR `number` must target in the dev-server:
- *  where that number comes from. The dev-server lists `origin`'s pull requests
- *  (/api/gh-list-prs) and its per-PR routes resolve them with `resolvePrNwo`
- *  (origin, then the fork parent when the PR is not on origin), so the `gh`
- *  routes do the same. (The Tauri build lists the fork parent's for a fork:
- *  `gh_base_repo` in `commands/gh.rs`, consistently with its own list.)
- *  Without a token, origin. null without a github.com origin: `gh` chooses. */
+ *  where that number comes from, the base repo (`gh_base_repo` in
+ *  commands/gh.rs) — through REST with a token, through `gh` without. A
+ *  failed lookup throws. null without a github.com origin: `gh` chooses. */
 async function ghPrNwo(cwd, number) {
   const token = getGithubToken();
-  return token ? resolvePrNwo(cwd, number, token) : getRepoNwo(cwd);
+  return token ? resolvePrNwo(cwd, number, token) : devGhBaseNwo(cwd);
 }
 
 /** `GH_REPO` (and `GH_HOST`, so a user's `GH_HOST` cannot redirect it) for a
@@ -2340,49 +2338,31 @@ async function ghMergeSpawn(cwd, number, args) {
     : { args: [...args, "--repo", nwo], env: { ...process.env, GH_HOST: "github.com" } };
 }
 
-/** Cache of resolved PR repo nwo, keyed by `<origin>#<number>`. The repo a PR
- *  lives in is stable for the PR's lifetime, so one resolution per dev-server
- *  process is enough — without this the 3 per-PR endpoints each re-resolve
- *  (up to ~9 redundant API roundtrips when a PR detail opens). */
-const prNwoCache = new Map();
-
-/**
- * Resolve the repo where PR `number` actually lives. Mirrors the Rust
- * `get_pr_json` resolution: try origin first; if the PR isn't there, fall back
- * to the fork's upstream parent. Without this, cross-fork PRs (branch pushed to
- * a fork, PR opened against the upstream repo) resolve to the fork — where the
- * PR number doesn't exist — and per-PR endpoints 404.
- *
- * Only a *definitive* answer (origin or parent confirmed) is cached; a transient
- * failure (5xx / rate limit / network) falls back to origin for this request but
- * stays uncached so a later call can re-resolve instead of pinning the wrong repo.
- */
+/** The repo PR `number` lives in: the base repo — `get_pr_json` in
+ *  commands/github_api.rs. Every number the app shows comes from the base
+ *  repo's list (the fork parent for a fork), so asking origin would read, or
+ *  write on, the fork's own same-numbered PR (#262). A failed fork lookup is
+ *  an error (thrown), never a guess. */
 async function resolvePrNwo(cwd, number, token) {
+  return devRestBaseNwo(cwd, token);
+}
+
+/** `rest_fork_info` + `base_repo_of` (commands/github_api.rs): the repo PRs
+ *  are listed from and act on — the fork parent when origin is a fork, else
+ *  origin. Shares `devForkParentCache` (10 minutes) with `devGhBaseNwo`, so
+ *  the REST and `gh` routes agree; a failed lookup throws, like it. null
+ *  without a github.com origin. */
+async function devRestBaseNwo(cwd, token) {
   const origin = getRepoNwo(cwd);
   if (!origin) return null;
-  const cacheKey = `${origin}#${number}`;
-  if (prNwoCache.has(cacheKey)) return prNwoCache.get(cacheKey);
-  try {
-    const resp = await githubFetch(`/repos/${origin}/pulls/${number}`, token);
-    if (resp.ok) {
-      prNwoCache.set(cacheKey, origin);
-      return origin;
-    }
-    // PR not visible on origin (404 missing / 403 private / 410 gone) → try the
-    // fork's upstream parent. Other statuses are treated as transient.
-    if ([403, 404, 410].includes(resp.status)) {
-      const info = await githubFetch(`/repos/${origin}`, token);
-      const parent = info.ok ? (await info.json()).parent?.full_name : null;
-      if (parent) {
-        const r2 = await githubFetch(`/repos/${parent}/pulls/${number}`, token);
-        if (r2.ok) {
-          prNwoCache.set(cacheKey, parent);
-          return parent;
-        }
-      }
-    }
-  } catch { /* transient — fall through without caching */ }
-  return origin;
+  const hit = devForkParentCache.get(origin);
+  if (hit && Date.now() - hit.at < 600_000) return hit.parent ?? origin;
+  const info = await githubFetch(`/repos/${origin}`, token);
+  if (!info.ok) throw new Error(`${devGithubError(info.status, await info.json().catch(() => ({})))} (looking up ${origin})`);
+  const j = await info.json();
+  const parent = j.fork && j.parent?.full_name ? j.parent.full_name : null;
+  devForkParentCache.set(origin, { parent, at: Date.now() });
+  return parent ?? origin;
 }
 
 /** Fetch from GitHub REST API with auth. `accept` overrides the default JSON accept header. */
@@ -6590,23 +6570,71 @@ async function handleRequest(req, res) {
       const cwd = url.searchParams.get("cwd");
       const state = url.searchParams.get("state") || "open";
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      // `rest_list_prs`: one page of `limit + offset` (at most 100), then the
+      // slice — the per-PR enrichment below runs for `limit` PRs at most, not
+      // for a whole (parent) repo's list.
+      // `gh_list_prs`: `limit.unwrap_or(10)`.
+      const limit = Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "", 10) || 10);
+      const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") ?? "", 10) || 0);
+      const perPage = Math.min(100, Math.max(1, limit + offset));
+      const apiState = state === "closed" || state === "merged" ? "closed" : state === "all" ? "all" : "open";
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token found. Run: gh auth login" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // `rest_list_prs`: the base repo (the fork parent for a fork), or the
+        // fork lookup's error — a list built from origin would show numbers
+        // every per-PR route then resolves in the parent.
+        const nwo = await devRestBaseNwo(resolve(cwd), token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo from git remote origin" }, 400);
-        // Paginate up to 300 PRs (3 pages × 100)
-        let raw = [];
-        for (let page = 1; page <= 3; page++) {
-          const resp = await githubFetch(`/repos/${nwo}/pulls?state=${state}&per_page=100&page=${page}`, token);
-          if (!resp.ok) {
-            const text = await resp.text();
-            return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+        // `list_page_plan`: start at the page holding `offset`.
+        const merged = state === "merged";
+        const firstPage = Math.floor(offset / perPage) + 1;
+        const skipped = (firstPage - 1) * perPage;
+        let fetched = [];
+        if (merged) {
+          // `merged_prs_page`: the search API pages merged PRs directly; each
+          // number is then read as a pull request.
+          const numbers = [];
+          // The search API serves its first 1 000 results only.
+          for (let page = firstPage; (page - 1) * perPage < 1000; page++) {
+            const resp = await githubFetch(
+              `/search/issues?q=${encodeURIComponent(`repo:${nwo} type:pr is:merged`)}&sort=updated&order=desc&per_page=${perPage}&page=${page}`,
+              token,
+            );
+            if (!resp.ok) {
+              const text = await resp.text();
+              return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+            }
+            const items = (await resp.json())?.items ?? [];
+            numbers.push(...items.map((i) => i.number));
+            if (items.length < perPage || skipped + numbers.length >= limit + offset) break;
           }
-          const page_data = await resp.json();
-          raw = raw.concat(page_data);
-          if (page_data.length < 100) break; // last page
+          // Only the numbers the slice keeps are read as pull requests.
+          for (const n of numbers.slice(offset - skipped, offset - skipped + limit)) {
+            const resp = await githubFetch(`/repos/${nwo}/pulls/${n}`, token);
+            if (!resp.ok) {
+              const text = await resp.text();
+              return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+            }
+            fetched.push(await resp.json());
+          }
+        } else {
+          for (let page = firstPage; page < firstPage + 10; page++) {
+            const resp = await githubFetch(
+              `/repos/${nwo}/pulls?state=${apiState}&per_page=${perPage}&page=${page}&sort=updated&direction=desc`,
+              token,
+            );
+            if (!resp.ok) {
+              const text = await resp.text();
+              return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+            }
+            const chunk = (await resp.json()) ?? [];
+            fetched = fetched.concat(chunk);
+            if (chunk.length < perPage || skipped + fetched.length >= limit + offset) break;
+          }
         }
+        const from = merged ? 0 : Math.max(0, offset - skipped);
+        const raw = fetched.slice(from, from + limit);
         const prs = raw.map((pr) => ({
           number: pr.number,
           title: pr.title,
@@ -6703,7 +6731,12 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, 0);
-        const nwo = getRepoNwo(resolve(cwd));
+        // `rest_pr_count`: the base repo, like the list — and its error when
+        // the fork lookup fails, as Rust returns it (`ghPrCount` shows 0 for
+        // any failure, on both backends).
+        let nwo;
+        try { nwo = await devRestBaseNwo(resolve(cwd), token); }
+        catch (e) { return jsonResponse(req, res, { error: e.message }, 500); }
         if (!nwo) return jsonResponse(req, res, 0);
         const resp = await githubFetch(`/repos/${nwo}/pulls?state=${state}&per_page=1`, token);
         if (!resp.ok) return jsonResponse(req, res, 0);
@@ -6734,7 +6767,12 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, null);
-        const nwo = getRepoNwo(resolve(cwd));
+        // `rest_pr_freshness_signal`: the base repo, like the list — and its
+        // error when the fork lookup fails, as Rust returns it
+        // (`ghPrFreshnessSignal` reads any failure as "no signal").
+        let nwo;
+        try { nwo = await devRestBaseNwo(resolve(cwd), token); }
+        catch (e) { return jsonResponse(req, res, { error: e.message }, 500); }
         if (!nwo) return jsonResponse(req, res, null);
         const topResp = await githubFetch(`/repos/${nwo}/pulls?state=open&per_page=1&page=1&sort=updated&direction=desc`, token);
         if (!topResp.ok) return jsonResponse(req, res, null);
@@ -7036,8 +7074,19 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
-        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        // `gh_list_reviewer_candidates` / `reviewer_candidates_repo`: the
+        // target named by the create form (origin or the base repo), else
+        // the base repo, whose PRs the detail requests reviewers on.
+        const base = await devRestBaseNwo(resolve(cwd), token);
+        if (!base) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const origin = getRepoNwo(resolve(cwd));
+        // "origin": the create form's default target (`ORIGIN_TARGET`).
+        const target = url.searchParams.get("repo") === "origin" ? origin : url.searchParams.get("repo");
+        const same = (a, b) => a && b && a.toLowerCase() === b.toLowerCase();
+        if (target && !same(target, origin) && !same(target, base)) {
+          return jsonResponse(req, res, { error: `${target} is neither this repository nor its parent` }, 400);
+        }
+        const nwo = target || base;
         // Up to 3 pages of 100, read like the Rust `api_get_pages` (an error
         // page fails the call instead of returning partial data).
         const items = await devGithubPages(`/repos/${nwo}/assignees`, "", token, 3);
@@ -7056,9 +7105,12 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // The repo PR `number` lives in (`get_pr_json`: the base repo).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        const resp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        const resp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token);
         if (!resp.ok) return jsonResponse(req, res, { error: `GitHub API ${resp.status}` }, 500);
         const pr = await resp.json();
         return jsonResponse(req, res, {
@@ -7098,9 +7150,12 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // The repo PR `number` lives in (`get_pr_json`: the base repo).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        const resp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token, "application/vnd.github.v3.diff");
+        const resp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token, "application/vnd.github.v3.diff");
         if (!resp.ok) return jsonResponse(req, res, { error: `GitHub API ${resp.status}` }, 500);
         const diff = await resp.text();
         return jsonResponse(req, res, { diff });
@@ -7117,10 +7172,13 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // The repo PR `number` lives in (`get_pr_json`: the base repo).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         // Get PR head SHA first
-        const prResp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        const prResp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token);
         if (!prResp.ok) return jsonResponse(req, res, { error: `GitHub API ${prResp.status}` }, 500);
         const pr = await prResp.json();
         const sha = pr.head?.sha;
@@ -7163,10 +7221,13 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // The repo PR `number` lives in (`get_pr_json`: the base repo).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         // PR head SHA
-        const prResp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        const prResp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token);
         if (!prResp.ok) return jsonResponse(req, res, { error: `GitHub API ${prResp.status}` }, 500);
         const pr = await prResp.json();
         const sha = pr.head?.sha;
@@ -7212,10 +7273,12 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = await resolvePrNwo(resolve(cwd), number, token);
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         // Fetch all review comments (paginated — up to 200)
-        const resp = await githubFetch(`/repos/${nwo}/pulls/${number}/comments?per_page=100`, token);
+        const resp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}/comments?per_page=100`, token);
         if (!resp.ok) return jsonResponse(req, res, { error: `GitHub API ${resp.status}` }, 500);
         const raw = await resp.json();
         return jsonResponse(req, res, raw.map((c) => ({
@@ -7248,9 +7311,11 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = await resolvePrNwo(resolve(cwd), number, token);
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        const resp = await githubFetch(`/repos/${nwo}/issues/${number}/comments?per_page=100`, token);
+        const resp = await githubFetch(`/repos/${nwo}/issues/${prNumber}/comments?per_page=100`, token);
         if (!resp.ok) return jsonResponse(req, res, { error: `GitHub API ${resp.status}` }, 500);
         const raw = await resp.json();
         return jsonResponse(req, res, raw.map((c) => ({
@@ -7286,13 +7351,15 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = await resolvePrNwo(resolve(cwd), number, token);
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         const paths = [
-          `/repos/${nwo}/issues/${number}`,
-          `/repos/${nwo}/issues/${number}/comments?per_page=100`,
-          `/repos/${nwo}/pulls/${number}/comments?per_page=100`,
-          `/repos/${nwo}/pulls/${number}/reviews?per_page=100`,
+          `/repos/${nwo}/issues/${prNumber}`,
+          `/repos/${nwo}/issues/${prNumber}/comments?per_page=100`,
+          `/repos/${nwo}/pulls/${prNumber}/comments?per_page=100`,
+          `/repos/${nwo}/pulls/${prNumber}/reviews?per_page=100`,
         ];
         // Best effort, like `signed_urls_from_fetches`: one failed endpoint
         // does not cost the others' URLs; all failing is the error.
@@ -7302,7 +7369,7 @@ async function handleRequest(req, res) {
         // Visibility alongside the bodies, best effort (null when unreadable),
         // read from the PR's base repository as the Rust command does.
         const [repoResult, ...fetches] = await Promise.allSettled([
-          githubFetch(`/repos/${nwo}/pulls/${number}`, token).then((r) => (r.ok ? r.json() : null)),
+          githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token).then((r) => (r.ok ? r.json() : null)),
           ...paths.map(async (p) => {
             const resp = await githubFetch(p, token, "application/vnd.github.html+json");
             if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
@@ -7403,12 +7470,25 @@ async function handleRequest(req, res) {
     // POST /api/gh-issue-comment  { cwd, number, body }
     if (url.pathname === "/api/gh-issue-comment" && req.method === "POST") {
       const body = await readBody(req);
-      const { cwd, number, body: commentBody } = body;
+      const { cwd, number, body: commentBody, pr } = body;
       if (!cwd || !number || !commentBody) return jsonResponse(req, res, { error: "Missing required fields" }, 400);
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // `gh_issue_add_comment` with `pr`: the PR's repo (the base repo),
+        // after reading the PR there, as `rest_pr_add_conversation_comment`.
+        let nwo;
+        if (pr) {
+          const prNumber = devPrNumber(number);
+          if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+          nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
+          const prResp = nwo ? await githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token) : null;
+          if (prResp && !prResp.ok) {
+            return jsonResponse(req, res, { error: `GitHub API ${prResp.status} (fetching PR #${prNumber})` }, prResp.status);
+          }
+        } else {
+          nwo = getRepoNwo(resolve(cwd));
+        }
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         const resp = await fetch(`https://api.github.com/repos/${nwo}/issues/${number}/comments`, {
           method: "POST",
@@ -7473,10 +7553,13 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // `gh_pr_create_comment`: the repo the PR lives in (`get_pr_json`).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         // Get PR head commit SHA
-        const prResp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        const prResp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token);
         if (!prResp.ok) return jsonResponse(req, res, { error: `GitHub API ${prResp.status}` }, 500);
         const pr = await prResp.json();
         const commit_id = pr.head?.sha;
@@ -7484,7 +7567,7 @@ async function handleRequest(req, res) {
           ? { body: commentBody, in_reply_to: in_reply_to_id }
           : { body: commentBody, commit_id, path: filePath, line: line ?? 1, side: side ?? "RIGHT",
               ...(start_line ? { start_line, start_side: start_side ?? "RIGHT" } : {}) };
-        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${number}/comments`, {
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${prNumber}/comments`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -7516,12 +7599,16 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/gh-pr-comment" && req.method === "PATCH") {
       const id = url.searchParams.get("id");
       const body = await readBody(req);
-      const { cwd, body: newBody } = body;
+      const { cwd, body: newBody, number } = body;
       if (!id || !cwd || !newBody) return jsonResponse(req, res, { error: "Missing id, cwd or body" }, 400);
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // `gh_pr_update_comment`: the repo the PR lives in (`get_pr_json`).
+        // `gh_pr_update_comment` takes the PR number (the wrapper requires it).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/comments/${id}`, {
           method: "PATCH",
@@ -7545,11 +7632,16 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/gh-pr-comment" && req.method === "DELETE") {
       const cwd = url.searchParams.get("cwd");
       const id = url.searchParams.get("id");
+      const number = url.searchParams.get("number");
       if (!cwd || !id) return jsonResponse(req, res, { error: "Missing cwd or id" }, 400);
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // `gh_pr_delete_comment`: the repo the PR lives in (`get_pr_json`).
+        // `gh_pr_delete_comment` takes the PR number (the wrapper requires it).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/comments/${id}`, {
           method: "DELETE",
@@ -7576,9 +7668,11 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = await resolvePrNwo(resolve(cwd), number, token);
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        const resp = await githubFetch(`/repos/${nwo}/pulls/${number}/reviews?per_page=100`, token);
+        const resp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}/reviews?per_page=100`, token);
         if (!resp.ok) return jsonResponse(req, res, { error: `GitHub API ${resp.status}` }, 500);
         const raw = await resp.json();
         // Map to the frontend `PrReview` shape (parity with the Tauri
@@ -7607,11 +7701,14 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // The repo PR `number` lives in (`get_pr_json`: the base repo).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
 
         // Get PR head SHA (required by GitHub API)
-        const prResp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        const prResp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token);
         if (!prResp.ok) return jsonResponse(req, res, { error: `GitHub API ${prResp.status}` }, 500);
         const pr = await prResp.json();
         const commitId = pr.head.sha;
@@ -7620,7 +7717,7 @@ async function handleRequest(req, res) {
         if (reviewBody) payload.body = reviewBody;
         if (comments.length > 0) payload.comments = comments;
 
-        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${number}/reviews`, {
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${prNumber}/reviews`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -7665,35 +7762,75 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // The repo PR `number` lives in (`get_pr_json`: the base repo).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
 
         // Get PR base branch + head SHA from GitHub API
-        const prResp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        const prResp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}`, token);
         if (!prResp.ok) return jsonResponse(req, res, { error: `GitHub API ${prResp.status}` }, 500);
         const pr = await prResp.json();
         const baseBranch = pr.base.ref;
         const headSha = pr.head.sha;
         const absPath = resolve(cwd);
 
-        // Fetch PR head ref so we have it locally
-        const fetchRes = spawnSync(GIT, ["fetch", "--quiet", "origin", `refs/pull/${number}/head:refs/pr/${number}`], {
+        // The PR's head and base come from the repo it lives in: for a fork,
+        // its parent — fetched by URL, as `rest_checkout_pr` does — not origin,
+        // whose same-numbered `pull/<n>/head` is another PR (#262).
+        const origin = getRepoNwo(absPath);
+        const remote = nwo === origin ? "origin" : `https://github.com/${nwo}.git`;
+        // Scratch refs named per request: two previews of the same PR at once
+        // must not delete each other's. Forced (`+`): a PR head is
+        // force-pushed.
+        const scratch = `${prNumber}-${process.hrtime.bigint()}`;
+        const fetchRes = spawnSync(GIT, ["fetch", "--quiet", remote, `+refs/pull/${prNumber}/head:refs/pr-preview/head-${scratch}`], {
           cwd: absPath, encoding: "utf-8",
         });
         // If fetch fails (e.g., no network access to remote), fall back to using headSha directly
-        const prRef = fetchRes.status === 0 ? `refs/pr/${number}` : headSha;
+        const prRef = fetchRes.status === 0 ? `refs/pr-preview/head-${scratch}` : headSha;
+        // The two fetched refs are scratch: deleted once merge-tree has run,
+        // so a fork's parent history does not stay in the user's repo (and in
+        // every `--all` walk, the Git Tree's included).
+        const dropScratchRefs = () => {
+          for (const ref of [`refs/pr-preview/head-${scratch}`, `refs/pr-preview/base-${scratch}`]) {
+            spawnSync(GIT, ["update-ref", "-d", ref], { cwd: absPath, encoding: "utf-8" });
+          }
+        };
 
         // Fetch base branch too (may already be current)
-        spawnSync(GIT, ["fetch", "--quiet", "origin", baseBranch], { cwd: absPath, encoding: "utf-8" });
-        const baseRef = `origin/${baseBranch}`;
+        let baseRef = `origin/${baseBranch}`;
+        if (remote === "origin") {
+          spawnSync(GIT, ["fetch", "--quiet", "origin", baseBranch], { cwd: absPath, encoding: "utf-8" });
+        } else {
+          // The parent's base branch, never origin's same-named one (another
+          // history); its fetch failing is the answer.
+          const baseFetch = spawnSync(
+            GIT,
+            ["fetch", "--quiet", remote, `+refs/heads/${baseBranch}:refs/pr-preview/base-${scratch}`],
+            { cwd: absPath, encoding: "utf-8" },
+          );
+          if (baseFetch.status !== 0) {
+            dropScratchRefs();
+            return jsonResponse(req, res, {
+              error: `Could not fetch ${baseBranch} from ${nwo}: ${(baseFetch.stderr || "").trim()}`,
+            }, 500);
+          }
+          baseRef = `refs/pr-preview/base-${scratch}`;
+        }
 
         // Find merge base
         const mbRes = spawnSync(GIT, ["merge-base", baseRef, prRef], { cwd: absPath, encoding: "utf-8" });
-        if (mbRes.status !== 0) return jsonResponse(req, res, { error: "Cannot find merge-base" }, 500);
+        if (mbRes.status !== 0) {
+          dropScratchRefs();
+          return jsonResponse(req, res, { error: "Cannot find merge-base" }, 500);
+        }
         const mergeBase = mbRes.stdout.trim();
 
         // Run git merge-tree (read-only)
         const mtRes = spawnSync(GIT, ["merge-tree", mergeBase, baseRef, prRef], { cwd: absPath, encoding: "utf-8" });
+        dropScratchRefs();
         const output = mtRes.stdout || "";
 
         // Parse output: lines starting with "changed in both" or conflict markers
@@ -7725,7 +7862,7 @@ async function handleRequest(req, res) {
         const mergeState = pr.mergeable_state;
 
         // Get the list of files changed in this PR
-        const prFilesResp = await githubFetch(`/repos/${nwo}/pulls/${number}/files?per_page=100`, token);
+        const prFilesResp = await githubFetch(`/repos/${nwo}/pulls/${prNumber}/files?per_page=100`, token);
         const prFiles = prFilesResp.ok ? await prFilesResp.json() : [];
 
         // For each file, check if it also has local changes on base (potential conflict)
@@ -8575,10 +8712,12 @@ async function handleRequest(req, res) {
       try {
         const { cwd, number, method } = await readBody(req);
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
-        const spawn = await ghMergeSpawn(resolve(cwd), number, ["pr", "merge", String(number), mergeFlag, "--delete-branch"]);
+        const spawn = await ghMergeSpawn(resolve(cwd), prNumber, ["pr", "merge", String(prNumber), mergeFlag, "--delete-branch"]);
         const r = spawnSync(GH, spawn.args, {
           cwd: resolve(cwd),
           env: spawn.env,
@@ -8599,12 +8738,14 @@ async function handleRequest(req, res) {
       try {
         const { cwd, number, method } = await readBody(req);
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
         // Through ghMergeSpawn: an already-mergeable PR is merged at once and
         // then gets the same --delete-branch local cleanup.
-        const spawn = await ghMergeSpawn(resolve(cwd), number, ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch"]);
+        const spawn = await ghMergeSpawn(resolve(cwd), prNumber, ["pr", "merge", String(prNumber), "--auto", mergeFlag, "--delete-branch"]);
         const r = spawnSync(GH, spawn.args, { cwd: resolve(cwd), env: spawn.env, encoding: "utf-8" });
         if (r.status !== 0) {
           const detail = spawnFailureDetail(r, "gh pr merge --auto failed");
@@ -8621,9 +8762,11 @@ async function handleRequest(req, res) {
       try {
         const { cwd, number } = await readBody(req);
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
-        const r = spawnSync(GH, ["pr", "merge", String(number), "--disable-auto"], {
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const r = spawnSync(GH, ["pr", "merge", String(prNumber), "--disable-auto"], {
           cwd: resolve(cwd),
-          env: await ghPrEnv(resolve(cwd), number),
+          env: await ghPrEnv(resolve(cwd), prNumber),
           encoding: "utf-8",
         });
         if (r.status !== 0) {
@@ -8693,14 +8836,16 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = await resolvePrNwo(resolve(cwd), number, token);
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         const [owner, name] = nwo.split("/");
         const query = "query($owner: String!, $name: String!, $n: Int!, $after: String) { repository(owner: $owner, name: $name) { pullRequest(number: $n) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id isResolved comments(first: 1) { nodes { databaseId } } } } } } }";
         const out = [];
         let after = null;
         for (let page = 0; page < 20; page++) {
-          const data = await githubGraphql(token, query, { owner, name, n: Number(number), after });
+          const data = await githubGraphql(token, query, { owner, name, n: prNumber, after });
           const threads = data?.repository?.pullRequest?.reviewThreads;
           for (const t of threads?.nodes ?? []) {
             const root = t.comments?.nodes?.[0]?.databaseId;
@@ -8804,9 +8949,12 @@ async function handleRequest(req, res) {
         if (!cwd || !number || !reviewId) return jsonResponse(req, res, { error: "Missing cwd, number, or reviewId" }, 400);
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // The repo PR `number` lives in (`get_pr_json`: the base repo).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${number}/reviews/${reviewId}/dismissals`, {
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${prNumber}/reviews/${reviewId}/dismissals`, {
           method: "PUT",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -8833,9 +8981,12 @@ async function handleRequest(req, res) {
         if (!cwd || !number || !Array.isArray(logins)) return jsonResponse(req, res, { error: "Missing cwd, number, or logins" }, 400);
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // The repo PR `number` lives in (`get_pr_json`: the base repo).
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const nwo = await resolvePrNwo(resolve(cwd), prNumber, token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
-        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${number}/requested_reviewers`, {
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${prNumber}/requested_reviewers`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -9483,10 +9634,20 @@ async function handleRequest(req, res) {
             // CI flips, review requests and new comments. Mirror of the Rust
             // change in `commands/workspace.rs`. This runs on the background
             // Launchpad poller (~60 s), so the extra cost is acceptable.
-            const raw = execSync(
-              "gh pr list --state open --json number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,labels,assignees,reviewRequests,reviewDecision,mergeStateStatus,statusCheckRollup,comments --limit 10",
-              { cwd: repo.path, encoding: "utf-8" }
+            // The base repo (`gh_base_cmd`, like `workspace_list_prs_all`):
+            // the numbers the nudge then comments on resolve there (#262).
+            const r = spawnSync(
+              GH,
+              [
+                "pr", "list", "--state", "open",
+                "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,labels,assignees,reviewRequests,reviewDecision,mergeStateStatus,statusCheckRollup,comments",
+                "--limit", "10",
+              ],
+              { cwd: repo.path, encoding: "utf-8", env: ghRepoEnv(devGhBaseNwo(repo.path)) },
             );
+            if (r.error) throw r.error;
+            if (r.status !== 0) throw new Error((r.stderr || "gh pr list failed").trim());
+            const raw = r.stdout;
             const ghPrs = JSON.parse(raw || "[]");
             const prs = ghPrs.map(pr => ({
               number: pr.number,

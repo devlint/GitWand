@@ -385,20 +385,39 @@ async function rankByActivity(cwd: string, candidates: ReviewerCandidate[]): Pro
     .sort((a, b) => score(b) - score(a) || a.login.localeCompare(b.login));
 }
 
-onMounted(async () => {
+/** Candidates from the repo the PR will be created in: on a fork, the target
+ *  picked above (the fork or its parent) — reviewers are requested there. */
+let candidatesSeq = 0;
+async function loadReviewerCandidates() {
   if (!props.cwd) return;
+  const seq = ++candidatesSeq;
+  // `createPr` creates on origin when no target is picked: so do these
+  // ("origin" names it when its `owner/name` is not known).
+  const target = p.newPrBaseRepo.value.trim() || p.forkInfo.value?.origin || "origin";
   reviewerCandidatesLoading.value = true;
   try {
     const provider = await forgeForRepo(props.cwd);
-    const candidates = await provider.listReviewerCandidates(props.cwd);
-    reviewerCandidates.value = await rankByActivity(props.cwd, candidates);
+    const candidates = await provider.listReviewerCandidates(props.cwd, target);
+    const ranked = await rankByActivity(props.cwd, candidates);
+    if (seq === candidatesSeq) {
+      reviewerCandidates.value = ranked;
+      // Reviewers picked from the previous target's assignees cannot be
+      // requested on this one (the request is best effort and would drop
+      // them silently): keep only those the new target offers.
+      if (ranked.length > 0) {
+        const logins = new Set(ranked.map((c) => c.login.toLowerCase()));
+        p.newPrReviewers.value = p.newPrReviewers.value.filter((r) => logins.has(r.toLowerCase()));
+      }
+    }
   } catch {
     // Silently ignore — autocomplete is optional, manual typing still works.
-    reviewerCandidates.value = [];
+    if (seq === candidatesSeq) reviewerCandidates.value = [];
   } finally {
-    reviewerCandidatesLoading.value = false;
+    if (seq === candidatesSeq) reviewerCandidatesLoading.value = false;
   }
-});
+}
+onMounted(loadReviewerCandidates);
+watch(() => p.newPrBaseRepo.value, () => void loadReviewerCandidates());
 
 const filteredCandidates = computed<ReviewerCandidate[]>(() => {
   const q = reviewerInput.value.trim().replace(/^@/, "").toLowerCase();

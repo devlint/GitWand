@@ -190,12 +190,6 @@ fn token_for_repo(cwd: &str, settings_token: Option<String>) -> Option<String> {
     }
 }
 
-/// The Settings token for a command on `cwd`: `None` when there is none, or
-/// when this repository's organization refused it earlier in the session.
-pub(crate) fn rest_token_for(cwd: &str) -> Option<String> {
-    token_for_repo(cwd, settings_github_token())
-}
-
 /// Testable core of [`with_rest`]: `token` is the Settings token and
 /// `gh_signed_in` says whether the `gh` CLI can take over. A refusal is
 /// remembered under `key`: `cwd` itself for its `origin`, another key for a
@@ -272,6 +266,68 @@ pub(crate) fn with_rest_other_repo_using<T>(
         || super::gh::gh_auth_token().is_some(),
         call,
     )
+}
+
+/// [`with_rest`] for a call about one of the base repo's pull requests. On a
+/// fork, an OAuth App refusal comes from the parent's organization: it is
+/// remembered for the parent ([`with_rest_other_repo_using`]), and the
+/// user's own fork keeps its REST calls. Not a fork (or no token): as
+/// [`with_rest`].
+pub(crate) fn with_rest_pr<T>(
+    cwd: &str,
+    call: impl FnOnce(&str) -> Result<T, String>,
+) -> Option<Result<T, String>> {
+    with_rest_pr_using(cwd, settings_github_token().as_deref(), call)
+}
+
+/// [`with_rest_pr`] with a Settings token read once by the caller, for
+/// commands that loop over many repositories (the Launchpad).
+pub(crate) fn with_rest_pr_using<T>(
+    cwd: &str,
+    token: Option<&str>,
+    call: impl FnOnce(&str) -> Result<T, String>,
+) -> Option<Result<T, String>> {
+    if cached_fork_parent(cwd).is_none() && !fork_info_cached(cwd) {
+        // Not known yet: look the fork up first — a request to `origin`
+        // itself, so through the origin-keyed wrapper — and stop on its
+        // error. Going on without it would let the call's own lookup succeed
+        // and its parent's refusal be remembered for `cwd`.
+        match with_rest_using(cwd, token, |tok| rest_fork_info(cwd, tok)) {
+            None => return None,
+            Some(Err(e)) => return Some(Err(e)),
+            Some(Ok(_)) => {}
+        }
+    }
+    match cached_fork_parent(cwd) {
+        Some(parent) => with_rest_other_repo_using(cwd, &parent, token, call),
+        None => with_rest_using(cwd, token, call),
+    }
+}
+
+/// Whether `cwd`'s fork lookup is in `FORK_INFO_CACHE`.
+fn fork_info_cached(cwd: &str) -> bool {
+    let Ok((owner, repo)) = owner_repo(cwd) else {
+        return false;
+    };
+    let cache = FORK_INFO_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cached = cache
+        .lock()
+        .unwrap()
+        .contains_key(&format!("{}/{}", owner, repo));
+    cached
+}
+
+/// `cwd`'s fork parent from `FORK_INFO_CACHE`, without a request: `None` when
+/// the fork has not been looked up yet, or `origin` is not a fork.
+fn cached_fork_parent(cwd: &str) -> Option<String> {
+    let (owner, repo) = owner_repo(cwd).ok()?;
+    let cache = FORK_INFO_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let fi = cache
+        .lock()
+        .unwrap()
+        .get(&format!("{}/{}", owner, repo))?
+        .clone();
+    (fi.is_fork && !fi.parent.is_empty()).then_some(fi.parent)
 }
 
 // ─── Owner/repo resolution ──────────────────────────────────────────────────
@@ -815,6 +871,78 @@ pub(crate) fn rest_current_user(token: &str) -> Result<String, String> {
     Ok(login)
 }
 
+/// Merged pull requests of `repo`, most recently updated first, from
+/// search-API pages of `per_page` starting at `first_page`: `count` of them
+/// after skipping `skip`, each read as a pull-request object. Past the search
+/// API's 1 000-result window the list ends there.
+fn merged_prs_page(
+    repo: &str,
+    per_page: usize,
+    first_page: usize,
+    skip: usize,
+    count: usize,
+    token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    /// The search API serves its first 1 000 results only (422 past them).
+    const SEARCH_WINDOW: usize = 1_000;
+    let mut numbers: Vec<i64> = Vec::new();
+    for n in first_page.. {
+        if (n - 1) * per_page >= SEARCH_WINDOW {
+            break;
+        }
+        let v = api_json_cached(
+            &format!(
+                "{}/search/issues?q=repo:{}+type:pr+is:merged&sort=updated&order=desc&per_page={}&page={}",
+                API_BASE,
+                enc_nwo(repo),
+                per_page,
+                n
+            ),
+            token,
+            None,
+        )?;
+        let items = v
+            .get("items")
+            .and_then(|i| i.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let short = items.len() < per_page;
+        numbers.extend(
+            items
+                .iter()
+                .filter_map(|i| i.get("number").and_then(|x| x.as_i64())),
+        );
+        if short || numbers.len() >= skip + count {
+            break;
+        }
+    }
+    // Only the numbers the slice keeps are read as pull requests, in
+    // parallel; one that cannot be read is left out rather than failing the
+    // page.
+    let wanted: Vec<i64> = numbers.into_iter().skip(skip).take(count).collect();
+    Ok(wanted
+        .par_iter()
+        .filter_map(|num| {
+            api_json_cached(
+                &format!("{}/repos/{}/pulls/{}", API_BASE, repo, num),
+                token,
+                None,
+            )
+            .ok()
+        })
+        .collect())
+}
+
+/// How `rest_list_prs` pages through `offset + limit` PRs: `(per_page,
+/// first_page, PRs on the pages skipped before it)`. Up to 100, one page of
+/// exactly that size (as before); past 100, pages of 100, starting at the
+/// page holding `offset` (the search API pages merged PRs the same way).
+fn list_page_plan(offset: usize, limit: usize) -> (usize, usize, usize) {
+    let per_page = (offset + limit).clamp(1, 100);
+    let first_page = offset / per_page + 1;
+    (per_page, first_page, (first_page - 1) * per_page)
+}
+
 pub(crate) fn rest_list_prs(
     cwd: &str,
     state: &str,
@@ -822,14 +950,14 @@ pub(crate) fn rest_list_prs(
     offset: i64,
     token: &str,
 ) -> Result<Vec<PullRequest>, String> {
-    let (owner, repo) = owner_repo(cwd)?;
-    let origin = format!("{}/{}", owner, repo);
-    let base = base_owner_repo(cwd, token).unwrap_or_else(|_| origin.clone());
+    /// Pages read at most for one list call.
+    const LIST_PRS_MAX_PAGES: usize = 10;
+    // The base repo, or the fork lookup's error: a list built from origin
+    // would show numbers every PR action then resolves in the parent (#262).
+    let base = base_owner_repo(cwd, token)?;
 
     let page = limit.max(1);
     let off = offset.max(0);
-    // Naïve pagination identical to gh_list_prs: fetch offset+limit, then slice.
-    let per_page = (page + off).clamp(1, 100);
     // "merged" is not a native GitHub pulls state — fetch closed and filter.
     let api_state = match state {
         "closed" => "closed",
@@ -837,35 +965,67 @@ pub(crate) fn rest_list_prs(
         "all" => "all",
         _ => "open",
     };
+    let keep = |pr: &serde_json::Value| {
+        state != "merged" || pr.get("merged_at").map(|m| !m.is_null()).unwrap_or(false)
+    };
 
-    // Fetch PRs from the base repository (matches `gh pr list` behavior).
-    let raw: Vec<serde_json::Value> = api_json_cached(
-        &format!(
-            "{}/repos/{}/pulls?state={}&per_page={}&page=1&sort=updated&direction=desc",
-            API_BASE, base, api_state, per_page
-        ),
-        token,
-        None,
-    )?
-    .as_array()
-    .cloned()
-    .unwrap_or_default();
-
-    let mut prs: Vec<PullRequest> = raw
-        .iter()
-        .filter(|pr| {
-            if state == "merged" {
-                pr.get("merged_at").map(|m| !m.is_null()).unwrap_or(false)
-            } else {
-                true
-            }
-        })
-        .map(json_to_pr)
-        .collect();
-    if off > 0 {
-        let skip = (off as usize).min(prs.len());
-        prs.drain(..skip);
+    // Fetch PRs from the base repository (matches `gh pr list` behavior):
+    // `offset + limit` kept PRs, then the slice. Up to 100 that is one page of
+    // exactly that size (as before); past 100, pages of 100 until enough are
+    // kept or the list ends — a single page capped at 100 returned nothing at
+    // offset 100 and stopped "load more" there.
+    let want = (page + off) as usize;
+    let merged = state == "merged";
+    let (per_page, first_page, skip_in_pages) = list_page_plan(off as usize, page as usize);
+    let mut raw: Vec<serde_json::Value> = Vec::new();
+    if merged {
+        // Merged PRs come from the search API (`is:merged`, like the count),
+        // which pages them directly: closed pages filtered client-side hit a
+        // page cap, then an empty page that ended "load more". Each number is
+        // then read as a pull request (the enrichment below reads the same
+        // URL, so the ETag cache answers it).
+        let local_skip = off as usize - skip_in_pages;
+        raw = merged_prs_page(
+            &base,
+            per_page,
+            first_page,
+            local_skip,
+            page as usize,
+            token,
+        )?;
     }
+    for n in first_page..first_page + LIST_PRS_MAX_PAGES {
+        if merged {
+            break;
+        }
+        let chunk: Vec<serde_json::Value> = api_json_cached(
+            &format!(
+                "{}/repos/{}/pulls?state={}&per_page={}&page={}&sort=updated&direction=desc",
+                API_BASE, base, api_state, per_page, n
+            ),
+            token,
+            None,
+        )?
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+        let short = chunk.len() < per_page;
+        raw.extend(chunk);
+        if short {
+            break;
+        }
+        if skip_in_pages + raw.iter().filter(|pr| keep(pr)).count() >= want {
+            break;
+        }
+    }
+    let mut prs: Vec<PullRequest> = raw.iter().filter(|pr| keep(pr)).map(json_to_pr).collect();
+    // `merged` already read only its window.
+    let skip = if merged {
+        0
+    } else {
+        (off as usize).saturating_sub(skip_in_pages).min(prs.len())
+    };
+    prs.drain(..skip);
     prs.truncate(page as usize);
 
     // The list endpoint omits additions/deletions and returns a null/unknown
@@ -951,10 +1111,8 @@ pub(crate) fn rest_pr_freshness_signal(
     cwd: &str,
     token: &str,
 ) -> Result<Option<PrFreshnessSignal>, String> {
-    let base = base_owner_repo(cwd, token).unwrap_or_else(|_| {
-        let (o, r) = owner_repo(cwd).unwrap_or_default();
-        format!("{}/{}", o, r)
-    });
+    // Same repo, and same failure, as the list.
+    let base = base_owner_repo(cwd, token)?;
     let raw: Vec<serde_json::Value> = api_json_cached(
         &format!(
             "{}/repos/{}/pulls?state=open&per_page=1&page=1&sort=updated&direction=desc",
@@ -1085,51 +1243,42 @@ pub(crate) fn diff_numstat(cwd: &str, head: &str, base: &str) -> (i64, i64) {
     (adds, dels)
 }
 
-/// Fetch a PR object, trying `origin` first and falling back to the upstream
-/// parent (for fork → upstream PRs that don't live in origin). Returns the
-/// `owner/repo` the PR actually lives in alongside its JSON, so callers issue
-/// follow-up requests against the right repo.
+/// Fetch PR `number` from the base repo — the fork parent for a fork, else
+/// `origin` — and return that `owner/repo` alongside its JSON, so callers
+/// issue follow-up requests against the same repo. Every PR read and
+/// comment/review write goes through here.
+///
+/// Every number the app acts on comes from the base repo: the PR list
+/// (`rest_list_prs`) and a branch's PR (`rest_branch_pr`); a PR created into
+/// the fork itself only shows its number in the success message (the list
+/// then reloads from the base repo). Asking
+/// `origin` would read, or write on, the fork's own same-numbered PR (#262),
+/// so it is not asked at all — as the `gh` commands, which name the base repo
+/// (`gh_base_repo`, #300). A failed fork lookup is an error, never a guess,
+/// and every other refusal (an OAuth App restriction included) reaches
+/// `rest_attempt` as is.
 fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_json::Value), String> {
-    let (owner, repo) = owner_repo(cwd)?;
-    let origin = format!("{}/{}", owner, repo);
+    let repo = base_repo_of(&rest_fork_info(cwd, token)?);
     // Conditional: the live CI tab reads the PR's head on every poll.
     let (st, body) = get_cached_raw(
-        &format!("{}/repos/{}/pulls/{}", API_BASE, origin, number),
+        &format!("{}/repos/{}/pulls/{}", API_BASE, repo, number),
         token,
         None,
     )?;
-    if st < 400 {
-        let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
-        return Ok((origin, v));
+    if st >= 400 {
+        return Err(format!(
+            "{} (fetching PR #{})",
+            map_api_error(st, &body),
+            number
+        ));
     }
-    if st == 404 {
-        if let Some(parent) = upstream_parent(cwd, token) {
-            let (st2, body2) = curl_raw(
-                "GET",
-                &format!("{}/repos/{}/pulls/{}", API_BASE, parent, number),
-                Some(token),
-                None,
-                "application/vnd.github+json",
-            )?;
-            if st2 < 400 {
-                let v =
-                    serde_json::from_str(body2.trim()).map_err(|e| format!("parse PR: {}", e))?;
-                return Ok((parent, v));
-            }
-        }
-    }
-    Err(format!(
-        "{} (fetching PR #{})",
-        map_api_error(st, &body),
-        number
-    ))
+    let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
+    Ok((repo, v))
 }
 
 pub(crate) fn rest_pr_count(cwd: &str, state: &str, token: &str) -> Result<i64, String> {
-    let base = base_owner_repo(cwd, token).unwrap_or_else(|_| {
-        let (o, r) = owner_repo(cwd).unwrap_or_default();
-        format!("{}/{}", o, r)
-    });
+    // Same repo, and same failure, as the list.
+    let base = base_owner_repo(cwd, token)?;
     let qualifier = match state.to_lowercase().as_str() {
         "closed" => "+state:closed",
         "merged" => "+is:merged",
@@ -1614,6 +1763,21 @@ pub(crate) fn rest_issue_add_comment(
     Ok(map_comment(&v, true))
 }
 
+/// Comment on the conversation of PR `number` (REST), in the repo the PR
+/// lives in (`get_pr_json`: the base repo). Returns the created comment.
+pub(crate) fn rest_pr_add_conversation_comment(
+    cwd: &str,
+    number: i64,
+    body: &str,
+    token: &str,
+) -> Result<serde_json::Value, String> {
+    let (repo, _) = get_pr_json(cwd, number, token)?;
+    let url = format!("{}/repos/{}/issues/{}/comments", API_BASE, repo, number);
+    let payload = serde_json::json!({ "body": body });
+    let v = api_json("POST", &url, token, Some(&payload.to_string()))?;
+    Ok(map_comment(&v, true))
+}
+
 /// Close or reopen an issue (REST). `state` is "closed" or "open".
 pub(crate) fn rest_issue_set_state(
     cwd: &str,
@@ -1668,7 +1832,7 @@ pub(crate) fn rest_pr_reviews(
 
 /// Process-lifetime cache of a repo's fork relationship, keyed by origin
 /// `owner/repo`. The fork status of a repo doesn't change during a session, yet
-/// `base_owner_repo` / `upstream_parent` resolve it on every PR-list refresh — so
+/// `base_owner_repo` resolves it on every PR-list refresh and `get_pr_json` on every PR read or write, the live CI poll included — so
 /// without this the poller spent one `GET /repos/{o}/{r}` per tick for a value
 /// that never moves (same lifetime model as `GIT_DIR_CACHE`).
 static FORK_INFO_CACHE: OnceLock<Mutex<HashMap<String, ForkInfo>>> = OnceLock::new();
@@ -1705,17 +1869,9 @@ pub(crate) fn rest_fork_info(cwd: &str, token: &str) -> Result<ForkInfo, String>
     Ok(fi)
 }
 
-/// The upstream parent `owner/repo` when the current repo is a fork, else None.
-/// Centralizes the `is_fork && !parent.is_empty()` guard shared by the PR list
-/// and the origin→upstream PR fallback.
-fn upstream_parent(cwd: &str, token: &str) -> Option<String> {
-    let fi = rest_fork_info(cwd, token).ok()?;
-    (fi.is_fork && !fi.parent.is_empty()).then_some(fi.parent)
-}
-
 /// The canonical base `owner/repo` for PRs. For a fork, this is the upstream
 /// parent. For a regular repo, it's the repo itself.
-fn base_owner_repo(cwd: &str, token: &str) -> Result<String, String> {
+pub(crate) fn base_owner_repo(cwd: &str, token: &str) -> Result<String, String> {
     let fi = rest_fork_info(cwd, token)?;
     Ok(base_repo_of(&fi))
 }
@@ -1730,38 +1886,14 @@ fn base_repo_of(fi: &ForkInfo) -> String {
     }
 }
 
-/// The repo a PR *number* refers to when it comes from the PR list the user is
-/// looking at. `rest_list_prs` lists the base repo, so a write action on such a
-/// number must target the base repo too: going through `get_pr_json` (origin
-/// first) would act on the fork's own same-numbered PR. `fork_info` is `None`
-/// when the fork lookup failed; fall back to origin, as `rest_pr_edit` always did.
-fn pr_target_repo(cwd: &str, fork_info: Option<&ForkInfo>) -> Result<String, String> {
-    match fork_info {
-        Some(fi) => Ok(base_repo_of(fi)),
-        None => {
-            let (owner, repo) = owner_repo(cwd)?;
-            Ok(format!("{}/{}", owner, repo))
-        }
-    }
-}
-
-/// Fetch PR `number` from the base repo (see `pr_target_repo`). Returns the
-/// `owner/repo` it was fetched from alongside the JSON. No origin/upstream
-/// fallback: a 404 here means the PR is not in the repo the list shows.
+/// `get_pr_json`, for the write actions (merge, ready, auto-merge, reviewers):
+/// the base repo, or the fork lookup's error — never a guess at origin.
 fn get_base_pr_json(
     cwd: &str,
     number: i64,
     token: &str,
 ) -> Result<(String, serde_json::Value), String> {
-    let fi = rest_fork_info(cwd, token).ok();
-    let repo = pr_target_repo(cwd, fi.as_ref())?;
-    let v = api_json(
-        "GET",
-        &format!("{}/repos/{}/pulls/{}", API_BASE, repo, number),
-        token,
-        None,
-    )?;
-    Ok((repo, v))
+    get_pr_json(cwd, number, token)
 }
 
 // Bundling these into a params struct is a real API-shape decision (one
@@ -2027,8 +2159,8 @@ pub(crate) fn rest_pr_ready(cwd: &str, number: i64, token: &str) -> Result<(), S
 ///
 /// The PR number refers to the list the user is looking at, and `rest_list_prs`
 /// lists the *base* repo (the upstream for a fork). Resolve the repo the same
-/// way — going through `get_pr_json` (origin first) would patch the fork's own
-/// PR of the same number.
+/// way as every PR action (`get_pr_json`): the base repo, never origin, which
+/// would patch the fork's own PR of the same number.
 pub(crate) fn rest_pr_edit(
     cwd: &str,
     number: i64,
@@ -2037,8 +2169,9 @@ pub(crate) fn rest_pr_edit(
     token: &str,
 ) -> Result<(), String> {
     let payload = super::pr_edit::edit_payload(title, body, "body")?;
-    let fi = rest_fork_info(cwd, token).ok();
-    let repo = pr_target_repo(cwd, fi.as_ref())?;
+    // The number comes from the base repo's list: that repo, or the fork
+    // lookup's error.
+    let repo = base_owner_repo(cwd, token)?;
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
     api_json("PATCH", &url, token, Some(&payload.to_string()))?;
     Ok(())
@@ -2186,16 +2319,17 @@ pub(crate) fn rest_disable_auto_merge(cwd: &str, number: i64, token: &str) -> Re
     Ok(())
 }
 
-pub(crate) fn rest_checkout_pr(cwd: &str, number: i64) -> Result<(), String> {
+pub(crate) fn rest_checkout_pr(cwd: &str, number: i64, token: &str) -> Result<(), String> {
     // Resolve which repo the PR actually lives in. When the local repo is a
     // fork, the listed PRs belong to the upstream *parent*, so `pull/N/head`
     // exists on the parent's refs — fetching it from `origin` (the fork) 404s.
     let (owner, repo) = owner_repo(cwd)?;
     let origin = format!("{}/{}", owner, repo);
-    let pr_repo = settings_github_token()
-        .and_then(|tok| get_pr_json(cwd, number, &tok).ok())
-        .map(|(repo, _)| repo)
-        .unwrap_or_else(|| origin.clone());
+    // The base repo (where the list's numbers come from; cached after the
+    // first lookup, no per-PR request) or the fork lookup's error: a failed
+    // lookup must not check out the fork's own same-numbered PR. An OAuth App
+    // refusal goes back through `with_rest_pr` to `gh pr checkout`.
+    let pr_repo = base_owner_repo(cwd, token)?;
 
     // Fetch the PR head ref. When the PR lives in `origin` use the configured
     // remote; otherwise fetch straight from the upstream repo URL (no remote is
@@ -2206,33 +2340,122 @@ pub(crate) fn rest_checkout_pr(cwd: &str, number: i64) -> Result<(), String> {
     } else {
         format!("https://github.com/{}.git", pr_repo)
     };
-    let local = format!("pr-{}", number);
-    let refspec = format!("pull/{}/head:{}", number, local);
-    let fetch = git_cmd()
-        .args(["fetch", &fetch_target, &refspec])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("git fetch failed: {}", e))?;
+    checkout_pr_head(cwd, &fetch_target, number)
+}
+
+/// Fetch `pull/<number>/head` from `fetch_target` and check it out as the
+/// local branch `pr-<number>`. The fetch lands in `FETCH_HEAD`, then the
+/// branch is created there or moved forward to it; it is never rewritten. A
+/// `pr-<number>` holding commits the PR does not have (the PR was
+/// force-pushed, or the branch came from another PR with that number — the
+/// fork's own, before #262) is refused with what to do, rather than a raw
+/// `non-fast-forward` from the fetch.
+fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), String> {
+    let git = |args: &[&str]| {
+        git_cmd()
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .map_err(|e| format!("git {} failed: {}", args.first().unwrap_or(&""), e))
+    };
+    let fail = |what: &str, out: &std::process::Output| {
+        format!(
+            "{} failed: {}",
+            what,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )
+    };
+    let pull = format!("pull/{}/head", number);
+    let fetch = git(&["fetch", fetch_target, &pull])?;
     if !fetch.status.success() {
-        return Err(format!(
-            "git fetch pull/{}/head failed: {}",
-            number,
-            String::from_utf8_lossy(&fetch.stderr).trim()
-        ));
+        return Err(fail(&format!("git fetch {}", pull), &fetch));
     }
-    let checkout = git_cmd()
-        .args(["checkout", &local])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("git checkout failed: {}", e))?;
+    let local = format!("pr-{}", number);
+    let local_ref = format!("refs/heads/{}", local);
+    // `branch.pr-<n>.gitwandPrHead`: the PR head this branch was last checked
+    // out at (config, not a ref: nothing extra in the Git Tree).
+    let head_key = format!("branch.{}.gitwandPrHead", local);
+    // Pinned right after the fetch: every later step names this sha, so a
+    // fetch run meanwhile by another tool (FETCH_HEAD rewritten) cannot move
+    // `pr-<n>` to another commit.
+    let pinned = git(&["rev-parse", "--verify", "FETCH_HEAD^{commit}"])?;
+    if !pinned.status.success() {
+        return Err(fail("git rev-parse FETCH_HEAD", &pinned));
+    }
+    let fetched = String::from_utf8_lossy(&pinned.stdout).trim().to_string();
+    // Best effort: the checkout itself has succeeded by then. A missing
+    // record only makes the next checkout read `pr-<n>` ahead as local work.
+    let record = || -> Result<(), String> {
+        match git(&["config", &head_key, &fetched]) {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => eprintln!("[checkout_pr_head] {}", fail("git config", &out)),
+            Err(e) => eprintln!("[checkout_pr_head] {e}"),
+        }
+        Ok(())
+    };
+    let exists = git(&["show-ref", "--verify", "--quiet", &local_ref])?
+        .status
+        .success();
+    if exists {
+        let ancestor = |a: &str, b: &str| -> Result<bool, String> {
+            Ok(git(&["merge-base", "--is-ancestor", a, b])?
+                .status
+                .success())
+        };
+        let ff = ancestor(&local_ref, &fetched)?;
+        // The PR head recorded at the last checkout. `pr-<n>` ahead of a PR
+        // that has not moved back since is local work (commits, a merge of
+        // main, commits pushed to the PR meanwhile): checked out as it is.
+        // Ahead of a PR whose head moved back is the PR rewound: treated as
+        // diverged below. No record (a checkout before this): local work.
+        let recorded = git(&["config", "--get", &head_key])?;
+        let recorded = String::from_utf8_lossy(&recorded.stdout).trim().to_string();
+        // A PR that moved forward (the recorded head is an ancestor of the
+        // fetched one) has not been rewound either.
+        let unchanged =
+            recorded.is_empty() || recorded == fetched || ancestor(&recorded, &fetched)?;
+        if !ff && unchanged && ancestor(fetched.as_str(), &local_ref)? {
+            let checkout = git(&["checkout", &local])?;
+            return if checkout.status.success() {
+                record()
+            } else {
+                Err(fail(&format!("git checkout {}", local), &checkout))
+            };
+        }
+        if !ff {
+            return Err(format!(
+                "the local branch {local} and PR #{number} have diverged (the PR was \
+                 force-pushed or rewound, or {local} was made from another PR #{number}); \
+                 {local} was left as it is: check it out to keep its commits, or rename it, \
+                 then check the PR out again"
+            ));
+        }
+        let head = git(&["symbolic-ref", "-q", "HEAD"])?;
+        let on_it = String::from_utf8_lossy(&head.stdout).trim() == local_ref;
+        if on_it {
+            let merge = git(&["merge", "--ff-only", "-q", fetched.as_str()])?;
+            return if merge.status.success() {
+                record()
+            } else {
+                Err(fail("git merge --ff-only", &merge))
+            };
+        }
+        let mv = git(&["branch", "-f", &local, fetched.as_str()])?;
+        if !mv.status.success() {
+            return Err(fail(&format!("git branch -f {}", local), &mv));
+        }
+        let checkout = git(&["checkout", &local])?;
+        return if checkout.status.success() {
+            record()
+        } else {
+            Err(fail(&format!("git checkout {}", local), &checkout))
+        };
+    }
+    let checkout = git(&["checkout", "-b", &local, fetched.as_str()])?;
     if !checkout.status.success() {
-        return Err(format!(
-            "git checkout {} failed: {}",
-            local,
-            String::from_utf8_lossy(&checkout.stderr).trim()
-        ));
+        return Err(fail(&format!("git checkout -b {}", local), &checkout));
     }
-    Ok(())
+    record()
 }
 
 // ─── Reactions ──────────────────────────────────────────────────────────────
@@ -3181,31 +3404,6 @@ mod tests {
         assert_eq!(top_pr_from_rest_json(&[]), None);
     }
 
-    /// Run a git command in `dir`, panicking on failure (test scaffolding).
-    fn git_in(dir: &std::path::Path, args: &[&str]) {
-        let st = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .expect("git runs");
-        assert!(st.success(), "git {:?} failed", args);
-    }
-
-    /// A real temp repo whose `origin` is the given URL (the user's fork).
-    fn repo_with_origin(url: &str) -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static N: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "gitwand-pr-target-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        git_in(&dir, &["init", "-q"]);
-        git_in(&dir, &["remote", "add", "origin", url]);
-        dir
-    }
-
     fn fork_info(is_fork: bool, origin: &str, parent: &str) -> ForkInfo {
         ForkInfo {
             is_fork,
@@ -3216,40 +3414,15 @@ mod tests {
 
     // Regression: `rest_pr_ready` resolved the PR via `get_pr_json` (origin
     // first), so on a fork it marked the fork's same-numbered PR ready instead
-    // of the upstream PR the list shows.
+    // of the upstream PR the list shows. Every PR action now uses the base repo.
     #[test]
-    fn pr_target_repo_is_upstream_for_a_fork() {
-        let dir = repo_with_origin("git@github.com:me/proj.git");
-        let fi = fork_info(true, "me/proj", "upstream/proj");
-        let got = pr_target_repo(dir.to_str().unwrap(), Some(&fi));
-        std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(got.unwrap(), "upstream/proj");
-    }
-
-    #[test]
-    fn pr_target_repo_is_origin_for_a_non_fork() {
-        let dir = repo_with_origin("https://github.com/me/proj.git");
-        let fi = fork_info(false, "me/proj", "");
-        let got = pr_target_repo(dir.to_str().unwrap(), Some(&fi));
-        std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(got.unwrap(), "me/proj");
-    }
-
-    #[test]
-    fn pr_target_repo_falls_back_to_the_real_origin_remote() {
-        let dir = repo_with_origin("git@github.com:me/proj.git");
-        let got = pr_target_repo(dir.to_str().unwrap(), None);
-        std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(got.unwrap(), "me/proj");
-    }
-
-    #[test]
-    fn pr_target_repo_ignores_a_fork_with_an_empty_parent() {
-        let dir = repo_with_origin("git@github.com:me/proj.git");
-        let fi = fork_info(true, "me/proj", "");
-        let got = pr_target_repo(dir.to_str().unwrap(), Some(&fi));
-        std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(got.unwrap(), "me/proj");
+    fn the_base_repo_is_the_parent_for_a_fork_else_origin() {
+        assert_eq!(
+            base_repo_of(&fork_info(true, "me/proj", "upstream/proj")),
+            "upstream/proj"
+        );
+        assert_eq!(base_repo_of(&fork_info(false, "me/proj", "")), "me/proj");
+        assert_eq!(base_repo_of(&fork_info(true, "me/proj", "")), "me/proj");
     }
 
     // Regression: after merging a fork PR, `rest_merge_pr` deleted `head.ref`
@@ -3371,6 +3544,199 @@ mod etag_cache_tests {
         c.insert("a".into(), "2".into(), "A2".into());
         assert!(c.get("b").is_some());
         assert_eq!(c.get("a"), Some(("2".into(), "A2".into())));
+    }
+}
+
+#[cfg(test)]
+mod list_page_plan_tests {
+    use super::list_page_plan;
+
+    #[test]
+    fn small_windows_are_one_page_from_the_start() {
+        assert_eq!(list_page_plan(0, 10), (10, 1, 0));
+        assert_eq!(list_page_plan(40, 10), (50, 1, 0));
+    }
+
+    /// Past 100: pages of 100, starting at the one holding `offset`, so
+    /// "load more" never hits a wall or an empty page.
+    #[test]
+    fn past_100_it_starts_at_the_offsets_page() {
+        assert_eq!(list_page_plan(100, 10), (100, 2, 100));
+        assert_eq!(list_page_plan(1_250, 50), (100, 13, 1_200));
+    }
+}
+
+#[cfg(test)]
+mod with_rest_pr_tests {
+    use super::*;
+    use crate::worktree::test_support::TempRepo;
+
+    /// `with_rest_pr` keys a parent's OAuth refusal on the parent only once
+    /// the fork is known; it never makes a request to find out.
+    #[test]
+    fn the_cached_fork_parent_is_read_without_a_request() {
+        let repo = TempRepo::new();
+        let cwd = repo.path.to_str().unwrap();
+        let origin = format!("gw-cfp-{}/proj", std::process::id());
+        repo.git(&[
+            "remote",
+            "add",
+            "origin",
+            &format!("https://github.com/{origin}.git"),
+        ]);
+        assert_eq!(cached_fork_parent(cwd), None);
+        let cache = FORK_INFO_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        cache.lock().unwrap().insert(
+            origin.clone(),
+            ForkInfo {
+                is_fork: true,
+                origin: origin.clone(),
+                parent: "upstream/proj".to_string(),
+            },
+        );
+        assert_eq!(cached_fork_parent(cwd).as_deref(), Some("upstream/proj"));
+        cache.lock().unwrap().insert(
+            origin.clone(),
+            ForkInfo {
+                is_fork: false,
+                origin: origin.clone(),
+                parent: String::new(),
+            },
+        );
+        assert_eq!(cached_fork_parent(cwd), None);
+        cache.lock().unwrap().remove(&origin);
+    }
+}
+
+#[cfg(test)]
+mod checkout_pr_head_tests {
+    use super::checkout_pr_head;
+    use crate::worktree::test_support::{git_at, TempRepo};
+
+    /// `repo` with a bare `origin` carrying `refs/pull/7/head` at a commit of
+    /// a side branch. Returns (repo, bare, PR head sha).
+    fn with_pr7() -> (TempRepo, std::path::PathBuf, String) {
+        let repo = TempRepo::new();
+        let bare = repo.add_bare_origin();
+        repo.git(&["checkout", "-q", "-b", "side"]);
+        let head = repo.commit("pr.txt", "1\n", "pr 1");
+        repo.git(&["push", "-q", "origin", "side:refs/pull/7/head"]);
+        repo.git(&["checkout", "-q", "main"]);
+        repo.git(&["branch", "-q", "-D", "side"]);
+        (repo, bare, head)
+    }
+
+    fn cwd(repo: &TempRepo) -> &str {
+        repo.path.to_str().unwrap()
+    }
+
+    #[test]
+    fn creates_the_branch_at_the_pr_head() {
+        let (repo, _bare, head) = with_pr7();
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(repo.git(&["symbolic-ref", "--short", "HEAD"]), "pr-7");
+    }
+
+    #[test]
+    fn moves_an_existing_branch_forward_checked_out_or_not() {
+        let (repo, bare, _head) = with_pr7();
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        // The PR gains a commit.
+        repo.git(&["checkout", "-q", "-b", "next", "pr-7"]);
+        let next = repo.commit("pr.txt", "2\n", "pr 2");
+        repo.git(&["push", "-q", "origin", "next:refs/pull/7/head"]);
+        // On pr-7: fast-forwarded in place.
+        repo.git(&["checkout", "-q", "pr-7"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), next);
+        // Not on pr-7: moved, then checked out.
+        repo.git(&["checkout", "-q", "main"]);
+        repo.git(&["branch", "-q", "-f", "pr-7", "pr-7~1"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), next);
+        assert_eq!(git_at(&bare, &["rev-parse", "refs/pull/7/head"]), next);
+    }
+
+    /// A `pr-7` from another PR #7 (the fork's own, before #262) or a
+    /// force-pushed PR: refused with what to do, and left as it was.
+    #[test]
+    fn refuses_a_branch_with_commits_the_pr_does_not_have() {
+        let (repo, _bare, _head) = with_pr7();
+        repo.git(&["checkout", "-q", "-b", "pr-7", "main"]);
+        let other = repo.commit("other.txt", "x\n", "another PR 7");
+        repo.git(&["checkout", "-q", "main"]);
+        let err = checkout_pr_head(cwd(&repo), "origin", 7).unwrap_err();
+        assert!(err.contains("have diverged"), "{err}");
+        assert!(err.contains("left as it is"), "{err}");
+        assert_eq!(repo.git(&["rev-parse", "pr-7"]), other);
+        assert_eq!(repo.git(&["symbolic-ref", "--short", "HEAD"]), "main");
+    }
+
+    /// The PR rewound (by anyone, its author or the user as maintainer):
+    /// pr-7 ahead of a PR head that moved back is refused like a divergence,
+    /// pr-7 left as it is.
+    #[test]
+    fn refuses_a_rewound_pr() {
+        let (repo, bare, head) = with_pr7();
+        repo.git(&["checkout", "-q", "-b", "next", &head]);
+        repo.git(&["commit", "-q", "--allow-empty", "-m", "pr 2"]);
+        let pr2 = repo.git(&["rev-parse", "HEAD"]);
+        repo.git(&["push", "-q", "origin", "next:refs/pull/7/head"]);
+        repo.git(&["checkout", "-q", "main"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        repo.git(&["checkout", "-q", "main"]);
+        // Rewound to the first commit.
+        repo.git(&[
+            "push",
+            "-q",
+            "-f",
+            "origin",
+            &format!("{head}:refs/pull/7/head"),
+        ]);
+        let err = checkout_pr_head(cwd(&repo), "origin", 7).unwrap_err();
+        assert!(err.contains("rewound"), "{err}");
+        assert_eq!(repo.git(&["rev-parse", "pr-7"]), pr2);
+        assert_eq!(git_at(&bare, &["rev-parse", "refs/pull/7/head"]), head);
+    }
+
+    /// The user pushed part of their pr-7 work to the PR: the PR moved
+    /// forward, pr-7 is still ahead of it — local work, not a rewind.
+    #[test]
+    fn a_pr_that_only_moved_forward_is_not_a_rewind() {
+        let (repo, _bare, _head) = with_pr7();
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        let a = repo.commit("a.txt", "a\n", "A");
+        let b = repo.commit("b.txt", "b\n", "B");
+        repo.git(&["push", "-q", "origin", &format!("{a}:refs/pull/7/head")]);
+        repo.git(&["checkout", "-q", "main"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), b);
+    }
+
+    /// The user's own commits on `pr-7` (ahead of the PR): checked out as
+    /// they are, never refused or rewritten.
+    #[test]
+    fn checks_out_a_branch_ahead_of_the_pr_as_it_is() {
+        let (repo, _bare, _head) = with_pr7();
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        let mine = repo.commit("mine.txt", "m\n", "my work");
+        repo.git(&["checkout", "-q", "main"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), mine);
+        assert_eq!(repo.git(&["symbolic-ref", "--short", "HEAD"]), "pr-7");
+        // Already on it: still fine.
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), mine);
+        // A merge of main on top (others' commits): still local work.
+        repo.git(&["checkout", "-q", "main"]);
+        repo.commit("main.txt", "x\n", "main moves");
+        repo.git(&["checkout", "-q", "pr-7"]);
+        repo.git(&["merge", "-q", "--no-edit", "main"]);
+        let merged = repo.git(&["rev-parse", "HEAD"]);
+        repo.git(&["checkout", "-q", "main"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), merged);
     }
 }
 

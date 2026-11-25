@@ -180,13 +180,10 @@ _Synthesis: none of the three addresses structured conflict-resolution AI (Stran
 - **SSH routing on identity profiles + wrong-account guard** (from the 2026-10-08 Multi-Git scan) — the v2.12 profiles (`useIdentity.ts`) only inject `user.name`/`user.email` at commit time; authentication still goes through the global SSH config. Add an optional SSH key per profile, routed per operation via `GIT_SSH_COMMAND` (fetch/pull/push/clone), auto-select rules on the origin URL (`github.com/acme/` → Pro), and a pre-push check: the account the key actually signs in as (`ssh -T`, remembered per key) vs. the one the remote expects; on mismatch, block with an explicit override, force-push included. Real pain for anyone juggling work and personal accounts, and author + key always switch together, so a repo can no longer push as one account and commit as another.
 
 - **Follow-ups from #260–#265** (2026-10-14):
-  - #262: PR reads (detail, review threads, comments, reviews) and comment/review writes still resolve the PR via `get_pr_json`, origin first — on a fork with a same-numbered PR they act on the fork's PR. Moving `get_pr_json` itself to the base repo fixes every caller at once
-  - #262: the tokenless merge (`gh pr merge`, `gh_merge_pr_inner`) passes no `--repo`, unlike `gh pr ready`
   - #265: a bisect in progress is invisible to the status, so the tooltip shows it only after a fast-forward attempt; a stale block reason can linger up to one fetch tick (30 s); a branch literally named `HEAD` or `unknown` is treated as detached
   - #264: `git_untrack_paths` needs git ≥ 2.25 (`--pathspec-from-file`)
   - #263: the fr/es/pt-BR/zh-CN strings for the Keep mode were not read by a native speaker
 - **Follow-ups from #258 (command registry covers the forge wrappers)** (2026-10-14):
-  - on a fork, dev-server `/api/gh-pr-comment` (POST, PATCH, DELETE) targets origin via `getRepoNwo`, while the Rust commands resolve the PR elsewhere; the PATCH and DELETE web branches of `ghPrUpdateComment` / `ghPrDeleteComment` do not even send the PR number. dev:web QA of review-comment edits on a fork is not representative
   - 97 forge commands are registered as `GAP:` (Azure DevOps and Bitbucket PRs, GitLab MRs beyond auto-merge and issues, Gitea beyond the 8 read routes, and some GitHub PR actions, reactions and auth flows) — dev:web cannot exercise them
 - **Follow-ups from #269–#270 (file history compare, diff parsers)** (2026-10-14):
   - a file history entry outside the loaded history (line-range result, rebased commit) has no known name before a rename; the Compare tab says so instead of guessing — load more history, or have `git log -L` results carry names

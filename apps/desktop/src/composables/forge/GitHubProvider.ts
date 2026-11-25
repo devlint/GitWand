@@ -103,8 +103,8 @@ export class GitHubProvider implements ForgeProvider {
     return ghCurrentUser();
   }
 
-  listReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
-    return ghListReviewerCandidates(cwd);
+  listReviewerCandidates(cwd: string, repo?: string): Promise<ReviewerCandidate[]> {
+    return ghListReviewerCandidates(cwd, repo);
   }
 
   listBranches(cwd: string): Promise<string[]> {
