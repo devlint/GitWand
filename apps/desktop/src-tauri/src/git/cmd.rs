@@ -433,6 +433,48 @@ pub(crate) fn git_cmd() -> std::process::Command {
     hidden_cmd(&git_binary())
 }
 
+/// Global options (before the subcommand) for a git call whose patch output
+/// GitWand parses. Names print literally, never C-quoted with octal escapes,
+/// and the headers keep the `a/` `b/` prefixes the parser expects whatever
+/// `diff.noprefix`, `diff.mnemonicPrefix` or `diff.srcPrefix` /
+/// `diff.dstPrefix` say (a `-c` here outranks every config file).
+///
+/// The prefixes are pinned as config, not with `--src-prefix` /
+/// `--dst-prefix`: `git stash show -p --src-prefix=a/` prints no prefix at
+/// all (git 2.54). Older gits ignore the `srcPrefix` keys they do not know.
+pub(crate) const PATCH_CONFIG: [&str; 10] = [
+    "-c",
+    "core.quotePath=false",
+    "-c",
+    "diff.noprefix=false",
+    "-c",
+    "diff.mnemonicPrefix=false",
+    "-c",
+    "diff.srcPrefix=a/",
+    "-c",
+    "diff.dstPrefix=b/",
+];
+
+/// Diff options for a git call whose patch output GitWand parses: no colour
+/// codes (`color.ui=always`), no external diff tool (`diff.external`).
+pub(crate) const PATCH_FLAGS: [&str; 2] = ["--no-color", "--no-ext-diff"];
+
+/// Repo config that changes how git prints a patch; tests set all of it and
+/// check that a command's result does not change. `log.showSignature` only
+/// matters to `git show`/`log`.
+#[cfg(test)]
+pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 9] = [
+    ("diff.noprefix", "true"),
+    ("diff.mnemonicPrefix", "true"),
+    ("diff.srcPrefix", "SRC/"),
+    ("diff.dstPrefix", "DST/"),
+    ("color.ui", "always"),
+    ("color.diff", "always"),
+    ("core.quotePath", "true"),
+    ("diff.external", "echo EXTERNAL"),
+    ("log.showSignature", "true"),
+];
+
 /// Run `cmd` with a deadline, killing it if it doesn't finish in time.
 ///
 /// Unlike `Command::output()`, this never blocks the caller for longer than

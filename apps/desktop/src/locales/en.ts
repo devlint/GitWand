@@ -92,6 +92,7 @@ const en = {
     pullRefusedDirty: "Pull refused: uncommitted changes are present.",
     pullAutostashParked: "Pulled — your changes are stashed and will come back when the operation finishes.",
     pullAutostashConflict: "Pull done, but restoring your changes hit conflicts — resolve them in the Changes view. Your changes are safe in the stash.",
+    forcePushRemoteMoved: "Force push refused: the remote branch has commits you have not pulled (someone else may have pushed). Nothing was overwritten. Pull them in first, then push again.",
     pushDone: "Push completed",
     stashDone: "Changes stashed",
     mergeDone: "Merge completed",

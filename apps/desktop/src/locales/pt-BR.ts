@@ -93,6 +93,7 @@ const ptBR: Locale = {
     pullRefusedDirty: "Pull recusado: há alterações não commitadas.",
     pullAutostashParked: "Pull feito — suas alterações estão no stash e voltarão quando a operação terminar.",
     pullAutostashConflict: "Pull feito, mas restaurar suas alterações gerou conflitos — resolva-os na visão Alterações. Suas alterações estão seguras no stash.",
+    forcePushRemoteMoved: "Force push recusado: o branch remoto tem commits que você ainda não puxou (outra pessoa pode ter feito push). Nada foi sobrescrito. Integre-os primeiro e faça push de novo.",
     pushDone: "Push concluído",
     stashDone: "Mudanças guardadas no stash",
     mergeDone: "Merge concluído",

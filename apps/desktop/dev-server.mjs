@@ -1349,6 +1349,19 @@ const COMBINED_GIT_PINS = [
   "-c", "diff.renameLimit=7000",
 ];
 
+/** git/cmd.rs `PATCH_CONFIG`: global options for a git call whose patch is
+ *  parsed — literal names, `a/` `b/` prefixes whatever the user's config. */
+const PATCH_CONFIG = [
+  "-c", "core.quotePath=false",
+  "-c", "diff.noprefix=false",
+  "-c", "diff.mnemonicPrefix=false",
+  "-c", "diff.srcPrefix=a/",
+  "-c", "diff.dstPrefix=b/",
+];
+
+/** git/cmd.rs `PATCH_FLAGS`: no colour codes, no external diff tool. */
+const PATCH_FLAGS = ["--no-color", "--no-ext-diff"];
+
 /** replay.rs `PATHSPEC_BATCH_BYTES`: the argv stays under 8 KB. */
 const COMBINED_PATHSPEC_BATCH_BYTES = 7 * 1024;
 
@@ -2660,6 +2673,29 @@ function devForceWithLeaseArg(branch, sha) {
     !b.includes("@{") && !/[\p{Cc}\p{White_Space}~^:?*[\\]/u.test(b);
   if (!branchOk) throw new Error("invalid lease branch");
   return `--force-with-lease=refs/heads/${b}:${s}`;
+}
+
+/** `push_destination` (commands/ops.rs): the remote branch a plain push from
+ *  `branch` updates, from `%(push)` minus `refs/remotes/<%(push:remotename)>/`;
+ *  null when git names none or it maps back to no branch. */
+function devPushDestination(cwd, branch) {
+  const refname = `refs/heads/${branch}`;
+  const r = spawnSync(
+    GIT,
+    ["for-each-ref", "--format=%(refname) %(push:remotename) %(push)", refname],
+    { cwd, encoding: "utf-8" },
+  );
+  if (r.error || r.status !== 0) return null;
+  const line = (r.stdout || "").split("\n").find((l) => l.startsWith(`${refname} `));
+  if (line === undefined) return null;
+  const rest = line.slice(refname.length + 1);
+  const sp = rest.indexOf(" ");
+  if (sp <= 0) return null;
+  const remote = rest.slice(0, sp);
+  const tracking = rest.slice(sp + 1);
+  const prefix = `refs/remotes/${remote}/`;
+  if (!tracking.startsWith(prefix) || tracking.length === prefix.length) return null;
+  return tracking.slice(prefix.length);
 }
 
 /** `gh_fork_parent` (commands/gh.rs) answers, by origin, for ten minutes. */
@@ -5196,11 +5232,18 @@ async function handleRequest(req, res) {
             return jsonResponse(req, res, { success: false, message: "lease_branch and lease_sha must be given together" });
           }
           if (hasBranch) {
-            // force_with_lease_arg() in src-tauri/src/commands/ops.rs.
-            try { args.push(devForceWithLeaseArg(leaseBranch, leaseSha)); }
-            catch (e) { return jsonResponse(req, res, { success: false, message: e.message }); }
+            // force_with_lease_arg() in src-tauri/src/commands/ops.rs, on the
+            // branch the push updates (`push_destination`).
+            try {
+              devForceWithLeaseArg(leaseBranch, leaseSha);
+              const dest = devPushDestination(resolvedCwd, String(leaseBranch)) ?? leaseBranch;
+              args.push(devForceWithLeaseArg(dest, leaseSha));
+            } catch (e) { return jsonResponse(req, res, { success: false, message: e.message }); }
           } else {
+            // `git_push`: the tip must also have been integrated locally.
             args.push("--force-with-lease");
+            const v = await combinedGitVersion();
+            if (v && (v[0] > 2 || (v[0] === 2 && v[1] >= 30))) args.push("--force-if-includes");
           }
         }
         const r = spawnSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
@@ -5773,7 +5816,7 @@ async function handleRequest(req, res) {
         }
         // Literal pathspecs; external diff, colour and textconv off — the
         // output is parsed, never shown as is.
-        const args = ["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--no-textconv"];
+        const args = [...PATCH_CONFIG, "--literal-pathspecs", "diff", "--no-textconv", ...PATCH_FLAGS];
         if (fromName !== toName && fromType !== null && toType !== null) {
           // Renamed in between: blob to blob, so the hunks are the content change.
           args.push(`${from}:${fromName}`, `${to}:${toName}`);
@@ -5896,6 +5939,10 @@ async function handleRequest(req, res) {
       const cwd = url.searchParams.get("cwd");
       const hash = url.searchParams.get("hash");
       if (!cwd || !hash) return jsonResponse(req, res, { error: "Missing cwd or hash param" }, 400);
+      // Rust's `validate_revision("hash", …)`.
+      if (!hash.trim() || hash.startsWith("-") || /[\u0000-\u001f\u007f]/.test(hash)) {
+        return jsonResponse(req, res, { error: `invalid hash: ${hash}` }, 400);
+      }
 
       try {
         const resolvedCwd = resolve(cwd);
@@ -5903,7 +5950,12 @@ async function handleRequest(req, res) {
         // Stream stdout via spawn — execSync's maxBuffer (10 MB) is exceeded by large
         // merge commits in monorepos and causes a 500.
         const stdout = await gitSpawn(
-          ["show", "-m", "--first-parent", "--format=", hash],
+          [
+            ...PATCH_CONFIG,
+            "show", "-m", "--first-parent", "--format=", "--no-show-signature",
+            ...PATCH_FLAGS,
+            "--end-of-options", hash,
+          ],
           resolvedCwd,
         );
 
@@ -6261,7 +6313,7 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         const out = execFileSync(
           "git",
-          ["stash", "show", "-p", `stash@{${parseInt(idx, 10)}}`],
+          [...PATCH_CONFIG, "stash", "show", "-p", ...PATCH_FLAGS, `stash@{${parseInt(idx, 10)}}`],
           { cwd: resolvedCwd, encoding: "utf-8" },
         );
         return jsonResponse(req, res, { diff: out });

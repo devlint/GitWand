@@ -44,6 +44,7 @@ import {
   isLocalRewriteOfUpstream,
   probeLocalRewriteOfUpstream,
   evaluateAutoForcePush,
+  isForcePushRemoteMoved,
 } from "../useBranchUpdatePrompt";
 
 function git(cwd: string, args: string[]): string {
@@ -217,6 +218,61 @@ describe("probeLocalRewriteOfUpstream", () => {
     const { me } = setup();
     git(me, ["switch", "-q", "-c", "local-only"]);
     expect(await probeLocalRewriteOfUpstream(me, "local-only")).toEqual({ safe: false, upstream: null });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  // `push.default=upstream` pushes `mine` to its upstream `origin/feat`: the
+  // force push replaces exactly the commits the probe judged.
+  it("is safe for an upstream named differently that a plain push updates", async () => {
+    const { teammate, me } = setup();
+    git(me, ["switch", "-q", "-c", "mine", "--track", "origin/feat"]);
+    git(me, ["config", "push.default", "upstream"]);
+    rebaseLocallyOntoMovedMain(teammate, me);
+    const probe = await probeLocalRewriteOfUpstream(me, "mine");
+    expect(probe).toEqual({ safe: true, upstream: git(me, ["rev-parse", "origin/feat"]).trim() });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  // A branch tracking origin/feat but pushed to origin/mine (`current`): a
+  // force push would not touch origin/feat, so it is never preferred.
+  it("is not safe when a plain push goes elsewhere than the upstream", async () => {
+    const { teammate, me } = setup();
+    git(me, ["switch", "-q", "-c", "mine", "--track", "origin/feat"]);
+    git(me, ["config", "push.default", "current"]);
+    rebaseLocallyOntoMovedMain(teammate, me);
+    expect((await probeLocalRewriteOfUpstream(me, "mine")).safe).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("isForcePushRemoteMoved", () => {
+  /** `me` amends feat after a teammate's commit landed in origin/feat. */
+  function refusedSetup() {
+    const { teammate, me } = setup();
+    const judged = git(me, ["rev-parse", "origin/feat"]).trim();
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["fetch", "-q"]);
+    commit(me, "h", "mine\n", "mine");
+    git(me, ["commit", "-q", "--amend", "-m", "mine amended"]);
+    return { me, judged };
+  }
+  const push = (cwd: string, args: string[]) => {
+    const r = spawnSync("git", ["push", ...args], { cwd, env: gitEnv(), encoding: "utf-8" });
+    expect(r.status).not.toBe(0);
+    return `${r.stdout}${r.stderr}`;
+  };
+
+  it("recognises git's --force-if-includes refusal", () => {
+    const { me } = refusedSetup();
+    expect(isForcePushRemoteMoved(push(me, ["--force-with-lease", "--force-if-includes"]))).toBe(true);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("recognises git's stale explicit lease refusal", () => {
+    const { me, judged } = refusedSetup();
+    expect(isForcePushRemoteMoved(push(me, [`--force-with-lease=refs/heads/feat:${judged}`]))).toBe(true);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("does not claim an ordinary non-fast-forward rejection", () => {
+    const { me } = refusedSetup();
+    expect(isForcePushRemoteMoved(push(me, []))).toBe(false);
   }, GIT_TEST_TIMEOUT_MS);
 });
 

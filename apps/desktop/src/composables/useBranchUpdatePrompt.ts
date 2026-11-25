@@ -87,6 +87,8 @@ export async function isUpstreamRewriteOnly(cwd: string): Promise<boolean> {
  *
  * A collaborator's new commit was never a local tip and has no local
  * equivalent, so Sync stays the default whenever pulling is actually needed.
+ * The verdict is only positive when a plain push goes to the upstream itself
+ * (`@{push}` is `@{upstream}`), since that is the ref the force push replaces.
  *
  * Returns the `@{upstream}` sha the verdict was computed against so callers can
  * tell when it goes stale (the remote-tracking ref moved).
@@ -96,14 +98,20 @@ export async function probeLocalRewriteOfUpstream(
   branch: string,
 ): Promise<{ safe: boolean; upstream: string | null }> {
   try {
-    const [upstream, reflog, upstreamOnly] = await Promise.all([
+    const [upstream, reflog, upstreamOnly, refs] = await Promise.all([
       gitExec(cwd, ["rev-parse", "@{upstream}"]),
       gitExec(cwd, ["reflog", "show", "--format=%H", `refs/heads/${branch}`]),
       gitExec(cwd, ["rev-list", "--cherry-pick", "--right-only", "HEAD...@{upstream}"]),
+      gitExec(cwd, ["rev-parse", "--symbolic-full-name", "@{upstream}", "@{push}"]),
     ]);
     if (upstream.exitCode !== 0) return { safe: false, upstream: null };
     const tip = upstream.stdout.trim();
     if (!tip) return { safe: false, upstream: null };
+    // A push that goes elsewhere than the upstream (a branch tracking
+    // origin/main, pushed to origin/<branch>) would not overwrite the commits
+    // judged here: never prefer a force push for it.
+    const [upRef, pushRef] = refs.stdout.trim().split("\n");
+    if (refs.exitCode !== 0 || !upRef || upRef !== pushRef) return { safe: false, upstream: tip };
     if (reflog.exitCode === 0 && reflog.stdout.split("\n").some((h) => h.trim() === tip)) {
       return { safe: true, upstream: tip };
     }
@@ -111,6 +119,16 @@ export async function probeLocalRewriteOfUpstream(
   } catch {
     return { safe: false, upstream: null };
   }
+}
+
+/**
+ * True when git refused a force push because the remote branch moved past
+ * what the lease allows: `(stale info)` for `--force-with-lease`, `(remote ref
+ * updated since checkout)` for `--force-if-includes`. git prints both reasons
+ * in English whatever the locale.
+ */
+export function isForcePushRemoteMoved(message: string): boolean {
+  return /\(stale info\)|\(remote ref updated since checkout\)/.test(message);
 }
 
 export async function isLocalRewriteOfUpstream(cwd: string, branch: string): Promise<boolean> {

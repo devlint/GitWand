@@ -55,7 +55,11 @@ import {
 } from "../utils/backend";
 import { shouldForceLogAfterFetch } from "../utils/fetchRefresh";
 import { requireOnline } from "../utils/networkGuard";
-import { clearUpdatePromptSkip, evaluateAutoForcePush } from "./useBranchUpdatePrompt";
+import {
+  clearUpdatePromptSkip,
+  evaluateAutoForcePush,
+  isForcePushRemoteMoved,
+} from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
 import { resolveConflictOperation } from "../utils/conflictOperation";
 import { useWorkspaceScope } from "./useWorkspaceScope";
@@ -1248,7 +1252,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         result = await gitPush(folderPath.value, true, force, lease);
       }
       if (!result.success) {
-        error.value = `push: ${result.message}`;
+        error.value =
+          force && isForcePushRemoteMoved(result.message)
+            ? t("header.forcePushRemoteMoved")
+            : `push: ${result.message}`;
       } else {
         successMessage.value = "push-done";
         forcePushPreferred.value = false;

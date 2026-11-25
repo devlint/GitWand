@@ -447,6 +447,48 @@ fn force_with_lease_arg(branch: &str, sha: &str) -> Result<String, String> {
     Ok(format!("--force-with-lease=refs/heads/{}:{}", branch, sha))
 }
 
+/// `--force-if-includes` landed in git 2.30.
+fn supports_force_if_includes(v: Option<(u32, u32)>) -> bool {
+    matches!(v, Some(v) if v >= (2, 30))
+}
+
+/// The remote branch a plain `git push` from `branch` updates, e.g. `topic`
+/// for a local `feature` tracking `origin/topic` under
+/// `push.default=upstream`. Read from `%(push)`, the remote-tracking ref of
+/// the push destination (`refs/remotes/origin/topic`), minus
+/// `refs/remotes/<%(push:remotename)>/` — `%(push:remoteref)` stays empty
+/// without an explicit push refspec. `None` when git names no destination, or
+/// one that does not map back to a branch (a non-default fetch refspec): the
+/// caller then leases the local branch name, as before.
+fn push_destination(cwd: &str, branch: &str) -> Option<String> {
+    let refname = format!("refs/heads/{branch}");
+    // A for-each-ref pattern also matches `refs/heads/<branch>/…`: keep the
+    // exact ref's line only. Ref and remote names hold no space.
+    let out = git_cmd()
+        .args([
+            "for-each-ref",
+            "--format=%(refname) %(push:remotename) %(push)",
+            &refname,
+        ])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let prefix = format!("{refname} ");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let rest = stdout.lines().find_map(|l| l.strip_prefix(&prefix))?;
+    let (remote, tracking) = rest.split_once(' ')?;
+    if remote.is_empty() {
+        return None;
+    }
+    tracking
+        .strip_prefix(&format!("refs/remotes/{remote}/"))
+        .filter(|b| !b.is_empty())
+        .map(str::to_string)
+}
+
 #[tauri::command]
 pub(crate) async fn git_push(
     cwd: String,
@@ -458,17 +500,28 @@ pub(crate) async fn git_push(
     // Explicit lease (branch + the remote tip the user was shown). Validated
     // before anything runs: a malformed value must never degrade into a bare
     // `--force-with-lease`, which trusts whatever the last fetch brought in.
-    let lease_arg = match (lease_branch.as_deref(), lease_sha.as_deref()) {
-        (None, None) => None,
-        (Some(branch), Some(sha)) => Some(force_with_lease_arg(branch, sha)?),
+    match (lease_branch.as_deref(), lease_sha.as_deref()) {
+        (None, None) => {}
+        (Some(branch), Some(sha)) => {
+            force_with_lease_arg(branch, sha)?;
+        }
         _ => return Err("lease_branch and lease_sha must be given together".to_string()),
-    };
+    }
     // Push guard: network-bound, touches only refs (not the index/worktree),
     // so it stays concurrent with reads — but it must not overlap a writer
     // (checkout/pull/rebase) mutating the refs it publishes, nor another push
     // to the same repo (concurrent first-publish create → "reference already
     // exists"). See `repo_lock::push`.
     let _repo = repo_lock::push(&cwd);
+    // The lease names the branch the push actually updates on the remote,
+    // which `push.default=upstream` can name differently from the local one.
+    let lease_arg = match (lease_branch.as_deref(), lease_sha.as_deref()) {
+        (Some(branch), Some(sha)) => Some(force_with_lease_arg(
+            &push_destination(&cwd, branch).unwrap_or_else(|| branch.to_string()),
+            sha,
+        )?),
+        _ => None,
+    };
     let mut args: Vec<&str> = vec!["push"];
     if set_upstream.unwrap_or(false) {
         args.extend(["--set-upstream", "origin", "HEAD"]);
@@ -476,7 +529,17 @@ pub(crate) async fn git_push(
     if force.unwrap_or(false) {
         match lease_arg.as_deref() {
             Some(lease) => args.push(lease),
-            None => args.push("--force-with-lease"),
+            None => {
+                // A bare lease only compares with the remote-tracking ref,
+                // which the background fetch keeps current: alone it would
+                // overwrite a commit someone pushed since the user's last
+                // pull. `--force-if-includes` also requires that tip to have
+                // been part of the local branch at some point (its reflog).
+                args.push("--force-with-lease");
+                if supports_force_if_includes(crate::stack::guard::git_version()) {
+                    args.push("--force-if-includes");
+                }
+            }
         }
     }
     let _t0 = Instant::now();
@@ -1795,7 +1858,10 @@ pub(crate) async fn git_stash_show(cwd: String, index: usize) -> Result<String, 
     let _repo = repo_lock::read(&cwd);
     let stash_ref = format!("stash@{{{}}}", index);
     let output = git_cmd()
-        .args(["stash", "show", "-p", &stash_ref])
+        .args(PATCH_CONFIG)
+        .args(["stash", "show", "-p"])
+        .args(PATCH_FLAGS)
+        .arg(&stash_ref)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to show stash: {}", e))?;
@@ -6422,6 +6488,22 @@ mod stash_and_tag_date_tests {
     }
 
     #[test]
+    fn stash_show_ignores_user_patch_config() {
+        let repo = TempRepo::new();
+        repo.write("é t.txt", "v1\n");
+        repo.commit_all("base");
+        repo.write("é t.txt", "v2\n");
+        repo.git_ok(&["stash", "push", "-q", "-m", "s"]);
+        let show = || tauri::async_runtime::block_on(git_stash_show(repo.cwd(), 0)).unwrap();
+        let clean = show();
+        assert!(clean.contains("diff --git a/é t.txt b/é t.txt"), "{clean}");
+        for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
+            repo.git_ok(&["config", k, v]);
+        }
+        assert_eq!(show(), clean);
+    }
+
+    #[test]
     fn stash_list_dates_are_strict_iso_8601() {
         let repo = TempRepo::new();
         repo.write("a.txt", "v1\n");
@@ -7070,6 +7152,157 @@ mod force_with_lease_tests {
         ] {
             assert!(force_with_lease_arg(b, SHA).is_err(), "{b:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod git_push_force_tests {
+    use super::*;
+    use crate::worktree::test_support::{git_at, TempRepo};
+
+    /// `feature` published from `repo` (tracking `origin/feature`), plus a
+    /// second clone (`<sandbox>/mate`) of the same remote, as a collaborator.
+    fn published() -> (TempRepo, PathBuf, PathBuf) {
+        let repo = TempRepo::new();
+        let bare = repo.add_bare_origin();
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        repo.commit("f.txt", "1\n", "feature 1");
+        repo.git(&["push", "-q", "-u", "origin", "feature"]);
+        git_at(
+            &repo.sandbox,
+            &[
+                "clone",
+                "-q",
+                "-b",
+                "feature",
+                bare.to_str().unwrap(),
+                "mate",
+            ],
+        );
+        let mate = repo.sandbox.join("mate");
+        git_at(&mate, &["config", "user.name", "Mate"]);
+        git_at(&mate, &["config", "user.email", "mate@example.com"]);
+        git_at(&mate, &["config", "commit.gpgsign", "false"]);
+        (repo, bare, mate)
+    }
+
+    fn force_push(repo: &TempRepo, lease: Option<(&str, &str)>) -> GitPushPullResult {
+        tauri::async_runtime::block_on(git_push(
+            repo.path.to_str().unwrap().to_string(),
+            None,
+            Some(true),
+            lease.map(|l| l.0.to_string()),
+            lease.map(|l| l.1.to_string()),
+        ))
+        .unwrap()
+    }
+
+    fn has_force_if_includes() -> bool {
+        supports_force_if_includes(crate::stack::guard::git_version())
+    }
+
+    #[test]
+    fn force_if_includes_needs_git_2_30() {
+        assert!(!supports_force_if_includes(None));
+        assert!(!supports_force_if_includes(Some((2, 29))));
+        assert!(supports_force_if_includes(Some((2, 30))));
+        assert!(supports_force_if_includes(Some((3, 0))));
+    }
+
+    /// The background fetch brought a collaborator's commit into
+    /// `origin/feature`; the user rewrote their branch without ever pulling
+    /// it. A bare `--force-with-lease` would compare with the fetched tip and
+    /// overwrite it.
+    #[test]
+    fn refuses_to_overwrite_a_fetched_commit_never_integrated() {
+        if !has_force_if_includes() {
+            return;
+        }
+        let (repo, bare, mate) = published();
+        std::fs::write(mate.join("m.txt"), "mate\n").unwrap();
+        git_at(&mate, &["add", "-A"]);
+        git_at(&mate, &["commit", "-q", "-m", "mate"]);
+        git_at(&mate, &["push", "-q", "origin", "feature"]);
+        let theirs = git_at(&bare, &["rev-parse", "feature"]);
+        repo.git(&["fetch", "-q", "origin"]);
+        repo.write("f.txt", "2\n");
+        repo.git(&["commit", "-q", "-a", "--amend", "-m", "feature 1 amended"]);
+
+        let r = force_push(&repo, None);
+        assert!(!r.success, "{}", r.message);
+        assert_eq!(git_at(&bare, &["rev-parse", "feature"]), theirs);
+    }
+
+    /// Rewriting one's own published commits (amend, rebase) still pushes.
+    #[test]
+    fn force_pushes_a_rewrite_of_the_users_own_commits() {
+        let (repo, bare, _mate) = published();
+        repo.write("f.txt", "2\n");
+        repo.git(&["commit", "-q", "-a", "--amend", "-m", "feature 1 amended"]);
+        let local = repo.git(&["rev-parse", "HEAD"]);
+        repo.git(&["fetch", "-q", "origin"]);
+
+        let r = force_push(&repo, None);
+        assert!(r.success, "{}", r.message);
+        assert_eq!(git_at(&bare, &["rev-parse", "feature"]), local);
+    }
+
+    /// `push.default=upstream` with an upstream named differently: the
+    /// explicit lease must name the branch the push updates (`topic`), not the
+    /// local one (`feature`), which the remote does not have.
+    #[test]
+    fn an_explicit_lease_names_the_push_destination() {
+        let (repo, bare, _mate) = published();
+        repo.git(&["push", "-q", "origin", "feature:topic"]);
+        repo.git(&["fetch", "-q", "origin"]);
+        repo.git(&["branch", "-q", "--set-upstream-to=origin/topic"]);
+        repo.git(&["config", "push.default", "upstream"]);
+        let judged = repo.git(&["rev-parse", "origin/topic"]);
+        repo.write("f.txt", "2\n");
+        repo.git(&["commit", "-q", "-a", "--amend", "-m", "amended"]);
+        let local = repo.git(&["rev-parse", "HEAD"]);
+        assert_eq!(
+            push_destination(repo.path.to_str().unwrap(), "feature").as_deref(),
+            Some("topic")
+        );
+
+        let r = force_push(&repo, Some(("feature", &judged)));
+        assert!(r.success, "{}", r.message);
+        assert_eq!(git_at(&bare, &["rev-parse", "topic"]), local);
+    }
+
+    /// The explicit lease still refuses once the destination moved past the
+    /// sha it was judged against.
+    #[test]
+    fn an_explicit_lease_refuses_a_moved_destination() {
+        let (repo, bare, mate) = published();
+        let judged = repo.git(&["rev-parse", "origin/feature"]);
+        std::fs::write(mate.join("m.txt"), "mate\n").unwrap();
+        git_at(&mate, &["add", "-A"]);
+        git_at(&mate, &["commit", "-q", "-m", "mate"]);
+        git_at(&mate, &["push", "-q", "origin", "feature"]);
+        let theirs = git_at(&bare, &["rev-parse", "feature"]);
+        repo.write("f.txt", "2\n");
+        repo.git(&["commit", "-q", "-a", "--amend", "-m", "amended"]);
+
+        let r = force_push(&repo, Some(("feature", &judged)));
+        assert!(!r.success, "{}", r.message);
+        assert_eq!(git_at(&bare, &["rev-parse", "feature"]), theirs);
+    }
+
+    #[test]
+    fn push_destination_ignores_a_longer_branch_sharing_the_prefix() {
+        let repo = TempRepo::new();
+        repo.add_bare_origin();
+        repo.git(&["branch", "-q", "feat/x"]);
+        repo.git(&["config", "branch.feat/x.remote", "origin"]);
+        repo.git(&["config", "branch.feat/x.merge", "refs/heads/other"]);
+        repo.git(&["config", "push.default", "upstream"]);
+        assert_eq!(push_destination(repo.path.to_str().unwrap(), "feat"), None);
+        assert_eq!(
+            push_destination(repo.path.to_str().unwrap(), "feat/x").as_deref(),
+            Some("other")
+        );
     }
 }
 

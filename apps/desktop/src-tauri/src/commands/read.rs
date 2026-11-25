@@ -1257,9 +1257,21 @@ pub(crate) async fn git_repo_state(cwd: String) -> Result<RepoOperationState, St
 
 #[tauri::command]
 pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, String> {
+    validate_revision("hash", &hash)?;
     let _repo = repo_lock::read(&cwd);
+    // `--no-show-signature`: `log.showSignature=true` would print gpg output
+    // into the patch even with an empty `--format=`.
     let output = git_cmd()
-        .args(["show", "-m", "--first-parent", "--format=", &hash])
+        .args(PATCH_CONFIG)
+        .args([
+            "show",
+            "-m",
+            "--first-parent",
+            "--format=",
+            "--no-show-signature",
+        ])
+        .args(PATCH_FLAGS)
+        .args(["--end-of-options", &hash])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git show: {}", e))?;
@@ -1790,13 +1802,9 @@ pub(crate) async fn git_file_diff(
     }
 
     let mut cmd = git_cmd();
-    cmd.args([
-        "--literal-pathspecs",
-        "diff",
-        "--no-ext-diff",
-        "--no-color",
-        "--no-textconv",
-    ]);
+    cmd.args(PATCH_CONFIG)
+        .args(["--literal-pathspecs", "diff", "--no-textconv"])
+        .args(PATCH_FLAGS);
     if from_name != to_name && from_type.is_some() && to_type.is_some() {
         cmd.arg(format!("{}:{}", from, from_name))
             .arg(format!("{}:{}", to, to_name));
@@ -4967,6 +4975,28 @@ mod file_diff_tests {
     }
 
     #[test]
+    fn user_patch_config_does_not_change_the_diff() {
+        let repo = TempRepo::new();
+        let a = repo.commit("é t.txt", Some("1\n2\n"), "a");
+        let b = repo.commit("é t.txt", Some("1\nTWO\n"), "b");
+        let (r1, _, _, r2) = renamed_history(&repo);
+        let run = || {
+            (
+                serde_json::to_value(diff(&repo, "é t.txt", &a, &b).unwrap()).unwrap(),
+                serde_json::to_value(compare(repo.cwd(), "new.txt", &r1, &r2)).unwrap(),
+            )
+        };
+        let clean = run();
+        assert_eq!(clean.0["path"], "é t.txt");
+        assert!(!clean.0["hunks"].as_array().unwrap().is_empty());
+        assert!(!clean.1["hunks"].as_array().unwrap().is_empty());
+        for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
+            repo.git(&["config", k, v]);
+        }
+        assert_eq!(run(), clean);
+    }
+
+    #[test]
     fn refuses_a_directory() {
         let repo = TempRepo::new();
         let a = repo.commit("dir/f.txt", Some("x\n"), "a");
@@ -5417,5 +5447,54 @@ mod multi_file_header_tests {
             ]
         );
         assert!(diffs.iter().all(|d| d.hunks.len() == 1));
+    }
+
+    /// User config that changes how git prints a patch must not change what
+    /// `git_show` returns.
+    #[test]
+    fn git_show_ignores_user_patch_config() {
+        let repo = TempRepo::new();
+        repo.write("é t.txt", "1\n");
+        repo.write("plain.txt", "a\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.write("é t.txt", "2\n");
+        repo.write("plain.txt", "b\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "edit"]);
+        let show = || {
+            tauri::async_runtime::block_on(git_show(
+                repo.path.to_string_lossy().to_string(),
+                "HEAD".to_string(),
+            ))
+            .expect("git show")
+        };
+        let clean = serde_json::to_value(show()).unwrap();
+        for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
+            repo.git(&["config", k, v]);
+        }
+        let hostile = serde_json::to_value(show()).unwrap();
+        assert_eq!(hostile, clean);
+        let paths: Vec<&str> = clean
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["plain.txt", "é t.txt"]);
+    }
+
+    #[test]
+    fn git_show_refuses_an_option_as_hash() {
+        let repo = TempRepo::new();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let err = tauri::async_runtime::block_on(git_show(
+            repo.path.to_string_lossy().to_string(),
+            "--output=/tmp/gitwand-pwn".to_string(),
+        ))
+        .expect_err("refused");
+        assert!(err.contains("invalid"), "{err}");
     }
 }
