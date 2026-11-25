@@ -3587,7 +3587,7 @@ async function confirmNudgePr() {
   const { pr, comment } = nudgeConfirm.value;
   nudgeConfirm.value.busy = true;
   try {
-    await ghIssueAddComment(pr.repoPath!, pr.number, comment);
+    await ghIssueAddComment(pr.repoPath!, pr.number, comment, true);
     nudgeConfirm.value = null;
     showDetailToast(t("launchpad.toast.nudged"), null);
   } catch (err: any) {

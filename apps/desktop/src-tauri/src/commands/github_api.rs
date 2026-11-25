@@ -268,6 +268,35 @@ pub(crate) fn with_rest_other_repo_using<T>(
     )
 }
 
+/// [`with_rest`] for a call about one of the base repo's pull requests. On a
+/// fork whose parent is already known (`FORK_INFO_CACHE`), an OAuth App
+/// refusal comes from the parent's organization: it is remembered for the
+/// parent ([`with_rest_other_repo_using`]), and the user's own fork keeps its
+/// REST calls. Before the fork is known, as [`with_rest`].
+pub(crate) fn with_rest_pr<T>(
+    cwd: &str,
+    call: impl FnOnce(&str) -> Result<T, String>,
+) -> Option<Result<T, String>> {
+    let token = settings_github_token();
+    match cached_fork_parent(cwd) {
+        Some(parent) => with_rest_other_repo_using(cwd, &parent, token.as_deref(), call),
+        None => with_rest_using(cwd, token.as_deref(), call),
+    }
+}
+
+/// `cwd`'s fork parent from `FORK_INFO_CACHE`, without a request: `None` when
+/// the fork has not been looked up yet, or `origin` is not a fork.
+fn cached_fork_parent(cwd: &str) -> Option<String> {
+    let (owner, repo) = owner_repo(cwd).ok()?;
+    let cache = FORK_INFO_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let fi = cache
+        .lock()
+        .unwrap()
+        .get(&format!("{}/{}", owner, repo))?
+        .clone();
+    (fi.is_fork && !fi.parent.is_empty()).then_some(fi.parent)
+}
+
 // ─── Owner/repo resolution ──────────────────────────────────────────────────
 
 /// Parse `(owner, repo)` from `git remote get-url origin` in `cwd`.
@@ -816,14 +845,14 @@ pub(crate) fn rest_list_prs(
     offset: i64,
     token: &str,
 ) -> Result<Vec<PullRequest>, String> {
+    /// Pages of 100 read at most for one list call (1 000 PRs).
+    const LIST_PRS_MAX_PAGES: usize = 10;
     // The base repo, or the fork lookup's error: a list built from origin
     // would show numbers every PR action then resolves in the parent (#262).
     let base = base_owner_repo(cwd, token)?;
 
     let page = limit.max(1);
     let off = offset.max(0);
-    // Naïve pagination identical to gh_list_prs: fetch offset+limit, then slice.
-    let per_page = (page + off).clamp(1, 100);
     // "merged" is not a native GitHub pulls state — fetch closed and filter.
     let api_state = match state {
         "closed" => "closed",
@@ -831,31 +860,38 @@ pub(crate) fn rest_list_prs(
         "all" => "all",
         _ => "open",
     };
+    let keep = |pr: &serde_json::Value| {
+        state != "merged" || pr.get("merged_at").map(|m| !m.is_null()).unwrap_or(false)
+    };
 
-    // Fetch PRs from the base repository (matches `gh pr list` behavior).
-    let raw: Vec<serde_json::Value> = api_json_cached(
-        &format!(
-            "{}/repos/{}/pulls?state={}&per_page={}&page=1&sort=updated&direction=desc",
-            API_BASE, base, api_state, per_page
-        ),
-        token,
-        None,
-    )?
-    .as_array()
-    .cloned()
-    .unwrap_or_default();
+    // Fetch PRs from the base repository (matches `gh pr list` behavior):
+    // `offset + limit` kept PRs, then the slice. Up to 100 that is one page of
+    // exactly that size (as before); past 100, pages of 100 until enough are
+    // kept or the list ends — a single page capped at 100 returned nothing at
+    // offset 100 and stopped "load more" there.
+    let want = (page + off) as usize;
+    let per_page = want.clamp(1, 100);
+    let mut raw: Vec<serde_json::Value> = Vec::new();
+    for n in 1..=LIST_PRS_MAX_PAGES {
+        let chunk: Vec<serde_json::Value> = api_json_cached(
+            &format!(
+                "{}/repos/{}/pulls?state={}&per_page={}&page={}&sort=updated&direction=desc",
+                API_BASE, base, api_state, per_page, n
+            ),
+            token,
+            None,
+        )?
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+        let short = chunk.len() < per_page;
+        raw.extend(chunk);
+        if short || raw.iter().filter(|pr| keep(pr)).count() >= want {
+            break;
+        }
+    }
 
-    let mut prs: Vec<PullRequest> = raw
-        .iter()
-        .filter(|pr| {
-            if state == "merged" {
-                pr.get("merged_at").map(|m| !m.is_null()).unwrap_or(false)
-            } else {
-                true
-            }
-        })
-        .map(json_to_pr)
-        .collect();
+    let mut prs: Vec<PullRequest> = raw.iter().filter(|pr| keep(pr)).map(json_to_pr).collect();
     if off > 0 {
         let skip = (off as usize).min(prs.len());
         prs.drain(..skip);
@@ -1594,6 +1630,21 @@ pub(crate) fn rest_issue_add_comment(
     Ok(map_comment(&v, true))
 }
 
+/// Comment on the conversation of PR `number` (REST), in the repo the PR
+/// lives in (`get_pr_json`: the base repo). Returns the created comment.
+pub(crate) fn rest_pr_add_conversation_comment(
+    cwd: &str,
+    number: i64,
+    body: &str,
+    token: &str,
+) -> Result<serde_json::Value, String> {
+    let (repo, _) = get_pr_json(cwd, number, token)?;
+    let url = format!("{}/repos/{}/issues/{}/comments", API_BASE, repo, number);
+    let payload = serde_json::json!({ "body": body });
+    let v = api_json("POST", &url, token, Some(&payload.to_string()))?;
+    Ok(map_comment(&v, true))
+}
+
 /// Close or reopen an issue (REST). `state` is "closed" or "open".
 pub(crate) fn rest_issue_set_state(
     cwd: &str,
@@ -1687,7 +1738,7 @@ pub(crate) fn rest_fork_info(cwd: &str, token: &str) -> Result<ForkInfo, String>
 
 /// The canonical base `owner/repo` for PRs. For a fork, this is the upstream
 /// parent. For a regular repo, it's the repo itself.
-fn base_owner_repo(cwd: &str, token: &str) -> Result<String, String> {
+pub(crate) fn base_owner_repo(cwd: &str, token: &str) -> Result<String, String> {
     let fi = rest_fork_info(cwd, token)?;
     Ok(base_repo_of(&fi))
 }
@@ -2155,31 +2206,74 @@ pub(crate) fn rest_checkout_pr(cwd: &str, number: i64, token: &str) -> Result<()
     } else {
         format!("https://github.com/{}.git", pr_repo)
     };
-    let local = format!("pr-{}", number);
-    let refspec = format!("pull/{}/head:{}", number, local);
-    let fetch = git_cmd()
-        .args(["fetch", &fetch_target, &refspec])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("git fetch failed: {}", e))?;
+    checkout_pr_head(cwd, &fetch_target, number)
+}
+
+/// Fetch `pull/<number>/head` from `fetch_target` and check it out as the
+/// local branch `pr-<number>`. The fetch lands in `FETCH_HEAD`, then the
+/// branch is created there or moved forward to it; it is never rewritten. A
+/// `pr-<number>` holding commits the PR does not have (the PR was
+/// force-pushed, or the branch came from another PR with that number — the
+/// fork's own, before #262) is refused with what to do, rather than a raw
+/// `non-fast-forward` from the fetch.
+fn checkout_pr_head(cwd: &str, fetch_target: &str, number: i64) -> Result<(), String> {
+    let git = |args: &[&str]| {
+        git_cmd()
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .map_err(|e| format!("git {} failed: {}", args.first().unwrap_or(&""), e))
+    };
+    let fail = |what: &str, out: &std::process::Output| {
+        format!(
+            "{} failed: {}",
+            what,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )
+    };
+    let pull = format!("pull/{}/head", number);
+    let fetch = git(&["fetch", fetch_target, &pull])?;
     if !fetch.status.success() {
-        return Err(format!(
-            "git fetch pull/{}/head failed: {}",
-            number,
-            String::from_utf8_lossy(&fetch.stderr).trim()
-        ));
+        return Err(fail(&format!("git fetch {}", pull), &fetch));
     }
-    let checkout = git_cmd()
-        .args(["checkout", &local])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("git checkout failed: {}", e))?;
+    let local = format!("pr-{}", number);
+    let local_ref = format!("refs/heads/{}", local);
+    let exists = git(&["show-ref", "--verify", "--quiet", &local_ref])?
+        .status
+        .success();
+    if exists {
+        let ff = git(&["merge-base", "--is-ancestor", &local_ref, "FETCH_HEAD"])?;
+        if !ff.status.success() {
+            return Err(format!(
+                "the local branch {local} has commits that are not in PR #{number} \
+                 (the PR was force-pushed, or {local} belongs to another PR): rename or \
+                 delete {local}, then check the PR out again"
+            ));
+        }
+        let head = git(&["symbolic-ref", "-q", "HEAD"])?;
+        let on_it = String::from_utf8_lossy(&head.stdout).trim() == local_ref;
+        if on_it {
+            let merge = git(&["merge", "--ff-only", "-q", "FETCH_HEAD"])?;
+            return if merge.status.success() {
+                Ok(())
+            } else {
+                Err(fail("git merge --ff-only", &merge))
+            };
+        }
+        let mv = git(&["branch", "-f", &local, "FETCH_HEAD"])?;
+        if !mv.status.success() {
+            return Err(fail(&format!("git branch -f {}", local), &mv));
+        }
+        let checkout = git(&["checkout", &local])?;
+        return if checkout.status.success() {
+            Ok(())
+        } else {
+            Err(fail(&format!("git checkout {}", local), &checkout))
+        };
+    }
+    let checkout = git(&["checkout", "-b", &local, "FETCH_HEAD"])?;
     if !checkout.status.success() {
-        return Err(format!(
-            "git checkout {} failed: {}",
-            local,
-            String::from_utf8_lossy(&checkout.stderr).trim()
-        ));
+        return Err(fail(&format!("git checkout -b {}", local), &checkout));
     }
     Ok(())
 }
@@ -3270,6 +3364,113 @@ mod etag_cache_tests {
         c.insert("a".into(), "2".into(), "A2".into());
         assert!(c.get("b").is_some());
         assert_eq!(c.get("a"), Some(("2".into(), "A2".into())));
+    }
+}
+
+#[cfg(test)]
+mod with_rest_pr_tests {
+    use super::*;
+    use crate::worktree::test_support::TempRepo;
+
+    /// `with_rest_pr` keys a parent's OAuth refusal on the parent only once
+    /// the fork is known; it never makes a request to find out.
+    #[test]
+    fn the_cached_fork_parent_is_read_without_a_request() {
+        let repo = TempRepo::new();
+        let cwd = repo.path.to_str().unwrap();
+        let origin = format!("gw-cfp-{}/proj", std::process::id());
+        repo.git(&[
+            "remote",
+            "add",
+            "origin",
+            &format!("https://github.com/{origin}.git"),
+        ]);
+        assert_eq!(cached_fork_parent(cwd), None);
+        let cache = FORK_INFO_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        cache.lock().unwrap().insert(
+            origin.clone(),
+            ForkInfo {
+                is_fork: true,
+                origin: origin.clone(),
+                parent: "upstream/proj".to_string(),
+            },
+        );
+        assert_eq!(cached_fork_parent(cwd).as_deref(), Some("upstream/proj"));
+        cache.lock().unwrap().insert(
+            origin.clone(),
+            ForkInfo {
+                is_fork: false,
+                origin: origin.clone(),
+                parent: String::new(),
+            },
+        );
+        assert_eq!(cached_fork_parent(cwd), None);
+        cache.lock().unwrap().remove(&origin);
+    }
+}
+
+#[cfg(test)]
+mod checkout_pr_head_tests {
+    use super::checkout_pr_head;
+    use crate::worktree::test_support::{git_at, TempRepo};
+
+    /// `repo` with a bare `origin` carrying `refs/pull/7/head` at a commit of
+    /// a side branch. Returns (repo, bare, PR head sha).
+    fn with_pr7() -> (TempRepo, std::path::PathBuf, String) {
+        let repo = TempRepo::new();
+        let bare = repo.add_bare_origin();
+        repo.git(&["checkout", "-q", "-b", "side"]);
+        let head = repo.commit("pr.txt", "1\n", "pr 1");
+        repo.git(&["push", "-q", "origin", "side:refs/pull/7/head"]);
+        repo.git(&["checkout", "-q", "main"]);
+        repo.git(&["branch", "-q", "-D", "side"]);
+        (repo, bare, head)
+    }
+
+    fn cwd(repo: &TempRepo) -> &str {
+        repo.path.to_str().unwrap()
+    }
+
+    #[test]
+    fn creates_the_branch_at_the_pr_head() {
+        let (repo, _bare, head) = with_pr7();
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(repo.git(&["symbolic-ref", "--short", "HEAD"]), "pr-7");
+    }
+
+    #[test]
+    fn moves_an_existing_branch_forward_checked_out_or_not() {
+        let (repo, bare, _head) = with_pr7();
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        // The PR gains a commit.
+        repo.git(&["checkout", "-q", "-b", "next", "pr-7"]);
+        let next = repo.commit("pr.txt", "2\n", "pr 2");
+        repo.git(&["push", "-q", "origin", "next:refs/pull/7/head"]);
+        // On pr-7: fast-forwarded in place.
+        repo.git(&["checkout", "-q", "pr-7"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), next);
+        // Not on pr-7: moved, then checked out.
+        repo.git(&["checkout", "-q", "main"]);
+        repo.git(&["branch", "-q", "-f", "pr-7", "pr-7~1"]);
+        checkout_pr_head(cwd(&repo), "origin", 7).unwrap();
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), next);
+        assert_eq!(git_at(&bare, &["rev-parse", "refs/pull/7/head"]), next);
+    }
+
+    /// A `pr-7` from another PR #7 (the fork's own, before #262) or a
+    /// force-pushed PR: refused with what to do, and left as it was.
+    #[test]
+    fn refuses_a_branch_with_commits_the_pr_does_not_have() {
+        let (repo, _bare, _head) = with_pr7();
+        repo.git(&["checkout", "-q", "-b", "pr-7", "main"]);
+        let other = repo.commit("other.txt", "x\n", "another PR 7");
+        repo.git(&["checkout", "-q", "main"]);
+        let err = checkout_pr_head(cwd(&repo), "origin", 7).unwrap_err();
+        assert!(err.contains("rename or delete pr-7"), "{err}");
+        assert_eq!(repo.git(&["rev-parse", "pr-7"]), other);
+        assert_eq!(repo.git(&["symbolic-ref", "--short", "HEAD"]), "main");
     }
 }
 

@@ -3890,12 +3890,19 @@ export async function ghIssueComments(cwd: string, number: number): Promise<Issu
 }
 
 /** Add a comment to an issue; returns the created comment. */
-export async function ghIssueAddComment(cwd: string, number: number, body: string): Promise<IssueComment> {
-  if (isTauri()) return tauriInvoke<IssueComment>("gh_issue_add_comment", { cwd, number, body });
+/** `pr`: `number` is a pull request from the PR list (a Launchpad nudge),
+ *  commented in the repo the PR lives in (the fork's parent on a fork). */
+export async function ghIssueAddComment(
+  cwd: string,
+  number: number,
+  body: string,
+  pr: boolean = false,
+): Promise<IssueComment> {
+  if (isTauri()) return tauriInvoke<IssueComment>("gh_issue_add_comment", { cwd, number, body, pr });
   const res = await devFetch(`${DEV_SERVER}/api/gh-issue-comment`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, number, body }),
+    body: JSON.stringify({ cwd, number, body, pr }),
   });
   const raw = await res.json();
   if (!res.ok || raw.error) throw new Error(raw.error || `gh issue comment failed: ${res.status}`);

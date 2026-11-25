@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **On a fork, PR actions act on the PR you see.** The PR list shows the fork parent's pull requests, but PR reads (detail, review threads, comments, reviews, checkout) and comment/review writes looked the number up on `origin` first: when the fork had its own PR with the same number, they read or wrote that one. They now use the base repo, where every number the app shows comes from, as the `gh` commands already did; when the fork itself cannot be looked up, the list and every PR action (merge, edit, ready, auto-merge, checkout included) stop with that error instead of guessing `origin` (the PR counts read 0), and an OAuth App refusal during a checkout falls back to `gh pr checkout`. Under `pnpm dev:web`, the PR list (now paged like the desktop one), count and per-PR routes follow the same repo, and editing or deleting a review comment sends the PR number, so dev QA on a fork exercises what ships.
+- **Also on a fork:** the Launchpad nudge comments on the parent's PR, not on the fork's issue or PR with that number; the reviewer picker offers the parent repo's assignees; an OAuth App refusal from the parent's organization no longer sends the fork's own REST calls to `gh`.
+- **Checking out a PR never rewrites a local `pr-<number>` branch.** It is created at the PR's head or moved forward to it; one holding commits the PR does not have (a force-pushed PR, or another PR with that number checked out before this fix) is refused with what to do, instead of git's `non-fast-forward`.
+- **The PR list loads past its first 100 pull requests.** "Load more" stopped at 100: one page of at most 100 was read whatever the offset.
 
 ## [3.14.0] - 2026-11-24
 

@@ -6442,17 +6442,24 @@ async function handleRequest(req, res) {
         // every per-PR route then resolves in the parent.
         const nwo = await devRestBaseNwo(resolve(cwd), token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo from git remote origin" }, 400);
-        const resp = await githubFetch(
-          `/repos/${nwo}/pulls?state=${apiState}&per_page=${perPage}&page=1&sort=updated&direction=desc`,
-          token,
-        );
-        if (!resp.ok) {
-          const text = await resp.text();
-          return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+        // `rest_list_prs`: pages of `perPage` (100 past 100) until `offset +
+        // limit` kept PRs or the end of the list, at most 10 pages.
+        const keep = (pr) => state !== "merged" || pr.merged_at != null;
+        let fetched = [];
+        for (let page = 1; page <= 10; page++) {
+          const resp = await githubFetch(
+            `/repos/${nwo}/pulls?state=${apiState}&per_page=${perPage}&page=${page}&sort=updated&direction=desc`,
+            token,
+          );
+          if (!resp.ok) {
+            const text = await resp.text();
+            return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+          }
+          const chunk = (await resp.json()) ?? [];
+          fetched = fetched.concat(chunk);
+          if (chunk.length < perPage || fetched.filter(keep).length >= limit + offset) break;
         }
-        const raw = ((await resp.json()) ?? [])
-          .filter((pr) => state !== "merged" || pr.merged_at != null)
-          .slice(offset, offset + limit);
+        const raw = fetched.filter(keep).slice(offset, offset + limit);
         const prs = raw.map((pr) => ({
           number: pr.number,
           title: pr.title,
@@ -6890,7 +6897,9 @@ async function handleRequest(req, res) {
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // `gh_list_reviewer_candidates`: the base repo's assignees (the fork
+        // parent's), the repo its PRs request reviewers on.
+        const nwo = await devRestBaseNwo(resolve(cwd), token);
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         // Up to 3 pages of 100, read like the Rust `api_get_pages` (an error
         // page fails the call instead of returning partial data).
@@ -7275,12 +7284,13 @@ async function handleRequest(req, res) {
     // POST /api/gh-issue-comment  { cwd, number, body }
     if (url.pathname === "/api/gh-issue-comment" && req.method === "POST") {
       const body = await readBody(req);
-      const { cwd, number, body: commentBody } = body;
+      const { cwd, number, body: commentBody, pr } = body;
       if (!cwd || !number || !commentBody) return jsonResponse(req, res, { error: "Missing required fields" }, 400);
       try {
         const token = getGithubToken();
         if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
-        const nwo = getRepoNwo(resolve(cwd));
+        // `gh_issue_add_comment` with `pr`: the PR's repo (the base repo).
+        const nwo = pr ? await resolvePrNwo(resolve(cwd), devPrNumber(number), token) : getRepoNwo(resolve(cwd));
         if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
         const resp = await fetch(`https://api.github.com/repos/${nwo}/issues/${number}/comments`, {
           method: "POST",
@@ -7573,7 +7583,9 @@ async function handleRequest(req, res) {
         // whose same-numbered `pull/<n>/head` is another PR (#262).
         const origin = getRepoNwo(absPath);
         const remote = nwo === origin ? "origin" : `https://github.com/${nwo}.git`;
-        const fetchRes = spawnSync(GIT, ["fetch", "--quiet", remote, `refs/pull/${prNumber}/head:refs/pr/${prNumber}`], {
+        // Forced (`+`): a PR head is force-pushed, and a ref left by another
+        // same-numbered PR (the fork's own, before #262) is not an ancestor.
+        const fetchRes = spawnSync(GIT, ["fetch", "--quiet", remote, `+refs/pull/${prNumber}/head:refs/pr/${prNumber}`], {
           cwd: absPath, encoding: "utf-8",
         });
         // If fetch fails (e.g., no network access to remote), fall back to using headSha directly
@@ -7584,12 +7596,19 @@ async function handleRequest(req, res) {
         if (remote === "origin") {
           spawnSync(GIT, ["fetch", "--quiet", "origin", baseBranch], { cwd: absPath, encoding: "utf-8" });
         } else {
+          // The parent's base branch, never origin's same-named one (another
+          // history); its fetch failing is the answer.
           const baseFetch = spawnSync(
             GIT,
-            ["fetch", "--quiet", remote, `refs/heads/${baseBranch}:refs/pr-base/${prNumber}`],
+            ["fetch", "--quiet", remote, `+refs/heads/${baseBranch}:refs/pr-base/${prNumber}`],
             { cwd: absPath, encoding: "utf-8" },
           );
-          if (baseFetch.status === 0) baseRef = `refs/pr-base/${prNumber}`;
+          if (baseFetch.status !== 0) {
+            return jsonResponse(req, res, {
+              error: `Could not fetch ${baseBranch} from ${nwo}: ${(baseFetch.stderr || "").trim()}`,
+            }, 500);
+          }
+          baseRef = `refs/pr-base/${prNumber}`;
         }
 
         // Find merge base
@@ -8480,10 +8499,12 @@ async function handleRequest(req, res) {
       try {
         const { cwd, number, method } = await readBody(req);
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
-        const spawn = await ghMergeSpawn(resolve(cwd), number, ["pr", "merge", String(number), mergeFlag, "--delete-branch"]);
+        const spawn = await ghMergeSpawn(resolve(cwd), prNumber, ["pr", "merge", String(prNumber), mergeFlag, "--delete-branch"]);
         const r = spawnSync(GH, spawn.args, {
           cwd: resolve(cwd),
           env: spawn.env,
@@ -8504,12 +8525,14 @@ async function handleRequest(req, res) {
       try {
         const { cwd, number, method } = await readBody(req);
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
         const mergeFlag = method === "squash" ? "--squash"
           : method === "rebase" ? "--rebase"
           : "--merge";
         // Through ghMergeSpawn: an already-mergeable PR is merged at once and
         // then gets the same --delete-branch local cleanup.
-        const spawn = await ghMergeSpawn(resolve(cwd), number, ["pr", "merge", String(number), "--auto", mergeFlag, "--delete-branch"]);
+        const spawn = await ghMergeSpawn(resolve(cwd), prNumber, ["pr", "merge", String(prNumber), "--auto", mergeFlag, "--delete-branch"]);
         const r = spawnSync(GH, spawn.args, { cwd: resolve(cwd), env: spawn.env, encoding: "utf-8" });
         if (r.status !== 0) {
           const detail = spawnFailureDetail(r, "gh pr merge --auto failed");
@@ -8526,9 +8549,11 @@ async function handleRequest(req, res) {
       try {
         const { cwd, number } = await readBody(req);
         if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
-        const r = spawnSync(GH, ["pr", "merge", String(number), "--disable-auto"], {
+        const prNumber = devPrNumber(number);
+        if (prNumber === null) return jsonResponse(req, res, { error: "Missing or invalid PR number" }, 400);
+        const r = spawnSync(GH, ["pr", "merge", String(prNumber), "--disable-auto"], {
           cwd: resolve(cwd),
-          env: await ghPrEnv(resolve(cwd), number),
+          env: await ghPrEnv(resolve(cwd), prNumber),
           encoding: "utf-8",
         });
         if (r.status !== 0) {
