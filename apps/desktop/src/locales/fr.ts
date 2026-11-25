@@ -86,7 +86,7 @@ const fr: Locale = {
     pullRefusedDirty: "Pull refus\u00e9 : des changements non commit\u00e9s sont pr\u00e9sents.",
     pullAutostashParked: "Pull effectu\u00e9 \u2014 tes changements sont stash\u00e9s et reviendront \u00e0 la fin de l'op\u00e9ration.",
     pullAutostashConflict: "Pull effectu\u00e9, mais la restauration de tes changements a produit des conflits \u2014 r\u00e9sous-les dans la vue Changements. Tes changements sont en s\u00e9curit\u00e9 dans le stash.",
-    forcePushRemoteMoved: "Force push refus\u00e9 : la branche distante contient des commits que tu n'as pas r\u00e9cup\u00e9r\u00e9s (quelqu'un d'autre a peut-\u00eatre pouss\u00e9). Rien n'a \u00e9t\u00e9 \u00e9cras\u00e9. Int\u00e8gre-les d'abord, puis pousse \u00e0 nouveau.",
+    forcePushRemoteMoved: "Force push refus\u00e9 : la branche distante n'est plus l\u00e0 o\u00f9 ton historique local l'a vue en dernier. Quelqu'un a peut-\u00eatre pouss\u00e9 dessus, ou elle a \u00e9t\u00e9 r\u00e9\u00e9crite ailleurs ou supprim\u00e9e. Rien n'a \u00e9t\u00e9 \u00e9cras\u00e9. Fais un fetch, v\u00e9rifie la branche distante, puis pousse \u00e0 nouveau.",
     pushDone: "Push termin\u00e9",
     stashDone: "Changements stashed",
     mergeDone: "Merge termin\u00e9",

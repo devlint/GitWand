@@ -22,9 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A force push no longer overwrites a commit you never pulled.** The Force Push button, and force pushes after a reset, rebase or undo, used a bare `--force-with-lease`, which only compares with the remote-tracking ref, and the 30 s background fetch keeps that ref current. A collaborator's commit pushed since your last pull could be overwritten. These pushes now add `--force-if-includes` (git 2.30 or later): the remote tip must have been part of your branch at some point. A refused push says so in plain words instead of git's `(stale info)`.
+- **A force push no longer overwrites a commit you never pulled.** The Force Push button, and force pushes after a reset, rebase or undo, used a bare `--force-with-lease`, which only compares with the remote-tracking ref, and the 30 s background fetch keeps that ref current. A collaborator's commit pushed since your last pull could be overwritten. These pushes now add `--force-if-includes` (git 2.30 or later; older gits keep the previous check): the remote tip must have been part of your branch at some point. A refused push says so in plain words, followed by git's rejection line.
 - **The automatic force-push lease names the branch the push actually updates.** With `push.default=upstream` and an upstream named differently from the local branch, the lease named the local branch, so the force push could never succeed. A branch whose plain push goes elsewhere than its upstream is no longer offered an automatic force push.
-- **Commit, file-history and stash diffs ignore the user's git config.** `diff.noprefix`, `diff.mnemonicPrefix`, `diff.srcPrefix`/`dstPrefix`, `color.ui=always`, `diff.external`, `core.quotePath` and `log.showSignature` could break or empty them. `git show` also refuses a hash that git would read as an option.
+- **Diffs ignore the user's git config.** In the commit, file-history, stash and working-tree diffs (an untracked file always goes through the CLI) and in the staged-secrets scan, `diff.noprefix`, `diff.mnemonicPrefix`, `diff.srcPrefix`/`dstPrefix`, `color.ui=always`, `diff.external`, `core.quotePath`, `log.showSignature` and textconv drivers could break, empty or rewrite them. `git show` also refuses a hash that git would read as an option.
+- **The staged-secrets scan reports a file whose name holds a space under its real name.** git ends such a `+++ b/` header with a tab, which ended up in the reported path.
 
 ## [3.14.0] - 2026-11-24
 

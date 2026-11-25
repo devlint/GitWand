@@ -799,13 +799,18 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
         Ok(patch) => patch.into_bytes(),
         Err(e) => {
             eprintln!("[git_diff] libgit2 fast path failed ({e}); falling back to CLI");
+            // Raw content like libgit2's patch: no textconv, and the user's
+            // patch config pinned away.
             let mut cmd = git_cmd();
+            cmd.args(PATCH_CONFIG).arg("diff");
             if staged {
-                cmd.arg("diff").arg("--cached");
-            } else {
-                cmd.arg("diff");
+                cmd.arg("--cached");
             }
-            cmd.arg("--").arg(&git_path).current_dir(&cwd);
+            cmd.arg("--no-textconv")
+                .args(PATCH_FLAGS)
+                .arg("--")
+                .arg(&git_path)
+                .current_dir(&cwd);
             cmd.output()
                 .map_err(|e| format!("Failed to run git diff: {}", e))?
                 .stdout
@@ -838,7 +843,10 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
 
     if is_untracked {
         if let Ok(fb) = git_cmd()
-            .args(["diff", "--no-index", "--", "/dev/null", &git_path])
+            .args(PATCH_CONFIG)
+            .args(["diff", "--no-index", "--no-textconv"])
+            .args(PATCH_FLAGS)
+            .args(["--", "/dev/null", &git_path])
             .current_dir(&cwd)
             .output()
         {
@@ -1269,6 +1277,7 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
             "--first-parent",
             "--format=",
             "--no-show-signature",
+            "--no-textconv",
         ])
         .args(PATCH_FLAGS)
         .args(["--end-of-options", &hash])
@@ -1433,7 +1442,7 @@ fn unquote_header_name(s: &str) -> Option<String> {
 /// The name on a `--- a/P` / `+++ b/P` line, without `prefix`. `None` for
 /// `/dev/null` or a line this parser cannot read. Git ends the line with a
 /// tab when the name holds a space; an unquoted name never holds a tab.
-fn file_line_name(s: &str, prefix: &str) -> Option<String> {
+pub(crate) fn file_line_name(s: &str, prefix: &str) -> Option<String> {
     let name = if s.starts_with('"') {
         match read_c_quoted(s)? {
             (name, "" | "\t") => name,
@@ -3989,6 +3998,38 @@ mod pathspec_tests {
         );
     }
 
+    /// The untracked file's `--no-index` diff (always the CLI) ignores the
+    /// user's patch config and textconv, like the libgit2 path.
+    #[test]
+    fn git_diff_of_an_untracked_file_ignores_user_patch_config() {
+        let repo = TempRepo::new();
+        repo.write("é new.json", "{\"a\": 1}\n");
+        let diff = || {
+            tauri::async_runtime::block_on(git_diff(
+                repo.cwd().to_string(),
+                "é new.json".to_string(),
+                false,
+            ))
+            .expect("git_diff")
+        };
+        let clean = serde_json::to_value(diff()).unwrap();
+        assert_eq!(clean["hunks"][0]["lines"][0]["content"], "{\"a\": 1}");
+        for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
+            Command::new(git_binary())
+                .args(["config", k, v])
+                .current_dir(repo.cwd())
+                .output()
+                .unwrap();
+        }
+        repo.write(".gitattributes", "*.json diff=upper\n");
+        Command::new(git_binary())
+            .args(["config", "diff.upper.textconv", "tr a-z A-Z <"])
+            .current_dir(repo.cwd())
+            .output()
+            .unwrap();
+        assert_eq!(serde_json::to_value(diff()).unwrap(), clean);
+    }
+
     // ── git_diff path boundary (safe_repo_path) ───────────────
     //
     // The untracked `--no-index` fallback reads whatever file `path` names,
@@ -5473,6 +5514,8 @@ mod multi_file_header_tests {
         for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
             repo.git(&["config", k, v]);
         }
+        repo.write(".git/info/attributes", "*.txt diff=upper\n");
+        repo.git(&["config", "diff.upper.textconv", "tr a-z A-Z <"]);
         let hostile = serde_json::to_value(show()).unwrap();
         assert_eq!(hostile, clean);
         let paths: Vec<&str> = clean

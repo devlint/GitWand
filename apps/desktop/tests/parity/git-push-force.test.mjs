@@ -89,7 +89,13 @@ afterAll(async () => {
 describe("git_push force parity", () => {
   // The background fetch brought a teammate's commit into origin/feature;
   // the user amended without pulling it. Both refuse, the remote keeps it.
-  it("refuses to overwrite a fetched commit never integrated", async () => {
+  // `--force-if-includes` needs git 2.30; older gits keep the bare lease.
+  const [major, minor] = execFileSync("git", ["--version"], { encoding: "utf-8" })
+    .match(/(\d+)\.(\d+)/)
+    .slice(1)
+    .map(Number);
+  const forceIfIncludes = major > 2 || (major === 2 && minor >= 30);
+  it.skipIf(!forceIfIncludes)("refuses to overwrite a fetched commit never integrated", async () => {
     const sides = [published(), published()];
     for (const { me, mate } of sides) {
       commit(mate, "m", "mate\n", "mate");

@@ -4622,7 +4622,11 @@ async function handleRequest(req, res) {
           });
         }
 
-        const args = staged ? ["diff", "--cached", "--", gitPath] : ["diff", "--", gitPath];
+        // git_diff's CLI fallback: raw content, user patch config pinned away.
+        const args = [
+          ...PATCH_CONFIG, "diff", ...(staged ? ["--cached"] : []), "--no-textconv", ...PATCH_FLAGS,
+          "--", gitPath,
+        ];
         let stdout;
         let truncatedFromBytes;
         try {
@@ -4650,7 +4654,7 @@ async function handleRequest(req, res) {
             // then truncate the same way as the plain diff. The repo-relative
             // path (as in Rust) keeps the header, hence the byte count and the
             // cut, identical on both sides.
-            const r = spawnSync(GIT, ["diff", "--no-index", "--", "/dev/null", gitPath], {
+            const r = spawnSync(GIT, [...PATCH_CONFIG, "diff", "--no-index", "--no-textconv", ...PATCH_FLAGS, "--", "/dev/null", gitPath], {
               cwd: resolvedCwd, maxBuffer: Infinity,
             });
             ({ text: stdout, truncatedFromBytes } = truncateDiffOutput(r.stdout || Buffer.alloc(0)));
@@ -4699,7 +4703,10 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         let stdout;
         try {
-          stdout = await gitSpawn(["diff", "--cached", "--unified=0", "--no-color", "--", "."], resolvedCwd);
+          stdout = await gitSpawn(
+            [...PATCH_CONFIG, "diff", "--cached", "--unified=0", "--no-textconv", ...PATCH_FLAGS, "--", "."],
+            resolvedCwd,
+          );
         } catch {
           stdout = "";
         }
@@ -4739,7 +4746,8 @@ async function handleRequest(req, res) {
             flush();
           } else if (line.startsWith("+++ ")) {
             const rest = line.slice("+++ ".length);
-            currentPath = rest === "/dev/null" ? null : rest.replace(/^b\//, "");
+            // `file_line_name`: trailing tab and C-quoting handled.
+            currentPath = fileLineName(rest, "b/");
           } else if (line.startsWith("@@")) {
             newLineNo = parseHunkHeader(line)?.newStart ?? 0;
             body = hunkBodyFromHeader(line);
@@ -5940,7 +5948,7 @@ async function handleRequest(req, res) {
       const hash = url.searchParams.get("hash");
       if (!cwd || !hash) return jsonResponse(req, res, { error: "Missing cwd or hash param" }, 400);
       // Rust's `validate_revision("hash", …)`.
-      if (!hash.trim() || hash.startsWith("-") || /[\u0000-\u001f\u007f]/.test(hash)) {
+      if (!hash.trim() || hash.startsWith("-") || /\p{Cc}/u.test(hash)) {
         return jsonResponse(req, res, { error: `invalid hash: ${hash}` }, 400);
       }
 
@@ -5952,7 +5960,7 @@ async function handleRequest(req, res) {
         const stdout = await gitSpawn(
           [
             ...PATCH_CONFIG,
-            "show", "-m", "--first-parent", "--format=", "--no-show-signature",
+            "show", "-m", "--first-parent", "--format=", "--no-show-signature", "--no-textconv",
             ...PATCH_FLAGS,
             "--end-of-options", hash,
           ],
@@ -6313,7 +6321,7 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         const out = execFileSync(
           "git",
-          [...PATCH_CONFIG, "stash", "show", "-p", ...PATCH_FLAGS, `stash@{${parseInt(idx, 10)}}`],
+          [...PATCH_CONFIG, "stash", "show", "-p", "--no-textconv", ...PATCH_FLAGS, `stash@{${parseInt(idx, 10)}}`],
           { cwd: resolvedCwd, encoding: "utf-8" },
         );
         return jsonResponse(req, res, { diff: out });

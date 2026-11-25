@@ -45,6 +45,7 @@ import {
   probeLocalRewriteOfUpstream,
   evaluateAutoForcePush,
   isForcePushRemoteMoved,
+  forcePushRejectionLine,
 } from "../useBranchUpdatePrompt";
 
 function git(cwd: string, args: string[]): string {
@@ -262,7 +263,9 @@ describe("isForcePushRemoteMoved", () => {
 
   it("recognises git's --force-if-includes refusal", () => {
     const { me } = refusedSetup();
-    expect(isForcePushRemoteMoved(push(me, ["--force-with-lease", "--force-if-includes"]))).toBe(true);
+    const out = push(me, ["--force-with-lease", "--force-if-includes"]);
+    expect(isForcePushRemoteMoved(out)).toBe(true);
+    expect(forcePushRejectionLine(out)).toBe("! [rejected]        feat -> feat (remote ref updated since checkout)");
   }, GIT_TEST_TIMEOUT_MS);
 
   it("recognises git's stale explicit lease refusal", () => {

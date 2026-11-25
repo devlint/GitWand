@@ -59,6 +59,7 @@ import {
   clearUpdatePromptSkip,
   evaluateAutoForcePush,
   isForcePushRemoteMoved,
+  forcePushRejectionLine,
 } from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
 import { resolveConflictOperation } from "../utils/conflictOperation";
@@ -1252,9 +1253,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         result = await gitPush(folderPath.value, true, force, lease);
       }
       if (!result.success) {
+        // The plain-words reason, plus git's own rejection line, which says
+        // which ref moved (or that it is gone).
         error.value =
           force && isForcePushRemoteMoved(result.message)
-            ? t("header.forcePushRemoteMoved")
+            ? `${t("header.forcePushRemoteMoved")} (${forcePushRejectionLine(result.message)})`
             : `push: ${result.message}`;
       } else {
         successMessage.value = "push-done";

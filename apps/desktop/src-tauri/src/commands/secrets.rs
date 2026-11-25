@@ -11,7 +11,7 @@
 
 use regex::Regex;
 
-use crate::git::cmd::git_cmd;
+use crate::git::cmd::{git_cmd, PATCH_CONFIG, PATCH_FLAGS};
 use crate::git::{parse_hunk_header, HunkBody, HunkLineKind};
 use crate::types::{SecretFinding, SecretsScanConfig};
 
@@ -409,8 +409,13 @@ fn extract_staged_added_lines(cwd: &str) -> Result<Vec<ScanFileInput>, String> {
         current_lines.clear();
     }
 
+    // The staged bytes themselves (no textconv), parsed whatever the user's
+    // patch config says.
     let output = git_cmd()
-        .args(["diff", "--cached", "--unified=0", "--no-color", "--", "."])
+        .args(PATCH_CONFIG)
+        .args(["diff", "--cached", "--unified=0", "--no-textconv"])
+        .args(PATCH_FLAGS)
+        .args(["--", "."])
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("Failed to run git diff --cached: {}", e))?;
@@ -452,12 +457,10 @@ fn extract_staged_added_lines(cwd: &str) -> Result<Vec<ScanFileInput>, String> {
             body = HunkBody::default();
             flush(&mut files, &mut current_path, &mut current_lines);
         } else if let Some(rest) = line.strip_prefix("+++ ") {
-            // "+++ b/<path>" for a file with new-side content, "+++ /dev/null" for a deletion.
-            current_path = if rest == "/dev/null" {
-                None
-            } else {
-                Some(rest.strip_prefix("b/").unwrap_or(rest).to_string())
-            };
+            // "+++ b/<path>" for a file with new-side content, "+++ /dev/null"
+            // for a deletion; a name holding a space ends with a tab, an
+            // unusual one is C-quoted (the shared header parser reads both).
+            current_path = crate::commands::read::file_line_name(rest, "b/");
         } else if line.starts_with("@@") {
             // "@@ -oldStart,oldCount +newStart,newCount @@" — only the new-side start matters,
             // since we only ever record `+` lines.
@@ -942,6 +945,22 @@ mod tests {
             assert_eq!(findings[1].pattern_id, "stripe_live_key");
             assert_eq!(findings[1].file, "src/b.ts");
             assert_eq!(findings[1].line, 1);
+        }
+
+        #[test]
+        fn the_staged_scan_ignores_user_patch_config() {
+            let repo = TempRepo::new("hostile");
+            for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
+                repo.git(&["config", k, v]);
+            }
+            repo.write("src/é k.ts", "const key = \"AKIAABCDEFGHIJKLMNOP\";\n");
+            repo.git(&["add", "-A"]);
+
+            let findings = scan_staged(&repo.cwd(), &base_config()).unwrap();
+
+            assert_eq!(findings.len(), 1, "{findings:?}");
+            assert_eq!(findings[0].file, "src/é k.ts");
+            assert_eq!(findings[0].line, 1);
         }
 
         #[test]

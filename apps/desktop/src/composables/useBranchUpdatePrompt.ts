@@ -131,6 +131,15 @@ export function isForcePushRemoteMoved(message: string): boolean {
   return /\(stale info\)|\(remote ref updated since checkout\)/.test(message);
 }
 
+/** git's `! [rejected] … (stale info)` line from a refused push, trimmed. */
+export function forcePushRejectionLine(message: string): string {
+  const line = message
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => isForcePushRemoteMoved(l));
+  return line ?? message.trim();
+}
+
 export async function isLocalRewriteOfUpstream(cwd: string, branch: string): Promise<boolean> {
   return (await probeLocalRewriteOfUpstream(cwd, branch)).safe;
 }

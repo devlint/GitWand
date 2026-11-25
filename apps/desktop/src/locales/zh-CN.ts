@@ -97,7 +97,7 @@ const zhCN: Locale = {
     pullRefusedDirty: "拉取被拒绝：存在未提交的更改。",
     pullAutostashParked: "已拉取——你的更改已暂存，操作完成后会自动恢复。",
     pullAutostashConflict: "拉取已完成，但恢复你的更改时发生冲突——请在更改视图中解决。你的更改已安全保存在储藏中。",
-    forcePushRemoteMoved: "强制推送被拒绝：远程分支有你尚未拉取的提交（可能有其他人推送过）。没有任何内容被覆盖。请先拉取并整合这些提交，然后再推送。",
+    forcePushRemoteMoved: "强制推送被拒绝：远程分支已不在你本地历史最后看到的位置。可能有人推送过，或它在别处被重写或删除。没有任何内容被覆盖。请先抓取（fetch）并检查远程分支，然后再推送。",
     pushDone: "推送已完成",
     stashDone: "更改已暂存 (Stash)",
     mergeDone: "合并已完成",

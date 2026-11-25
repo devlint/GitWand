@@ -538,6 +538,11 @@ pub(crate) async fn git_push(
                 args.push("--force-with-lease");
                 if supports_force_if_includes(crate::stack::guard::git_version()) {
                     args.push("--force-if-includes");
+                } else {
+                    eprintln!(
+                        "[git_push] git < 2.30: no --force-if-includes, the force push \
+                         only checks the last fetched remote tip"
+                    );
                 }
             }
         }
@@ -1859,7 +1864,7 @@ pub(crate) async fn git_stash_show(cwd: String, index: usize) -> Result<String, 
     let stash_ref = format!("stash@{{{}}}", index);
     let output = git_cmd()
         .args(PATCH_CONFIG)
-        .args(["stash", "show", "-p"])
+        .args(["stash", "show", "-p", "--no-textconv"])
         .args(PATCH_FLAGS)
         .arg(&stash_ref)
         .current_dir(&cwd)
