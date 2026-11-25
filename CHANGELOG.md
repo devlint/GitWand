@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **On a fork, PR actions act on the PR you see.** The PR list shows the fork parent's pull requests, but PR reads (detail, review threads, comments, reviews, checkout) and comment/review writes looked the number up on `origin` first: when the fork had its own PR with the same number, they read or wrote that one. They now use the base repo, where every number the app shows comes from, as the `gh` commands already did; when the fork itself cannot be looked up, the action stops with that error instead of guessing `origin`. Under `pnpm dev:web`, the PR list (now paged like the desktop one), count and per-PR routes follow the same repo, and editing or deleting a review comment sends the PR number, so dev QA on a fork exercises what ships.
+- **On a fork, PR actions act on the PR you see.** The PR list shows the fork parent's pull requests, but PR reads (detail, review threads, comments, reviews, checkout) and comment/review writes looked the number up on `origin` first: when the fork had its own PR with the same number, they read or wrote that one. They now use the base repo, where every number the app shows comes from, as the `gh` commands already did; when the fork itself cannot be looked up, the list, the counts and every PR action (merge, edit, ready, auto-merge, checkout included) stop with that error instead of guessing `origin`, and an OAuth App refusal during a checkout falls back to `gh pr checkout`. Under `pnpm dev:web`, the PR list (now paged like the desktop one), count and per-PR routes follow the same repo, and editing or deleting a review comment sends the PR number, so dev QA on a fork exercises what ships.
 
 ## [3.14.0] - 2026-11-24
 

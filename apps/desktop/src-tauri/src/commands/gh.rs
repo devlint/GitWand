@@ -682,8 +682,10 @@ fn gh_checkout_pr_inner(cwd: String, number: i64) -> Result<(), String> {
     // `github_api::rest_checkout_pr` must NOT re-lock (the RwLock is
     // non-reentrant), so the guard lives only here.
     let _repo = repo_lock::write(&cwd);
-    if github_api::rest_token_for(&cwd).is_some() {
-        return github_api::rest_checkout_pr(&cwd, number);
+    if let Some(r) =
+        github_api::with_rest(&cwd, |tok| github_api::rest_checkout_pr(&cwd, number, tok))
+    {
+        return r;
     }
     let mut cmd = gh_base_cmd(&cwd)?;
     cmd.args(["pr", "checkout", &number.to_string()]);

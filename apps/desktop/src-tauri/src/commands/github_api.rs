@@ -190,12 +190,6 @@ fn token_for_repo(cwd: &str, settings_token: Option<String>) -> Option<String> {
     }
 }
 
-/// The Settings token for a command on `cwd`: `None` when there is none, or
-/// when this repository's organization refused it earlier in the session.
-pub(crate) fn rest_token_for(cwd: &str) -> Option<String> {
-    token_for_repo(cwd, settings_github_token())
-}
-
 /// Testable core of [`with_rest`]: `token` is the Settings token and
 /// `gh_signed_in` says whether the `gh` CLI can take over. A refusal is
 /// remembered under `key`: `cwd` itself for its `origin`, another key for a
@@ -822,9 +816,9 @@ pub(crate) fn rest_list_prs(
     offset: i64,
     token: &str,
 ) -> Result<Vec<PullRequest>, String> {
-    let (owner, repo) = owner_repo(cwd)?;
-    let origin = format!("{}/{}", owner, repo);
-    let base = base_owner_repo(cwd, token).unwrap_or_else(|_| origin.clone());
+    // The base repo, or the fork lookup's error: a list built from origin
+    // would show numbers every PR action then resolves in the parent (#262).
+    let base = base_owner_repo(cwd, token)?;
 
     let page = limit.max(1);
     let off = offset.max(0);
@@ -951,10 +945,8 @@ pub(crate) fn rest_pr_freshness_signal(
     cwd: &str,
     token: &str,
 ) -> Result<Option<PrFreshnessSignal>, String> {
-    let base = base_owner_repo(cwd, token).unwrap_or_else(|_| {
-        let (o, r) = owner_repo(cwd).unwrap_or_default();
-        format!("{}/{}", o, r)
-    });
+    // Same repo, and same failure, as the list.
+    let base = base_owner_repo(cwd, token)?;
     let raw: Vec<serde_json::Value> = api_json_cached(
         &format!(
             "{}/repos/{}/pulls?state=open&per_page=1&page=1&sort=updated&direction=desc",
@@ -1114,10 +1106,8 @@ fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_jso
 }
 
 pub(crate) fn rest_pr_count(cwd: &str, state: &str, token: &str) -> Result<i64, String> {
-    let base = base_owner_repo(cwd, token).unwrap_or_else(|_| {
-        let (o, r) = owner_repo(cwd).unwrap_or_default();
-        format!("{}/{}", o, r)
-    });
+    // Same repo, and same failure, as the list.
+    let base = base_owner_repo(cwd, token)?;
     let qualifier = match state.to_lowercase().as_str() {
         "closed" => "+state:closed",
         "merged" => "+is:merged",
@@ -1710,38 +1700,14 @@ fn base_repo_of(fi: &ForkInfo) -> String {
     }
 }
 
-/// The repo a PR *number* refers to when it comes from the PR list the user is
-/// looking at. `rest_list_prs` lists the base repo, so a write action on such a
-/// number must target the base repo too: going through `get_pr_json` (origin
-/// first) would act on the fork's own same-numbered PR. `fork_info` is `None`
-/// when the fork lookup failed; fall back to origin, as `rest_pr_edit` always did.
-fn pr_target_repo(cwd: &str, fork_info: Option<&ForkInfo>) -> Result<String, String> {
-    match fork_info {
-        Some(fi) => Ok(base_repo_of(fi)),
-        None => {
-            let (owner, repo) = owner_repo(cwd)?;
-            Ok(format!("{}/{}", owner, repo))
-        }
-    }
-}
-
-/// Fetch PR `number` from the base repo (see `pr_target_repo`). Returns the
-/// `owner/repo` it was fetched from alongside the JSON. No origin/upstream
-/// fallback: a 404 here means the PR is not in the repo the list shows.
+/// `get_pr_json`, for the write actions (merge, ready, auto-merge, reviewers):
+/// the base repo, or the fork lookup's error — never a guess at origin.
 fn get_base_pr_json(
     cwd: &str,
     number: i64,
     token: &str,
 ) -> Result<(String, serde_json::Value), String> {
-    let fi = rest_fork_info(cwd, token).ok();
-    let repo = pr_target_repo(cwd, fi.as_ref())?;
-    let v = api_json(
-        "GET",
-        &format!("{}/repos/{}/pulls/{}", API_BASE, repo, number),
-        token,
-        None,
-    )?;
-    Ok((repo, v))
+    get_pr_json(cwd, number, token)
 }
 
 // Bundling these into a params struct is a real API-shape decision (one
@@ -2017,8 +1983,9 @@ pub(crate) fn rest_pr_edit(
     token: &str,
 ) -> Result<(), String> {
     let payload = super::pr_edit::edit_payload(title, body, "body")?;
-    let fi = rest_fork_info(cwd, token).ok();
-    let repo = pr_target_repo(cwd, fi.as_ref())?;
+    // The number comes from the base repo's list: that repo, or the fork
+    // lookup's error.
+    let repo = base_owner_repo(cwd, token)?;
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
     api_json("PATCH", &url, token, Some(&payload.to_string()))?;
     Ok(())
@@ -2166,19 +2133,16 @@ pub(crate) fn rest_disable_auto_merge(cwd: &str, number: i64, token: &str) -> Re
     Ok(())
 }
 
-pub(crate) fn rest_checkout_pr(cwd: &str, number: i64) -> Result<(), String> {
+pub(crate) fn rest_checkout_pr(cwd: &str, number: i64, token: &str) -> Result<(), String> {
     // Resolve which repo the PR actually lives in. When the local repo is a
     // fork, the listed PRs belong to the upstream *parent*, so `pull/N/head`
     // exists on the parent's refs — fetching it from `origin` (the fork) 404s.
     let (owner, repo) = owner_repo(cwd)?;
     let origin = format!("{}/{}", owner, repo);
-    // With a token, the PR's repo or the lookup's error (a failed fork lookup
-    // must not check out the fork's own same-numbered PR); without one,
-    // origin, as before.
-    let pr_repo = match settings_github_token() {
-        Some(tok) => get_pr_json(cwd, number, &tok)?.0,
-        None => origin.clone(),
-    };
+    // The PR's repo or the lookup's error: a failed fork lookup must not check
+    // out the fork's own same-numbered PR. An OAuth App refusal goes back
+    // through `with_rest` to `gh pr checkout`.
+    let pr_repo = get_pr_json(cwd, number, token)?.0;
 
     // Fetch the PR head ref. When the PR lives in `origin` use the configured
     // remote; otherwise fetch straight from the upstream repo URL (no remote is
@@ -3164,31 +3128,6 @@ mod tests {
         assert_eq!(top_pr_from_rest_json(&[]), None);
     }
 
-    /// Run a git command in `dir`, panicking on failure (test scaffolding).
-    fn git_in(dir: &std::path::Path, args: &[&str]) {
-        let st = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .expect("git runs");
-        assert!(st.success(), "git {:?} failed", args);
-    }
-
-    /// A real temp repo whose `origin` is the given URL (the user's fork).
-    fn repo_with_origin(url: &str) -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static N: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "gitwand-pr-target-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        git_in(&dir, &["init", "-q"]);
-        git_in(&dir, &["remote", "add", "origin", url]);
-        dir
-    }
-
     fn fork_info(is_fork: bool, origin: &str, parent: &str) -> ForkInfo {
         ForkInfo {
             is_fork,
@@ -3199,40 +3138,15 @@ mod tests {
 
     // Regression: `rest_pr_ready` resolved the PR via `get_pr_json` (origin
     // first), so on a fork it marked the fork's same-numbered PR ready instead
-    // of the upstream PR the list shows.
+    // of the upstream PR the list shows. Every PR action now uses the base repo.
     #[test]
-    fn pr_target_repo_is_upstream_for_a_fork() {
-        let dir = repo_with_origin("git@github.com:me/proj.git");
-        let fi = fork_info(true, "me/proj", "upstream/proj");
-        let got = pr_target_repo(dir.to_str().unwrap(), Some(&fi));
-        std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(got.unwrap(), "upstream/proj");
-    }
-
-    #[test]
-    fn pr_target_repo_is_origin_for_a_non_fork() {
-        let dir = repo_with_origin("https://github.com/me/proj.git");
-        let fi = fork_info(false, "me/proj", "");
-        let got = pr_target_repo(dir.to_str().unwrap(), Some(&fi));
-        std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(got.unwrap(), "me/proj");
-    }
-
-    #[test]
-    fn pr_target_repo_falls_back_to_the_real_origin_remote() {
-        let dir = repo_with_origin("git@github.com:me/proj.git");
-        let got = pr_target_repo(dir.to_str().unwrap(), None);
-        std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(got.unwrap(), "me/proj");
-    }
-
-    #[test]
-    fn pr_target_repo_ignores_a_fork_with_an_empty_parent() {
-        let dir = repo_with_origin("git@github.com:me/proj.git");
-        let fi = fork_info(true, "me/proj", "");
-        let got = pr_target_repo(dir.to_str().unwrap(), Some(&fi));
-        std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(got.unwrap(), "me/proj");
+    fn the_base_repo_is_the_parent_for_a_fork_else_origin() {
+        assert_eq!(
+            base_repo_of(&fork_info(true, "me/proj", "upstream/proj")),
+            "upstream/proj"
+        );
+        assert_eq!(base_repo_of(&fork_info(false, "me/proj", "")), "me/proj");
+        assert_eq!(base_repo_of(&fork_info(true, "me/proj", "")), "me/proj");
     }
 
     // Regression: after merging a fork PR, `rest_merge_pr` deleted `head.ref`
