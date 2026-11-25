@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cmdScan } from "../commands/scan.js";
+import { cmdScan, extractStagedAddedLines } from "../commands/scan.js";
 
 function initRepo(): string {
   const raw = mkdtempSync(join(tmpdir(), "gw-cli-scan-"));
@@ -132,6 +132,22 @@ describe("gitwand scan", { timeout: GIT_IO_TIMEOUT_MS }, () => {
     const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     const parsed = JSON.parse(output);
     expect(parsed.findings.map((f: { file: string }) => f.file)).toEqual(["src/é k.ts"]);
+  });
+
+  // A `+++` header the name reader cannot parse still names the file as
+  // printed: its added lines are scanned, never skipped.
+  it("still scans the added lines under a header it cannot parse", () => {
+    const diff = [
+      "diff --git x/odd.ts y/odd.ts",
+      "--- x/odd.ts",
+      "+++ y/odd.ts\t",
+      "@@ -0,0 +1 @@",
+      '+const key = "AKIAABCDEFGHIJKLMNOP";',
+      "",
+    ].join("\n");
+    expect(extractStagedAddedLines(diff)).toEqual([
+      { path: "y/odd.ts", addedLines: [{ line: 1, text: 'const key = "AKIAABCDEFGHIJKLMNOP";' }] },
+    ]);
   });
 
   it("nothing staged reports no findings", async () => {

@@ -56,7 +56,10 @@ function getStagedDiff(cwd: string): string {
         "-c", "diff.submodule=short",
         "diff", "--cached", "--unified=0", "--no-textconv", "--no-color", "--no-ext-diff",
       ],
-      { encoding: "utf-8", cwd, maxBuffer: 1024 * 1024 * 32 },
+      // Through the shell on Windows only, where `git` can be a `.cmd` shim that
+      // a direct spawn does not find (the scan would then see nothing). The
+      // arguments are constants.
+      { encoding: "utf-8", cwd, maxBuffer: 1024 * 1024 * 32, shell: process.platform === "win32" },
     );
   } catch {
     return "";
@@ -101,7 +104,10 @@ export function extractStagedAddedLines(diffText: string): ScanFileInput[] {
     } else if (line.startsWith("+++ ")) {
       // "+++ b/<path>" for a file with new-side content, "+++ /dev/null" for a deletion;
       // a name holding a space ends with a tab, an unusual one is C-quoted.
-      currentPath = diffFileLineName(line.slice(4), "b/");
+      // One it cannot read still names the file as printed: scanned, never skipped.
+      const rest = line.slice(4);
+      const raw = rest.endsWith("\t") ? rest.slice(0, -1) : rest;
+      currentPath = diffFileLineName(rest, "b/") ?? (raw === "/dev/null" ? null : raw);
     } else if (line.startsWith("@@")) {
       const range = parseHunkHeader(line);
       newLineNo = range ? range.newStart : 0;

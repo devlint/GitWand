@@ -2093,6 +2093,8 @@ const forcePushConfirm = ref<{
   behind: number;
   protected: boolean;
   leaseSha: string | null;
+  /** The repository the decision was made in (tabs can switch meanwhile). */
+  cwd: string;
 } | null>(null);
 
 const PROTECTED_TRUNKS = new Set(["main", "master"]);
@@ -2103,39 +2105,51 @@ const PROTECTED_TRUNKS = new Set(["main", "master"]);
  * count the modal shows is what the push will overwrite, and the push leases
  * that exact sha, so anything pushed after this moment is refused.
  */
-let forcePushChecking = false;
+/**
+ * Set from the moment a force push is triggered until its push settles (or
+ * its confirmation modal takes over): a second click in that window would
+ * push again on a lease the first push spends, and be refused.
+ */
+let forcePushInFlight = false;
 async function doForcePush() {
   const cwd = repoFolderPath.value;
-  // One decision at a time: a second click while the tip is being read, or
-  // while the push runs, would push again on a lease the first one spends.
-  if (!cwd || forcePushChecking || isPushing.value) return;
+  if (!cwd || forcePushInFlight || isPushing.value) return;
   const branch = repoStatus.value?.branch ?? "";
   const isProtected = PROTECTED_TRUNKS.has(branch);
-  forcePushChecking = true;
-  let target: Awaited<ReturnType<typeof forcePushTarget>>;
+  forcePushInFlight = true;
   try {
-    target = await forcePushTarget(cwd);
+    const target = await forcePushTarget(cwd);
+    // The lease is for this repo and this branch only.
+    if (repoFolderPath.value !== cwd || (repoStatus.value?.branch ?? "") !== branch) return;
+    // No readable destination (never pushed): nothing known to overwrite.
+    // The upstream's count would describe another ref.
+    const behind = target ? target.behind : 0;
+    const leaseSha = target?.sha ?? null;
+    if (isProtected || behind > 0) {
+      forcePushConfirm.value = { branch, behind, protected: isProtected, leaseSha, cwd };
+      return;
+    }
+    await handlePush(true, leaseSha);
   } finally {
-    forcePushChecking = false;
+    forcePushInFlight = false;
   }
-  // The lease is for this repo and this branch only.
-  if (repoFolderPath.value !== cwd || (repoStatus.value?.branch ?? "") !== branch) return;
-  const behind = target ? target.behind : behindCount.value;
-  const leaseSha = target?.sha ?? null;
-  if (isProtected || behind > 0) {
-    forcePushConfirm.value = { branch, behind, protected: isProtected, leaseSha };
-    return;
-  }
-  void handlePush(true, leaseSha);
 }
 
 async function confirmForcePush() {
   const pending = forcePushConfirm.value;
+  if (!pending) return;
+  // A push is running: keep the modal, the user can confirm once it is done.
+  if (forcePushInFlight || isPushing.value) return;
   forcePushConfirm.value = null;
-  // Checked out another branch while the modal was open: what it showed (and
-  // the lease) no longer describes the push.
-  if (!pending || (repoStatus.value?.branch ?? "") !== pending.branch || isPushing.value) return;
-  await handlePush(true, pending.leaseSha);
+  // Switched tab or checked out another branch while the modal was open: what
+  // it showed (and the lease) no longer describes the push.
+  if (repoFolderPath.value !== pending.cwd || (repoStatus.value?.branch ?? "") !== pending.branch) return;
+  forcePushInFlight = true;
+  try {
+    await handlePush(true, pending.leaseSha);
+  } finally {
+    forcePushInFlight = false;
+  }
 }
 
 function cancelForcePush() {
@@ -3898,6 +3912,22 @@ const pendingUnpushedTags = ref<string[]>([]);
 const pendingPushForce = ref(false);
 /** The force push's decided lease, kept across the unpushed-tags modal. */
 const pendingPushLease = ref<string | null>(null);
+/** The repository the pending push was started in. */
+const pendingPushCwd = ref<string | null>(null);
+
+/**
+ * The unpushed-tags modal can outlive a tab switch: a pending push started
+ * in another repository is dropped rather than run here.
+ */
+function dropStalePendingPush(): boolean {
+  if (pendingPushCwd.value === repoFolderPath.value) return false;
+  pushTagsConfirm.value = false;
+  pendingUnpushedTags.value = [];
+  pendingPushForce.value = false;
+  pendingPushLease.value = null;
+  pendingPushCwd.value = null;
+  return true;
+}
 
 /**
  * Intercepts the normal push flow:
@@ -3910,6 +3940,7 @@ async function handlePush(force: boolean = false, leaseSha: string | null = null
   if (!cwd) return;
   pendingPushForce.value = force;
   pendingPushLease.value = leaseSha;
+  pendingPushCwd.value = cwd;
   try {
     const remoteInfo = await gitRemoteInfo(cwd).catch(() => null);
     const remote = remoteInfo?.name || "origin";
@@ -3925,6 +3956,7 @@ async function handlePush(force: boolean = false, leaseSha: string | null = null
 }
 
 async function confirmPushWithTags() {
+  if (dropStalePendingPush()) return;
   const cwd = repoFolderPath.value;
   pushTagsConfirm.value = false;
   await doPush(pendingPushForce.value, pendingPushLease.value);
@@ -3943,6 +3975,7 @@ async function confirmPushWithTags() {
 }
 
 async function confirmPushWithoutTags() {
+  if (dropStalePendingPush()) return;
   pushTagsConfirm.value = false;
   const force = pendingPushForce.value;
   const leaseSha = pendingPushLease.value;
@@ -3953,6 +3986,7 @@ async function confirmPushWithoutTags() {
 }
 
 async function deleteTagInModal(tagName: string) {
+  if (dropStalePendingPush()) return;
   const cwd = repoFolderPath.value;
   if (!cwd) return;
   try {

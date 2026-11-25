@@ -460,7 +460,12 @@ fn extract_staged_added_lines(cwd: &str) -> Result<Vec<ScanFileInput>, String> {
             // "+++ b/<path>" for a file with new-side content, "+++ /dev/null"
             // for a deletion; a name holding a space ends with a tab, an
             // unusual one is C-quoted (the shared header parser reads both).
-            current_path = crate::commands::read::file_line_name(rest, "b/");
+            // A header it cannot read still names the file as printed (minus
+            // the tab): its added lines are scanned, never skipped.
+            current_path = crate::commands::read::file_line_name(rest, "b/").or_else(|| {
+                let raw = rest.strip_suffix('\t').unwrap_or(rest);
+                (raw != "/dev/null").then(|| raw.to_string())
+            });
         } else if line.starts_with("@@") {
             // "@@ -oldStart,oldCount +newStart,newCount @@" — only the new-side start matters,
             // since we only ever record `+` lines.

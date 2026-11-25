@@ -4749,7 +4749,8 @@ async function handleRequest(req, res) {
             const rest = line.slice("+++ ".length);
             // core's `diffFileLineName` (Rust `file_line_name`): trailing tab
             // and C-quoting handled.
-            currentPath = diffFileLineName(rest, "b/");
+            const raw = rest.endsWith("\t") ? rest.slice(0, -1) : rest;
+            currentPath = diffFileLineName(rest, "b/") ?? (raw === "/dev/null" ? null : raw);
           } else if (line.startsWith("@@")) {
             newLineNo = parseHunkHeader(line)?.newStart ?? 0;
             body = hunkBodyFromHeader(line);
@@ -6337,7 +6338,10 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         // The resolved GIT, streamed (no 1 MB maxBuffer), like /api/git-show.
         const out = await gitSpawn(
-          [...PATCH_CONFIG, "stash", "show", "-p", "--no-textconv", ...PATCH_FLAGS, `stash@{${parseInt(idx, 10)}}`],
+          [
+            ...PATCH_CONFIG, "-c", "stash.showIncludeUntracked=false",
+            "stash", "show", "-p", "--no-textconv", ...PATCH_FLAGS, `stash@{${parseInt(idx, 10)}}`,
+          ],
           resolvedCwd,
         );
         return jsonResponse(req, res, { diff: out });

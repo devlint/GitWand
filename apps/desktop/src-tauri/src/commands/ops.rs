@@ -1894,6 +1894,8 @@ pub(crate) async fn git_stash_show(cwd: String, index: usize) -> Result<String, 
     let stash_ref = format!("stash@{{{}}}", index);
     let output = git_cmd()
         .args(PATCH_CONFIG)
+        // Untracked files of a `-u` stash only with this config set.
+        .args(["-c", "stash.showIncludeUntracked=false"])
         .args(["stash", "show", "-p", "--no-textconv"])
         .args(PATCH_FLAGS)
         .arg(&stash_ref)
@@ -6528,10 +6530,12 @@ mod stash_and_tag_date_tests {
         repo.write("é t.txt", "v1\n");
         repo.commit_all("base");
         repo.write("é t.txt", "v2\n");
-        repo.git_ok(&["stash", "push", "-q", "-m", "s"]);
+        repo.write("untracked.txt", "u\n");
+        repo.git_ok(&["stash", "push", "-q", "-u", "-m", "s"]);
         let show = || tauri::async_runtime::block_on(git_stash_show(repo.cwd(), 0)).unwrap();
         let clean = show();
         assert!(clean.contains("diff --git a/é t.txt b/é t.txt"), "{clean}");
+        assert!(!clean.contains("untracked.txt"), "{clean}");
         for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
             repo.git_ok(&["config", k, v]);
         }

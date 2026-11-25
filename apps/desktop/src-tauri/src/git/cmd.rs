@@ -467,7 +467,7 @@ pub(crate) const PATCH_FLAGS: [&str; 2] = ["--no-color", "--no-ext-diff"];
 /// check that a command's result does not change. `log.showSignature` and
 /// `log.diffMerges` only matter to `git show`/`log`.
 #[cfg(test)]
-pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 12] = [
+pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 13] = [
     ("diff.noprefix", "true"),
     ("diff.mnemonicPrefix", "true"),
     ("diff.srcPrefix", "SRC/"),
@@ -480,6 +480,7 @@ pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 12] = [
     ("log.diffMerges", "combined"),
     ("log.showRoot", "false"),
     ("diff.submodule", "log"),
+    ("stash.showIncludeUntracked", "true"),
 ];
 
 /// Run `cmd` with a deadline, killing it if it doesn't finish in time.
