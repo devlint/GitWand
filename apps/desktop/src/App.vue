@@ -113,7 +113,7 @@ import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
 import { useWorktreeHookTrust } from "./composables/useWorktreeHookTrust";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
-import { computeCheckoutPrompt, isUpdatePromptSkipped, isUpstreamRewriteOnly, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
+import { computeCheckoutPrompt, forcePushTarget, isUpdatePromptSkipped, isUpstreamRewriteOnly, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
 import { useGitRepo, type ViewMode, type RepoFileEntry } from "./composables/useGitRepo";
 import { useHeaderAlign } from "./composables/useHeaderAlign";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
@@ -2088,25 +2088,41 @@ async function doPublish() {
 // (main/master), or (b) the remote has diverged (behind > 0 — someone
 // else may have pushed). A clean ahead-only force push (e.g. after a
 // local rebase with no remote divergence) skips the modal.
-const forcePushConfirm = ref<{ branch: string; behind: number; protected: boolean } | null>(null);
+const forcePushConfirm = ref<{
+  branch: string;
+  behind: number;
+  protected: boolean;
+  leaseSha: string | null;
+} | null>(null);
 
 const PROTECTED_TRUNKS = new Set(["main", "master"]);
 
-/** Entry point for every force-push trigger (split button + branch context menu). */
-function doForcePush() {
+/**
+ * Entry point for every force-push trigger (split button + branch context
+ * menu). The remote tip is read now, not from the last status refresh: the
+ * count the modal shows is what the push will overwrite, and the push leases
+ * that exact sha, so anything pushed after this moment is refused.
+ */
+async function doForcePush() {
+  const cwd = repoFolderPath.value;
+  if (!cwd) return;
   const branch = repoStatus.value?.branch ?? "";
   const isProtected = PROTECTED_TRUNKS.has(branch);
-  const behind = behindCount.value;
+  const target = await forcePushTarget(cwd);
+  if (repoFolderPath.value !== cwd) return;
+  const behind = target ? target.behind : behindCount.value;
+  const leaseSha = target?.sha ?? null;
   if (isProtected || behind > 0) {
-    forcePushConfirm.value = { branch, behind, protected: isProtected };
+    forcePushConfirm.value = { branch, behind, protected: isProtected, leaseSha };
     return;
   }
-  void handlePush(true);
+  void handlePush(true, leaseSha);
 }
 
 async function confirmForcePush() {
+  const leaseSha = forcePushConfirm.value?.leaseSha ?? null;
   forcePushConfirm.value = null;
-  await handlePush(true);
+  await handlePush(true, leaseSha);
 }
 
 function cancelForcePush() {
@@ -3867,6 +3883,8 @@ function handleWipStash() {
 const pushTagsConfirm = ref(false);
 const pendingUnpushedTags = ref<string[]>([]);
 const pendingPushForce = ref(false);
+/** The force push's decided lease, kept across the unpushed-tags modal. */
+const pendingPushLease = ref<string | null>(null);
 
 /**
  * Intercepts the normal push flow:
@@ -3874,10 +3892,11 @@ const pendingPushForce = ref(false);
  * 2. If any exist, shows a confirmation modal instead of pushing immediately.
  * 3. Otherwise falls through to the regular push.
  */
-async function handlePush(force: boolean = false) {
+async function handlePush(force: boolean = false, leaseSha: string | null = null) {
   const cwd = repoFolderPath.value;
   if (!cwd) return;
   pendingPushForce.value = force;
+  pendingPushLease.value = leaseSha;
   try {
     const remoteInfo = await gitRemoteInfo(cwd).catch(() => null);
     const remote = remoteInfo?.name || "origin";
@@ -3888,13 +3907,14 @@ async function handlePush(force: boolean = false) {
       return;
     }
   } catch { /* best-effort — fall through to normal push */ }
-  await doPush(force);
+  pendingPushLease.value = null;
+  await doPush(force, leaseSha);
 }
 
 async function confirmPushWithTags() {
   const cwd = repoFolderPath.value;
   pushTagsConfirm.value = false;
-  await doPush(pendingPushForce.value);
+  await doPush(pendingPushForce.value, pendingPushLease.value);
   if (cwd) {
     const remoteInfo = await gitRemoteInfo(cwd).catch(() => null);
     const remote = remoteInfo?.name || "origin";
@@ -3904,6 +3924,7 @@ async function confirmPushWithTags() {
   }
   pendingUnpushedTags.value = [];
   pendingPushForce.value = false;
+  pendingPushLease.value = null;
   // Trigger scheduled release notes if the user just pushed a version tag
   triggerReleaseNotesIfEnabled();
 }
@@ -3911,9 +3932,11 @@ async function confirmPushWithTags() {
 async function confirmPushWithoutTags() {
   pushTagsConfirm.value = false;
   const force = pendingPushForce.value;
+  const leaseSha = pendingPushLease.value;
   pendingUnpushedTags.value = [];
   pendingPushForce.value = false;
-  await doPush(force);
+  pendingPushLease.value = null;
+  await doPush(force, leaseSha);
 }
 
 async function deleteTagInModal(tagName: string) {
@@ -3926,8 +3949,11 @@ async function deleteTagInModal(tagName: string) {
     pendingUnpushedTags.value = pendingUnpushedTags.value.filter(t => t !== tagName);
     if (pendingUnpushedTags.value.length === 0) {
       pushTagsConfirm.value = false;
-      await doPush(pendingPushForce.value);
+      const force = pendingPushForce.value;
+      const leaseSha = pendingPushLease.value;
       pendingPushForce.value = false;
+      pendingPushLease.value = null;
+      await doPush(force, leaseSha);
     }
   } catch (err: any) {
     repoError.value = `delete tag: ${err?.message ?? err}`;

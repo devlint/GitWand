@@ -447,6 +447,17 @@ fn force_with_lease_arg(branch: &str, sha: &str) -> Result<String, String> {
     Ok(format!("--force-with-lease=refs/heads/{}:{}", branch, sha))
 }
 
+/// The checked-out branch's short name; `None` on a detached HEAD.
+fn head_branch(cwd: &str) -> Option<String> {
+    let out = git_cmd()
+        .args(["symbolic-ref", "--short", "-q", "HEAD"])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !name.is_empty()).then_some(name)
+}
+
 /// `--force-if-includes` landed in git 2.30.
 fn supports_force_if_includes(v: Option<(u32, u32)>) -> bool {
     matches!(v, Some(v) if v >= (2, 30))
@@ -535,8 +546,22 @@ pub(crate) async fn git_push(
                 // overwrite a commit someone pushed since the user's last
                 // pull. `--force-if-includes` also requires that tip to have
                 // been part of the local branch at some point (its reflog).
+                //
+                // The app passes an explicit lease whenever it can read the
+                // push destination; this path is the fallback. git checks the
+                // reflog of the local branch *named like the destination*, so
+                // a branch pushed under another name (`push.default=upstream`)
+                // would always be refused: no `--force-if-includes` there.
                 args.push("--force-with-lease");
-                if supports_force_if_includes(crate::stack::guard::git_version()) {
+                let renamed = head_branch(&cwd)
+                    .and_then(|b| push_destination(&cwd, &b).map(|d| d != b))
+                    .unwrap_or(false);
+                if renamed {
+                    eprintln!(
+                        "[git_push] pushed under another name: no --force-if-includes, \
+                         the force push only checks the last fetched remote tip"
+                    );
+                } else if supports_force_if_includes(crate::stack::guard::git_version()) {
                     args.push("--force-if-includes");
                 } else {
                     eprintln!(
@@ -7272,6 +7297,25 @@ mod git_push_force_tests {
         );
 
         let r = force_push(&repo, Some(("feature", &judged)));
+        assert!(r.success, "{}", r.message);
+        assert_eq!(git_at(&bare, &["rev-parse", "topic"]), local);
+    }
+
+    /// Without a lease, a branch pushed under another name still force
+    /// pushes: `--force-if-includes` would read the reflog of a local
+    /// `topic` that does not exist and always refuse.
+    #[test]
+    fn a_bare_force_push_under_another_name_is_not_always_refused() {
+        let (repo, bare, _mate) = published();
+        repo.git(&["push", "-q", "origin", "feature:topic"]);
+        repo.git(&["fetch", "-q", "origin"]);
+        repo.git(&["branch", "-q", "--set-upstream-to=origin/topic"]);
+        repo.git(&["config", "push.default", "upstream"]);
+        repo.write("f.txt", "2\n");
+        repo.git(&["commit", "-q", "-a", "--amend", "-m", "amended"]);
+        let local = repo.git(&["rev-parse", "HEAD"]);
+
+        let r = force_push(&repo, None);
         assert!(r.success, "{}", r.message);
         assert_eq!(git_at(&bare, &["rev-parse", "topic"]), local);
     }

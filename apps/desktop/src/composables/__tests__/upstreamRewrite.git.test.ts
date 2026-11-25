@@ -46,6 +46,7 @@ import {
   evaluateAutoForcePush,
   isForcePushRemoteMoved,
   forcePushRejectionLine,
+  forcePushTarget,
 } from "../useBranchUpdatePrompt";
 
 function git(cwd: string, args: string[]): string {
@@ -240,6 +241,37 @@ describe("probeLocalRewriteOfUpstream", () => {
     git(me, ["config", "push.default", "current"]);
     rebaseLocallyOntoMovedMain(teammate, me);
     expect((await probeLocalRewriteOfUpstream(me, "mine")).safe).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("forcePushTarget", () => {
+  it("reads the push destination's tip and the commits only it has", async () => {
+    const { teammate, me } = setup();
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["fetch", "-q"]);
+    git(me, ["commit", "-q", "--amend", "-m", "f2 amended"]);
+    expect(await forcePushTarget(me)).toEqual({
+      sha: git(me, ["rev-parse", "origin/feat"]).trim(),
+      behind: 2,
+    });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  // push.default=upstream: `mine` pushes to origin/feat, so that is the tip.
+  it("follows a destination named differently from the branch", async () => {
+    const { me } = setup();
+    git(me, ["switch", "-q", "-c", "mine", "--track", "origin/feat"]);
+    git(me, ["config", "push.default", "upstream"]);
+    expect(await forcePushTarget(me)).toEqual({
+      sha: git(me, ["rev-parse", "origin/feat"]).trim(),
+      behind: 0,
+    });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is null when there is nothing to push to yet", async () => {
+    const { me } = setup();
+    git(me, ["switch", "-q", "-c", "local-only"]);
+    expect(await forcePushTarget(me)).toBeNull();
   }, GIT_TEST_TIMEOUT_MS);
 });
 

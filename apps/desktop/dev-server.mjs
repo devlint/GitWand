@@ -5248,10 +5248,19 @@ async function handleRequest(req, res) {
               args.push(devForceWithLeaseArg(dest, leaseSha));
             } catch (e) { return jsonResponse(req, res, { success: false, message: e.message }); }
           } else {
-            // `git_push`: the tip must also have been integrated locally.
+            // `git_push`: the tip must also have been integrated locally —
+            // except for a branch pushed under another name, whose reflog git
+            // would not find.
             args.push("--force-with-lease");
+            const head = spawnSync(GIT, ["symbolic-ref", "--short", "-q", "HEAD"], {
+              cwd: resolvedCwd,
+              encoding: "utf-8",
+            });
+            const headName = head.status === 0 ? (head.stdout || "").trim() : "";
+            const dest = headName ? devPushDestination(resolvedCwd, headName) : null;
+            const renamed = dest !== null && dest !== headName;
             const v = await combinedGitVersion();
-            if (v && (v[0] > 2 || (v[0] === 2 && v[1] >= 30))) args.push("--force-if-includes");
+            if (!renamed && v && (v[0] > 2 || (v[0] === 2 && v[1] >= 30))) args.push("--force-if-includes");
           }
         }
         const r = spawnSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
@@ -5948,7 +5957,8 @@ async function handleRequest(req, res) {
       const hash = url.searchParams.get("hash");
       if (!cwd || !hash) return jsonResponse(req, res, { error: "Missing cwd or hash param" }, 400);
       // Rust's `validate_revision("hash", …)`.
-      if (!hash.trim() || hash.startsWith("-") || /\p{Cc}/u.test(hash)) {
+      if (!hash.trim()) return jsonResponse(req, res, { error: "hash must not be empty" }, 400);
+      if (hash.startsWith("-") || /\p{Cc}/u.test(hash)) {
         return jsonResponse(req, res, { error: `invalid hash: ${hash}` }, 400);
       }
 
@@ -5960,9 +5970,10 @@ async function handleRequest(req, res) {
         const stdout = await gitSpawn(
           [
             ...PATCH_CONFIG,
+            "-c", "log.diffMerges=first-parent",
             "show", "-m", "--first-parent", "--format=", "--no-show-signature", "--no-textconv",
             ...PATCH_FLAGS,
-            "--end-of-options", hash,
+            hash,
           ],
           resolvedCwd,
         );
@@ -6319,10 +6330,10 @@ async function handleRequest(req, res) {
       }
       try {
         const resolvedCwd = resolve(cwd);
-        const out = execFileSync(
-          "git",
+        // The resolved GIT, streamed (no 1 MB maxBuffer), like /api/git-show.
+        const out = await gitSpawn(
           [...PATCH_CONFIG, "stash", "show", "-p", "--no-textconv", ...PATCH_FLAGS, `stash@{${parseInt(idx, 10)}}`],
-          { cwd: resolvedCwd, encoding: "utf-8" },
+          resolvedCwd,
         );
         return jsonResponse(req, res, { diff: out });
       } catch (err) {

@@ -1268,9 +1268,14 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
     validate_revision("hash", &hash)?;
     let _repo = repo_lock::read(&cwd);
     // `--no-show-signature`: `log.showSignature=true` would print gpg output
-    // into the patch even with an empty `--format=`.
+    // into the patch even with an empty `--format=`. `log.diffMerges`: an
+    // explicit `-m` takes its mode from there (git 2.31+), so `combined` or
+    // `off` would print `diff --cc` sections or nothing for a merge.
+    // `validate_revision` keeps `hash` from reading as an option (no
+    // `--end-of-options`, which gits before 2.24 take for a revision).
     let output = git_cmd()
         .args(PATCH_CONFIG)
+        .args(["-c", "log.diffMerges=first-parent"])
         .args([
             "show",
             "-m",
@@ -1280,7 +1285,7 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
             "--no-textconv",
         ])
         .args(PATCH_FLAGS)
-        .args(["--end-of-options", &hash])
+        .arg(&hash)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git show: {}", e))?;
@@ -5525,6 +5530,44 @@ mod multi_file_header_tests {
             .map(|d| d["path"].as_str().unwrap())
             .collect();
         assert_eq!(paths, ["plain.txt", "é t.txt"]);
+    }
+
+    /// A merge commit shows its first-parent diff whatever `log.diffMerges`
+    /// says (`combined` would print `diff --cc`, `off` nothing).
+    #[test]
+    fn git_show_of_a_merge_ignores_log_diff_merges() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.git(&["checkout", "-q", "-b", "side"]);
+        repo.write("b.txt", "side\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "side"]);
+        repo.git(&["checkout", "-q", "-"]);
+        repo.write("a.txt", "2\n");
+        repo.git(&["commit", "-q", "-am", "main"]);
+        repo.git(&["merge", "-q", "--no-ff", "-m", "merge", "side"]);
+        let show = || {
+            tauri::async_runtime::block_on(git_show(
+                repo.path.to_string_lossy().to_string(),
+                "HEAD".to_string(),
+            ))
+            .expect("git show")
+        };
+        let clean = show();
+        assert_eq!(
+            clean.iter().map(|d| d.path.as_str()).collect::<Vec<_>>(),
+            ["b.txt"]
+        );
+        for mode in ["combined", "dense-combined", "off", "separate"] {
+            repo.git(&["config", "log.diffMerges", mode]);
+            assert_eq!(
+                serde_json::to_value(show()).unwrap(),
+                serde_json::to_value(&clean).unwrap(),
+                "log.diffMerges={mode}"
+            );
+        }
     }
 
     #[test]

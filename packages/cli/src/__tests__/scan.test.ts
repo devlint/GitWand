@@ -111,6 +111,29 @@ describe("gitwand scan", { timeout: GIT_IO_TIMEOUT_MS }, () => {
     expect(process.exitCode).toBe(0);
   });
 
+  // An external diff tool or colour would hide every added line (the scan
+  // would fail open); other prefixes or git's trailing tab after a name with a
+  // space would misname the file.
+  it("scans the staged bytes under their real name whatever the patch config", async () => {
+    for (const [k, v] of [
+      ["diff.external", "echo EXTERNAL"],
+      ["color.ui", "always"],
+      ["diff.noprefix", "true"],
+      ["diff.srcPrefix", "SRC/"],
+      ["diff.dstPrefix", "DST/"],
+      ["core.quotePath", "true"],
+    ]) {
+      execFileSync("git", ["-C", repoDir, "config", k, v]);
+    }
+    stageFile(repoDir, "src/é k.ts", 'const key = "AKIAABCDEFGHIJKLMNOP";\n');
+
+    await cmdScan({ json: true });
+
+    const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    const parsed = JSON.parse(output);
+    expect(parsed.findings.map((f: { file: string }) => f.file)).toEqual(["src/é k.ts"]);
+  });
+
   it("nothing staged reports no findings", async () => {
     await cmdScan({ json: true });
 

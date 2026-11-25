@@ -92,7 +92,7 @@ const es: Locale = {
     pullRefusedDirty: "Pull rechazado: hay cambios sin confirmar.",
     pullAutostashParked: "Pull realizado — tus cambios están en stash y volverán cuando termine la operación.",
     pullAutostashConflict: "Pull realizado, pero al restaurar tus cambios hubo conflictos — resúelvelos en la vista Cambios. Tus cambios están a salvo en el stash.",
-    forcePushRemoteMoved: "Force push rechazado: la rama remota ya no está donde tu historial local la vio por última vez. Puede que alguien haya hecho push, o que se haya reescrito en otro sitio o eliminado. No se ha sobrescrito nada. Haz fetch, revisa la rama remota y vuelve a hacer push.",
+    forcePushRemoteMoved: "Force push rechazado: la rama remota cambió después de que decidieras forzar el push (puede que alguien haya hecho push, o que se haya eliminado). No se ha sobrescrito nada. Vuelve a hacer force push para ver lo que contiene ahora.",
     pushDone: "Push completado",
     stashDone: "Cambios guardados en stash",
     mergeDone: "Merge completado",

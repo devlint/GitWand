@@ -131,6 +131,28 @@ export function isForcePushRemoteMoved(message: string): boolean {
   return /\(stale info\)|\(remote ref updated since checkout\)/.test(message);
 }
 
+/**
+ * What a force push would replace, read when the user decides to force push:
+ * the tip of the branch a plain push updates (`@{push}`), and how many of its
+ * commits the local branch does not have. The push then leases exactly that
+ * sha, so it overwrites what the user was shown and nothing that arrived
+ * since. `null` when there is no such destination yet (never pushed, not
+ * fetched): the backend then falls back to `--force-if-includes`.
+ */
+export async function forcePushTarget(cwd: string): Promise<{ sha: string; behind: number } | null> {
+  try {
+    const tip = await gitExec(cwd, ["rev-parse", "--verify", "-q", "@{push}"]);
+    const sha = tip.stdout.trim();
+    if (tip.exitCode !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) return null;
+    const count = await gitExec(cwd, ["rev-list", "--count", `HEAD..${sha}`]);
+    const behind = Number.parseInt(count.stdout.trim(), 10);
+    if (count.exitCode !== 0 || !Number.isFinite(behind)) return null;
+    return { sha, behind };
+  } catch {
+    return null;
+  }
+}
+
 /** git's `! [rejected] … (stale info)` line from a refused push, trimmed. */
 export function forcePushRejectionLine(message: string): string {
   const line = message

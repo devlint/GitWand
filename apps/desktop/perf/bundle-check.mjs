@@ -125,7 +125,11 @@ const BUDGETS = {
   // the view closes, prune limited to the unfiltered log): measured at 984 KB
   // (1,007,247 bytes). The selection code stays lazy (CombinedDiffView sets
   // the range anchor, not App).
-  main_max_kb: 984,
+  //
+  // Push/show reliability fix: main measured at 986 KB (1,010,073 bytes): the
+  // decided force-push lease (`forcePushTarget` and its wiring in App.vue,
+  // eager like the rest of the push path) and the localized refusal message.
+  main_max_kb: 988,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked

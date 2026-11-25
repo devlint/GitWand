@@ -14,11 +14,12 @@
  * Ne JAMAIS imprimer la valeur brute d'un secret — uniquement `redactedExcerpt` (déjà masqué).
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   classifyHunkLine,
+  diffFileLineName,
   hunkBodyFromHeader,
   noHunkBody,
   parseGitwandrc,
@@ -35,16 +36,27 @@ import { c } from "../ui.js";
 import { findGitRoot } from "../llm-config.js";
 
 /**
- * Runs `git diff --cached --unified=0 --no-color`, tolerant on failure (returns "" if git is
- * unavailable or we're not in a repo — same tolerant style as `getConflictedFiles()`).
+ * The staged bytes as a patch, tolerant on failure (returns "" if git is unavailable or
+ * we're not in a repo — same tolerant style as `getConflictedFiles()`). The user's patch
+ * config is pinned away as in the desktop backend (`PATCH_CONFIG` / `PATCH_FLAGS` in
+ * apps/desktop/src-tauri/src/git/cmd.rs): an external diff tool or colour codes would
+ * hide every added line, other prefixes would misname files, and textconv would scan a
+ * rendering instead of the staged content.
  */
 function getStagedDiff(cwd: string): string {
   try {
-    return execSync("git diff --cached --unified=0 --no-color", {
-      encoding: "utf-8",
-      cwd,
-      maxBuffer: 1024 * 1024 * 32,
-    });
+    return execFileSync(
+      "git",
+      [
+        "-c", "core.quotePath=false",
+        "-c", "diff.noprefix=false",
+        "-c", "diff.mnemonicPrefix=false",
+        "-c", "diff.srcPrefix=a/",
+        "-c", "diff.dstPrefix=b/",
+        "diff", "--cached", "--unified=0", "--no-textconv", "--no-color", "--no-ext-diff",
+      ],
+      { encoding: "utf-8", cwd, maxBuffer: 1024 * 1024 * 32 },
+    );
   } catch {
     return "";
   }
@@ -86,9 +98,9 @@ export function extractStagedAddedLines(diffText: string): ScanFileInput[] {
       body = noHunkBody();
       flush();
     } else if (line.startsWith("+++ ")) {
-      // "+++ b/<path>" for a file with new-side content, "+++ /dev/null" for a deletion.
-      const rest = line.slice(4);
-      currentPath = rest === "/dev/null" ? null : rest.replace(/^b\//, "");
+      // "+++ b/<path>" for a file with new-side content, "+++ /dev/null" for a deletion;
+      // a name holding a space ends with a tab, an unusual one is C-quoted.
+      currentPath = diffFileLineName(line.slice(4), "b/");
     } else if (line.startsWith("@@")) {
       const range = parseHunkHeader(line);
       newLineNo = range ? range.newStart : 0;

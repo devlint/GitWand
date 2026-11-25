@@ -460,10 +460,10 @@ pub(crate) const PATCH_CONFIG: [&str; 10] = [
 pub(crate) const PATCH_FLAGS: [&str; 2] = ["--no-color", "--no-ext-diff"];
 
 /// Repo config that changes how git prints a patch; tests set all of it and
-/// check that a command's result does not change. `log.showSignature` only
-/// matters to `git show`/`log`.
+/// check that a command's result does not change. `log.showSignature` and
+/// `log.diffMerges` only matter to `git show`/`log`.
 #[cfg(test)]
-pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 9] = [
+pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 10] = [
     ("diff.noprefix", "true"),
     ("diff.mnemonicPrefix", "true"),
     ("diff.srcPrefix", "SRC/"),
@@ -473,6 +473,7 @@ pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 9] = [
     ("core.quotePath", "true"),
     ("diff.external", "echo EXTERNAL"),
     ("log.showSignature", "true"),
+    ("log.diffMerges", "combined"),
 ];
 
 /// Run `cmd` with a deadline, killing it if it doesn't finish in time.
