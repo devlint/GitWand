@@ -4781,12 +4781,11 @@ mod file_diff_tests {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
         for (from, to) in [("--output=/tmp/pwn", a.as_str()), (a.as_str(), "-R")] {
-            let err = diff(&repo, "f.txt", from, to).err().expect("refused");
+            let err = diff(&repo, "f.txt", from, to).expect_err("refused");
             assert!(err.contains("invalid"), "{err}");
         }
         assert!(diff(&repo, "f.txt", "", &a)
-            .err()
-            .expect("refused")
+            .expect_err("refused")
             .contains("empty"));
     }
 
@@ -4807,8 +4806,7 @@ mod file_diff_tests {
             &a,
             "0000000000000000000000000000000000000bad",
         )
-        .err()
-        .expect("refused");
+        .expect_err("refused");
         assert!(err.contains("unknown revision"), "{err}");
     }
 
@@ -4973,7 +4971,7 @@ mod file_diff_tests {
         let repo = TempRepo::new();
         let a = repo.commit("dir/f.txt", Some("x\n"), "a");
         let b = repo.commit("dir/f.txt", Some("y\n"), "b");
-        let err = diff(&repo, "dir", &a, &b).err().expect("refused");
+        let err = diff(&repo, "dir", &a, &b).expect_err("refused");
         assert!(err.contains("directory"), "{err}");
     }
 
@@ -4993,8 +4991,7 @@ mod file_diff_tests {
                 from_path.map(str::to_string),
                 to_path.map(str::to_string),
             ))
-            .err()
-            .expect("refused");
+            .expect_err("refused");
             assert!(err.contains(needle), "{err}");
         }
     }
@@ -5112,7 +5109,7 @@ mod file_diff_tests {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
         let b = repo.commit("f.txt", Some("y\n"), "b");
-        let err = diff(&repo, "never.txt", &a, &b).err().expect("refused");
+        let err = diff(&repo, "never.txt", &a, &b).expect_err("refused");
         assert!(
             err.contains("never.txt not found at either commit"),
             "{err}"
@@ -5123,9 +5120,7 @@ mod file_diff_tests {
     fn a_control_character_in_a_revision_is_refused() {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
-        let err = diff(&repo, "f.txt", &format!("{a}\nHEAD"), &a)
-            .err()
-            .expect("refused");
+        let err = diff(&repo, "f.txt", &format!("{a}\nHEAD"), &a).expect_err("refused");
         assert!(err.contains("invalid fromHash"), "{err}");
     }
 
@@ -5133,9 +5128,9 @@ mod file_diff_tests {
     fn names_which_revision_is_unknown() {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
-        let err = diff(&repo, "f.txt", "nope", &a).err().expect("refused");
+        let err = diff(&repo, "f.txt", "nope", &a).expect_err("refused");
         assert_eq!(err, "unknown revision: nope");
-        let err = diff(&repo, "f.txt", &a, "nada").err().expect("refused");
+        let err = diff(&repo, "f.txt", &a, "nada").expect_err("refused");
         assert_eq!(err, "unknown revision: nada");
     }
 
@@ -5201,7 +5196,7 @@ mod file_diff_tests {
         let repo = TempRepo::new();
         let a = repo.commit("f.txt", Some("x\n"), "a");
         let b = repo.commit("f.txt", Some("y\n"), "b");
-        let err = diff(&repo, ".", &a, &b).err().expect("refused");
+        let err = diff(&repo, ".", &a, &b).expect_err("refused");
         assert!(err.contains("repository root"), "{err}");
     }
 
