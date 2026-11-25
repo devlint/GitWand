@@ -150,6 +150,20 @@ describe("gitwand scan", { timeout: GIT_IO_TIMEOUT_MS }, () => {
     ]);
   });
 
+  // No git on PATH: an error (exit 2), never a clean scan.
+  it("reports git missing instead of a clean scan", async () => {
+    const path = process.env.PATH;
+    process.env.PATH = "";
+    try {
+      await cmdScan({ json: true });
+    } finally {
+      process.env.PATH = path;
+    }
+    const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(JSON.parse(output).error).toMatch(/git not found/);
+    expect(process.exitCode).toBe(2);
+  });
+
   it("nothing staged reports no findings", async () => {
     await cmdScan({ json: true });
 

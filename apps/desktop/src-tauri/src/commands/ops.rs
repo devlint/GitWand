@@ -447,15 +447,23 @@ fn force_with_lease_arg(branch: &str, sha: &str) -> Result<String, String> {
     Ok(format!("--force-with-lease=refs/heads/{}:{}", branch, sha))
 }
 
-/// The checked-out branch's short name; `None` on a detached HEAD.
+/// The checked-out branch's name (without `refs/heads/`); `None` on a
+/// detached HEAD. Not `--short`, which prints `heads/<b>` when a tag shares
+/// the name.
 fn head_branch(cwd: &str) -> Option<String> {
     let out = git_cmd()
-        .args(["symbolic-ref", "--short", "-q", "HEAD"])
+        .args(["symbolic-ref", "-q", "HEAD"])
         .current_dir(cwd)
         .output()
         .ok()?;
-    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (out.status.success() && !name.is_empty()).then_some(name)
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .strip_prefix("refs/heads/")
+        .filter(|b| !b.is_empty())
+        .map(str::to_string)
 }
 
 /// `--force-if-includes` landed in git 2.30.
@@ -491,13 +499,32 @@ fn push_destination(cwd: &str, branch: &str) -> Option<String> {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let rest = stdout.lines().find_map(|l| l.strip_prefix(&prefix))?;
     let (remote, tracking) = rest.split_once(' ')?;
-    if remote.is_empty() {
+    if remote.is_empty() || remote.starts_with('-') {
         return None;
     }
-    tracking
+    let name = tracking
         .strip_prefix(&format!("refs/remotes/{remote}/"))
-        .filter(|b| !b.is_empty())
-        .map(str::to_string)
+        .filter(|b| !b.is_empty())?;
+    // Stripping the prefix only names the remote branch under the default
+    // mapping; a custom fetch refspec (`refs/heads/*:refs/remotes/o/heads/*`)
+    // would turn `heads/topic` into a branch that does not exist.
+    has_default_fetch_refspec(cwd, remote).then(|| name.to_string())
+}
+
+/// Whether `remote` fetches `refs/heads/*` to `refs/remotes/<remote>/*`.
+fn has_default_fetch_refspec(cwd: &str, remote: &str) -> bool {
+    let key = format!("remote.{remote}.fetch");
+    let Ok(out) = git_cmd()
+        .args(["config", "--get-all", &key])
+        .current_dir(cwd)
+        .output()
+    else {
+        return false;
+    };
+    let wanted = format!("refs/heads/*:refs/remotes/{remote}/*");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .any(|l| l.trim().trim_start_matches('+') == wanted)
 }
 
 #[tauri::command]
@@ -7348,6 +7375,36 @@ mod git_push_force_tests {
         let r = force_push(&repo, Some(("feature", &judged)));
         assert!(!r.success, "{}", r.message);
         assert_eq!(git_at(&bare, &["rev-parse", "feature"]), theirs);
+    }
+
+    /// A custom fetch refspec: the tracking ref no longer spells the remote
+    /// branch, so no destination is claimed.
+    #[test]
+    fn push_destination_needs_the_default_fetch_mapping() {
+        let repo = TempRepo::new();
+        repo.add_bare_origin();
+        repo.git(&[
+            "config",
+            "--replace-all",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/heads/*",
+        ]);
+        repo.git(&["fetch", "-q", "origin"]);
+        repo.git(&["branch", "-q", "--set-upstream-to=origin/heads/main"]);
+        repo.git(&["config", "push.default", "upstream"]);
+        assert_eq!(push_destination(repo.path.to_str().unwrap(), "main"), None);
+    }
+
+    /// A tag named like the branch makes `symbolic-ref --short` print
+    /// `heads/<b>`; the branch name must come out plain.
+    #[test]
+    fn head_branch_is_plain_when_a_tag_shares_the_name() {
+        let repo = TempRepo::new();
+        repo.git(&["tag", "main"]);
+        assert_eq!(
+            head_branch(repo.path.to_str().unwrap()).as_deref(),
+            Some("main")
+        );
     }
 
     #[test]

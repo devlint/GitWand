@@ -36,14 +36,15 @@ import { c } from "../ui.js";
 import { findGitRoot } from "../llm-config.js";
 
 /**
- * The staged bytes as a patch, tolerant on failure (returns "" if git is unavailable or
- * we're not in a repo — same tolerant style as `getConflictedFiles()`). The user's patch
+ * The staged bytes as a patch, tolerant on failure (returns "" when we're not in a repo —
+ * same tolerant style as `getConflictedFiles()`), but `null` when git itself cannot be
+ * run: a scan that saw nothing must not pass as clean. The user's patch
  * config is pinned away as in the desktop backend (`PATCH_CONFIG` / `PATCH_FLAGS` in
  * apps/desktop/src-tauri/src/git/cmd.rs): an external diff tool or colour codes would
  * hide every added line, other prefixes would misname files, and textconv would scan a
  * rendering instead of the staged content.
  */
-function getStagedDiff(cwd: string): string {
+function getStagedDiff(cwd: string): string | null {
   try {
     return execFileSync(
       "git",
@@ -56,12 +57,11 @@ function getStagedDiff(cwd: string): string {
         "-c", "diff.submodule=short",
         "diff", "--cached", "--unified=0", "--no-textconv", "--no-color", "--no-ext-diff",
       ],
-      // Through the shell on Windows only, where `git` can be a `.cmd` shim that
-      // a direct spawn does not find (the scan would then see nothing). The
-      // arguments are constants.
-      { encoding: "utf-8", cwd, maxBuffer: 1024 * 1024 * 32, shell: process.platform === "win32" },
+      { encoding: "utf-8", cwd, maxBuffer: 1024 * 1024 * 32 },
     );
-  } catch {
+  } catch (err) {
+    // ENOENT: no `git` executable on PATH (on Windows, a `.cmd` shim is not one).
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return null;
     return "";
   }
 }
@@ -170,6 +170,13 @@ export async function cmdScan(flags: Record<string, boolean | string>): Promise<
   const repoRoot = findGitRoot();
   const cwd = repoRoot ?? process.cwd();
   const diffText = getStagedDiff(cwd);
+  if (diffText === null) {
+    const message = "git not found on PATH: the staged changes could not be scanned.";
+    if (isJson) console.log(JSON.stringify({ error: message, findings: [] }, null, 2));
+    else console.error(`${c.red}${message}${c.reset}`);
+    process.exitCode = 2;
+    return;
+  }
   const files = extractStagedAddedLines(diffText);
   const config = loadSecretsConfig(repoRoot);
 

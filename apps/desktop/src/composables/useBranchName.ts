@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { t } from "./useI18n";
+import { patchDiffArgs } from "../utils/patchArgs";
 
 /**
  * Suggests a Git branch name from:
@@ -127,7 +128,7 @@ export function useBranchName() {
       if (cwd) {
         try {
           const [diffRes, statRes] = await Promise.all([
-            gitExec(cwd, ["diff", "HEAD", "--no-color"]),
+            gitExec(cwd, patchDiffArgs("HEAD")),
             gitExec(cwd, ["diff", "HEAD", "--stat", "--no-color"]),
           ]);
           diff = clip((diffRes.stdout ?? "").trim(), maxDiffChars);

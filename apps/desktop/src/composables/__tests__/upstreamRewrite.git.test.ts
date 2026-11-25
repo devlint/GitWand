@@ -47,6 +47,7 @@ import {
   isForcePushRemoteMoved,
   forcePushRejectionLine,
   forcePushTarget,
+  fetchPushRemote,
 } from "../useBranchUpdatePrompt";
 
 function git(cwd: string, args: string[]): string {
@@ -254,6 +255,7 @@ describe("forcePushTarget", () => {
     expect(await forcePushTarget(me)).toEqual({
       sha: git(me, ["rev-parse", "origin/feat"]).trim(),
       behind: 2,
+      branch: "feat",
     });
   }, GIT_TEST_TIMEOUT_MS);
 
@@ -265,6 +267,7 @@ describe("forcePushTarget", () => {
     expect(await forcePushTarget(me)).toEqual({
       sha: git(me, ["rev-parse", "origin/feat"]).trim(),
       behind: 0,
+      branch: "feat",
     });
   }, GIT_TEST_TIMEOUT_MS);
 
@@ -272,6 +275,33 @@ describe("forcePushTarget", () => {
     const { me } = setup();
     git(me, ["switch", "-q", "-c", "local-only"]);
     expect(await forcePushTarget(me)).toBeNull();
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("fetchPushRemote", () => {
+  // Triangular: upstream on origin, pushes to `fork`. The app's own fetch
+  // covers origin only; the fork's tracking ref must be refreshed too, or a
+  // retry after a refused force push judges the same stale tip.
+  it("fetches the push remote when it is not the upstream's", async () => {
+    const { me } = setup();
+    const fork = join(root, "fork.git");
+    git(root, ["clone", "-q", "--bare", join(root, "remote.git"), fork]);
+    git(me, ["remote", "add", "fork", fork]);
+    git(me, ["fetch", "-q", "fork"]);
+    git(me, ["config", "remote.pushDefault", "fork"]);
+    git(me, ["config", "push.default", "current"]);
+    const mate = join(root, "forkmate");
+    git(root, ["clone", "-q", "-b", "feat", fork, mate]);
+    commit(mate, "k", "fork work\n", "fork work");
+    git(mate, ["push", "-q", "origin", "feat"]);
+    const before = git(me, ["rev-parse", "fork/feat"]).trim();
+
+    await fetchPushRemote(me);
+
+    const after = git(me, ["rev-parse", "fork/feat"]).trim();
+    expect(after).not.toBe(before);
+    expect(after).toBe(git(mate, ["rev-parse", "HEAD"]).trim());
+    expect((await forcePushTarget(me))?.sha).toBe(after);
   }, GIT_TEST_TIMEOUT_MS);
 });
 

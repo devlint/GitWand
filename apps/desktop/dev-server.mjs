@@ -2694,9 +2694,14 @@ function devPushDestination(cwd, branch) {
   if (sp <= 0) return null;
   const remote = rest.slice(0, sp);
   const tracking = rest.slice(sp + 1);
+  if (remote.startsWith("-")) return null;
   const prefix = `refs/remotes/${remote}/`;
   if (!tracking.startsWith(prefix) || tracking.length === prefix.length) return null;
-  return tracking.slice(prefix.length);
+  // `has_default_fetch_refspec`: only the default mapping spells the branch.
+  const fetch = spawnSync(GIT, ["config", "--get-all", `remote.${remote}.fetch`], { cwd, encoding: "utf-8" });
+  const wanted = `refs/heads/*:refs/remotes/${remote}/*`;
+  const ok = (fetch.stdout || "").split("\n").some((l) => l.trim().replace(/^\+/, "") === wanted);
+  return ok ? tracking.slice(prefix.length) : null;
 }
 
 /** `gh_fork_parent` (commands/gh.rs) answers, by origin, for ten minutes. */
@@ -5255,11 +5260,12 @@ async function handleRequest(req, res) {
             // except for a branch pushed under another name, whose reflog git
             // would not find.
             args.push("--force-with-lease");
-            const head = spawnSync(GIT, ["symbolic-ref", "--short", "-q", "HEAD"], {
+            const head = spawnSync(GIT, ["symbolic-ref", "-q", "HEAD"], {
               cwd: resolvedCwd,
               encoding: "utf-8",
             });
-            const headName = head.status === 0 ? (head.stdout || "").trim() : "";
+            const headRef = head.status === 0 ? (head.stdout || "").trim() : "";
+            const headName = headRef.startsWith("refs/heads/") ? headRef.slice("refs/heads/".length) : "";
             const dest = headName ? devPushDestination(resolvedCwd, headName) : null;
             const renamed = dest !== null && dest !== headName;
             const v = await combinedGitVersion();

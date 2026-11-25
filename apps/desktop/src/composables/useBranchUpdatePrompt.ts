@@ -131,15 +131,56 @@ export function isForcePushRemoteMoved(message: string): boolean {
   return /\(stale info\)|\(remote ref updated since checkout\)/.test(message);
 }
 
+/** Where a plain push from the checked-out branch goes, and its upstream's remote. */
+async function pushRefs(
+  cwd: string,
+): Promise<{ pushRemote: string; pushRef: string; upstreamRemote: string } | null> {
+  const head = await gitExec(cwd, ["symbolic-ref", "-q", "HEAD"]);
+  const ref = head.stdout.trim();
+  if (head.exitCode !== 0 || !ref.startsWith("refs/heads/")) return null;
+  const out = await gitExec(cwd, [
+    "for-each-ref",
+    "--format=%(refname)%09%(push:remotename)%09%(push)%09%(upstream:remotename)",
+    ref,
+  ]);
+  if (out.exitCode !== 0) return null;
+  const line = out.stdout.split("\n").find((l) => l.startsWith(`${ref}\t`));
+  if (line === undefined) return null;
+  const [, pushRemote = "", pushRef = "", upstreamRemote = ""] = line.split("\t");
+  return { pushRemote, pushRef, upstreamRemote };
+}
+
+/**
+ * Bring the push destination's remote-tracking ref up to date before a force
+ * push is judged. The app's own fetch (`gitFetch`, done by the caller) covers
+ * the upstream's remote; a destination on another remote (`remote.pushDefault`,
+ * `branch.<b>.pushRemote`) is fetched here. Best-effort: offline, the last
+ * fetched state is what the user is shown, and the push itself will fail.
+ */
+export async function fetchPushRemote(cwd: string): Promise<void> {
+  try {
+    const refs = await pushRefs(cwd);
+    if (!refs || !refs.pushRemote || refs.pushRemote === refs.upstreamRemote) return;
+    if (refs.pushRemote.startsWith("-")) return;
+    await gitExec(cwd, ["fetch", "--quiet", "--end-of-options", refs.pushRemote]);
+  } catch {
+    /* best-effort */
+  }
+}
+
 /**
  * What a force push would replace, read when the user decides to force push:
- * the tip of the branch a plain push updates (`@{push}`), and how many of its
- * commits the local branch does not have. The push then leases exactly that
- * sha, so it overwrites what the user was shown and nothing that arrived
- * since. `null` when there is no such destination yet (never pushed, not
- * fetched): the backend then falls back to `--force-if-includes`.
+ * the tip of the branch a plain push updates (`@{push}`), how many of its
+ * commits the local branch does not have, and that branch's name on the
+ * remote (`branch`, which can differ from the local name). The push then
+ * leases exactly that sha, so it overwrites what the user was shown and
+ * nothing that arrived since. `null` when there is no such destination yet
+ * (never pushed, not fetched): the backend then falls back to
+ * `--force-if-includes`.
  */
-export async function forcePushTarget(cwd: string): Promise<{ sha: string; behind: number } | null> {
+export async function forcePushTarget(
+  cwd: string,
+): Promise<{ sha: string; behind: number; branch: string | null } | null> {
   try {
     const tip = await gitExec(cwd, ["rev-parse", "--verify", "-q", "@{push}"]);
     const sha = tip.stdout.trim();
@@ -147,7 +188,13 @@ export async function forcePushTarget(cwd: string): Promise<{ sha: string; behin
     const count = await gitExec(cwd, ["rev-list", "--count", `HEAD..${sha}`]);
     const behind = Number.parseInt(count.stdout.trim(), 10);
     if (count.exitCode !== 0 || !Number.isFinite(behind)) return null;
-    return { sha, behind };
+    const refs = await pushRefs(cwd);
+    const prefix = refs?.pushRemote ? `refs/remotes/${refs.pushRemote}/` : null;
+    const branch =
+      prefix && refs!.pushRef.startsWith(prefix) && refs!.pushRef.length > prefix.length
+        ? refs!.pushRef.slice(prefix.length)
+        : null;
+    return { sha, behind, branch };
   } catch {
     return null;
   }

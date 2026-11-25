@@ -113,7 +113,7 @@ import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
 import { useWorktreeHookTrust } from "./composables/useWorktreeHookTrust";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
-import { computeCheckoutPrompt, forcePushTarget, isUpdatePromptSkipped, isUpstreamRewriteOnly, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
+import { computeCheckoutPrompt, fetchPushRemote, forcePushTarget, isUpdatePromptSkipped, isUpstreamRewriteOnly, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
 import { useGitRepo, type ViewMode, type RepoFileEntry } from "./composables/useGitRepo";
 import { useHeaderAlign } from "./composables/useHeaderAlign";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
@@ -161,7 +161,7 @@ import {
   COMMIT_MESSAGE_SINK_KEY,
   type SettingsSectionTarget,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree, type SnapshotMeta } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitFetch, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree, type SnapshotMeta } from "./utils/backend";
 import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorktreeCreation";
 import { registerRemovalHost } from "./composables/useWorktreeRemoval";
 import { registerMergeBackHost } from "./composables/useWorktreeMergeBack";
@@ -2092,6 +2092,8 @@ const forcePushConfirm = ref<{
   branch: string;
   behind: number;
   protected: boolean;
+  /** The protected trunk the push would overwrite (local or remote name). */
+  protectedName: string;
   leaseSha: string | null;
   /** The repository the decision was made in (tabs can switch meanwhile). */
   cwd: string;
@@ -2100,33 +2102,40 @@ const forcePushConfirm = ref<{
 const PROTECTED_TRUNKS = new Set(["main", "master"]);
 
 /**
- * Entry point for every force-push trigger (split button + branch context
- * menu). The remote tip is read now, not from the last status refresh: the
- * count the modal shows is what the push will overwrite, and the push leases
- * that exact sha, so anything pushed after this moment is refused.
- */
-/**
  * Set from the moment a force push is triggered until its push settles (or
  * its confirmation modal takes over): a second click in that window would
  * push again on a lease the first push spends, and be refused.
  */
 let forcePushInFlight = false;
+
+/**
+ * Entry point for every force-push trigger (split button + branch context
+ * menu). The remote is fetched and its tip read now, not taken from the last
+ * status refresh: the count the modal shows is what the push will overwrite,
+ * and the push leases that exact sha, so anything pushed after this moment is
+ * refused. A retry after such a refusal fetches again, so it judges the new
+ * tip instead of failing on the same stale one.
+ */
 async function doForcePush() {
   const cwd = repoFolderPath.value;
   if (!cwd || forcePushInFlight || isPushing.value) return;
   const branch = repoStatus.value?.branch ?? "";
-  const isProtected = PROTECTED_TRUNKS.has(branch);
   forcePushInFlight = true;
   try {
+    await gitFetch(cwd).catch(() => null);
+    await fetchPushRemote(cwd);
     const target = await forcePushTarget(cwd);
     // The lease is for this repo and this branch only.
     if (repoFolderPath.value !== cwd || (repoStatus.value?.branch ?? "") !== branch) return;
+    // A trunk is protected under its remote name too: `mine` pushed to main.
+    const protectedName = [branch, target?.branch ?? ""].find((b) => PROTECTED_TRUNKS.has(b)) ?? "";
+    const isProtected = protectedName !== "";
     // No readable destination (never pushed): nothing known to overwrite.
     // The upstream's count would describe another ref.
     const behind = target ? target.behind : 0;
     const leaseSha = target?.sha ?? null;
     if (isProtected || behind > 0) {
-      forcePushConfirm.value = { branch, behind, protected: isProtected, leaseSha, cwd };
+      forcePushConfirm.value = { branch, behind, protected: isProtected, protectedName, leaseSha, cwd };
       return;
     }
     await handlePush(true, leaseSha);
@@ -5566,7 +5575,7 @@ onUnmounted(() => {
 
       <p class="ptc-desc">{{ t('forcePushConfirm.desc', forcePushConfirm.branch) }}</p>
       <p v-if="forcePushConfirm.protected" class="ptc-desc ptc-desc--warn">
-        {{ t('forcePushConfirm.protectedWarn', forcePushConfirm.branch) }}
+        {{ t('forcePushConfirm.protectedWarn', forcePushConfirm.protectedName) }}
       </p>
       <p v-if="forcePushConfirm.behind > 0" class="ptc-desc ptc-desc--warn">
         {{ t('forcePushConfirm.divergedWarn', forcePushConfirm.behind) }}
