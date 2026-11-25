@@ -1088,10 +1088,11 @@ export async function ghPrUpdateComment(
     await tauriInvoke("gh_pr_update_comment", { cwd, number: prNumber, commentId, body });
     return;
   }
+  // The PR number locates the repo, as on desktop (the fork's parent).
   const res = await devFetch(`${DEV_SERVER}/api/gh-pr-comment?id=${commentId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, body }),
+    body: JSON.stringify({ cwd, body, number: prNumber ?? null }),
   });
   if (!res.ok) throw new Error(`update comment failed: ${res.status}`);
 }
@@ -1103,8 +1104,9 @@ export async function ghPrDeleteComment(cwd: string, commentId: number, prNumber
     await tauriInvoke("gh_pr_delete_comment", { cwd, number: prNumber, commentId });
     return;
   }
-  const res = await fetch(
-    `${DEV_SERVER}/api/gh-pr-comment?cwd=${encodeURIComponent(cwd)}&id=${commentId}`,
+  const num = prNumber != null ? `&number=${prNumber}` : "";
+  const res = await devFetch(
+    `${DEV_SERVER}/api/gh-pr-comment?cwd=${encodeURIComponent(cwd)}&id=${commentId}${num}`,
     { method: "DELETE" },
   );
   if (!res.ok) throw new Error(`delete comment failed: ${res.status}`);

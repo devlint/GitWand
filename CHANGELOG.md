@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The desktop main-bundle budget is raised from 980 KB to 984 KB** for the combined-diff wrappers and strings; the view itself is a lazy chunk.
 
+### Fixed
+
+- **On a fork, PR actions act on the PR you see.** The PR list shows the fork parent's pull requests, but PR reads (detail, review threads, comments, reviews) and comment/review writes looked the number up on `origin` first: when the fork had its own PR with the same number, they read or wrote that one. They now ask the base repo first and fall back to `origin` only for a PR that exists only there. Under `pnpm dev:web`, the PR list, count and per-PR routes follow the same repo, and editing or deleting a review comment sends the PR number, so dev QA on a fork exercises what ships.
+
 ## [3.14.0] - 2026-11-24
 
 ### Added

@@ -1082,44 +1082,48 @@ pub(crate) fn diff_numstat(cwd: &str, head: &str, base: &str) -> (i64, i64) {
     (adds, dels)
 }
 
-/// Fetch a PR object, trying `origin` first and falling back to the upstream
-/// parent (for fork → upstream PRs that don't live in origin). Returns the
-/// `owner/repo` the PR actually lives in alongside its JSON, so callers issue
-/// follow-up requests against the right repo.
+/// The repos a PR number is looked up in, in order. The numbers the app shows
+/// come from the base repo's list (`rest_list_prs`, `rest_branch_pr`): for a
+/// fork, its parent. Asking `origin` first would act on the fork's own
+/// same-numbered PR (#262). `origin` stays as a fallback for a PR that only
+/// exists on the fork. `fork_info` is `None` when the fork lookup failed:
+/// `origin` alone, the only repo known.
+fn pr_lookup_order(origin: &str, fork_info: Option<&ForkInfo>) -> Vec<String> {
+    match fork_info.map(base_repo_of) {
+        Some(base) if base != origin => vec![base, origin.to_string()],
+        _ => vec![origin.to_string()],
+    }
+}
+
+/// Fetch a PR object from the repo its number comes from (`pr_lookup_order`:
+/// the base repo, then `origin`). Returns the `owner/repo` the PR lives in
+/// alongside its JSON, so callers issue follow-up requests against the right
+/// repo — every PR read and comment/review write goes through here.
 fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_json::Value), String> {
     let (owner, repo) = owner_repo(cwd)?;
     let origin = format!("{}/{}", owner, repo);
-    // Conditional: the live CI tab reads the PR's head on every poll.
-    let (st, body) = get_cached_raw(
-        &format!("{}/repos/{}/pulls/{}", API_BASE, origin, number),
-        token,
-        None,
-    )?;
-    if st < 400 {
-        let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
-        return Ok((origin, v));
-    }
-    if st == 404 {
-        if let Some(parent) = upstream_parent(cwd, token) {
-            let (st2, body2) = curl_raw(
-                "GET",
-                &format!("{}/repos/{}/pulls/{}", API_BASE, parent, number),
-                Some(token),
-                None,
-                "application/vnd.github+json",
-            )?;
-            if st2 < 400 {
-                let v =
-                    serde_json::from_str(body2.trim()).map_err(|e| format!("parse PR: {}", e))?;
-                return Ok((parent, v));
-            }
+    let fork_info = rest_fork_info(cwd, token).ok();
+    let mut first_error: Option<String> = None;
+    for repo in pr_lookup_order(&origin, fork_info.as_ref()) {
+        // Conditional: the live CI tab reads the PR's head on every poll.
+        let (st, body) = get_cached_raw(
+            &format!("{}/repos/{}/pulls/{}", API_BASE, repo, number),
+            token,
+            None,
+        )?;
+        if st < 400 {
+            let v = serde_json::from_str(body.trim()).map_err(|e| format!("parse PR: {}", e))?;
+            return Ok((repo, v));
         }
+        let err = format!("{} (fetching PR #{})", map_api_error(st, &body), number);
+        // Only a missing PR moves on to the next repo; anything else (auth,
+        // rate limit) is the answer.
+        if st != 404 {
+            return Err(err);
+        }
+        first_error.get_or_insert(err);
     }
-    Err(format!(
-        "{} (fetching PR #{})",
-        map_api_error(st, &body),
-        number
-    ))
+    Err(first_error.unwrap_or_else(|| format!("PR #{} not found", number)))
 }
 
 pub(crate) fn rest_pr_count(cwd: &str, state: &str, token: &str) -> Result<i64, String> {
@@ -1700,14 +1704,6 @@ pub(crate) fn rest_fork_info(cwd: &str, token: &str) -> Result<ForkInfo, String>
     };
     cache.lock().unwrap().insert(origin, fi.clone());
     Ok(fi)
-}
-
-/// The upstream parent `owner/repo` when the current repo is a fork, else None.
-/// Centralizes the `is_fork && !parent.is_empty()` guard shared by the PR list
-/// and the origin→upstream PR fallback.
-fn upstream_parent(cwd: &str, token: &str) -> Option<String> {
-    let fi = rest_fork_info(cwd, token).ok()?;
-    (fi.is_fork && !fi.parent.is_empty()).then_some(fi.parent)
 }
 
 /// The canonical base `owner/repo` for PRs. For a fork, this is the upstream
@@ -3221,6 +3217,22 @@ mod tests {
         let got = pr_target_repo(dir.to_str().unwrap(), Some(&fi));
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(got.unwrap(), "upstream/proj");
+    }
+
+    /// #262: a fork's PR numbers come from the parent's list, so the parent
+    /// is asked first; origin only as the fallback for a fork-only PR.
+    #[test]
+    fn pr_lookup_order_asks_the_base_repo_first() {
+        let fi = fork_info(true, "me/proj", "upstream/proj");
+        assert_eq!(
+            pr_lookup_order("me/proj", Some(&fi)),
+            ["upstream/proj", "me/proj"]
+        );
+        let plain = fork_info(false, "me/proj", "");
+        assert_eq!(pr_lookup_order("me/proj", Some(&plain)), ["me/proj"]);
+        let no_parent = fork_info(true, "me/proj", "");
+        assert_eq!(pr_lookup_order("me/proj", Some(&no_parent)), ["me/proj"]);
+        assert_eq!(pr_lookup_order("me/proj", None), ["me/proj"]);
     }
 
     #[test]
