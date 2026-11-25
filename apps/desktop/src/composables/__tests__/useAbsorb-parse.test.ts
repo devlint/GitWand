@@ -42,4 +42,25 @@ describe("useAbsorb parseDiffHunks", () => {
       { filePath: "b.ts", origStart: 4, origCount: 1 },
     ]);
   });
+
+  // git ends a header with a tab after a name holding a space, and C-quotes
+  // unusual names: `git blame -- <path>` needs the name itself.
+  it("reads names with a space or quoting exactly", () => {
+    const diff = [
+      "diff --git a/my notes.md b/my notes.md",
+      "--- a/my notes.md\t",
+      "+++ b/my notes.md\t",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "+new",
+      'diff --git "a/we\\"ird.txt" "b/we\\"ird.txt"',
+      '--- "a/we\\"ird.txt"',
+      '+++ "b/we\\"ird.txt"',
+      "@@ -2,1 +2,1 @@",
+      "-x",
+      "+y",
+      "",
+    ].join("\n");
+    expect(parseDiffHunks(diff).map((h) => h.filePath)).toEqual(["my notes.md", 'we"ird.txt']);
+  });
 });

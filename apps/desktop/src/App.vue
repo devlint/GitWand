@@ -113,6 +113,7 @@ import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
 import { useWorktreeHookTrust } from "./composables/useWorktreeHookTrust";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
+import { useForcePush } from "./composables/useForcePush";
 import { computeCheckoutPrompt, isUpdatePromptSkipped, isUpstreamRewriteOnly, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
 import { useGitRepo, type ViewMode, type RepoFileEntry } from "./composables/useGitRepo";
 import { useHeaderAlign } from "./composables/useHeaderAlign";
@@ -161,7 +162,7 @@ import {
   COMMIT_MESSAGE_SINK_KEY,
   type SettingsSectionTarget,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree, type SnapshotMeta } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitFetch, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree, type SnapshotMeta } from "./utils/backend";
 import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorktreeCreation";
 import { registerRemovalHost } from "./composables/useWorktreeRemoval";
 import { registerMergeBackHost } from "./composables/useWorktreeMergeBack";
@@ -2088,30 +2089,25 @@ async function doPublish() {
 // (main/master), or (b) the remote has diverged (behind > 0 — someone
 // else may have pushed). A clean ahead-only force push (e.g. after a
 // local rebase with no remote divergence) skips the modal.
-const forcePushConfirm = ref<{ branch: string; behind: number; protected: boolean } | null>(null);
-
-const PROTECTED_TRUNKS = new Set(["main", "master"]);
-
-/** Entry point for every force-push trigger (split button + branch context menu). */
-function doForcePush() {
-  const branch = repoStatus.value?.branch ?? "";
-  const isProtected = PROTECTED_TRUNKS.has(branch);
-  const behind = behindCount.value;
-  if (isProtected || behind > 0) {
-    forcePushConfirm.value = { branch, behind, protected: isProtected };
-    return;
-  }
-  void handlePush(true);
-}
-
-async function confirmForcePush() {
-  forcePushConfirm.value = null;
-  await handlePush(true);
-}
-
-function cancelForcePush() {
-  forcePushConfirm.value = null;
-}
+const {
+  forcePushConfirm,
+  deciding: forcePushDeciding,
+  requestForcePush: doForcePush,
+  confirmForcePush,
+  cancelForcePush,
+} = useForcePush({
+  folderPath: repoFolderPath,
+  currentBranch: () => repoStatus.value?.branch ?? "",
+  isPushing,
+  // `needsUpstream` in useGitRepo: no upstream, so the push publishes.
+  publishing: () => !!repoStatus.value && !repoStatus.value.remote,
+  // The backend fetch itself: it waits behind a background fetch (repo lock)
+  // where the composable's fetch would return at once and skip it.
+  fetch: () => (repoFolderPath.value ? gitFetch(repoFolderPath.value) : Promise.resolve()),
+  refresh: () => repoRefresh(true),
+  requireOnline: () => requireOnline("push"),
+  push: (leaseSha) => handlePush(true, leaseSha),
+});
 
 /** Dropdown "Rebase onto origin" — explicit rebase pull. */
 async function doRebaseOntoRemote() {
@@ -3867,6 +3863,33 @@ function handleWipStash() {
 const pushTagsConfirm = ref(false);
 const pendingUnpushedTags = ref<string[]>([]);
 const pendingPushForce = ref(false);
+/** The force push's decided lease (`undefined`: none decided), kept across the unpushed-tags modal. */
+const pendingPushLease = ref<string | null | undefined>(undefined);
+/** The repository and branch the pending push was started on. */
+const pendingPushCwd = ref<string | null>(null);
+const pendingPushBranch = ref<string | null>(null);
+
+/**
+ * The unpushed-tags modal can outlive a tab switch: a pending push started
+ * in another repository is dropped rather than run here.
+ */
+function dropStalePendingPush(): boolean {
+  // Another repository: never push it from here. Another branch: only a
+  // force push is dropped (its lease was decided for the old one); a plain
+  // push pushes the branch checked out now, as before.
+  const sameRepo = pendingPushCwd.value === repoFolderPath.value;
+  const sameBranch = pendingPushBranch.value === (repoStatus.value?.branch ?? "");
+  if (sameRepo && (sameBranch || !pendingPushForce.value)) {
+    return false;
+  }
+  pushTagsConfirm.value = false;
+  pendingUnpushedTags.value = [];
+  pendingPushForce.value = false;
+  pendingPushLease.value = undefined;
+  pendingPushCwd.value = null;
+  pendingPushBranch.value = null;
+  return true;
+}
 
 /**
  * Intercepts the normal push flow:
@@ -3874,10 +3897,13 @@ const pendingPushForce = ref(false);
  * 2. If any exist, shows a confirmation modal instead of pushing immediately.
  * 3. Otherwise falls through to the regular push.
  */
-async function handlePush(force: boolean = false) {
+async function handlePush(force: boolean = false, leaseSha?: string | null) {
   const cwd = repoFolderPath.value;
   if (!cwd) return;
   pendingPushForce.value = force;
+  pendingPushLease.value = leaseSha;
+  pendingPushCwd.value = cwd;
+  pendingPushBranch.value = repoStatus.value?.branch ?? "";
   try {
     const remoteInfo = await gitRemoteInfo(cwd).catch(() => null);
     const remote = remoteInfo?.name || "origin";
@@ -3888,13 +3914,15 @@ async function handlePush(force: boolean = false) {
       return;
     }
   } catch { /* best-effort — fall through to normal push */ }
-  await doPush(force);
+  pendingPushLease.value = undefined;
+  await doPush(force, leaseSha);
 }
 
 async function confirmPushWithTags() {
+  if (dropStalePendingPush()) return;
   const cwd = repoFolderPath.value;
   pushTagsConfirm.value = false;
-  await doPush(pendingPushForce.value);
+  await doPush(pendingPushForce.value, pendingPushLease.value);
   if (cwd) {
     const remoteInfo = await gitRemoteInfo(cwd).catch(() => null);
     const remote = remoteInfo?.name || "origin";
@@ -3904,19 +3932,24 @@ async function confirmPushWithTags() {
   }
   pendingUnpushedTags.value = [];
   pendingPushForce.value = false;
+  pendingPushLease.value = undefined;
   // Trigger scheduled release notes if the user just pushed a version tag
   triggerReleaseNotesIfEnabled();
 }
 
 async function confirmPushWithoutTags() {
+  if (dropStalePendingPush()) return;
   pushTagsConfirm.value = false;
   const force = pendingPushForce.value;
+  const leaseSha = pendingPushLease.value;
   pendingUnpushedTags.value = [];
   pendingPushForce.value = false;
-  await doPush(force);
+  pendingPushLease.value = undefined;
+  await doPush(force, leaseSha);
 }
 
 async function deleteTagInModal(tagName: string) {
+  if (dropStalePendingPush()) return;
   const cwd = repoFolderPath.value;
   if (!cwd) return;
   try {
@@ -3926,8 +3959,11 @@ async function deleteTagInModal(tagName: string) {
     pendingUnpushedTags.value = pendingUnpushedTags.value.filter(t => t !== tagName);
     if (pendingUnpushedTags.value.length === 0) {
       pushTagsConfirm.value = false;
-      await doPush(pendingPushForce.value);
+      const force = pendingPushForce.value;
+      const leaseSha = pendingPushLease.value;
       pendingPushForce.value = false;
+      pendingPushLease.value = undefined;
+      await doPush(force, leaseSha);
     }
   } catch (err: any) {
     repoError.value = `delete tag: ${err?.message ?? err}`;
@@ -4985,7 +5021,7 @@ onUnmounted(() => {
       :has-repo="hasRepo" :folder-name="folderName" :can-push="canPush" :can-pull="canPull"
       :needs-publish="needsPublish" :ahead-count="aheadCount" :behind-count="behindCount"
       :main-commit-count="mainCommitCount" :push-remote="pushRemote"
-      :ahead-push-count="aheadPushCount" :is-pushing="isPushing" :is-pulling="isPulling"
+      :ahead-push-count="aheadPushCount" :is-pushing="isPushing || forcePushDeciding" :is-pulling="isPulling"
       :force-push-preferred="forcePushPreferred" :is-fetching="isFetching" :fetch-percent="fetchPercent"
       :auto-ff-block="autoFfBlock" :cwd="repoFolderPath ?? ''" :branches="branches" :worktree-branches="worktreeBranches" :branches-loading="branchesLoading"
       :is-switching-branch="isSwitchingBranch" :is-merging="isMerging" :tabs="repoTabs" :active-tab-id="activeTabId"
@@ -5493,7 +5529,7 @@ onUnmounted(() => {
 
       <p class="ptc-desc">{{ t('forcePushConfirm.desc', forcePushConfirm.branch) }}</p>
       <p v-if="forcePushConfirm.protected" class="ptc-desc ptc-desc--warn">
-        {{ t('forcePushConfirm.protectedWarn', forcePushConfirm.branch) }}
+        {{ t('forcePushConfirm.protectedWarn', forcePushConfirm.protectedName) }}
       </p>
       <p v-if="forcePushConfirm.behind > 0" class="ptc-desc ptc-desc--warn">
         {{ t('forcePushConfirm.divergedWarn', forcePushConfirm.behind) }}

@@ -1,7 +1,8 @@
 import { ref } from "vue";
-import { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader, type HunkBody } from "@gitwand/core";
+import { classifyHunkLine, diffFileLineName, hunkBodyFromHeader, noHunkBody, parseHunkHeader, type HunkBody } from "@gitwand/core";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
+import { patchDiffArgs } from "../utils/patchArgs";
 
 /**
  * Absorb — automatically amend unstaged/staged changes into the commit
@@ -83,11 +84,14 @@ export function parseDiffHunks(diffOutput: string): DiffHunk[] {
     if (classifyHunkLine(body, line)) continue;
     if (line.startsWith("diff ")) {
       body = noHunkBody();
-    } else if (line.startsWith("--- a/")) {
-      // --- a/path or +++ b/path
-      currentFile = line.slice(6);
-    } else if (line.startsWith("+++ b/")) {
-      currentFile = line.slice(6);
+    } else if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+      // --- a/path or +++ b/path: the shared name reader drops git's trailing
+      // tab after a name with a space and reads a C-quoted one; /dev/null
+      // (an added or deleted side) leaves the other side's name.
+      const name = line.startsWith("--- ")
+        ? diffFileLineName(line.slice(4), "a/")
+        : diffFileLineName(line.slice(4), "b/");
+      if (name !== null) currentFile = name;
     } else if (line.startsWith("@@ ")) {
       // @@ -origStart,origCount +newStart,newCount @@
       body = hunkBodyFromHeader(line);
@@ -316,9 +320,9 @@ export function useAbsorb() {
 
     try {
       // Get the diff
-      const diffArgs = staged
-        ? ["diff", "--cached", "--no-color"]
-        : ["diff", "--no-color"];
+      // The user's patch config pinned away: other prefixes or quoted names
+      // would misplace hunks, an external tool would hide them.
+      const diffArgs = staged ? patchDiffArgs("--cached") : patchDiffArgs();
       if (filePaths?.length) diffArgs.push("--", ...filePaths);
 
       const diffResult = await gitExec(cwd, diffArgs);

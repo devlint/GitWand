@@ -1050,9 +1050,11 @@ describe("parity: git-push-branch", () => {
     const cwd = fixtureStack("squashed");
     const push = (leaseBranch) =>
       node(dev, "/api/git-push", { cwd, force: true, leaseBranch, leaseSha: lease });
-    // U+00A0 is whitespace to Rust's `char::is_whitespace`.
-    expect((await push("a b")).value).toEqual({ success: false, message: "invalid lease branch" });
-    expect((await push("a\u0085b")).value).toEqual({ success: false, message: "invalid lease branch" });
+    // U+00A0 is whitespace to Rust's `char::is_whitespace`. A refused lease
+    // is the Rust command's `Err` (thrown by backend.ts), so a 400 here.
+    for (const branch of ["a\u00a0b", "a\u0085b"]) {
+      expect(await push(branch)).toMatchObject({ ok: false, status: 400, error: "invalid lease branch" });
+    }
   }, 30_000);
 });
 

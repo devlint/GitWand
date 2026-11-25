@@ -1349,6 +1349,20 @@ const COMBINED_GIT_PINS = [
   "-c", "diff.renameLimit=7000",
 ];
 
+/** git/cmd.rs `PATCH_CONFIG`: global options for a git call whose patch is
+ *  parsed — literal names, `a/` `b/` prefixes whatever the user's config. */
+const PATCH_CONFIG = [
+  "-c", "core.quotePath=false",
+  "-c", "diff.noprefix=false",
+  "-c", "diff.mnemonicPrefix=false",
+  "-c", "diff.srcPrefix=a/",
+  "-c", "diff.dstPrefix=b/",
+  "-c", "diff.submodule=short",
+];
+
+/** git/cmd.rs `PATCH_FLAGS`: no colour codes, no external diff tool. */
+const PATCH_FLAGS = ["--no-color", "--no-ext-diff"];
+
 /** replay.rs `PATHSPEC_BATCH_BYTES`: the argv stays under 8 KB. */
 const COMBINED_PATHSPEC_BATCH_BYTES = 7 * 1024;
 
@@ -2661,6 +2675,78 @@ function devForceWithLeaseArg(branch, sha) {
   if (!branchOk) throw new Error("invalid lease branch");
   return `--force-with-lease=refs/heads/${b}:${s}`;
 }
+
+/** `push_destination` (commands/ops.rs): the remote branch a plain push from
+ *  `branch` updates, from `%(push)` minus `refs/remotes/<%(push:remotename)>/`;
+ *  null when git names none or it maps back to no branch. */
+function devPushDestination(cwd, branch) {
+  const refname = `refs/heads/${branch}`;
+  const r = spawnSync(
+    GIT,
+    ["for-each-ref", "--format=%(refname) %(push:remotename) %(push)", refname],
+    { cwd, encoding: "utf-8" },
+  );
+  if (r.error || r.status !== 0) return { kind: "none" };
+  const line = (r.stdout || "").split("\n").find((l) => l.startsWith(`${refname} `));
+  if (line === undefined) return { kind: "none" };
+  const rest = line.slice(refname.length + 1);
+  const sp = rest.indexOf(" ");
+  if (sp < 0) return { kind: "none" };
+  const remote = rest.slice(0, sp);
+  const tracking = rest.slice(sp + 1);
+  if (tracking === "") return { kind: "none" };
+  if (remote === "" || remote.startsWith("-")) return { kind: "unmapped" };
+  // `remote_branch_of`: the tracking ref read back through the fetch refspecs.
+  const fetch = spawnSync(GIT, ["config", "--get-all", `remote.${remote}.fetch`], { cwd, encoding: "utf-8" });
+  const name = devRemoteBranchOf(fetch.stdout || "", tracking);
+  return name !== null ? { kind: "branch", name } : { kind: "unmapped" };
+}
+
+/** ops.rs `remote_branch_of` (src/utils/refspec.ts `remoteBranchOf`). */
+function devRemoteBranchOf(refspecs, tracking) {
+  const excluded = (full) =>
+    refspecs.split("\n").some((l) => {
+      const t = l.trim();
+      if (!t.startsWith("^")) return false;
+      const neg = t.slice(1);
+      const star = neg.indexOf("*");
+      if (star < 0) return neg === full;
+      const pre = neg.slice(0, star);
+      const suf = neg.slice(star + 1);
+      return full.length >= pre.length + suf.length && full.startsWith(pre) && full.endsWith(suf);
+    });
+  for (const line of refspecs.split("\n")) {
+    const spec = line.trim().replace(/^\+/, "");
+    if (spec === "" || spec.startsWith("^")) continue;
+    const colon = spec.indexOf(":");
+    if (colon < 0) continue;
+    const src = spec.slice(0, colon);
+    const dst = spec.slice(colon + 1);
+    const srcStar = src.indexOf("*");
+    const dstStar = dst.indexOf("*");
+    let full = null;
+    if (srcStar >= 0 && dstStar >= 0) {
+      const dstPre = dst.slice(0, dstStar);
+      const dstSuf = dst.slice(dstStar + 1);
+      if (tracking.length >= dstPre.length + dstSuf.length && tracking.startsWith(dstPre) && tracking.endsWith(dstSuf)) {
+        full = src.slice(0, srcStar) + tracking.slice(dstPre.length, tracking.length - dstSuf.length) + src.slice(srcStar + 1);
+      }
+    } else if (srcStar < 0 && dstStar < 0 && dst === tracking) {
+      full = src;
+    }
+    if (full !== null) {
+      if (excluded(full)) return null;
+      if (full.startsWith("refs/heads/") && full.length > "refs/heads/".length) return full.slice("refs/heads/".length);
+      return null;
+    }
+  }
+  return null;
+}
+
+/** ops.rs `UNMAPPED_PUSH_DEST`. */
+const UNMAPPED_PUSH_DEST =
+  "force push refused: the remote branch this push updates cannot be read (a custom fetch refspec), " +
+  "so it cannot be leased; force push from a terminal";
 
 /** `gh_fork_parent` (commands/gh.rs) answers, by origin, for ten minutes. */
 const devForkParentCache = new Map();
@@ -4586,7 +4672,11 @@ async function handleRequest(req, res) {
           });
         }
 
-        const args = staged ? ["diff", "--cached", "--", gitPath] : ["diff", "--", gitPath];
+        // git_diff's CLI fallback: raw content, user patch config pinned away.
+        const args = [
+          ...PATCH_CONFIG, "diff", ...(staged ? ["--cached"] : []), "--no-textconv", ...PATCH_FLAGS,
+          "--", gitPath,
+        ];
         let stdout;
         let truncatedFromBytes;
         try {
@@ -4614,7 +4704,7 @@ async function handleRequest(req, res) {
             // then truncate the same way as the plain diff. The repo-relative
             // path (as in Rust) keeps the header, hence the byte count and the
             // cut, identical on both sides.
-            const r = spawnSync(GIT, ["diff", "--no-index", "--", "/dev/null", gitPath], {
+            const r = spawnSync(GIT, [...PATCH_CONFIG, "diff", "--no-index", "--no-textconv", ...PATCH_FLAGS, "--", "/dev/null", gitPath], {
               cwd: resolvedCwd, maxBuffer: Infinity,
             });
             ({ text: stdout, truncatedFromBytes } = truncateDiffOutput(r.stdout || Buffer.alloc(0)));
@@ -4663,7 +4753,10 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         let stdout;
         try {
-          stdout = await gitSpawn(["diff", "--cached", "--unified=0", "--no-color", "--", "."], resolvedCwd);
+          stdout = await gitSpawn(
+            [...PATCH_CONFIG, "diff", "--cached", "--unified=0", "--no-textconv", ...PATCH_FLAGS, "--", "."],
+            resolvedCwd,
+          );
         } catch {
           stdout = "";
         }
@@ -4681,7 +4774,7 @@ async function handleRequest(req, res) {
           currentLines = [];
         };
 
-        const { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader, scanSecrets } =
+        const { classifyHunkLine, diffFileLineName, hunkBodyFromHeader, noHunkBody, parseHunkHeader, scanSecrets } =
           await loadDevCore();
 
         // Remaining body of the current hunk (core's hunk-body helpers, the twin of Rust's
@@ -4703,7 +4796,10 @@ async function handleRequest(req, res) {
             flush();
           } else if (line.startsWith("+++ ")) {
             const rest = line.slice("+++ ".length);
-            currentPath = rest === "/dev/null" ? null : rest.replace(/^b\//, "");
+            // core's `diffFileLineName` (Rust `file_line_name`): trailing tab
+            // and C-quoting handled.
+            const raw = rest.endsWith("\t") ? rest.slice(0, -1) : rest;
+            currentPath = diffFileLineName(rest, "b/") ?? (raw === "/dev/null" ? null : raw);
           } else if (line.startsWith("@@")) {
             newLineNo = parseHunkHeader(line)?.newStart ?? 0;
             body = hunkBodyFromHeader(line);
@@ -5189,18 +5285,46 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         const args = ["push"];
         if (setUpstream) args.push("--set-upstream", "origin", "HEAD");
+        // `git_push` validates the lease before anything runs, forced or not.
+        const hasBranch = leaseBranch != null;
+        const hasSha = leaseSha != null;
+        if (hasBranch !== hasSha) {
+          return jsonResponse(req, res, { error: "lease_branch and lease_sha must be given together" }, 400);
+        }
+        if (hasBranch) {
+          try { devForceWithLeaseArg(leaseBranch, leaseSha); }
+          catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
+        }
         if (force) {
-          const hasBranch = leaseBranch != null;
-          const hasSha = leaseSha != null;
-          if (hasBranch !== hasSha) {
-            return jsonResponse(req, res, { success: false, message: "lease_branch and lease_sha must be given together" });
-          }
           if (hasBranch) {
-            // force_with_lease_arg() in src-tauri/src/commands/ops.rs.
-            try { args.push(devForceWithLeaseArg(leaseBranch, leaseSha)); }
-            catch (e) { return jsonResponse(req, res, { success: false, message: e.message }); }
+            // force_with_lease_arg() in src-tauri/src/commands/ops.rs, on the
+            // branch the push updates (`push_destination`).
+            try {
+              devForceWithLeaseArg(leaseBranch, leaseSha);
+              // A publish pushes `HEAD` to origin under the local name.
+              const dest = setUpstream ? { kind: "none" } : devPushDestination(resolvedCwd, String(leaseBranch));
+              if (dest.kind === "unmapped") return jsonResponse(req, res, { error: UNMAPPED_PUSH_DEST }, 400);
+              args.push(devForceWithLeaseArg(dest.kind === "branch" ? dest.name : leaseBranch, leaseSha));
+            } catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
           } else {
+            // `git_push`: the tip must also have been integrated locally —
+            // except for a branch pushed under another name, whose reflog git
+            // would not find.
             args.push("--force-with-lease");
+            const head = spawnSync(GIT, ["symbolic-ref", "-q", "HEAD"], {
+              cwd: resolvedCwd,
+              encoding: "utf-8",
+            });
+            const headRef = head.status === 0 ? (head.stdout || "").trim() : "";
+            const headName = headRef.startsWith("refs/heads/") ? headRef.slice("refs/heads/".length) : "";
+            const dest = headName ? devPushDestination(resolvedCwd, headName) : { kind: "none" };
+            // `git_push`: an unreadable destination is refused, not pushed on a bare lease.
+            if (dest.kind === "unmapped") return jsonResponse(req, res, { error: UNMAPPED_PUSH_DEST }, 400);
+            const renamed = dest.kind === "branch" && dest.name !== headName;
+            const v = await combinedGitVersion();
+            const hasIfIncludes = v && (v[0] > 2 || (v[0] === 2 && v[1] >= 30));
+            // `push.useForceIfIncludes=true` would bring the check back: negate it.
+            if (hasIfIncludes) args.push(renamed ? "--no-force-if-includes" : "--force-if-includes");
           }
         }
         const r = spawnSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
@@ -5240,6 +5364,11 @@ async function handleRequest(req, res) {
       if (rejectCrossOrigin(req, res)) return;
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      // `git_fetch`'s `remote`: one remote instead of the default.
+      const remote = url.searchParams.get("remote");
+      if (remote !== null && (remote === "" || remote.startsWith("-"))) {
+        return jsonResponse(req, res, { error: "invalid remote" }, 400);
+      }
       const resolvedCwd = resolve(cwd);
       const sseOrigin = req.headers.origin;
       const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
@@ -5252,7 +5381,7 @@ async function handleRequest(req, res) {
       // Mirrors git_fetch's `refs_changed` (#287): compare every ref before
       // and after, so the frontend only forces a log reload when one moved.
       const refsBefore = devRefFingerprint(resolvedCwd);
-      const proc = spawn(GIT, ["fetch", "--prune", "--progress"], {
+      const proc = spawn(GIT, ["fetch", "--prune", "--progress", ...(remote !== null ? [remote] : [])], {
         cwd: resolvedCwd,
         stdio: ["ignore", "ignore", "pipe"],
       });
@@ -5773,7 +5902,7 @@ async function handleRequest(req, res) {
         }
         // Literal pathspecs; external diff, colour and textconv off — the
         // output is parsed, never shown as is.
-        const args = ["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--no-textconv"];
+        const args = [...PATCH_CONFIG, "--literal-pathspecs", "diff", "--no-textconv", ...PATCH_FLAGS];
         if (fromName !== toName && fromType !== null && toType !== null) {
           // Renamed in between: blob to blob, so the hunks are the content change.
           args.push(`${from}:${fromName}`, `${to}:${toName}`);
@@ -5896,6 +6025,11 @@ async function handleRequest(req, res) {
       const cwd = url.searchParams.get("cwd");
       const hash = url.searchParams.get("hash");
       if (!cwd || !hash) return jsonResponse(req, res, { error: "Missing cwd or hash param" }, 400);
+      // Rust's `validate_revision("hash", …)`.
+      if (!hash.trim()) return jsonResponse(req, res, { error: "hash must not be empty" }, 400);
+      if (hash.startsWith("-") || /\p{Cc}/u.test(hash)) {
+        return jsonResponse(req, res, { error: `invalid hash: ${hash}` }, 400);
+      }
 
       try {
         const resolvedCwd = resolve(cwd);
@@ -5903,7 +6037,14 @@ async function handleRequest(req, res) {
         // Stream stdout via spawn — execSync's maxBuffer (10 MB) is exceeded by large
         // merge commits in monorepos and causes a 500.
         const stdout = await gitSpawn(
-          ["show", "-m", "--first-parent", "--format=", hash],
+          [
+            ...PATCH_CONFIG,
+            "-c", "log.diffMerges=first-parent",
+            "-c", "log.showRoot=true",
+            "show", "-m", "--first-parent", "--format=", "--no-show-signature", "--no-textconv",
+            ...PATCH_FLAGS,
+            hash,
+          ],
           resolvedCwd,
         );
 
@@ -6259,10 +6400,13 @@ async function handleRequest(req, res) {
       }
       try {
         const resolvedCwd = resolve(cwd);
-        const out = execFileSync(
-          "git",
-          ["stash", "show", "-p", `stash@{${parseInt(idx, 10)}}`],
-          { cwd: resolvedCwd, encoding: "utf-8" },
+        // The resolved GIT, streamed (no 1 MB maxBuffer), like /api/git-show.
+        const out = await gitSpawn(
+          [
+            ...PATCH_CONFIG, "-c", "stash.showIncludeUntracked=true",
+            "stash", "show", "-p", "--no-textconv", ...PATCH_FLAGS, `stash@{${parseInt(idx, 10)}}`,
+          ],
+          resolvedCwd,
         );
         return jsonResponse(req, res, { diff: out });
       } catch (err) {

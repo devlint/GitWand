@@ -97,6 +97,8 @@ const zhCN: Locale = {
     pullRefusedDirty: "拉取被拒绝：存在未提交的更改。",
     pullAutostashParked: "已拉取——你的更改已暂存，操作完成后会自动恢复。",
     pullAutostashConflict: "拉取已完成，但恢复你的更改时发生冲突——请在更改视图中解决。你的更改已安全保存在储藏中。",
+    forcePushRemoteMoved: "强制推送被拒绝：在你决定强制推送之后，远程分支发生了变化（可能有人推送过，或它已被删除）。没有任何内容被覆盖。请再次强制推送，查看它现在的内容。",
+    forcePushUnmapped: "强制推送被拒绝：GitWand 无法确定此推送会更新哪个远程分支（其 fetch refspec 无法反推），因此无法保护那里的提交。如确有需要，请在终端中强制推送。",
     pushDone: "推送已完成",
     stashDone: "更改已暂存 (Stash)",
     mergeDone: "合并已完成",

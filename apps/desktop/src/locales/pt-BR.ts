@@ -93,6 +93,8 @@ const ptBR: Locale = {
     pullRefusedDirty: "Pull recusado: há alterações não commitadas.",
     pullAutostashParked: "Pull feito — suas alterações estão no stash e voltarão quando a operação terminar.",
     pullAutostashConflict: "Pull feito, mas restaurar suas alterações gerou conflitos — resolva-os na visão Alterações. Suas alterações estão seguras no stash.",
+    forcePushRemoteMoved: "Force push recusado: o branch remoto mudou depois que você decidiu forçar o push (alguém pode ter feito push, ou ele foi excluído). Nada foi sobrescrito. Faça o force push de novo para ver o que ele contém agora.",
+    forcePushUnmapped: "Force push recusado: o GitWand não consegue saber qual branch remoto este push atualiza (o refspec de fetch não permite deduzi-lo), então não pode proteger os commits dele. Faça o force push pelo terminal se for o que você quer.",
     pushDone: "Push concluído",
     stashDone: "Mudanças guardadas no stash",
     mergeDone: "Merge concluído",

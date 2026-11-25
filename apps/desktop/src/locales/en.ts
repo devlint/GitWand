@@ -92,6 +92,8 @@ const en = {
     pullRefusedDirty: "Pull refused: uncommitted changes are present.",
     pullAutostashParked: "Pulled — your changes are stashed and will come back when the operation finishes.",
     pullAutostashConflict: "Pull done, but restoring your changes hit conflicts — resolve them in the Changes view. Your changes are safe in the stash.",
+    forcePushRemoteMoved: "Force push refused: the remote branch changed after you chose to force push (someone may have pushed, or it was deleted). Nothing was overwritten. Force push again to see what it holds now.",
+    forcePushUnmapped: "Force push refused: GitWand cannot tell which remote branch this push updates (its fetch refspec does not map it back), so it cannot protect the commits there. Force push from a terminal if you mean to.",
     pushDone: "Push completed",
     stashDone: "Changes stashed",
     mergeDone: "Merge completed",

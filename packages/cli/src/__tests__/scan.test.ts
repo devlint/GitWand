@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cmdScan } from "../commands/scan.js";
+import { cmdScan, extractStagedAddedLines } from "../commands/scan.js";
 
 function initRepo(): string {
   const raw = mkdtempSync(join(tmpdir(), "gw-cli-scan-"));
@@ -109,6 +109,59 @@ describe("gitwand scan", { timeout: GIT_IO_TIMEOUT_MS }, () => {
     await cmdScan({ strict: true });
 
     expect(process.exitCode).toBe(0);
+  });
+
+  // An external diff tool or colour would hide every added line (the scan
+  // would fail open); other prefixes or git's trailing tab after a name with a
+  // space would misname the file.
+  it("scans the staged bytes under their real name whatever the patch config", async () => {
+    for (const [k, v] of [
+      ["diff.external", "echo EXTERNAL"],
+      ["color.ui", "always"],
+      ["diff.noprefix", "true"],
+      ["diff.srcPrefix", "SRC/"],
+      ["diff.dstPrefix", "DST/"],
+      ["core.quotePath", "true"],
+    ]) {
+      execFileSync("git", ["-C", repoDir, "config", k, v]);
+    }
+    stageFile(repoDir, "src/é k.ts", 'const key = "AKIAABCDEFGHIJKLMNOP";\n');
+
+    await cmdScan({ json: true });
+
+    const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    const parsed = JSON.parse(output);
+    expect(parsed.findings.map((f: { file: string }) => f.file)).toEqual(["src/é k.ts"]);
+  });
+
+  // A `+++` header the name reader cannot parse still names the file as
+  // printed: its added lines are scanned, never skipped.
+  it("still scans the added lines under a header it cannot parse", () => {
+    const diff = [
+      "diff --git x/odd.ts y/odd.ts",
+      "--- x/odd.ts",
+      "+++ y/odd.ts\t",
+      "@@ -0,0 +1 @@",
+      '+const key = "AKIAABCDEFGHIJKLMNOP";',
+      "",
+    ].join("\n");
+    expect(extractStagedAddedLines(diff)).toEqual([
+      { path: "y/odd.ts", addedLines: [{ line: 1, text: 'const key = "AKIAABCDEFGHIJKLMNOP";' }] },
+    ]);
+  });
+
+  // No git on PATH: an error (exit 2), never a clean scan.
+  it("reports git missing instead of a clean scan", async () => {
+    const path = process.env.PATH;
+    process.env.PATH = "";
+    try {
+      await cmdScan({ json: true });
+    } finally {
+      process.env.PATH = path;
+    }
+    const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(JSON.parse(output).error).toMatch(/git could not be run/);
+    expect(process.exitCode).toBe(2);
   });
 
   it("nothing staged reports no findings", async () => {

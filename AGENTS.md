@@ -178,9 +178,11 @@ until the next `diff ` line.
 Shared implementations, which must stay in sync — do not write another parser:
 
 - **TypeScript**, `packages/core/src/hunk-body.ts` (`classifyHunkLine`,
-  `hunkBodyFromHeader`, `parseHunkHeader`, `noHunkBody`). Callers:
+  `hunkBodyFromHeader`, `parseHunkHeader`, `noHunkBody`, and
+  `diffFileLineName` for the name on a `--- a/` / `+++ b/` line). Callers:
   - core: `history/parse.ts` (`isPureMove`);
-  - CLI: `packages/cli/src/commands/scan.ts` (`extractStagedAddedLines`);
+  - CLI: `packages/cli/src/commands/scan.ts` (`extractStagedAddedLines`,
+    names through `diffFileLineName`);
   - desktop frontend: `utils/unifiedDiff.ts` (`parseFileDiff` /
     `parseUnifiedDiff`, used by PR and commit review and `PullRequestPanel.vue`),
     `composables/useAbsorb.ts`, `composables/usePrSummary.ts`;

@@ -41,6 +41,7 @@ import {
   clear as clearCommitReviewState,
   reconcileHead,
 } from "./commitReviewState";
+import { patchDiffArgs } from "../utils/patchArgs";
 
 /**
  * Hard cap on the number of staged files sent through the review pass — a
@@ -509,7 +510,7 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       const config = await resolveEffectiveConfig(cwd);
       if (config.enabled) {
         try {
-          const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+          const res = await gitExec(cwd, patchDiffArgs("--cached"));
           if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
         } catch {
           // A coverage-refresh failure must never disrupt anything else —
@@ -554,7 +555,7 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       const config = await resolveEffectiveConfig(cwd);
       if (config.enabled) {
         try {
-          const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+          const res = await gitExec(cwd, patchDiffArgs("--cached"));
           if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
         } catch {
           // A coverage-refresh failure must never disrupt the commit flow —
@@ -645,7 +646,7 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       const headHash = await resolveHeadHash(cwd);
       if (controller.signal.aborted) return false;
 
-      const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+      const res = await gitExec(cwd, patchDiffArgs("--cached"));
       if (controller.signal.aborted) return false;
 
       if (res.exitCode !== 0) {

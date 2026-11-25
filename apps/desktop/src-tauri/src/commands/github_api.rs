@@ -39,7 +39,7 @@
 use super::curl_util::{
     bearer_config, curl_with_headers, curl_with_status, curl_with_status_bounded, RequestOpts,
 };
-use crate::git::{git_cmd, hidden_cmd};
+use crate::git::{git_cmd, hidden_cmd, PATCH_CONFIG, PATCH_FLAGS};
 use crate::types::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -1065,7 +1065,10 @@ pub(crate) fn diff_numstat(cwd: &str, head: &str, base: &str) -> (i64, i64) {
     }
     let range = format!("origin/{}...origin/{}", base, head);
     let out = match hidden_cmd("git")
-        .args(["diff", "--numstat", &range])
+        .args(PATCH_CONFIG)
+        .args(["diff", "--numstat", "--no-textconv"])
+        .args(PATCH_FLAGS)
+        .arg(&range)
         .current_dir(cwd)
         .output()
     {
