@@ -141,6 +141,40 @@ describe("parity: git-show", () => {
     }
   });
 
+  // Repo config that changes how git prints a patch (no or other prefixes,
+  // forced colour, an external diff tool, quoted names, signatures) changes
+  // neither backend's result: both pin it away (git/cmd.rs `PATCH_CONFIG`).
+  it("ignores the user's patch config", async () => {
+    const cwd = mkTempRepo("gw-parity-show-hostile-");
+    commitFile(cwd, "é t.txt", "1\n", "a", 0);
+    commitFile(cwd, "plain.txt", "a\n", "b", 1);
+    writeFileSync(join(cwd, "é t.txt"), "2\n");
+    writeFileSync(join(cwd, "plain.txt"), "b\n");
+    execFileSync("git", ["-C", cwd, "commit", "-q", "-am", "edit"]);
+    const show = () =>
+      assertParity(dev, {
+        command: "git-show",
+        args: { cwd, hash: "HEAD" },
+        httpPath: `/api/git-show?cwd=${encodeURIComponent(cwd)}&hash=HEAD`,
+      });
+    const clean = await show();
+    for (const [k, v] of [
+      ["diff.noprefix", "true"],
+      ["diff.mnemonicPrefix", "true"],
+      ["diff.srcPrefix", "SRC/"],
+      ["diff.dstPrefix", "DST/"],
+      ["color.ui", "always"],
+      ["core.quotePath", "true"],
+      ["diff.external", "echo EXTERNAL"],
+      ["log.showSignature", "true"],
+    ]) {
+      execFileSync("git", ["-C", cwd, "config", k, v]);
+    }
+    const hostile = await show();
+    expect(hostile.rust).toEqual(clean.rust);
+    expect(clean.rust.map((d) => d.path)).toEqual(["plain.txt", "é t.txt"]);
+  });
+
   // A name holding ` b/` and names git C-quotes (`"`, `\\`, a tab, non-ASCII
   // with the default core.quotePath=true) come out exactly as git stores them.
   it.skipIf(process.platform === "win32")("names files with ` b/`, quotes, escapes and non-ASCII exactly", async () => {

@@ -128,3 +128,24 @@ describe("hunk-body", () => {
     }
   });
 });
+
+describe("diffFileLineName", () => {
+  it("strips the prefix and git's trailing tab after a name with a space", () => {
+    expect(core.diffFileLineName("b/src/a.ts", "b/")).toBe("src/a.ts");
+    expect(core.diffFileLineName("b/src/é k.ts\t", "b/")).toBe("src/é k.ts");
+  });
+
+  it("reads a C-quoted name, octal UTF-8 bytes and escapes included", () => {
+    expect(core.diffFileLineName('"b/\\303\\251 t.txt"', "b/")).toBe("é t.txt");
+    expect(core.diffFileLineName('"b/we\\"ird\\ttab.txt"\t', "b/")).toBe('we"ird\ttab.txt');
+    expect(core.diffFileLineName('"b/back\\\\slash"', "b/")).toBe("back\\slash");
+  });
+
+  it("is null for /dev/null, a missing prefix or a malformed quote", () => {
+    expect(core.diffFileLineName("/dev/null", "b/")).toBeNull();
+    expect(core.diffFileLineName("src/a.ts", "b/")).toBeNull();
+    expect(core.diffFileLineName('"b/unterminated', "b/")).toBeNull();
+    expect(core.diffFileLineName('"b/x" trailing', "b/")).toBeNull();
+    expect(core.diffFileLineName('"b/\\9bad"', "b/")).toBeNull();
+  });
+});

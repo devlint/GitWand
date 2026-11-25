@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { t } from "./useI18n";
+import { patchShowArgs } from "../utils/patchArgs";
 
 /**
  * "Why did this line change?" — given a commit hash and a file path,
@@ -122,7 +123,7 @@ export function useBlameContext() {
 
       const [msgRes, diffRes, shortRes] = await Promise.all([
         gitExec(cwd, ["show", "-s", "--format=%B", hashFull]),
-        gitExec(cwd, ["show", hashFull, "--no-color", "--", filePath]),
+        gitExec(cwd, patchShowArgs(hashFull, "--", filePath)),
         gitExec(cwd, ["rev-parse", "--short", hashFull]),
       ]);
 

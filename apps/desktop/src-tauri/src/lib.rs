@@ -467,6 +467,22 @@ pub fn command_parity(
             Some(false),
         ))
         .map(|r| serde_json::json!({ "success": r.success, "message": r.message })),
+        "git_push" => {
+            let opt = |k: &str| args.get(k).and_then(|v| v.as_str()).map(str::to_string);
+            tauri::async_runtime::block_on(commands::ops::git_push(
+                s("cwd")?,
+                args.get("setUpstream").and_then(|v| v.as_bool()),
+                args.get("force").and_then(|v| v.as_bool()),
+                opt("leaseBranch"),
+                opt("leaseSha"),
+            ))
+            .map(|r| serde_json::json!({ "success": r.success, "message": r.message }))
+        }
+        "git_stash_show" => tauri::async_runtime::block_on(commands::ops::git_stash_show(
+            s("cwd")?,
+            args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+        ))
+        .map(|d| serde_json::json!({ "diff": d })),
         "git_fast_forward_to_upstream" => {
             tauri::async_runtime::block_on(commands::ops::git_fast_forward_to_upstream(s("cwd")?))
                 .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string()))

@@ -1782,6 +1782,8 @@ mod tests {
         for (key, value) in [
             ("diff.noprefix", "true"),
             ("diff.mnemonicPrefix", "true"),
+            ("diff.srcPrefix", "SRC/"),
+            ("diff.dstPrefix", "DST/"),
             ("color.ui", "always"),
             ("diff.external", "false"),
             ("commit.gpgSign", "true"),

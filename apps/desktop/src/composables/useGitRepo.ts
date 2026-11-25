@@ -55,7 +55,12 @@ import {
 } from "../utils/backend";
 import { shouldForceLogAfterFetch } from "../utils/fetchRefresh";
 import { requireOnline } from "../utils/networkGuard";
-import { clearUpdatePromptSkip, evaluateAutoForcePush } from "./useBranchUpdatePrompt";
+import {
+  clearUpdatePromptSkip,
+  evaluateAutoForcePush,
+  isForcePushRemoteMoved,
+  forcePushRejectionLine,
+} from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
 import { resolveConflictOperation } from "../utils/conflictOperation";
 import { useWorkspaceScope } from "./useWorkspaceScope";
@@ -1216,11 +1221,27 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * exists" case that happens on a --set-upstream push with no local tracking
    * ref. Matches git's English rejection text, which is stable across versions.
    */
+  /** An error a push reported (raw, or one of its localized refusals). */
+  function isPushError(message: string | null): boolean {
+    if (!message) return false;
+    return (
+      message.startsWith("push: ") ||
+      message.startsWith(t("header.forcePushRemoteMoved")) ||
+      message.startsWith(t("header.forcePushUnmapped"))
+    );
+  }
+
   function isRefAlreadyExistsError(message: string): boolean {
     return /reference already exists/i.test(message);
   }
 
-  async function push(force: boolean = false) {
+  /**
+   * `decidedLeaseSha`: for a force push, the remote tip the user was shown
+   * when they chose to force push (`forcePushTarget`), or `null` when that
+   * decision found none to lease. It wins over the auto-detected one, which
+   * only applies when it is `undefined` (no decision made).
+   */
+  async function push(force: boolean = false, decidedLeaseSha?: string | null) {
     if (!folderPath.value) return;
     if (!(await requireOnline("push"))) return;
     isPushing.value = true;
@@ -1229,9 +1250,18 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // this covers both a genuine first publish and a branch that exists on
       // the remote but lost its tracking config.
       const publish = needsUpstream.value;
-      // An auto-detected preference was judged against one remote tip: pass it
-      // as an explicit lease so the push is refused if the remote moved since.
-      const leaseSha = force ? autoForcePushSha.value : null;
+      // A force push leases the remote tip it was judged against (by the user,
+      // or by the divergence probe), so it is refused if the remote moved since.
+      // `undefined`: no decision was made, the auto-detected lease applies
+      // (never on a publish, which pushes to `origin HEAD`, not `@{push}`).
+      // `null`: decided, with no lease (the backend falls back).
+      const leaseSha = !force
+        ? null
+        : decidedLeaseSha !== undefined
+          ? decidedLeaseSha
+          : publish
+            ? null
+            : autoForcePushSha.value;
       const leaseBranch = status.value?.branch;
       const lease = leaseSha && leaseBranch ? { branch: leaseBranch, sha: leaseSha } : undefined;
       let result = await gitPush(folderPath.value, publish, force, lease);
@@ -1248,10 +1278,18 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         result = await gitPush(folderPath.value, true, force, lease);
       }
       if (!result.success) {
-        error.value = `push: ${result.message}`;
+        // The plain-words reason, plus git's own rejection line, which says
+        // which ref moved (or that it is gone).
+        error.value =
+          force && isForcePushRemoteMoved(result.message)
+            ? `${t("header.forcePushRemoteMoved")} (${forcePushRejectionLine(result.message)})`
+            : `push: ${result.message}`;
       } else {
         successMessage.value = "push-done";
         forcePushPreferred.value = false;
+        // A previous push's refusal no longer holds: drop its banner (and
+        // only that kind of error, not an unrelated one).
+        if (isPushError(error.value)) error.value = null;
       }
       // Force: push advances origin/<branch> but not local HEAD, so the log's
       // remote label must be re-pulled to move off the pre-push commit.
@@ -1260,7 +1298,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // (e.g. the PR-create publish guard) see the new tracking state.
       await loadBranches();
     } catch (err: any) {
-      error.value = `push: ${err?.message ?? err}`;
+      const message = String(err?.message ?? err);
+      // The backend's UNMAPPED_PUSH_DEST refusal (ops.rs), in the user's language.
+      error.value = message.includes("the remote branch this push updates cannot be read")
+        ? t("header.forcePushUnmapped")
+        : `push: ${message}`;
     } finally {
       isPushing.value = false;
     }

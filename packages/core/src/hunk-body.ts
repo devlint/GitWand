@@ -121,3 +121,69 @@ export function classifyHunkLine(body: HunkBody, line: string): HunkLineKind | n
   }
   return null;
 }
+
+/**
+ * A C-quoted name at the start of `s` (git's `"a\\303\\251"` form for names
+ * with `"`, `\\`, control or, under `core.quotePath=true`, non-ASCII bytes):
+ * `[unquoted name, rest after the closing quote]`, or `null` if malformed.
+ * Octal escapes are bytes of the UTF-8 name. Mirrors `read_c_quoted` in
+ * apps/desktop/src-tauri/src/commands/read.rs.
+ */
+function readCQuoted(s: string): [string, string] | null {
+  if (!s.startsWith('"')) return null;
+  const body = new TextEncoder().encode(s.slice(1));
+  const simple: Record<string, number> = {
+    a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92,
+  };
+  const out: number[] = [];
+  let i = 0;
+  while (i < body.length) {
+    const b = body[i];
+    if (b === 0x22) {
+      const dec = new TextDecoder();
+      return [dec.decode(new Uint8Array(out)), dec.decode(body.subarray(i + 1))];
+    }
+    if (b !== 0x5c) {
+      out.push(b);
+      i += 1;
+      continue;
+    }
+    if (i + 1 >= body.length) return null;
+    const c = String.fromCharCode(body[i + 1]);
+    i += 2;
+    if (c in simple) {
+      out.push(simple[c]);
+    } else if (c >= "0" && c <= "3") {
+      if (i + 1 >= body.length) return null;
+      const d1 = body[i];
+      const d2 = body[i + 1];
+      if (d1 < 0x30 || d1 > 0x37 || d2 < 0x30 || d2 > 0x37) return null;
+      out.push((c.charCodeAt(0) - 0x30) * 64 + (d1 - 0x30) * 8 + (d2 - 0x30));
+      i += 2;
+    } else {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * The name on a `--- a/P` / `+++ b/P` file-header line (the text after
+ * `--- ` / `+++ `), without `prefix`. `null` for `/dev/null`, a name without
+ * the prefix, or a line this cannot read. git ends the line with a tab when
+ * the name holds a space, and C-quotes unusual names; both are undone here.
+ * Mirrors `file_line_name` in apps/desktop/src-tauri/src/commands/read.rs.
+ */
+export function diffFileLineName(s: string, prefix: string): string | null {
+  let name: string;
+  if (s.startsWith('"')) {
+    const q = readCQuoted(s);
+    if (q === null || (q[1] !== "" && q[1] !== "\t")) return null;
+    name = q[0];
+  } else {
+    const t = s.endsWith("\t") ? s.slice(0, -1) : s;
+    if (t === "/dev/null") return null;
+    name = t;
+  }
+  return name.startsWith(prefix) ? name.slice(prefix.length) : null;
+}

@@ -4,6 +4,7 @@ import { useAIProvider } from "./useAIProvider";
 import { localeToAiLanguage } from "./prAiLocale";
 import { t } from "./useI18n";
 import { applyLang, applyLangStrict, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
+import { patchDiffArgs } from "../utils/patchArgs";
 
 /**
  * Generates commit messages from the currently staged diff.
@@ -108,7 +109,7 @@ export function useCommitMessage() {
       let diffRes, statusRes;
       try {
         [diffRes, statusRes] = await Promise.all([
-          gitExec(cwd, ["diff", "--cached", "--no-color"]),
+          gitExec(cwd, patchDiffArgs("--cached")),
           gitExec(cwd, ["diff", "--cached", "--name-status"]),
         ]);
       } catch (execErr: unknown) {

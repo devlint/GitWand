@@ -52,6 +52,7 @@ export {
   hunkBodyFor,
   hunkBodyFromHeader,
   classifyHunkLine,
+  diffFileLineName,
   type HunkHeaderRange,
   type HunkBody,
   type HunkLineKind,

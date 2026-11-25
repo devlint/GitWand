@@ -34,7 +34,7 @@
 //! token is never logged or returned to the frontend.
 
 use super::curl_util::{bearer_config, curl_with_status, run_curl};
-use crate::git::{git_cmd, hidden_cmd};
+use crate::git::{git_cmd, hidden_cmd, PATCH_CONFIG, PATCH_FLAGS};
 use crate::types::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -831,7 +831,10 @@ fn rest_pr_detail(cwd: &str, number: i64) -> Result<PullRequestDetail, String> {
 fn diff_numstat(cwd: &str, source: &str, target: &str) -> (i64, i64, i64) {
     let range = format!("origin/{}...origin/{}", target, source);
     let out = match git_cmd()
-        .args(["diff", "--numstat", &range])
+        .args(PATCH_CONFIG)
+        .args(["diff", "--numstat", "--no-textconv"])
+        .args(PATCH_FLAGS)
+        .arg(&range)
         .current_dir(cwd)
         .output()
     {
@@ -883,8 +886,12 @@ fn rest_pr_diff(cwd: &str, number: i64) -> Result<String, String> {
     let target = short_ref(&js(&pr, "targetRefName"));
     fetch_pr_branches(cwd, &source, &target)?;
     let range = format!("origin/{}...origin/{}", target, source);
+    // The PR's patch, parsed by the frontend: the user's patch config pinned.
     let out = git_cmd()
-        .args(["diff", &range])
+        .args(PATCH_CONFIG)
+        .args(["diff", "--no-textconv"])
+        .args(PATCH_FLAGS)
+        .arg(&range)
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("git diff failed: {}", e))?;
@@ -904,6 +911,7 @@ fn rest_pr_files(cwd: &str, number: i64) -> Result<Vec<String>, String> {
     fetch_pr_branches(cwd, &source, &target)?;
     let range = format!("origin/{}...origin/{}", target, source);
     let out = git_cmd()
+        .args(PATCH_CONFIG)
         .args(["diff", "--name-only", &range])
         .current_dir(cwd)
         .output()

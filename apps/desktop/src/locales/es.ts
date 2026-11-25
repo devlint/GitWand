@@ -92,6 +92,8 @@ const es: Locale = {
     pullRefusedDirty: "Pull rechazado: hay cambios sin confirmar.",
     pullAutostashParked: "Pull realizado — tus cambios están en stash y volverán cuando termine la operación.",
     pullAutostashConflict: "Pull realizado, pero al restaurar tus cambios hubo conflictos — resúelvelos en la vista Cambios. Tus cambios están a salvo en el stash.",
+    forcePushRemoteMoved: "Force push rechazado: la rama remota cambió después de que decidieras forzar el push (puede que alguien haya hecho push, o que se haya eliminado). No se ha sobrescrito nada. Vuelve a hacer force push para ver lo que contiene ahora.",
+    forcePushUnmapped: "Force push rechazado: GitWand no puede saber qué rama remota actualiza este push (su refspec de fetch no permite deducirla), así que no puede proteger sus commits. Haz el force push desde una terminal si es lo que quieres.",
     pushDone: "Push completado",
     stashDone: "Cambios guardados en stash",
     mergeDone: "Merge completado",

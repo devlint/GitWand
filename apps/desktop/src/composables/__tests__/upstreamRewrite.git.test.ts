@@ -31,11 +31,20 @@ function gitEnv(): NodeJS.ProcessEnv {
   };
 }
 
-// Route the module's gitExec to real git.
+// Route the module's gitExec and gitFetch (the `git_fetch` command: `fetch
+// --prune [remote]`) to real git.
 vi.mock("../../utils/backend", () => ({
   gitExec: vi.fn(async (cwd: string, args: string[]) => {
     const r = spawnSync("git", args, { cwd, env: gitEnv(), encoding: "utf-8" });
     return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
+  }),
+  gitFetch: vi.fn(async (cwd: string, _onProgress: unknown, remote?: string) => {
+    const r = spawnSync("git", ["fetch", "--prune", ...(remote ? [remote] : [])], {
+      cwd,
+      env: gitEnv(),
+      encoding: "utf-8",
+    });
+    return { success: r.status === 0, message: r.stderr ?? "" };
   }),
 }));
 
@@ -44,6 +53,10 @@ import {
   isLocalRewriteOfUpstream,
   probeLocalRewriteOfUpstream,
   evaluateAutoForcePush,
+  isForcePushRemoteMoved,
+  forcePushRejectionLine,
+  forcePushTarget,
+  fetchPushRemote,
 } from "../useBranchUpdatePrompt";
 
 function git(cwd: string, args: string[]): string {
@@ -217,6 +230,123 @@ describe("probeLocalRewriteOfUpstream", () => {
     const { me } = setup();
     git(me, ["switch", "-q", "-c", "local-only"]);
     expect(await probeLocalRewriteOfUpstream(me, "local-only")).toEqual({ safe: false, upstream: null });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  // `push.default=upstream` pushes `mine` to its upstream `origin/feat`: the
+  // force push replaces exactly the commits the probe judged.
+  it("is safe for an upstream named differently that a plain push updates", async () => {
+    const { teammate, me } = setup();
+    git(me, ["switch", "-q", "-c", "mine", "--track", "origin/feat"]);
+    git(me, ["config", "push.default", "upstream"]);
+    rebaseLocallyOntoMovedMain(teammate, me);
+    const probe = await probeLocalRewriteOfUpstream(me, "mine");
+    expect(probe).toEqual({ safe: true, upstream: git(me, ["rev-parse", "origin/feat"]).trim() });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  // A branch tracking origin/feat but pushed to origin/mine (`current`): a
+  // force push would not touch origin/feat, so it is never preferred.
+  it("is not safe when a plain push goes elsewhere than the upstream", async () => {
+    const { teammate, me } = setup();
+    git(me, ["switch", "-q", "-c", "mine", "--track", "origin/feat"]);
+    git(me, ["config", "push.default", "current"]);
+    rebaseLocallyOntoMovedMain(teammate, me);
+    expect((await probeLocalRewriteOfUpstream(me, "mine")).safe).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("forcePushTarget", () => {
+  it("reads the push destination's tip and the commits only it has", async () => {
+    const { teammate, me } = setup();
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["fetch", "-q"]);
+    git(me, ["commit", "-q", "--amend", "-m", "f2 amended"]);
+    expect(await forcePushTarget(me)).toEqual({
+      sha: git(me, ["rev-parse", "origin/feat"]).trim(),
+      behind: 2,
+      branch: "feat",
+    });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  // push.default=upstream: `mine` pushes to origin/feat, so that is the tip.
+  it("follows a destination named differently from the branch", async () => {
+    const { me } = setup();
+    git(me, ["switch", "-q", "-c", "mine", "--track", "origin/feat"]);
+    git(me, ["config", "push.default", "upstream"]);
+    expect(await forcePushTarget(me)).toEqual({
+      sha: git(me, ["rev-parse", "origin/feat"]).trim(),
+      behind: 0,
+      branch: "feat",
+    });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is null when there is nothing to push to yet", async () => {
+    const { me } = setup();
+    git(me, ["switch", "-q", "-c", "local-only"]);
+    expect(await forcePushTarget(me)).toBeNull();
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("fetchPushRemote", () => {
+  // Triangular: upstream on origin, pushes to `fork`. The app's own fetch
+  // covers origin only; the fork's tracking ref must be refreshed too, or a
+  // retry after a refused force push judges the same stale tip.
+  it("fetches the push remote when it is not the upstream's", async () => {
+    const { me } = setup();
+    const fork = join(root, "fork.git");
+    git(root, ["clone", "-q", "--bare", join(root, "remote.git"), fork]);
+    git(me, ["remote", "add", "fork", fork]);
+    git(me, ["fetch", "-q", "fork"]);
+    git(me, ["config", "remote.pushDefault", "fork"]);
+    git(me, ["config", "push.default", "current"]);
+    const mate = join(root, "forkmate");
+    git(root, ["clone", "-q", "-b", "feat", fork, mate]);
+    commit(mate, "k", "fork work\n", "fork work");
+    git(mate, ["push", "-q", "origin", "feat"]);
+    const before = git(me, ["rev-parse", "fork/feat"]).trim();
+
+    await fetchPushRemote(me);
+
+    const after = git(me, ["rev-parse", "fork/feat"]).trim();
+    expect(after).not.toBe(before);
+    expect(after).toBe(git(mate, ["rev-parse", "HEAD"]).trim());
+    expect((await forcePushTarget(me))?.sha).toBe(after);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("isForcePushRemoteMoved", () => {
+  /** `me` amends feat after a teammate's commit landed in origin/feat. */
+  function refusedSetup() {
+    const { teammate, me } = setup();
+    const judged = git(me, ["rev-parse", "origin/feat"]).trim();
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["fetch", "-q"]);
+    commit(me, "h", "mine\n", "mine");
+    git(me, ["commit", "-q", "--amend", "-m", "mine amended"]);
+    return { me, judged };
+  }
+  const push = (cwd: string, args: string[]) => {
+    const r = spawnSync("git", ["push", ...args], { cwd, env: gitEnv(), encoding: "utf-8" });
+    expect(r.status).not.toBe(0);
+    return `${r.stdout}${r.stderr}`;
+  };
+
+  it("recognises git's --force-if-includes refusal", () => {
+    const { me } = refusedSetup();
+    const out = push(me, ["--force-with-lease", "--force-if-includes"]);
+    expect(isForcePushRemoteMoved(out)).toBe(true);
+    expect(forcePushRejectionLine(out)).toBe("! [rejected]        feat -> feat (remote ref updated since checkout)");
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("recognises git's stale explicit lease refusal", () => {
+    const { me, judged } = refusedSetup();
+    expect(isForcePushRemoteMoved(push(me, [`--force-with-lease=refs/heads/feat:${judged}`]))).toBe(true);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("does not claim an ordinary non-fast-forward rejection", () => {
+    const { me } = refusedSetup();
+    expect(isForcePushRemoteMoved(push(me, []))).toBe(false);
   }, GIT_TEST_TIMEOUT_MS);
 });
 

@@ -799,13 +799,18 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
         Ok(patch) => patch.into_bytes(),
         Err(e) => {
             eprintln!("[git_diff] libgit2 fast path failed ({e}); falling back to CLI");
+            // Raw content like libgit2's patch: no textconv, and the user's
+            // patch config pinned away.
             let mut cmd = git_cmd();
+            cmd.args(PATCH_CONFIG).arg("diff");
             if staged {
-                cmd.arg("diff").arg("--cached");
-            } else {
-                cmd.arg("diff");
+                cmd.arg("--cached");
             }
-            cmd.arg("--").arg(&git_path).current_dir(&cwd);
+            cmd.arg("--no-textconv")
+                .args(PATCH_FLAGS)
+                .arg("--")
+                .arg(&git_path)
+                .current_dir(&cwd);
             cmd.output()
                 .map_err(|e| format!("Failed to run git diff: {}", e))?
                 .stdout
@@ -838,7 +843,10 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
 
     if is_untracked {
         if let Ok(fb) = git_cmd()
-            .args(["diff", "--no-index", "--", "/dev/null", &git_path])
+            .args(PATCH_CONFIG)
+            .args(["diff", "--no-index", "--no-textconv"])
+            .args(PATCH_FLAGS)
+            .args(["--", "/dev/null", &git_path])
             .current_dir(&cwd)
             .output()
         {
@@ -1257,9 +1265,33 @@ pub(crate) async fn git_repo_state(cwd: String) -> Result<RepoOperationState, St
 
 #[tauri::command]
 pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, String> {
+    validate_revision("hash", &hash)?;
     let _repo = repo_lock::read(&cwd);
+    // `--no-show-signature`: `log.showSignature=true` would print gpg output
+    // into the patch even with an empty `--format=`. `log.diffMerges`: an
+    // explicit `-m` takes its mode from there (git 2.31+), so `combined` or
+    // `off` would print `diff --cc` sections or nothing for a merge.
+    // `log.showRoot=false` would print nothing for a root commit.
+    // `validate_revision` keeps `hash` from reading as an option (no
+    // `--end-of-options`, which gits before 2.24 take for a revision).
     let output = git_cmd()
-        .args(["show", "-m", "--first-parent", "--format=", &hash])
+        .args(PATCH_CONFIG)
+        .args([
+            "-c",
+            "log.diffMerges=first-parent",
+            "-c",
+            "log.showRoot=true",
+        ])
+        .args([
+            "show",
+            "-m",
+            "--first-parent",
+            "--format=",
+            "--no-show-signature",
+            "--no-textconv",
+        ])
+        .args(PATCH_FLAGS)
+        .arg(&hash)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git show: {}", e))?;
@@ -1421,7 +1453,7 @@ fn unquote_header_name(s: &str) -> Option<String> {
 /// The name on a `--- a/P` / `+++ b/P` line, without `prefix`. `None` for
 /// `/dev/null` or a line this parser cannot read. Git ends the line with a
 /// tab when the name holds a space; an unquoted name never holds a tab.
-fn file_line_name(s: &str, prefix: &str) -> Option<String> {
+pub(crate) fn file_line_name(s: &str, prefix: &str) -> Option<String> {
     let name = if s.starts_with('"') {
         match read_c_quoted(s)? {
             (name, "" | "\t") => name,
@@ -1790,13 +1822,9 @@ pub(crate) async fn git_file_diff(
     }
 
     let mut cmd = git_cmd();
-    cmd.args([
-        "--literal-pathspecs",
-        "diff",
-        "--no-ext-diff",
-        "--no-color",
-        "--no-textconv",
-    ]);
+    cmd.args(PATCH_CONFIG)
+        .args(["--literal-pathspecs", "diff", "--no-textconv"])
+        .args(PATCH_FLAGS);
     if from_name != to_name && from_type.is_some() && to_type.is_some() {
         cmd.arg(format!("{}:{}", from, from_name))
             .arg(format!("{}:{}", to, to_name));
@@ -3981,6 +4009,38 @@ mod pathspec_tests {
         );
     }
 
+    /// The untracked file's `--no-index` diff (always the CLI) ignores the
+    /// user's patch config and textconv, like the libgit2 path.
+    #[test]
+    fn git_diff_of_an_untracked_file_ignores_user_patch_config() {
+        let repo = TempRepo::new();
+        repo.write("é new.json", "{\"a\": 1}\n");
+        let diff = || {
+            tauri::async_runtime::block_on(git_diff(
+                repo.cwd().to_string(),
+                "é new.json".to_string(),
+                false,
+            ))
+            .expect("git_diff")
+        };
+        let clean = serde_json::to_value(diff()).unwrap();
+        assert_eq!(clean["hunks"][0]["lines"][0]["content"], "{\"a\": 1}");
+        for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
+            Command::new(git_binary())
+                .args(["config", k, v])
+                .current_dir(repo.cwd())
+                .output()
+                .unwrap();
+        }
+        repo.write(".gitattributes", "*.json diff=upper\n");
+        Command::new(git_binary())
+            .args(["config", "diff.upper.textconv", "tr a-z A-Z <"])
+            .current_dir(repo.cwd())
+            .output()
+            .unwrap();
+        assert_eq!(serde_json::to_value(diff()).unwrap(), clean);
+    }
+
     // ── git_diff path boundary (safe_repo_path) ───────────────
     //
     // The untracked `--no-index` fallback reads whatever file `path` names,
@@ -4967,6 +5027,28 @@ mod file_diff_tests {
     }
 
     #[test]
+    fn user_patch_config_does_not_change_the_diff() {
+        let repo = TempRepo::new();
+        let a = repo.commit("é t.txt", Some("1\n2\n"), "a");
+        let b = repo.commit("é t.txt", Some("1\nTWO\n"), "b");
+        let (r1, _, _, r2) = renamed_history(&repo);
+        let run = || {
+            (
+                serde_json::to_value(diff(&repo, "é t.txt", &a, &b).unwrap()).unwrap(),
+                serde_json::to_value(compare(repo.cwd(), "new.txt", &r1, &r2)).unwrap(),
+            )
+        };
+        let clean = run();
+        assert_eq!(clean.0["path"], "é t.txt");
+        assert!(!clean.0["hunks"].as_array().unwrap().is_empty());
+        assert!(!clean.1["hunks"].as_array().unwrap().is_empty());
+        for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
+            repo.git(&["config", k, v]);
+        }
+        assert_eq!(run(), clean);
+    }
+
+    #[test]
     fn refuses_a_directory() {
         let repo = TempRepo::new();
         let a = repo.commit("dir/f.txt", Some("x\n"), "a");
@@ -5417,5 +5499,102 @@ mod multi_file_header_tests {
             ]
         );
         assert!(diffs.iter().all(|d| d.hunks.len() == 1));
+    }
+
+    /// User config that changes how git prints a patch must not change what
+    /// `git_show` returns.
+    #[test]
+    fn git_show_ignores_user_patch_config() {
+        let repo = TempRepo::new();
+        repo.write("é t.txt", "1\n");
+        repo.write("plain.txt", "a\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.write("é t.txt", "2\n");
+        repo.write("plain.txt", "b\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "edit"]);
+        let show_rev = |rev: &str| {
+            tauri::async_runtime::block_on(git_show(
+                repo.path.to_string_lossy().to_string(),
+                rev.to_string(),
+            ))
+            .expect("git show")
+        };
+        let show = || show_rev("HEAD");
+        let root = repo.git(&["rev-list", "--max-parents=0", "HEAD"]);
+        let clean_root = serde_json::to_value(show_rev(root.trim())).unwrap();
+        assert!(!clean_root.as_array().unwrap().is_empty());
+        let clean = serde_json::to_value(show()).unwrap();
+        for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
+            repo.git(&["config", k, v]);
+        }
+        repo.write(".git/info/attributes", "*.txt diff=upper\n");
+        repo.git(&["config", "diff.upper.textconv", "tr a-z A-Z <"]);
+        let hostile = serde_json::to_value(show()).unwrap();
+        assert_eq!(hostile, clean);
+        assert_eq!(
+            serde_json::to_value(show_rev(root.trim())).unwrap(),
+            clean_root
+        );
+        let paths: Vec<&str> = clean
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["plain.txt", "é t.txt"]);
+    }
+
+    /// A merge commit shows its first-parent diff whatever `log.diffMerges`
+    /// says (`combined` would print `diff --cc`, `off` nothing).
+    #[test]
+    fn git_show_of_a_merge_ignores_log_diff_merges() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo.git(&["checkout", "-q", "-b", "side"]);
+        repo.write("b.txt", "side\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "side"]);
+        repo.git(&["checkout", "-q", "-"]);
+        repo.write("a.txt", "2\n");
+        repo.git(&["commit", "-q", "-am", "main"]);
+        repo.git(&["merge", "-q", "--no-ff", "-m", "merge", "side"]);
+        let show = || {
+            tauri::async_runtime::block_on(git_show(
+                repo.path.to_string_lossy().to_string(),
+                "HEAD".to_string(),
+            ))
+            .expect("git show")
+        };
+        let clean = show();
+        assert_eq!(
+            clean.iter().map(|d| d.path.as_str()).collect::<Vec<_>>(),
+            ["b.txt"]
+        );
+        for mode in ["combined", "dense-combined", "off", "separate"] {
+            repo.git(&["config", "log.diffMerges", mode]);
+            assert_eq!(
+                serde_json::to_value(show()).unwrap(),
+                serde_json::to_value(&clean).unwrap(),
+                "log.diffMerges={mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn git_show_refuses_an_option_as_hash() {
+        let repo = TempRepo::new();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let err = tauri::async_runtime::block_on(git_show(
+            repo.path.to_string_lossy().to_string(),
+            "--output=/tmp/gitwand-pwn".to_string(),
+        ))
+        .expect_err("refused");
+        assert!(err.contains("invalid"), "{err}");
     }
 }

@@ -3,6 +3,7 @@ import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { localeToAiLanguage } from "./prAiLocale";
 import { t } from "./useI18n";
+import { patchDiffArgs } from "../utils/patchArgs";
 
 /**
  * Generates a stash message from the current working-tree diff.
@@ -89,7 +90,7 @@ export function useStashMessage() {
       let diffRes, statusRes;
       try {
         [diffRes, statusRes] = await Promise.all([
-          gitExec(cwd, ["diff", "HEAD", "--no-color"]),
+          gitExec(cwd, patchDiffArgs("HEAD")),
           gitExec(cwd, ["status", "--short"]),
         ]);
       } catch (execErr: unknown) {

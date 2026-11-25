@@ -11,7 +11,8 @@
  * via localStorage — same shape and lifecycle as useArchivedBranches.
  */
 
-import { gitExec } from "../utils/backend";
+import { gitExec, gitFetch } from "../utils/backend";
+import { remoteBranchOf, trackingRefOf } from "../utils/refspec";
 import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
 
 // ─── decision ────────────────────────────────────────────────────────────────
@@ -87,6 +88,8 @@ export async function isUpstreamRewriteOnly(cwd: string): Promise<boolean> {
  *
  * A collaborator's new commit was never a local tip and has no local
  * equivalent, so Sync stays the default whenever pulling is actually needed.
+ * The verdict is only positive when a plain push goes to the upstream itself
+ * (`@{push}` is `@{upstream}`), since that is the ref the force push replaces.
  *
  * Returns the `@{upstream}` sha the verdict was computed against so callers can
  * tell when it goes stale (the remote-tracking ref moved).
@@ -96,14 +99,20 @@ export async function probeLocalRewriteOfUpstream(
   branch: string,
 ): Promise<{ safe: boolean; upstream: string | null }> {
   try {
-    const [upstream, reflog, upstreamOnly] = await Promise.all([
+    const [upstream, reflog, upstreamOnly, refs] = await Promise.all([
       gitExec(cwd, ["rev-parse", "@{upstream}"]),
       gitExec(cwd, ["reflog", "show", "--format=%H", `refs/heads/${branch}`]),
       gitExec(cwd, ["rev-list", "--cherry-pick", "--right-only", "HEAD...@{upstream}"]),
+      gitExec(cwd, ["rev-parse", "--symbolic-full-name", "@{upstream}", "@{push}"]),
     ]);
     if (upstream.exitCode !== 0) return { safe: false, upstream: null };
     const tip = upstream.stdout.trim();
     if (!tip) return { safe: false, upstream: null };
+    // A push that goes elsewhere than the upstream (a branch tracking
+    // origin/main, pushed to origin/<branch>) would not overwrite the commits
+    // judged here: never prefer a force push for it.
+    const [upRef, pushRef] = refs.stdout.trim().split("\n");
+    if (refs.exitCode !== 0 || !upRef || upRef !== pushRef) return { safe: false, upstream: tip };
     if (reflog.exitCode === 0 && reflog.stdout.split("\n").some((h) => h.trim() === tip)) {
       return { safe: true, upstream: tip };
     }
@@ -111,6 +120,115 @@ export async function probeLocalRewriteOfUpstream(
   } catch {
     return { safe: false, upstream: null };
   }
+}
+
+/**
+ * True when git refused a force push because the remote branch moved past
+ * what the lease allows: `(stale info)` for `--force-with-lease`, `(remote ref
+ * updated since checkout)` for `--force-if-includes`. git prints both reasons
+ * in English whatever the locale.
+ */
+export function isForcePushRemoteMoved(message: string): boolean {
+  return /\(stale info\)|\(remote ref updated since checkout\)/.test(message);
+}
+
+/** Where a plain push from the checked-out branch goes, and its upstream's remote. */
+async function pushRefs(
+  cwd: string,
+): Promise<{ pushRemote: string; pushRef: string; upstreamRemote: string } | null> {
+  const head = await gitExec(cwd, ["symbolic-ref", "-q", "HEAD"]);
+  const ref = head.stdout.trim();
+  if (head.exitCode !== 0 || !ref.startsWith("refs/heads/")) return null;
+  const out = await gitExec(cwd, [
+    "for-each-ref",
+    "--format=%(refname)%09%(push:remotename)%09%(push)%09%(upstream:remotename)",
+    ref,
+  ]);
+  if (out.exitCode !== 0) return null;
+  const line = out.stdout.split("\n").find((l) => l.startsWith(`${ref}\t`));
+  if (line === undefined) return null;
+  const [, pushRemote = "", pushRef = "", upstreamRemote = ""] = line.split("\t");
+  return { pushRemote, pushRef, upstreamRemote };
+}
+
+/**
+ * Bring the push destination's remote-tracking ref up to date before a force
+ * push is judged. The app's own fetch (`gitFetch`, done by the caller) covers
+ * the upstream's remote; a destination on another remote (`remote.pushDefault`,
+ * `branch.<b>.pushRemote`) is fetched here. Best-effort: offline, the last
+ * fetched state is what the user is shown, and the push itself will fail.
+ */
+export async function fetchPushRemote(cwd: string): Promise<void> {
+  try {
+    const refs = await pushRefs(cwd);
+    if (!refs || !refs.pushRemote || refs.pushRemote === refs.upstreamRemote) return;
+    if (refs.pushRemote.startsWith("-")) return;
+    // The app's fetch command (repo lock, prune), on that remote.
+    await gitFetch(cwd, undefined, refs.pushRemote);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * What a force push would replace, read when the user decides to force push:
+ * the tip of the ref the push updates, how many of its commits the local
+ * branch does not have, and that branch's name on the remote (`branch`, which
+ * can differ from the local name; `null` when the fetch refspecs do not map
+ * it back). The push then leases exactly that sha, so it overwrites what the
+ * user was shown and nothing that arrived since.
+ *
+ * The ref is `@{push}` (read as `%(push)`), or, for a publish
+ * (`publishBranch`: no upstream yet, the push runs `--set-upstream origin
+ * HEAD`), `origin/<branch>`. `null` when there is no such ref (never pushed,
+ * not fetched, or `@{push}` unresolvable): the backend then falls back to
+ * `--force-if-includes`.
+ */
+export async function forcePushTarget(
+  cwd: string,
+  opts: { publishBranch?: string } = {},
+): Promise<{ sha: string; behind: number; branch: string | null } | null> {
+  try {
+    let remote: string;
+    let tracking: string;
+    if (opts.publishBranch) {
+      remote = "origin";
+      // Where origin's fetch refspecs put its `refs/heads/<branch>`.
+      const fetch = await gitExec(cwd, ["config", "--get-all", "remote.origin.fetch"]);
+      const mapped = trackingRefOf(fetch.stdout, opts.publishBranch);
+      if (mapped === null) return null;
+      tracking = mapped;
+    } else {
+      const refs = await pushRefs(cwd);
+      if (!refs || !refs.pushRef) return null;
+      remote = refs.pushRemote;
+      tracking = refs.pushRef;
+    }
+    if (!tracking.startsWith("refs/")) return null;
+    const tip = await gitExec(cwd, ["rev-parse", "--verify", "-q", tracking]);
+    const sha = tip.stdout.trim();
+    if (tip.exitCode !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) return null;
+    const count = await gitExec(cwd, ["rev-list", "--count", `HEAD..${sha}`]);
+    const behind = Number.parseInt(count.stdout.trim(), 10);
+    if (count.exitCode !== 0 || !Number.isFinite(behind)) return null;
+    let branch: string | null = null;
+    if (remote && !remote.startsWith("-")) {
+      const fetch = await gitExec(cwd, ["config", "--get-all", `remote.${remote}.fetch`]);
+      branch = remoteBranchOf(fetch.stdout, tracking);
+    }
+    return { sha, behind, branch };
+  } catch {
+    return null;
+  }
+}
+
+/** git's `! [rejected] … (stale info)` line from a refused push, trimmed. */
+export function forcePushRejectionLine(message: string): string {
+  const line = message
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => isForcePushRemoteMoved(l));
+  return line ?? message.trim();
 }
 
 export async function isLocalRewriteOfUpstream(cwd: string, branch: string): Promise<boolean> {

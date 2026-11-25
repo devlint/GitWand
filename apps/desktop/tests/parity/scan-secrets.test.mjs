@@ -72,6 +72,32 @@ describe("parity: scan-secrets", () => {
     });
   });
 
+  // git ends `+++ b/<name>` with a tab when the name holds a space; the
+  // finding's file is the name itself on both sides, under hostile config.
+  it("names a file holding a space and a non-ASCII char exactly, whatever the patch config", async () => {
+    const cwd = mkTempRepo("gw-secrets-names-");
+    for (const [k, v] of [
+      ["diff.noprefix", "true"],
+      ["diff.srcPrefix", "SRC/"],
+      ["diff.dstPrefix", "DST/"],
+      ["color.ui", "always"],
+      ["core.quotePath", "true"],
+      ["diff.external", "echo EXTERNAL"],
+    ]) {
+      execFileSync("git", ["-C", cwd, "config", k, v]);
+    }
+    stageFile(cwd, "src/é k.ts", 'const key = "AKIAABCDEFGHIJKLMNOP";\n');
+
+    const { rust } = await assertParity(dev, {
+      command: "scan-secrets",
+      args: { cwd, config: BASE_CONFIG },
+      httpPath: "/api/scan-secrets",
+      method: "POST",
+      body: { cwd, config: BASE_CONFIG },
+    });
+    expect(rust.map((f) => f.file)).toEqual(["src/é k.ts"]);
+  });
+
   it("ignore-glob case: a fixtures/** path is entirely suppressed", async () => {
     const cwd = mkTempRepo("gw-secrets-ignore-");
     stageFile(cwd, "fixtures/sample.ts", 'const key = "AKIAABCDEFGHIJKLMNOP";\n');
