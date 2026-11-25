@@ -5272,12 +5272,17 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         const args = ["push"];
         if (setUpstream) args.push("--set-upstream", "origin", "HEAD");
+        // `git_push` validates the lease before anything runs, forced or not.
+        const hasBranch = leaseBranch != null;
+        const hasSha = leaseSha != null;
+        if (hasBranch !== hasSha) {
+          return jsonResponse(req, res, { error: "lease_branch and lease_sha must be given together" }, 400);
+        }
+        if (hasBranch) {
+          try { devForceWithLeaseArg(leaseBranch, leaseSha); }
+          catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
+        }
         if (force) {
-          const hasBranch = leaseBranch != null;
-          const hasSha = leaseSha != null;
-          if (hasBranch !== hasSha) {
-            return jsonResponse(req, res, { success: false, message: "lease_branch and lease_sha must be given together" });
-          }
           if (hasBranch) {
             // force_with_lease_arg() in src-tauri/src/commands/ops.rs, on the
             // branch the push updates (`push_destination`).
@@ -5300,8 +5305,9 @@ async function handleRequest(req, res) {
             const headRef = head.status === 0 ? (head.stdout || "").trim() : "";
             const headName = headRef.startsWith("refs/heads/") ? headRef.slice("refs/heads/".length) : "";
             const dest = headName ? devPushDestination(resolvedCwd, headName) : { kind: "none" };
-            // An unreadable destination may be renamed: treated as such.
-            const renamed = dest.kind === "unmapped" || (dest.kind === "branch" && dest.name !== headName);
+            // `git_push`: an unreadable destination is refused, not pushed on a bare lease.
+            if (dest.kind === "unmapped") return jsonResponse(req, res, { error: UNMAPPED_PUSH_DEST }, 400);
+            const renamed = dest.kind === "branch" && dest.name !== headName;
             const v = await combinedGitVersion();
             const hasIfIncludes = v && (v[0] > 2 || (v[0] === 2 && v[1] >= 30));
             // `push.useForceIfIncludes=true` would bring the check back: negate it.

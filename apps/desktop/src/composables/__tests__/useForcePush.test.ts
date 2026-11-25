@@ -20,6 +20,7 @@ function setup(branch = "feature") {
   const pushes: Array<string | null> = [];
   const fetch = vi.fn(async () => {});
   const publishing = ref(false);
+  const online = ref(true);
   const fp = useForcePush({
     folderPath,
     currentBranch: () => current.value,
@@ -27,11 +28,12 @@ function setup(branch = "feature") {
     publishing: () => publishing.value,
     fetch,
     refresh: async () => {},
+    requireOnline: async () => online.value,
     push: async (lease) => {
       pushes.push(lease);
     },
   });
-  return { fp, folderPath, current, isPushing, pushes, fetch, publishing };
+  return { fp, folderPath, current, isPushing, pushes, fetch, publishing, online };
 }
 
 beforeEach(() => {
@@ -66,13 +68,23 @@ describe("useForcePush", () => {
     expect(fp.forcePushConfirm.value).toMatchObject({ protected: true, protectedName: "main" });
   });
 
-  // Without a remote branch name the backend would refuse the lease: none is
-  // sent, and the backend falls back.
-  it("sends no lease when the remote branch name cannot be read", async () => {
+  // The tip read is leased even without a remote branch name: the backend
+  // then refuses an unreadable destination instead of a bare lease.
+  it("leases the tip it read even when the remote branch name is unknown", async () => {
     target.mockResolvedValue({ sha: SHA, behind: 0, branch: null });
     const { fp, pushes } = setup();
     await fp.requestForcePush();
-    expect(pushes).toEqual([null]);
+    expect(pushes).toEqual([SHA]);
+  });
+
+  it("gives up before fetching when offline", async () => {
+    target.mockResolvedValue({ sha: SHA, behind: 0, branch: "feature" });
+    const { fp, pushes, fetch, online } = setup();
+    online.value = false;
+    await fp.requestForcePush();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(pushes).toEqual([]);
+    expect(fp.deciding.value).toBe(false);
   });
 
   // A publish pushes to origin/<branch>: that is the ref judged.

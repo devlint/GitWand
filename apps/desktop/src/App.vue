@@ -2105,6 +2105,7 @@ const {
   // where the composable's fetch would return at once and skip it.
   fetch: () => (repoFolderPath.value ? gitFetch(repoFolderPath.value) : Promise.resolve()),
   refresh: () => repoRefresh(true),
+  requireOnline: () => requireOnline("push"),
   push: (leaseSha) => handlePush(true, leaseSha),
 });
 

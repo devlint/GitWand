@@ -43,6 +43,8 @@ export interface ForcePushDeps {
   fetch: () => Promise<unknown>;
   /** Refresh status and log after the decision's fetch (header counts). */
   refresh: () => Promise<unknown>;
+  /** Online check before the decision's fetch (false: give up, it reported why). */
+  requireOnline: () => Promise<boolean>;
   /** Push with force and this lease (null: the backend's fallback). */
   push: (leaseSha: string | null) => Promise<unknown>;
 }
@@ -66,6 +68,8 @@ export function useForcePush(deps: ForcePushDeps) {
     inFlight = true;
     deciding.value = true;
     try {
+      // Offline: say so now rather than after the fetch times out.
+      if (!(await deps.requireOnline())) return;
       await deps.fetch().catch(() => null);
       // The fetch moved remote-tracking refs: the header and log follow it,
       // whether or not the push goes ahead.
@@ -84,9 +88,10 @@ export function useForcePush(deps: ForcePushDeps) {
       // No readable destination (never pushed): nothing known to overwrite.
       // The upstream's count would describe another ref.
       const behind = target ? target.behind : 0;
-      // A lease names the remote branch: without a readable name, none is
-      // sent (the backend would refuse it) and the push falls back.
-      const leaseSha = target?.branch ? target.sha : null;
+      // Whenever a tip was read, it is leased: a destination whose branch
+      // name the backend cannot read is then refused there, never pushed on
+      // a bare lease that a background fetch would satisfy.
+      const leaseSha = target?.sha ?? null;
       if (protectedName !== "" || behind > 0) {
         forcePushConfirm.value = {
           branch,

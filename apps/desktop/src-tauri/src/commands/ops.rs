@@ -629,12 +629,14 @@ pub(crate) async fn git_push(
                 // a branch pushed under another name (`push.default=upstream`)
                 // would always be refused: no `--force-if-includes` there.
                 args.push("--force-with-lease");
-                // An unreadable destination may be renamed: treated as such.
-                let renamed = head_branch(&cwd).is_some_and(|b| match push_destination(&cwd, &b) {
-                    PushDest::Branch(d) => d != b,
-                    PushDest::None => false,
-                    PushDest::Unmapped => true,
-                });
+                let renamed = match head_branch(&cwd).map(|b| (push_destination(&cwd, &b), b)) {
+                    Some((PushDest::Branch(d), b)) => d != b,
+                    // A destination git names but whose branch cannot be
+                    // read: neither the reflog check nor a lease can be
+                    // trusted, so no force push at all.
+                    Some((PushDest::Unmapped, _)) => return Err(UNMAPPED_PUSH_DEST.to_string()),
+                    _ => false,
+                };
                 let if_includes = supports_force_if_includes(crate::stack::guard::git_version());
                 if renamed {
                     // `push.useForceIfIncludes=true` would turn it back on.
