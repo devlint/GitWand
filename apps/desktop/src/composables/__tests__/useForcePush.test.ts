@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ref } from "vue";
+import { nextTick, ref } from "vue";
 
 // The git reads are covered against real repos in upstreamRewrite.git.test.ts;
 // here they are controlled, to drive the decision's races.
@@ -165,6 +165,16 @@ describe("useForcePush", () => {
     release({ sha: SHA, behind: 0, branch: "feature" });
     await req;
     expect(pushes).toEqual([]);
+  });
+
+  it("closes an open confirmation when the tab or branch changes", async () => {
+    target.mockResolvedValue({ sha: SHA, behind: 1, branch: "feature" });
+    const { fp, current } = setup();
+    await fp.requestForcePush();
+    expect(fp.forcePushConfirm.value).not.toBeNull();
+    current.value = "other";
+    await nextTick();
+    expect(fp.forcePushConfirm.value).toBeNull();
   });
 
   it("keeps the confirmation open while a push runs", async () => {

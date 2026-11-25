@@ -2704,6 +2704,17 @@ function devPushDestination(cwd, branch) {
 
 /** ops.rs `remote_branch_of` (src/utils/refspec.ts `remoteBranchOf`). */
 function devRemoteBranchOf(refspecs, tracking) {
+  const excluded = (full) =>
+    refspecs.split("\n").some((l) => {
+      const t = l.trim();
+      if (!t.startsWith("^")) return false;
+      const neg = t.slice(1);
+      const star = neg.indexOf("*");
+      if (star < 0) return neg === full;
+      const pre = neg.slice(0, star);
+      const suf = neg.slice(star + 1);
+      return full.length >= pre.length + suf.length && full.startsWith(pre) && full.endsWith(suf);
+    });
   for (const line of refspecs.split("\n")) {
     const spec = line.trim().replace(/^\+/, "");
     if (spec === "" || spec.startsWith("^")) continue;
@@ -2723,8 +2734,10 @@ function devRemoteBranchOf(refspecs, tracking) {
     } else if (srcStar < 0 && dstStar < 0 && dst === tracking) {
       full = src;
     }
-    if (full !== null && full.startsWith("refs/heads/") && full.length > "refs/heads/".length) {
-      return full.slice("refs/heads/".length);
+    if (full !== null) {
+      if (excluded(full)) return null;
+      if (full.startsWith("refs/heads/") && full.length > "refs/heads/".length) return full.slice("refs/heads/".length);
+      return null;
     }
   }
   return null;
@@ -6390,7 +6403,7 @@ async function handleRequest(req, res) {
         // The resolved GIT, streamed (no 1 MB maxBuffer), like /api/git-show.
         const out = await gitSpawn(
           [
-            ...PATCH_CONFIG, "-c", "stash.showIncludeUntracked=false",
+            ...PATCH_CONFIG, "-c", "stash.showIncludeUntracked=true",
             "stash", "show", "-p", "--no-textconv", ...PATCH_FLAGS, `stash@{${parseInt(idx, 10)}}`,
           ],
           resolvedCwd,

@@ -28,4 +28,12 @@ describe("trackingRefOf", () => {
     expect(trackingRefOf("+refs/heads/main:refs/remotes/origin/main", "dev")).toBeNull();
     expect(trackingRefOf("", "main")).toBeNull();
   });
+
+  it("honours negative refspecs, both ways", () => {
+    const neg = "+refs/heads/*:refs/remotes/origin/*\n^refs/heads/wip\n^refs/heads/tmp-*";
+    expect(trackingRefOf(neg, "wip")).toBeNull();
+    expect(trackingRefOf(neg, "tmp-1")).toBeNull();
+    expect(remoteBranchOf(neg, "refs/remotes/origin/wip")).toBeNull();
+    expect(remoteBranchOf(neg, "refs/remotes/origin/main")).toBe("main");
+  });
 });

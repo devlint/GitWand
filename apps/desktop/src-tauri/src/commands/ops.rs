@@ -544,7 +544,25 @@ fn push_destination(cwd: &str, branch: &str) -> PushDest {
 /// `refs/heads/*:refs/remotes/origin/heads/*`. git has no command for this
 /// reverse mapping. `None` when no refspec maps a branch onto `tracking`.
 fn remote_branch_of(refspecs: &str, tracking: &str) -> Option<String> {
-    refspecs.lines().find_map(|line| {
+    // A negative refspec (`^refs/heads/wip`, `^refs/heads/tmp-*`) excludes
+    // the branch: git never fetches it, so a tracking ref by that name is
+    // stale, never the remote's tip.
+    let excluded = |full: &str| {
+        refspecs.lines().any(|l| {
+            let Some(neg) = l.trim().strip_prefix('^') else {
+                return false;
+            };
+            match neg.split_once('*') {
+                Some((pre, suf)) => {
+                    full.len() >= pre.len() + suf.len()
+                        && full.starts_with(pre)
+                        && full.ends_with(suf)
+                }
+                None => neg == full,
+            }
+        })
+    };
+    let name = refspecs.lines().find_map(|line| {
         let spec = line.trim().trim_start_matches('+');
         if spec.starts_with('^') {
             return None; // a negative refspec maps nothing
@@ -558,10 +576,11 @@ fn remote_branch_of(refspecs: &str, tracking: &str) -> Option<String> {
             (None, None) if dst == tracking => src.to_string(),
             _ => return None,
         };
-        full.strip_prefix("refs/heads/")
-            .filter(|b| !b.is_empty())
-            .map(str::to_string)
-    })
+        (!excluded(&full)).then_some(full)
+    })?;
+    name.strip_prefix("refs/heads/")
+        .filter(|b| !b.is_empty())
+        .map(str::to_string)
 }
 
 #[tauri::command]
@@ -1985,8 +2004,9 @@ pub(crate) async fn git_stash_show(cwd: String, index: usize) -> Result<String, 
     let stash_ref = format!("stash@{{{}}}", index);
     let output = git_cmd()
         .args(PATCH_CONFIG)
-        // Untracked files of a `-u` stash only with this config set.
-        .args(["-c", "stash.showIncludeUntracked=false"])
+        // GitWand stashes with `--include-untracked`: show those files too,
+        // whatever the user's config (older gits ignore the key).
+        .args(["-c", "stash.showIncludeUntracked=true"])
         .args(["stash", "show", "-p", "--no-textconv"])
         .args(PATCH_FLAGS)
         .arg(&stash_ref)
@@ -6631,7 +6651,7 @@ mod stash_and_tag_date_tests {
         let show = || tauri::async_runtime::block_on(git_stash_show(repo.cwd(), 0)).unwrap();
         let clean = show();
         assert!(clean.contains("diff --git a/é t.txt b/é t.txt"), "{clean}");
-        assert!(!clean.contains("untracked.txt"), "{clean}");
+        assert!(clean.contains("untracked.txt"), "{clean}");
         for (k, v) in crate::git::HOSTILE_PATCH_CONFIG {
             repo.git_ok(&["config", k, v]);
         }
@@ -7543,6 +7563,14 @@ mod git_push_force_tests {
         assert_eq!(
             remote_branch_of("^refs/heads/x", "refs/remotes/origin/x"),
             None
+        );
+        // Excluded by a negative refspec: a stale tracking ref, not a tip.
+        let neg = "+refs/heads/*:refs/remotes/origin/*\n^refs/heads/wip\n^refs/heads/tmp-*";
+        assert_eq!(remote_branch_of(neg, "refs/remotes/origin/wip"), None);
+        assert_eq!(remote_branch_of(neg, "refs/remotes/origin/tmp-1"), None);
+        assert_eq!(
+            remote_branch_of(neg, "refs/remotes/origin/main").as_deref(),
+            Some("main")
         );
         assert_eq!(remote_branch_of("", "refs/remotes/origin/main"), None);
     }

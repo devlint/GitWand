@@ -3874,10 +3874,12 @@ const pendingPushBranch = ref<string | null>(null);
  * in another repository is dropped rather than run here.
  */
 function dropStalePendingPush(): boolean {
-  if (
-    pendingPushCwd.value === repoFolderPath.value &&
-    pendingPushBranch.value === (repoStatus.value?.branch ?? "")
-  ) {
+  // Another repository: never push it from here. Another branch: only a
+  // force push is dropped (its lease was decided for the old one); a plain
+  // push pushes the branch checked out now, as before.
+  const sameRepo = pendingPushCwd.value === repoFolderPath.value;
+  const sameBranch = pendingPushBranch.value === (repoStatus.value?.branch ?? "");
+  if (sameRepo && (sameBranch || !pendingPushForce.value)) {
     return false;
   }
   pushTagsConfirm.value = false;

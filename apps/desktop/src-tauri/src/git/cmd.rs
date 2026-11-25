@@ -480,7 +480,7 @@ pub(crate) const HOSTILE_PATCH_CONFIG: [(&str, &str); 13] = [
     ("log.diffMerges", "combined"),
     ("log.showRoot", "false"),
     ("diff.submodule", "log"),
-    ("stash.showIncludeUntracked", "true"),
+    ("stash.showIncludeUntracked", "false"),
 ];
 
 /// Run `cmd` with a deadline, killing it if it doesn't finish in time.

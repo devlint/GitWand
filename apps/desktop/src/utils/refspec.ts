@@ -8,6 +8,20 @@
  * branch onto `tracking`. Mirrors `remote_branch_of` in
  * src-tauri/src/commands/ops.rs (and `devRemoteBranchOf` in dev-server.mjs).
  */
+/** A negative refspec (`^refs/heads/wip`, `^refs/heads/tmp-*`) excludes `full`. */
+function excluded(refspecs: string, full: string): boolean {
+  return refspecs.split("\n").some((l) => {
+    const t = l.trim();
+    if (!t.startsWith("^")) return false;
+    const neg = t.slice(1);
+    const star = neg.indexOf("*");
+    if (star < 0) return neg === full;
+    const pre = neg.slice(0, star);
+    const suf = neg.slice(star + 1);
+    return full.length >= pre.length + suf.length && full.startsWith(pre) && full.endsWith(suf);
+  });
+}
+
 export function remoteBranchOf(refspecs: string, tracking: string): string | null {
   for (const line of refspecs.split("\n")) {
     const spec = line.trim().replace(/^\+/, "");
@@ -29,8 +43,12 @@ export function remoteBranchOf(refspecs: string, tracking: string): string | nul
     } else if (srcStar < 0 && dstStar < 0 && dst === tracking) {
       full = src;
     }
-    if (full !== null && full.startsWith("refs/heads/") && full.length > "refs/heads/".length) {
-      return full.slice("refs/heads/".length);
+    if (full !== null) {
+      // Excluded by a negative refspec: git never fetches it, the tracking
+      // ref by that name is stale.
+      if (excluded(refspecs, full)) return null;
+      if (full.startsWith("refs/heads/") && full.length > "refs/heads/".length) return full.slice("refs/heads/".length);
+      return null;
     }
   }
   return null;
@@ -43,6 +61,7 @@ export function remoteBranchOf(refspecs: string, tracking: string): string | nul
  */
 export function trackingRefOf(refspecs: string, branch: string): string | null {
   const src = `refs/heads/${branch}`;
+  if (excluded(refspecs, src)) return null;
   for (const line of refspecs.split("\n")) {
     const spec = line.trim().replace(/^\+/, "");
     if (spec === "" || spec.startsWith("^")) continue;

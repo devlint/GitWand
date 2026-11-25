@@ -9,7 +9,7 @@
  * refusal fetches again, so it judges the new tip instead of failing on the
  * same stale one.
  */
-import { ref, type Ref } from "vue";
+import { ref, watch, type Ref } from "vue";
 import { fetchPushRemote, forcePushTarget } from "./useBranchUpdatePrompt";
 
 /** Trunks a force push always confirms, under their local or remote name. */
@@ -103,7 +103,9 @@ export function useForcePush(deps: ForcePushDeps) {
         };
         return;
       }
-      deciding.value = false;
+      // `deciding` stays on until the push settles: `isPushing` only turns
+      // on once the push itself starts, and a Push click in between would
+      // overlap it.
       await deps.push(leaseSha);
     } finally {
       inFlight = false;
@@ -121,16 +123,28 @@ export function useForcePush(deps: ForcePushDeps) {
     // showed (and the lease) no longer describes the push.
     if (deps.folderPath.value !== pending.cwd || deps.currentBranch() !== pending.branch) return;
     inFlight = true;
+    deciding.value = true;
     try {
       await deps.push(pending.leaseSha);
     } finally {
       inFlight = false;
+      deciding.value = false;
     }
   }
 
   function cancelForcePush(): void {
     forcePushConfirm.value = null;
   }
+
+  // A tab or branch switch makes an open confirmation describe another push:
+  // it closes rather than showing stale counts until clicked.
+  watch(
+    () => [deps.folderPath.value, deps.currentBranch()] as const,
+    ([cwd, branch]) => {
+      const open = forcePushConfirm.value;
+      if (open && (open.cwd !== cwd || open.branch !== branch)) forcePushConfirm.value = null;
+    },
+  );
 
   return { forcePushConfirm, deciding, requestForcePush, confirmForcePush, cancelForcePush };
 }

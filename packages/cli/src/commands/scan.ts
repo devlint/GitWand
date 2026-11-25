@@ -36,6 +36,24 @@ import { c } from "../ui.js";
 import { findGitRoot } from "../llm-config.js";
 
 /**
+ * The git to run without a shell. On Windows, `where git` can list a
+ * `git.cmd` wrapper before `git.exe`: the first `.exe` is taken, so a shim
+ * earlier on PATH does not stop the scan when the real executable is there.
+ */
+function gitExecutable(): string {
+  if (process.platform !== "win32") return "git";
+  try {
+    const found = execFileSync("where", ["git"], { encoding: "utf-8" })
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => /\.exe$/i.test(l));
+    return found ?? "git";
+  } catch {
+    return "git";
+  }
+}
+
+/**
  * The staged bytes as a patch, tolerant on failure (returns "" when we're not in a repo —
  * same tolerant style as `getConflictedFiles()`), but `null` when the output was not seen
  * (git not runnable, output over the buffer): a scan that saw nothing must not pass as clean. The user's patch
@@ -47,7 +65,7 @@ import { findGitRoot } from "../llm-config.js";
 function getStagedDiff(cwd: string): string | null {
   try {
     return execFileSync(
-      "git",
+      gitExecutable(),
       [
         "-c", "core.quotePath=false",
         "-c", "diff.noprefix=false",

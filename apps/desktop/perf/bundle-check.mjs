@@ -126,12 +126,12 @@ const BUDGETS = {
   // (1,007,247 bytes). The selection code stays lazy (CombinedDiffView sets
   // the range anchor, not App).
   //
-  // Push/show reliability fix: main measured at 990 KB (1,013,981 bytes):
+  // Push/show reliability fix: main measured at 991 KB (1,014,780 bytes):
   // the force-push decision (`useForcePush`, `forcePushTarget`, eager like
   // the rest of the push path: fetch before judging, decided lease,
   // double-click and tab/branch guards), the `patchDiffArgs` pins and the
-  // localized refusal message.
-  main_max_kb: 990,
+  // localized refusal messages (remote moved, destination unreadable).
+  main_max_kb: 992,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked

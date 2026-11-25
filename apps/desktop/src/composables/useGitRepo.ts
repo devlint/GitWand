@@ -1285,7 +1285,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // (e.g. the PR-create publish guard) see the new tracking state.
       await loadBranches();
     } catch (err: any) {
-      error.value = `push: ${err?.message ?? err}`;
+      const message = String(err?.message ?? err);
+      // The backend's UNMAPPED_PUSH_DEST refusal (ops.rs), in the user's language.
+      error.value = message.includes("the remote branch this push updates cannot be read")
+        ? t("header.forcePushUnmapped")
+        : `push: ${message}`;
     } finally {
       isPushing.value = false;
     }
