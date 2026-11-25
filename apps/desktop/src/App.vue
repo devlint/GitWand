@@ -2091,6 +2091,7 @@ async function doPublish() {
 // local rebase with no remote divergence) skips the modal.
 const {
   forcePushConfirm,
+  deciding: forcePushDeciding,
   requestForcePush: doForcePush,
   confirmForcePush,
   cancelForcePush,
@@ -2103,6 +2104,7 @@ const {
   // The backend fetch itself: it waits behind a background fetch (repo lock)
   // where the composable's fetch would return at once and skip it.
   fetch: () => (repoFolderPath.value ? gitFetch(repoFolderPath.value) : Promise.resolve()),
+  refresh: () => repoRefresh(true),
   push: (leaseSha) => handlePush(true, leaseSha),
 });
 
@@ -3860,8 +3862,8 @@ function handleWipStash() {
 const pushTagsConfirm = ref(false);
 const pendingUnpushedTags = ref<string[]>([]);
 const pendingPushForce = ref(false);
-/** The force push's decided lease, kept across the unpushed-tags modal. */
-const pendingPushLease = ref<string | null>(null);
+/** The force push's decided lease (`undefined`: none decided), kept across the unpushed-tags modal. */
+const pendingPushLease = ref<string | null | undefined>(undefined);
 /** The repository and branch the pending push was started on. */
 const pendingPushCwd = ref<string | null>(null);
 const pendingPushBranch = ref<string | null>(null);
@@ -3880,7 +3882,7 @@ function dropStalePendingPush(): boolean {
   pushTagsConfirm.value = false;
   pendingUnpushedTags.value = [];
   pendingPushForce.value = false;
-  pendingPushLease.value = null;
+  pendingPushLease.value = undefined;
   pendingPushCwd.value = null;
   pendingPushBranch.value = null;
   return true;
@@ -3892,7 +3894,7 @@ function dropStalePendingPush(): boolean {
  * 2. If any exist, shows a confirmation modal instead of pushing immediately.
  * 3. Otherwise falls through to the regular push.
  */
-async function handlePush(force: boolean = false, leaseSha: string | null = null) {
+async function handlePush(force: boolean = false, leaseSha?: string | null) {
   const cwd = repoFolderPath.value;
   if (!cwd) return;
   pendingPushForce.value = force;
@@ -3909,7 +3911,7 @@ async function handlePush(force: boolean = false, leaseSha: string | null = null
       return;
     }
   } catch { /* best-effort — fall through to normal push */ }
-  pendingPushLease.value = null;
+  pendingPushLease.value = undefined;
   await doPush(force, leaseSha);
 }
 
@@ -3927,7 +3929,7 @@ async function confirmPushWithTags() {
   }
   pendingUnpushedTags.value = [];
   pendingPushForce.value = false;
-  pendingPushLease.value = null;
+  pendingPushLease.value = undefined;
   // Trigger scheduled release notes if the user just pushed a version tag
   triggerReleaseNotesIfEnabled();
 }
@@ -3939,7 +3941,7 @@ async function confirmPushWithoutTags() {
   const leaseSha = pendingPushLease.value;
   pendingUnpushedTags.value = [];
   pendingPushForce.value = false;
-  pendingPushLease.value = null;
+  pendingPushLease.value = undefined;
   await doPush(force, leaseSha);
 }
 
@@ -3957,7 +3959,7 @@ async function deleteTagInModal(tagName: string) {
       const force = pendingPushForce.value;
       const leaseSha = pendingPushLease.value;
       pendingPushForce.value = false;
-      pendingPushLease.value = null;
+      pendingPushLease.value = undefined;
       await doPush(force, leaseSha);
     }
   } catch (err: any) {
@@ -5016,7 +5018,7 @@ onUnmounted(() => {
       :has-repo="hasRepo" :folder-name="folderName" :can-push="canPush" :can-pull="canPull"
       :needs-publish="needsPublish" :ahead-count="aheadCount" :behind-count="behindCount"
       :main-commit-count="mainCommitCount" :push-remote="pushRemote"
-      :ahead-push-count="aheadPushCount" :is-pushing="isPushing" :is-pulling="isPulling"
+      :ahead-push-count="aheadPushCount" :is-pushing="isPushing || forcePushDeciding" :is-pulling="isPulling"
       :force-push-preferred="forcePushPreferred" :is-fetching="isFetching" :fetch-percent="fetchPercent"
       :auto-ff-block="autoFfBlock" :cwd="repoFolderPath ?? ''" :branches="branches" :worktree-branches="worktreeBranches" :branches-loading="branchesLoading"
       :is-switching-branch="isSwitchingBranch" :is-merging="isMerging" :tabs="repoTabs" :active-tab-id="activeTabId"

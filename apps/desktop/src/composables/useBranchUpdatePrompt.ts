@@ -12,7 +12,7 @@
  */
 
 import { gitExec, gitFetch } from "../utils/backend";
-import { remoteBranchOf } from "../utils/refspec";
+import { remoteBranchOf, trackingRefOf } from "../utils/refspec";
 import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
 
 // ─── decision ────────────────────────────────────────────────────────────────
@@ -193,7 +193,11 @@ export async function forcePushTarget(
     let tracking: string;
     if (opts.publishBranch) {
       remote = "origin";
-      tracking = `refs/remotes/origin/${opts.publishBranch}`;
+      // Where origin's fetch refspecs put its `refs/heads/<branch>`.
+      const fetch = await gitExec(cwd, ["config", "--get-all", "remote.origin.fetch"]);
+      const mapped = trackingRefOf(fetch.stdout, opts.publishBranch);
+      if (mapped === null) return null;
+      tracking = mapped;
     } else {
       const refs = await pushRefs(cwd);
       if (!refs || !refs.pushRef) return null;

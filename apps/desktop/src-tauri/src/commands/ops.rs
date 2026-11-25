@@ -591,6 +591,12 @@ pub(crate) async fn git_push(
     // The lease names the branch the push actually updates on the remote,
     // which `push.default=upstream` can name differently from the local one.
     let lease_arg = match (lease_branch.as_deref(), lease_sha.as_deref()) {
+        // A lease only means something on a force push (as in the dev-server).
+        _ if !force.unwrap_or(false) => None,
+        // A publish pushes `HEAD` to origin under the local name.
+        (Some(branch), Some(sha)) if set_upstream.unwrap_or(false) => {
+            Some(force_with_lease_arg(branch, sha)?)
+        }
         (Some(branch), Some(sha)) => Some(force_with_lease_arg(
             &match push_destination(&cwd, branch) {
                 PushDest::Branch(dest) => dest,
@@ -7396,6 +7402,37 @@ mod git_push_force_tests {
         let r = force_push(&repo, Some(("feature", &judged)));
         assert!(r.success, "{}", r.message);
         assert_eq!(git_at(&bare, &["rev-parse", "topic"]), local);
+    }
+
+    /// A publish (`--set-upstream origin HEAD`) of a branch already on origin
+    /// leases the tip the user was shown, under the local name.
+    #[test]
+    fn a_publish_force_push_leases_the_local_name_on_origin() {
+        let repo = TempRepo::new();
+        let bare = repo.add_bare_origin();
+        repo.git(&["checkout", "-q", "-b", "fresh"]);
+        repo.commit("f.txt", "1\n", "fresh 1");
+        repo.git(&["push", "-q", "origin", "fresh"]);
+        repo.git(&["fetch", "-q", "origin"]);
+        let shown = repo.git(&["rev-parse", "origin/fresh"]);
+        repo.write("f.txt", "2\n");
+        repo.git(&["commit", "-q", "-a", "--amend", "-m", "fresh amended"]);
+        let local = repo.git(&["rev-parse", "HEAD"]);
+        let publish = |sha: &str| {
+            tauri::async_runtime::block_on(git_push(
+                repo.path.to_str().unwrap().to_string(),
+                Some(true),
+                Some(true),
+                Some("fresh".to_string()),
+                Some(sha.to_string()),
+            ))
+            .unwrap()
+        };
+        let stale = publish(&"0".repeat(40));
+        assert!(!stale.success, "{}", stale.message);
+        let r = publish(&shown);
+        assert!(r.success, "{}", r.message);
+        assert_eq!(git_at(&bare, &["rev-parse", "fresh"]), local);
     }
 
     /// Without a lease, a branch pushed under another name still force

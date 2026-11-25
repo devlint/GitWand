@@ -126,7 +126,7 @@ const BUDGETS = {
   // (1,007,247 bytes). The selection code stays lazy (CombinedDiffView sets
   // the range anchor, not App).
   //
-  // Push/show reliability fix: main measured at 989 KB (1,012,416 bytes):
+  // Push/show reliability fix: main measured at 990 KB (1,013,876 bytes):
   // the force-push decision (`useForcePush`, `forcePushTarget`, eager like
   // the rest of the push path: fetch before judging, decided lease,
   // double-click and tab/branch guards), the `patchDiffArgs` pins and the

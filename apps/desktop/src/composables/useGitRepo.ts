@@ -1227,10 +1227,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
   /**
    * `decidedLeaseSha`: for a force push, the remote tip the user was shown
-   * when they chose to force push (`forcePushTarget`). It wins over the
-   * auto-detected one.
+   * when they chose to force push (`forcePushTarget`), or `null` when that
+   * decision found none to lease. It wins over the auto-detected one, which
+   * only applies when it is `undefined` (no decision made).
    */
-  async function push(force: boolean = false, decidedLeaseSha: string | null = null) {
+  async function push(force: boolean = false, decidedLeaseSha?: string | null) {
     if (!folderPath.value) return;
     if (!(await requireOnline("push"))) return;
     isPushing.value = true;
@@ -1241,9 +1242,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       const publish = needsUpstream.value;
       // A force push leases the remote tip it was judged against (by the user,
       // or by the divergence probe), so it is refused if the remote moved since.
-      // A publish pushes to `origin HEAD`, not to `@{push}` (which can name
-      // another remote): no lease read from there applies.
-      const leaseSha = force && !publish ? (decidedLeaseSha ?? autoForcePushSha.value) : null;
+      // `undefined`: no decision was made, the auto-detected lease applies
+      // (never on a publish, which pushes to `origin HEAD`, not `@{push}`).
+      // `null`: decided, with no lease (the backend falls back).
+      const leaseSha = !force
+        ? null
+        : decidedLeaseSha !== undefined
+          ? decidedLeaseSha
+          : publish
+            ? null
+            : autoForcePushSha.value;
       const leaseBranch = status.value?.branch;
       const lease = leaseSha && leaseBranch ? { branch: leaseBranch, sha: leaseSha } : undefined;
       let result = await gitPush(folderPath.value, publish, force, lease);

@@ -5283,7 +5283,8 @@ async function handleRequest(req, res) {
             // branch the push updates (`push_destination`).
             try {
               devForceWithLeaseArg(leaseBranch, leaseSha);
-              const dest = devPushDestination(resolvedCwd, String(leaseBranch));
+              // A publish pushes `HEAD` to origin under the local name.
+              const dest = setUpstream ? { kind: "none" } : devPushDestination(resolvedCwd, String(leaseBranch));
               if (dest.kind === "unmapped") return jsonResponse(req, res, { error: UNMAPPED_PUSH_DEST }, 400);
               args.push(devForceWithLeaseArg(dest.kind === "branch" ? dest.name : leaseBranch, leaseSha));
             } catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }

@@ -26,6 +26,7 @@ function setup(branch = "feature") {
     isPushing,
     publishing: () => publishing.value,
     fetch,
+    refresh: async () => {},
     push: async (lease) => {
       pushes.push(lease);
     },
@@ -128,6 +129,30 @@ describe("useForcePush", () => {
     b.folderPath.value = "/other-repo";
     await b.fp.confirmForcePush();
     expect(b.pushes).toEqual([]);
+  });
+
+  it("shows it is deciding while it fetches and reads the tip", async () => {
+    let release!: (v: unknown) => void;
+    target.mockReturnValue(new Promise((r) => (release = r)));
+    const { fp } = setup();
+    const req = fp.requestForcePush();
+    await Promise.resolve();
+    expect(fp.deciding.value).toBe(true);
+    release({ sha: SHA, behind: 0, branch: "feature" });
+    await req;
+    expect(fp.deciding.value).toBe(false);
+  });
+
+  // Push clicked while the force push was deciding: they would overlap.
+  it("drops the request when a push started meanwhile", async () => {
+    let release!: (v: unknown) => void;
+    target.mockReturnValue(new Promise((r) => (release = r)));
+    const { fp, pushes, isPushing } = setup();
+    const req = fp.requestForcePush();
+    isPushing.value = true;
+    release({ sha: SHA, behind: 0, branch: "feature" });
+    await req;
+    expect(pushes).toEqual([]);
   });
 
   it("keeps the confirmation open while a push runs", async () => {

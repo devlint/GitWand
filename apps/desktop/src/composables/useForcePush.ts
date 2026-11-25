@@ -41,12 +41,16 @@ export interface ForcePushDeps {
    * it. Failures (offline) are ignored: the push reports them.
    */
   fetch: () => Promise<unknown>;
+  /** Refresh status and log after the decision's fetch (header counts). */
+  refresh: () => Promise<unknown>;
   /** Push with force and this lease (null: the backend's fallback). */
   push: (leaseSha: string | null) => Promise<unknown>;
 }
 
 export function useForcePush(deps: ForcePushDeps) {
   const forcePushConfirm = ref<ForcePushConfirm | null>(null);
+  /** True while the request fetches and reads the tip (before any push). */
+  const deciding = ref(false);
   /**
    * Set from the moment a force push is asked for until its push settles (or
    * its confirmation takes over): a second click in that window would push
@@ -60,14 +64,21 @@ export function useForcePush(deps: ForcePushDeps) {
     if (!cwd || inFlight || deps.isPushing.value) return;
     const branch = deps.currentBranch();
     inFlight = true;
+    deciding.value = true;
     try {
       await deps.fetch().catch(() => null);
+      // The fetch moved remote-tracking refs: the header and log follow it,
+      // whether or not the push goes ahead.
+      void deps.refresh().catch(() => null);
       const publishing = deps.publishing();
       if (!publishing) await fetchPushRemote(cwd);
       const target = await forcePushTarget(cwd, publishing ? { publishBranch: branch } : {});
       // The lease is for this repo and this branch only: a switch meanwhile
       // is the user's own action, and drops the request.
       if (deps.folderPath.value !== cwd || deps.currentBranch() !== branch) return;
+      // A push started meanwhile (Push clicked during the fetch): this one
+      // would overlap it, on a tip it is about to move.
+      if (deps.isPushing.value) return;
       // A trunk is protected under its remote name too: `mine` pushed to main.
       const protectedName = [branch, target?.branch ?? ""].find((b) => PROTECTED_TRUNKS.has(b)) ?? "";
       // No readable destination (never pushed): nothing known to overwrite.
@@ -87,9 +98,11 @@ export function useForcePush(deps: ForcePushDeps) {
         };
         return;
       }
+      deciding.value = false;
       await deps.push(leaseSha);
     } finally {
       inFlight = false;
+      deciding.value = false;
     }
   }
 
@@ -114,5 +127,5 @@ export function useForcePush(deps: ForcePushDeps) {
     forcePushConfirm.value = null;
   }
 
-  return { forcePushConfirm, requestForcePush, confirmForcePush, cancelForcePush };
+  return { forcePushConfirm, deciding, requestForcePush, confirmForcePush, cancelForcePush };
 }

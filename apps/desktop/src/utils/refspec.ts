@@ -35,3 +35,32 @@ export function remoteBranchOf(refspecs: string, tracking: string): string | nul
   }
   return null;
 }
+
+/**
+ * The forward mapping: the remote-tracking ref that `refs/heads/<branch>` on
+ * the remote is fetched into, through the same refspecs. `null` when none
+ * fetches it.
+ */
+export function trackingRefOf(refspecs: string, branch: string): string | null {
+  const src = `refs/heads/${branch}`;
+  for (const line of refspecs.split("\n")) {
+    const spec = line.trim().replace(/^\+/, "");
+    if (spec === "" || spec.startsWith("^")) continue;
+    const colon = spec.indexOf(":");
+    if (colon < 0) continue;
+    const from = spec.slice(0, colon);
+    const to = spec.slice(colon + 1);
+    const fromStar = from.indexOf("*");
+    const toStar = to.indexOf("*");
+    if (fromStar >= 0 && toStar >= 0) {
+      const pre = from.slice(0, fromStar);
+      const suf = from.slice(fromStar + 1);
+      if (src.length >= pre.length + suf.length && src.startsWith(pre) && src.endsWith(suf)) {
+        return to.slice(0, toStar) + src.slice(pre.length, src.length - suf.length) + to.slice(toStar + 1);
+      }
+    } else if (fromStar < 0 && toStar < 0 && from === src && to !== "") {
+      return to;
+    }
+  }
+  return null;
+}
