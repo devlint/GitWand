@@ -33,7 +33,13 @@ export interface ForcePushDeps {
   /** The checked-out branch now ("" when unknown or detached). */
   currentBranch: () => string;
   isPushing: Ref<boolean>;
-  /** The app's fetch of the default remote (progress, offline check). */
+  /** The push publishes the branch (no upstream: `--set-upstream origin HEAD`). */
+  publishing: () => boolean;
+  /**
+   * A fetch of the default remote that waits behind one already running (the
+   * backend's repo lock), rather than being skipped: the tip is judged after
+   * it. Failures (offline) are ignored: the push reports them.
+   */
   fetch: () => Promise<unknown>;
   /** Push with force and this lease (null: the backend's fallback). */
   push: (leaseSha: string | null) => Promise<unknown>;
@@ -56,8 +62,9 @@ export function useForcePush(deps: ForcePushDeps) {
     inFlight = true;
     try {
       await deps.fetch().catch(() => null);
-      await fetchPushRemote(cwd);
-      const target = await forcePushTarget(cwd);
+      const publishing = deps.publishing();
+      if (!publishing) await fetchPushRemote(cwd);
+      const target = await forcePushTarget(cwd, publishing ? { publishBranch: branch } : {});
       // The lease is for this repo and this branch only: a switch meanwhile
       // is the user's own action, and drops the request.
       if (deps.folderPath.value !== cwd || deps.currentBranch() !== branch) return;
@@ -66,7 +73,9 @@ export function useForcePush(deps: ForcePushDeps) {
       // No readable destination (never pushed): nothing known to overwrite.
       // The upstream's count would describe another ref.
       const behind = target ? target.behind : 0;
-      const leaseSha = target?.sha ?? null;
+      // A lease names the remote branch: without a readable name, none is
+      // sent (the backend would refuse it) and the push falls back.
+      const leaseSha = target?.branch ? target.sha : null;
       if (protectedName !== "" || behind > 0) {
         forcePushConfirm.value = {
           branch,

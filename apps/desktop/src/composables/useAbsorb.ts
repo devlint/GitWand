@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { classifyHunkLine, hunkBodyFromHeader, noHunkBody, parseHunkHeader, type HunkBody } from "@gitwand/core";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
+import { patchDiffArgs } from "../utils/patchArgs";
 
 /**
  * Absorb — automatically amend unstaged/staged changes into the commit
@@ -316,9 +317,9 @@ export function useAbsorb() {
 
     try {
       // Get the diff
-      const diffArgs = staged
-        ? ["diff", "--cached", "--no-color"]
-        : ["diff", "--no-color"];
+      // The user's patch config pinned away: other prefixes or quoted names
+      // would misplace hunks, an external tool would hide them.
+      const diffArgs = staged ? patchDiffArgs("--cached") : patchDiffArgs();
       if (filePaths?.length) diffArgs.push("--", ...filePaths);
 
       const diffResult = await gitExec(cwd, diffArgs);

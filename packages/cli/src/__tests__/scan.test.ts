@@ -160,7 +160,7 @@ describe("gitwand scan", { timeout: GIT_IO_TIMEOUT_MS }, () => {
       process.env.PATH = path;
     }
     const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
-    expect(JSON.parse(output).error).toMatch(/git not found/);
+    expect(JSON.parse(output).error).toMatch(/git could not be run/);
     expect(process.exitCode).toBe(2);
   });
 

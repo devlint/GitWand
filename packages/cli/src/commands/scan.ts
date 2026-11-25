@@ -37,8 +37,8 @@ import { findGitRoot } from "../llm-config.js";
 
 /**
  * The staged bytes as a patch, tolerant on failure (returns "" when we're not in a repo —
- * same tolerant style as `getConflictedFiles()`), but `null` when git itself cannot be
- * run: a scan that saw nothing must not pass as clean. The user's patch
+ * same tolerant style as `getConflictedFiles()`), but `null` when the output was not seen
+ * (git not runnable, output over the buffer): a scan that saw nothing must not pass as clean. The user's patch
  * config is pinned away as in the desktop backend (`PATCH_CONFIG` / `PATCH_FLAGS` in
  * apps/desktop/src-tauri/src/git/cmd.rs): an external diff tool or colour codes would
  * hide every added line, other prefixes would misname files, and textconv would scan a
@@ -60,9 +60,12 @@ function getStagedDiff(cwd: string): string | null {
       { encoding: "utf-8", cwd, maxBuffer: 1024 * 1024 * 32 },
     );
   } catch (err) {
-    // ENOENT: no `git` executable on PATH (on Windows, a `.cmd` shim is not one).
-    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return null;
-    return "";
+    // git ran and exited non-zero (not a repository): nothing staged to scan.
+    // Anything else (git not found, output over maxBuffer, killed) means the
+    // staged changes were not seen at all.
+    const e = err as NodeJS.ErrnoException & { status?: number | null };
+    if (typeof e?.code !== "string" && typeof e?.status === "number" && e.status !== 0) return "";
+    return null;
   }
 }
 
@@ -174,8 +177,8 @@ export async function cmdScan(flags: Record<string, boolean | string>): Promise<
     // On Windows a `git.cmd` / `git.bat` wrapper is not an executable git can
     // be run as without a shell (and a shell would break the argv rule).
     const message =
-      "git not found on PATH (on Windows, put git.exe itself on PATH: a git.cmd wrapper is not run): " +
-      "the staged changes could not be scanned.";
+      "git could not be run, or its output was too large: the staged changes could not be scanned " +
+      "(on Windows, put git.exe itself on PATH: a git.cmd wrapper is not run).";
     if (isJson) console.log(JSON.stringify({ error: message, findings: [] }, null, 2));
     else console.error(`${c.red}${message}${c.reset}`);
     process.exitCode = 2;

@@ -489,10 +489,9 @@ enum PushDest {
 }
 
 /// Read from `%(push)`, the remote-tracking ref of the push destination
-/// (`refs/remotes/origin/topic`), minus `refs/remotes/<%(push:remotename)>/`;
-/// `%(push:remoteref)` stays empty without an explicit push refspec. git has
-/// no command to map a tracking ref back through a custom fetch refspec, so
-/// only the default mapping is read.
+/// (`refs/remotes/origin/topic`), mapped back through the remote's fetch
+/// refspecs (`remote_branch_of`); `%(push:remoteref)` stays empty without an
+/// explicit push refspec.
 fn push_destination(cwd: &str, branch: &str) -> PushDest {
     let refname = format!("refs/heads/{branch}");
     // A for-each-ref pattern also matches `refs/heads/<branch>/…`: keep the
@@ -525,29 +524,44 @@ fn push_destination(cwd: &str, branch: &str) -> PushDest {
     if remote.is_empty() || remote.starts_with('-') {
         return PushDest::Unmapped;
     }
-    match tracking
-        .strip_prefix(&format!("refs/remotes/{remote}/"))
-        .filter(|b| !b.is_empty())
-    {
-        Some(name) if has_default_fetch_refspec(cwd, remote) => PushDest::Branch(name.to_string()),
-        _ => PushDest::Unmapped,
-    }
-}
-
-/// Whether `remote` fetches `refs/heads/*` to `refs/remotes/<remote>/*`.
-fn has_default_fetch_refspec(cwd: &str, remote: &str) -> bool {
     let key = format!("remote.{remote}.fetch");
-    let Ok(out) = git_cmd()
+    let refspecs = git_cmd()
         .args(["config", "--get-all", &key])
         .current_dir(cwd)
         .output()
-    else {
-        return false;
-    };
-    let wanted = format!("refs/heads/*:refs/remotes/{remote}/*");
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .any(|l| l.trim().trim_start_matches('+') == wanted)
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    match remote_branch_of(&refspecs, tracking) {
+        Some(name) => PushDest::Branch(name),
+        None => PushDest::Unmapped,
+    }
+}
+
+/// The remote branch whose remote-tracking ref is `tracking`, read back
+/// through the remote's fetch refspecs (`remote.<r>.fetch`, one per line):
+/// the default `+refs/heads/*:refs/remotes/origin/*`, a single-branch clone's
+/// `+refs/heads/main:refs/remotes/origin/main`, or a custom
+/// `refs/heads/*:refs/remotes/origin/heads/*`. git has no command for this
+/// reverse mapping. `None` when no refspec maps a branch onto `tracking`.
+fn remote_branch_of(refspecs: &str, tracking: &str) -> Option<String> {
+    refspecs.lines().find_map(|line| {
+        let spec = line.trim().trim_start_matches('+');
+        if spec.starts_with('^') {
+            return None; // a negative refspec maps nothing
+        }
+        let (src, dst) = spec.split_once(':')?;
+        let full = match (src.split_once('*'), dst.split_once('*')) {
+            (Some((src_pre, src_suf)), Some((dst_pre, dst_suf))) => {
+                let mid = tracking.strip_prefix(dst_pre)?.strip_suffix(dst_suf)?;
+                format!("{src_pre}{mid}{src_suf}")
+            }
+            (None, None) if dst == tracking => src.to_string(),
+            _ => return None,
+        };
+        full.strip_prefix("refs/heads/")
+            .filter(|b| !b.is_empty())
+            .map(str::to_string)
+    })
 }
 
 #[tauri::command]
@@ -7424,10 +7438,10 @@ mod git_push_force_tests {
         assert_eq!(git_at(&bare, &["rev-parse", "feature"]), theirs);
     }
 
-    /// A custom fetch refspec: the tracking ref no longer spells the remote
-    /// branch, so no destination is claimed.
+    /// Custom and single-branch fetch refspecs: the tracking ref is mapped
+    /// back to the branch, so the lease and the rename check stay right.
     #[test]
-    fn push_destination_needs_the_default_fetch_mapping() {
+    fn push_destination_reads_custom_and_single_branch_refspecs() {
         let repo = TempRepo::new();
         repo.add_bare_origin();
         repo.git(&[
@@ -7439,22 +7453,59 @@ mod git_push_force_tests {
         repo.git(&["fetch", "-q", "origin"]);
         repo.git(&["branch", "-q", "--set-upstream-to=origin/heads/main"]);
         repo.git(&["config", "push.default", "upstream"]);
+        let cwd = repo.path.to_str().unwrap();
         assert_eq!(
-            push_destination(repo.path.to_str().unwrap(), "main"),
-            PushDest::Unmapped
+            push_destination(cwd, "main"),
+            PushDest::Branch("main".to_string())
         );
-        // An explicit lease is refused rather than sent on the local name.
-        let sha = repo.git(&["rev-parse", "HEAD"]);
-        let err = tauri::async_runtime::block_on(git_push(
-            repo.path.to_str().unwrap().to_string(),
-            None,
-            Some(true),
-            Some("main".to_string()),
-            Some(sha),
-        ))
-        .err()
-        .unwrap_or_default();
-        assert!(err.contains("cannot be read"), "{err}");
+
+        repo.git(&[
+            "config",
+            "--replace-all",
+            "remote.origin.fetch",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ]);
+        repo.git(&["fetch", "-q", "origin"]);
+        repo.git(&["branch", "-q", "--set-upstream-to=origin/main"]);
+        assert_eq!(
+            push_destination(cwd, "main"),
+            PushDest::Branch("main".to_string())
+        );
+    }
+
+    #[test]
+    fn remote_branch_of_reads_refspecs_back() {
+        let glob = "+refs/heads/*:refs/remotes/origin/*";
+        assert_eq!(
+            remote_branch_of(glob, "refs/remotes/origin/feat/x").as_deref(),
+            Some("feat/x")
+        );
+        assert_eq!(remote_branch_of(glob, "refs/remotes/fork/feat"), None);
+        let custom = "+refs/heads/*:refs/remotes/origin/heads/*";
+        assert_eq!(
+            remote_branch_of(custom, "refs/remotes/origin/heads/main").as_deref(),
+            Some("main")
+        );
+        let single =
+            "+refs/heads/main:refs/remotes/origin/main\n+refs/heads/dev:refs/remotes/origin/dev";
+        assert_eq!(
+            remote_branch_of(single, "refs/remotes/origin/dev").as_deref(),
+            Some("dev")
+        );
+        assert_eq!(remote_branch_of(single, "refs/remotes/origin/other"), None);
+        // Not a branch, a negative refspec, or nothing configured: unmapped.
+        assert_eq!(
+            remote_branch_of(
+                "+refs/tags/*:refs/remotes/origin/*",
+                "refs/remotes/origin/v1"
+            ),
+            None
+        );
+        assert_eq!(
+            remote_branch_of("^refs/heads/x", "refs/remotes/origin/x"),
+            None
+        );
+        assert_eq!(remote_branch_of("", "refs/remotes/origin/main"), None);
     }
 
     /// A tag named like the branch makes `symbolic-ref --short` print

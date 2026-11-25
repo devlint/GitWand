@@ -12,6 +12,7 @@
  */
 
 import { gitExec, gitFetch } from "../utils/backend";
+import { remoteBranchOf } from "../utils/refspec";
 import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
 
 // ─── decision ────────────────────────────────────────────────────────────────
@@ -171,34 +172,45 @@ export async function fetchPushRemote(cwd: string): Promise<void> {
 
 /**
  * What a force push would replace, read when the user decides to force push:
- * the tip of the branch a plain push updates (`@{push}`), how many of its
- * commits the local branch does not have, and that branch's name on the
- * remote (`branch`, which can differ from the local name). The push then
- * leases exactly that sha, so it overwrites what the user was shown and
- * nothing that arrived since. `null` when there is no such destination yet
- * (never pushed, not fetched): the backend then falls back to
+ * the tip of the ref the push updates, how many of its commits the local
+ * branch does not have, and that branch's name on the remote (`branch`, which
+ * can differ from the local name; `null` when the fetch refspecs do not map
+ * it back). The push then leases exactly that sha, so it overwrites what the
+ * user was shown and nothing that arrived since.
+ *
+ * The ref is `@{push}` (read as `%(push)`), or, for a publish
+ * (`publishBranch`: no upstream yet, the push runs `--set-upstream origin
+ * HEAD`), `origin/<branch>`. `null` when there is no such ref (never pushed,
+ * not fetched, or `@{push}` unresolvable): the backend then falls back to
  * `--force-if-includes`.
  */
 export async function forcePushTarget(
   cwd: string,
+  opts: { publishBranch?: string } = {},
 ): Promise<{ sha: string; behind: number; branch: string | null } | null> {
   try {
-    const tip = await gitExec(cwd, ["rev-parse", "--verify", "-q", "@{push}"]);
+    let remote: string;
+    let tracking: string;
+    if (opts.publishBranch) {
+      remote = "origin";
+      tracking = `refs/remotes/origin/${opts.publishBranch}`;
+    } else {
+      const refs = await pushRefs(cwd);
+      if (!refs || !refs.pushRef) return null;
+      remote = refs.pushRemote;
+      tracking = refs.pushRef;
+    }
+    if (!tracking.startsWith("refs/")) return null;
+    const tip = await gitExec(cwd, ["rev-parse", "--verify", "-q", tracking]);
     const sha = tip.stdout.trim();
     if (tip.exitCode !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) return null;
     const count = await gitExec(cwd, ["rev-list", "--count", `HEAD..${sha}`]);
     const behind = Number.parseInt(count.stdout.trim(), 10);
     if (count.exitCode !== 0 || !Number.isFinite(behind)) return null;
-    const refs = await pushRefs(cwd);
-    const prefix = refs?.pushRemote ? `refs/remotes/${refs.pushRemote}/` : null;
     let branch: string | null = null;
-    if (prefix && refs!.pushRef.startsWith(prefix) && refs!.pushRef.length > prefix.length) {
-      // Only the default fetch mapping spells the remote branch (Rust
-      // `has_default_fetch_refspec`); otherwise the backend refuses the lease.
-      const fetch = await gitExec(cwd, ["config", "--get-all", `remote.${refs!.pushRemote}.fetch`]);
-      const wanted = `refs/heads/*:refs/remotes/${refs!.pushRemote}/*`;
-      const mapped = fetch.stdout.split("\n").some((l) => l.trim().replace(/^\+/, "") === wanted);
-      if (mapped) branch = refs!.pushRef.slice(prefix.length);
+    if (remote && !remote.startsWith("-")) {
+      const fetch = await gitExec(cwd, ["config", "--get-all", `remote.${remote}.fetch`]);
+      branch = remoteBranchOf(fetch.stdout, tracking);
     }
     return { sha, behind, branch };
   } catch {

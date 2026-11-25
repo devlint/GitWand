@@ -2696,13 +2696,38 @@ function devPushDestination(cwd, branch) {
   const tracking = rest.slice(sp + 1);
   if (tracking === "") return { kind: "none" };
   if (remote === "" || remote.startsWith("-")) return { kind: "unmapped" };
-  const prefix = `refs/remotes/${remote}/`;
-  if (!tracking.startsWith(prefix) || tracking.length === prefix.length) return { kind: "unmapped" };
-  // `has_default_fetch_refspec`: only the default mapping spells the branch.
+  // `remote_branch_of`: the tracking ref read back through the fetch refspecs.
   const fetch = spawnSync(GIT, ["config", "--get-all", `remote.${remote}.fetch`], { cwd, encoding: "utf-8" });
-  const wanted = `refs/heads/*:refs/remotes/${remote}/*`;
-  const ok = (fetch.stdout || "").split("\n").some((l) => l.trim().replace(/^\+/, "") === wanted);
-  return ok ? { kind: "branch", name: tracking.slice(prefix.length) } : { kind: "unmapped" };
+  const name = devRemoteBranchOf(fetch.stdout || "", tracking);
+  return name !== null ? { kind: "branch", name } : { kind: "unmapped" };
+}
+
+/** ops.rs `remote_branch_of` (src/utils/refspec.ts `remoteBranchOf`). */
+function devRemoteBranchOf(refspecs, tracking) {
+  for (const line of refspecs.split("\n")) {
+    const spec = line.trim().replace(/^\+/, "");
+    if (spec === "" || spec.startsWith("^")) continue;
+    const colon = spec.indexOf(":");
+    if (colon < 0) continue;
+    const src = spec.slice(0, colon);
+    const dst = spec.slice(colon + 1);
+    const srcStar = src.indexOf("*");
+    const dstStar = dst.indexOf("*");
+    let full = null;
+    if (srcStar >= 0 && dstStar >= 0) {
+      const dstPre = dst.slice(0, dstStar);
+      const dstSuf = dst.slice(dstStar + 1);
+      if (tracking.length >= dstPre.length + dstSuf.length && tracking.startsWith(dstPre) && tracking.endsWith(dstSuf)) {
+        full = src.slice(0, srcStar) + tracking.slice(dstPre.length, tracking.length - dstSuf.length) + src.slice(srcStar + 1);
+      }
+    } else if (srcStar < 0 && dstStar < 0 && dst === tracking) {
+      full = src;
+    }
+    if (full !== null && full.startsWith("refs/heads/") && full.length > "refs/heads/".length) {
+      return full.slice("refs/heads/".length);
+    }
+  }
+  return null;
 }
 
 /** ops.rs `UNMAPPED_PUSH_DEST`. */
@@ -5261,7 +5286,7 @@ async function handleRequest(req, res) {
               const dest = devPushDestination(resolvedCwd, String(leaseBranch));
               if (dest.kind === "unmapped") return jsonResponse(req, res, { error: UNMAPPED_PUSH_DEST }, 400);
               args.push(devForceWithLeaseArg(dest.kind === "branch" ? dest.name : leaseBranch, leaseSha));
-            } catch (e) { return jsonResponse(req, res, { success: false, message: e.message }); }
+            } catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
           } else {
             // `git_push`: the tip must also have been integrated locally —
             // except for a branch pushed under another name, whose reflog git

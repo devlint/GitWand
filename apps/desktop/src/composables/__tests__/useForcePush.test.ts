@@ -19,16 +19,18 @@ function setup(branch = "feature") {
   const isPushing = ref(false);
   const pushes: Array<string | null> = [];
   const fetch = vi.fn(async () => {});
+  const publishing = ref(false);
   const fp = useForcePush({
     folderPath,
     currentBranch: () => current.value,
     isPushing,
+    publishing: () => publishing.value,
     fetch,
     push: async (lease) => {
       pushes.push(lease);
     },
   });
-  return { fp, folderPath, current, isPushing, pushes, fetch };
+  return { fp, folderPath, current, isPushing, pushes, fetch, publishing };
 }
 
 beforeEach(() => {
@@ -61,6 +63,25 @@ describe("useForcePush", () => {
     await fp.requestForcePush();
     expect(pushes).toEqual([]);
     expect(fp.forcePushConfirm.value).toMatchObject({ protected: true, protectedName: "main" });
+  });
+
+  // Without a remote branch name the backend would refuse the lease: none is
+  // sent, and the backend falls back.
+  it("sends no lease when the remote branch name cannot be read", async () => {
+    target.mockResolvedValue({ sha: SHA, behind: 0, branch: null });
+    const { fp, pushes } = setup();
+    await fp.requestForcePush();
+    expect(pushes).toEqual([null]);
+  });
+
+  // A publish pushes to origin/<branch>: that is the ref judged.
+  it("judges a publish against origin/<branch>", async () => {
+    target.mockResolvedValue({ sha: SHA, behind: 2, branch: "feature" });
+    const { fp, publishing } = setup();
+    publishing.value = true;
+    await fp.requestForcePush();
+    expect(target).toHaveBeenCalledWith("/repo", { publishBranch: "feature" });
+    expect(fp.forcePushConfirm.value).toMatchObject({ behind: 2 });
   });
 
   it("announces nothing to overwrite when no destination can be read", async () => {

@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { patchDiffArgs } from "../patchArgs";
+import { patchDiffArgs, patchShowArgs } from "../patchArgs";
 
 const env = {
   ...process.env,
@@ -52,6 +52,23 @@ describe("patchDiffArgs", () => {
     }
     writeFileSync(join(dir, ".gitattributes"), "*.json diff=upper\n");
     git(dir, ["config", "diff.upper.textconv", "tr a-z A-Z <"]);
+    expect(run()).toBe(clean);
+  });
+
+  // The blame context sent to the AI: a root commit still shows its diff.
+  it("patchShowArgs shows a root commit's diff whatever log.showRoot says", () => {
+    dir = mkdtempSync(join(tmpdir(), "gw-patchargs-show-"));
+    git(dir, ["init", "-q"]);
+    writeFileSync(join(dir, "f.txt"), "one\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-q", "-m", "root"]);
+    const run = () =>
+      spawnSync("git", patchShowArgs("HEAD", "--", "f.txt"), { cwd: dir, env, encoding: "utf-8" }).stdout;
+    const clean = run();
+    expect(clean).toContain("+one");
+    git(dir, ["config", "log.showRoot", "false"]);
+    git(dir, ["config", "diff.noprefix", "true"]);
+    git(dir, ["config", "color.ui", "always"]);
     expect(run()).toBe(clean);
   });
 });

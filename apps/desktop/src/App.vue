@@ -162,7 +162,7 @@ import {
   COMMIT_MESSAGE_SINK_KEY,
   type SettingsSectionTarget,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree, type SnapshotMeta } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitFetch, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, gitWorktreeList, type CommitSubmoduleChange, type RemoveOutcome, worktreeRunHook, worktreeResolveBase, type BaseResolution, type CreatedWorktree, type SnapshotMeta } from "./utils/backend";
 import { useWorktreeCreation, registerSetupRunner } from "./composables/useWorktreeCreation";
 import { registerRemovalHost } from "./composables/useWorktreeRemoval";
 import { registerMergeBackHost } from "./composables/useWorktreeMergeBack";
@@ -2098,8 +2098,11 @@ const {
   folderPath: repoFolderPath,
   currentBranch: () => repoStatus.value?.branch ?? "",
   isPushing,
-  // The app's fetch: progress in the header, offline check, refreshed counts.
-  fetch: () => doFetch(false),
+  // `needsUpstream` in useGitRepo: no upstream, so the push publishes.
+  publishing: () => !!repoStatus.value && !repoStatus.value.remote,
+  // The backend fetch itself: it waits behind a background fetch (repo lock)
+  // where the composable's fetch would return at once and skip it.
+  fetch: () => (repoFolderPath.value ? gitFetch(repoFolderPath.value) : Promise.resolve()),
   push: (leaseSha) => handlePush(true, leaseSha),
 });
 
