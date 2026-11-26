@@ -137,7 +137,7 @@ describe("BisectBanner", () => {
     expect(events.changed).toBe(1);
   });
 
-  it("clears an old error once a reload succeeds", async () => {
+  it("keeps an action's error through the reloads it causes, until the next action", async () => {
     vi.mocked(gitBisectStatus).mockResolvedValueOnce(status());
     vi.mocked(gitBisectMark).mockRejectedValue(new Error("boom"));
     vi.mocked(gitBisectStatus).mockResolvedValue(status());
@@ -153,7 +153,12 @@ describe("BisectBanner", () => {
     button("Bad")!.click();
     await flush();
     expect(host.textContent).toContain("boom");
+    // A refused checkout still records the mark: the mark count moves.
     key.value++;
+    await flush();
+    expect(host.textContent).toContain("boom");
+    vi.mocked(gitBisectMark).mockResolvedValue(status());
+    button("Skip")!.click();
     await flush();
     expect(host.textContent).not.toContain("boom");
   });

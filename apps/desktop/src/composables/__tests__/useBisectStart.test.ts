@@ -25,7 +25,7 @@ describe("useBisectStart", () => {
     const { b, notify } = setup(log);
     b.askFromHere(log[2]);
     expect(notify).not.toHaveBeenCalled();
-    expect(b.confirm.value).toEqual({ good: H("a"), bad: H("c"), ordered: true });
+    expect(b.confirm.value).toEqual({ good: H("a"), bad: H("c"), ordered: true, keepOrder: true });
     b.cancel();
     expect(b.confirm.value).toBeNull();
   });
@@ -62,5 +62,14 @@ describe("useBisectStart", () => {
     b.ask(H("y"), H("c"));
     expect(notify).not.toHaveBeenCalled();
     expect(b.confirm.value).toEqual({ good: H("y"), bad: H("c"), ordered: false });
+  });
+  it("keeps the clicked commit as the good end when the loaded log cannot tell", () => {
+    // HEAD (b) is older than the clicked commit (n), which descends from it;
+    // the log is cut before any root, so it cannot rule n out.
+    const cut = [entry(H("n"), [H("b")]), entry(H("b"), [H("z")], "HEAD -> old")];
+    const { b, notify } = setup(cut);
+    b.askFromHere(cut[0]);
+    expect(notify).not.toHaveBeenCalled();
+    expect(b.confirm.value).toEqual({ good: H("n"), bad: H("b"), ordered: true, keepOrder: true });
   });
 });

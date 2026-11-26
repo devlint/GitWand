@@ -5566,7 +5566,7 @@ async function handleRequest(req, res) {
       const cwd = body.cwd;
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       try {
-        return jsonResponse(req, res, devBisectStart(resolve(cwd), body.bad, body.good));
+        return jsonResponse(req, res, devBisectStart(resolve(cwd), body.bad, body.good, body.keepOrder === true));
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 400);
       }

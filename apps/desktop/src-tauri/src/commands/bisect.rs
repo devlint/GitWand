@@ -355,13 +355,16 @@ pub(crate) async fn git_bisect_status(cwd: String) -> Result<BisectStatus, Strin
 
 /// Start a bisect between two commits, one an ancestor of the other: the
 /// ancestor is the good end, whichever way they are passed (the Git Tree's
-/// row order is not ancestry). Refused on tracked changes, during another
+/// row order is not ancestry). With `keep_order` ("Bisect from here": this
+/// commit is good, HEAD is bad), `good` must be an ancestor of `bad`; the
+/// ends are never swapped. Refused on tracked changes, during another
 /// operation, or when neither is an ancestor of the other.
 #[tauri::command]
 pub(crate) async fn git_bisect_start(
     cwd: String,
     bad: String,
     good: String,
+    keep_order: Option<bool>,
 ) -> Result<BisectStatus, String> {
     if !is_full_hash(&bad) || !is_full_hash(&good) {
         return Err("bisect:notHashes: A bisect starts from two full commit hashes.".to_string());
@@ -382,6 +385,10 @@ pub(crate) async fn git_bisect_start(
     }
     let (bad, good) = if is_ancestor(&cwd, &good, &bad)? {
         (bad, good)
+    } else if keep_order == Some(true) {
+        return Err(
+            "bisect:notInHead: The good commit is not in the history of the bad one.".to_string(),
+        );
     } else if is_ancestor(&cwd, &bad, &good)? {
         (good, bad)
     } else {
@@ -538,7 +545,7 @@ mod tests {
     fn status_counts_and_estimate() {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
-        let st = block(git_bisect_start(repo.cwd(), c8.clone(), c1.clone())).expect("start");
+        let st = block(git_bisect_start(repo.cwd(), c8.clone(), c1.clone(), None)).expect("start");
         let vars = repo.git(&["rev-list", "--bisect-vars", &c8, "--not", &c1]);
         let var = |k: &str| -> u32 {
             vars.lines()
@@ -567,7 +574,7 @@ mod tests {
     fn remaining_leaves_out_skipped_commits() {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
-        let st = block(git_bisect_start(repo.cwd(), c8, c1)).expect("start");
+        let st = block(git_bisect_start(repo.cwd(), c8, c1, None)).expect("start");
         let before = st.remaining.unwrap();
         let st = block(git_bisect_mark(repo.cwd(), "skip".to_string())).expect("skip");
         assert_eq!(st.remaining, Some(before - 1));
@@ -577,7 +584,7 @@ mod tests {
     fn status_describes_the_commit_under_test_and_the_culprit() {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
-        let st = block(git_bisect_start(repo.cwd(), c8, c1)).expect("start");
+        let st = block(git_bisect_start(repo.cwd(), c8, c1, None)).expect("start");
         let head = repo.head();
         let subject = repo.git(&["log", "-1", "--format=%s", &head]);
         let info = st
@@ -591,12 +598,23 @@ mod tests {
     }
 
     #[test]
+    fn start_keeps_the_order_when_asked() {
+        let repo = TempRepo::linear(8);
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        // "Bisect from here" on c8 with HEAD at c1: c8 is not in HEAD's
+        // history, so it cannot be the good end of a bisect ending at HEAD.
+        let err = block(git_bisect_start(repo.cwd(), c1, c8, Some(true))).unwrap_err();
+        assert!(err.starts_with("bisect:notInHead:"), "{err}");
+        assert!(!repo.bisecting());
+    }
+
+    #[test]
     fn start_orders_the_ends_by_ancestry() {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
         // Passed the wrong way round (as a Git Tree whose rows are out of
         // order would): the ancestor is still the good end.
-        let st = block(git_bisect_start(repo.cwd(), c1.clone(), c8.clone())).expect("start");
+        let st = block(git_bisect_start(repo.cwd(), c1.clone(), c8.clone(), None)).expect("start");
         assert_eq!(st.bad.as_deref(), Some(c8.as_str()));
         assert_eq!(st.good, vec![c1]);
     }
@@ -605,7 +623,7 @@ mod tests {
     fn a_mark_whose_checkout_fails_is_kept_and_next_moves_on() {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
-        block(git_bisect_start(repo.cwd(), c8, c1)).expect("start");
+        block(git_bisect_start(repo.cwd(), c8, c1, None)).expect("start");
         let tested = repo.head();
         // A tracked edit every other commit's a.txt would overwrite.
         repo.write("a.txt", "local edit\n");
@@ -637,7 +655,7 @@ mod tests {
     fn mark_until_culprit() {
         let repo = TempRepo::linear(8);
         let (c1, c5, c8) = (repo.sha("c1"), repo.sha("c5"), repo.sha("c8"));
-        let mut st = block(git_bisect_start(repo.cwd(), c8, c1)).expect("start");
+        let mut st = block(git_bisect_start(repo.cwd(), c8, c1, None)).expect("start");
         for _ in 0..10 {
             if st.candidates.len() == 1 {
                 break;
@@ -665,7 +683,7 @@ mod tests {
             repo.sha("c3"),
             repo.sha("c4"),
         );
-        let mut st = block(git_bisect_start(repo.cwd(), c4.clone(), c1)).expect("start");
+        let mut st = block(git_bisect_start(repo.cwd(), c4.clone(), c1, None)).expect("start");
         for _ in 0..5 {
             if !st.candidates.is_empty() {
                 break;
@@ -686,7 +704,7 @@ mod tests {
     fn remaining_ignores_skips_that_later_marks_left_out_of_the_range() {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
-        block(git_bisect_start(repo.cwd(), c8.clone(), c1)).expect("start");
+        block(git_bisect_start(repo.cwd(), c8.clone(), c1, None)).expect("start");
         let skipped = repo.head();
         let mut st = block(git_bisect_mark(repo.cwd(), "skip".to_string())).expect("skip");
         let mut left_out = false;
@@ -804,7 +822,7 @@ mod tests {
         let repo = TempRepo::linear(4);
         let c1 = repo.sha("c1");
         let missing = "0123456789abcdef0123456789abcdef01234567".to_string();
-        let err = block(git_bisect_start(repo.cwd(), missing, c1)).unwrap_err();
+        let err = block(git_bisect_start(repo.cwd(), missing, c1, None)).unwrap_err();
         assert!(!err.contains("separate branches"), "{err}");
         assert!(!is_bisecting(&repo.cwd()).unwrap());
     }
@@ -862,12 +880,12 @@ mod tests {
         let repo = TempRepo::linear(4);
         let (c1, c4) = (repo.sha("c1"), repo.sha("c4"));
         repo.write("a.txt", "dirty\n");
-        let err = block(git_bisect_start(repo.cwd(), c4.clone(), c1.clone())).unwrap_err();
+        let err = block(git_bisect_start(repo.cwd(), c4.clone(), c1.clone(), None)).unwrap_err();
         assert!(err.contains("uncommitted"), "{err}");
         assert!(!repo.bisecting());
         repo.git(&["checkout", "--", "a.txt"]);
         repo.write("untracked.txt", "x");
-        block(git_bisect_start(repo.cwd(), c4, c1)).expect("untracked alone is fine");
+        block(git_bisect_start(repo.cwd(), c4, c1, None)).expect("untracked alone is fine");
     }
 
     #[test]
@@ -880,7 +898,7 @@ mod tests {
         repo.git(&["commit", "-q", "-m", "side"]);
         let side = repo.head();
         repo.git(&["checkout", "-q", "main"]);
-        let err = block(git_bisect_start(repo.cwd(), c8, side)).unwrap_err();
+        let err = block(git_bisect_start(repo.cwd(), c8, side, None)).unwrap_err();
         assert!(err.contains("ancestor"), "{err}");
         assert!(!repo.bisecting());
     }
@@ -890,7 +908,7 @@ mod tests {
         let repo = TempRepo::linear(4);
         let (c1, c4) = (repo.sha("c1"), repo.sha("c4"));
         repo.git(&["bisect", "start"]);
-        assert!(block(git_bisect_start(repo.cwd(), c4, c1)).is_err());
+        assert!(block(git_bisect_start(repo.cwd(), c4, c1, None)).is_err());
     }
 
     #[test]
@@ -900,7 +918,8 @@ mod tests {
         assert!(block(git_bisect_start(
             repo.cwd(),
             c4.clone(),
-            "--foo".to_string()
+            "--foo".to_string(),
+            None,
         ))
         .is_err());
         // A prefix could name a branch or tag: only full hashes are taken.
@@ -908,6 +927,7 @@ mod tests {
             repo.cwd(),
             c4,
             repo.sha("c1")[..12].to_string(),
+            None,
         ))
         .unwrap_err();
         assert!(err.starts_with("bisect:notHashes:"), "{err}");
@@ -918,7 +938,7 @@ mod tests {
     fn status_after_the_bisect_ended_is_inactive() {
         let repo = TempRepo::linear(4);
         let (c1, c4) = (repo.sha("c1"), repo.sha("c4"));
-        let st = block(git_bisect_start(repo.cwd(), c4, c1)).expect("start");
+        let st = block(git_bisect_start(repo.cwd(), c4, c1, None)).expect("start");
         assert!(st.active);
         repo.git(&["bisect", "reset"]);
         let st = status(&repo);
@@ -930,7 +950,7 @@ mod tests {
     fn mark_rejects_unknown_verdict() {
         let repo = TempRepo::linear(4);
         let (c1, c4) = (repo.sha("c1"), repo.sha("c4"));
-        block(git_bisect_start(repo.cwd(), c4, c1)).expect("start");
+        block(git_bisect_start(repo.cwd(), c4, c1, None)).expect("start");
         let head = repo.head();
         assert!(block(git_bisect_mark(repo.cwd(), "maybe".to_string())).is_err());
         assert_eq!(repo.head(), head);
@@ -940,7 +960,7 @@ mod tests {
     fn reset_returns_to_start_branch() {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
-        block(git_bisect_start(repo.cwd(), c8, c1)).expect("start");
+        block(git_bisect_start(repo.cwd(), c8, c1, None)).expect("start");
         block(git_bisect_mark(repo.cwd(), "good".to_string())).expect("mark");
         block(git_bisect_reset(repo.cwd())).expect("reset");
         assert!(!repo.bisecting());
@@ -952,7 +972,7 @@ mod tests {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
         repo.git(&["checkout", "-q", "-b", "tmp"]);
-        block(git_bisect_start(repo.cwd(), c8, c1)).expect("start");
+        block(git_bisect_start(repo.cwd(), c8, c1, None)).expect("start");
         repo.git(&["update-ref", "-d", "refs/heads/tmp"]);
         assert!(block(git_bisect_reset(repo.cwd())).is_err());
         assert!(repo.bisecting());

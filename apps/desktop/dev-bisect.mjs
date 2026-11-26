@@ -235,7 +235,8 @@ function otherOperation(d) {
   );
 }
 
-export function devBisectStart(cwd, bad, good) {
+/** As in the Rust command; `keepOrder` ("Bisect from here") never swaps the ends. */
+export function devBisectStart(cwd, bad, good, keepOrder = false) {
   if (!isHash(bad) || !isHash(good)) throw new Error("bisect:notHashes: A bisect starts from two full commit hashes.");
   const dir = gitDir(cwd);
   if (otherOperation(dir) || isBisecting(dir)) {
@@ -253,6 +254,7 @@ export function devBisectStart(cwd, bad, good) {
     throw new Error((r.stderr || "").trim() || `git could not compare ${a} and ${b}`);
   };
   if (!isAncestor(good, bad)) {
+    if (keepOrder) throw new Error("bisect:notInHead: The good commit is not in the history of the bad one.");
     if (!isAncestor(bad, good)) {
       throw new Error(
         "bisect:unrelated: One of the two commits must be an ancestor of the other: they are on separate branches.",

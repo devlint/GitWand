@@ -251,4 +251,9 @@ describe("dev-server bisect", { timeout: 30_000 }, () => {
     expect(st.remaining).toBe(0);
     expect(st.pendingCheckout).toBe(false);
   });
+  it("never swaps the ends with keepOrder (Bisect from here)", () => {
+    const { path, sha } = linear(8);
+    expect(() => devBisectStart(path, sha("c1"), sha("c8"), true)).toThrow(/^bisect:notInHead:/);
+    expect(devBisectRepoState(path)).toBeNull();
+  });
 });

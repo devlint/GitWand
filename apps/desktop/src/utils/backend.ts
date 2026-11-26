@@ -1272,9 +1272,13 @@ export async function gitBisectStatus(cwd: string): Promise<BisectStatus> {
 }
 
 /** Start a bisect: `good` must be an ancestor of `bad` (full hashes). */
-export async function gitBisectStart(cwd: string, bad: string, good: string): Promise<BisectStatus> {
-  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_start", { cwd, bad, good });
-  return bisectPost<BisectStatus>("/api/git-bisect-start", { cwd, bad, good });
+/**
+ * Start a bisect between two commits, ordered by ancestry; with `keepOrder`
+ * ("Bisect from here"), `good` must be an ancestor of `bad`, never swapped.
+ */
+export async function gitBisectStart(cwd: string, bad: string, good: string, keepOrder = false): Promise<BisectStatus> {
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_start", { cwd, bad, good, keepOrder });
+  return bisectPost<BisectStatus>("/api/git-bisect-start", { cwd, bad, good, keepOrder });
 }
 
 export async function gitBisectMark(cwd: string, verdict: BisectVerdict): Promise<BisectStatus> {

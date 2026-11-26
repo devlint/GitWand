@@ -25,22 +25,31 @@ export function useBisectStatus(opts: {
 }) {
   const status = ref<BisectStatus | null>(null);
   const busy = ref(false);
-  const error = ref("");
+  /** The last read's error: cleared by the next read that succeeds. */
+  const loadError = ref("");
+  /**
+   * The last action's error (git refused a checkout, say): kept until the
+   * next action or repo, whatever reloads follow (a refused checkout still
+   * records the mark, which moves the mark count and reloads).
+   */
+  const actionError = ref("");
+  const error = computed(() => actionError.value || loadError.value);
 
   // Only the latest load applies: an older one (a previous repo, an earlier
   // key) finishing last must not overwrite it.
   let loadRequest = 0;
-  async function load(keepError = false) {
+  async function load() {
     const request = ++loadRequest;
     try {
       const next = await gitBisectStatus(opts.cwd());
       if (request !== loadRequest) return;
       // Ended (in a terminal) before the repo state caught up: nothing to show.
       status.value = next.active ? next : null;
-      if (!keepError || !next.active) error.value = "";
+      loadError.value = "";
+      if (!next.active) actionError.value = "";
     } catch (e) {
       if (request !== loadRequest) return;
-      error.value = bisectErrorMessage(e);
+      loadError.value = bisectErrorMessage(e);
     }
   }
 
@@ -71,7 +80,8 @@ export function useBisectStatus(opts: {
       // this one's read fails, and a read still running for it is dropped.
       loadRequest++;
       status.value = null;
-      error.value = "";
+      loadError.value = "";
+      actionError.value = "";
     },
   );
   watch(() => [opts.cwd(), opts.refreshKey()], reload, { immediate: true });
@@ -101,7 +111,7 @@ export function useBisectStatus(opts: {
   async function act(run: () => Promise<BisectStatus | void>) {
     if (busy.value) return;
     busy.value = true;
-    error.value = "";
+    actionError.value = "";
     // Another repo opened meanwhile (the banner stays mounted): its result
     // is not this repo's. A load started meanwhile is at least as fresh.
     const cwd = opts.cwd();
@@ -113,10 +123,10 @@ export function useBisectStatus(opts: {
       opts.onChanged();
     } catch (e) {
       if (opts.cwd() !== cwd) return;
-      error.value = bisectErrorMessage(e);
+      actionError.value = bisectErrorMessage(e);
       // git may have recorded the mark before failing (a checkout refused by
-      // uncommitted changes): show what it holds now, keeping the error.
-      await load(true);
+      // uncommitted changes): show what it holds now, with the error.
+      await load();
       opts.onChanged();
     } finally {
       busy.value = false;

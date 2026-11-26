@@ -12,7 +12,7 @@
  */
 import { toRef } from "vue";
 import { useBisectStatus } from "../composables/useBisectStatus";
-import { t } from "../composables/useI18n";
+import { t, useI18n } from "../composables/useI18n";
 
 const props = defineProps<{
   cwd: string;
@@ -36,6 +36,7 @@ const { status, busy, error, culprit, candidates, narrowing, pending, noResult, 
     onChanged: () => emit("changed"),
   });
 
+const { locale } = useI18n();
 const short = (hash: string | null | undefined) => (hash ? hash.slice(0, 7) : "");
 const subject = (hash: string | null | undefined) => info(hash)?.subject ?? "";
 /** "Jane, 20 Nov 2026" for the result line. */
@@ -43,7 +44,8 @@ const byline = (hash: string | null | undefined) => {
   const c = info(hash);
   if (!c) return "";
   const d = new Date(c.date);
-  return isNaN(d.getTime()) ? c.author : `${c.author}, ${d.toLocaleDateString()}`;
+  // In the app's language, not the OS's.
+  return isNaN(d.getTime()) ? c.author : `${c.author}, ${d.toLocaleDateString(locale.value)}`;
 };
 /** A bisect with its own terms names them on the buttons. */
 const label = (verdict: "good" | "bad") => {

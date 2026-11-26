@@ -23,7 +23,7 @@ export function useBisectStart(opts: {
    * shows `good` is an ancestor of `bad`; otherwise the confirmation does not
    * say which end is which (the backend orders them by ancestry).
    */
-  const confirm = ref<{ good: string; bad: string; ordered: boolean } | null>(null);
+  const confirm = ref<{ good: string; bad: string; ordered: boolean; keepOrder?: boolean } | null>(null);
   const starting = ref(false);
 
   /** Two ends in any order (the Git Tree's row order is not ancestry). */
@@ -54,13 +54,14 @@ export function useBisectStart(opts: {
       opts.notify(t("bisect.noHead"), null);
       return;
     }
-    // Explained before the confirmation, not after it (when the loaded log
-    // can tell; otherwise the backend refuses with the same reason).
+    // Explained before the confirmation, not after it, when the loaded log
+    // can tell. Otherwise the backend refuses with the same reason: the ends
+    // are kept as the menu names them (`keepOrder`), never swapped.
     if (inLoadedHistoryOf(log, entry.hashFull, head.hashFull) === false) {
       opts.notify(t("bisect.notInHead"), null);
       return;
     }
-    ask(entry.hashFull, head.hashFull);
+    confirm.value = { good: entry.hashFull, bad: head.hashFull, ordered: true, keepOrder: true };
   }
 
   function cancel() {
@@ -74,7 +75,7 @@ export function useBisectStart(opts: {
     starting.value = true;
     try {
       const { gitBisectStart } = await import("../utils/backend");
-      await gitBisectStart(cwd, pair.bad, pair.good);
+      await gitBisectStart(cwd, pair.bad, pair.good, pair.keepOrder === true);
       confirm.value = null;
       await opts.onStarted();
     } catch (e) {
