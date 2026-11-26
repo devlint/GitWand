@@ -84,13 +84,47 @@ export function devBisectStatus(cwd) {
       const n = line ? Number(line.slice(k.length + 1).trim().replace(/'/g, "")) : NaN;
       return Number.isFinite(n) ? n : null;
     };
-    remaining = v("bisect_nr");
     steps = v("bisect_steps");
-    const range = runOk(cwd, ["rev-list", bad, "--not", ...good]).split("\n").filter(Boolean);
-    const untested = range.filter((h) => !skipped.includes(h));
-    if (untested.length === 1 && untested[0] === bad) candidates = range;
+    // As in the Rust command: `bisect_nr` ignores skips, this leaves them out.
+    const rangeLen = Number(runOk(cwd, ["rev-list", "--count", bad, "--not", ...good]).trim()) || 0;
+    remaining = Math.max(0, rangeLen - 1 - skipped.length);
+    if (rangeLen <= skipped.length + 1) {
+      const range = runOk(cwd, ["rev-list", bad, "--not", ...good]).split("\n").filter(Boolean);
+      const untested = range.filter((h) => !skipped.includes(h));
+      if (untested.length === 1 && untested[0] === bad) candidates = range;
+    }
   }
-  return { current: headHash(cwd), start, bad, good, skipped, remaining, steps, candidates, terms: [badTerm, goodTerm] };
+  const current = headHash(cwd);
+  const marked = (h) => h === bad || good.includes(h) || skipped.includes(h);
+  const pendingCheckout = candidates.length === 0 && remaining !== null && remaining > 0 && !!current && marked(current);
+  const toDescribe = [...(current ? [current] : []), ...candidates.filter((c) => c !== current)];
+  return {
+    current,
+    start,
+    bad,
+    good,
+    skipped,
+    remaining,
+    steps,
+    candidates,
+    terms: [badTerm, goodTerm],
+    commits: describe(cwd, toDescribe),
+    pendingCheckout,
+  };
+}
+
+/** Subject, author and date of each hash, in one `git log`. */
+function describe(cwd, hashes) {
+  if (hashes.length === 0) return [];
+  const r = run(cwd, ["log", "--no-walk=unsorted", "--format=%H%x1f%s%x1f%an%x1f%aI", ...hashes]);
+  if (r.status !== 0) return [];
+  return r.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => {
+      const [hash, subject, author, date] = l.split("\x1f");
+      return { hash, subject, author, date };
+    });
 }
 
 const isHash = (s) => typeof s === "string" && /^[0-9a-f]{7,64}$/i.test(s);
@@ -111,8 +145,13 @@ export function devBisectStart(cwd, bad, good) {
   if (runOk(cwd, ["status", "--porcelain", "--untracked-files=no"]).trim()) {
     throw new Error("Commit or stash your uncommitted changes before starting a bisect.");
   }
-  if (run(cwd, ["merge-base", "--is-ancestor", good, bad]).status !== 0) {
-    throw new Error("The good commit must be an ancestor of the bad one.");
+  // The ancestor is the good end, whichever way they are passed.
+  const isAncestor = (a, b) => run(cwd, ["merge-base", "--is-ancestor", a, b]).status === 0;
+  if (!isAncestor(good, bad)) {
+    if (!isAncestor(bad, good)) {
+      throw new Error("One of the two commits must be an ancestor of the other: they are on separate branches.");
+    }
+    [bad, good] = [good, bad];
   }
   runOk(cwd, ["bisect", "start", bad, good]);
   return devBisectStatus(cwd);
@@ -120,7 +159,7 @@ export function devBisectStart(cwd, bad, good) {
 
 export function devBisectMark(cwd, verdict) {
   const [badTerm, goodTerm] = terms(cwd);
-  const term = verdict === "good" ? goodTerm : verdict === "bad" ? badTerm : verdict === "skip" ? "skip" : null;
+  const term = verdict === "good" ? goodTerm : verdict === "bad" ? badTerm : verdict === "skip" || verdict === "next" ? verdict : null;
   if (!term) throw new Error(`Unknown bisect verdict: ${verdict}`);
   if (!isBisecting(cwd)) throw new Error("No bisect is in progress.");
   try {

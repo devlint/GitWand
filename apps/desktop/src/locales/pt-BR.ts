@@ -760,6 +760,9 @@ const ptBR: Locale = {
 
   // ─── Interactive Rebase ─────────────────────────────────
   bisect: {
+    notInHead: "Este commit não está no histórico do HEAD: mude antes para um branch que o contenha.",
+    continue: "Continuar",
+    pending: "Marcado. O git não conseguiu passar para o próximo commit: faça commit ou stash das alterações e depois Continuar.",
     menuBetween: "Bisect entre estes commits",
     menuFromHere: "Bisect a partir daqui (este commit é bom)",
     menuFromHereHint: "Encontrar o primeiro commit ruim entre este e o HEAD",

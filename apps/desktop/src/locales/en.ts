@@ -771,6 +771,9 @@ const en = {
 
   // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
   bisect: {
+    notInHead: "This commit is not in HEAD's history: check out a branch that contains it first.",
+    continue: "Continue",
+    pending: "Marked. git could not check out the next commit: commit or stash your changes, then Continue.",
     menuBetween: "Bisect between these commits",
     menuFromHere: "Bisect from here (this commit is good)",
     menuFromHereHint: "Find the first bad commit between this one and HEAD",

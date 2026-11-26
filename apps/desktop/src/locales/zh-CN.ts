@@ -772,6 +772,9 @@ const zhCN: Locale = {
   },
 
   bisect: {
+    notInHead: "此提交不在 HEAD 的历史中：请先切换到包含它的分支。",
+    continue: "继续",
+    pending: "已标记。git 无法检出下一个提交：请提交或暂存你的更改，然后点击继续。",
     menuBetween: "在这两个提交之间二分查找",
     menuFromHere: "从这里开始二分查找（此提交是好的）",
     menuFromHereHint: "在此提交与 HEAD 之间找到第一个坏提交",

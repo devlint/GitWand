@@ -5,7 +5,7 @@
 //! which are translated.
 
 use crate::git::*;
-use crate::types::BisectStatus;
+use crate::types::{BisectCommit, BisectStatus};
 use std::process::Output;
 
 fn run(cwd: &str, args: &[&str]) -> Result<Output, String> {
@@ -32,6 +32,54 @@ fn run_ok(cwd: &str, args: &[&str]) -> Result<String, String> {
 
 fn is_bisecting(cwd: &str) -> Result<bool, String> {
     Ok(resolve_git_dir(cwd)?.join("BISECT_LOG").exists())
+}
+
+/// A rebase, merge, cherry-pick or revert in progress (what `git_repo_state`
+/// reports ahead of a bisect), read under the caller's lock.
+fn other_operation(cwd: &str) -> Result<bool, String> {
+    let dir = resolve_git_dir(cwd)?;
+    Ok([
+        "rebase-merge",
+        "rebase-apply",
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+    ]
+    .iter()
+    .any(|f| dir.join(f).exists()))
+}
+
+fn is_ancestor(cwd: &str, ancestor: &str, of: &str) -> Result<bool, String> {
+    Ok(run(cwd, &["merge-base", "--is-ancestor", ancestor, of])?
+        .status
+        .success())
+}
+
+/// Subject, author and date of each hash, in one `git log`.
+fn describe(cwd: &str, hashes: &[String]) -> Vec<BisectCommit> {
+    if hashes.is_empty() {
+        return Vec::new();
+    }
+    let mut args = vec![
+        "log",
+        "--no-walk=unsorted",
+        "--format=%H%x1f%s%x1f%an%x1f%aI",
+    ];
+    args.extend(hashes.iter().map(String::as_str));
+    let Ok(out) = run_ok(cwd, &args) else {
+        return Vec::new();
+    };
+    out.lines()
+        .filter_map(|l| {
+            let mut f = l.split('\x1f');
+            Some(BisectCommit {
+                hash: f.next()?.to_string(),
+                subject: f.next()?.to_string(),
+                author: f.next()?.to_string(),
+                date: f.next()?.to_string(),
+            })
+        })
+        .collect()
 }
 
 /// (bad term, good term): `BISECT_TERMS` when a bisect set custom terms.
@@ -96,19 +144,42 @@ fn read_status(cwd: &str) -> Result<BisectStatus, String> {
                 .find_map(|l| l.strip_prefix(&format!("{key}=")))
                 .and_then(|v| v.trim().trim_matches('\'').parse().ok())
         };
-        remaining = var("bisect_nr");
         steps = var("bisect_steps");
 
-        // The commits that can still be the first bad one: when every one
-        // but `bad` is skipped (or there is none), git cannot narrow further.
-        let mut args = vec!["rev-list", bad.as_str(), "--not"];
+        // The range (`bad` and the commits that can still be the first bad
+        // one). `bisect_nr` ignores skips; this leaves them out (git only
+        // checks out, so only skips, commits of the range).
+        let mut args = vec!["rev-list", "--count", bad.as_str(), "--not"];
         args.extend(good.iter().map(String::as_str));
-        let range: Vec<String> = run_ok(cwd, &args)?.lines().map(str::to_string).collect();
-        let untested: Vec<&String> = range.iter().filter(|h| !skipped.contains(h)).collect();
-        if untested.len() == 1 && untested[0] == bad {
-            candidates = range;
+        let range_len: usize = run_ok(cwd, &args)?.trim().parse().unwrap_or(0);
+        remaining = Some(range_len.saturating_sub(1 + skipped.len()) as u32);
+
+        // When every commit but `bad` is skipped (or there is none), git
+        // cannot narrow further: list them. Only then is the range listed.
+        if range_len <= skipped.len() + 1 {
+            let mut args = vec!["rev-list", bad.as_str(), "--not"];
+            args.extend(good.iter().map(String::as_str));
+            let range: Vec<String> = run_ok(cwd, &args)?.lines().map(str::to_string).collect();
+            let untested: Vec<&String> = range.iter().filter(|h| !skipped.contains(h)).collect();
+            if untested.len() == 1 && untested[0] == bad {
+                candidates = range;
+            }
         }
     }
+
+    let marked = |h: &String| bad.as_ref() == Some(h) || good.contains(h) || skipped.contains(h);
+    let pending_checkout = candidates.is_empty()
+        && remaining.is_some_and(|n| n > 0)
+        && current.as_ref().is_some_and(marked);
+
+    let mut to_describe: Vec<String> = current.iter().cloned().collect();
+    to_describe.extend(
+        candidates
+            .iter()
+            .filter(|c| Some(*c) != current.as_ref())
+            .cloned(),
+    );
+    let commits = describe(cwd, &to_describe);
 
     Ok(BisectStatus {
         current,
@@ -120,6 +191,8 @@ fn read_status(cwd: &str) -> Result<BisectStatus, String> {
         steps,
         candidates,
         terms: (bad_term, good_term),
+        commits,
+        pending_checkout,
     })
 }
 
@@ -134,8 +207,10 @@ pub(crate) async fn git_bisect_status(cwd: String) -> Result<BisectStatus, Strin
     read_status(&cwd)
 }
 
-/// Start a bisect between `good` (an ancestor) and `bad`. Refused on tracked
-/// changes, during another operation, or when `good` is not an ancestor.
+/// Start a bisect between two commits, one an ancestor of the other: the
+/// ancestor is the good end, whichever way they are passed (the Git Tree's
+/// row order is not ancestry). Refused on tracked changes, during another
+/// operation, or when neither is an ancestor of the other.
 #[tauri::command]
 pub(crate) async fn git_bisect_start(
     cwd: String,
@@ -145,9 +220,8 @@ pub(crate) async fn git_bisect_start(
     if !is_full_or_short_hash(&bad) || !is_full_or_short_hash(&good) {
         return Err("A bisect starts from two commit hashes.".to_string());
     }
-    let state = crate::commands::read::git_repo_state(cwd.clone()).await?;
     let _repo = repo_lock::write(&cwd);
-    if state.state != "clean" || is_bisecting(&cwd)? {
+    if other_operation(&cwd)? || is_bisecting(&cwd)? {
         return Err(
             "Another operation is in progress; finish it before starting a bisect.".to_string(),
         );
@@ -158,16 +232,23 @@ pub(crate) async fn git_bisect_start(
             "Commit or stash your uncommitted changes before starting a bisect.".to_string(),
         );
     }
-    let ancestor = run(&cwd, &["merge-base", "--is-ancestor", &good, &bad])?;
-    if !ancestor.status.success() {
-        return Err("The good commit must be an ancestor of the bad one.".to_string());
-    }
+    let (bad, good) = if is_ancestor(&cwd, &good, &bad)? {
+        (bad, good)
+    } else if is_ancestor(&cwd, &bad, &good)? {
+        (good, bad)
+    } else {
+        return Err(
+            "One of the two commits must be an ancestor of the other: they are on separate branches."
+                .to_string(),
+        );
+    };
     run_ok(&cwd, &["bisect", "start", &bad, &good])?;
     read_status(&cwd)
 }
 
 /// Mark the commit under test: `good`, `bad` (mapped to the bisect's own
-/// terms) or `skip`.
+/// terms) or `skip`; or `next`, which checks out the next commit to test
+/// after a mark git recorded but could not move on from (`pending_checkout`).
 #[tauri::command]
 pub(crate) async fn git_bisect_mark(cwd: String, verdict: String) -> Result<BisectStatus, String> {
     let _repo = repo_lock::write(&cwd);
@@ -175,7 +256,7 @@ pub(crate) async fn git_bisect_mark(cwd: String, verdict: String) -> Result<Bise
     let term = match verdict.as_str() {
         "good" => good_term,
         "bad" => bad_term,
-        "skip" => "skip".to_string(),
+        "skip" | "next" => verdict.clone(),
         _ => return Err(format!("Unknown bisect verdict: {verdict}")),
     };
     if !is_bisecting(&cwd)? {
@@ -318,12 +399,75 @@ mod tests {
         };
         assert_eq!(st.bad.as_deref(), Some(c8.as_str()));
         assert_eq!(st.good, vec![c1.clone()]);
-        assert_eq!(st.remaining, Some(var("bisect_nr")));
+        // Commits still untested: the range minus the known-bad end.
+        let range: u32 = repo
+            .git(&["rev-list", "--count", &c8, "--not", &c1])
+            .parse()
+            .unwrap();
+        assert_eq!(st.remaining, Some(range - 1));
         assert_eq!(st.steps, Some(var("bisect_steps")));
         assert!(st.candidates.is_empty());
         assert_eq!(st.current.as_deref(), Some(repo.head().as_str()));
         assert_eq!(st.start.as_deref(), Some("main"));
         assert_eq!(st.terms, ("bad".to_string(), "good".to_string()));
+    }
+
+    #[test]
+    fn remaining_leaves_out_skipped_commits() {
+        let repo = TempRepo::linear(8);
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        let st = block(git_bisect_start(repo.cwd(), c8, c1)).expect("start");
+        let before = st.remaining.unwrap();
+        let st = block(git_bisect_mark(repo.cwd(), "skip".to_string())).expect("skip");
+        assert_eq!(st.remaining, Some(before - 1));
+    }
+
+    #[test]
+    fn status_describes_the_commit_under_test_and_the_culprit() {
+        let repo = TempRepo::linear(8);
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        let st = block(git_bisect_start(repo.cwd(), c8, c1)).expect("start");
+        let head = repo.head();
+        let subject = repo.git(&["log", "-1", "--format=%s", &head]);
+        let info = st
+            .commits
+            .iter()
+            .find(|c| c.hash == head)
+            .expect("current described");
+        assert_eq!(info.subject, subject);
+        assert_eq!(info.author, "Test");
+        assert!(!info.date.is_empty());
+    }
+
+    #[test]
+    fn start_orders_the_ends_by_ancestry() {
+        let repo = TempRepo::linear(8);
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        // Passed the wrong way round (as a Git Tree whose rows are out of
+        // order would): the ancestor is still the good end.
+        let st = block(git_bisect_start(repo.cwd(), c1.clone(), c8.clone())).expect("start");
+        assert_eq!(st.bad.as_deref(), Some(c8.as_str()));
+        assert_eq!(st.good, vec![c1]);
+    }
+
+    #[test]
+    fn a_mark_whose_checkout_fails_is_kept_and_next_moves_on() {
+        let repo = TempRepo::linear(8);
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        block(git_bisect_start(repo.cwd(), c8, c1)).expect("start");
+        let tested = repo.head();
+        // A tracked edit every other commit's a.txt would overwrite.
+        repo.write("a.txt", "local edit\n");
+        let err = block(git_bisect_mark(repo.cwd(), "good".to_string())).unwrap_err();
+        assert!(!err.is_empty());
+        let st = status(&repo);
+        assert!(st.good.contains(&tested), "the mark was recorded");
+        assert_eq!(repo.head(), tested);
+        assert!(st.pending_checkout, "HEAD is a commit already marked");
+        repo.git(&["checkout", "--", "a.txt"]);
+        let st = block(git_bisect_mark(repo.cwd(), "next".to_string())).expect("next");
+        assert_ne!(st.current.as_deref(), Some(tested.as_str()));
+        assert!(!st.pending_checkout);
     }
 
     #[test]

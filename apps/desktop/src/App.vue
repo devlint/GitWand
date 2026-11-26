@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { IS_MAC } from "./utils/platform";
 import { isBisect, pollsRepoState, showsOperationBanner } from "./utils/operationKinds";
+import { inLoadedHistoryOf } from "./utils/bisectEndpoints";
 import { ref, computed, watch, onMounted, onUnmounted, provide, defineAsyncComponent, nextTick } from "vue";
 
 // ─── Eager imports — main views & shared building blocks ─────────────────────
@@ -3229,10 +3230,13 @@ const bisectHasTrackedChanges = computed(() =>
   !!repoStatus.value && (repoStatus.value.staged.length > 0 || repoStatus.value.unstaged.length > 0),
 );
 
-/** A commit's subject when the loaded log has it. */
-function describeLoggedCommit(hash: string): string | null {
-  return repoLog.value.find((e) => e.hashFull === hash)?.message ?? null;
-}
+/**
+ * Bumped by watcher events that can move a bisect (refs/bisect, HEAD, the
+ * BISECT_* files): with HEAD, the banner's reload key. Not the whole
+ * `repoOperationState`, which is a new object at every status reload (each
+ * file save while testing a step).
+ */
+const bisectTick = ref(0);
 
 /** A bisect moved HEAD and refs/bisect: reload repo state, status and the forced log. */
 async function onBisectChanged() {
@@ -3253,6 +3257,12 @@ function askBisectFromHere(entry: GitLogEntry) {
   const head = repoLog.value.find((e) => /(^|, )HEAD( ->|,|$)/.test(e.refs));
   if (!head) {
     showDetailToast(t("bisect.noHead"), null);
+    return;
+  }
+  // Explained before the confirmation, not after it (when the loaded log
+  // can tell; otherwise the backend refuses with the same reason).
+  if (inLoadedHistoryOf(repoLog.value, entry.hashFull, head.hashFull) === false) {
+    showDetailToast(t("bisect.notInHead"), null);
     return;
   }
   askBisect(entry.hashFull, head.hashFull);
@@ -4574,6 +4584,11 @@ repoWatcher.on(["worktree", "config", "head"], (ev) => {
   if (shouldRecheckTrackedIgnored(ev)) trackedIgnored.scheduleCheck();
 });
 
+// Guided bisect: reload the banner's status (see `bisectTick`).
+repoWatcher.on(["refs", "head", "mergeState"], () => {
+  if (isBisect(repoOperationState.value)) bisectTick.value++;
+});
+
 repoWatcher.on(["head", "refs"], () => {
   watcherRefreshQueue.schedule("head-refs", async () => {
     // A head/refs event means decorations changed, possibly below the first
@@ -5160,9 +5175,8 @@ onUnmounted(() => {
             <!-- Guided bisect: a bisect in progress, from GitWand or a terminal. -->
             <BisectBanner v-if="repoFolderPath && isBisect(repoOperationState)"
               :cwd="repoFolderPath"
-              :refresh-key="repoOperationState"
+              :refresh-key="`${repoOperationState?.operationHead ?? ''}:${bisectTick}`"
               :has-tracked-changes="bisectHasTrackedChanges"
-              :describe-commit="describeLoggedCommit"
               @changed="onBisectChanged"
               @open-commit="openBisectCommit" />
 

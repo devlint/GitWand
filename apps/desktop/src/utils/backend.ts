@@ -1233,9 +1233,22 @@ export interface BisectStatus {
   candidates: string[];
   /** [bad term, good term] ("bad"/"good" unless the bisect set its own). */
   terms: [string, string];
+  /** Subject, author and date of the commit under test and the candidates. */
+  commits: BisectCommit[];
+  /** The last mark was recorded but git could not check out the next commit: `next` moves on. */
+  pendingCheckout: boolean;
 }
 
-export type BisectVerdict = "good" | "bad" | "skip";
+export interface BisectCommit {
+  hash: string;
+  subject: string;
+  author: string;
+  /** Author date, ISO 8601. */
+  date: string;
+}
+
+/** `next` checks out the next commit to test after a `pendingCheckout`. */
+export type BisectVerdict = "good" | "bad" | "skip" | "next";
 
 async function bisectPost<T>(route: string, body: Record<string, unknown>): Promise<T> {
   const res = await devFetch(`${DEV_SERVER}${route}`, {

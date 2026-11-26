@@ -26,8 +26,6 @@ const props = defineProps<{
   refreshKey: unknown;
   /** Tracked files are modified: they follow to the next commit. */
   hasTrackedChanges: boolean;
-  /** A commit's subject when the parent knows it (the loaded log). */
-  describeCommit?: (hash: string) => string | null;
 }>();
 
 const emit = defineEmits<{
@@ -40,19 +38,46 @@ const status = ref<BisectStatus | null>(null);
 const busy = ref(false);
 const error = ref("");
 
-async function load() {
+// Only the latest load applies: an older one (a previous repo, an earlier
+// key) finishing last must not overwrite it.
+let loadRequest = 0;
+async function load(keepError = false) {
+  const request = ++loadRequest;
   try {
-    status.value = await gitBisectStatus(props.cwd);
+    const next = await gitBisectStatus(props.cwd);
+    if (request !== loadRequest) return;
+    status.value = next;
+    if (!keepError) error.value = "";
   } catch (e) {
+    if (request !== loadRequest) return;
     error.value = e instanceof Error ? e.message : String(e);
   }
 }
 
-watch(() => [props.cwd, props.refreshKey], load, { immediate: true });
+watch(() => [props.cwd, props.refreshKey], () => load(), { immediate: true });
 
 const short = (hash: string | null | undefined) => (hash ? hash.slice(0, 7) : "");
-const subject = (hash: string | null | undefined) =>
-  (hash && props.describeCommit?.(hash)) || "";
+const info = (hash: string | null | undefined) =>
+  (hash && status.value?.commits.find((c) => c.hash === hash)) || null;
+const subject = (hash: string | null | undefined) => info(hash)?.subject ?? "";
+/** "Jane, 20 Nov 2026" for the result line. */
+const byline = (hash: string | null | undefined) => {
+  const c = info(hash);
+  if (!c) return "";
+  const d = new Date(c.date);
+  return isNaN(d.getTime()) ? c.author : `${c.author}, ${d.toLocaleDateString()}`;
+};
+
+/** A bisect with its own terms (`--term-old/--term-new`) names them on the buttons. */
+const customTerms = computed(() => {
+  const terms = status.value?.terms;
+  return terms && (terms[0] !== "bad" || terms[1] !== "good") ? terms : null;
+});
+const label = (verdict: "good" | "bad") => {
+  const base = t(verdict === "good" ? "bisect.good" : "bisect.bad");
+  const terms = customTerms.value;
+  return terms ? `${base} (${verdict === "good" ? terms[1] : terms[0]})` : base;
+};
 
 const culprit = computed(() =>
   status.value && status.value.candidates.length === 1 ? status.value.candidates[0] : null,
@@ -61,6 +86,7 @@ const candidates = computed(() =>
   status.value && status.value.candidates.length > 1 ? status.value.candidates : [],
 );
 const narrowing = computed(() => !culprit.value && candidates.value.length === 0);
+const pending = computed(() => narrowing.value && !!status.value?.pendingCheckout);
 
 async function act(run: () => Promise<BisectStatus | void>) {
   if (busy.value) return;
@@ -72,6 +98,10 @@ async function act(run: () => Promise<BisectStatus | void>) {
     emit("changed");
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
+    // git may have recorded the mark before failing (a checkout refused by
+    // uncommitted changes): show what it holds now, keeping the error.
+    await load(true);
+    emit("changed");
   } finally {
     busy.value = false;
   }
@@ -93,6 +123,7 @@ const end = () => act(() => gitBisectReset(props.cwd));
       <template v-if="culprit">
         <span class="bisect-title">{{ t('bisect.culprit', short(culprit)) }}</span>
         <span v-if="subject(culprit)" class="bisect-subject">{{ subject(culprit) }}</span>
+        <span v-if="byline(culprit)" class="bisect-meta">{{ byline(culprit) }}</span>
       </template>
       <template v-else-if="candidates.length">
         <span class="bisect-title">{{ t('bisect.candidates', candidates.length) }}</span>
@@ -117,14 +148,16 @@ const end = () => act(() => gitBisectReset(props.cwd));
           {{ t('bisect.counts', status.good.length, status.bad ? 1 : 0, status.skipped.length) }}
         </span>
       </template>
-      <span v-if="hasTrackedChanges && narrowing" class="bisect-note">{{ t('bisect.dirty') }}</span>
+      <span v-if="pending" class="bisect-note">{{ t('bisect.pending') }}</span>
+      <span v-else-if="hasTrackedChanges && narrowing" class="bisect-note">{{ t('bisect.dirty') }}</span>
       <span v-if="error" class="bisect-error" role="alert">{{ error }}</span>
     </div>
 
     <div class="bisect-actions">
-      <template v-if="narrowing">
-        <button class="btn btn--sm btn--success" :disabled="busy" @click="mark('good')">{{ t('bisect.good') }}</button>
-        <button class="btn btn--sm btn--danger" :disabled="busy" @click="mark('bad')">{{ t('bisect.bad') }}</button>
+      <button v-if="pending" class="btn btn--sm btn--primary" :disabled="busy" @click="mark('next')">{{ t('bisect.continue') }}</button>
+      <template v-else-if="narrowing">
+        <button class="btn btn--sm btn--success" :disabled="busy" @click="mark('good')">{{ label('good') }}</button>
+        <button class="btn btn--sm btn--danger" :disabled="busy" @click="mark('bad')">{{ label('bad') }}</button>
         <button class="btn btn--sm btn--secondary" :disabled="busy" @click="mark('skip')">{{ t('bisect.skip') }}</button>
       </template>
       <button v-if="culprit" class="btn btn--sm btn--primary" :disabled="busy"

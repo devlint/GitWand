@@ -384,6 +384,23 @@ pub struct BisectStatus {
     pub candidates: Vec<String>,
     /// (bad term, good term).
     pub terms: (String, String),
+    /// Subject, author and date of the commit under test and the candidates.
+    pub commits: Vec<BisectCommit>,
+    /// HEAD is a commit already marked while git still has commits to test:
+    /// the last mark was recorded but git could not check out the next one
+    /// (uncommitted changes in the way). `next` moves on.
+    pub pending_checkout: bool,
+}
+
+/// A commit the bisect banner describes.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BisectCommit {
+    pub hash: String,
+    pub subject: String,
+    pub author: String,
+    /// Author date, ISO 8601.
+    pub date: String,
 }
 
 // ─── Git branch ────────────────────────────────────────────────────

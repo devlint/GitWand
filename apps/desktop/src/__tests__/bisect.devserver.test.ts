@@ -89,6 +89,38 @@ describe("dev-server bisect", { timeout: 30_000 }, () => {
     for (const c of [c2, c3, c4]) expect(st.candidates).toContain(c);
   });
 
+  it("orders the ends by ancestry, describes commits, counts without skips", () => {
+    const { path, g, sha } = linear(8);
+    const [c1, c8] = [sha("c1"), sha("c8")];
+    let st = devBisectStart(path, c1, c8);
+    expect(st.bad).toBe(c8);
+    expect(st.good).toEqual([c1]);
+    const range = Number(g("rev-list", "--count", c8, "--not", c1));
+    expect(st.remaining).toBe(range - 1);
+    const head = g("rev-parse", "HEAD");
+    expect(st.commits.find((c: { hash: string }) => c.hash === head)?.subject).toBe(
+      g("log", "-1", "--format=%s", head),
+    );
+    st = devBisectMark(path, "skip");
+    expect(st.remaining).toBe(range - 2);
+  });
+
+  it("keeps a mark whose checkout fails, then moves on with next", () => {
+    const { path, g, sha } = linear(8);
+    const [c1, c8] = [sha("c1"), sha("c8")];
+    devBisectStart(path, c8, c1);
+    const tested = g("rev-parse", "HEAD");
+    writeFileSync(join(path, "a.txt"), "local edit\n");
+    expect(() => devBisectMark(path, "good")).toThrow();
+    let st = devBisectStatus(path);
+    expect(st.good).toContain(tested);
+    expect(st.pendingCheckout).toBe(true);
+    g("checkout", "--", "a.txt");
+    st = devBisectMark(path, "next");
+    expect(st.current).not.toBe(tested);
+    expect(st.pendingCheckout).toBe(false);
+  });
+
   it("reads a terminal bisect with custom terms", () => {
     const { path, g, sha } = linear(8);
     const [c1, c8] = [sha("c1"), sha("c8")];

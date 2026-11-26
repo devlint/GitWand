@@ -23,6 +23,8 @@ const status = (over: Partial<BisectStatus> = {}): BisectStatus => ({
   steps: 5,
   candidates: [],
   terms: ["bad", "good"],
+  commits: [{ hash: H("a"), subject: "Fix parser edge case", author: "Jane", date: "2026-11-20T10:00:00Z" }],
+  pendingCheckout: false,
   ...over,
 });
 
@@ -46,7 +48,6 @@ async function mount(props: Record<string, unknown> = {}) {
         cwd: "/repo",
         refreshKey: 0,
         hasTrackedChanges: false,
-        describeCommit: (hash: string) => (hash === H("a") ? "Fix parser edge case" : null),
         onChanged: () => events.changed++,
         onOpenCommit: (hash: string) => events.open.push(hash),
         ...props,
@@ -111,20 +112,64 @@ describe("BisectBanner", () => {
     expect(host.textContent).toContain("To test: 18 · steps left: ~4");
   });
 
-  it("shows a mark error inline", async () => {
+  it("shows a mark error inline, reloads and tells the parent", async () => {
     vi.mocked(gitBisectStatus).mockResolvedValue(status());
     vi.mocked(gitBisectMark).mockRejectedValue(new Error("Your local changes would be overwritten"));
-    await mount();
+    const events = await mount();
     button("Skip")!.click();
     await flush();
     expect(host.textContent).toContain("Your local changes would be overwritten");
     expect(button("Skip")!.disabled).toBe(false);
+    expect(gitBisectStatus).toHaveBeenCalledTimes(2);
+    expect(events.changed).toBe(1);
+  });
+
+  it("offers Continue when git recorded the mark but could not move on", async () => {
+    vi.mocked(gitBisectStatus).mockResolvedValue(status({ pendingCheckout: true }));
+    vi.mocked(gitBisectMark).mockResolvedValue(status());
+    const events = await mount();
+    expect(host.textContent).toContain("Marked. git could not check out the next commit");
+    expect(button("Good")).toBeUndefined();
+    button("Continue")!.click();
+    await flush();
+    expect(gitBisectMark).toHaveBeenCalledWith("/repo", "next");
+    expect(events.changed).toBe(1);
+  });
+
+  it("clears an old error once a reload succeeds", async () => {
+    vi.mocked(gitBisectStatus).mockResolvedValueOnce(status());
+    vi.mocked(gitBisectMark).mockRejectedValue(new Error("boom"));
+    vi.mocked(gitBisectStatus).mockResolvedValue(status());
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    const { ref } = await import("vue");
+    const key = ref(0);
+    app = createApp({
+      render: () => h(BisectBanner, { cwd: "/repo", refreshKey: key.value, hasTrackedChanges: false }),
+    });
+    app.mount(host);
+    await flush();
+    button("Bad")!.click();
+    await flush();
+    expect(host.textContent).toContain("boom");
+    key.value++;
+    await flush();
+    expect(host.textContent).not.toContain("boom");
+  });
+
+  it("names a bisect's own terms on the buttons", async () => {
+    vi.mocked(gitBisectStatus).mockResolvedValue(status({ terms: ["broken", "fixed"] }));
+    await mount();
+    expect(button("Good (fixed)")).toBeDefined();
+    expect(button("Bad (broken)")).toBeDefined();
   });
 
   it("names the first bad commit and opens it", async () => {
     vi.mocked(gitBisectStatus).mockResolvedValue(status({ candidates: [H("a")] }));
     const events = await mount();
     expect(host.textContent).toContain("First bad commit: aaaaaaa");
+    expect(host.textContent).toContain("Fix parser edge case");
+    expect(host.textContent).toContain("Jane");
     expect(button("Good")).toBeUndefined();
     button("Open commit")!.click();
     expect(events.open).toEqual([H("a")]);

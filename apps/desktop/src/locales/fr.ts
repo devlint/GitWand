@@ -764,6 +764,9 @@ const fr: Locale = {
 
   // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
   bisect: {
+    notInHead: "Ce commit n'est pas dans l'historique de HEAD : passez d'abord sur une branche qui le contient.",
+    continue: "Continuer",
+    pending: "Marqué. git n'a pas pu passer au commit suivant : commitez ou mettez de côté vos modifications, puis Continuer.",
     menuBetween: "Bisect entre ces commits",
     menuFromHere: "Bisect depuis ici (ce commit est bon)",
     menuFromHereHint: "Trouver le premier mauvais commit entre celui-ci et HEAD",
