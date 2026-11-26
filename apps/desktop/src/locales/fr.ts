@@ -772,10 +772,10 @@ const fr: Locale = {
     menuFromHere: "Bisect depuis ici (ce commit est bon)",
     menuFromHereHint: "Trouver le premier mauvais commit entre celui-ci et HEAD",
     confirmTitle: "Lancer un bisect ?",
-    confirmBody: "Bisect entre le bon commit {0} et le mauvais {1} ? Votre copie de travail passera sur les commits choisis par git ; « Terminer le bisect » vous ramène sur {2}.",
+    confirmBody: "Bisect entre le bon commit {0} et le mauvais {1}\u00a0? Votre copie de travail passera sur les commits choisis par git ; « Terminer le bisect » vous ramène sur {2}.",
     confirmStart: "Lancer le bisect",
     startFailed: "Impossible de lancer le bisect",
-    confirmBodyUnordered: "Bisect entre {0} et {1} ? Le plus ancien est le bon commit. Votre copie de travail passera sur les commits choisis par git ; « Terminer le bisect » vous ramène sur {2}.",
+    confirmBodyUnordered: "Bisect entre {0} et {1}\u00a0? Le plus ancien est le bon commit. Votre copie de travail passera sur les commits choisis par git ; « Terminer le bisect » vous ramène sur {2}.",
     errors: {
       notHashes: "Un bisect part de deux hashes de commit complets.",
       busy: "Une autre opération est en cours : terminez-la avant de lancer un bisect.",
