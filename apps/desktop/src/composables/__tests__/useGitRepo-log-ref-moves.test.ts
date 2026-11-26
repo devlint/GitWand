@@ -529,6 +529,52 @@ describe("refreshOnRefsEvent reloads only when the refs moved", () => {
   );
 
   it(
+    "forgets an older record when a forced reload gets no fingerprint",
+    async () => {
+      const dir = newRepo(5);
+      git(dir, ["branch", "side"]);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true); // records the refs on main
+      const top = sha(dir, "c5");
+
+      git(dir, ["checkout", "-q", "side"]);
+      vi.mocked(getGitRefsFingerprint).mockRejectedValueOnce(new Error("boom"));
+      await repo.loadLog(undefined, true); // shows side, records nothing
+      expect(refsOf(repo, top)).toBe("HEAD -> side, main");
+
+      // Back to the refs of the first record: the event must still reload.
+      git(dir, ["checkout", "-q", "main"]);
+      await repo.refreshOnRefsEvent();
+
+      expect(refsOf(repo, top)).toBe("HEAD -> main, side");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "forgets the record when a plain reload replaces the log",
+    async () => {
+      const dir = newRepo(5);
+      git(dir, ["branch", "side"]);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true); // records the refs on main
+      const top = sha(dir, "c5");
+
+      git(dir, ["checkout", "-q", "side"]);
+      await repo.loadLog(); // the worktree handler's plain reload
+      expect(refsOf(repo, top)).toBe("HEAD -> side, main");
+
+      git(dir, ["checkout", "-q", "main"]);
+      await repo.refreshOnRefsEvent();
+
+      expect(refsOf(repo, top)).toBe("HEAD -> main, side");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "still reloads status when it skips the log",
     async () => {
       const dir = newRepo(5);

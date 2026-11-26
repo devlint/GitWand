@@ -781,9 +781,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // reload thus hands its force to the request that supersedes it.
   let _logForcePending = false;
   // Refs fingerprint (`getGitRefsFingerprint`) read before the last forced
-  // reload that replaced the log (`recordRefs`): the log holds every ref move
-  // up to it. A non-forced load never makes the log older, so it leaves the
-  // record alone; a superseded or failed forced reload records nothing. A watcher
+  // reload that replaced the log (`recordRefs`): the log shows exactly those
+  // refs. Any other replacement of the log forgets it (`replaceLog`), and a
+  // superseded or failed forced reload records nothing. A watcher
   // refs/head event that finds the same fingerprint has nothing to reload
   // (`refreshOnRefsEvent`).
   let _refsSeen: { repo: string; fp: string } | null = null;
@@ -798,13 +798,21 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (branches.value.length > 0) void loadBranches();
   }
 
-  /** A forced reload replaced the log with rows read after `fp` was. */
+  /**
+   * A forced reload replaced the log with rows read after `fp` was; `null`
+   * (no fingerprint) leaves nothing recorded, never an older one.
+   */
   function recordRefs(repo: string, fp: string | null) {
-    if (fp !== null) _refsSeen = { repo, fp };
+    _refsSeen = fp === null ? null : { repo, fp };
   }
 
-  /** Replace the whole log and invalidate in-flight pagination against the old one. */
+  /**
+   * Replace the whole log and invalidate in-flight pagination against the old
+   * one. Forgets the recorded refs: the new rows may show other refs than the
+   * record (a forced reload records its own right after).
+   */
   function replaceLog(entries: GitLogEntry[]) {
+    _refsSeen = null;
     _logGen++;
     _prefetchToken++;
     logLoadingMore.value = false;
@@ -997,8 +1005,6 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           // change, never on an idle poll.
           const depth = forcedReloadDepth();
           if (!viewChanged && depth > pageSize) {
-            // The log is read again, later: keep the record out of doubt.
-            refsFp = null;
             fresh = await getGitLog(repo, depth, true, undefined, 0);
             if (!current()) {
               // Superseded meanwhile: the newer request decides, keeping the force.
