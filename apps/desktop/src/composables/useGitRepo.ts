@@ -711,7 +711,12 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // Unknown: reload, as before.
     }
     if (folderPath.value !== repo) return;
-    if (fp !== null && _refsSeen?.repo === repo && _refsSeen.fp === fp) {
+    if (
+      fp !== null &&
+      _logLoadsInFlight === 0 &&
+      _refsSeen?.repo === repo &&
+      _refsSeen.fp === fp
+    ) {
       await loadStatus(repo);
       return;
     }
@@ -787,6 +792,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // refs/head event that finds the same fingerprint has nothing to reload
   // (`refreshOnRefsEvent`).
   let _refsSeen: { repo: string; fp: string } | null = null;
+  // loadLog calls running. One started before an event may apply rows read
+  // with refs the event's fingerprint no longer shows (a checkout and back):
+  // an event never skips while one runs (`refreshOnRefsEvent`).
+  let _logLoadsInFlight = 0;
 
   /**
    * The log just took changed rows: a ref may have moved, and the Git Tree
@@ -915,6 +924,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (force) _logForcePending = true;
     const current = () =>
       req === _logRequest && epoch === _logViewEpoch && folderPath.value === repo;
+    _logLoadsInFlight++;
     try {
       // A forced reload (or one inheriting a force) records the refs it saw,
       // read BEFORE the log so the log is at least as new as the fingerprint.
@@ -1031,6 +1041,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         if (!unchanged) {
           replaceLog(entries);
           if (!viewChanged) refreshLoadedBranches();
+        } else if (forced) {
+          // Recorded below as showing the current refs: a scroll page still
+          // in flight was read with older ones, and must not land after.
+          _logGen++;
         }
         if (forced) recordRefs(repo, refsFp);
         // hasMore: in branch-only mode a full page is exactly `pageSize`. In
@@ -1049,6 +1063,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       }
     } catch (err: any) {
       error.value = `git log: ${err?.message ?? err}`;
+    } finally {
+      _logLoadsInFlight--;
     }
   }
 

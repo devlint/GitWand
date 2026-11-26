@@ -575,6 +575,35 @@ describe("refreshOnRefsEvent reloads only when the refs moved", () => {
   );
 
   it(
+    "does not skip while an older log load is still running",
+    async () => {
+      const dir = newRepo(5);
+      git(dir, ["branch", "side"]);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true); // records the refs on main
+      const top = sha(dir, "c5");
+
+      // A plain load reads the log on `side`, its result held back.
+      git(dir, ["checkout", "-q", "side"]);
+      let release!: () => void;
+      firstPageGate = new Promise<void>((r) => (release = r));
+      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const plain = repo.loadLog();
+      await vi.waitFor(() => expect(vi.mocked(getGitLog).mock.calls.length).toBe(calls + 1));
+
+      // Back on main before the event runs: same refs as the record.
+      git(dir, ["checkout", "-q", "main"]);
+      await repo.refreshOnRefsEvent();
+      release();
+      await plain;
+
+      expect(refsOf(repo, top)).toBe("HEAD -> main, side");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "still reloads status when it skips the log",
     async () => {
       const dir = newRepo(5);
