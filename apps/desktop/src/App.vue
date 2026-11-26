@@ -5496,7 +5496,7 @@ onUnmounted(() => {
     <!-- Guided bisect: confirms both ends before git moves the working tree. -->
     <BaseModal v-if="bisectConfirm" :title="t('bisect.confirmTitle')" size="sm" role="alertdialog"
       @close="bisectStart.cancel()">
-      <p class="ptc-desc">{{ t('bisect.confirmBody', bisectConfirm.good.slice(0, 7), bisectConfirm.bad.slice(0, 7), repoStatus?.branch || 'HEAD') }}</p>
+      <p class="ptc-desc">{{ t(bisectConfirm.ordered ? 'bisect.confirmBody' : 'bisect.confirmBodyUnordered', bisectConfirm.good.slice(0, 7), bisectConfirm.bad.slice(0, 7), repoStatus?.branch || 'HEAD') }}</p>
       <template #footer>
         <button class="bm-btn bm-btn--ghost" @click="bisectStart.cancel()">{{ t('project.cancel') }}</button>
         <button class="bm-btn bm-btn--primary" :disabled="bisectStart.starting.value" @click="bisectStart.start()">{{ t('bisect.confirmStart') }}</button>

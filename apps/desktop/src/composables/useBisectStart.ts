@@ -7,6 +7,7 @@ import { ref } from "vue";
 import type { GitLogEntry } from "../utils/backend";
 import { inLoadedHistoryOf } from "../utils/bisectEndpoints";
 import { t } from "./useI18n";
+import { bisectErrorMessage } from "./bisectError";
 
 export function useBisectStart(opts: {
   cwd: () => string;
@@ -17,12 +18,32 @@ export function useBisectStart(opts: {
   /** The bisect started: reload repo state, status and the log. */
   onStarted: () => Promise<void>;
 }) {
-  /** A bisect waiting for the user's confirmation. */
-  const confirm = ref<{ good: string; bad: string } | null>(null);
+  /**
+   * A bisect waiting for the user's confirmation. `ordered`: the loaded log
+   * shows `good` is an ancestor of `bad`; otherwise the confirmation does not
+   * say which end is which (the backend orders them by ancestry).
+   */
+  const confirm = ref<{ good: string; bad: string; ordered: boolean } | null>(null);
   const starting = ref(false);
 
-  function ask(good: string, bad: string) {
-    confirm.value = { good, bad };
+  /** Two ends in any order (the Git Tree's row order is not ancestry). */
+  function ask(a: string, b: string) {
+    const log = opts.log();
+    const aFirst = inLoadedHistoryOf(log, a, b);
+    if (aFirst === true) {
+      confirm.value = { good: a, bad: b, ordered: true };
+      return;
+    }
+    const bFirst = inLoadedHistoryOf(log, b, a);
+    if (bFirst === true) {
+      confirm.value = { good: b, bad: a, ordered: true };
+      return;
+    }
+    if (aFirst === false && bFirst === false) {
+      opts.notify(t("bisect.startFailed"), t("bisect.errors.unrelated"));
+      return;
+    }
+    confirm.value = { good: a, bad: b, ordered: false };
   }
 
   /** "Bisect from here": this commit is good, HEAD (found in the loaded log) is bad. */
@@ -57,7 +78,7 @@ export function useBisectStart(opts: {
       confirm.value = null;
       await opts.onStarted();
     } catch (e) {
-      opts.notify(t("bisect.startFailed"), e instanceof Error ? e.message : String(e));
+      opts.notify(t("bisect.startFailed"), bisectErrorMessage(e));
     } finally {
       starting.value = false;
     }

@@ -14,6 +14,7 @@ import BisectBanner from "../BisectBanner.vue";
 const H = (c: string) => c.repeat(40);
 
 const status = (over: Partial<BisectStatus> = {}): BisectStatus => ({
+  active: true,
   current: H("a"),
   start: "main",
   bad: H("b"),
@@ -235,5 +236,19 @@ describe("BisectBanner", () => {
     await flush();
     expect(gitBisectReset).toHaveBeenCalledWith("/repo");
     expect(events.changed).toBe(1);
+  });
+  it("hides itself when the bisect has ended before the repo state caught up", async () => {
+    vi.mocked(gitBisectStatus).mockResolvedValue(status({ active: false, current: null, bad: null, good: [] }));
+    await mount();
+    expect(host.querySelector(".bisect-banner")).toBeNull();
+  });
+
+  it("shows GitWand's refusals in the user's language", async () => {
+    vi.mocked(gitBisectStatus).mockResolvedValue(status());
+    vi.mocked(gitBisectMark).mockRejectedValue(new Error("bisect:notBisecting: No bisect is in progress."));
+    await mount();
+    button("Good")!.click();
+    await flush();
+    expect(host.querySelector(".bisect-error")?.textContent).toBe("No bisect is in progress.");
   });
 });

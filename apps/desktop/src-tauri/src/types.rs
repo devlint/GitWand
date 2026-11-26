@@ -369,7 +369,10 @@ pub struct RepoOperationState {
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BisectStatus {
-    /// HEAD, the commit under test.
+    /// A bisect is in progress (`BISECT_LOG`); false once it has ended, with
+    /// every other field empty.
+    pub active: bool,
+    /// HEAD (BISECT_HEAD for `--no-checkout`), the commit under test.
     pub current: Option<String>,
     /// What `git bisect reset` returns to (`BISECT_START`).
     pub start: Option<String>,

@@ -25,7 +25,7 @@ describe("useBisectStart", () => {
     const { b, notify } = setup(log);
     b.askFromHere(log[2]);
     expect(notify).not.toHaveBeenCalled();
-    expect(b.confirm.value).toEqual({ good: H("a"), bad: H("c") });
+    expect(b.confirm.value).toEqual({ good: H("a"), bad: H("c"), ordered: true });
     b.cancel();
     expect(b.confirm.value).toBeNull();
   });
@@ -42,5 +42,25 @@ describe("useBisectStart", () => {
     b.askFromHere(log[2]);
     expect(notify).toHaveBeenCalledOnce();
     expect(b.confirm.value).toBeNull();
+  });
+  it("orders two ends by ancestry, whatever the row order", () => {
+    const { b } = setup(log);
+    b.ask(H("c"), H("a"));
+    expect(b.confirm.value).toEqual({ good: H("a"), bad: H("c"), ordered: true });
+  });
+
+  it("refuses two ends on separate branches before asking", () => {
+    const { b, notify } = setup(log);
+    b.ask(H("s"), H("c"));
+    expect(notify).toHaveBeenCalledOnce();
+    expect(b.confirm.value).toBeNull();
+  });
+
+  it("leaves the ends unnamed when the loaded log cannot order them", () => {
+    const partial = [entry(H("c"), [H("b")], "HEAD -> main"), entry(H("b"), [H("z")]), entry(H("y"), [H("x")])];
+    const { b, notify } = setup(partial);
+    b.ask(H("y"), H("c"));
+    expect(notify).not.toHaveBeenCalled();
+    expect(b.confirm.value).toEqual({ good: H("y"), bad: H("c"), ordered: false });
   });
 });

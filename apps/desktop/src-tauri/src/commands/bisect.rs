@@ -3,6 +3,9 @@
 //! Everything is read from git's machine state (`refs/bisect/*`, the
 //! `BISECT_*` files, `rev-list --bisect-vars`), never from its messages,
 //! which are translated.
+//!
+//! GitWand's own refusals start with a stable code (`bisect:<code>: …`) the
+//! frontend translates (`bisect.errors.<code>`); git's errors pass through.
 
 use crate::git::*;
 use crate::types::{BisectCommit, BisectStatus};
@@ -192,6 +195,24 @@ fn terms(cwd: &str) -> Result<(String, String), String> {
 fn read_status(cwd: &str) -> Result<BisectStatus, String> {
     let git_dir = resolve_git_dir(cwd)?;
     let (bad_term, good_term) = terms(cwd)?;
+    // Ended (in a terminal, say) while a reload was on its way: nothing to
+    // mark, whatever refs are left.
+    if !git_dir.join("BISECT_LOG").exists() {
+        return Ok(BisectStatus {
+            active: false,
+            current: None,
+            start: None,
+            bad: None,
+            good: Vec::new(),
+            skipped: Vec::new(),
+            remaining: None,
+            steps: None,
+            candidates: Vec::new(),
+            terms: (bad_term, good_term),
+            commits: Vec::new(),
+            pending_checkout: false,
+        });
+    }
     let start = std::fs::read_to_string(git_dir.join("BISECT_START"))
         .ok()
         .map(|s| s.trim().to_string())
@@ -285,6 +306,7 @@ fn read_status(cwd: &str) -> Result<BisectStatus, String> {
     let commits = describe(cwd, &to_describe);
 
     Ok(BisectStatus {
+        active: true,
         current,
         start,
         bad,
@@ -299,8 +321,10 @@ fn read_status(cwd: &str) -> Result<BisectStatus, String> {
     })
 }
 
-fn is_full_or_short_hash(s: &str) -> bool {
-    (7..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
+/// A full object id (SHA-1 or SHA-256): git reads it as an object, never as
+/// a branch or tag that happens to have a hex name, as it could a prefix.
+fn is_full_hash(s: &str) -> bool {
+    matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// The bisect in progress, read from git's state.
@@ -320,19 +344,21 @@ pub(crate) async fn git_bisect_start(
     bad: String,
     good: String,
 ) -> Result<BisectStatus, String> {
-    if !is_full_or_short_hash(&bad) || !is_full_or_short_hash(&good) {
-        return Err("A bisect starts from two commit hashes.".to_string());
+    if !is_full_hash(&bad) || !is_full_hash(&good) {
+        return Err("bisect:notHashes: A bisect starts from two full commit hashes.".to_string());
     }
     let _repo = repo_lock::write(&cwd);
     if other_operation(&cwd)? || is_bisecting(&cwd)? {
         return Err(
-            "Another operation is in progress; finish it before starting a bisect.".to_string(),
+            "bisect:busy: Another operation is in progress; finish it before starting a bisect."
+                .to_string(),
         );
     }
     let dirty = run_ok(&cwd, &["status", "--porcelain", "--untracked-files=no"])?;
     if !dirty.trim().is_empty() {
         return Err(
-            "Commit or stash your uncommitted changes before starting a bisect.".to_string(),
+            "bisect:dirty: Commit or stash your uncommitted changes before starting a bisect."
+                .to_string(),
         );
     }
     let (bad, good) = if is_ancestor(&cwd, &good, &bad)? {
@@ -341,7 +367,7 @@ pub(crate) async fn git_bisect_start(
         (good, bad)
     } else {
         return Err(
-            "One of the two commits must be an ancestor of the other: they are on separate branches."
+            "bisect:unrelated: One of the two commits must be an ancestor of the other: they are on separate branches."
                 .to_string(),
         );
     };
@@ -360,16 +386,19 @@ pub(crate) async fn git_bisect_mark(cwd: String, verdict: String) -> Result<Bise
         "good" => good_term,
         "bad" => bad_term,
         "skip" | "next" => verdict.clone(),
-        _ => return Err(format!("Unknown bisect verdict: {verdict}")),
+        _ => return Err(format!("bisect:verdict: Unknown bisect verdict: {verdict}")),
     };
     if !is_bisecting(&cwd)? {
-        return Err("No bisect is in progress.".to_string());
+        return Err("bisect:notBisecting: No bisect is in progress.".to_string());
     }
     if let Err(err) = run_ok(&cwd, &["bisect", &term]) {
         // git exits non-zero when only skipped commits are left: the mark is
         // recorded and the candidates are known, which is a result, not a
         // failure.
-        let status = read_status(&cwd)?;
+        // A status that cannot be read does not hide git's own error.
+        let Ok(status) = read_status(&cwd) else {
+            return Err(err);
+        };
         if status.candidates.is_empty() {
             return Err(err);
         }
@@ -384,7 +413,7 @@ pub(crate) async fn git_bisect_reset(cwd: String) -> Result<(), String> {
     let _repo = repo_lock::write(&cwd);
     run_ok(&cwd, &["bisect", "reset"])?;
     if is_bisecting(&cwd)? {
-        return Err("git could not end the bisect.".to_string());
+        return Err("bisect:resetFailed: git could not end the bisect.".to_string());
     }
     Ok(())
 }
@@ -825,8 +854,33 @@ mod tests {
     fn start_rejects_non_hex() {
         let repo = TempRepo::linear(4);
         let c4 = repo.sha("c4");
-        assert!(block(git_bisect_start(repo.cwd(), c4, "--foo".to_string())).is_err());
+        assert!(block(git_bisect_start(
+            repo.cwd(),
+            c4.clone(),
+            "--foo".to_string()
+        ))
+        .is_err());
+        // A prefix could name a branch or tag: only full hashes are taken.
+        let err = block(git_bisect_start(
+            repo.cwd(),
+            c4,
+            repo.sha("c1")[..12].to_string(),
+        ))
+        .unwrap_err();
+        assert!(err.starts_with("bisect:notHashes:"), "{err}");
         assert!(!repo.bisecting());
+    }
+
+    #[test]
+    fn status_after_the_bisect_ended_is_inactive() {
+        let repo = TempRepo::linear(4);
+        let (c1, c4) = (repo.sha("c1"), repo.sha("c4"));
+        let st = block(git_bisect_start(repo.cwd(), c4, c1)).expect("start");
+        assert!(st.active);
+        repo.git(&["bisect", "reset"]);
+        let st = status(&repo);
+        assert!(!st.active);
+        assert!(st.bad.is_none() && st.good.is_empty() && st.current.is_none());
     }
 
     #[test]

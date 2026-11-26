@@ -1253,8 +1253,14 @@ pub(crate) async fn git_repo_state(cwd: String) -> Result<RepoOperationState, St
     // ── Bisect in progress (after the operations above, which take
     // precedence: a merge or cherry-pick can run inside a bisect) ─────────
     if git_dir.join("BISECT_LOG").exists() {
+        // `--no-checkout` bisects move BISECT_HEAD, not HEAD.
+        let head_ref = if git_dir.join("BISECT_HEAD").exists() {
+            "BISECT_HEAD"
+        } else {
+            "HEAD"
+        };
         let head = git_cmd()
-            .args(["rev-parse", "--verify", "-q", "HEAD"])
+            .args(["rev-parse", "--verify", "-q", head_ref])
             .current_dir(&cwd)
             .output()
             .ok()
@@ -3924,6 +3930,29 @@ mod pathspec_tests {
         assert!(!st.has_conflict);
         repo.git(&["bisect", "reset"]);
         assert_eq!(repo_state(&repo.cwd()).state, "clean");
+    }
+
+    #[test]
+    fn repo_state_reports_the_commit_under_test_of_a_no_checkout_bisect() {
+        let repo = TempRepo::new();
+        three_commits(&repo);
+        let out = |args: &[&str]| {
+            String::from_utf8(repo.git(args).stdout)
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        let (bad, good) = (
+            out(&["rev-parse", "HEAD"]),
+            out(&["rev-list", "--max-parents=0", "HEAD"]),
+        );
+        repo.git(&["bisect", "start", "--no-checkout", &bad, &good]);
+        let tested = out(&["rev-parse", "BISECT_HEAD"]);
+        assert_ne!(tested, bad);
+        assert_eq!(
+            repo_state(&repo.cwd()).operation_head.as_deref(),
+            Some(tested.as_str())
+        );
     }
 
     #[test]

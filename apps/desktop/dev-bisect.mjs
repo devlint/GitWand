@@ -2,13 +2,18 @@
 // Same git calls, same refusals, same result shape (`BisectStatus`, camelCase;
 // `terms` as [bad, good]). Kept in its own module so tests import it directly.
 // Everything is read from git's machine state, never from its messages.
+// GitWand's own refusals start with the same stable codes (`bisect:<code>: …`).
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { resolveBin } from "./dev-bin.mjs";
+
+/** The git dev-server.mjs spawns (`resolveBin`), not whatever is first on PATH. */
+const GIT = resolveBin("git");
 
 function run(cwd, args) {
-  const r = spawnSync("git", args, { cwd, encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 });
+  const r = spawnSync(GIT, args, { cwd, encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 });
   if (r.error) throw r.error;
   return r;
 }
@@ -96,11 +101,30 @@ function revList(cwd, sc, extra, bad, good) {
 /** The bisect part of `/api/git-repo-state`: its state object, or null. */
 export function devBisectRepoState(cwd) {
   if (!isBisecting(cwd)) return null;
-  return { state: "bisect", hasConflict: false, operationHead: headHash(cwd), targetBranch: null, step: 0, total: 0 };
+  // `--no-checkout` bisects move BISECT_HEAD, not HEAD.
+  const head = headHash(cwd, existsSync(join(gitDir(cwd), "BISECT_HEAD")) ? "BISECT_HEAD" : "HEAD");
+  return { state: "bisect", hasConflict: false, operationHead: head, targetBranch: null, step: 0, total: 0 };
 }
 
 export function devBisectStatus(cwd) {
   const [badTerm, goodTerm] = terms(cwd);
+  // As in the Rust command: ended while a reload was on its way.
+  if (!isBisecting(cwd)) {
+    return {
+      active: false,
+      current: null,
+      start: null,
+      bad: null,
+      good: [],
+      skipped: [],
+      remaining: null,
+      steps: null,
+      candidates: [],
+      terms: [badTerm, goodTerm],
+      commits: [],
+      pendingCheckout: false,
+    };
+  }
   let start = null;
   try {
     start = readFileSync(join(gitDir(cwd), "BISECT_START"), "utf-8").trim() || null;
@@ -146,6 +170,7 @@ export function devBisectStatus(cwd) {
   const pendingCheckout = candidates.length === 0 && remaining !== null && remaining > 0 && !!current && marked(current);
   const toDescribe = [...(current ? [current] : []), ...candidates.filter((c) => c !== current)];
   return {
+    active: true,
     current,
     start,
     bad,
@@ -174,7 +199,8 @@ function describe(cwd, hashes) {
     });
 }
 
-const isHash = (s) => typeof s === "string" && /^[0-9a-f]{7,64}$/i.test(s);
+/** A full object id: git reads it as an object, never as a hex-named ref. */
+const isHash = (s) => typeof s === "string" && /^([0-9a-f]{40}|[0-9a-f]{64})$/i.test(s);
 
 /** A rebase, merge, cherry-pick or revert in progress (what `git_repo_state` reports before bisect). */
 function otherOperation(cwd) {
@@ -185,12 +211,12 @@ function otherOperation(cwd) {
 }
 
 export function devBisectStart(cwd, bad, good) {
-  if (!isHash(bad) || !isHash(good)) throw new Error("A bisect starts from two commit hashes.");
+  if (!isHash(bad) || !isHash(good)) throw new Error("bisect:notHashes: A bisect starts from two full commit hashes.");
   if (otherOperation(cwd) || isBisecting(cwd)) {
-    throw new Error("Another operation is in progress; finish it before starting a bisect.");
+    throw new Error("bisect:busy: Another operation is in progress; finish it before starting a bisect.");
   }
   if (runOk(cwd, ["status", "--porcelain", "--untracked-files=no"]).trim()) {
-    throw new Error("Commit or stash your uncommitted changes before starting a bisect.");
+    throw new Error("bisect:dirty: Commit or stash your uncommitted changes before starting a bisect.");
   }
   // The ancestor is the good end, whichever way they are passed. Exit 1 is
   // "no"; anything else (an unknown or ambiguous hash) is git's error.
@@ -202,7 +228,9 @@ export function devBisectStart(cwd, bad, good) {
   };
   if (!isAncestor(good, bad)) {
     if (!isAncestor(bad, good)) {
-      throw new Error("One of the two commits must be an ancestor of the other: they are on separate branches.");
+      throw new Error(
+        "bisect:unrelated: One of the two commits must be an ancestor of the other: they are on separate branches.",
+      );
     }
     [bad, good] = [good, bad];
   }
@@ -213,13 +241,19 @@ export function devBisectStart(cwd, bad, good) {
 export function devBisectMark(cwd, verdict) {
   const [badTerm, goodTerm] = terms(cwd);
   const term = verdict === "good" ? goodTerm : verdict === "bad" ? badTerm : verdict === "skip" || verdict === "next" ? verdict : null;
-  if (!term) throw new Error(`Unknown bisect verdict: ${verdict}`);
-  if (!isBisecting(cwd)) throw new Error("No bisect is in progress.");
+  if (!term) throw new Error(`bisect:verdict: Unknown bisect verdict: ${verdict}`);
+  if (!isBisecting(cwd)) throw new Error("bisect:notBisecting: No bisect is in progress.");
   try {
     runOk(cwd, ["bisect", term]);
   } catch (err) {
-    // As in the Rust command: only skipped commits left is a result.
-    const st = devBisectStatus(cwd);
+    // As in the Rust command: only skipped commits left is a result, and a
+    // status that cannot be read does not hide git's own error.
+    let st;
+    try {
+      st = devBisectStatus(cwd);
+    } catch {
+      throw err;
+    }
     if (st.candidates.length === 0) throw err;
     return st;
   }
@@ -228,5 +262,5 @@ export function devBisectMark(cwd, verdict) {
 
 export function devBisectReset(cwd) {
   runOk(cwd, ["bisect", "reset"]);
-  if (isBisecting(cwd)) throw new Error("git could not end the bisect.");
+  if (isBisecting(cwd)) throw new Error("bisect:resetFailed: git could not end the bisect.");
 }

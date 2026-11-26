@@ -1219,6 +1219,8 @@ export async function gitRepoState(cwd: string): Promise<RepoOperationState> {
 
 /** A bisect in progress (`git_bisect_status`, commands/bisect.rs). */
 export interface BisectStatus {
+  /** A bisect is in progress; false once it has ended, every other field empty. */
+  active: boolean;
   /** HEAD, the commit under test. */
   current: string | null;
   /** What End bisect returns to (branch name or hash). */

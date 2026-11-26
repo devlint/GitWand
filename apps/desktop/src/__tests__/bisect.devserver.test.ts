@@ -206,4 +206,24 @@ describe("dev-server bisect", { timeout: 30_000 }, () => {
     expect(parseSqQuoted("'--' 'a.txt' 'it'\\''s b.txt'\n")).toEqual(["--", "a.txt", "it's b.txt"]);
     expect(parseSqQuoted("\n")).toEqual([]);
   });
+  it("reports an ended bisect as inactive", () => {
+    const { path, g, sha } = linear(4);
+    expect(devBisectStart(path, sha("c4"), sha("c1")).active).toBe(true);
+    g("bisect", "reset");
+    const st = devBisectStatus(path);
+    expect(st.active).toBe(false);
+    expect([st.bad, st.current, st.good.length]).toEqual([null, null, 0]);
+  });
+
+  it("takes full hashes only, with stable error codes", () => {
+    const { path, sha } = linear(4);
+    expect(() => devBisectStart(path, sha("c4"), sha("c1").slice(0, 12))).toThrow(/^bisect:notHashes:/);
+    expect(() => devBisectMark(path, "good")).toThrow(/^bisect:notBisecting:/);
+  });
+
+  it("reports the commit under test of a no-checkout bisect in the repo state", () => {
+    const { path, g, sha } = linear(8);
+    g("bisect", "start", "--no-checkout", sha("c8"), sha("c1"));
+    expect(devBisectRepoState(path)?.operationHead).toBe(g("rev-parse", "BISECT_HEAD"));
+  });
 });

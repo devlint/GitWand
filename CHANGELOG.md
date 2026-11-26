@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The desktop main-bundle budget is raised to 996 KB** for the guided bisect's wrappers, strings and Git Tree wiring (measured at 995 KB); the banner is a lazy chunk.
+- **The desktop main-bundle budget is raised to 998 KB** for the guided bisect's wrappers, strings (with its translated refusals) and Git Tree wiring (measured at 997 KB); the banner is a lazy chunk.
 - **The desktop main-bundle budget is raised from 980 KB to 984 KB** for the combined-diff wrappers and strings; the view itself is a lazy chunk. It is then raised to 992 KB for the force-push decision and its refusal messages (measured at 991 KB).
 
 ### Fixed

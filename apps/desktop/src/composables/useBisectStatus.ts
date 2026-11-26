@@ -14,6 +14,7 @@ import {
   type BisectStatus,
   type BisectVerdict,
 } from "../utils/backend";
+import { bisectErrorMessage } from "./bisectError";
 
 export function useBisectStatus(opts: {
   cwd: () => string;
@@ -34,11 +35,12 @@ export function useBisectStatus(opts: {
     try {
       const next = await gitBisectStatus(opts.cwd());
       if (request !== loadRequest) return;
-      status.value = next;
-      if (!keepError) error.value = "";
+      // Ended (in a terminal) before the repo state caught up: nothing to show.
+      status.value = next.active ? next : null;
+      if (!keepError || !next.active) error.value = "";
     } catch (e) {
       if (request !== loadRequest) return;
-      error.value = e instanceof Error ? e.message : String(e);
+      error.value = bisectErrorMessage(e);
     }
   }
 
@@ -71,7 +73,7 @@ export function useBisectStatus(opts: {
       if (next) status.value = next;
       opts.onChanged();
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      error.value = bisectErrorMessage(e);
       // git may have recorded the mark before failing (a checkout refused by
       // uncommitted changes): show what it holds now, keeping the error.
       await load(true);

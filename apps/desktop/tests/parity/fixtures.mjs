@@ -647,3 +647,29 @@ export function fixtureStack(kind) {
   }
   return cwd;
 }
+
+/**
+ * Fixture « bisect » : c1..c8 sur `main`, un bisect `c8` (mauvais) / `c1`
+ * (bon) lancé, un commit sauté et un marqué bon ; ou, si `pathspec`, un
+ * bisect limité à `b.txt`, sans marque : le décompte, les sauts et la portée
+ * de `git_bisect_status`.
+ */
+export function fixtureBisect(pathspec = false) {
+  const cwd = mkTempRepo("gw-bisect-");
+  for (let i = 1; i <= 8; i++) {
+    const file = pathspec && i % 3 === 0 ? "b.txt" : "a.txt";
+    commitFile(cwd, file, `v${i}\n`, `c${i}`, i);
+  }
+  const git = (...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf-8" }).trim();
+  const c1 = git("rev-list", "--max-parents=0", "HEAD");
+  const start = ["bisect", "start", "HEAD", c1];
+  if (pathspec) {
+    // Only c3 and c6 touch b.txt: no mark, git would be done after one.
+    git(...start, "--", "b.txt");
+    return cwd;
+  }
+  git(...start);
+  git("bisect", "skip");
+  git("bisect", "good");
+  return cwd;
+}

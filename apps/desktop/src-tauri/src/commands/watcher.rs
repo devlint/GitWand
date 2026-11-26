@@ -63,6 +63,8 @@ pub(crate) fn classify_path(rel: &str) -> Option<&'static str> {
                 | "BISECT_NAMES"
                 | "BISECT_TERMS"
                 | "BISECT_RUN"
+                | "BISECT_HEAD"
+                | "BISECT_FIRST_PARENT"
         ) || inner.starts_with("rebase-merge/")
             || inner.starts_with("rebase-apply/")
         {
@@ -565,6 +567,8 @@ mod tests {
             "BISECT_NAMES",
             "BISECT_TERMS",
             "BISECT_RUN",
+            "BISECT_HEAD",
+            "BISECT_FIRST_PARENT",
         ] {
             assert_eq!(
                 classify_path(&format!(".git/{f}")),

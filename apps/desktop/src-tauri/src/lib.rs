@@ -700,6 +700,12 @@ pub fn git_stash_list_parity(cwd: String) -> Result<Vec<types::StashEntry>, Stri
     tauri::async_runtime::block_on(commands::ops::git_stash_list(cwd))
 }
 
+/// Parity entry point for `git_bisect_status` (range, skips, candidates and
+/// scope, ported to `dev-bisect.mjs`).
+pub fn git_bisect_status_parity(cwd: String) -> Result<types::BisectStatus, String> {
+    tauri::async_runtime::block_on(commands::bisect::git_bisect_status(cwd))
+}
+
 /// Parity entry point for `gh_enable_auto_merge`. Only a repo with no forge
 /// remote is checkable here (see the refusal test in `tests/parity/`): no
 /// test arms an auto-merge on a live PR.
