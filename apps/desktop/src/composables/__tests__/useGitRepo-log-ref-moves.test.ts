@@ -24,6 +24,7 @@ import {
   getGitLog,
   getGitRefsFingerprint,
   getGitRevCount,
+  getGitStatus,
   type GitLogEntry,
 } from "../../utils/backend";
 
@@ -142,7 +143,11 @@ beforeEach(() => {
     const refs = git(cwd, ["for-each-ref", "--format=%(objectname) %(refname)"])
       .split("\n")
       .filter((l) => l && !l.split(" ")[1].startsWith("refs/gitwand/snapshots/"));
-    return refs.join("\n") + "\0" + git(cwd, ["rev-parse", "HEAD", "--symbolic-full-name", "HEAD"]);
+    return [
+      refs.join("\n"),
+      git(cwd, ["worktree", "list", "--porcelain"]),
+      git(cwd, ["stash", "list", "--format=%H"]),
+    ].join("\0");
   });
   vi.mocked(getGitRevCount).mockImplementation(async (cwd) =>
     Number(git(cwd, ["rev-list", "--count", "--all"]).trim()),
@@ -500,6 +505,58 @@ describe("refreshOnRefsEvent reloads only when the refs moved", () => {
       await repo.refreshOnRefsEvent();
 
       expect(refsOf(repo, top)).toBe("HEAD -> side, main");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "still reloads status when it skips the log",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true);
+      vi.mocked(getGitStatus).mockClear();
+
+      await repo.refreshOnRefsEvent();
+
+      expect(getGitStatus).toHaveBeenCalledTimes(1);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "records nothing for a forced reload that failed",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      git(dir, ["branch", "topic", sha(dir, "c2")]);
+      vi.mocked(getGitLog).mockRejectedValueOnce(new Error("boom"));
+      await repo.loadLog(undefined, true);
+      expect(refsOf(repo, sha(dir, "c2"))).toBe("");
+
+      await repo.refreshOnRefsEvent();
+
+      expect(refsOf(repo, sha(dir, "c2"))).toBe("topic");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "records a forced reload in a filtered view",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      repo.logBranchFilter.value = "current";
+      await repo.loadLog(undefined, true);
+      const loads = firstPageLoads();
+
+      await repo.refreshOnRefsEvent();
+
+      expect(firstPageLoads()).toBe(loads);
     },
     GIT_TEST_TIMEOUT_MS,
   );

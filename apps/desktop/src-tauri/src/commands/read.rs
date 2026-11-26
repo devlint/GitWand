@@ -1163,12 +1163,13 @@ pub(crate) async fn git_rev_count(
 
 // ─── Refs fingerprint ────────────────────────────────────────
 
-/// A fingerprint of what decorates the Git Tree: every ref the all-refs log
-/// walks (Time Machine snapshot refs excluded, as in `git_log`) with its
-/// target, and HEAD (its commit and the branch it is on). Two equal
-/// fingerprints mean the log's rows and decorations cannot have changed, so a
-/// watcher `refs`/`head` event that leaves it unchanged (a second batch for
-/// one `git branch`, a snapshot ref, a read) needs no reload.
+/// A fingerprint of what the all-refs Git Tree log (`git_log`) starts from
+/// and decorates: every ref with its target (Time Machine snapshot refs
+/// excluded, as in `git_log`), the HEAD of every worktree with the branch it
+/// is on (`git log --all` walks the other worktrees' HEADs too; an unborn
+/// branch still has its name), and the stash entries `git_log` adds as start
+/// points. A watcher `refs`/`head` event that leaves it unchanged (a second
+/// batch for one `git branch`, a snapshot ref, a read) needs no log reload.
 ///
 /// Only compared for equality, in one process: not stable across versions.
 #[tauri::command]
@@ -1188,12 +1189,24 @@ fn refs_fingerprint(cwd: &str) -> Result<String, String> {
     if !refs.status.success() {
         return Err(String::from_utf8_lossy(&refs.stderr).trim().to_string());
     }
-    // An unborn HEAD (no commit yet) makes rev-parse fail: nothing to decorate.
-    let head = git_cmd()
-        .args(["rev-parse", "HEAD", "--symbolic-full-name", "HEAD"])
+    // HEAD and branch of every worktree, this one included (an unborn HEAD
+    // reads as zeros, with its branch name).
+    let worktrees = git_cmd()
+        .args(["worktree", "list", "--porcelain"])
         .current_dir(cwd)
         .output()
-        .map_err(|e| format!("Failed to run git rev-parse: {}", e))?;
+        .map_err(|e| format!("Failed to run git worktree list: {}", e))?;
+    if !worktrees.status.success() {
+        return Err(String::from_utf8_lossy(&worktrees.stderr)
+            .trim()
+            .to_string());
+    }
+    // Older stash entries are log start points too; no stash is an error.
+    let stashes = git_cmd()
+        .args(["stash", "list", "--format=%H"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git stash list: {}", e))?;
 
     let snapshots = format!("{}/", crate::git::snapshot::SNAPSHOT_REF_PREFIX);
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -1203,10 +1216,9 @@ fn refs_fingerprint(cwd: &str) -> Result<String, String> {
             line.hash(&mut hasher);
         }
     }
-    if head.status.success() {
-        String::from_utf8_lossy(&head.stdout).hash(&mut hasher);
-    } else {
-        "unborn".hash(&mut hasher);
+    String::from_utf8_lossy(&worktrees.stdout).hash(&mut hasher);
+    if stashes.status.success() {
+        String::from_utf8_lossy(&stashes.stdout).hash(&mut hasher);
     }
     Ok(format!("{:016x}", hasher.finish()))
 }
@@ -3935,8 +3947,12 @@ mod pathspec_tests {
     fn refs_fingerprint_follows_refs_and_head_but_not_snapshots() {
         let repo = TempRepo::new();
         let fp = || refs_fingerprint(&repo.cwd()).expect("fingerprint failed");
-        // Unborn HEAD: still a fingerprint.
+        // Unborn HEAD: still a fingerprint, and it follows the branch name.
         let unborn = fp();
+        repo.git(&["checkout", "-q", "--orphan", "other"]);
+        assert_ne!(fp(), unborn);
+        repo.git(&["checkout", "-q", "--orphan", "main"]);
+        assert_eq!(fp(), unborn);
         repo.write("a.txt", "v1");
         repo.commit_all("c1");
         let first = fp();
@@ -3969,7 +3985,32 @@ mod pathspec_tests {
 
         // A tag does.
         repo.git(&["tag", "v1"]);
-        assert_ne!(fp(), on_side);
+        let tagged = fp();
+        assert_ne!(tagged, on_side);
+
+        // So does a second stash entry (only refs/stash is a ref).
+        repo.git(&["stash", "-q"]);
+        let one_stash = fp();
+        assert_ne!(one_stash, tagged);
+        repo.write("a.txt", "dirty again");
+        repo.git(&["stash", "-q"]);
+        let two = fp();
+        assert_ne!(two, one_stash);
+        repo.git(&["stash", "drop", "-q", "stash@{1}"]);
+        assert_ne!(fp(), two);
+
+        // And a commit on another worktree's detached HEAD.
+        let wt = format!("{}-wt", repo.cwd());
+        repo.git(&["worktree", "add", "-q", "--detach", &wt]);
+        let with_wt = fp();
+        let out = std::process::Command::new(git_binary())
+            .args(["commit", "-q", "--allow-empty", "-m", "detached"])
+            .current_dir(&wt)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert_ne!(fp(), with_wt);
+        repo.git(&["worktree", "remove", "--force", &wt]);
     }
 
     #[test]

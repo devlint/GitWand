@@ -686,10 +686,12 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * Refresh after a watcher `head`/`refs` event. Such an event usually means
    * decorations changed, possibly below the first page a plain refresh
    * compares, so it forces the log (#266) — unless the refs fingerprint is
-   * the one the last forced reload saw: then nothing the Git Tree shows has
-   * moved (a second event batch for one `git branch`, an in-app action that
-   * already reloaded, a Time Machine snapshot ref), and a forced reload would
-   * only restart the full-history prefetch for nothing.
+   * the one the last forced reload saw: then the log cannot have changed (a
+   * second event batch for one `git branch`, an in-app action that already
+   * reloaded it, a Time Machine snapshot ref), and a forced reload would only
+   * restart the full-history prefetch for nothing. Status is still reloaded:
+   * an action that forced only the log (deleting a remote branch) leaves the
+   * upstream and ahead/behind to this event.
    */
   async function refreshOnRefsEvent() {
     const repo = folderPath.value;
@@ -701,7 +703,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // Unknown: reload, as before.
     }
     if (folderPath.value !== repo) return;
-    if (fp !== null && _refsSeen?.repo === repo && _refsSeen.fp === fp) return;
+    if (fp !== null && _refsSeen?.repo === repo && _refsSeen.fp === fp) {
+      await loadStatus(repo);
+      return;
+    }
     await refresh(true);
   }
 
@@ -767,7 +772,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // reload thus hands its force to the request that supersedes it.
   let _logForcePending = false;
   // Refs fingerprint (`getGitRefsFingerprint`) read before the last forced
-  // reload that applied: the log holds every ref move up to it. A watcher
+  // reload that replaced the log (`recordRefs`): the log holds every ref move
+  // up to it. A non-forced load never makes the log older, so it leaves the
+  // record alone; a superseded or failed forced reload records nothing. A watcher
   // refs/head event that finds the same fingerprint has nothing to reload
   // (`refreshOnRefsEvent`).
   let _refsSeen: { repo: string; fp: string } | null = null;
@@ -780,6 +787,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    */
   function refreshLoadedBranches() {
     if (branches.value.length > 0) void loadBranches();
+  }
+
+  /** A forced reload replaced the log with rows read after `fp` was. */
+  function recordRefs(repo: string, fp: string | null) {
+    if (fp !== null) _refsSeen = { repo, fp };
   }
 
   /** Replace the whole log and invalidate in-flight pagination against the old one. */
@@ -925,10 +937,6 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // applies, so concurrent calls never lose it.
       const forced = force || _logForcePending;
       _logForcePending = false;
-      // A forced reload below takes every row fresh (see the branches): the
-      // log now holds every ref move up to the fingerprint. A non-forced load
-      // never makes it older, so it leaves the record alone.
-      if (forced && refsFp !== null) _refsSeen = { repo, fp: refsFp };
 
       if (isCanon) {
         const cached = LOG_CACHE.get(repo);
@@ -973,6 +981,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
             }
           }
           replaceLog(fresh);
+          if (forced) recordRefs(repo, refsFp);
           logHasMore.value = log.value.length < effectiveTotalCount();
           void prefetchAllPages();
           if (!viewChanged) refreshLoadedBranches();
@@ -991,6 +1000,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           replaceLog(entries);
           if (!viewChanged) refreshLoadedBranches();
         }
+        if (forced) recordRefs(repo, refsFp);
         // hasMore: in branch-only mode a full page is exactly `pageSize`. In
         // all-refs mode the backend appends stash start-points and filters the
         // `index on`/`untracked files on` pseudo-commits, so a full page returns

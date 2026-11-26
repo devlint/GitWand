@@ -4915,29 +4915,33 @@ async function handleRequest(req, res) {
 
     // GET /api/git-refs-fingerprint?cwd=<path>
     // Mirrors git_refs_fingerprint (read.rs): every ref but the Time Machine
-    // snapshots, plus HEAD's commit and branch. Only compared for equality.
+    // snapshots, every worktree's HEAD and branch, the stash entries. Only
+    // compared for equality.
     if (url.pathname === "/api/git-refs-fingerprint" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        const refs = execFileSync(GIT, ["for-each-ref", "--format=%(objectname) %(refname)"], {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-        })
+        // Thousands of tags exceed the default 1 MiB output buffer.
+        const big = { cwd: resolvedCwd, encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 };
+        const refs = execFileSync(GIT, ["for-each-ref", "--format=%(objectname) %(refname)"], big)
           .split("\n")
           .filter((line) => line && !line.split(" ").slice(1).join(" ").startsWith("refs/gitwand/snapshots/"));
-        let head = "unborn";
+        const worktrees = execFileSync(GIT, ["worktree", "list", "--porcelain"], big);
+        let stashes = "";
         try {
-          head = execFileSync(GIT, ["rev-parse", "HEAD", "--symbolic-full-name", "HEAD"], {
-            cwd: resolvedCwd,
-            encoding: "utf-8",
-            stdio: ["ignore", "pipe", "ignore"],
-          });
+          stashes = execFileSync(GIT, ["stash", "list", "--format=%H"], { ...big, stdio: ["ignore", "pipe", "ignore"] });
         } catch (_) {
-          // Unborn HEAD, as in the Rust command.
+          // As in the Rust command: no stash list, nothing to add.
         }
-        const fp = createHash("sha256").update(refs.join("\n")).update("\0").update(head).digest("hex").slice(0, 16);
+        const fp = createHash("sha256")
+          .update(refs.join("\n"))
+          .update("\0")
+          .update(worktrees)
+          .update("\0")
+          .update(stashes)
+          .digest("hex")
+          .slice(0, 16);
         return jsonResponse(req, res, fp);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
