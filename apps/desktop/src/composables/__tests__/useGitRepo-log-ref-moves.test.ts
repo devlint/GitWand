@@ -140,7 +140,7 @@ beforeEach(() => {
   // `git_refs_fingerprint`), unhashed: only compared for equality.
   vi.mocked(getGitRefsFingerprint).mockReset();
   vi.mocked(getGitRefsFingerprint).mockImplementation(async (cwd) => {
-    const refs = git(cwd, ["for-each-ref", "--format=%(objectname) %(refname)"])
+    const refs = git(cwd, ["for-each-ref", "--format=%(objectname) %(refname) %(symref)"])
       .split("\n")
       .filter((l) => l && !l.split(" ")[1].startsWith("refs/gitwand/snapshots/"));
     return [
@@ -505,6 +505,25 @@ describe("refreshOnRefsEvent reloads only when the refs moved", () => {
       await repo.refreshOnRefsEvent();
 
       expect(refsOf(repo, top)).toBe("HEAD -> side, main");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "reads the fingerprint once before the log when an event reloads",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true);
+      git(dir, ["branch", "topic", sha(dir, "c2")]);
+      vi.mocked(getGitRefsFingerprint).mockClear();
+
+      await repo.refreshOnRefsEvent();
+
+      // The event's read is reused by the forced reload.
+      expect(getGitRefsFingerprint).toHaveBeenCalledTimes(1);
+      expect(refsOf(repo, sha(dir, "c2"))).toBe("topic");
     },
     GIT_TEST_TIMEOUT_MS,
   );

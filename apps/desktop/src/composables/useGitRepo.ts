@@ -674,8 +674,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * views stay in sync with the repository state.
    */
   async function refresh(forceLog = false) {
+    await refreshWith(forceLog, null);
+  }
+
+  /** `refresh`, with a refs fingerprint already read before it (see `loadLog`). */
+  async function refreshWith(forceLog: boolean, refsFp: string | null) {
     if (!folderPath.value) return;
-    await Promise.all([loadStatus(folderPath.value), loadLog(undefined, forceLog)]);
+    await Promise.all([
+      loadStatus(folderPath.value),
+      loadLog(undefined, forceLog, false, refsFp),
+    ]);
     // Also refresh diff if a file is selected
     if (selectedFilePath.value) {
       await loadDiff(selectedFilePath.value, selectedFileStaged.value);
@@ -707,7 +715,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await loadStatus(repo);
       return;
     }
-    await refresh(true);
+    // Read before the log that follows: loadLog can use it as its own.
+    await refreshWith(true, fp);
   }
 
   /**
@@ -878,8 +887,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * @param viewChanged True when the filter/scope just changed: fetch only the
    *   first page (the current depth belongs to the old view — up to the whole
    *   prefetched history) and never keep the old view's entries.
+   * @param refsFpBefore A refs fingerprint the caller read just before this
+   *   call, used instead of reading one again (`refreshOnRefsEvent`).
    */
-  async function loadLog(count?: number, force = false, viewChanged = false) {
+  async function loadLog(
+    count?: number,
+    force = false,
+    viewChanged = false,
+    refsFpBefore: string | null = null,
+  ) {
     if (!folderPath.value) return;
     const epoch = _logViewEpoch;
     // Captured before the awaits: a repo switch while this fetch is in flight
@@ -894,12 +910,20 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       // A forced reload (or one inheriting a force) records the refs it saw,
       // read BEFORE the log so the log is at least as new as the fingerprint.
+      // Known gap: a ref that moves and comes back between that read and the
+      // log's (two checkouts within milliseconds) leaves the log showing the
+      // intermediate state with the original fingerprint recorded, so the
+      // events for both moves are skipped. Reading again after the log cannot
+      // see it either; the next real ref move or manual refresh corrects it.
       let refsFp: string | null = null;
       if (_logForcePending) {
-        try {
-          refsFp = await getGitRefsFingerprint(repo);
-        } catch {
-          // No fingerprint: the next refs event reloads, as before.
+        refsFp = refsFpBefore;
+        if (refsFp === null) {
+          try {
+            refsFp = await getGitRefsFingerprint(repo);
+          } catch {
+            // No fingerprint: the next refs event reloads, as before.
+          }
         }
       }
       const authorEmail =
@@ -973,6 +997,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           // change, never on an idle poll.
           const depth = forcedReloadDepth();
           if (!viewChanged && depth > pageSize) {
+            // The log is read again, later: keep the record out of doubt.
+            refsFp = null;
             fresh = await getGitLog(repo, depth, true, undefined, 0);
             if (!current()) {
               // Superseded meanwhile: the newer request decides, keeping the force.

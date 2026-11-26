@@ -4924,7 +4924,7 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         // Thousands of tags exceed the default 1 MiB output buffer.
         const big = { cwd: resolvedCwd, encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 };
-        const refs = execFileSync(GIT, ["for-each-ref", "--format=%(objectname) %(refname)"], big)
+        const refs = execFileSync(GIT, ["for-each-ref", "--format=%(objectname) %(refname) %(symref)"], big)
           .split("\n")
           .filter((line) => line && !line.split(" ").slice(1).join(" ").startsWith("refs/gitwand/snapshots/"));
         const worktrees = execFileSync(GIT, ["worktree", "list", "--porcelain"], big);

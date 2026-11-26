@@ -1182,7 +1182,12 @@ fn refs_fingerprint(cwd: &str) -> Result<String, String> {
     use std::hash::{Hash, Hasher};
 
     let refs = git_cmd()
-        .args(["for-each-ref", "--format=%(objectname) %(refname)"])
+        // %(symref): a symbolic ref (`origin/HEAD`) can change target
+        // without changing commit.
+        .args([
+            "for-each-ref",
+            "--format=%(objectname) %(refname) %(symref)",
+        ])
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("Failed to run git for-each-ref: {}", e))?;
@@ -4000,7 +4005,8 @@ mod pathspec_tests {
         assert_ne!(fp(), two);
 
         // And a commit on another worktree's detached HEAD.
-        let wt = format!("{}-wt", repo.cwd());
+        // Inside the temporary repo, so it goes away with it.
+        let wt = format!("{}/wt", repo.cwd());
         repo.git(&["worktree", "add", "-q", "--detach", &wt]);
         let with_wt = fp();
         let out = std::process::Command::new(git_binary())
@@ -4010,7 +4016,20 @@ mod pathspec_tests {
             .unwrap();
         assert!(out.status.success());
         assert_ne!(fp(), with_wt);
-        repo.git(&["worktree", "remove", "--force", &wt]);
+
+        // A symbolic ref changing target on the same commit.
+        repo.git(&[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/heads/main",
+        ]);
+        let sym = fp();
+        repo.git(&[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/heads/side",
+        ]);
+        assert_ne!(fp(), sym);
     }
 
     #[test]
