@@ -36,6 +36,9 @@ use std::time::{Duration, Instant};
 /// devlint/GitWand#161 reported the 30s timeout reappearing once the per-PR
 /// stats enrichment below was added.
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
+/// `gh pr create` resolves the head, may look up reviewers and creates the
+/// PR: more than one API call, so more room than `GH_TIMEOUT`.
+const GH_CREATE_TIMEOUT: Duration = Duration::from_secs(120);
 /// Timeout for the best-effort `git fetch origin` that refreshes
 /// remote-tracking refs before the per-PR numstat diffs below.
 const GH_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -389,8 +392,10 @@ fn gh_create_pr_inner(
         "create".to_string(),
         "--title".to_string(),
         title,
-        "--body".to_string(),
-        body,
+        // The body on stdin: on argv it hits Windows' ~32K command-line limit
+        // and any local user can read it with `ps`.
+        "--body-file".to_string(),
+        "-".to_string(),
     ];
 
     // Target repo: the caller-supplied one (cross-fork), else `origin` — as on
@@ -450,10 +455,9 @@ fn gh_create_pr_inner(
     }
 
     // Note: gh pr create doesn't support --json, but returns the URL.
-    let output = gh_cmd(target.as_ref())
-        .args(&args)
-        .current_dir(&cwd)
-        .output()
+    let mut cmd = gh_cmd(target.as_ref());
+    cmd.args(&args).current_dir(&cwd);
+    let output = crate::git::output_with_timeout_input(cmd, GH_CREATE_TIMEOUT, Some(body))
         .map_err(|e| format!("Failed to create PR: {}", e))?;
 
     if !output.status.success() {
@@ -2637,8 +2641,10 @@ pub(crate) fn gh_api_on(
     )
 }
 
-/// Run a mutating `gh api` call (`POST`/`DELETE`) with optional `-f key=value` fields.
-/// Returns the parsed JSON body, or `Null` for 204 No Content responses.
+/// Run a mutating `gh api` call (`POST`/`PATCH`/`PUT`/`DELETE`), `fields`
+/// sent as a JSON object of strings on stdin (`--input -`), never on argv
+/// (see `pr_edit::fields_json`). Returns the parsed JSON body, or `Null` for
+/// 204 No Content responses.
 fn gh_api_write(
     cwd: &str,
     method: &str,
@@ -2646,13 +2652,12 @@ fn gh_api_write(
     fields: &[(&str, &str)],
 ) -> Result<serde_json::Value, String> {
     let mut cmd = gh_api_cmd(cwd);
-    cmd.args(["api", "-X", method, path]);
-    for (k, v) in fields {
-        cmd.args(["-f", &format!("{}={}", k, v)]);
+    cmd.args(["api", "-X", method, path]).current_dir(cwd);
+    let input = super::pr_edit::fields_json(fields);
+    if input.is_some() {
+        cmd.args(["--input", "-"]);
     }
-    let output = cmd
-        .current_dir(cwd)
-        .output()
+    let output = crate::git::output_with_timeout_input(cmd, GH_TIMEOUT, input)
         .map_err(|e| format!("gh api write: {}", e))?;
     gh_api_parse(
         output,

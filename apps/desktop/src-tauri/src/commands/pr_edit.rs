@@ -43,9 +43,36 @@ pub(crate) fn edit_payload(
     Ok(serde_json::Value::Object(map))
 }
 
+/// `key=value` fields as the JSON object sent on stdin to `gh api --input -` /
+/// `glab api --input -`. A description or comment is free text of any length:
+/// on argv it would hit Windows' ~32K command-line limit, and any local user
+/// could read it with `ps`. `None` when there are no fields (no body to send).
+pub(crate) fn fields_json(fields: &[(&str, &str)]) -> Option<String> {
+    if fields.is_empty() {
+        return None;
+    }
+    let map: serde_json::Map<String, serde_json::Value> = fields
+        .iter()
+        .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string())))
+        .collect();
+    Some(serde_json::Value::Object(map).to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fields_json_sends_values_as_strings() {
+        assert_eq!(fields_json(&[]), None);
+        let body = "x".repeat(40_000) + "\n\"quoted\" @file -f";
+        let json = fields_json(&[("body", &body), ("event", "DISMISS")]).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed,
+            serde_json::json!({ "body": body, "event": "DISMISS" })
+        );
+    }
 
     #[test]
     fn keeps_only_the_given_fields() {

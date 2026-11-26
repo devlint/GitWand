@@ -23,7 +23,7 @@
 //! frontend's 30s IPC timeout) so a hung subprocess is killed rather than
 //! orphaned (#149).
 
-use crate::git::{hidden_cmd, output_with_timeout};
+use crate::git::{hidden_cmd, output_with_timeout, output_with_timeout_input};
 use crate::types::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -1117,6 +1117,38 @@ pub(crate) async fn gl_list_issues(
         .map_err(|e| e.to_string())?
 }
 
+/// Run `glab mr create` with `args`, the description on stdin
+/// (`--description-file -`): on argv it hits Windows' ~32K command-line limit
+/// and any local user can read it with `ps`. A glab too old for that flag
+/// gets the description on argv, as before.
+fn gl_create_mr_run(
+    cwd: &str,
+    args: &[String],
+    body: String,
+) -> Result<std::process::Output, String> {
+    let run = |extra: &[&str], input: Option<String>| {
+        let mut cmd = hidden_cmd("glab");
+        cmd.args(args).args(extra).current_dir(cwd);
+        output_with_timeout_input(cmd, GLAB_TIMEOUT, input)
+            .map_err(|e| format!("Failed to create MR: {}", e))
+    };
+    let output = run(&["--description-file", "-"], Some(body.clone()))?;
+    if !output.status.success()
+        && is_unknown_flag(
+            &String::from_utf8_lossy(&output.stderr),
+            "--description-file",
+        )
+    {
+        return run(&["--description", &body], None);
+    }
+    Ok(output)
+}
+
+/// Whether `stderr` is a CLI refusing `flag` as unknown (cobra's wording).
+fn is_unknown_flag(stderr: &str, flag: &str) -> bool {
+    stderr.contains(&format!("unknown flag: {}", flag))
+}
+
 /// Create a MR using `glab mr create`.
 fn gl_create_mr_inner(
     cwd: String,
@@ -1132,8 +1164,6 @@ fn gl_create_mr_inner(
         "create".to_string(),
         "--title".to_string(),
         title,
-        "--description".to_string(),
-        body,
         "--source-branch".to_string(),
         source_branch,
         "--target-branch".to_string(),
@@ -1157,10 +1187,7 @@ fn gl_create_mr_inner(
         }
     }
 
-    let mut cmd = hidden_cmd("glab");
-    cmd.args(&args).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT)
-        .map_err(|e| format!("Failed to create MR: {}", e))?;
+    let output = gl_create_mr_run(&cwd, &args, body)?;
 
     if !output.status.success() {
         return Err(format!(
@@ -1430,8 +1457,8 @@ pub(crate) async fn gl_convert_draft_to_ready(cwd: String, iid: i64) -> Result<(
         .map_err(|e| e.to_string())?
 }
 
-/// Edit a MR's title and/or description via `glab api` (`-f` sends each
-/// value as a raw string).
+/// Edit a MR's title and/or description via `glab api`, the fields sent as
+/// JSON on stdin (`glab_api_cmd`).
 fn gl_mr_edit_inner(
     cwd: String,
     iid: i64,
@@ -1440,14 +1467,9 @@ fn gl_mr_edit_inner(
 ) -> Result<(), String> {
     let fields = super::pr_edit::edit_fields(&title, &body, "description")?;
     let endpoint = format!("projects/:fullpath/merge_requests/{}", iid);
-    let mut cmd = hidden_cmd("glab");
-    cmd.args(["api", "-X", "PUT", &endpoint]);
-    for (k, v) in &fields {
-        cmd.args(["-f", &format!("{}={}", k, v)]);
-    }
-    cmd.current_dir(&cwd);
-    let output =
-        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api edit MR: {}", e))?;
+    let (cmd, input) = glab_api_cmd(&cwd, "PUT", &endpoint, &fields);
+    let output = output_with_timeout_input(cmd, GLAB_TIMEOUT, input)
+        .map_err(|e| format!("glab api edit MR: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -2063,20 +2085,33 @@ fn map_gl_reaction(r: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-/// Run any `glab api` call with optional `-f key=value` fields.
+/// A `glab api` command and the stdin it takes: `fields` as a JSON object of
+/// strings (`--input -`), never on argv (see `pr_edit::fields_json`).
+fn glab_api_cmd(
+    cwd: &str,
+    method: &str,
+    endpoint: &str,
+    fields: &[(&str, &str)],
+) -> (std::process::Command, Option<String>) {
+    let mut cmd = hidden_cmd("glab");
+    cmd.args(["api", "-X", method, endpoint]).current_dir(cwd);
+    let input = super::pr_edit::fields_json(fields);
+    if input.is_some() {
+        cmd.args(["-H", "Content-Type: application/json", "--input", "-"]);
+    }
+    (cmd, input)
+}
+
+/// Run any `glab api` call with optional string fields (`glab_api_cmd`).
 fn glab_api(
     cwd: &str,
     method: &str,
     endpoint: &str,
     fields: &[(&str, &str)],
 ) -> Result<serde_json::Value, String> {
-    let mut cmd = hidden_cmd("glab");
-    cmd.args(["api", "-X", method, endpoint]);
-    for (k, v) in fields {
-        cmd.args(["-f", &format!("{}={}", k, v)]);
-    }
-    cmd.current_dir(cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api: {}", e))?;
+    let (cmd, input) = glab_api_cmd(cwd, method, endpoint, fields);
+    let output = output_with_timeout_input(cmd, GLAB_TIMEOUT, input)
+        .map_err(|e| format!("glab api: {}", e))?;
     if !output.status.success() {
         return Err(format!(
             "glab api {} {}: {}",
@@ -2232,7 +2267,18 @@ mod gl_state_flag_tests {
 /// `gl_mergeable_state`, consumed by `gl_mr_to_detail`.
 #[cfg(test)]
 mod gl_mergeable_state_tests {
-    use super::gl_mergeable_state;
+    #[test]
+    fn an_old_glab_without_description_file_is_recognised() {
+        let old = "Error: unknown flag: --description-file\nUsage: ...";
+        assert!(is_unknown_flag(old, "--description-file"));
+        assert!(!is_unknown_flag(
+            "unknown flag: --draft",
+            "--description-file"
+        ));
+        assert!(!is_unknown_flag("403 Forbidden", "--description-file"));
+    }
+
+    use super::{gl_mergeable_state, is_unknown_flag};
     use serde_json::json;
 
     #[test]
