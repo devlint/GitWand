@@ -1410,16 +1410,14 @@ fn codex_cli_prompt_inner(
 /// question it was answering.
 const MODEL_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
 
-/// Run a model-listing command under `MODEL_LIST_TIMEOUT`, killing it on
-/// expiry. The callers treat any error, a timeout included, as "no list".
-fn list_models_output(
-    binary: &str,
-    cli: AiCli,
-    args: &[&str],
-) -> std::io::Result<std::process::Output> {
+/// Stdout of a model-listing command that succeeded within
+/// `MODEL_LIST_TIMEOUT`, `None` otherwise ("no list" for the callers). On
+/// expiry the whole process tree is killed (`stdout_within`): an npm-installed
+/// CLI is a node shim, `copilot.cmd` runs cmd.exe then node.
+fn list_models_output(binary: &str, cli: AiCli, args: &[&str]) -> Option<String> {
     let mut cmd = ai_cmd(binary, cli);
     cmd.args(args);
-    output_with_timeout(cmd, MODEL_LIST_TIMEOUT)
+    stdout_within(cmd, MODEL_LIST_TIMEOUT)
 }
 
 /// Enumerate the models Antigravity offers (`agy models`). Each line is
@@ -1440,18 +1438,11 @@ fn antigravity_list_models_inner() -> Result<Vec<AntigravityModel>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match list_models_output(&binary, AiCli::Antigravity, &["models"]) {
-        Ok(o) => o,
-        Err(_) => return Ok(Vec::new()),
+    let Some(stdout) = list_models_output(&binary, AiCli::Antigravity, &["models"]) else {
+        return Ok(Vec::new());
     };
 
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-
-    Ok(parse_antigravity_models(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
+    Ok(parse_antigravity_models(&stdout))
 }
 
 /// Parse `agy models` stdout. Lines without a tab (the "Fetching available
@@ -1506,16 +1497,11 @@ fn codex_list_models_inner() -> Result<Vec<CodexModel>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match list_models_output(&binary, AiCli::Codex, &["debug", "models"]) {
-        Ok(o) => o,
-        Err(_) => return Ok(Vec::new()),
+    let Some(stdout) = list_models_output(&binary, AiCli::Codex, &["debug", "models"]) else {
+        return Ok(Vec::new());
     };
 
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-
-    Ok(parse_codex_models(&String::from_utf8_lossy(&output.stdout)))
+    Ok(parse_codex_models(&stdout))
 }
 
 fn parse_codex_models(json: &str) -> Vec<CodexModel> {
@@ -2037,16 +2023,11 @@ fn opencode_list_models_inner() -> Result<Vec<String>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match list_models_output(&binary, AiCli::Opencode, &["models"]) {
-        Ok(o) => o,
-        Err(_) => return Ok(Vec::new()),
+    let Some(stdout) = list_models_output(&binary, AiCli::Opencode, &["models"]) else {
+        return Ok(Vec::new());
     };
 
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-
-    let models: Vec<String> = String::from_utf8_lossy(&output.stdout)
+    let models: Vec<String> = stdout
         .lines()
         .map(|l| l.trim().to_string())
         .filter(|l| !l.is_empty() && l.contains('/'))
@@ -2244,18 +2225,11 @@ fn copilot_list_models_inner() -> Result<Vec<String>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match list_models_output(&binary, AiCli::Copilot, &["help", "config"]) {
-        Ok(o) => o,
-        Err(_) => return Ok(Vec::new()),
+    let Some(stdout) = list_models_output(&binary, AiCli::Copilot, &["help", "config"]) else {
+        return Ok(Vec::new());
     };
 
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-
-    Ok(parse_copilot_models(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
+    Ok(parse_copilot_models(&stdout))
 }
 
 /// Extract the `- "<id>"` lines that follow the `` `model`: `` heading of

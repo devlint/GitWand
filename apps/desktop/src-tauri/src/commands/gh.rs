@@ -40,9 +40,9 @@ const GH_TIMEOUT: Duration = Duration::from_secs(20);
 /// PR: more than one API call, so more room than `GH_TIMEOUT` (`ghCreatePr`
 /// waits on it with `IPC_TIMEOUT.NETWORK`).
 const GH_CREATE_TIMEOUT: Duration = Duration::from_secs(120);
-/// `gh api` writes (`gh_api_write`): ended just before the frontend's
-/// default 30 s IPC timeout gives up on them.
-const GH_WRITE_TIMEOUT: Duration = Duration::from_secs(28);
+/// `gh api` writes (`gh_api_write`). Their frontend wrappers wait with
+/// `IPC_TIMEOUT.NETWORK`, which also covers the lookups made before the write.
+const GH_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Timeout for the best-effort `git fetch origin` that refreshes
 /// remote-tracking refs before the per-PR numstat diffs below.
 const GH_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -462,7 +462,14 @@ fn gh_create_pr_inner(
     let mut cmd = gh_cmd(target.as_ref());
     cmd.args(&args).current_dir(&cwd);
     let output = crate::git::output_with_timeout_input(cmd, GH_CREATE_TIMEOUT, Some(body))
-        .map_err(|e| format!("Failed to create PR: {}", e))?;
+        .map_err(|e| match e.kind() {
+            // gh may have created the PR before the deadline.
+            std::io::ErrorKind::TimedOut => format!(
+                "Failed to create PR: {}; it may have been created, reload the PR list before retrying",
+                e
+            ),
+            _ => format!("Failed to create PR: {}", e),
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1626,20 +1633,7 @@ fn gh_issue_add_comment_inner(
     }
     let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/issues/{}/comments", nwo, number);
-    let field = format!("body={}", body);
-    let output = gh_api_cmd(&cwd)
-        .args(["api", &path, "-X", "POST", "-f", &field])
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("gh api add comment: {}", e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh api add comment failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let v: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("parse created comment: {}", e))?;
+    let v = gh_api_write(&cwd, "POST", &path, &[("body", &body)])?;
     Ok(github_api::map_comment(&v, true))
 }
 

@@ -762,14 +762,22 @@ function onAIProviderChange(val: AIProvider) {
 // Ollama detection
 const ollamaAvailable = ref(false);
 const ollamaModels = ref<string[]>([]);
+/** Why the last Test click failed (the backend's message), "" otherwise. */
+const ollamaError = ref("");
 
-async function detectOllama() {
+/**
+ * Probe the Ollama server. On mount it is a background check: an address the
+ * user has not allowed yet fails without a question. The Test button passes
+ * `interactive`, so a remote address gets the backend's native question, and
+ * a failure says why.
+ */
+async function detectOllama(interactive = false) {
+  ollamaError.value = "";
   try {
     const url = settings.value.aiOllamaUrl || "http://localhost:11434";
     // Through the backend: the webview's CSP no longer reaches arbitrary hosts.
-    // A probe: an address not allowed yet fails here rather than asking.
     const res = await aiHttpRequest("GET", `${url.replace(/\/+$/, "")}/api/tags`, "none", undefined, 2, {
-      interactive: false,
+      interactive,
     });
     if (res.status >= 200 && res.status < 300) {
       const data = JSON.parse(res.body);
@@ -778,9 +786,10 @@ async function detectOllama() {
         ollamaModels.value = data.models.map((m: any) => m.name || m.model).filter(Boolean);
       }
     }
-  } catch {
+  } catch (e) {
     ollamaAvailable.value = false;
     ollamaModels.value = [];
+    if (interactive) ollamaError.value = e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -3166,7 +3175,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                     :value="settings.aiOllamaUrl"
                     @input="updateSetting('aiOllamaUrl', ($event.target as HTMLInputElement).value)"
                     placeholder="http://localhost:11434" />
-                  <button class="sp-key-toggle" @click="detectOllama" :title="t('settings.aiOllamaTest')">
+                  <button class="sp-key-toggle" @click="detectOllama(true)" :title="t('settings.aiOllamaTest')">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
                       stroke-width="1.3">
                       <path d="M14 8A6 6 0 112 8" />
@@ -3176,7 +3185,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 </div>
                 <span class="sp-hint" :class="{ 'sp-hint--ok': ollamaAvailable }">
                   {{ ollamaAvailable ? t('settings.aiOllamaConnected', ollamaModels.length) :
-                    t('settings.aiOllamaNotConnected') }}
+                    ollamaError || t('settings.aiOllamaNotConnected') }}
                 </span>
               </div>
 

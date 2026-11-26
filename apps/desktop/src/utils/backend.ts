@@ -3909,7 +3909,9 @@ export async function ghIssueAddComment(
   body: string,
   pr: boolean = false,
 ): Promise<IssueComment> {
-  if (isTauri()) return tauriInvoke<IssueComment>("gh_issue_add_comment", { cwd, number, body, pr });
+  if (isTauri()) {
+    return tauriInvoke<IssueComment>("gh_issue_add_comment", { cwd, number, body, pr }, IPC_TIMEOUT.NETWORK);
+  }
   const res = await devFetch(`${DEV_SERVER}/api/gh-issue-comment`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

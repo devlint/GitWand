@@ -279,6 +279,12 @@ is a regression risk.
 GitWand supports 5 languages. Every user-visible string must have a key in all
 locale files.
 
+One exception: a native dialog the backend shows so that the webview cannot
+draw or answer it (`open_endpoint_prompt` in `commands/ai_http.rs`, the AI
+endpoint question and its refusal message) keeps its 5 translations in Rust.
+The frontend only passes the locale code, never the text. Keep them in step
+with the locale files when a language is added.
+
 | Code  | Language        |
 |-------|-----------------|
 | `en`  | English (default) |
