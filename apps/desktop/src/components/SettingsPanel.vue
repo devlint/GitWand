@@ -769,7 +769,8 @@ const ollamaError = ref("");
 function isLoopbackUrl(url: string): boolean {
   try {
     const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
-    return host === "localhost" || host === "::1" || /^127\./.test(host);
+    // IPv4 literals only, as the backend's `is_loopback`: `127.gpu.lan` is a name.
+    return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
   } catch {
     return false;
   }

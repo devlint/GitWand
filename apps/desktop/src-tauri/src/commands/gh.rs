@@ -478,15 +478,17 @@ fn gh_create_pr_inner(
 
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    // Fetch the PR details using the URL.
-    let view_output = hidden_cmd("gh")
+    // Fetch the PR details using the URL. Under GH_TIMEOUT: the PR exists by
+    // now, and a hung view falls back to the minimal info below.
+    let mut view_cmd = hidden_cmd("gh");
+    view_cmd
         .args([
             "pr", "view",
             &url,
             "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,additions,deletions,labels,assignees,reviewRequests,reviewDecision,mergeStateStatus,statusCheckRollup,autoMergeRequest",
         ])
-        .current_dir(&cwd)
-        .output();
+        .current_dir(&cwd);
+    let view_output = output_with_timeout(view_cmd, GH_TIMEOUT);
 
     if let Ok(view) = view_output {
         if view.status.success() {
