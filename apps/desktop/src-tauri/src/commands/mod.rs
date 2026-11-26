@@ -1,6 +1,7 @@
 pub(crate) mod ai;
 pub(crate) mod ai_http;
 pub(crate) mod azure;
+pub(crate) mod bisect;
 pub(crate) mod bitbucket;
 pub(crate) mod combined;
 pub(crate) mod credentials;

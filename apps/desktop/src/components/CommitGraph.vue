@@ -18,6 +18,7 @@ import { useStacks } from "../composables/useStacks";
 import { stackMenuFor, type StackMenuItems } from "../composables/useStackActions";
 import { clampMenuToWindow } from "../utils/contextMenu";
 import { useCommitSelection, orderSelection, COMBINE_MAX } from "../composables/useCommitSelection";
+import { bisectEndpoints } from "../utils/bisectEndpoints";
 import { isToggleModifier } from "../utils/platform";
 import { preventShiftSelect } from "../composables/useLineRange";
 
@@ -27,6 +28,8 @@ const { t } = useI18n();
 const { activeScope, clearScope } = useWorkspaceScope();
 
 const props = defineProps<{
+  /** A merge, rebase, bisect… is in progress: no bisect can start. */
+  operationInProgress?: boolean;
   commits: GitLogEntry[];
   selectedHash?: string | null;
   /** Current branch name for highlighting */
@@ -79,6 +82,7 @@ type CommitEvent =
   | "tag-commit"
   | "cherry-pick-commit"
   | "cherry-pick-commit-wip"
+  | "bisect-from-here"
   | "view-on-forge"
   | "create-issue"
   | "delete-tag"
@@ -107,6 +111,10 @@ const emit = defineEmits<{
   "tag-commit": [entry: GitLogEntry];
   "cherry-pick-commit": [entry: GitLogEntry];
   "cherry-pick-commit-wip": [entry: GitLogEntry];
+  /** Guided bisect: this commit is good, HEAD is bad. */
+  "bisect-from-here": [entry: GitLogEntry];
+  /** Guided bisect between two selected commits (full hashes). */
+  "bisect-between": [good: string, bad: string];
   "view-on-forge": [entry: GitLogEntry];
   /** "Create issue from commit" (#301). */
   "create-issue": [entry: GitLogEntry];
@@ -539,6 +547,15 @@ const isCtxEntryHead = computed(() => {
   if (!entry) return false;
   return isCurrent(entry);
 });
+
+/**
+ * Guided bisect between the two selected commits, when that is offered.
+ * Stash and WIP rows are not in `logOrder` (`isJoinable`): `bisectEndpoints`
+ * refuses a pair with one of them.
+ */
+const bisectPair = computed(() =>
+  props.operationInProgress ? null : bisectEndpoints(orderedSelection.value, logOrder.value),
+);
 
 /** The menu was opened on a row of a multi-selection of 2+ commits. */
 const ctxInMulti = computed(() => {
@@ -2133,6 +2150,17 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           </svg>
           <span>{{ t('combined.ctxOpen', orderedSelection.length) }}</span>
         </li>
+        <li
+          v-if="bisectPair"
+          class="commit-ctx-menu-item"
+          role="menuitem"
+          @click="emit('bisect-between', bisectPair.good, bisectPair.bad); closeCommitContextMenu()"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 1v14M3 4h10M3 12h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          <span>{{ t('bisect.menuBetween') }}</span>
+        </li>
         <li class="commit-ctx-menu-sep" role="separator"></li>
       </template>
       <!-- Stash actions (v2.12) — shown ONLY for stash commits -->
@@ -2412,6 +2440,18 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           <path d="M8 4V1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
         </svg>
         <span>{{ t('commitCtx.cherryPickWip') }}</span>
+      </li>
+      <li
+        v-if="!ctxInMulti && !isCtxEntryHead && !operationInProgress && ctxMenu.clickedBranchType !== 'stash'"
+        class="commit-ctx-menu-item"
+        role="menuitem"
+        :title="t('bisect.menuFromHereHint')"
+        @click="onCtxEmit('bisect-from-here')"
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 1v14M3 4h10M3 12h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <span>{{ t('bisect.menuFromHere') }}</span>
       </li>
 
       <!-- Branch Deletion (v2.12) — standard branches only -->

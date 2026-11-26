@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { IS_MAC } from "./utils/platform";
+import { isBisect, movesBisect, pollsRepoState, showsOperationBanner } from "./utils/operationKinds";
+import { useBisectStart } from "./composables/useBisectStart";
 import { ref, computed, watch, onMounted, onUnmounted, provide, defineAsyncComponent, nextTick } from "vue";
 
 // ─── Eager imports — main views & shared building blocks ─────────────────────
@@ -49,6 +51,7 @@ const RebaseProgressBanner = defineAsyncComponent(() => import("./components/Reb
 // v3.14: stack banner, top of every view (GitHub QA: in the sidebar it was
 // only seen with the file panel open).
 const StackBanner = defineAsyncComponent(() => import("./components/StackBanner.vue"));
+const BisectBanner = defineAsyncComponent(() => import("./components/BisectBanner.vue"));
 const StashManager = defineAsyncComponent(() => import("./components/StashManager.vue"));
 const TimeMachinePanel = defineAsyncComponent(() => import("./components/TimeMachinePanel.vue"));
 import UndoToast from "./components/UndoToast.vue";
@@ -1253,7 +1256,8 @@ async function handleEditHunk(path: string, hunkIdx: number, replacement: string
  */
 const pendingSplitAtHalt = computed(() => {
   const st = repoOperationState.value;
-  if (!showOperationBanner.value || !st || st.hasConflict) return null;
+  // A bisect's commit under test is not a halted commit: nothing to split.
+  if (!showOperationBanner.value || !st || st.hasConflict || isBisect(st)) return null;
   return getPendingSplitForHash(st.operationHead ?? null);
 });
 
@@ -3222,6 +3226,43 @@ const showOperationBanner = computed(() =>
   repoFolderPath.value !== ""
 );
 
+// ─── Guided bisect ──────────────────────────────────────────────────
+const bisectHasTrackedChanges = computed(() =>
+  !!repoStatus.value && (repoStatus.value.staged.length > 0 || repoStatus.value.unstaged.length > 0),
+);
+
+/**
+ * Bumped by watcher events that can move a bisect (refs/bisect, HEAD, the
+ * BISECT_* files; `movesBisect`, not a fetch). The banner's reload key is
+ * this, HEAD and the mark count (`step`, which `git_repo_state` reads: with
+ * the watcher down, the 3 s repo-state poll still runs for a bisect and
+ * catches a terminal mark that moves no HEAD). Not the whole
+ * `repoOperationState`, which is a new object at every status reload (each
+ * file save while testing a step).
+ */
+const bisectTick = ref(0);
+
+/** A bisect moved HEAD and refs/bisect: reload repo state, status and the forced log. */
+async function onBisectChanged() {
+  await refreshRepoState();
+  await repoRefresh(true);
+}
+
+/** Starting a bisect from the Git Tree context menu, behind a confirmation. */
+const bisectStart = useBisectStart({
+  cwd: () => repoFolderPath.value ?? "",
+  branch: () => repoStatus.value?.branch ?? "",
+  log: () => repoLog.value,
+  notify: (title, detail) => showDetailToast(title, detail),
+  onStarted: onBisectChanged,
+});
+const bisectConfirm = bisectStart.confirm;
+
+function openBisectCommit(hash: string) {
+  selectCommit(hash);
+  viewMode.value = "history";
+}
+
 async function refreshRepoState() {
   if (!repoFolderPath.value) {
     repoOperationState.value = null;
@@ -3347,17 +3388,6 @@ watch(
 // Also re-check whenever status changes (e.g. user stages a resolved file) so
 // the Continue button enables without waiting for the next 3-second tick.
 watch(repoStatus, () => { refreshRepoState(); }, { deep: false });
-
-// Start/stop the 3 s belt-and-suspenders poll based on whether an operation
-// is actually in progress. When idle, no interval runs at all.
-watch(repoOperationState, (op) => {
-  if (op && !_rebaseStateInterval) {
-    _rebaseStateInterval = setInterval(refreshRepoState, 3_000);
-  } else if (!op && _rebaseStateInterval) {
-    clearInterval(_rebaseStateInterval);
-    _rebaseStateInterval = null;
-  }
-});
 
 // ─── Stash manager panel ────────────────────────────────
 const showStash = ref(false);
@@ -3785,7 +3815,9 @@ async function onOperationAction(action: "continue" | "abort" | "skip") {
   // reports one in progress. A `--continue` that merely halted on a further
   // conflict leaves the state in place and so shows nothing, which is the
   // whole point of distinguishing the two (design §3).
-  if (action === "continue" && operationBefore === "merge" && repoOperationState.value === null) {
+  // A merge run inside a bisect leaves the bisect behind it: done all the same.
+  const after = repoOperationState.value;
+  if (action === "continue" && operationBefore === "merge" && (after === null || isBisect(after))) {
     showMergeSuccess.value = true;
   }
 }
@@ -4481,6 +4513,26 @@ const repoWatcher = useRepoWatcher({
   onHealthChange: (healthy) => poller.setWatcherHealthy(healthy),
 });
 
+// Start/stop the 3 s belt-and-suspenders poll based on whether an operation
+// is actually in progress. When idle, no interval runs at all.
+// A bisect, which can stay open for hours, only while the watcher is down
+// (`pollsRepoState`), and not while the window is hidden: its repo state
+// spawns no process, and the mark count it reads catches a terminal mark
+// that leaves HEAD and `git status` unchanged.
+function pollRepoState() {
+  if (isBisect(repoOperationState.value) && document.hidden) return;
+  void refreshRepoState();
+}
+watch([repoOperationState, repoWatcher.healthy], ([op, healthy]) => {
+  const polls = pollsRepoState(op, healthy);
+  if (polls && !_rebaseStateInterval) {
+    _rebaseStateInterval = setInterval(pollRepoState, 3_000);
+  } else if (!polls && _rebaseStateInterval) {
+    clearInterval(_rebaseStateInterval);
+    _rebaseStateInterval = null;
+  }
+});
+
 watch(
   [repoFolderPath, () => settings.value.liveRepoWatcher],
   ([path, enabled]) => {
@@ -4512,6 +4564,11 @@ repoWatcher.on(["worktree", "index"], () => {
 // kind carries .git/info/exclude (see classify_path in watcher.rs).
 repoWatcher.on(["worktree", "config", "head"], (ev) => {
   if (shouldRecheckTrackedIgnored(ev)) trackedIgnored.scheduleCheck();
+});
+
+// Guided bisect: reload the banner's status (see `bisectTick`).
+repoWatcher.on(["refs", "head", "mergeState"], (ev) => {
+  if (isBisect(repoOperationState.value) && movesBisect(ev)) bisectTick.value++;
 });
 
 repoWatcher.on(["head", "refs"], () => {
@@ -4630,11 +4687,13 @@ watch(
 );
 
 // A rebase that ended (continued from the banner, or outside GitWand) may
-// complete a restack: covers the watcher being disabled.
+// complete a restack: covers the watcher being disabled. A rebase run inside
+// a bisect leaves the bisect behind it: ended all the same.
 watch(
   () => repoOperationState.value?.state ?? "clean",
   (now, before) => {
-    if ((before === "rebase" || before === "rebase_interactive") && now === "clean") refreshStacks();
+    const ended = now === "clean" || now === "bisect";
+    if ((before === "rebase" || before === "rebase_interactive") && ended) refreshStacks();
   },
 );
 
@@ -5091,12 +5150,20 @@ onUnmounted(() => {
             <!-- Plain rebase-in-progress banner (pull --rebase paused on conflicts).
                  Non-blocking: sits at the top of the view so the resolution area
                  below stays reachable. -->
-            <RebaseProgressBanner v-if="showOperationBanner && repoOperationState" :repo-state="repoOperationState"
+            <RebaseProgressBanner v-if="showOperationBanner && repoOperationState && showsOperationBanner(repoOperationState)" :repo-state="repoOperationState"
               :auto-resolving="rebaseAutoResolving"
               :on-action="onOperationAction"
               :pending-split="pendingSplitAtHalt !== null"
               @split="onRebaseBannerSplit"
               @auto-resolve="onRebaseBannerAutoResolve" />
+
+            <!-- Guided bisect: a bisect in progress, from GitWand or a terminal. -->
+            <BisectBanner v-if="repoFolderPath && isBisect(repoOperationState)"
+              :cwd="repoFolderPath"
+              :refresh-key="`${repoOperationState?.operationHead ?? ''}:${repoOperationState?.step ?? 0}:${bisectTick}`"
+              :has-tracked-changes="bisectHasTrackedChanges"
+              @changed="onBisectChanged"
+              @open-commit="openBisectCommit" />
 
             <!-- v3.14 — stacked branches: restack / after-restack banner (renders nothing when idle) -->
             <StackBanner v-if="repoFolderPath" />
@@ -5246,6 +5313,9 @@ onUnmounted(() => {
                   @tag-commit="handleTagCommit"
                   @cherry-pick-commit="handleCherryPickCommit"
                   @cherry-pick-commit-wip="handleCherryPickCommitAsWip"
+                  :operation-in-progress="repoOperationState !== null"
+                  @bisect-between="(good: string, bad: string) => bisectStart.ask(good, bad)"
+                  @bisect-from-here="bisectStart.askFromHere"
                   @view-on-forge="handleViewOnForge"
                   :can-create-issue="createIssue.available.value" @create-issue="(entry: IssueCommitEntry) => createIssue.openFromCommit(entry)"
                   @delete-branch="handleDeleteBranchRequest"
@@ -5439,6 +5509,16 @@ onUnmounted(() => {
       @close="onRemovalClose" @done="onRemovalDone" @open-log="onOpenSetupLog" />
     <AiTaskCloseModal v-if="aiTaskClose" :branch="aiTaskClose.branch" :mode="aiTaskClose.mode" :busy="aiTaskCloseBusy"
       :error="aiTaskCloseError" @cancel="onAiTaskCancel" @delete="onAiTaskDelete" @merge-back="onAiTaskMergeBack" />
+
+    <!-- Guided bisect: confirms both ends before git moves the working tree. -->
+    <BaseModal v-if="bisectConfirm" :title="t('bisect.confirmTitle')" size="sm" role="alertdialog"
+      @close="bisectStart.cancel()">
+      <p class="ptc-desc">{{ t(bisectConfirm.ordered ? 'bisect.confirmBody' : 'bisect.confirmBodyUnordered', bisectConfirm.good.slice(0, 7), bisectConfirm.bad.slice(0, 7), bisectStart.returnsTo.value) }}</p>
+      <template #footer>
+        <button class="bm-btn bm-btn--ghost" @click="bisectStart.cancel()">{{ t('project.cancel') }}</button>
+        <button class="bm-btn bm-btn--primary" :disabled="bisectStart.starting.value" @click="bisectStart.start()">{{ t('bisect.confirmStart') }}</button>
+      </template>
+    </BaseModal>
 
     <!-- Close-project confirmation — guards against misclicks near the submenu caret -->
     <BaseModal v-if="closeProjectConfirm" :title="t('project.closeTitle')" size="sm" role="alertdialog"

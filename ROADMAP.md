@@ -32,9 +32,9 @@ _v3.14.0 (stacked branches: declare a stack, restack after a parent change or a 
 - **Combined Diffs** — merged, unreleased (multi-commit, non-contiguous aggregated diff; detail in CHANGELOG, Unreleased).
 - **#315 — the Git Tree skips refs events that change nothing it shows** (`git_refs_fingerprint`). Closes the Git Tree follow-up from #278 (full log reload on every refs event, ≈750 ms on a 74k-commit repo). Known gap, accepted: a ref that moves and comes back between two reads leaves stale decorations until the next ref move or a manual refresh.
 - **#314 — hardening batch**: AI endpoint gate (closes the `ai_http_request` `auth: "none"` follow-up from #244), PR/MR bodies on stdin (#234), model-listing timeouts that kill the process tree (#237), `pullAutostash` fixture retry. To check at merge: the #234 case where a background revalidation racing a save briefly shows the old title/body is not in its description. Not tested: Windows, a real `glab`, the native dialog in the packaged app (see the checklist below).
-- **Guided bisect** (Gitoryx) — `bisect` exists only as an in-progress operation GitWand can abort (`ops.rs`). Add a start flow (pick good/bad from the Git Tree), Good / Bad / Skip on the current commit, remaining-steps counter, culprit commit opened at the end; optional `bisect run` with a user command.
-- #265: a bisect in progress is invisible to the status, so the tooltip shows it only after a fast-forward attempt; a stale block reason can linger up to one fetch tick (30 s); a branch literally named `HEAD` or `unknown` is treated as detached
-- **Bundle budget** — the main chunk is at 992/992 KB on both open PRs and bisect touches the budget too. The raises these three need are the last ones: from v4.0 a feature lands in a lazy chunk.
+- **#317 — guided bisect** (Gitoryx): start from the Git Tree (two commits, or "from here" to HEAD), Good / Bad / Skip from a banner that also follows a bisect started in a terminal (paths, `--first-parent`, `--no-checkout`, custom terms), remaining commits and steps, culprit or skipped candidates opened in the Git Tree, End bisect (End here when the start branch is gone). QA done in `dev:web` and in the Tauri app (macOS debug build). `git bisect run` moves to v4.4.
+- #265: a stale block reason can linger up to one fetch tick (30 s); a branch literally named `HEAD` or `unknown` is treated as detached (the invisible bisect is closed by #317, which reports it in the repo state)
+- **Bundle budget** — #317 raises it from 992 to 1,002 KB (main chunk measured at 1,001 KB with #314 and #315 merged: bisect wrappers, strings and Git Tree wiring; the banner is a lazy chunk). The raises these three need are the last ones: from v4.0 a feature lands in a lazy chunk.
 
 **3.15.x — lot A: resolvers** (wrong resolutions a user can see)
 
@@ -291,6 +291,10 @@ _Inspired by Snipara's project-intelligence layer. Before a merge/rebase, answer
 - a file history entry outside the loaded history (line-range result, rebased commit) has no known name before a rename; the Compare tab says so instead of guessing — load more history, or have `git log -L` results carry names
 - **Commit Review coverage on a content-only restage** — v3.7.0's staged-set watcher fingerprints staged file paths + statuses, not content, so editing an already-staged file's content without changing which files are staged doesn't retrigger a coverage/finding recompute automatically (the pre-commit gate still recomputes coverage honestly right before the trailer is written, so the record itself stays accurate — this is a UI-staleness gap between review passes, not a data-integrity one).
 
+
+**Bisect**
+
+- **`git bisect run` from the bisect banner** (follow-up of #317) — run a user command at each step and let its exit code mark the commit. Same questions as worktree `setup`: where it runs (a terminal tab, so its output stays visible), stopping it, a timeout, and whether a command saved per repo needs the trust prompt.
 ---
 
 ### For reflection — competitive scan (GitUp · Aurees · Snipara · Strand · GitComet · RelaGit)

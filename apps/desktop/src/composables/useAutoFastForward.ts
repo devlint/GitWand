@@ -159,12 +159,13 @@ export async function readAutoFfFacts(cwd: string, ctx: AutoFfContext): Promise<
 }
 
 /** Branch names git status reports for a detached HEAD (libgit2 / CLI v2). */
-const DETACHED_BRANCH_NAMES = new Set(["HEAD", "(detached)", "(detached HEAD)", "unknown", ""]);
+export const DETACHED_BRANCH_NAMES: ReadonlySet<string> = new Set(["HEAD", "(detached)", "(detached HEAD)", "unknown", ""]);
 
 /**
  * Facts from already-loaded state — no process is spawned. Advisory only:
- * a bisect is invisible here, and the status may lag the disk by one poll.
- * The git-backed check (`readAutoFfFacts`) and the Rust command catch both.
+ * the status and the operation state may lag the disk by one poll (a bisect
+ * started since, say). The git-backed check (`readAutoFfFacts`) and the Rust
+ * command catch that.
  */
 export function factsFromStatus(
   status: GitStatus,

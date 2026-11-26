@@ -234,7 +234,9 @@ export function useApplyFromPreview(deps: ApplyDeps) {
     // 0. Pre-flight. Refuse before the snapshot, so a refusal changes nothing.
     try {
       const st = await deps.repoState();
-      if (st.state && st.state !== "clean") {
+      // A bisect blocks nothing (the user's call, 2026-11-26): git decides,
+      // as it did before `git_repo_state` reported bisects.
+      if (st.state && st.state !== "clean" && st.state !== "bisect") {
         return finish({
           ...base,
           stoppedReason: "op-failed",

@@ -51,7 +51,20 @@ pub(crate) fn classify_path(rel: &str) -> Option<&'static str> {
         }
         if matches!(
             inner,
-            "MERGE_HEAD" | "REBASE_HEAD" | "CHERRY_PICK_HEAD" | "REVERT_HEAD" | "MERGE_MSG"
+            "MERGE_HEAD"
+                | "REBASE_HEAD"
+                | "CHERRY_PICK_HEAD"
+                | "REVERT_HEAD"
+                | "MERGE_MSG"
+                | "BISECT_LOG"
+                | "BISECT_START"
+                | "BISECT_EXPECTED_REV"
+                | "BISECT_ANCESTORS_OK"
+                | "BISECT_NAMES"
+                | "BISECT_TERMS"
+                | "BISECT_RUN"
+                | "BISECT_HEAD"
+                | "BISECT_FIRST_PARENT"
         ) || inner.starts_with("rebase-merge/")
             || inner.starts_with("rebase-apply/")
         {
@@ -546,6 +559,23 @@ mod tests {
         assert_eq!(classify_path(".git/refs/heads/main"), Some("refs"));
         assert_eq!(classify_path(".git/packed-refs"), Some("refs"));
         assert_eq!(classify_path(".git/MERGE_HEAD"), Some("mergeState"));
+        for f in [
+            "BISECT_LOG",
+            "BISECT_START",
+            "BISECT_EXPECTED_REV",
+            "BISECT_ANCESTORS_OK",
+            "BISECT_NAMES",
+            "BISECT_TERMS",
+            "BISECT_RUN",
+            "BISECT_HEAD",
+            "BISECT_FIRST_PARENT",
+        ] {
+            assert_eq!(
+                classify_path(&format!(".git/{f}")),
+                Some("mergeState"),
+                "{f}"
+            );
+        }
         assert_eq!(
             classify_path(".git/rebase-merge/head-name"),
             Some("mergeState")

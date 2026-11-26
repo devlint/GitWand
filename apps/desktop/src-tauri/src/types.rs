@@ -365,6 +365,47 @@ pub struct RepoOperationState {
     pub total: u32,
 }
 
+/// A bisect in progress (`commands::bisect`).
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BisectStatus {
+    /// A bisect is in progress (`BISECT_LOG`); false once it has ended, with
+    /// every other field empty.
+    pub active: bool,
+    /// HEAD (BISECT_HEAD for `--no-checkout`), the commit under test.
+    pub current: Option<String>,
+    /// What `git bisect reset` returns to (`BISECT_START`).
+    pub start: Option<String>,
+    pub bad: Option<String>,
+    pub good: Vec<String>,
+    pub skipped: Vec<String>,
+    /// `bisect_nr` / `bisect_steps`, once a bad and a good commit are known.
+    pub remaining: Option<u32>,
+    pub steps: Option<u32>,
+    /// Set once git cannot narrow further: one hash is the first bad commit,
+    /// several are left by skips.
+    pub candidates: Vec<String>,
+    /// (bad term, good term).
+    pub terms: (String, String),
+    /// Subject, author and date of the commit under test and the candidates.
+    pub commits: Vec<BisectCommit>,
+    /// HEAD is a commit already marked while git still has commits to test:
+    /// the last mark was recorded but git could not check out the next one
+    /// (uncommitted changes in the way). `next` moves on.
+    pub pending_checkout: bool,
+}
+
+/// A commit the bisect banner describes.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BisectCommit {
+    pub hash: String,
+    pub subject: String,
+    pub author: String,
+    /// Author date, ISO 8601.
+    pub date: String,
+}
+
 // ─── Git branch ────────────────────────────────────────────────────
 #[derive(Serialize)]
 pub struct GitBranch {

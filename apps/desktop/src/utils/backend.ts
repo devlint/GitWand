@@ -1198,8 +1198,8 @@ export async function gitOperationAction(
 }
 
 export interface RepoOperationState {
-  /** "clean" | "rebase" | "rebase_interactive" | "merge" | "cherry_pick" | "revert" */
-  state: 'clean' | 'rebase' | 'rebase_interactive' | 'merge' | 'cherry_pick' | 'revert';
+  /** "clean" | "rebase" | "rebase_interactive" | "merge" | "cherry_pick" | "revert" | "bisect" */
+  state: 'clean' | 'rebase' | 'rebase_interactive' | 'merge' | 'cherry_pick' | 'revert' | 'bisect';
   /** True when there are still unresolved conflict markers in the working tree. */
   hasConflict: boolean;
   /** SHA of the commit being applied (REBASE_HEAD / MERGE_HEAD / …). */
@@ -1228,6 +1228,99 @@ export async function gitRepoState(cwd: string): Promise<RepoOperationState> {
   return res.json();
 }
 
+
+// ─── Guided bisect ────────────────────────────────────────────
+
+/** A bisect in progress (`git_bisect_status`, commands/bisect.rs). */
+export interface BisectStatus {
+  /** A bisect is in progress; false once it has ended, every other field empty. */
+  active: boolean;
+  /** HEAD, the commit under test. */
+  current: string | null;
+  /** What End bisect returns to (branch name or hash). */
+  start: string | null;
+  bad: string | null;
+  good: string[];
+  skipped: string[];
+  /** Commits left and estimated steps, once a bad and a good commit are known. */
+  remaining: number | null;
+  steps: number | null;
+  /** Set once git cannot narrow further: one = the first bad commit, several = left by skips. */
+  candidates: string[];
+  /** [bad term, good term] ("bad"/"good" unless the bisect set its own). */
+  terms: [string, string];
+  /** Subject, author and date of the commit under test and the candidates. */
+  commits: BisectCommit[];
+  /** The last mark was recorded but git could not check out the next commit: `next` moves on. */
+  pendingCheckout: boolean;
+}
+
+export interface BisectCommit {
+  hash: string;
+  subject: string;
+  author: string;
+  /** Author date, ISO 8601. */
+  date: string;
+}
+
+/** `next` checks out the next commit to test after a `pendingCheckout`. */
+export type BisectVerdict = "good" | "bad" | "skip" | "next";
+
+async function bisectPost<T>(route: string, body: Record<string, unknown>): Promise<T> {
+  const res = await devFetch(`${DEV_SERVER}${route}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error ?? `${route} failed: ${res.status}`);
+  return data as T;
+}
+
+export async function gitBisectStatus(cwd: string): Promise<BisectStatus> {
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_status", { cwd });
+  const res = await devFetch(`${DEV_SERVER}/api/git-bisect-status?cwd=${encodeURIComponent(cwd)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error ?? `bisect status failed: ${res.status}`);
+  return data as BisectStatus;
+}
+
+/**
+ * Start a bisect between two commits (full hashes), ordered by ancestry.
+ * With `keepOrder` ("Bisect from here"), `bad` must be HEAD and `good` an
+ * ancestor of it: never swapped.
+ */
+export async function gitBisectStart(cwd: string, bad: string, good: string, keepOrder = false): Promise<BisectStatus> {
+  // A checkout of the whole working tree, then the range walks: as long as a
+  // network command on a large repo, not a 30 s read.
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_start", { cwd, bad, good, keepOrder }, IPC_TIMEOUT.NETWORK);
+  return bisectPost<BisectStatus>("/api/git-bisect-start", { cwd, bad, good, keepOrder });
+}
+
+/**
+ * Mark the commit under test. `expected` is the commit the user answered
+ * for: refused (`bisect:moved`) when the commit under test is another one.
+ */
+export async function gitBisectMark(
+  cwd: string,
+  verdict: BisectVerdict,
+  expected: string | null = null,
+): Promise<BisectStatus> {
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_mark", { cwd, verdict, expected }, IPC_TIMEOUT.NETWORK);
+  return bisectPost<BisectStatus>("/api/git-bisect-mark", { cwd, verdict, expected });
+}
+
+/**
+ * End the bisect and check out what it started from; with `stay`, end it on
+ * the current commit (when the start branch is gone or cannot be checked out).
+ */
+export async function gitBisectReset(cwd: string, stay = false): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_bisect_reset", { cwd, stay }, IPC_TIMEOUT.NETWORK);
+    return;
+  }
+  await bisectPost<null>("/api/git-bisect-reset", { cwd, stay });
+}
 
 /**
  * Rebase the current branch onto `onto`, non-interactively.

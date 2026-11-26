@@ -102,6 +102,15 @@ describe("useApplyFromPreview — pre-flight", () => {
     expect(deps.snapshot, "no snapshot for a refusal").not.toHaveBeenCalled();
     expect(deps.runMerge).not.toHaveBeenCalled();
   });
+
+  it("does not refuse during a bisect: git decides, as before bisects were reported", async () => {
+    const deps = makeDeps({ repoState: vi.fn(async () => ({ state: "bisect" })) });
+    const { apply } = useApplyFromPreview(deps);
+
+    await apply("merge", "topic", 3);
+
+    expect(deps.runMerge).toHaveBeenCalled();
+  });
 });
 
 describe("useApplyFromPreview — conflicts", () => {

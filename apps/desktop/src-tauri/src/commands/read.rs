@@ -6,7 +6,7 @@
 //!   - `git_status` — porcelain v2 via libgit2 fast path + CLI fallback.
 //!   - `git_diff` — per-file diff (working tree or staged).
 //!   - `git_log` — commit list (with branch / author filter).
-//!   - `git_repo_state` — rebase / merge / cherry-pick / revert detection.
+//!   - `git_repo_state` — rebase / merge / cherry-pick / revert / bisect detection.
 //!   - `git_show` — multi-file diff for a single commit.
 //!   - `git_file_log` / `git_file_log_pickaxe` / `git_file_log_range` —
 //!     per-file history with --follow + pickaxe + -L line ranges.
@@ -1230,6 +1230,14 @@ fn refs_fingerprint(cwd: &str) -> Result<String, String> {
 
 // ─── Git repo state (rebase / merge in progress) ─────────────
 
+/// The marks a `BISECT_LOG` records: its `git bisect <term> <hash>` lines
+/// (comments and `git bisect start` aside).
+fn bisect_marks(log: &str) -> u32 {
+    log.lines()
+        .filter(|l| l.starts_with("git bisect ") && !l.starts_with("git bisect start"))
+        .count() as u32
+}
+
 /// Returns the current operation state of the repository by inspecting the
 /// .git directory directly — more reliable than parsing locale-dependent
 /// `git status` messages.
@@ -1313,6 +1321,33 @@ pub(crate) async fn git_repo_state(cwd: String) -> Result<RepoOperationState, St
             operation_head: read_git_file(&revert_head),
             target_branch: None,
             step: 0,
+            total: 0,
+        });
+    }
+
+    // ── Bisect in progress (after the operations above, which take
+    // precedence: a merge or cherry-pick can run inside a bisect) ─────────
+    if let Ok(log) = std::fs::read_to_string(git_dir.join("BISECT_LOG")) {
+        // `--no-checkout` bisects move BISECT_HEAD, not HEAD. Read through
+        // libgit2: this runs after every status poll, no process spawned.
+        let head_ref = if git_dir.join("BISECT_HEAD").exists() {
+            "BISECT_HEAD"
+        } else {
+            "HEAD"
+        };
+        // `discover`, as git does: `cwd` may be a subdirectory of the worktree.
+        let head = git2::Repository::discover(&cwd)
+            .ok()
+            .and_then(|r| r.revparse_single(head_ref).ok().map(|o| o.id().to_string()));
+        return Ok(RepoOperationState {
+            state: "bisect".into(),
+            has_conflict: false,
+            operation_head: head,
+            target_branch: None,
+            // Marks so far (every `git bisect <term>` git logged): it moves
+            // with each mark, from GitWand or a terminal, whatever the ref
+            // backend, so the banner reloads on it even when HEAD stays.
+            step: bisect_marks(&log),
             total: 0,
         });
     }
@@ -3946,6 +3981,100 @@ mod pathspec_tests {
             "snapshot commit leaked into git log --all"
         );
         assert_eq!(entries.len(), 1, "only the real commit should be listed");
+    }
+
+    fn repo_state(cwd: &str) -> RepoOperationState {
+        tauri::async_runtime::block_on(git_repo_state(cwd.to_string())).expect("git_repo_state")
+    }
+
+    fn three_commits(repo: &TempRepo) {
+        for i in 1..=3 {
+            repo.write("a.txt", &format!("v{i}"));
+            repo.commit_all(&format!("c{i}"));
+        }
+    }
+
+    #[test]
+    fn repo_state_reports_bisect() {
+        let repo = TempRepo::new();
+        three_commits(&repo);
+        repo.git(&["bisect", "start"]);
+        let head = String::from_utf8(repo.git(&["rev-parse", "HEAD"]).stdout).unwrap();
+        let st = repo_state(&repo.cwd());
+        assert_eq!(st.state, "bisect");
+        assert_eq!(st.operation_head.as_deref(), Some(head.trim()));
+        assert!(!st.has_conflict);
+        repo.git(&["bisect", "reset"]);
+        assert_eq!(repo_state(&repo.cwd()).state, "clean");
+    }
+
+    #[test]
+    fn repo_state_reports_the_commit_under_test_of_a_no_checkout_bisect() {
+        let repo = TempRepo::new();
+        three_commits(&repo);
+        let out = |args: &[&str]| {
+            String::from_utf8(repo.git(args).stdout)
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        let (bad, good) = (
+            out(&["rev-parse", "HEAD"]),
+            out(&["rev-list", "--max-parents=0", "HEAD"]),
+        );
+        repo.git(&["bisect", "start", "--no-checkout", &bad, &good]);
+        let tested = out(&["rev-parse", "BISECT_HEAD"]);
+        assert_ne!(tested, bad);
+        assert_eq!(
+            repo_state(&repo.cwd()).operation_head.as_deref(),
+            Some(tested.as_str())
+        );
+    }
+
+    #[test]
+    fn repo_state_counts_the_bisect_marks() {
+        let repo = TempRepo::new();
+        three_commits(&repo);
+        let out = |args: &[&str]| {
+            String::from_utf8(repo.git(args).stdout)
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        let (bad, good) = (
+            out(&["rev-parse", "HEAD"]),
+            out(&["rev-list", "--max-parents=0", "HEAD"]),
+        );
+        repo.git(&["bisect", "start", &bad, &good]);
+        let before = repo_state(&repo.cwd()).step;
+        repo.git(&["bisect", "good"]);
+        assert_eq!(repo_state(&repo.cwd()).step, before + 1);
+    }
+
+    #[test]
+    fn repo_state_prefers_merge_over_bisect() {
+        let repo = TempRepo::new();
+        three_commits(&repo);
+        repo.git(&["bisect", "start"]);
+        let head = String::from_utf8(repo.git(&["rev-parse", "HEAD"]).stdout).unwrap();
+        std::fs::write(repo.path.join(".git/MERGE_HEAD"), head).unwrap();
+        assert_eq!(repo_state(&repo.cwd()).state, "merge");
+    }
+
+    #[test]
+    fn repo_state_sees_bisect_in_linked_worktree_only() {
+        let repo = TempRepo::new();
+        three_commits(&repo);
+        let wt = format!("{}/wt", repo.cwd());
+        repo.git(&["worktree", "add", "-q", "--detach", &wt]);
+        let out = Command::new(git_binary())
+            .args(["bisect", "start"])
+            .current_dir(&wt)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert_eq!(repo_state(&wt).state, "bisect");
+        assert_eq!(repo_state(&repo.cwd()).state, "clean");
     }
 
     #[test]
