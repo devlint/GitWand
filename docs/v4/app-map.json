@@ -1,0 +1,5163 @@
+{
+ "commands": {
+  "github_device_start": {
+   "module": "commands/github_api.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useGithubAuth.ts",
+    "utils/backend-pr.ts"
+   ]
+  },
+  "github_device_poll": {
+   "module": "commands/github_api.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useGithubAuth.ts",
+    "utils/backend-pr.ts"
+   ]
+  },
+  "github_token_present": {
+   "module": "commands/github_api.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "telemetry_get_state": {
+   "module": "commands/telemetry.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "telemetry_set_enabled": {
+   "module": "commands/telemetry.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "scratch_worktree_create": {
+   "module": "commands/scratch.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "scratch_worktree_merge_back": {
+   "module": "commands/scratch.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "scratch_worktree_discard": {
+   "module": "commands/scratch.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_stop_processes": {
+   "module": "commands/worktree_processes.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_list_prs": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "composables/usePrPanel.ts",
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_count": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_freshness_signal": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_create_pr": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_list_reviewer_candidates": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_branches": {
+   "module": "commands/gh.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_checkout_pr": {
+   "module": "commands/gh.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_merge_pr": {
+   "module": "commands/gh.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_enable_auto_merge": {
+   "module": "commands/gh.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_disable_auto_merge": {
+   "module": "commands/gh.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_ready": {
+   "module": "commands/gh.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_edit": {
+   "module": "commands/gh.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_branch_pr": {
+   "module": "commands/gh.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_set_base": {
+   "module": "commands/gh.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_dismiss_review": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_create_comment": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_update_comment": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_delete_comment": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_review_threads": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_set_review_thread_resolved": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_request_reviewers": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_detail": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_issue_detail": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_issue_comments": {
+   "module": "commands/gh.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_issue_add_comment": {
+   "module": "commands/gh.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_issue_set_state": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_pr_attachment_urls": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_pr_diff": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_checks": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_comments": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_issue_comments": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_pr_reviews": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_list_reactions": {
+   "module": "commands/gh.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_add_reaction": {
+   "module": "commands/gh.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_delete_reaction": {
+   "module": "commands/gh.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_fork_info": {
+   "module": "commands/gh.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_check_annotations": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_list_issues": {
+   "module": "commands/gh.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_tracked_ignored": {
+   "module": "commands/tracked_ignored.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_untrack_paths": {
+   "module": "commands/tracked_ignored.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "detect_glab": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_list_mrs": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_count": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_get_mr": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_diff_refs": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_diff": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_pipelines": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_annotations": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_list_issues": {
+   "module": "commands/gitlab.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gl_create_mr": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_merge_mr_inner": {
+   "module": "commands/gitlab.rs",
+   "registry": null,
+   "callers": []
+  },
+  "gl_merge_mr": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_enable_auto_merge": {
+   "module": "commands/gitlab.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_disable_auto_merge": {
+   "module": "commands/gitlab.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_checkout_mr_inner": {
+   "module": "commands/gitlab.rs",
+   "registry": null,
+   "callers": []
+  },
+  "gl_checkout_mr": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_convert_draft_to_ready": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_edit": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_notes_inner": {
+   "module": "commands/gitlab.rs",
+   "registry": null,
+   "callers": []
+  },
+  "gl_mr_notes": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_create_note": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_update_note": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_delete_note": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_approve_mr_inner": {
+   "module": "commands/gitlab.rs",
+   "registry": null,
+   "callers": []
+  },
+  "gl_approve_mr": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_list_reviews": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_current_user": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_reviewer_candidates": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_request_reviewers": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_branches": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_files": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_mr_create_discussion": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_list_reactions": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_add_reaction": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "gl_delete_reaction": {
+   "module": "commands/gitlab.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitlab.ts"
+   ]
+  },
+  "detect_claude_cli": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "claude_cli_prompt": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "detect_codex_cli": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "codex_cli_prompt": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "antigravity_list_models": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "codex_list_models": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "detect_antigravity_cli": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "antigravity_cli_prompt": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "detect_opencode_cli": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "opencode_cli_prompt": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "opencode_list_models": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "detect_copilot_cli": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "copilot_cli_prompt": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "copilot_list_models": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "claude_cli_login": {
+   "module": "commands/ai.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "worktree_hooks_trust": {
+   "module": "commands/worktree_trust.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_hooks_trust_set": {
+   "module": "commands/worktree_trust.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "az_current_user": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_list_prs": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_count": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_detail": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_diff": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_files": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_reviewer_candidates": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_branches": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_create_pr": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_merge_pr": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_enable_auto_merge": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_disable_auto_merge": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_ready": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_edit": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_checkout_pr": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_comments": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_create_comment": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_checks": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_pr_reviews": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_submit_review": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_list_likes": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_add_like": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "az_delete_like": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "azure_device_start": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "composables/useAzureAuth.ts",
+    "utils/backend-pr.ts"
+   ]
+  },
+  "azure_device_poll": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "composables/useAzureAuth.ts",
+    "utils/backend-pr.ts"
+   ]
+  },
+  "azure_token_present": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "azure_sign_out": {
+   "module": "commands/azure.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "terminal_open": {
+   "module": "commands/terminal.rs",
+   "registry": "route",
+   "callers": [
+    "App.vue",
+    "utils/terminalEvents.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "terminal_write": {
+   "module": "commands/terminal.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "terminal_resize": {
+   "module": "commands/terminal.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "terminal_close": {
+   "module": "commands/terminal.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "set_credential": {
+   "module": "commands/credentials.rs",
+   "registry": "desktopOnly",
+   "callers": [
+    "composables/useCredentials.ts",
+    "utils/backend-pr.ts"
+   ]
+  },
+  "get_credential": {
+   "module": "commands/credentials.rs",
+   "registry": "desktopOnly",
+   "callers": [
+    "composables/useCredentials.ts",
+    "utils/backend-pr.ts"
+   ]
+  },
+  "delete_credential": {
+   "module": "commands/credentials.rs",
+   "registry": "desktopOnly",
+   "callers": [
+    "composables/useCredentials.ts",
+    "utils/backend-pr.ts"
+   ]
+  },
+  "gh_issue_targets": {
+   "module": "commands/gh_issues.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_issue_available": {
+   "module": "commands/gh_issues.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_create_issue": {
+   "module": "commands/gh_issues.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useCreateIssue.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "gh_create_gitwand_issue": {
+   "module": "commands/gh_issues.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_gitwand_writable": {
+   "module": "commands/gh_issues.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_list_labels": {
+   "module": "commands/gh_issues.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_list_milestones": {
+   "module": "commands/gh_issues.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_list_assignees": {
+   "module": "commands/gh_issues.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_issue_templates": {
+   "module": "commands/gh_issues.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts",
+    "utils/issueTemplates.ts"
+   ]
+  },
+  "mcp_detect_configs": {
+   "module": "commands/mcp_catalog.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "mcp_read_config": {
+   "module": "commands/mcp_catalog.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "mcp_install_server": {
+   "module": "commands/mcp_catalog.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "mcp_uninstall_server": {
+   "module": "commands/mcp_catalog.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "ai_api_key_set": {
+   "module": "commands/ai_http.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "ai_api_key_hint": {
+   "module": "commands/ai_http.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "ai_http_request": {
+   "module": "commands/ai_http.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "bb_list_prs": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_pr_count": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_get_pr": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_pr_diff": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_create_pr": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_merge_pr": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_checkout_pr": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_pr_comments": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_create_comment": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_update_comment": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_delete_comment": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_list_reviews": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_approve_pr": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_pr_files": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_current_user": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_reviewer_candidates": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_branches": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_pr_ci_checks": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_pr_annotations": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_list_issues": {
+   "module": "commands/bitbucket.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "bb_convert_draft_to_ready": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "bb_pr_edit": {
+   "module": "commands/bitbucket.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-bitbucket.ts"
+   ]
+  },
+  "snapshot_create": {
+   "module": "commands/snapshots.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "snapshot_list": {
+   "module": "commands/snapshots.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "snapshot_restore": {
+   "module": "commands/snapshots.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "snapshot_prune": {
+   "module": "commands/snapshots.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "read_file": {
+   "module": "commands/files.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useGitWand.ts",
+    "composables/useFileExplorer.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "write_file": {
+   "module": "commands/files.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "write_gitwandrc": {
+   "module": "commands/files.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "read_file_at_revision": {
+   "module": "commands/files.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "folder_diff": {
+   "module": "commands/files.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "list_dir": {
+   "module": "commands/files.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "list_repo_tree": {
+   "module": "commands/files.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "list_repo_dir": {
+   "module": "commands/files.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_combined_diff": {
+   "module": "commands/combined.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_file_lineage": {
+   "module": "commands/combined.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gitea_current_user": {
+   "module": "commands/gitea.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_validate_token": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_list_prs": {
+   "module": "commands/gitea.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_pr_count": {
+   "module": "commands/gitea.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_get_pr": {
+   "module": "commands/gitea.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_pr_diff": {
+   "module": "commands/gitea.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_pr_status": {
+   "module": "commands/gitea.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_pr_files": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_pr_comments": {
+   "module": "commands/gitea.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_create_comment": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_update_comment": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_delete_comment": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_list_reviews": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_list_issues": {
+   "module": "commands/gitea.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_reviewer_candidates": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_create_pr": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_merge_pr": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_checkout_pr": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_convert_draft_to_ready": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_pr_edit": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "gitea_branches": {
+   "module": "commands/gitea.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend-gitea.ts"
+   ]
+  },
+  "git_status": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_diff": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useFilePreview.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "git_log": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/commandRegistryParse.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "git_rev_count": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_repo_state": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_show": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/patchArgs.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "git_file_log": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_file_log_pickaxe": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_file_log_range": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_file_diff": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_blame": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "preview_merge": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "preview_rebase": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "preview_restack": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "preview_cherry_pick": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_branch_merged": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_config_identity": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_commit_template_path": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "read_commit_template": {
+   "module": "commands/read.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "workspace_read": {
+   "module": "commands/workspace.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "workspace_write": {
+   "module": "commands/workspace.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "path_exists": {
+   "module": "commands/workspace.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "workspace_status_all": {
+   "module": "commands/workspace.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "workspace_fetch_all": {
+   "module": "commands/workspace.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "workspace_pull_all": {
+   "module": "commands/workspace.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "workspace_wip_all": {
+   "module": "commands/workspace.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "workspace_prs_all": {
+   "module": "commands/workspace.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useLaunchpadNotifications.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "workspace_issues_all": {
+   "module": "commands/workspace.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "watch_repo_start": {
+   "module": "commands/watcher.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useRepoWatcher.ts",
+    "utils/backend-core.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "watch_repo_stop": {
+   "module": "commands/watcher.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "stack_status": {
+   "module": "commands/stack.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useStacks.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "stack_set_parent": {
+   "module": "commands/stack.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "stack_unset": {
+   "module": "commands/stack.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "stack_restack_plan": {
+   "module": "commands/stack.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_restack": {
+   "module": "commands/stack.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "stack_delete_merged_parent": {
+   "module": "commands/stack.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "software_rendering_get_state": {
+   "module": "commands/render_fallback.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "software_rendering_set_enabled": {
+   "module": "commands/render_fallback.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-ai.ts"
+   ]
+  },
+  "worktree_resolve_base": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_create": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_run_hook": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_url": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_guard": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useWorktreeRemoval.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_remove_prepare": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useWorktreeRemoval.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_remove": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useWorktreeRemoval.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_unlock": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_merge_back_check": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_merge_back_prepare": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_merge_back_squash": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "worktree_merge_back_fast_forward": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "snapshot_restore_as_worktree": {
+   "module": "commands/worktree.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "check_remote_reachable": {
+   "module": "commands/network.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_stage": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_unstage": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_stage_patch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_unstage_patch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_commit": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_amend_commit": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_split_commit": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "App.vue",
+    "utils/backend.ts",
+    "components/SplitCommitModal.vue"
+   ]
+  },
+  "git_push": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_push_branch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_fetch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-core.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "git_merge": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_pull": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_fast_forward_to_upstream": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_operation_action": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_interactive_rebase": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "composables/useInteractiveRebase.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "git_rebase_onto": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_add_to_gitignore": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_discard": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_branches": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "git_create_branch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_switch_branch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_delete_branch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_delete_remote_branch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_rename_branch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_stash": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_stash_pop": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_stash_list": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_stash_apply": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_stash_drop": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_stash_clear": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_stash_show": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_cherry_pick": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_checkout_commit": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_reset_to_commit": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_revert_commit": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_create_tag": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_list_tags": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_delete_tag": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_push_tags": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_unpushed_tags": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_delete_remote_tag": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_conflict_check": {
+   "module": "commands/ops.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_submodule_list": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_submodule_check_updates": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_submodule_init": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_submodule_update": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_submodule_update_one": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_submodule_add": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_submodule_branches": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_commit_submodule_changes": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_worktree_list": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_worktree_add": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_worktree_remove": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_worktree_prune": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_worktree_status_all": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_worktree_repair": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_clone": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-core.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "gh_fork": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_hook_list": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_hook_toggle": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_hook_create": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_hook_delete": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "agent_session_list": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "agent_session_launch": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_shortlog": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_author_line_stats": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_branch_top_authors": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_exec": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_autocomplete": {
+   "module": "commands/ops.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "set_git_config": {
+   "module": "commands/ops.rs",
+   "registry": "gap",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "get_conflicted_files": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "get_tree_conflicts": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "resolve_tree_conflict": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "reconstruct_conflict": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_remote_info": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "git_get_user": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "detect_monorepo": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts",
+    "components/ScopePicker.vue"
+   ]
+  },
+  "read_gitwandrc": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "shell_exec": {
+   "module": "commands/ops.rs",
+   "registry": "desktopOnly",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "gh_current_user": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "pr_files": {
+   "module": "commands/ops.rs",
+   "registry": null,
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "git_merge_base": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "open_url": {
+   "module": "commands/ops.rs",
+   "registry": "desktopOnly",
+   "callers": [
+    "utils/backend-pr.ts"
+   ]
+  },
+  "open_in_editor": {
+   "module": "commands/ops.rs",
+   "registry": "desktopOnly",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "reveal_in_file_manager": {
+   "module": "commands/ops.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  },
+  "get_command_log": {
+   "module": "commands/ops.rs",
+   "registry": null,
+   "callers": [
+    "composables/useCommandLog.ts",
+    "utils/backend.ts"
+   ]
+  },
+  "scan_secrets": {
+   "module": "commands/secrets.rs",
+   "registry": "route",
+   "callers": [
+    "utils/backend.ts"
+   ]
+  }
+ },
+ "components": {
+  "components/FileExplorerPanel.vue": {
+   "name": "FileExplorerPanel",
+   "loc": 1151,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/RemoteImagesNotice.vue": {
+   "name": "RemoteImagesNotice",
+   "loc": 76,
+   "eager": 4,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrCreateView.vue",
+    "components/PrDetailView.vue",
+    "components/CreateIssueModal.vue",
+    "components/DashboardView.vue"
+   ]
+  },
+  "components/SettingsMcpTab.vue": {
+   "name": "SettingsMcpTab",
+   "loc": 812,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "components/ScopePicker.vue": {
+   "name": "ScopePicker",
+   "loc": 280,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "components/AutomationsPanel.vue": {
+   "name": "AutomationsPanel",
+   "loc": 693,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "components/IssueSuggestList.vue": {
+   "name": "IssueSuggestList",
+   "loc": 96,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/LlmTracePanel.vue": {
+   "name": "LlmTracePanel",
+   "loc": 511,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/MergeEditor.vue"
+   ]
+  },
+  "components/StackBanner.vue": {
+   "name": "StackBanner",
+   "loc": 205,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/MergeEditor.vue": {
+   "name": "MergeEditor",
+   "loc": 2413,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/PrCreateView.vue": {
+   "name": "PrCreateView",
+   "loc": 1778,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/UndoToast.vue": {
+   "name": "UndoToast",
+   "loc": 138,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "components/WorkspacePanel.vue": {
+   "name": "WorkspacePanel",
+   "loc": 710,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "components/PrCommentThread.vue": {
+   "name": "PrCommentThread",
+   "loc": 508,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrInlineDiff.vue"
+   ]
+  },
+  "components/MergeSuccessModal.vue": {
+   "name": "MergeSuccessModal",
+   "loc": 179,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/CommitLog.vue": {
+   "name": "CommitLog",
+   "loc": 1490,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "components/PrIntelligencePanel.vue": {
+   "name": "PrIntelligencePanel",
+   "loc": 1183,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrDetailView.vue",
+    "components/PullRequestPanel.vue"
+   ]
+  },
+  "components/PrInlineDiff.vue": {
+   "name": "PrInlineDiff",
+   "loc": 1618,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/PrDetailView.vue",
+    "components/PullRequestPanel.vue"
+   ]
+  },
+  "components/BranchDirtySwitchModal.vue": {
+   "name": "BranchDirtySwitchModal",
+   "loc": 116,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/StackOnHost.vue": {
+   "name": "StackOnHost",
+   "loc": 33,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/FolderPicker.vue": {
+   "name": "FolderPicker",
+   "loc": 587,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/AgentIcon.vue": {
+   "name": "AgentIcon",
+   "loc": 44,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/TerminalPanel.vue"
+   ]
+  },
+  "components/AgentSessionsPanel.vue": {
+   "name": "AgentSessionsPanel",
+   "loc": 462,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/TrackedIgnoredNotice.vue": {
+   "name": "TrackedIgnoredNotice",
+   "loc": 229,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "components/CommitGraph.vue": {
+   "name": "CommitGraph",
+   "loc": 3389,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/MonorepoPanel.vue": {
+   "name": "MonorepoPanel",
+   "loc": 179,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "components/BaseModal.vue": {
+   "name": "BaseModal",
+   "loc": 471,
+   "eager": 40,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/SettingsMcpTab.vue",
+    "components/WorkspacePanel.vue",
+    "components/MergeSuccessModal.vue",
+    "components/BranchDirtySwitchModal.vue",
+    "components/AgentSessionsPanel.vue"
+   ]
+  },
+  "components/RebaseEditor.vue": {
+   "name": "RebaseEditor",
+   "loc": 1451,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/RebaseProgressBanner.vue": {
+   "name": "RebaseProgressBanner",
+   "loc": 384,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/PrDetailView.vue": {
+   "name": "PrDetailView",
+   "loc": 3598,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/PrReactions.vue": {
+   "name": "PrReactions",
+   "loc": 270,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrCommentThread.vue",
+    "components/PrDetailView.vue"
+   ]
+  },
+  "components/AiTaskCloseModal.vue": {
+   "name": "AiTaskCloseModal",
+   "loc": 154,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/CherryPickPanel.vue": {
+   "name": "CherryPickPanel",
+   "loc": 350,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "components/FileHistoryViewer.vue": {
+   "name": "FileHistoryViewer",
+   "loc": 1323,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/TerminalPanel.vue": {
+   "name": "TerminalPanel",
+   "loc": 1257,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/RepoSidebar.vue": {
+   "name": "RepoSidebar",
+   "loc": 3670,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "components/ReleaseNotesModal.vue": {
+   "name": "ReleaseNotesModal",
+   "loc": 343,
+   "eager": 0,
+   "lazy": 3,
+   "test": false,
+   "importers": []
+  },
+  "components/CombinedDiffBody.vue": {
+   "name": "CombinedDiffBody",
+   "loc": 333,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/CombinedDiffView.vue"
+   ]
+  },
+  "components/EditCommitOverlay.vue": {
+   "name": "EditCommitOverlay",
+   "loc": 197,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/LaunchpadView.vue": {
+   "name": "LaunchpadView",
+   "loc": 2100,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/AiSparkle.vue": {
+   "name": "AiSparkle",
+   "loc": 100,
+   "eager": 19,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "components/MergeEditor.vue",
+    "components/PrCreateView.vue",
+    "components/CommitLog.vue",
+    "components/PrInlineDiff.vue",
+    "components/CommitGraph.vue"
+   ]
+  },
+  "components/AiTaskNameModal.vue": {
+   "name": "AiTaskNameModal",
+   "loc": 131,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/RepoTabBar.vue": {
+   "name": "RepoTabBar",
+   "loc": 195,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "components/StackOnDialog.vue": {
+   "name": "StackOnDialog",
+   "loc": 100,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/StackOnHost.vue"
+   ]
+  },
+  "components/SubmodulePanel.vue": {
+   "name": "SubmodulePanel",
+   "loc": 487,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/MergeBackDialog.vue": {
+   "name": "MergeBackDialog",
+   "loc": 263,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/ResolveAutoSummaryModal.vue": {
+   "name": "ResolveAutoSummaryModal",
+   "loc": 133,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/MergeEditor.vue"
+   ]
+  },
+  "components/SettingsAccountsTab.vue": {
+   "name": "SettingsAccountsTab",
+   "loc": 746,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "components/StashManager.vue": {
+   "name": "StashManager",
+   "loc": 554,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/BranchNameField.vue": {
+   "name": "BranchNameField",
+   "loc": 131,
+   "eager": 0,
+   "lazy": 2,
+   "test": false,
+   "importers": []
+  },
+  "components/CreateIssueModal.vue": {
+   "name": "CreateIssueModal",
+   "loc": 624,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/CommitReviewDecisionModal.vue": {
+   "name": "CommitReviewDecisionModal",
+   "loc": 143,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/AppHeader.vue": {
+   "name": "AppHeader",
+   "loc": 1344,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "components/DashboardView.vue": {
+   "name": "DashboardView",
+   "loc": 2615,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/CombinedDiffView.vue": {
+   "name": "CombinedDiffView",
+   "loc": 71,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/AiContextButton.vue": {
+   "name": "AiContextButton",
+   "loc": 179,
+   "eager": 3,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrCreateView.vue",
+    "components/PrDetailView.vue",
+    "components/ReleaseNotesModal.vue"
+   ]
+  },
+  "components/FileList.vue": {
+   "name": "FileList",
+   "loc": 240,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "components/FolderDiffTree.vue": {
+   "name": "FolderDiffTree",
+   "loc": 514,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "components/UpdateModal.vue": {
+   "name": "UpdateModal",
+   "loc": 358,
+   "eager": 1,
+   "lazy": 1,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "components/CommandLogPanel.vue": {
+   "name": "CommandLogPanel",
+   "loc": 247,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/SettingsPanel.vue": {
+   "name": "SettingsPanel",
+   "loc": 5047,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/Avatar.vue": {
+   "name": "Avatar",
+   "loc": 112,
+   "eager": 12,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrCreateView.vue",
+    "components/PrCommentThread.vue",
+    "components/CommitLog.vue",
+    "components/CommitGraph.vue",
+    "components/PrDetailView.vue",
+    "components/FileHistoryViewer.vue"
+   ]
+  },
+  "components/TokenMergePanel.vue": {
+   "name": "TokenMergePanel",
+   "loc": 126,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/MergeEditor.vue"
+   ]
+  },
+  "components/TimeMachinePanel.vue": {
+   "name": "TimeMachinePanel",
+   "loc": 280,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/FileTreePane.vue": {
+   "name": "FileTreePane",
+   "loc": 452,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileExplorerPanel.vue"
+   ]
+  },
+  "components/WorktreeHookTrustModal.vue": {
+   "name": "WorktreeHookTrustModal",
+   "loc": 113,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/DiffViewer.vue": {
+   "name": "DiffViewer",
+   "loc": 1809,
+   "eager": 2,
+   "lazy": 1,
+   "test": true,
+   "importers": [
+    "components/FileExplorerPanel.vue",
+    "components/SplitCommitModal.vue"
+   ]
+  },
+  "components/HooksPanel.vue": {
+   "name": "HooksPanel",
+   "loc": 717,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "components/AdventCard.vue": {
+   "name": "AdventCard",
+   "loc": 91,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/CloneModal.vue": {
+   "name": "CloneModal",
+   "loc": 419,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/ConflictAlert.vue": {
+   "name": "ConflictAlert",
+   "loc": 116,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "components/MergeApplyReport.vue": {
+   "name": "MergeApplyReport",
+   "loc": 106,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/MergePreviewPanel.vue"
+   ]
+  },
+  "components/PrReviewModal.vue": {
+   "name": "PrReviewModal",
+   "loc": 321,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrDetailView.vue",
+    "components/PullRequestPanel.vue"
+   ]
+  },
+  "components/CommitDiffViewer.vue": {
+   "name": "CommitDiffViewer",
+   "loc": 1240,
+   "eager": 1,
+   "lazy": 1,
+   "test": true,
+   "importers": [
+    "components/CombinedDiffBody.vue"
+   ]
+  },
+  "components/ForkModal.vue": {
+   "name": "ForkModal",
+   "loc": 314,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/WorktreeRemoveDialog.vue": {
+   "name": "WorktreeRemoveDialog",
+   "loc": 237,
+   "eager": 1,
+   "lazy": 1,
+   "test": false,
+   "importers": [
+    "components/WorktreeManager.vue"
+   ]
+  },
+  "components/StackBranchMenu.vue": {
+   "name": "StackBranchMenu",
+   "loc": 117,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/WorktreeManager.vue": {
+   "name": "WorktreeManager",
+   "loc": 923,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/CommitReviewModal.vue": {
+   "name": "CommitReviewModal",
+   "loc": 275,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/ResolutionPreviewPanel.vue": {
+   "name": "ResolutionPreviewPanel",
+   "loc": 141,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/MergeEditor.vue"
+   ]
+  },
+  "components/ModalCloseButton.vue": {
+   "name": "ModalCloseButton",
+   "loc": 49,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/BaseModal.vue",
+    "components/HelpView.vue"
+   ]
+  },
+  "components/TagsPanel.vue": {
+   "name": "TagsPanel",
+   "loc": 600,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/AppDock.vue": {
+   "name": "AppDock",
+   "loc": 886,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "components/CodeEditor.vue": {
+   "name": "CodeEditor",
+   "loc": 127,
+   "eager": 0,
+   "lazy": 2,
+   "test": false,
+   "importers": []
+  },
+  "components/SplitCommitModal.vue": {
+   "name": "SplitCommitModal",
+   "loc": 666,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/EmptyState.vue": {
+   "name": "EmptyState",
+   "loc": 426,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "components/HelpView.vue": {
+   "name": "HelpView",
+   "loc": 586,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/PullRequestPanel.vue": {
+   "name": "PullRequestPanel",
+   "loc": 1403,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "components/PrListSidebar.vue": {
+   "name": "PrListSidebar",
+   "loc": 878,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "components/SecretsFindingsModal.vue": {
+   "name": "SecretsFindingsModal",
+   "loc": 154,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/RestackDialog.vue": {
+   "name": "RestackDialog",
+   "loc": 150,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "components/IssueDetailView.vue": {
+   "name": "IssueDetailView",
+   "loc": 363,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/AiTemplateMenu.vue": {
+   "name": "AiTemplateMenu",
+   "loc": 354,
+   "eager": 4,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrCreateView.vue",
+    "components/PrDetailView.vue",
+    "components/RepoSidebar.vue",
+    "components/ReleaseNotesModal.vue"
+   ]
+  },
+  "components/ImageDiffViewer.vue": {
+   "name": "ImageDiffViewer",
+   "loc": 748,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/StackBadge.vue": {
+   "name": "StackBadge",
+   "loc": 91,
+   "eager": 0,
+   "lazy": 2,
+   "test": true,
+   "importers": []
+  },
+  "components/MergePreviewPanel.vue": {
+   "name": "MergePreviewPanel",
+   "loc": 830,
+   "eager": 2,
+   "lazy": 1,
+   "test": false,
+   "importers": [
+    "components/MergeBackDialog.vue",
+    "components/RestackDialog.vue"
+   ]
+  },
+  "components/header/BranchRenameModal.vue": {
+   "name": "BranchRenameModal",
+   "loc": 154,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/header/BranchMenu.vue": {
+   "name": "BranchMenu",
+   "loc": 318,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/AppHeader.vue"
+   ]
+  },
+  "components/header/BranchDeleteModal.vue": {
+   "name": "BranchDeleteModal",
+   "loc": 159,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "components/header/HeaderLogo.vue": {
+   "name": "HeaderLogo",
+   "loc": 50,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/AppHeader.vue"
+   ]
+  },
+  "components/header/RepoTabStrip.vue": {
+   "name": "RepoTabStrip",
+   "loc": 1204,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/AppHeader.vue"
+   ]
+  },
+  "components/header/SearchPalette.vue": {
+   "name": "SearchPalette",
+   "loc": 437,
+   "eager": 1,
+   "lazy": 1,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "components/header/BranchRowActions.vue": {
+   "name": "BranchRowActions",
+   "loc": 130,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/header/BranchSelector.vue"
+   ]
+  },
+  "components/header/SearchTrigger.vue": {
+   "name": "SearchTrigger",
+   "loc": 111,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/AppHeader.vue"
+   ]
+  },
+  "components/header/BranchSelector.vue": {
+   "name": "BranchSelector",
+   "loc": 1706,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/AppHeader.vue"
+   ]
+  },
+  "components/header/SyncSplitButton.vue": {
+   "name": "SyncSplitButton",
+   "loc": 443,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/AppHeader.vue"
+   ]
+  }
+ },
+ "composables": {
+  "composables/useCommitMessage.ts": {
+   "name": "useCommitMessage",
+   "loc": 216,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/CommitGraph.vue",
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "composables/useStackActions.ts": {
+   "name": "useStackActions",
+   "loc": 149,
+   "eager": 7,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/StackBanner.vue",
+    "components/StackOnHost.vue",
+    "components/CommitGraph.vue",
+    "components/RepoSidebar.vue",
+    "components/StackBranchMenu.vue"
+   ]
+  },
+  "composables/useRepoTabs.ts": {
+   "name": "useRepoTabs",
+   "loc": 289,
+   "eager": 5,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/RepoTabBar.vue",
+    "components/AppHeader.vue",
+    "components/header/RepoTabStrip.vue",
+    "components/header/BranchSelector.vue"
+   ]
+  },
+  "composables/useFileHistoryCombine.ts": {
+   "name": "useFileHistoryCombine",
+   "loc": 80,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileHistoryViewer.vue"
+   ]
+  },
+  "composables/useRepoPoller.ts": {
+   "name": "useRepoPoller",
+   "loc": 234,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/usePrPanel.ts": {
+   "name": "usePrPanel",
+   "loc": 2081,
+   "eager": 7,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useReviewIntelligence.ts",
+    "components/PrCreateView.vue",
+    "components/CommitGraph.vue",
+    "components/PrDetailView.vue",
+    "components/PrListSidebar.vue"
+   ]
+  },
+  "composables/useCommitSearch.ts": {
+   "name": "useCommitSearch",
+   "loc": 217,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/CommitLog.vue",
+    "components/CommitGraph.vue"
+   ]
+  },
+  "composables/useCommitActions.ts": {
+   "name": "useCommitActions",
+   "loc": 463,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useMcpRegistry.ts": {
+   "name": "useMcpRegistry",
+   "loc": 343,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/SettingsMcpTab.vue"
+   ]
+  },
+  "composables/useWorkspaceScope.ts": {
+   "name": "useWorkspaceScope",
+   "loc": 138,
+   "eager": 5,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useGitRepo.ts",
+    "composables/useTreeScopeRoot.ts",
+    "components/ScopePicker.vue",
+    "components/CommitGraph.vue"
+   ]
+  },
+  "composables/useCustomAutomations.ts": {
+   "name": "useCustomAutomations",
+   "loc": 175,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/AutomationsPanel.vue",
+    "components/MergeEditor.vue"
+   ]
+  },
+  "composables/useForcePush.ts": {
+   "name": "useForcePush",
+   "loc": 151,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/aiTemplateDefaults.ts": {
+   "name": "aiTemplateDefaults",
+   "loc": 197,
+   "eager": 8,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/useCommitMessage.ts",
+    "composables/usePrDescription.ts",
+    "composables/useReleaseNotes.ts",
+    "composables/useAiPromptPresets.ts",
+    "composables/useAiTemplates.ts",
+    "composables/useSettings.ts"
+   ]
+  },
+  "composables/useLogs.ts": {
+   "name": "useLogs",
+   "loc": 126,
+   "eager": 6,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/useWorkspaceScope.ts",
+    "composables/useConnectivity.ts",
+    "utils/networkGuard.ts",
+    "components/FileExplorerPanel.vue",
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "composables/useMergePreview.ts": {
+   "name": "useMergePreview",
+   "loc": 434,
+   "eager": 6,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/useMergeRisk.ts",
+    "composables/useWorktreeMergeBack.ts",
+    "composables/useApplyFromPreview.ts",
+    "components/MergeBackDialog.vue",
+    "components/RestackDialog.vue",
+    "components/header/BranchSelector.vue"
+   ]
+  },
+  "composables/useAIProvider.ts": {
+   "name": "useAIProvider",
+   "loc": 798,
+   "eager": 38,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/useCommitMessage.ts",
+    "composables/useCommitSearch.ts",
+    "composables/useCommitActions.ts",
+    "composables/useMergeRisk.ts",
+    "composables/useStashMessage.ts"
+   ]
+  },
+  "composables/useMergeRisk.ts": {
+   "name": "useMergeRisk",
+   "loc": 158,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "composables/useSnapshots.ts": {
+   "name": "useSnapshots",
+   "loc": 103,
+   "eager": 4,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useTimeMachine.ts",
+    "composables/useGitWand.ts",
+    "components/TimeMachinePanel.vue"
+   ]
+  },
+  "composables/usePrReviewKeymap.ts": {
+   "name": "usePrReviewKeymap",
+   "loc": 70,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/usePrReviewNav.ts",
+    "components/PrDetailView.vue"
+   ]
+  },
+  "composables/useTrackedIgnored.ts": {
+   "name": "useTrackedIgnored",
+   "loc": 224,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/TrackedIgnoredNotice.vue"
+   ]
+  },
+  "composables/useTierStats.ts": {
+   "name": "useTierStats",
+   "loc": 132,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useGitWand.ts",
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "composables/usePrReviewQueue.ts": {
+   "name": "usePrReviewQueue",
+   "loc": 81,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useCommitReview.ts",
+    "composables/useReviewIntelligence.ts"
+   ]
+  },
+  "composables/useCommandLog.ts": {
+   "name": "useCommandLog",
+   "loc": 36,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/CommandLogPanel.vue"
+   ]
+  },
+  "composables/useLaunchpadScope.ts": {
+   "name": "useLaunchpadScope",
+   "loc": 73,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/LaunchpadView.vue"
+   ]
+  },
+  "composables/useAzureAuth.ts": {
+   "name": "useAzureAuth",
+   "loc": 31,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/SettingsAccountsTab.vue"
+   ]
+  },
+  "composables/useTimeMachine.ts": {
+   "name": "useTimeMachine",
+   "loc": 239,
+   "eager": 4,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/UndoToast.vue",
+    "components/AppHeader.vue",
+    "components/TimeMachinePanel.vue"
+   ]
+  },
+  "composables/useResolutionSelection.ts": {
+   "name": "useResolutionSelection",
+   "loc": 208,
+   "eager": 3,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useMergePreview.ts",
+    "components/MergeEditor.vue"
+   ]
+  },
+  "composables/useStashMessage.ts": {
+   "name": "useStashMessage",
+   "loc": 137,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "components/StashManager.vue"
+   ]
+  },
+  "composables/useTagSuggestion.ts": {
+   "name": "useTagSuggestion",
+   "loc": 135,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/useCommitActions.ts"
+   ]
+  },
+  "composables/useFileHistoryLists.ts": {
+   "name": "useFileHistoryLists",
+   "loc": 115,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileHistoryViewer.vue"
+   ]
+  },
+  "composables/useGitRepo.ts": {
+   "name": "useGitRepo",
+   "loc": 1968,
+   "eager": 8,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/useFileTree.ts",
+    "composables/useLazyRepoTree.ts",
+    "utils/discardPlan.ts",
+    "components/FileExplorerPanel.vue",
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "composables/useRemoteImages.ts": {
+   "name": "useRemoteImages",
+   "loc": 100,
+   "eager": 3,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/PrCommentThread.vue",
+    "components/PrDetailView.vue",
+    "components/DashboardView.vue"
+   ]
+  },
+  "composables/useGithubAuth.ts": {
+   "name": "useGithubAuth",
+   "loc": 33,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/SettingsAccountsTab.vue"
+   ]
+  },
+  "composables/useI18n.ts": {
+   "name": "useI18n",
+   "loc": 149,
+   "eager": 121,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useCommitMessage.ts",
+    "composables/useFileHistoryCombine.ts",
+    "composables/usePrPanel.ts",
+    "composables/useCommitSearch.ts",
+    "composables/useCommitActions.ts"
+   ]
+  },
+  "composables/useDiffEdit.ts": {
+   "name": "useDiffEdit",
+   "loc": 146,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/DiffViewer.vue"
+   ]
+  },
+  "composables/usePrSummary.ts": {
+   "name": "usePrSummary",
+   "loc": 132,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useCombinedSummary.ts",
+    "composables/useReviewIntelligence.ts"
+   ]
+  },
+  "composables/useResizeObserver.ts": {
+   "name": "useResizeObserver",
+   "loc": 35,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/MergeEditor.vue",
+    "components/CommitGraph.vue"
+   ]
+  },
+  "composables/prAiLocale.ts": {
+   "name": "prAiLocale",
+   "loc": 27,
+   "eager": 8,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useCommitMessage.ts",
+    "composables/useStashMessage.ts",
+    "composables/usePrSummary.ts",
+    "composables/useHunkExplanation.ts",
+    "composables/usePrDescription.ts",
+    "composables/useReleaseNotes.ts"
+   ]
+  },
+  "composables/useConnectivity.ts": {
+   "name": "useConnectivity",
+   "loc": 274,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "utils/networkGuard.ts"
+   ]
+  },
+  "composables/useTreeScopeRoot.ts": {
+   "name": "useTreeScopeRoot",
+   "loc": 60,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileExplorerPanel.vue"
+   ]
+  },
+  "composables/useAvatar.ts": {
+   "name": "useAvatar",
+   "loc": 107,
+   "eager": 6,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrCommentThread.vue",
+    "components/PrDetailView.vue",
+    "components/LaunchpadView.vue",
+    "components/Avatar.vue",
+    "components/CommitDiffViewer.vue",
+    "components/IssueDetailView.vue"
+   ]
+  },
+  "composables/branchPickerBridge.ts": {
+   "name": "branchPickerBridge",
+   "loc": 60,
+   "eager": 11,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "components/CommitLog.vue",
+    "components/RepoSidebar.vue",
+    "components/LaunchpadView.vue",
+    "components/AppHeader.vue",
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "composables/useInteractiveRebase.ts": {
+   "name": "useInteractiveRebase",
+   "loc": 405,
+   "eager": 3,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/useSquashSuggestion.ts",
+    "components/RebaseEditor.vue"
+   ]
+  },
+  "composables/useFolderHistory.ts": {
+   "name": "useFolderHistory",
+   "loc": 123,
+   "eager": 7,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/useRepoTabs.ts",
+    "composables/useGitWand.ts",
+    "composables/useAppMenu.ts",
+    "components/FolderPicker.vue",
+    "components/EmptyState.vue"
+   ]
+  },
+  "composables/useSyncAction.ts": {
+   "name": "useSyncAction",
+   "loc": 155,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/header/SyncSplitButton.vue"
+   ]
+  },
+  "composables/useAccounts.ts": {
+   "name": "useAccounts",
+   "loc": 259,
+   "eager": 4,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/forge/types.ts",
+    "composables/forge/useForge.ts",
+    "utils/backend.ts",
+    "components/SettingsAccountsTab.vue"
+   ]
+  },
+  "composables/useLaunchpadNotifications.ts": {
+   "name": "useLaunchpadNotifications",
+   "loc": 179,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useFileTree.ts": {
+   "name": "useFileTree",
+   "loc": 122,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "composables/useCollapseOnOverflow.ts": {
+   "name": "useCollapseOnOverflow",
+   "loc": 155,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/AppHeader.vue"
+   ]
+  },
+  "composables/useAiApiKey.ts": {
+   "name": "useAiApiKey",
+   "loc": 318,
+   "eager": 3,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useAIProvider.ts",
+    "composables/useSettings.ts",
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "composables/useBranchPrSearch.ts": {
+   "name": "useBranchPrSearch",
+   "loc": 105,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/CommitGraph.vue",
+    "components/header/BranchSelector.vue"
+   ]
+  },
+  "composables/usePrHunkCritique.ts": {
+   "name": "usePrHunkCritique",
+   "loc": 155,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrInlineDiff.vue"
+   ]
+  },
+  "composables/useWorktreeMergeBack.ts": {
+   "name": "useWorktreeMergeBack",
+   "loc": 316,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/MergeBackDialog.vue"
+   ]
+  },
+  "composables/useHunkExplanation.ts": {
+   "name": "useHunkExplanation",
+   "loc": 157,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/MergeEditor.vue"
+   ]
+  },
+  "composables/usePrDescription.ts": {
+   "name": "usePrDescription",
+   "loc": 458,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/PrCreateView.vue",
+    "components/PrDetailView.vue"
+   ]
+  },
+  "composables/useSquashSuggestion.ts": {
+   "name": "useSquashSuggestion",
+   "loc": 262,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/RebaseEditor.vue"
+   ]
+  },
+  "composables/useCreateIssue.ts": {
+   "name": "useCreateIssue",
+   "loc": 1150,
+   "eager": 6,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/MergeEditor.vue",
+    "components/PrInlineDiff.vue",
+    "components/CreateIssueModal.vue",
+    "components/CommitDiffViewer.vue",
+    "components/HelpView.vue"
+   ]
+  },
+  "composables/useLaunchpadPins.ts": {
+   "name": "useLaunchpadPins",
+   "loc": 125,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useLaunchpadIssues.ts",
+    "composables/useLaunchpadPrs.ts"
+   ]
+  },
+  "composables/useCodeMirror.ts": {
+   "name": "useCodeMirror",
+   "loc": 207,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileExplorerPanel.vue",
+    "components/CodeEditor.vue"
+   ]
+  },
+  "composables/useLaunchpadInbox.ts": {
+   "name": "useLaunchpadInbox",
+   "loc": 335,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/LaunchpadView.vue"
+   ]
+  },
+  "composables/useLaunchpadTeam.ts": {
+   "name": "useLaunchpadTeam",
+   "loc": 127,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/LaunchpadView.vue"
+   ]
+  },
+  "composables/useWorktreeRemoval.ts": {
+   "name": "useWorktreeRemoval",
+   "loc": 293,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/WorktreeRemoveDialog.vue"
+   ]
+  },
+  "composables/useGitWand.ts": {
+   "name": "useGitWand",
+   "loc": 1331,
+   "eager": 4,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/useApplyFromPreview.ts",
+    "components/MergeEditor.vue",
+    "components/FileList.vue"
+   ]
+  },
+  "composables/useRepoActionCards.ts": {
+   "name": "useRepoActionCards",
+   "loc": 66,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/LaunchpadView.vue"
+   ]
+  },
+  "composables/useConflictEditorSelection.ts": {
+   "name": "useConflictEditorSelection",
+   "loc": 59,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useLineRange.ts": {
+   "name": "useLineRange",
+   "loc": 105,
+   "eager": 4,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/PrInlineDiff.vue",
+    "components/CommitGraph.vue",
+    "components/FileHistoryViewer.vue",
+    "components/CommitDiffViewer.vue"
+   ]
+  },
+  "composables/commitReviewState.ts": {
+   "name": "commitReviewState",
+   "loc": 378,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useCommitReview.ts"
+   ]
+  },
+  "composables/useCredentials.ts": {
+   "name": "useCredentials",
+   "loc": 185,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/SettingsAccountsTab.vue"
+   ]
+  },
+  "composables/prAnnotations.ts": {
+   "name": "prAnnotations",
+   "loc": 125,
+   "eager": 4,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useReviewIntelligence.ts",
+    "components/PrIntelligencePanel.vue",
+    "components/PrInlineDiff.vue",
+    "components/DiffViewer.vue"
+   ]
+  },
+  "composables/useFilePreview.ts": {
+   "name": "useFilePreview",
+   "loc": 216,
+   "eager": 3,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileExplorerPanel.vue",
+    "components/FileHistoryViewer.vue",
+    "components/CombinedDiffBody.vue"
+   ]
+  },
+  "composables/useLaunchpadIssues.ts": {
+   "name": "useLaunchpadIssues",
+   "loc": 157,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useLaunchpadInbox.ts",
+    "components/LaunchpadView.vue"
+   ]
+  },
+  "composables/usePrFindingFilter.ts": {
+   "name": "usePrFindingFilter",
+   "loc": 43,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useCommitReview.ts",
+    "composables/useReviewIntelligence.ts"
+   ]
+  },
+  "composables/useReleaseNotes.ts": {
+   "name": "useReleaseNotes",
+   "loc": 239,
+   "eager": 1,
+   "lazy": 1,
+   "test": false,
+   "importers": [
+    "components/ReleaseNotesModal.vue"
+   ]
+  },
+  "composables/useAiTasks.ts": {
+   "name": "useAiTasks",
+   "loc": 118,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useAutoFastForward.ts": {
+   "name": "useAutoFastForward",
+   "loc": 345,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useBranchName.ts": {
+   "name": "useBranchName",
+   "loc": 173,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/useCommitActions.ts",
+    "components/header/BranchSelector.vue"
+   ]
+  },
+  "composables/useIdentity.ts": {
+   "name": "useIdentity",
+   "loc": 176,
+   "eager": 4,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/useCustomAutomations.ts",
+    "composables/useGitRepo.ts",
+    "components/RepoSidebar.vue",
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "composables/useHeaderAlign.ts": {
+   "name": "useHeaderAlign",
+   "loc": 64,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/usePrReviewNav.ts": {
+   "name": "usePrReviewNav",
+   "loc": 145,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/PrDetailView.vue"
+   ]
+  },
+  "composables/useLaunchpadPrs.ts": {
+   "name": "useLaunchpadPrs",
+   "loc": 95,
+   "eager": 5,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useLaunchpadNotifications.ts",
+    "composables/useLaunchpadInbox.ts",
+    "composables/useLaunchpadTeam.ts",
+    "components/LaunchpadView.vue"
+   ]
+  },
+  "composables/useVirtualRows.ts": {
+   "name": "useVirtualRows",
+   "loc": 78,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/PrInlineDiff.vue",
+    "components/FileTreePane.vue"
+   ]
+  },
+  "composables/useBlameGutter.ts": {
+   "name": "useBlameGutter",
+   "loc": 71,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileExplorerPanel.vue"
+   ]
+  },
+  "composables/useTheme.ts": {
+   "name": "useTheme",
+   "loc": 51,
+   "eager": 6,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/useCodeMirror.ts",
+    "components/CommitGraph.vue",
+    "components/AppHeader.vue",
+    "components/SettingsPanel.vue",
+    "components/DiffViewer.vue"
+   ]
+  },
+  "composables/fileTreeKeymap.ts": {
+   "name": "fileTreeKeymap",
+   "loc": 117,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileTreePane.vue"
+   ]
+  },
+  "composables/useFileCompare.ts": {
+   "name": "useFileCompare",
+   "loc": 104,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileHistoryViewer.vue"
+   ]
+  },
+  "composables/commitReviewKeymap.ts": {
+   "name": "commitReviewKeymap",
+   "loc": 50,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useCommitReviewNav.ts"
+   ]
+  },
+  "composables/useAbsorb.ts": {
+   "name": "useAbsorb",
+   "loc": 508,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "composables/useAiPromptPresets.ts": {
+   "name": "useAiPromptPresets",
+   "loc": 114,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "composables/useResolutionMemory.ts": {
+   "name": "useResolutionMemory",
+   "loc": 241,
+   "eager": 3,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/useGitWand.ts",
+    "components/MergeEditor.vue"
+   ]
+  },
+  "composables/useAdventCard.ts": {
+   "name": "useAdventCard",
+   "loc": 80,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/AdventCard.vue"
+   ]
+  },
+  "composables/useCombinedDiff.ts": {
+   "name": "useCombinedDiff",
+   "loc": 49,
+   "eager": 4,
+   "lazy": 1,
+   "test": true,
+   "importers": [
+    "composables/useFileHistoryCombine.ts",
+    "components/FileHistoryViewer.vue",
+    "components/CombinedDiffBody.vue",
+    "components/CombinedDiffView.vue"
+   ]
+  },
+  "composables/useCommitTemplates.ts": {
+   "name": "useCommitTemplates",
+   "loc": 98,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/RepoSidebar.vue",
+    "components/SettingsPanel.vue"
+   ]
+  },
+  "composables/usePrCache.ts": {
+   "name": "usePrCache",
+   "loc": 372,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/usePrPanel.ts",
+    "composables/useReviewIntelligence.ts"
+   ]
+  },
+  "composables/usePrPreReview.ts": {
+   "name": "usePrPreReview",
+   "loc": 297,
+   "eager": 13,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/usePrReviewQueue.ts",
+    "composables/prAnnotations.ts",
+    "composables/usePrFindingFilter.ts",
+    "composables/usePrReviewNav.ts",
+    "composables/usePrCache.ts",
+    "composables/useCommitReview.ts"
+   ]
+  },
+  "composables/useIssueSuggest.ts": {
+   "name": "useIssueSuggest",
+   "loc": 336,
+   "eager": 3,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/IssueSuggestList.vue",
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "composables/useScratchWorktree.ts": {
+   "name": "useScratchWorktree",
+   "loc": 97,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/header/BranchSelector.vue"
+   ]
+  },
+  "composables/useWorktreeCreation.ts": {
+   "name": "useWorktreeCreation",
+   "loc": 165,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/WorktreeManager.vue"
+   ]
+  },
+  "composables/useLazyRepoTree.ts": {
+   "name": "useLazyRepoTree",
+   "loc": 535,
+   "eager": 4,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useFilePreview.ts",
+    "composables/explorerTabView.ts",
+    "components/FileExplorerPanel.vue",
+    "components/FileTreePane.vue"
+   ]
+  },
+  "composables/issueLister.ts": {
+   "name": "issueLister",
+   "loc": 22,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "composables/useOsNotification.ts": {
+   "name": "useOsNotification",
+   "loc": 88,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useDeviceFlowAuth.ts": {
+   "name": "useDeviceFlowAuth",
+   "loc": 141,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/useAzureAuth.ts",
+    "composables/useGithubAuth.ts"
+   ]
+  },
+  "composables/explorerTabView.ts": {
+   "name": "explorerTabView",
+   "loc": 43,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/FileExplorerPanel.vue"
+   ]
+  },
+  "composables/useDraggableResizable.ts": {
+   "name": "useDraggableResizable",
+   "loc": 310,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/FileExplorerPanel.vue",
+    "components/TerminalPanel.vue"
+   ]
+  },
+  "composables/createdIssueToast.ts": {
+   "name": "createdIssueToast",
+   "loc": 69,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "composables/useStickyWidth.ts": {
+   "name": "useStickyWidth",
+   "loc": 49,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/CommitGraph.vue"
+   ]
+  },
+  "composables/useStacks.ts": {
+   "name": "useStacks",
+   "loc": 694,
+   "eager": 12,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useStackActions.ts",
+    "composables/useRestackHost.ts",
+    "composables/useStacksFlow.ts",
+    "components/StackBanner.vue",
+    "components/StackOnHost.vue"
+   ]
+  },
+  "composables/useFileExplorer.ts": {
+   "name": "useFileExplorer",
+   "loc": 199,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/FileExplorerPanel.vue"
+   ]
+  },
+  "composables/usePrAttachments.ts": {
+   "name": "usePrAttachments",
+   "loc": 326,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/PrCommentThread.vue",
+    "components/PrDetailView.vue"
+   ]
+  },
+  "composables/useAiExtraContext.ts": {
+   "name": "useAiExtraContext",
+   "loc": 40,
+   "eager": 4,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/PrCreateView.vue",
+    "components/PrDetailView.vue",
+    "components/ReleaseNotesModal.vue",
+    "components/AiContextButton.vue"
+   ]
+  },
+  "composables/useSplitCommit.ts": {
+   "name": "useSplitCommit",
+   "loc": 242,
+   "eager": 3,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "components/RebaseEditor.vue",
+    "components/SplitCommitModal.vue"
+   ]
+  },
+  "composables/useUndoStack.ts": {
+   "name": "useUndoStack",
+   "loc": 233,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/useTimeMachine.ts",
+    "components/AppHeader.vue"
+   ]
+  },
+  "composables/useCommitReview.ts": {
+   "name": "useCommitReview",
+   "loc": 812,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useRestackHost.ts": {
+   "name": "useRestackHost",
+   "loc": 100,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useRepoRemote.ts": {
+   "name": "useRepoRemote",
+   "loc": 88,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/RepoSidebar.vue"
+   ]
+  },
+  "composables/releaseNotesState.ts": {
+   "name": "releaseNotesState",
+   "loc": 40,
+   "eager": 4,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/useReleaseNotes.ts",
+    "components/AppHeader.vue",
+    "components/DashboardView.vue",
+    "components/TagsPanel.vue"
+   ]
+  },
+  "composables/useBranchUpdatePrompt.ts": {
+   "name": "useBranchUpdatePrompt",
+   "loc": 295,
+   "eager": 3,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useForcePush.ts",
+    "composables/useGitRepo.ts"
+   ]
+  },
+  "composables/useBlameContext.ts": {
+   "name": "useBlameContext",
+   "loc": 168,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/FileHistoryViewer.vue"
+   ]
+  },
+  "composables/useAiTemplates.ts": {
+   "name": "useAiTemplates",
+   "loc": 225,
+   "eager": 10,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/usePrDescription.ts",
+    "composables/useReleaseNotes.ts",
+    "composables/useAiPromptPresets.ts",
+    "components/PrCreateView.vue",
+    "components/PrDetailView.vue"
+   ]
+  },
+  "composables/useCommitReviewNav.ts": {
+   "name": "useCommitReviewNav",
+   "loc": 105,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/CommitReviewModal.vue"
+   ]
+  },
+  "composables/useWorktreeHookTrust.ts": {
+   "name": "useWorktreeHookTrust",
+   "loc": 122,
+   "eager": 4,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useWorktreeRemoval.ts",
+    "composables/useWorktreeCreation.ts",
+    "components/WorktreeManager.vue"
+   ]
+  },
+  "composables/useSecretsScanner.ts": {
+   "name": "useSecretsScanner",
+   "loc": 222,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useUndoToast.ts": {
+   "name": "useUndoToast",
+   "loc": 72,
+   "eager": 5,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useStackActions.ts",
+    "composables/useCommitActions.ts",
+    "composables/useGitRepo.ts",
+    "components/UndoToast.vue"
+   ]
+  },
+  "composables/useSettings.ts": {
+   "name": "useSettings",
+   "loc": 771,
+   "eager": 42,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/useCommitActions.ts",
+    "composables/aiTemplateDefaults.ts",
+    "composables/useLaunchpadScope.ts",
+    "composables/useGitRepo.ts",
+    "composables/useRemoteImages.ts"
+   ]
+  },
+  "composables/useAcceptedReports.ts": {
+   "name": "useAcceptedReports",
+   "loc": 52,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/MergeEditor.vue"
+   ]
+  },
+  "composables/usePinnedBranches.ts": {
+   "name": "usePinnedBranches",
+   "loc": 92,
+   "eager": 3,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "components/RepoSidebar.vue",
+    "components/header/BranchSelector.vue"
+   ]
+  },
+  "composables/useLaunchpadPoller.ts": {
+   "name": "useLaunchpadPoller",
+   "loc": 80,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useNetworkStatus.ts": {
+   "name": "useNetworkStatus",
+   "loc": 75,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useCommitSelection.ts": {
+   "name": "useCommitSelection",
+   "loc": 130,
+   "eager": 5,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useFileHistoryCombine.ts",
+    "utils/combinedError.ts",
+    "components/CommitGraph.vue",
+    "components/FileHistoryViewer.vue",
+    "components/CombinedDiffView.vue"
+   ]
+  },
+  "composables/useWatcherRefreshQueue.ts": {
+   "name": "useWatcherRefreshQueue",
+   "loc": 80,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useAiHunkQueue.ts": {
+   "name": "useAiHunkQueue",
+   "loc": 305,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/MergeEditor.vue"
+   ]
+  },
+  "composables/useSnapshotLabels.ts": {
+   "name": "useSnapshotLabels",
+   "loc": 110,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/TimeMachinePanel.vue"
+   ]
+  },
+  "composables/useIssuePanel.ts": {
+   "name": "useIssuePanel",
+   "loc": 116,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/IssueDetailView.vue"
+   ]
+  },
+  "composables/useTerminalSessions.ts": {
+   "name": "useTerminalSessions",
+   "loc": 357,
+   "eager": 3,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "components/TerminalPanel.vue",
+    "components/CommitReviewModal.vue"
+   ]
+  },
+  "composables/useRepoWatcher.ts": {
+   "name": "useRepoWatcher",
+   "loc": 140,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useLazyRepoTree.ts"
+   ]
+  },
+  "composables/useLaunchpadWip.ts": {
+   "name": "useLaunchpadWip",
+   "loc": 35,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/LaunchpadView.vue"
+   ]
+  },
+  "composables/useScheduler.ts": {
+   "name": "useScheduler",
+   "loc": 197,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useAppMenu.ts": {
+   "name": "useAppMenu",
+   "loc": 403,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue"
+   ]
+  },
+  "composables/useStacksFlow.ts": {
+   "name": "useStacksFlow",
+   "loc": 296,
+   "eager": 1,
+   "lazy": 1,
+   "test": false,
+   "importers": [
+    "composables/useStacks.ts"
+   ]
+  },
+  "composables/useCombinedSummary.ts": {
+   "name": "useCombinedSummary",
+   "loc": 106,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "components/CombinedDiffView.vue"
+   ]
+  },
+  "composables/useApplyFromPreview.ts": {
+   "name": "useApplyFromPreview",
+   "loc": 396,
+   "eager": 8,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useWorktreeMergeBack.ts",
+    "composables/useStacks.ts",
+    "composables/useRestackHost.ts",
+    "composables/useStacksFlow.ts",
+    "components/AppHeader.vue"
+   ]
+  },
+  "composables/useReviewIntelligence.ts": {
+   "name": "useReviewIntelligence",
+   "loc": 314,
+   "eager": 1,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/usePrPanel.ts"
+   ]
+  },
+  "composables/useConflictHistory.ts": {
+   "name": "useConflictHistory",
+   "loc": 105,
+   "eager": 2,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "composables/useGitWand.ts",
+    "components/MergeEditor.vue"
+   ]
+  },
+  "composables/useSafeHtml.ts": {
+   "name": "useSafeHtml",
+   "loc": 287,
+   "eager": 13,
+   "lazy": 0,
+   "test": true,
+   "importers": [
+    "App.vue",
+    "composables/useRemoteImages.ts",
+    "components/MergeEditor.vue",
+    "components/PrCreateView.vue",
+    "components/PrCommentThread.vue",
+    "components/PrInlineDiff.vue"
+   ]
+  },
+  "composables/useArchivedBranches.ts": {
+   "name": "useArchivedBranches",
+   "loc": 90,
+   "eager": 2,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "components/RepoSidebar.vue",
+    "components/header/BranchSelector.vue"
+   ]
+  },
+  "composables/forge/BitbucketProvider.ts": {
+   "name": "BitbucketProvider",
+   "loc": 295,
+   "eager": 0,
+   "lazy": 1,
+   "test": false,
+   "importers": []
+  },
+  "composables/forge/GiteaProvider.ts": {
+   "name": "GiteaProvider",
+   "loc": 238,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "composables/forge/CursorProvider.ts": {
+   "name": "CursorProvider",
+   "loc": 213,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "composables/forge/types.ts": {
+   "name": "types",
+   "loc": 338,
+   "eager": 18,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/usePrPanel.ts",
+    "composables/useAccounts.ts",
+    "composables/useBranchPrSearch.ts",
+    "composables/useCreateIssue.ts",
+    "composables/useLaunchpadIssues.ts"
+   ]
+  },
+  "composables/forge/AzureProvider.ts": {
+   "name": "AzureProvider",
+   "loc": 219,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "composables/forge/useForge.ts": {
+   "name": "useForge",
+   "loc": 158,
+   "eager": 8,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "App.vue",
+    "composables/usePrPanel.ts",
+    "composables/useLaunchpadIssues.ts",
+    "composables/useLaunchpadPrs.ts",
+    "composables/issueLister.ts",
+    "components/PrCreateView.vue"
+   ]
+  },
+  "composables/forge/GitLabProvider.ts": {
+   "name": "GitLabProvider",
+   "loc": 402,
+   "eager": 0,
+   "lazy": 1,
+   "test": true,
+   "importers": []
+  },
+  "composables/forge/index.ts": {
+   "name": "index",
+   "loc": 11,
+   "eager": 0,
+   "lazy": 0,
+   "test": false,
+   "importers": []
+  },
+  "composables/forge/GitHubProvider.ts": {
+   "name": "GitHubProvider",
+   "loc": 278,
+   "eager": 1,
+   "lazy": 0,
+   "test": false,
+   "importers": [
+    "composables/forge/useForge.ts"
+   ]
+  }
+ }
+}

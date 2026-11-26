@@ -18,6 +18,7 @@ const tauriInvoke = vi.fn();
 vi.mock("../backend-core", () => ({
   isTauri: () => true,
   tauriInvoke: (...args: unknown[]) => tauriInvoke(...args),
+  IPC_TIMEOUT: { DEFAULT: 30_000, NETWORK: 300_000, NONE: 0 },
 }));
 
 import { glListMrs, glMrPipelines, glCreateMr, glReviewerCandidates, glMrNotes } from "../backend-gitlab";

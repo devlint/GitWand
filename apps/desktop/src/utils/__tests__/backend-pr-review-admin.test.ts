@@ -13,6 +13,7 @@ vi.mock("../backend-core", () => ({
   devFetch: (...args: unknown[]) => devFetch(...args),
   tauriInvoke: (...args: unknown[]) => tauriInvoke(...args),
   DEV_SERVER: "http://localhost:3001",
+  IPC_TIMEOUT: { DEFAULT: 30_000, NETWORK: 300_000, NONE: 0 },
 }));
 
 function mockRes(opts: { ok: boolean; json?: unknown }) {
@@ -58,6 +59,6 @@ describe("ghDismissReview / ghRequestReviewers", () => {
     await ghDismissReview("/repo", 1, 7, "msg");
     expect(tauriInvoke).toHaveBeenCalledWith("gh_dismiss_review", {
       cwd: "/repo", number: 1, reviewId: 7, message: "msg",
-    });
+    }, 300_000);
   });
 });

@@ -3,6 +3,7 @@
 // Consumers should import directly from this file instead of backend.ts for these symbols.
 
 import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT } from "./backend-core";
+import { useI18n } from "../composables/useI18n";
 
 // ─── Claude Code CLI wrapper ─────────────────────────────
 //
@@ -530,13 +531,28 @@ export interface AiHttpResponse {
   body: string;
 }
 
-/** Perform one AI provider HTTP request through the backend. */
+/**
+ * When the backend may ask the user to allow an AI address (`AskMode` in
+ * commands/ai_http.rs): `"never"` for a load the user did not ask for (it
+ * fails with a message saying how to allow the address), `"always"` for an
+ * explicit Test connection or Refresh, `"unlessRefused"` (the default) for AI
+ * actions, which are not asked about again once the user refused.
+ */
+export type AiAskMode = "never" | "unlessRefused" | "always";
+
+/**
+ * Perform one AI provider HTTP request through the backend. A request to an
+ * address that is neither loopback nor a known provider makes the backend ask
+ * the user, in a native dialog in the app's language, before anything is sent
+ * (once per address, see `AiAskMode`).
+ */
 export async function aiHttpRequest(
   method: "GET" | "POST",
   url: string,
   auth: AiHttpAuth,
   body?: unknown,
   timeoutSecs?: number,
+  opts: { ask?: AiAskMode } = {},
 ): Promise<AiHttpResponse> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   if (isTauri()) {
@@ -546,6 +562,8 @@ export async function aiHttpRequest(
       body: payload,
       auth,
       timeoutSecs,
+      locale: useI18n().locale.value,
+      ask: opts.ask ?? "unlessRefused",
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/ai-http-request`, {

@@ -94,6 +94,7 @@ import {
   isFetchableEndpoint,
   isStaleEffort,
   listModelsForProvider,
+  probeOllama,
   providerEfforts,
 } from "../composables/useAIProvider";
 import { useLogs, type LogEntry } from "../composables/useLogs";
@@ -119,7 +120,7 @@ import {
   refreshSettings as refreshSharedSettings,
   settingsRevision,
 } from "../composables/useSettings";
-import { gitCommitTemplatePath, openExternalUrl, aiHttpRequest, telemetryGetState, telemetrySetEnabled, softwareRenderingGetState, softwareRenderingSetEnabled } from "../utils/backend";
+import { gitCommitTemplatePath, openExternalUrl, telemetryGetState, telemetrySetEnabled, softwareRenderingGetState, softwareRenderingSetEnabled } from "../utils/backend";
 import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings, normalizeEndpointSetting } from "../composables/useAiApiKey";
 export type { AIProvider };
 
@@ -762,24 +763,47 @@ function onAIProviderChange(val: AIProvider) {
 // Ollama detection
 const ollamaAvailable = ref(false);
 const ollamaModels = ref<string[]>([]);
+/** Why the last check failed, "" when there is nothing more to say than "not connected". */
+const ollamaError = ref("");
+/** A check of a just-edited URL is pending: nothing is known about it yet. */
+const ollamaChecking = ref(false);
 
-async function detectOllama() {
-  try {
-    const url = settings.value.aiOllamaUrl || "http://localhost:11434";
-    // Through the backend: the webview's CSP no longer reaches arbitrary hosts.
-    const res = await aiHttpRequest("GET", `${url.replace(/\/+$/, "")}/api/tags`, "none", undefined, 2);
-    if (res.status >= 200 && res.status < 300) {
-      const data = JSON.parse(res.body);
-      ollamaAvailable.value = true;
-      if (data.models && Array.isArray(data.models)) {
-        ollamaModels.value = data.models.map((m: any) => m.name || m.model).filter(Boolean);
-      }
-    }
-  } catch {
+// A slower probe for a previous URL must not overwrite a newer one.
+let ollamaRequest = 0;
+/** Probe Ollama (`probeOllama`); `explicit` is the Test button. */
+async function detectOllama(explicit = false) {
+  // An explicit Test replaces a background check still waiting to run: that
+  // one would fail at once ("not allowed yet") while the question is open,
+  // and its newer request number would drop the answer to the question.
+  if (explicit) clearTimeout(ollamaProbeTimer);
+  const request = ++ollamaRequest;
+  ollamaError.value = "";
+  const r = await probeOllama(settings.value.aiOllamaUrl, explicit);
+  if (request !== ollamaRequest) return;
+  ollamaChecking.value = false;
+  ollamaAvailable.value = r.available;
+  ollamaModels.value = r.models;
+  ollamaError.value = r.error;
+}
+// A result about the previous URL says nothing about the new one: a probe
+// still running for it lands nowhere (the counter), and the new URL is
+// checked once typing pauses, in the background (no question).
+let ollamaProbeTimer: ReturnType<typeof setTimeout> | undefined;
+watch(
+  () => settings.value.aiOllamaUrl,
+  () => {
+    ollamaRequest++;
+    // Nothing is known about the new URL yet: neither the previous server's
+    // models nor "not connected".
+    ollamaChecking.value = true;
     ollamaAvailable.value = false;
     ollamaModels.value = [];
-  }
-}
+    ollamaError.value = "";
+    clearTimeout(ollamaProbeTimer);
+    ollamaProbeTimer = setTimeout(() => detectOllama(), 500);
+  },
+);
+onUnmounted(() => clearTimeout(ollamaProbeTimer));
 
 // API key — stored in the OS keychain, never read back: the panel only sees
 // a masked hint. The input holds a draft that is saved on change.
@@ -1057,18 +1081,27 @@ const usesApiModelField = computed(() =>
 );
 
 // A slow fetch for a previous provider/key must not overwrite a newer one.
+// `explicit`: only Refresh may pop the backend's question for an address
+// not allowed yet; the loads on tab open, on a provider/key change and on
+// leaving the endpoint field fail instead, with a message pointing at Refresh.
 let modelsRequest = 0;
-async function loadModels(provider: AIProvider = settings.value.aiProvider) {
+async function loadModels(explicit = false, provider: AIProvider = settings.value.aiProvider) {
+  // Refresh replaces a background reload still waiting to run (see
+  // detectOllama).
+  if (explicit) clearTimeout(modelsReloadTimer);
   const request = ++modelsRequest;
   modelsError.value = "";
   modelsLoading.value = true;
   try {
-    const list = await listModelsForProvider(provider, settings.value);
+    const list = await listModelsForProvider(provider, settings.value, {
+      ask: explicit ? "always" : "never",
+    });
     if (request === modelsRequest) modelOptions.value = list;
   } catch (e) {
     if (request === modelsRequest) {
       modelOptions.value = fallbackModelsForProvider(provider);
-      modelsError.value = (e as Error).message;
+      // Tauri rejects with the command's error string, not an Error.
+      modelsError.value = e instanceof Error ? e.message : String(e);
     }
   } finally {
     if (request === modelsRequest) modelsLoading.value = false;
@@ -1093,7 +1126,11 @@ watch(
 );
 onUnmounted(() => clearTimeout(modelsReloadTimer));
 
-/** Endpoint field committed: refetch, but only for a complete URL. */
+/**
+ * Endpoint field committed: refetch, but only for a complete URL. Not
+ * explicit: every blur would otherwise ask again for an address the user
+ * refused; Refresh asks.
+ */
 function onEndpointBlur() {
   if (!aiDetectDone || !isFetchableEndpoint(settings.value.aiApiEndpoint)) return;
   clearTimeout(modelsReloadTimer);
@@ -2658,7 +2695,10 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                     t('settings.aiProviderAntigravityCliNotFound') : '' }}
                 </option>
                 <option value="openai-compat">{{ t('settings.aiProviderOpenAiCompat') }}</option>
-                <option value="ollama" :disabled="!ollamaAvailable">
+                <!-- Selectable when the check failed with a reason (a remote
+                     address not allowed yet): its Test button lives in the
+                     Ollama section, which needs the provider selected. -->
+                <option value="ollama" :disabled="!ollamaAvailable && !ollamaError && !ollamaChecking">
                   {{ t('settings.aiProviderOllama') }}{{ ollamaAvailable ? '' : t('settings.aiProviderOllamaNotFound')
                   }}
                 </option>
@@ -3122,7 +3162,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 <div class="sp-label-row">
                   <label class="sp-label" for="setting-ai-model">{{ t('settings.aiModelLabel') }}</label>
                   <span class="sp-label-aside">(<button class="sp-text-btn sp-label-aside__btn"
-                      :disabled="modelsLoading" @click="loadModels()">{{ t('settings.aiModelCliRefresh') }}</button>)</span>
+                      :disabled="modelsLoading" @click="loadModels(true)">{{ t('settings.aiModelCliRefresh') }}</button>)</span>
                 </div>
                 <select v-if="modelOptions.length > 0" id="setting-ai-model" class="sp-select"
                   :value="currentModel"
@@ -3163,7 +3203,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                     :value="settings.aiOllamaUrl"
                     @input="updateSetting('aiOllamaUrl', ($event.target as HTMLInputElement).value)"
                     placeholder="http://localhost:11434" />
-                  <button class="sp-key-toggle" @click="detectOllama" :title="t('settings.aiOllamaTest')">
+                  <button class="sp-key-toggle" @click="detectOllama(true)" :title="t('settings.aiOllamaTest')">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
                       stroke-width="1.3">
                       <path d="M14 8A6 6 0 112 8" />
@@ -3173,7 +3213,8 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 </div>
                 <span class="sp-hint" :class="{ 'sp-hint--ok': ollamaAvailable }">
                   {{ ollamaAvailable ? t('settings.aiOllamaConnected', ollamaModels.length) :
-                    t('settings.aiOllamaNotConnected') }}
+                    ollamaChecking ? t('settings.aiOllamaChecking') :
+                    ollamaError || t('settings.aiOllamaNotConnected') }}
                 </span>
               </div>
 

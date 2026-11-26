@@ -394,7 +394,12 @@ export async function ghCreatePr(
       merge_state_status: string;
       checks_rollup: string;
       autoMerge?: AutoMergeState;
-    }>("gh_create_pr", { cwd, title, body, base, baseRepo: baseRepo || null, draft, reviewers });
+    }>(
+      "gh_create_pr",
+      { cwd, title, body, base, baseRepo: baseRepo || null, draft, reviewers },
+      // gh pr create gets up to 120 s on the Rust side (GH_CREATE_TIMEOUT).
+      IPC_TIMEOUT.NETWORK,
+    );
     return {
       number: raw.number,
       title: raw.title,
@@ -564,7 +569,12 @@ export async function ghPrReady(cwd: string, number: number): Promise<void> {
 /** Edit a PR's title and/or description; an omitted field is left unchanged. */
 export async function ghPrEdit(cwd: string, number: number, edit: PrEdit): Promise<void> {
   if (!isTauri()) throw new Error("ghPrEdit requires Tauri");
-  return tauriInvoke<void>("gh_pr_edit", { cwd, number, title: edit.title ?? null, body: edit.body ?? null });
+  return tauriInvoke<void>(
+    "gh_pr_edit",
+    { cwd, number, title: edit.title ?? null, body: edit.body ?? null },
+    // A network write: up to GH_WRITE_TIMEOUT (60 s) on the Rust side.
+    IPC_TIMEOUT.NETWORK,
+  );
 }
 
 /** A PR found for a branch (stacked branches). Mirrors `BranchPr` in types.rs. */
@@ -623,7 +633,7 @@ export async function ghDismissReview(
   message: string = "",
 ): Promise<void> {
   if (isTauri()) {
-    await tauriInvoke("gh_dismiss_review", { cwd, number, reviewId, message });
+    await tauriInvoke("gh_dismiss_review", { cwd, number, reviewId, message }, IPC_TIMEOUT.NETWORK);
     return;
   }
   const resp = await devFetch(`${DEV_SERVER}/api/gh-dismiss-review`, {
@@ -1040,7 +1050,11 @@ export async function ghAddReaction(
   content: string,
 ): Promise<PrReaction> {
   if (isTauri()) {
-    return tauriInvoke<PrReaction>("gh_add_reaction", { cwd, number: prNumber, targetType, targetId, content });
+    return tauriInvoke<PrReaction>(
+      "gh_add_reaction",
+      { cwd, number: prNumber, targetType, targetId, content },
+      IPC_TIMEOUT.NETWORK,
+    );
   }
   throw new Error("Reactions not supported in dev mode");
 }
@@ -1054,7 +1068,11 @@ export async function ghDeleteReaction(
   reactionId: number,
 ): Promise<void> {
   if (isTauri()) {
-    return tauriInvoke<void>("gh_delete_reaction", { cwd, number: prNumber, targetType, targetId, reactionId });
+    return tauriInvoke<void>(
+      "gh_delete_reaction",
+      { cwd, number: prNumber, targetType, targetId, reactionId },
+      IPC_TIMEOUT.NETWORK,
+    );
   }
   throw new Error("Reactions not supported in dev mode");
 }

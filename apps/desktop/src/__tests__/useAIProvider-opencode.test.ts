@@ -82,6 +82,8 @@ import {
   useAIProvider,
   modelForProvider,
   effortForProvider,
+  isLoopbackUrl,
+  probeOllama,
   fetchAnthropicModels,
   listModelsForProvider,
   CLAUDE_CODE_MODELS,
@@ -356,5 +358,38 @@ describe("isStaleEffort", () => {
   it("never clears while the list is not loaded, or when nothing is saved", () => {
     expect(isStaleEffort("max", [], false)).toBe(false);
     expect(isStaleEffort("", ["low"], true)).toBe(false);
+  });
+});
+
+describe("isLoopbackUrl / probeOllama (AI endpoint gate)", () => {
+  const lastAiCall = () => aiHttpRequest.mock.calls[aiHttpRequest.mock.calls.length - 1];
+
+  it("treats only loopback names and IPv4 literals as loopback, like the backend", () => {
+    for (const u of ["http://localhost:11434", "http://127.0.0.1:11434", "http://127.2.3.4", "http://[::1]:11434"]) {
+      expect(isLoopbackUrl(u), u).toBe(true);
+    }
+    for (const u of ["http://127.gpu.lan:11434", "http://192.168.1.10:11434", "https://ollama.example.com", "not a url"]) {
+      expect(isLoopbackUrl(u), u).toBe(false);
+    }
+  });
+
+  it("asks only on Test, and explains a remote failure even on a background probe", async () => {
+    aiHttpRequest.mockRejectedValueOnce(new Error("http://10.0.0.1:11434 is not allowed yet"));
+    const bg = await probeOllama("http://10.0.0.1:11434", false);
+    expect(lastAiCall()?.[5]).toEqual({ ask: "never" });
+    expect(bg).toEqual({ available: false, models: [], error: "http://10.0.0.1:11434 is not allowed yet" });
+
+    aiHttpRequest.mockRejectedValueOnce(new Error("connection refused"));
+    const local = await probeOllama("", false);
+    expect(lastAiCall()?.[1]).toBe("http://localhost:11434/api/tags");
+    expect(local.error).toBe("");
+
+    aiHttpRequest.mockResolvedValueOnce({ status: 200, body: JSON.stringify({ models: [{ name: "qwen" }] }) });
+    const test = await probeOllama("http://10.0.0.1:11434/", true);
+    expect(lastAiCall()?.[5]).toEqual({ ask: "always" });
+    expect(test).toEqual({ available: true, models: ["qwen"], error: "" });
+
+    aiHttpRequest.mockResolvedValueOnce({ status: 404, body: "" });
+    expect((await probeOllama("http://localhost:11434", true)).error).toContain("404");
   });
 });
