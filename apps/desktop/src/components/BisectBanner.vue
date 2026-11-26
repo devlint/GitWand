@@ -29,7 +29,7 @@ const emit = defineEmits<{
 }>();
 
 const cwd = toRef(props, "cwd");
-const { status, busy, error, culprit, candidates, narrowing, pending, noResult, customTerms, info, mark, end } =
+const { status, busy, error, culprit, candidates, narrowing, pending, noResult, customTerms, info, mark, end, endFailed, endHere } =
   useBisectStatus({
     cwd: () => cwd.value,
     refreshKey: () => props.refreshKey,
@@ -113,6 +113,8 @@ const label = (verdict: "good" | "bad") => {
         @click="emit('open-commit', culprit)">{{ t('bisect.open') }}</button>
       <button class="btn btn--sm btn--ghost" :disabled="busy"
         :title="t('bisect.endHint', status?.start ?? '')" @click="end">{{ t('bisect.end') }}</button>
+      <button v-if="endFailed" class="btn btn--sm btn--secondary" :disabled="busy"
+        :title="t('bisect.endHereHint')" @click="endHere">{{ t('bisect.endHere') }}</button>
     </div>
   </div>
 </template>

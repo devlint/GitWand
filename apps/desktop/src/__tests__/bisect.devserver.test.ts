@@ -258,4 +258,36 @@ describe("dev-server bisect", { timeout: 30_000 }, () => {
     expect(() => devBisectStart(path, sha("c1"), sha("c8"), true)).toThrow(/^bisect:notInHead:/);
     expect(devBisectRepoState(path)).toBeNull();
   });
+  it("refuses a mark once the commit under test changed, takes it in any case", () => {
+    const { path, g, sha } = linear(8);
+    devBisectStart(path, sha("c8"), sha("c1"));
+    const shown = g("rev-parse", "HEAD");
+    expect(() => devBisectMark(path, "bad", sha("c1"))).toThrow(/^bisect:moved:/);
+    expect(devBisectMark(path, "skip", shown.toUpperCase()).skipped).toContain(shown);
+  });
+
+  it("ends a bisect in place when its start branch is gone", () => {
+    const { path, g, sha } = linear(8);
+    g("checkout", "-q", "-b", "tmp");
+    devBisectStart(path, sha("c8"), sha("c1"));
+    g("update-ref", "-d", "refs/heads/tmp");
+    expect(() => devBisectReset(path)).toThrow();
+    const head = g("rev-parse", "HEAD");
+    devBisectReset(path, true);
+    expect(devBisectRepoState(path)).toBeNull();
+    expect(g("rev-parse", "HEAD")).toBe(head);
+  });
+
+  it("reads a good mark that descends from bad as no result", () => {
+    const { path, g, sha } = linear(4);
+    g("bisect", "start");
+    g("bisect", "bad", sha("c1"));
+    try {
+      g("bisect", "good", sha("c3"));
+    } catch {
+      // git refuses, and keeps the bisect
+    }
+    const st = devBisectStatus(path);
+    expect([st.candidates, st.remaining, st.steps]).toEqual([[], 0, 0]);
+  });
 });

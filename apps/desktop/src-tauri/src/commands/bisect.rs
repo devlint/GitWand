@@ -193,6 +193,19 @@ fn terms(cwd: &str) -> Result<(String, String), String> {
     Ok(("bad".to_string(), "good".to_string()))
 }
 
+/// The commit under test: HEAD, or BISECT_HEAD for `--no-checkout`.
+fn under_test(cwd: &str, git_dir: &std::path::Path) -> Option<String> {
+    let head_ref = if git_dir.join("BISECT_HEAD").exists() {
+        "BISECT_HEAD"
+    } else {
+        "HEAD"
+    };
+    run(cwd, &["rev-parse", "--verify", "-q", head_ref])
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
 fn read_status(cwd: &str) -> Result<BisectStatus, String> {
     let git_dir = resolve_git_dir(cwd)?;
     let (bad_term, good_term) = terms(cwd)?;
@@ -218,16 +231,7 @@ fn read_status(cwd: &str) -> Result<BisectStatus, String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    // `--no-checkout` bisects move BISECT_HEAD, not HEAD.
-    let head_ref = if git_dir.join("BISECT_HEAD").exists() {
-        "BISECT_HEAD"
-    } else {
-        "HEAD"
-    };
-    let current = run(cwd, &["rev-parse", "--verify", "-q", head_ref])
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let current = under_test(cwd, &git_dir);
 
     let mut bad = None;
     let mut good = Vec::new();
@@ -260,11 +264,16 @@ fn read_status(cwd: &str) -> Result<BisectStatus, String> {
     let mut candidates = Vec::new();
     if let (Some(bad), false) = (&bad, good.is_empty()) {
         let scope = scope(&git_dir);
-        let vars = rev_list(cwd, &scope, &["--bisect-vars"], bad, &good)?;
-        steps = vars
-            .lines()
-            .find_map(|l| l.strip_prefix("bisect_steps="))
-            .and_then(|v| v.trim().trim_matches('\'').parse().ok());
+        // `--bisect-vars` on an empty range (a good mark that descends from
+        // `bad`, say) exits 1 with no output: no step left, not an error.
+        steps = match rev_list(cwd, &scope, &["--bisect-vars"], bad, &good) {
+            Ok(vars) => vars
+                .lines()
+                .find_map(|l| l.strip_prefix("bisect_steps="))
+                .and_then(|v| v.trim().trim_matches('\'').parse().ok()),
+            Err(_) if rev_list(cwd, &scope, &["--count"], bad, &good)?.trim() == "0" => Some(0),
+            Err(e) => return Err(e),
+        };
 
         // The commits git can still check out: the range, walked as git
         // walks it, minus `bad` and the skipped commits. `bisect_nr` ignores
@@ -369,6 +378,8 @@ pub(crate) async fn git_bisect_start(
     if !is_full_hash(&bad) || !is_full_hash(&good) {
         return Err("bisect:notHashes: A bisect starts from two full commit hashes.".to_string());
     }
+    // git prints object ids in lowercase: compare them as such.
+    let (bad, good) = (bad.to_ascii_lowercase(), good.to_ascii_lowercase());
     let _repo = repo_lock::write(&cwd);
     if other_operation(&cwd)? || is_bisecting(&cwd)? {
         return Err(
@@ -414,8 +425,14 @@ pub(crate) async fn git_bisect_start(
 /// Mark the commit under test: `good`, `bad` (mapped to the bisect's own
 /// terms) or `skip`; or `next`, which checks out the next commit to test
 /// after a mark git recorded but could not move on from (`pending_checkout`).
+/// `expected` is the commit the user answered for (the banner's): refused
+/// when the commit under test is another one by now (a terminal moved it).
 #[tauri::command]
-pub(crate) async fn git_bisect_mark(cwd: String, verdict: String) -> Result<BisectStatus, String> {
+pub(crate) async fn git_bisect_mark(
+    cwd: String,
+    verdict: String,
+    expected: Option<String>,
+) -> Result<BisectStatus, String> {
     let _repo = repo_lock::write(&cwd);
     let (bad_term, good_term) = terms(&cwd)?;
     let term = match verdict.as_str() {
@@ -426,6 +443,14 @@ pub(crate) async fn git_bisect_mark(cwd: String, verdict: String) -> Result<Bise
     };
     if !is_bisecting(&cwd)? {
         return Err("bisect:notBisecting: No bisect is in progress.".to_string());
+    }
+    if let Some(expected) = expected.filter(|_| verdict != "next") {
+        let current = under_test(&cwd, &resolve_git_dir(&cwd)?);
+        if current.as_deref() != Some(expected.to_ascii_lowercase().as_str()) {
+            return Err(
+                "bisect:moved: The commit under test has changed since it was shown.".to_string(),
+            );
+        }
     }
     if let Err(err) = run_ok(&cwd, &["bisect", &term]) {
         // git exits non-zero when only skipped commits are left: the mark is
@@ -443,11 +468,17 @@ pub(crate) async fn git_bisect_mark(cwd: String, verdict: String) -> Result<Bise
     read_status(&cwd)
 }
 
-/// End the bisect and check out what it started from.
+/// End the bisect and check out what it started from; with `stay`, end it
+/// on the current commit (`git bisect reset HEAD`), the way out when the
+/// start branch is gone or cannot be checked out.
 #[tauri::command]
-pub(crate) async fn git_bisect_reset(cwd: String) -> Result<(), String> {
+pub(crate) async fn git_bisect_reset(cwd: String, stay: Option<bool>) -> Result<(), String> {
     let _repo = repo_lock::write(&cwd);
-    run_ok(&cwd, &["bisect", "reset"])?;
+    if stay == Some(true) {
+        run_ok(&cwd, &["bisect", "reset", "HEAD"])?;
+    } else {
+        run_ok(&cwd, &["bisect", "reset"])?;
+    }
     if is_bisecting(&cwd)? {
         return Err("bisect:resetFailed: git could not end the bisect.".to_string());
     }
@@ -586,7 +617,7 @@ mod tests {
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
         let st = block(git_bisect_start(repo.cwd(), c8, c1, None)).expect("start");
         let before = st.remaining.unwrap();
-        let st = block(git_bisect_mark(repo.cwd(), "skip".to_string())).expect("skip");
+        let st = block(git_bisect_mark(repo.cwd(), "skip".to_string(), None)).expect("skip");
         assert_eq!(st.remaining, Some(before - 1));
     }
 
@@ -648,14 +679,14 @@ mod tests {
         let tested = repo.head();
         // A tracked edit every other commit's a.txt would overwrite.
         repo.write("a.txt", "local edit\n");
-        let err = block(git_bisect_mark(repo.cwd(), "good".to_string())).unwrap_err();
+        let err = block(git_bisect_mark(repo.cwd(), "good".to_string(), None)).unwrap_err();
         assert!(!err.is_empty());
         let st = status(&repo);
         assert!(st.good.contains(&tested), "the mark was recorded");
         assert_eq!(repo.head(), tested);
         assert!(st.pending_checkout, "HEAD is a commit already marked");
         repo.git(&["checkout", "--", "a.txt"]);
-        let st = block(git_bisect_mark(repo.cwd(), "next".to_string())).expect("next");
+        let st = block(git_bisect_mark(repo.cwd(), "next".to_string(), None)).expect("next");
         assert_ne!(st.current.as_deref(), Some(tested.as_str()));
         assert!(!st.pending_checkout);
     }
@@ -690,7 +721,7 @@ mod tests {
                 .unwrap()
                 .success();
             let verdict = if is_bad { "bad" } else { "good" };
-            st = block(git_bisect_mark(repo.cwd(), verdict.to_string())).expect("mark");
+            st = block(git_bisect_mark(repo.cwd(), verdict.to_string(), None)).expect("mark");
         }
         assert_eq!(st.candidates, vec![c5]);
     }
@@ -709,7 +740,7 @@ mod tests {
             if !st.candidates.is_empty() {
                 break;
             }
-            st = block(git_bisect_mark(repo.cwd(), "skip".to_string())).expect("skip");
+            st = block(git_bisect_mark(repo.cwd(), "skip".to_string(), None)).expect("skip");
         }
         assert!(st.candidates.len() > 1, "{:?}", st.candidates);
         for c in [&c2, &c3, &c4] {
@@ -727,13 +758,13 @@ mod tests {
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
         block(git_bisect_start(repo.cwd(), c8.clone(), c1, None)).expect("start");
         let skipped = repo.head();
-        let mut st = block(git_bisect_mark(repo.cwd(), "skip".to_string())).expect("skip");
+        let mut st = block(git_bisect_mark(repo.cwd(), "skip".to_string(), None)).expect("skip");
         let mut left_out = false;
         for _ in 0..3 {
             if !st.candidates.is_empty() {
                 break;
             }
-            st = block(git_bisect_mark(repo.cwd(), "good".to_string())).expect("good");
+            st = block(git_bisect_mark(repo.cwd(), "good".to_string(), None)).expect("good");
             let mut args = vec!["rev-list", c8.as_str(), "--not"];
             args.extend(st.good.iter().map(String::as_str));
             let range = repo.git(&args);
@@ -774,7 +805,7 @@ mod tests {
             if !st.candidates.is_empty() {
                 break;
             }
-            st = block(git_bisect_mark(repo.cwd(), "bad".to_string())).expect("bad");
+            st = block(git_bisect_mark(repo.cwd(), "bad".to_string(), None)).expect("bad");
         }
         assert_eq!(st.candidates, vec![c6]);
         assert_eq!(st.remaining, Some(0));
@@ -797,7 +828,7 @@ mod tests {
         let (c1, c6, c8) = (repo.sha("c1"), repo.sha("c6"), repo.sha("c8"));
         repo.git(&["bisect", "start", &c8, &c1, "--", "b.txt"]);
         assert_eq!(repo.head(), c6);
-        assert!(block(git_bisect_mark(repo.cwd(), "good".to_string())).is_err());
+        assert!(block(git_bisect_mark(repo.cwd(), "good".to_string(), None)).is_err());
         let st = status(&repo);
         assert!(st.candidates.is_empty(), "{:?}", st.candidates);
         assert_eq!(st.remaining, Some(0));
@@ -824,7 +855,7 @@ mod tests {
         let st = status(&repo);
         // The side branch is not walked: only c2 is left to test.
         assert_eq!(st.remaining, Some(1));
-        let st = block(git_bisect_mark(repo.cwd(), "bad".to_string())).expect("bad");
+        let st = block(git_bisect_mark(repo.cwd(), "bad".to_string(), None)).expect("bad");
         assert_eq!(st.candidates, vec![c2]);
     }
 
@@ -889,7 +920,7 @@ mod tests {
             &c1,
         ]);
         let head = repo.head();
-        block(git_bisect_mark(repo.cwd(), "good".to_string())).expect("mark");
+        block(git_bisect_mark(repo.cwd(), "good".to_string(), None)).expect("mark");
         assert_eq!(
             repo.git(&["rev-parse", &format!("refs/bisect/fixed-{head}")]),
             head
@@ -973,7 +1004,7 @@ mod tests {
         let (c1, c4) = (repo.sha("c1"), repo.sha("c4"));
         block(git_bisect_start(repo.cwd(), c4, c1, None)).expect("start");
         let head = repo.head();
-        assert!(block(git_bisect_mark(repo.cwd(), "maybe".to_string())).is_err());
+        assert!(block(git_bisect_mark(repo.cwd(), "maybe".to_string(), None)).is_err());
         assert_eq!(repo.head(), head);
     }
 
@@ -982,8 +1013,8 @@ mod tests {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
         block(git_bisect_start(repo.cwd(), c8, c1, None)).expect("start");
-        block(git_bisect_mark(repo.cwd(), "good".to_string())).expect("mark");
-        block(git_bisect_reset(repo.cwd())).expect("reset");
+        block(git_bisect_mark(repo.cwd(), "good".to_string(), None)).expect("mark");
+        block(git_bisect_reset(repo.cwd(), None)).expect("reset");
         assert!(!repo.bisecting());
         assert_eq!(repo.git(&["symbolic-ref", "--short", "HEAD"]), "main");
     }
@@ -995,7 +1026,60 @@ mod tests {
         repo.git(&["checkout", "-q", "-b", "tmp"]);
         block(git_bisect_start(repo.cwd(), c8, c1, None)).expect("start");
         repo.git(&["update-ref", "-d", "refs/heads/tmp"]);
-        assert!(block(git_bisect_reset(repo.cwd())).is_err());
+        assert!(block(git_bisect_reset(repo.cwd(), None)).is_err());
         assert!(repo.bisecting());
+        // The way out: end it on the current commit.
+        let head = repo.head();
+        block(git_bisect_reset(repo.cwd(), Some(true))).expect("reset in place");
+        assert!(!repo.bisecting());
+        assert_eq!(repo.head(), head);
+    }
+
+    #[test]
+    fn status_of_a_good_mark_that_descends_from_bad_is_no_result() {
+        let repo = TempRepo::linear(4);
+        let (c1, c3) = (repo.sha("c1"), repo.sha("c3"));
+        repo.git(&["bisect", "start"]);
+        repo.git(&["bisect", "bad", &c1]);
+        // git refuses, but keeps the bisect and both refs.
+        let _ = Command::new(git_binary())
+            .args(["bisect", "good", &c3])
+            .current_dir(&repo.path)
+            .output();
+        let st = status(&repo);
+        assert!(st.candidates.is_empty());
+        assert_eq!(st.remaining, Some(0));
+        assert_eq!(st.steps, Some(0));
+    }
+
+    #[test]
+    fn mark_refuses_once_the_commit_under_test_changed() {
+        let repo = TempRepo::linear(8);
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        block(git_bisect_start(repo.cwd(), c8, c1.clone(), None)).expect("start");
+        let shown = repo.head();
+        let err = block(git_bisect_mark(repo.cwd(), "bad".to_string(), Some(c1))).unwrap_err();
+        assert!(err.starts_with("bisect:moved:"), "{err}");
+        let st = block(git_bisect_mark(
+            repo.cwd(),
+            "skip".to_string(),
+            Some(shown.to_ascii_uppercase()),
+        ))
+        .expect("skip the commit shown");
+        assert!(st.skipped.contains(&shown));
+    }
+
+    #[test]
+    fn start_from_here_takes_an_uppercase_head() {
+        let repo = TempRepo::linear(8);
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        let st = block(git_bisect_start(
+            repo.cwd(),
+            c8.to_ascii_uppercase(),
+            c1,
+            Some(true),
+        ))
+        .expect("start");
+        assert_eq!(st.bad.as_deref(), Some(c8.as_str()));
     }
 }

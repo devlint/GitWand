@@ -5576,7 +5576,7 @@ async function handleRequest(req, res) {
       const cwd = body.cwd;
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       try {
-        return jsonResponse(req, res, devBisectMark(resolve(cwd), body.verdict));
+        return jsonResponse(req, res, devBisectMark(resolve(cwd), body.verdict, body.expected ?? null));
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 400);
       }
@@ -5586,7 +5586,7 @@ async function handleRequest(req, res) {
       const cwd = body.cwd;
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       try {
-        return jsonResponse(req, res, (devBisectReset(resolve(cwd)), null));
+        return jsonResponse(req, res, (devBisectReset(resolve(cwd), body.stay === true), null));
       } catch (err) {
         return jsonResponse(req, res, { error: err.message }, 400);
       }

@@ -120,6 +120,11 @@ export function bisectMarks(log) {
   return log.split("\n").filter((l) => l.startsWith("git bisect ") && !l.startsWith("git bisect start")).length;
 }
 
+/** The commit under test: HEAD, or BISECT_HEAD for `--no-checkout`. */
+function underTest(cwd, dir) {
+  return headHash(cwd, existsSync(join(dir, "BISECT_HEAD")) ? "BISECT_HEAD" : "HEAD");
+}
+
 export function devBisectStatus(cwd) {
   const dir = gitDir(cwd);
   const [badTerm, goodTerm] = terms(dir);
@@ -164,13 +169,20 @@ export function devBisectStatus(cwd) {
   let candidates = [];
   if (bad && good.length > 0) {
     const sc = scope(dir);
-    const vars = revList(cwd, sc, ["--bisect-vars"], bad, good);
+    // As in the Rust command: `--bisect-vars` on an empty range exits 1 with
+    // no output, which is no step left, not an error.
+    let vars = null;
+    try {
+      vars = revList(cwd, sc, ["--bisect-vars"], bad, good);
+    } catch (err) {
+      if (revList(cwd, sc, ["--count"], bad, good).trim() !== "0") throw err;
+    }
     const v = (k) => {
       const line = vars.split("\n").find((l) => l.startsWith(`${k}=`));
       const n = line ? Number(line.slice(k.length + 1).trim().replace(/'/g, "")) : NaN;
       return Number.isFinite(n) ? n : null;
     };
-    steps = v("bisect_steps");
+    steps = vars === null ? 0 : v("bisect_steps");
     // As in the Rust command: the range as git walks it, minus `bad` and the
     // skipped commits still inside it; listed only when there are skips.
     // `bad` is in it exactly when it tops a topo-ordered walk.
@@ -191,7 +203,7 @@ export function devBisectStatus(cwd) {
     if (untested === 0 && (badInRange || skippedInRange.length > 0)) candidates = [bad, ...skippedInRange];
   }
   // `--no-checkout` bisects move BISECT_HEAD, not HEAD.
-  const current = headHash(cwd, existsSync(join(dir, "BISECT_HEAD")) ? "BISECT_HEAD" : "HEAD");
+  const current = underTest(cwd, dir);
   const marked = (h) => h === bad || good.includes(h) || skipped.includes(h);
   const pendingCheckout = candidates.length === 0 && remaining !== null && remaining > 0 && !!current && marked(current);
   const toDescribe = [...(current ? [current] : []), ...candidates.filter((c) => c !== current)];
@@ -238,6 +250,8 @@ function otherOperation(d) {
 /** As in the Rust command; `keepOrder` ("Bisect from here") never swaps the ends. */
 export function devBisectStart(cwd, bad, good, keepOrder = false) {
   if (!isHash(bad) || !isHash(good)) throw new Error("bisect:notHashes: A bisect starts from two full commit hashes.");
+  // git prints object ids in lowercase: compare them as such.
+  [bad, good] = [bad.toLowerCase(), good.toLowerCase()];
   const dir = gitDir(cwd);
   if (otherOperation(dir) || isBisecting(dir)) {
     throw new Error("bisect:busy: Another operation is in progress; finish it before starting a bisect.");
@@ -270,12 +284,16 @@ export function devBisectStart(cwd, bad, good, keepOrder = false) {
   return devBisectStatus(cwd);
 }
 
-export function devBisectMark(cwd, verdict) {
+/** As in the Rust command; `expected` is the commit the user answered for. */
+export function devBisectMark(cwd, verdict, expected = null) {
   const dir = gitDir(cwd);
   const [badTerm, goodTerm] = terms(dir);
   const term = verdict === "good" ? goodTerm : verdict === "bad" ? badTerm : verdict === "skip" || verdict === "next" ? verdict : null;
   if (!term) throw new Error(`bisect:verdict: Unknown bisect verdict: ${verdict}`);
   if (!isBisecting(dir)) throw new Error("bisect:notBisecting: No bisect is in progress.");
+  if (expected && verdict !== "next" && underTest(cwd, dir) !== String(expected).toLowerCase()) {
+    throw new Error("bisect:moved: The commit under test has changed since it was shown.");
+  }
   try {
     runOk(cwd, ["bisect", term]);
   } catch (err) {
@@ -293,7 +311,8 @@ export function devBisectMark(cwd, verdict) {
   return devBisectStatus(cwd);
 }
 
-export function devBisectReset(cwd) {
-  runOk(cwd, ["bisect", "reset"]);
+/** As in the Rust command; `stay` ends it on the current commit. */
+export function devBisectReset(cwd, stay = false) {
+  runOk(cwd, stay ? ["bisect", "reset", "HEAD"] : ["bisect", "reset"]);
   if (isBisecting(gitDir(cwd))) throw new Error("bisect:resetFailed: git could not end the bisect.");
 }

@@ -37,7 +37,9 @@ export function useBisectStatus(opts: {
   /** Where the bisect stood when `actionError` was set; null while setting it. */
   let errorAt: string | null = null;
   const position = (st: BisectStatus) =>
-    `${st.current}:${st.pendingCheckout}:${st.candidates.length}:${st.good.length}:${st.skipped.length}`;
+    [st.current, st.pendingCheckout, st.bad, ...st.good, "|", ...st.skipped, "|", ...st.candidates].join(":");
+  /** End bisect failed (start branch gone, say): offer to end it here instead. */
+  const endFailed = ref(false);
   const error = computed(() => actionError.value || loadError.value);
 
   // Only the latest load applies: an older one (a previous repo, an earlier
@@ -91,6 +93,7 @@ export function useBisectStatus(opts: {
       loadError.value = "";
       actionError.value = "";
       errorAt = null;
+      endFailed.value = false;
     },
   );
   watch(() => [opts.cwd(), opts.refreshKey()], reload, { immediate: true });
@@ -122,6 +125,7 @@ export function useBisectStatus(opts: {
     busy.value = true;
     actionError.value = "";
     errorAt = null;
+    endFailed.value = false;
     // Another repo opened meanwhile (the banner stays mounted): its result
     // is not this repo's. A load started meanwhile is at least as fresh.
     const cwd = opts.cwd();
@@ -146,8 +150,16 @@ export function useBisectStatus(opts: {
     }
   }
 
-  const mark = (verdict: BisectVerdict) => act(() => gitBisectMark(opts.cwd(), verdict));
-  const end = () => act(() => gitBisectReset(opts.cwd()));
+  // The commit the banner shows goes with the answer: git marks whatever is
+  // under test when it runs, which a terminal may have changed meanwhile.
+  const mark = (verdict: BisectVerdict) =>
+    act(() => gitBisectMark(opts.cwd(), verdict, status.value?.current ?? null));
+  const end = async () => {
+    await act(() => gitBisectReset(opts.cwd()));
+    if (actionError.value) endFailed.value = true;
+  };
+  /** End the bisect on the current commit, without checking out its start. */
+  const endHere = () => act(() => gitBisectReset(opts.cwd(), true));
 
-  return { status, busy, error, culprit, candidates, narrowing, pending, noResult, customTerms, info, mark, end };
+  return { status, busy, error, culprit, candidates, narrowing, pending, noResult, customTerms, info, mark, end, endFailed, endHere };
 }

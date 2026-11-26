@@ -1281,18 +1281,29 @@ export async function gitBisectStart(cwd: string, bad: string, good: string, kee
   return bisectPost<BisectStatus>("/api/git-bisect-start", { cwd, bad, good, keepOrder });
 }
 
-export async function gitBisectMark(cwd: string, verdict: BisectVerdict): Promise<BisectStatus> {
-  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_mark", { cwd, verdict });
-  return bisectPost<BisectStatus>("/api/git-bisect-mark", { cwd, verdict });
+/**
+ * Mark the commit under test. `expected` is the commit the user answered
+ * for: refused (`bisect:moved`) when the commit under test is another one.
+ */
+export async function gitBisectMark(
+  cwd: string,
+  verdict: BisectVerdict,
+  expected: string | null = null,
+): Promise<BisectStatus> {
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_mark", { cwd, verdict, expected });
+  return bisectPost<BisectStatus>("/api/git-bisect-mark", { cwd, verdict, expected });
 }
 
-/** End the bisect and check out what it started from. */
-export async function gitBisectReset(cwd: string): Promise<void> {
+/**
+ * End the bisect and check out what it started from; with `stay`, end it on
+ * the current commit (when the start branch is gone or cannot be checked out).
+ */
+export async function gitBisectReset(cwd: string, stay = false): Promise<void> {
   if (isTauri()) {
-    await tauriInvoke("git_bisect_reset", { cwd });
+    await tauriInvoke("git_bisect_reset", { cwd, stay });
     return;
   }
-  await bisectPost<null>("/api/git-bisect-reset", { cwd });
+  await bisectPost<null>("/api/git-bisect-reset", { cwd, stay });
 }
 
 /**

@@ -104,7 +104,7 @@ describe("BisectBanner", () => {
     const events = await mount();
     button("Bad")!.click();
     await flush();
-    expect(gitBisectMark).toHaveBeenCalledWith("/repo", "bad");
+    expect(gitBisectMark).toHaveBeenCalledWith("/repo", "bad", H("a"));
     expect(button("Good")!.disabled).toBe(true);
     resolve(status({ remaining: 18, steps: 4 }));
     await flush();
@@ -133,7 +133,7 @@ describe("BisectBanner", () => {
     expect(button("Good")).toBeUndefined();
     button("Continue")!.click();
     await flush();
-    expect(gitBisectMark).toHaveBeenCalledWith("/repo", "next");
+    expect(gitBisectMark).toHaveBeenCalledWith("/repo", "next", H("a"));
     expect(events.changed).toBe(1);
   });
 
@@ -325,5 +325,18 @@ describe("BisectBanner", () => {
     key.value++;
     await flush();
     expect(host.textContent).not.toContain("would be overwritten");
+  });
+  it("offers End here once End bisect failed", async () => {
+    vi.mocked(gitBisectStatus).mockResolvedValue(status());
+    vi.mocked(gitBisectReset).mockRejectedValueOnce(new Error("Could not check out original HEAD 'feat'"));
+    vi.mocked(gitBisectReset).mockResolvedValue(undefined);
+    await mount();
+    expect(button("End here")).toBeUndefined();
+    button("End bisect")!.click();
+    await flush();
+    expect(host.textContent).toContain("Could not check out original HEAD");
+    button("End here")!.click();
+    await flush();
+    expect(gitBisectReset).toHaveBeenLastCalledWith("/repo", true);
   });
 });
