@@ -130,7 +130,8 @@ _A new working environment, not a rearranged one: GitWand supervises and control
 
 **Creation**
 - Start from a branch, a remote branch, a PR (`pull/<n>/head`) or a Launchpad issue (GitKraken 12.4): branch named after it, issue body as the starting prompt
-- Agent picker (Claude Code, Codex, Gemini, opencode… — the providers GitWand already knows), not Claude Code hard-wired
+- Agent picker (Claude Code, Codex, Gemini, Antigravity, opencode… — the providers GitWand already knows), not Claude Code hard-wired
+- **Antigravity CLI (`agy`) as a first-class agent, early** (asked 2026-11-27) — GitWand already launches it in the terminal and uses it as an AI provider; what the workspace needs on top: recognise its sessions and worktrees (`detect_agent_tool`), live status from PTY and process like any CLI, then whatever hook mechanism it exposes for richer states and permission requests. Its two open hardening items are in the 3.15.x security lot (prompt still passed on argv, tools not restricted) and come first
 
 **Visibility**
 - A worktrees view, sortable and filterable, replacing the modal: branch, dirty count, ahead/behind, last activity, disk use, PR state, env URL, agent status
