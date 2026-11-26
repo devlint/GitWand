@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { IS_MAC } from "./utils/platform";
+import { isBisect, pollsRepoState, showsOperationBanner } from "./utils/operationKinds";
 import { ref, computed, watch, onMounted, onUnmounted, provide, defineAsyncComponent, nextTick } from "vue";
 
 // ─── Eager imports — main views & shared building blocks ─────────────────────
@@ -1252,7 +1253,8 @@ async function handleEditHunk(path: string, hunkIdx: number, replacement: string
  */
 const pendingSplitAtHalt = computed(() => {
   const st = repoOperationState.value;
-  if (!showOperationBanner.value || !st || st.hasConflict) return null;
+  // A bisect's commit under test is not a halted commit: nothing to split.
+  if (!showOperationBanner.value || !st || st.hasConflict || isBisect(st)) return null;
   return getPendingSplitForHash(st.operationHead ?? null);
 });
 
@@ -3349,10 +3351,12 @@ watch(repoStatus, () => { refreshRepoState(); }, { deep: false });
 
 // Start/stop the 3 s belt-and-suspenders poll based on whether an operation
 // is actually in progress. When idle, no interval runs at all.
+// Not for a bisect, which can stay open for hours: the watcher (`mergeState`,
+// `head`, `refs`) and its own actions refresh it.
 watch(repoOperationState, (op) => {
-  if (op && !_rebaseStateInterval) {
+  if (pollsRepoState(op) && !_rebaseStateInterval) {
     _rebaseStateInterval = setInterval(refreshRepoState, 3_000);
-  } else if (!op && _rebaseStateInterval) {
+  } else if (!pollsRepoState(op) && _rebaseStateInterval) {
     clearInterval(_rebaseStateInterval);
     _rebaseStateInterval = null;
   }
@@ -5089,7 +5093,7 @@ onUnmounted(() => {
             <!-- Plain rebase-in-progress banner (pull --rebase paused on conflicts).
                  Non-blocking: sits at the top of the view so the resolution area
                  below stays reachable. -->
-            <RebaseProgressBanner v-if="showOperationBanner && repoOperationState" :repo-state="repoOperationState"
+            <RebaseProgressBanner v-if="showOperationBanner && repoOperationState && showsOperationBanner(repoOperationState)" :repo-state="repoOperationState"
               :auto-resolving="rebaseAutoResolving"
               :on-action="onOperationAction"
               :pending-split="pendingSplitAtHalt !== null"
