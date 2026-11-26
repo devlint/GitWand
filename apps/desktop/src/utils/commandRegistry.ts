@@ -215,6 +215,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   git_reset_to_commit: { route: "/api/git-reset-to-commit" },
   git_restack: { route: "/api/git-restack" },
   git_rev_count: { route: "/api/git-rev-count" },
+  git_refs_fingerprint: { route: "/api/git-refs-fingerprint" },
   git_revert_commit: { route: "/api/git-revert-commit" },
   git_shortlog: { route: "/api/git-shortlog" },
   git_show: { route: "/api/git-show" },

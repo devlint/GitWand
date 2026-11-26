@@ -44,9 +44,8 @@ _v3.14.0 (stacked branches: declare a stack, restack after a parent change or a 
 **3.15.x — lot B: test net** (before v4.0 moves code)
 
 - **Test the log view epoch** (follow-up to v3.12.0, #214) — the filter/scope change that drops in-flight log pages and the forced-reload depth (`forcedReloadDepth`) have no test; a `useGitRepo` test for "filter change while a page is in flight" would lock them in.
-- `merge_back_without_a_recorded_base_still_works` fails under full-suite load (seen 2026-10-10; the `pullAutostash` half of that report is fixed in #314)
+- `merge_back_without_a_recorded_base_still_works` fails under full-suite load (seen 2026-10-10, not reproduced in 15 runs of the `scratch` tests on 2026-11-26; the `pullAutostash` half of that report is fixed in #314)
 - parity-probe dispatch entries for `read_commit_template` and `ai_http_request` (`none` auth against a local fixture server)
-- `usePrPanel-cli-missing.test.ts` fails on a machine whose locale is not English (asserts the English timeout string) — pin the locale in the test
 
 **3.15.x — lot C: security & data safety**
 
@@ -57,6 +56,9 @@ _v3.14.0 (stacked branches: declare a stack, restack after a parent change or a 
 - Windows: a grandchild of the `claude --help` probe can outlive it once the direct child has exited (needs a Job Object)
 - the `ai-runs` sweep (24 h, at base setup) could remove a run directory still in use by a run older than that in another GitWand process
 - `img-src` stays `https: http:` for self-hosted forge avatars — proxy or allowlist avatar hosts, then tighten it
+- `ai_http_request` under `pnpm dev:web` goes to any origin unasked: the dev server has no native dialog to mirror `check_open_endpoint_with` (from #314)
+- allowed AI endpoints cannot be listed or revoked from Settings (they live in the keychain, service `gitwand:ai`, one account `open-endpoint:<SHA-256 of the origin>` per origin); a refusal lasts until restart or an explicit Test connection / Refresh (from #314)
+- an OpenAI-compatible server without a key: the model list loads (`auth: "none"`), but `isAvailable` requires a key and `callOpenAICompat` always sends `bearer`, so completions are never offered. Support it end to end or say so in Settings (from #314)
 
 ---
 
@@ -74,6 +76,7 @@ _Moved to the v4 track on 2026-11-26, since 3.x takes fixes only. The measuremen
 - **libgit2 phases 3-4** — migrate `git_log`/`git_show` (revwalk, the real win on 40k commits — but the object-fetch loop needs optimizing first) then `git_file_log` (`--follow`/rename tracking to reimplement). Scheduled here; `gix` is evaluated in the spike below.
 - **`gix` spike, time-boxed** — same scope as phase 3 (revwalk for `git_log`/`git_show`), same parity tests, same benchmark repo; one decision at the end: stay on `git2` or move the reads to `gix`. Writes, filters, hooks and credentials stay on the CLI either way.
 - **SHA-256 / reftable repositories** (2026-10-08 scan: GitButler 0.19.10, Sublime Merge 2130, Zed) — git handles them, but a few GitWand parsers assume 40-hex ids (`git/libgit2.rs:754`, `dev-server.mjs:4165`). Audit every such assumption and add a SHA-256 fixture repo to the parity tests.
+- **Git Tree: reload only the first page on a refs change** (follow-up of #315) — a refs event whose refs did change still forces a full log reload and restarts the background prefetch (≈750 ms of `git log` on a 74k-commit repo), even when only rows of the first page moved. Reloading only the first page needs to know where new commits land in the held log (a fetched branch with old commit dates is inserted deep).
 
 **Rendering**
 

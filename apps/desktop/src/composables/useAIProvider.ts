@@ -12,6 +12,7 @@ import {
   listCodexModels,
   detectClaudeCli,
   aiHttpRequest,
+  type AiAskMode,
 } from "../utils/backend";
 import { t } from "./useI18n";
 import { ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
@@ -466,10 +467,78 @@ function anthropicEfforts(capabilities: any): string[] {
 }
 
 /**
+ * How a model-list fetch treats an address the user has not allowed yet
+ * (`AiAskMode`, see `aiHttpRequest`).
+ */
+export interface ModelListOptions {
+  ask?: AiAskMode;
+}
+
+/**
+ * Whether `url` is a loopback address, which never meets the backend's AI
+ * endpoint question. IPv4 literals only, as the backend's `is_loopback`:
+ * `127.gpu.lan` is a name.
+ */
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
+  } catch {
+    return false;
+  }
+}
+
+/** Outcome of an Ollama probe, for the Settings status line. */
+export interface OllamaProbe {
+  available: boolean;
+  models: string[];
+  /** Why it failed, "" when "not connected" says it all. */
+  error: string;
+}
+
+/**
+ * Probe an Ollama server (`GET /api/tags`). `explicit` is the Test button:
+ * the backend may then ask to allow a remote address, even one refused
+ * earlier. A failure is explained after Test, and for a remote address on a
+ * background probe too (the backend's message then says how to allow it); a
+ * local Ollama that is not running keeps the install hint.
+ */
+export async function probeOllama(rawUrl: string, explicit: boolean): Promise<OllamaProbe> {
+  const url = (rawUrl || "http://localhost:11434").replace(/\/+$/, "");
+  const explain = explicit || !isLoopbackUrl(url);
+  try {
+    const res = await aiHttpRequest("GET", `${url}/api/tags`, "none", undefined, 2, {
+      ask: explicit ? "always" : "never",
+    });
+    if (isOk(res.status)) {
+      const data = JSON.parse(res.body);
+      const models = Array.isArray(data.models)
+        ? data.models.map((m: any) => m.name || m.model).filter(Boolean)
+        : [];
+      return { available: true, models, error: "" };
+    }
+    return {
+      available: false,
+      models: [],
+      error: explain ? t("settings.aiOllamaHttpError", res.status) : "",
+    };
+  } catch (e) {
+    return {
+      available: false,
+      models: [],
+      error: explain ? (e instanceof Error ? e.message : String(e)) : "",
+    };
+  }
+}
+
+/**
  * Fetch the models the Anthropic API key can use (`GET /v1/models`), newest
  * first as the API returns them.
  */
-export async function fetchAnthropicModels(endpoint: string): Promise<AIModelOption[]> {
+export async function fetchAnthropicModels(
+  endpoint: string,
+  opts: ModelListOptions = {},
+): Promise<AIModelOption[]> {
   const base = (endpoint || "https://api.anthropic.com").replace(/\/+$/, "");
   const models: AIModelOption[] = [];
   let afterId: string | undefined;
@@ -478,7 +547,7 @@ export async function fetchAnthropicModels(endpoint: string): Promise<AIModelOpt
     const url = new URL(`${base}/v1/models`);
     url.searchParams.set("limit", "1000");
     if (afterId) url.searchParams.set("after_id", afterId);
-    const res = await aiHttpRequest("GET", url.toString(), "anthropic", undefined, 10);
+    const res = await aiHttpRequest("GET", url.toString(), "anthropic", undefined, 10, opts);
     if (!isOk(res.status)) {
       throw new Error(`Anthropic API error ${res.status}: ${res.body}`);
     }
@@ -501,10 +570,13 @@ export async function fetchAnthropicModels(endpoint: string): Promise<AIModelOpt
  * Fetch the models an OpenAI-compatible endpoint serves (`GET /models`).
  * The endpoint reports ids only — no display name, no effort support.
  */
-export async function fetchOpenAICompatModels(endpoint: string): Promise<AIModelOption[]> {
+export async function fetchOpenAICompatModels(
+  endpoint: string,
+  opts: ModelListOptions = {},
+): Promise<AIModelOption[]> {
   const base = endpoint.replace(/\/+$/, "");
   const auth = isAiApiKeyConfigured() ? "bearer" : "none";
-  const res = await aiHttpRequest("GET", `${base}/models`, auth, undefined, 10);
+  const res = await aiHttpRequest("GET", `${base}/models`, auth, undefined, 10, opts);
   if (!isOk(res.status)) {
     throw new Error(`API error ${res.status}: ${res.body}`);
   }
@@ -525,14 +597,15 @@ export async function fetchOpenAICompatModels(endpoint: string): Promise<AIModel
 export async function listModelsForProvider(
   provider: AIProvider,
   s?: Pick<AISettings, "aiApiEndpoint">,
+  opts: ModelListOptions = {},
 ): Promise<AIModelOption[]> {
   switch (provider) {
     case "claude":
       if (!isAiApiKeyConfigured()) return CLAUDE_API_MODELS;
-      return fetchAnthropicModels(s?.aiApiEndpoint ?? "");
+      return fetchAnthropicModels(s?.aiApiEndpoint ?? "", opts);
     case "openai-compat":
       if (!s?.aiApiEndpoint) return [];
-      return fetchOpenAICompatModels(s.aiApiEndpoint);
+      return fetchOpenAICompatModels(s.aiApiEndpoint, opts);
     case "opencode-cli":
       return (await listOpencodeModels()).map((id) => ({ id, name: id, efforts: [] }));
     case "antigravity-cli":
