@@ -65,14 +65,25 @@ fn check_service(service: &str) -> Result<(), String> {
     // ASCII only: Windows' Credential Manager folds case with its own Unicode
     // rules, so a look-alike (`gitwand:aı`, dotless i) could reach a
     // backend-only service that `check_not_backend_only` compares in ASCII.
-    if !service.is_ascii() {
-        return Err("Refusing a keychain service name that is not ASCII".to_string());
+    if !service.is_ascii() || service.chars().any(|c| c.is_control()) {
+        return Err("Refusing a keychain service name that is not plain ASCII text".to_string());
     }
     if !service.starts_with(SERVICE_PREFIX) || service.len() == SERVICE_PREFIX.len() {
         return Err(format!(
             "Refusing keychain access outside the `{}` namespace",
             SERVICE_PREFIX
         ));
+    }
+    Ok(())
+}
+
+/// Reject an account name holding a control character. Windows passes the
+/// credential name `{account}.{service}` as a NUL-terminated string: a NUL
+/// in the account cuts it there, so `api-key.gitwand:ai\0` under service
+/// `gitwand:x` would name the backend-only `gitwand:ai` credential.
+fn check_account(account: &str) -> Result<(), String> {
+    if account.chars().any(|c| c.is_control()) {
+        return Err("Refusing a keychain account name with control characters".to_string());
     }
     Ok(())
 }
@@ -90,6 +101,7 @@ pub(crate) async fn set_credential(
 ) -> Result<(), String> {
     check_service(&service)?;
     check_not_backend_only(&service)?;
+    check_account(&account)?;
     let entry = keyring::Entry::new(&service, &account)
         .map_err(|e| format!("keyring init failed for {}/{}: {}", service, account, e))?;
     entry
@@ -106,6 +118,7 @@ pub(crate) async fn set_credential(
 pub(crate) async fn get_credential(service: String, account: String) -> Result<String, String> {
     check_service(&service)?;
     check_not_backend_only(&service)?;
+    check_account(&account)?;
     let entry = keyring::Entry::new(&service, &account)
         .map_err(|e| format!("keyring init failed for {}/{}: {}", service, account, e))?;
     entry.get_password().map_err(|_| {
@@ -123,6 +136,7 @@ pub(crate) async fn get_credential(service: String, account: String) -> Result<S
 pub(crate) async fn delete_credential(service: String, account: String) -> Result<(), String> {
     check_service(&service)?;
     check_not_backend_only(&service)?;
+    check_account(&account)?;
     let entry = match keyring::Entry::new(&service, &account) {
         Ok(e) => e,
         Err(_) => return Ok(()), // Entry cannot exist if we can't init
@@ -153,6 +167,10 @@ mod tests {
         }
         assert!(check_not_backend_only("gitwand:github").is_ok());
         assert!(check_service("gitwand:a\u{131}").is_err());
+        assert!(check_service("gitwand:ai\0").is_err());
+        assert!(check_account("api-key.gitwand:ai\0").is_err());
+        assert!(check_account("line\nbreak").is_err());
+        assert!(check_account("alice@example.com").is_ok());
         assert!(check_service("gitwand:github").is_ok());
     }
 
