@@ -46,7 +46,8 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
 <template>
   <section class="nx">
     <div class="nx-inner">
-      <h1 class="nx-h1">GitWand v4, before it is finished.</h1>
+      <h1 class="nx-h1">This is the future of GitWand.</h1>
+      <h2 class="nx-h2">GitWand v4, before it is finished.</h2>
       <p class="nx-sub">
         One working environment where coding agents are supervised and controlled, and where their work is
         integrated with proof. This is a sketch of it. Part of it is still under the cover, because that part
@@ -55,6 +56,7 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
       <p class="nx-links">
         <a href="#why">Read where this is going</a>
         <a href="https://github.com/devlint/GitWand/blob/main/ROADMAP.md">The roadmap on GitHub</a>
+        <a href="#take-part">Take part, or sponsor the work</a>
       </p>
 
       <figure class="nx-figure">
@@ -136,6 +138,16 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
   font-weight: 650;
   letter-spacing: -0.035em;
   color: var(--nc-neutral-100);
+}
+.nx-h2 {
+  margin: 14px 0 0;
+  padding: 0;
+  border: 0;
+  font-size: clamp(1.25rem, 2.1vw, 1.75rem);
+  line-height: 1.25;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--nc-accent-300);
 }
 .nx-sub {
   margin: 16px 0 0;

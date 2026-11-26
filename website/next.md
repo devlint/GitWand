@@ -45,7 +45,7 @@ GitWand has spent three major versions on the question that matters here: what a
 - **Open source, MIT.** Core and desktop.
 - **The engine stays deterministic.** No model touches a resolution unless you turn the LLM fallback on, and a hunk the engine classifies as a real disagreement is never applied without you.
 - **You can still work by hand.** Committing yourself is a task like any other, with you as its author. The full history, diff and blame stay one step away.
-- **No lock-in to an agent.** Claude Code, Codex, Gemini, opencode: GitWand supervises the session, it does not replace the CLI.
+- **No lock-in to an agent.** Claude Code, Codex, Gemini, Antigravity, opencode: GitWand supervises the session, it does not replace the CLI.
 - **macOS, Linux, Windows**, as today.
 
 ## What happens to 3.x
@@ -64,9 +64,13 @@ GitWand has spent three major versions on the question that matters here: what a
 
 GitWand will keep a local journal of the resolutions it applies, so the engine's accuracy can be shown to you on your own machine. Sharing anything from it will be opt-in, asked after you have seen the numbers, and limited to aggregated counts. No file content, no paths, no repository names. The design is in the roadmap before a line of it is written, so it can be discussed first.
 
-## Have a say
+## Take part {#take-part}
 
-The complete plan, with the reasoning, is in the [roadmap](https://github.com/devlint/GitWand/blob/main/ROADMAP.md). If you rely on something in GitWand today and want to know where it goes in v4, or you think this direction is wrong, say so in the [discussions](https://github.com/devlint/GitWand/discussions). That is more useful now than once it is built.
+GitWand is free and open source, and it is maintained by one person, with contributors. v4 is the largest piece of work the project has taken on. There are three ways to have a hand in it.
+
+- **Sponsor the work.** [Sponsoring on GitHub](https://github.com/sponsors/devlint) buys the time v4 takes. It does not buy features or a place in a queue: the roadmap stays public and the same for everyone.
+- **Say what you rely on.** If something in GitWand matters to your day and you want to know where it goes in v4, or you think this direction is wrong, say so in the [discussions](https://github.com/devlint/GitWand/discussions). That is more useful now than once it is built.
+- **Read the plan.** The complete [roadmap](https://github.com/devlint/GitWand/blob/main/ROADMAP.md) carries the reasoning, including what was dropped and why.
 
 </div>
 
