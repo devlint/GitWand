@@ -16,7 +16,7 @@ const H = (c: string) => c.repeat(40);
 
 function setup(log: GitLogEntry[]) {
   const notify = vi.fn();
-  const b = useBisectStart({ cwd: () => "/repo", log: () => log, notify, onStarted: async () => {} });
+  const b = useBisectStart({ cwd: () => "/repo", branch: () => "main", log: () => log, notify, onStarted: async () => {} });
   return { b, notify };
 }
 
@@ -84,7 +84,7 @@ describe("useBisectStart", () => {
     vi.mocked(gitBisectStatus).mockResolvedValue({ active: true } as never);
     const notify = vi.fn();
     const onStarted = vi.fn(async () => {});
-    const b = useBisectStart({ cwd: () => "/repo", log: () => log, notify, onStarted });
+    const b = useBisectStart({ cwd: () => "/repo", branch: () => "main", log: () => log, notify, onStarted });
     b.ask(H("a"), H("c"));
     await b.start();
     expect(b.confirm.value).toBeNull();
@@ -96,10 +96,30 @@ describe("useBisectStart", () => {
     vi.mocked(gitBisectStart).mockRejectedValue(new Error("bisect:dirty: Commit or stash"));
     vi.mocked(gitBisectStatus).mockResolvedValue({ active: false } as never);
     const notify = vi.fn();
-    const b = useBisectStart({ cwd: () => "/repo", log: () => log, notify, onStarted: async () => {} });
+    const b = useBisectStart({ cwd: () => "/repo", branch: () => "main", log: () => log, notify, onStarted: async () => {} });
     b.ask(H("a"), H("c"));
     await b.start();
     expect(b.confirm.value).not.toBeNull();
     expect(notify).toHaveBeenCalledOnce();
+  });
+  it("names where End bisect returns to: the branch, or HEAD's hash when detached", () => {
+    let branch = "main";
+    const b = useBisectStart({
+      cwd: () => "/repo",
+      branch: () => branch,
+      log: () => log,
+      notify: vi.fn(),
+      onStarted: async () => {},
+    });
+    expect(b.returnsTo.value).toBe("main");
+    branch = "(detached)";
+    const detached = useBisectStart({
+      cwd: () => "/repo",
+      branch: () => branch,
+      log: () => log,
+      notify: vi.fn(),
+      onStarted: async () => {},
+    });
+    expect(detached.returnsTo.value).toBe(H("c").slice(0, 7));
   });
 });

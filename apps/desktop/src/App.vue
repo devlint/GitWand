@@ -128,7 +128,7 @@ import { useNetworkStatus } from "./composables/useNetworkStatus";
 import { useConnectivity } from "./composables/useConnectivity";
 import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
-import { DETACHED_BRANCH_NAMES, useAutoFastForward } from "./composables/useAutoFastForward";
+import { useAutoFastForward } from "./composables/useAutoFastForward";
 import { useRepoWatcher } from "./composables/useRepoWatcher";
 import { useTrackedIgnored, shouldRecheckTrackedIgnored } from "./composables/useTrackedIgnored";
 import { useWatcherRefreshQueue } from "./composables/useWatcherRefreshQueue";
@@ -3247,20 +3247,10 @@ async function onBisectChanged() {
   await repoRefresh(true);
 }
 
-/**
- * Where End bisect returns to (what `BISECT_START` will record): the branch,
- * or HEAD's short hash when it is detached.
- */
-const bisectReturnsTo = computed(() => {
-  const branch = repoStatus.value?.branch ?? "";
-  if (branch && !DETACHED_BRANCH_NAMES.has(branch)) return branch;
-  const head = repoLog.value.find((e) => /(^|, )HEAD( ->|,|$)/.test(e.refs));
-  return head ? head.hashFull.slice(0, 7) : "HEAD";
-});
-
 /** Starting a bisect from the Git Tree context menu, behind a confirmation. */
 const bisectStart = useBisectStart({
   cwd: () => repoFolderPath.value ?? "",
+  branch: () => repoStatus.value?.branch ?? "",
   log: () => repoLog.value,
   notify: (title, detail) => showDetailToast(title, detail),
   onStarted: onBisectChanged,
@@ -5519,7 +5509,7 @@ onUnmounted(() => {
     <!-- Guided bisect: confirms both ends before git moves the working tree. -->
     <BaseModal v-if="bisectConfirm" :title="t('bisect.confirmTitle')" size="sm" role="alertdialog"
       @close="bisectStart.cancel()">
-      <p class="ptc-desc">{{ t(bisectConfirm.ordered ? 'bisect.confirmBody' : 'bisect.confirmBodyUnordered', bisectConfirm.good.slice(0, 7), bisectConfirm.bad.slice(0, 7), bisectReturnsTo) }}</p>
+      <p class="ptc-desc">{{ t(bisectConfirm.ordered ? 'bisect.confirmBody' : 'bisect.confirmBodyUnordered', bisectConfirm.good.slice(0, 7), bisectConfirm.bad.slice(0, 7), bisectStart.returnsTo.value) }}</p>
       <template #footer>
         <button class="bm-btn bm-btn--ghost" @click="bisectStart.cancel()">{{ t('project.cancel') }}</button>
         <button class="bm-btn bm-btn--primary" :disabled="bisectStart.starting.value" @click="bisectStart.start()">{{ t('bisect.confirmStart') }}</button>

@@ -661,6 +661,30 @@ mod tests {
     }
 
     #[test]
+    fn a_start_whose_first_checkout_fails_leaves_no_bisect() {
+        // The tree check ignores untracked files; one the midpoint tracks
+        // makes git refuse its first checkout. git then removes its own
+        // bisect state: nothing half-started for the banner to show.
+        let repo = TempRepo::linear(1);
+        for i in 2..=8 {
+            if i == 3 {
+                repo.write("build.cfg", "tracked\n");
+            }
+            if i == 6 {
+                repo.git(&["rm", "-q", "build.cfg"]);
+            }
+            repo.write("a.txt", &format!("v{i}\n"));
+            repo.git(&["add", "-A"]);
+            repo.git(&["commit", "-q", "-m", &format!("c{i}")]);
+        }
+        repo.write("build.cfg", "local\n");
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        assert!(block(git_bisect_start(repo.cwd(), c8.clone(), c1, None)).is_err());
+        assert!(!repo.bisecting());
+        assert_eq!(repo.head(), c8);
+    }
+
+    #[test]
     fn start_orders_the_ends_by_ancestry() {
         let repo = TempRepo::linear(8);
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));

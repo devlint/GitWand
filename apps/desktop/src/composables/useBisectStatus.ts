@@ -137,7 +137,11 @@ export function useBisectStatus(opts: {
     try {
       const next = await run();
       if (opts.cwd() !== cwd) return;
-      if (next && request === loadRequest) status.value = next.active ? next : null;
+      if (next && request === loadRequest) {
+        status.value = next.active ? next : null;
+        // A fresh status: an older read's error no longer describes it.
+        loadError.value = "";
+      }
       opts.onChanged();
     } catch (e) {
       if (opts.cwd() !== cwd) return;

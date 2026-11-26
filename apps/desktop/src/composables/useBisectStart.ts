@@ -3,11 +3,17 @@
  * docs/superpowers/specs/2026-11-26-guided-bisect-design.md): the context
  * menu asks, a confirmation names both ends, then `gitBisectStart` runs.
  */
-import { ref } from "vue";
+import { computed, ref } from "vue";
+import { DETACHED_BRANCH_NAMES } from "./useAutoFastForward";
 import type { GitLogEntry } from "../utils/backend";
 import { inLoadedHistoryOf } from "../utils/bisectEndpoints";
 import { t } from "./useI18n";
 import { bisectErrorMessage } from "./bisectError";
+
+/** HEAD's row in the loaded Git Tree log (its `%D` decoration names HEAD). */
+export function headEntry(log: readonly GitLogEntry[]): GitLogEntry | undefined {
+  return log.find((e) => /(^|, )HEAD( ->|,|$)/.test(e.refs));
+}
 
 async function bisectIsActive(cwd: string): Promise<boolean> {
   try {
@@ -22,6 +28,8 @@ async function bisectIsActive(cwd: string): Promise<boolean> {
 
 export function useBisectStart(opts: {
   cwd: () => string;
+  /** The current branch (`git status`), or a detached placeholder. */
+  branch: () => string;
   /** The loaded Git Tree log. */
   log: () => readonly GitLogEntry[];
   /** Tells the user why a bisect cannot start. */
@@ -60,7 +68,7 @@ export function useBisectStart(opts: {
   /** "Bisect from here": this commit is good, HEAD (found in the loaded log) is bad. */
   function askFromHere(entry: GitLogEntry) {
     const log = opts.log();
-    const head = log.find((e) => /(^|, )HEAD( ->|,|$)/.test(e.refs));
+    const head = headEntry(log);
     if (!head) {
       opts.notify(t("bisect.noHead"), null);
       return;
@@ -103,5 +111,15 @@ export function useBisectStart(opts: {
     }
   }
 
-  return { confirm, starting, ask, askFromHere, cancel, start };
+  /**
+   * Where End bisect returns to (what `BISECT_START` will record): the
+   * branch, or HEAD's short hash when it is detached.
+   */
+  const returnsTo = computed(() => {
+    const branch = opts.branch();
+    if (branch && !DETACHED_BRANCH_NAMES.has(branch)) return branch;
+    return headEntry(opts.log())?.hashFull.slice(0, 7) ?? "HEAD";
+  });
+
+  return { confirm, starting, ask, askFromHere, cancel, start, returnsTo };
 }
