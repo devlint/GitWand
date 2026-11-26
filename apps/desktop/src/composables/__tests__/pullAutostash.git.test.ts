@@ -138,7 +138,10 @@ describe.skipIf(!isGitAvailable())(
 
     afterEach(() => {
       for (const dir of createdDirs) {
-        rmSync(dir, { recursive: true, force: true });
+        // A git process can still be writing under `.git` (auto gc, the
+        // autostash's own cleanup) when the test ends: the removal then hits
+        // ENOTEMPTY under full-suite load. Node retries those errors.
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     });
 
