@@ -757,7 +757,7 @@ const es: Locale = {
     commitPickerEmpty: "No se encontraron commits",
   },
 
-  // ─── Interactive Rebase ─────────────────────────────────
+  // ─── Guided bisect ─────────────────────────────────────
   bisect: {
     notInHead: "Este commit no está en el historial de HEAD: cambia antes a una rama que lo contenga.",
     continue: "Continuar",
@@ -785,6 +785,8 @@ const es: Locale = {
     open: "Abrir commit",
     dirty: "Tus cambios sin confirmar te seguirán al siguiente commit.",
   },
+
+  // ─── Interactive Rebase ─────────────────────────────────
   rebase: {
     title: "Rebase interactivo",
     button: "Rebase",

@@ -758,7 +758,7 @@ const ptBR: Locale = {
     commitPickerEmpty: "Nenhum commit encontrado",
   },
 
-  // ─── Interactive Rebase ─────────────────────────────────
+  // ─── Guided bisect ─────────────────────────────────────
   bisect: {
     notInHead: "Este commit não está no histórico do HEAD: mude antes para um branch que o contenha.",
     continue: "Continuar",
@@ -786,6 +786,8 @@ const ptBR: Locale = {
     open: "Abrir commit",
     dirty: "Suas alterações não commitadas vão junto para o próximo commit.",
   },
+
+  // ─── Interactive Rebase ─────────────────────────────────
   rebase: {
     title: "Rebase interativo",
     button: "Rebase",

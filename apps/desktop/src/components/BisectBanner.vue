@@ -10,14 +10,8 @@
  * it names the first bad commit (or the candidates skips left) and offers to
  * open it.
  */
-import { computed, ref, watch } from "vue";
-import {
-  gitBisectMark,
-  gitBisectReset,
-  gitBisectStatus,
-  type BisectStatus,
-  type BisectVerdict,
-} from "../utils/backend";
+import { toRef } from "vue";
+import { useBisectStatus } from "../composables/useBisectStatus";
 import { t } from "../composables/useI18n";
 
 const props = defineProps<{
@@ -34,31 +28,15 @@ const emit = defineEmits<{
   (e: "open-commit", hash: string): void;
 }>();
 
-const status = ref<BisectStatus | null>(null);
-const busy = ref(false);
-const error = ref("");
-
-// Only the latest load applies: an older one (a previous repo, an earlier
-// key) finishing last must not overwrite it.
-let loadRequest = 0;
-async function load(keepError = false) {
-  const request = ++loadRequest;
-  try {
-    const next = await gitBisectStatus(props.cwd);
-    if (request !== loadRequest) return;
-    status.value = next;
-    if (!keepError) error.value = "";
-  } catch (e) {
-    if (request !== loadRequest) return;
-    error.value = e instanceof Error ? e.message : String(e);
-  }
-}
-
-watch(() => [props.cwd, props.refreshKey], () => load(), { immediate: true });
+const cwd = toRef(props, "cwd");
+const { status, busy, error, culprit, candidates, narrowing, pending, customTerms, info, mark, end } =
+  useBisectStatus({
+    cwd: () => cwd.value,
+    refreshKey: () => props.refreshKey,
+    onChanged: () => emit("changed"),
+  });
 
 const short = (hash: string | null | undefined) => (hash ? hash.slice(0, 7) : "");
-const info = (hash: string | null | undefined) =>
-  (hash && status.value?.commits.find((c) => c.hash === hash)) || null;
 const subject = (hash: string | null | undefined) => info(hash)?.subject ?? "";
 /** "Jane, 20 Nov 2026" for the result line. */
 const byline = (hash: string | null | undefined) => {
@@ -67,52 +45,17 @@ const byline = (hash: string | null | undefined) => {
   const d = new Date(c.date);
   return isNaN(d.getTime()) ? c.author : `${c.author}, ${d.toLocaleDateString()}`;
 };
-
-/** A bisect with its own terms (`--term-old/--term-new`) names them on the buttons. */
-const customTerms = computed(() => {
-  const terms = status.value?.terms;
-  return terms && (terms[0] !== "bad" || terms[1] !== "good") ? terms : null;
-});
+/** A bisect with its own terms names them on the buttons. */
 const label = (verdict: "good" | "bad") => {
   const base = t(verdict === "good" ? "bisect.good" : "bisect.bad");
   const terms = customTerms.value;
   return terms ? `${base} (${verdict === "good" ? terms[1] : terms[0]})` : base;
 };
-
-const culprit = computed(() =>
-  status.value && status.value.candidates.length === 1 ? status.value.candidates[0] : null,
-);
-const candidates = computed(() =>
-  status.value && status.value.candidates.length > 1 ? status.value.candidates : [],
-);
-const narrowing = computed(() => !culprit.value && candidates.value.length === 0);
-const pending = computed(() => narrowing.value && !!status.value?.pendingCheckout);
-
-async function act(run: () => Promise<BisectStatus | void>) {
-  if (busy.value) return;
-  busy.value = true;
-  error.value = "";
-  try {
-    const next = await run();
-    if (next) status.value = next;
-    emit("changed");
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
-    // git may have recorded the mark before failing (a checkout refused by
-    // uncommitted changes): show what it holds now, keeping the error.
-    await load(true);
-    emit("changed");
-  } finally {
-    busy.value = false;
-  }
-}
-
-const mark = (verdict: BisectVerdict) => act(() => gitBisectMark(props.cwd, verdict));
-const end = () => act(() => gitBisectReset(props.cwd));
 </script>
 
 <template>
-  <div v-if="status" class="bisect-banner" role="status">
+  <!-- Shown on a failed first read too: the error, and End bisect as a way out. -->
+  <div v-if="status || error" class="bisect-banner" role="status">
     <div class="bisect-icon" aria-hidden="true">
       <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
         <path d="M8 1v14M3 4h10M3 12h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
@@ -133,6 +76,7 @@ const end = () => act(() => gitBisectReset(props.cwd));
           <span v-if="subject(c)">{{ subject(c) }}</span>
         </button>
       </template>
+      <span v-else-if="!status" class="bisect-title">{{ t('bisect.title') }}</span>
       <template v-else>
         <span class="bisect-title">{{ t('bisect.title') }}</span>
         <span v-if="status.current" class="bisect-meta">
@@ -149,21 +93,23 @@ const end = () => act(() => gitBisectReset(props.cwd));
         </span>
       </template>
       <span v-if="pending" class="bisect-note">{{ t('bisect.pending') }}</span>
-      <span v-else-if="hasTrackedChanges && narrowing" class="bisect-note">{{ t('bisect.dirty') }}</span>
+      <span v-else-if="hasTrackedChanges && narrowing && status" class="bisect-note">{{ t('bisect.dirty') }}</span>
       <span v-if="error" class="bisect-error" role="alert">{{ error }}</span>
     </div>
 
     <div class="bisect-actions">
-      <button v-if="pending" class="btn btn--sm btn--primary" :disabled="busy" @click="mark('next')">{{ t('bisect.continue') }}</button>
-      <template v-else-if="narrowing">
-        <button class="btn btn--sm btn--success" :disabled="busy" @click="mark('good')">{{ label('good') }}</button>
-        <button class="btn btn--sm btn--danger" :disabled="busy" @click="mark('bad')">{{ label('bad') }}</button>
-        <button class="btn btn--sm btn--secondary" :disabled="busy" @click="mark('skip')">{{ t('bisect.skip') }}</button>
+      <template v-if="status">
+        <button v-if="pending" class="btn btn--sm btn--primary" :disabled="busy" @click="mark('next')">{{ t('bisect.continue') }}</button>
+        <template v-else-if="narrowing">
+          <button class="btn btn--sm btn--success" :disabled="busy" @click="mark('good')">{{ label('good') }}</button>
+          <button class="btn btn--sm btn--danger" :disabled="busy" @click="mark('bad')">{{ label('bad') }}</button>
+          <button class="btn btn--sm btn--secondary" :disabled="busy" @click="mark('skip')">{{ t('bisect.skip') }}</button>
+        </template>
       </template>
       <button v-if="culprit" class="btn btn--sm btn--primary" :disabled="busy"
         @click="emit('open-commit', culprit)">{{ t('bisect.open') }}</button>
       <button class="btn btn--sm btn--ghost" :disabled="busy"
-        :title="t('bisect.endHint', status.start ?? '')" @click="end">{{ t('bisect.end') }}</button>
+        :title="t('bisect.endHint', status?.start ?? '')" @click="end">{{ t('bisect.end') }}</button>
     </div>
   </div>
 </template>

@@ -49,10 +49,105 @@ fn other_operation(cwd: &str) -> Result<bool, String> {
     .any(|f| dir.join(f).exists()))
 }
 
+/// `merge-base --is-ancestor`: exit 0 yes, 1 no; anything else (an unknown
+/// or ambiguous hash) is an error carrying git's stderr.
 fn is_ancestor(cwd: &str, ancestor: &str, of: &str) -> Result<bool, String> {
-    Ok(run(cwd, &["merge-base", "--is-ancestor", ancestor, of])?
-        .status
-        .success())
+    let out = run(cwd, &["merge-base", "--is-ancestor", ancestor, of])?;
+    match out.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => {
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            Err(if err.is_empty() {
+                format!("git could not compare {ancestor} and {of}")
+            } else {
+                err
+            })
+        }
+    }
+}
+
+/// The words of a `BISECT_NAMES` file: git writes them shell-quoted
+/// (`'--' 'a.txt' 'it'\''s'`), the paths after a leading `--`.
+fn parse_sq_quoted(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut chars = text.chars().peekable();
+    loop {
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+        if chars.peek().is_none() {
+            break;
+        }
+        let mut word = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_whitespace() {
+                break;
+            }
+            chars.next();
+            match c {
+                '\'' => {
+                    for q in chars.by_ref() {
+                        if q == '\'' {
+                            break;
+                        }
+                        word.push(q);
+                    }
+                }
+                '\\' => {
+                    if let Some(n) = chars.next() {
+                        word.push(n);
+                    }
+                }
+                _ => word.push(c),
+            }
+        }
+        words.push(word);
+    }
+    words
+}
+
+/// How the bisect walks history, as git does: `--first-parent` and the
+/// paths it was limited to (`git bisect start … -- <paths>`).
+struct Scope {
+    first_parent: bool,
+    paths: Vec<String>,
+}
+
+fn scope(git_dir: &std::path::Path) -> Scope {
+    let mut paths = std::fs::read_to_string(git_dir.join("BISECT_NAMES"))
+        .map(|t| parse_sq_quoted(&t))
+        .unwrap_or_default();
+    if paths.first().is_some_and(|w| w == "--") {
+        paths.remove(0);
+    }
+    Scope {
+        first_parent: git_dir.join("BISECT_FIRST_PARENT").exists(),
+        paths,
+    }
+}
+
+/// `git rev-list [extra] [--first-parent] <bad> --not <goods> [-- <paths>]`.
+fn rev_list(
+    cwd: &str,
+    scope: &Scope,
+    extra: &[&str],
+    bad: &str,
+    good: &[String],
+) -> Result<String, String> {
+    let mut args = vec!["rev-list"];
+    args.extend_from_slice(extra);
+    if scope.first_parent {
+        args.push("--first-parent");
+    }
+    args.push(bad);
+    args.push("--not");
+    args.extend(good.iter().map(String::as_str));
+    if !scope.paths.is_empty() {
+        args.push("--");
+        args.extend(scope.paths.iter().map(String::as_str));
+    }
+    run_ok(cwd, &args)
 }
 
 /// Subject, author and date of each hash, in one `git log`.
@@ -101,7 +196,13 @@ fn read_status(cwd: &str) -> Result<BisectStatus, String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let current = run(cwd, &["rev-parse", "--verify", "-q", "HEAD"])
+    // `--no-checkout` bisects move BISECT_HEAD, not HEAD.
+    let head_ref = if git_dir.join("BISECT_HEAD").exists() {
+        "BISECT_HEAD"
+    } else {
+        "HEAD"
+    };
+    let current = run(cwd, &["rev-parse", "--verify", "-q", head_ref])
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
@@ -136,34 +237,36 @@ fn read_status(cwd: &str) -> Result<BisectStatus, String> {
     let mut steps = None;
     let mut candidates = Vec::new();
     if let (Some(bad), false) = (&bad, good.is_empty()) {
-        let mut args = vec!["rev-list", "--bisect-vars", bad.as_str(), "--not"];
-        args.extend(good.iter().map(String::as_str));
-        let vars = run_ok(cwd, &args)?;
-        let var = |key: &str| -> Option<u32> {
-            vars.lines()
-                .find_map(|l| l.strip_prefix(&format!("{key}=")))
-                .and_then(|v| v.trim().trim_matches('\'').parse().ok())
-        };
-        steps = var("bisect_steps");
+        let scope = scope(&git_dir);
+        let vars = rev_list(cwd, &scope, &["--bisect-vars"], bad, &good)?;
+        steps = vars
+            .lines()
+            .find_map(|l| l.strip_prefix("bisect_steps="))
+            .and_then(|v| v.trim().trim_matches('\'').parse().ok());
 
-        // The range (`bad` and the commits that can still be the first bad
-        // one). `bisect_nr` ignores skips; this leaves them out (git only
-        // checks out, so only skips, commits of the range).
-        let mut args = vec!["rev-list", "--count", bad.as_str(), "--not"];
-        args.extend(good.iter().map(String::as_str));
-        let range_len: usize = run_ok(cwd, &args)?.trim().parse().unwrap_or(0);
-        remaining = Some(range_len.saturating_sub(1 + skipped.len()) as u32);
+        // The commits git can still check out: the range, walked as git
+        // walks it, minus `bad` and the skipped commits. `bisect_nr` ignores
+        // skips; a skip ref can also point outside the range once later
+        // marks narrowed it, so only skips inside it count.
+        let range: Vec<String> = rev_list(cwd, &scope, &[], bad, &good)?
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let untested = range
+            .iter()
+            .filter(|h| *h != bad && !skipped.contains(h))
+            .count();
+        remaining = Some(untested as u32);
 
-        // When every commit but `bad` is skipped (or there is none), git
-        // cannot narrow further: list them. Only then is the range listed.
-        if range_len <= skipped.len() + 1 {
-            let mut args = vec!["rev-list", bad.as_str(), "--not"];
-            args.extend(good.iter().map(String::as_str));
-            let range: Vec<String> = run_ok(cwd, &args)?.lines().map(str::to_string).collect();
-            let untested: Vec<&String> = range.iter().filter(|h| !skipped.contains(h)).collect();
-            if untested.len() == 1 && untested[0] == bad {
-                candidates = range;
-            }
+        // Nothing left to test: `bad` is the first bad commit, or, when
+        // skipped commits remain in the range, one of them may be.
+        if untested == 0 {
+            candidates.push(bad.clone());
+            candidates.extend(
+                range
+                    .into_iter()
+                    .filter(|h| h != bad && skipped.contains(h)),
+            );
         }
     }
 
@@ -529,6 +632,118 @@ mod tests {
                 st.candidates
             );
         }
+    }
+
+    #[test]
+    fn remaining_ignores_skips_that_later_marks_left_out_of_the_range() {
+        let repo = TempRepo::linear(8);
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        block(git_bisect_start(repo.cwd(), c8.clone(), c1)).expect("start");
+        let skipped = repo.head();
+        let mut st = block(git_bisect_mark(repo.cwd(), "skip".to_string())).expect("skip");
+        let mut left_out = false;
+        for _ in 0..3 {
+            if !st.candidates.is_empty() {
+                break;
+            }
+            st = block(git_bisect_mark(repo.cwd(), "good".to_string())).expect("good");
+            let mut args = vec!["rev-list", c8.as_str(), "--not"];
+            args.extend(st.good.iter().map(String::as_str));
+            let range = repo.git(&args);
+            let range: Vec<&str> = range.lines().collect();
+            left_out |= !range.contains(&skipped.as_str());
+            let untested = range
+                .iter()
+                .filter(|h| **h != c8 && !st.skipped.iter().any(|s| s == *h))
+                .count() as u32;
+            assert_eq!(st.remaining, Some(untested), "range {range:?}");
+        }
+        assert!(
+            left_out,
+            "a good mark put the skipped commit out of the range"
+        );
+    }
+
+    #[test]
+    fn status_follows_a_pathspec_bisect_to_its_culprit() {
+        let repo = TempRepo::linear(1);
+        let commit = |file: &str, content: &str, subject: &str| {
+            repo.write(file, content);
+            repo.git(&["add", "-A"]);
+            repo.git(&["commit", "-q", "-m", subject]);
+        };
+        commit("b.txt", "1\n", "c2");
+        for i in 3..=8 {
+            if i == 6 {
+                commit("b.txt", "2\n", "c6");
+            } else {
+                commit("a.txt", &format!("v{i}\n"), &format!("c{i}"));
+            }
+        }
+        let (c2, c6, c8) = (repo.sha("c2"), repo.sha("c6"), repo.sha("c8"));
+        repo.git(&["bisect", "start", &c8, &c2, "--", "b.txt"]);
+        let mut st = status(&repo);
+        for _ in 0..5 {
+            if !st.candidates.is_empty() {
+                break;
+            }
+            st = block(git_bisect_mark(repo.cwd(), "bad".to_string())).expect("bad");
+        }
+        assert_eq!(st.candidates, vec![c6]);
+        assert_eq!(st.remaining, Some(0));
+    }
+
+    #[test]
+    fn status_follows_a_first_parent_bisect() {
+        let repo = TempRepo::linear(1);
+        let c1 = repo.sha("c1");
+        repo.git(&["checkout", "-q", "-b", "side"]);
+        for s in ["s1", "s2"] {
+            repo.write("side.txt", s);
+            repo.git(&["add", "-A"]);
+            repo.git(&["commit", "-q", "-m", s]);
+        }
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("a.txt", "v2\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "c2"]);
+        repo.git(&["merge", "-q", "--no-ff", "-m", "m", "side"]);
+        let (c2, m) = (repo.sha("c2"), repo.head());
+        repo.git(&["bisect", "start", "--first-parent", &m, &c1]);
+        let st = status(&repo);
+        // The side branch is not walked: only c2 is left to test.
+        assert_eq!(st.remaining, Some(1));
+        let st = block(git_bisect_mark(repo.cwd(), "bad".to_string())).expect("bad");
+        assert_eq!(st.candidates, vec![c2]);
+    }
+
+    #[test]
+    fn status_reads_the_commit_under_test_of_a_no_checkout_bisect() {
+        let repo = TempRepo::linear(8);
+        let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
+        repo.git(&["bisect", "start", "--no-checkout", &c8, &c1]);
+        let tested = repo.git(&["rev-parse", "BISECT_HEAD"]);
+        assert_ne!(tested, repo.head());
+        assert_eq!(status(&repo).current.as_deref(), Some(tested.as_str()));
+    }
+
+    #[test]
+    fn start_reports_an_unknown_commit_as_such() {
+        let repo = TempRepo::linear(4);
+        let c1 = repo.sha("c1");
+        let missing = "0123456789abcdef0123456789abcdef01234567".to_string();
+        let err = block(git_bisect_start(repo.cwd(), missing, c1)).unwrap_err();
+        assert!(!err.contains("separate branches"), "{err}");
+        assert!(!is_bisecting(&repo.cwd()).unwrap());
+    }
+
+    #[test]
+    fn bisect_names_are_unquoted() {
+        assert_eq!(
+            parse_sq_quoted("'--' 'a.txt' 'it'\\''s b.txt'\n"),
+            vec!["--", "a.txt", "it's b.txt"]
+        );
+        assert!(parse_sq_quoted("\n").is_empty());
     }
 
     #[test]

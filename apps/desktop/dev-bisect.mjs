@@ -42,9 +42,55 @@ function terms(cwd) {
   return ["bad", "good"];
 }
 
-function headHash(cwd) {
-  const r = run(cwd, ["rev-parse", "--verify", "-q", "HEAD"]);
+function headHash(cwd, ref = "HEAD") {
+  const r = run(cwd, ["rev-parse", "--verify", "-q", ref]);
   return r.status === 0 ? r.stdout.trim() : null;
+}
+
+/** The words of a `BISECT_NAMES` file, which git writes shell-quoted (`'--' 'a.txt' 'it'\\''s'`). */
+export function parseSqQuoted(text) {
+  const words = [];
+  let i = 0;
+  while (i < text.length) {
+    while (i < text.length && /\s/.test(text[i])) i++;
+    if (i >= text.length) break;
+    let word = "";
+    while (i < text.length && !/\s/.test(text[i])) {
+      const c = text[i++];
+      if (c === "'") {
+        while (i < text.length && text[i] !== "'") word += text[i++];
+        i++;
+      } else if (c === "\\") {
+        if (i < text.length) word += text[i++];
+      } else word += c;
+    }
+    words.push(word);
+  }
+  return words;
+}
+
+/** As in the Rust command: `--first-parent` and the paths the bisect was limited to. */
+function scope(dir) {
+  let paths = [];
+  try {
+    paths = parseSqQuoted(readFileSync(join(dir, "BISECT_NAMES"), "utf-8"));
+  } catch {
+    // no names
+  }
+  if (paths[0] === "--") paths = paths.slice(1);
+  return { firstParent: existsSync(join(dir, "BISECT_FIRST_PARENT")), paths };
+}
+
+function revList(cwd, sc, extra, bad, good) {
+  return runOk(cwd, [
+    "rev-list",
+    ...extra,
+    ...(sc.firstParent ? ["--first-parent"] : []),
+    bad,
+    "--not",
+    ...good,
+    ...(sc.paths.length ? ["--", ...sc.paths] : []),
+  ]);
 }
 
 /** The bisect part of `/api/git-repo-state`: its state object, or null. */
@@ -77,24 +123,25 @@ export function devBisectStatus(cwd) {
   let remaining = null;
   let steps = null;
   let candidates = [];
+  const dir = gitDir(cwd);
   if (bad && good.length > 0) {
-    const vars = runOk(cwd, ["rev-list", "--bisect-vars", bad, "--not", ...good]);
+    const sc = scope(dir);
+    const vars = revList(cwd, sc, ["--bisect-vars"], bad, good);
     const v = (k) => {
       const line = vars.split("\n").find((l) => l.startsWith(`${k}=`));
       const n = line ? Number(line.slice(k.length + 1).trim().replace(/'/g, "")) : NaN;
       return Number.isFinite(n) ? n : null;
     };
     steps = v("bisect_steps");
-    // As in the Rust command: `bisect_nr` ignores skips, this leaves them out.
-    const rangeLen = Number(runOk(cwd, ["rev-list", "--count", bad, "--not", ...good]).trim()) || 0;
-    remaining = Math.max(0, rangeLen - 1 - skipped.length);
-    if (rangeLen <= skipped.length + 1) {
-      const range = runOk(cwd, ["rev-list", bad, "--not", ...good]).split("\n").filter(Boolean);
-      const untested = range.filter((h) => !skipped.includes(h));
-      if (untested.length === 1 && untested[0] === bad) candidates = range;
-    }
+    // As in the Rust command: the range as git walks it, minus `bad` and the
+    // skipped commits still inside it.
+    const range = revList(cwd, sc, [], bad, good).split("\n").filter(Boolean);
+    const untested = range.filter((h) => h !== bad && !skipped.includes(h)).length;
+    remaining = untested;
+    if (untested === 0) candidates = [bad, ...range.filter((h) => h !== bad && skipped.includes(h))];
   }
-  const current = headHash(cwd);
+  // `--no-checkout` bisects move BISECT_HEAD, not HEAD.
+  const current = headHash(cwd, existsSync(join(dir, "BISECT_HEAD")) ? "BISECT_HEAD" : "HEAD");
   const marked = (h) => h === bad || good.includes(h) || skipped.includes(h);
   const pendingCheckout = candidates.length === 0 && remaining !== null && remaining > 0 && !!current && marked(current);
   const toDescribe = [...(current ? [current] : []), ...candidates.filter((c) => c !== current)];
@@ -145,8 +192,14 @@ export function devBisectStart(cwd, bad, good) {
   if (runOk(cwd, ["status", "--porcelain", "--untracked-files=no"]).trim()) {
     throw new Error("Commit or stash your uncommitted changes before starting a bisect.");
   }
-  // The ancestor is the good end, whichever way they are passed.
-  const isAncestor = (a, b) => run(cwd, ["merge-base", "--is-ancestor", a, b]).status === 0;
+  // The ancestor is the good end, whichever way they are passed. Exit 1 is
+  // "no"; anything else (an unknown or ambiguous hash) is git's error.
+  const isAncestor = (a, b) => {
+    const r = run(cwd, ["merge-base", "--is-ancestor", a, b]);
+    if (r.status === 0) return true;
+    if (r.status === 1) return false;
+    throw new Error((r.stderr || "").trim() || `git could not compare ${a} and ${b}`);
+  };
   if (!isAncestor(good, bad)) {
     if (!isAncestor(bad, good)) {
       throw new Error("One of the two commits must be an ancestor of the other: they are on separate branches.");

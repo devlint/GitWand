@@ -771,6 +771,7 @@ const zhCN: Locale = {
     commitPickerEmpty: "未找到提交",
   },
 
+  // ─── Guided bisect ─────────────────────────────────────
   bisect: {
     notInHead: "此提交不在 HEAD 的历史中：请先切换到包含它的分支。",
     continue: "继续",

@@ -14,6 +14,7 @@ import {
   devBisectStart,
   devBisectMark,
   devBisectReset,
+  parseSqQuoted,
   // @ts-expect-error — plain ESM module without types, shared with dev-server.mjs
 } from "../../dev-bisect.mjs";
 
@@ -131,5 +132,78 @@ describe("dev-server bisect", { timeout: 30_000 }, () => {
     const head = g("rev-parse", "HEAD");
     devBisectMark(path, "good");
     expect(g("rev-parse", `refs/bisect/fixed-${head}`)).toBe(head);
+  });
+  it("counts only the skips still inside the range", () => {
+    const { path, g, sha } = linear(8);
+    const [c1, c8] = [sha("c1"), sha("c8")];
+    devBisectStart(path, c8, c1);
+    const skippedHash = g("rev-parse", "HEAD");
+    let st = devBisectMark(path, "skip");
+    let leftOut = false;
+    for (let i = 0; i < 3 && st.candidates.length === 0; i++) {
+      st = devBisectMark(path, "good");
+      const range = g("rev-list", c8, "--not", ...st.good).split("\n").filter(Boolean);
+      leftOut ||= !range.includes(skippedHash);
+      expect(st.remaining).toBe(range.filter((h) => h !== c8 && !st.skipped.includes(h)).length);
+    }
+    expect(leftOut).toBe(true);
+  });
+
+  it("follows a pathspec bisect to its culprit", () => {
+    const { path, g, sha } = linear(1);
+    const commit = (file: string, content: string, subject: string) => {
+      writeFileSync(join(path, file), content);
+      g("add", "-A");
+      g("commit", "-q", "-m", subject);
+    };
+    commit("b.txt", "1\n", "c2");
+    for (let i = 3; i <= 8; i++) {
+      if (i === 6) commit("b.txt", "2\n", "c6");
+      else commit("a.txt", `v${i}\n`, `c${i}`);
+    }
+    g("bisect", "start", sha("c8"), sha("c2"), "--", "b.txt");
+    let st = devBisectStatus(path);
+    for (let i = 0; i < 5 && st.candidates.length === 0; i++) st = devBisectMark(path, "bad");
+    expect(st.candidates).toEqual([sha("c6")]);
+    expect(st.remaining).toBe(0);
+  });
+
+  it("follows a first-parent bisect", () => {
+    const { path, g, sha } = linear(1);
+    g("checkout", "-q", "-b", "side");
+    for (const s of ["s1", "s2"]) {
+      writeFileSync(join(path, "side.txt"), s);
+      g("add", "-A");
+      g("commit", "-q", "-m", s);
+    }
+    g("checkout", "-q", "main");
+    writeFileSync(join(path, "a.txt"), "v2\n");
+    g("add", "-A");
+    g("commit", "-q", "-m", "c2");
+    g("merge", "-q", "--no-ff", "-m", "m", "side");
+    g("bisect", "start", "--first-parent", g("rev-parse", "HEAD"), sha("c1"));
+    expect(devBisectStatus(path).remaining).toBe(1);
+    expect(devBisectMark(path, "bad").candidates).toEqual([sha("c2")]);
+  });
+
+  it("reads the commit under test of a no-checkout bisect", () => {
+    const { path, g, sha } = linear(8);
+    g("bisect", "start", "--no-checkout", sha("c8"), sha("c1"));
+    const tested = g("rev-parse", "BISECT_HEAD");
+    expect(tested).not.toBe(g("rev-parse", "HEAD"));
+    expect(devBisectStatus(path).current).toBe(tested);
+  });
+
+  it("reports an unknown commit as such", () => {
+    const { path, sha } = linear(4);
+    expect(() => devBisectStart(path, "0123456789abcdef0123456789abcdef01234567", sha("c1"))).toThrow(
+      /^(?!.*separate branches)/,
+    );
+    expect(devBisectRepoState(path)).toBeNull();
+  });
+
+  it("unquotes BISECT_NAMES", () => {
+    expect(parseSqQuoted("'--' 'a.txt' 'it'\\''s b.txt'\n")).toEqual(["--", "a.txt", "it's b.txt"]);
+    expect(parseSqQuoted("\n")).toEqual([]);
   });
 });

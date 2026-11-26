@@ -762,7 +762,7 @@ const fr: Locale = {
     commitPickerEmpty: "Aucun commit trouvé",
   },
 
-  // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
+  // ─── Guided bisect ─────────────────────────────────────
   bisect: {
     notInHead: "Ce commit n'est pas dans l'historique de HEAD : passez d'abord sur une branche qui le contient.",
     continue: "Continuer",
@@ -790,6 +790,8 @@ const fr: Locale = {
     open: "Ouvrir le commit",
     dirty: "Vos modifications non commitées vous suivront au commit suivant.",
   },
+
+  // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
   rebase: {
     title: "Rebase interactif",
     button: "Rebase",

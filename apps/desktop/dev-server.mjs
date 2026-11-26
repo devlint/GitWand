@@ -2170,7 +2170,10 @@ function devClassifyPath(rel) {
     if (inner === "index") return "index";
     if (inner === "config") return "config";
     if (inner.startsWith("refs/") || inner === "packed-refs") return "refs";
-    if (["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"].includes(inner)
+    if (["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG",
+      // As in watcher.rs `classify_path`: the bisect's own files.
+      "BISECT_LOG", "BISECT_START", "BISECT_EXPECTED_REV", "BISECT_ANCESTORS_OK", "BISECT_NAMES",
+      "BISECT_TERMS", "BISECT_RUN"].includes(inner)
       || inner.startsWith("rebase-merge/") || inner.startsWith("rebase-apply/")) return "mergeState";
     return null;
   }

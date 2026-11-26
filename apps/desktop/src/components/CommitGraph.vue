@@ -548,7 +548,11 @@ const isCtxEntryHead = computed(() => {
   return isCurrent(entry);
 });
 
-/** Guided bisect between the two selected commits, when that is offered. */
+/**
+ * Guided bisect between the two selected commits, when that is offered.
+ * Stash and WIP rows are not in `logOrder` (`isJoinable`): `bisectEndpoints`
+ * refuses a pair with one of them.
+ */
 const bisectPair = computed(() =>
   props.operationInProgress ? null : bisectEndpoints(orderedSelection.value, logOrder.value),
 );

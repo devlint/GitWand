@@ -223,4 +223,17 @@ describe("BisectBanner", () => {
     await flush();
     expect(gitBisectStatus).toHaveBeenCalledTimes(2);
   });
+  it("shows a failed first read with End bisect as a way out", async () => {
+    vi.mocked(gitBisectStatus).mockRejectedValue(new Error("bad object refs/bisect/bad"));
+    vi.mocked(gitBisectReset).mockResolvedValue(undefined);
+    const events = await mount();
+    expect(host.querySelector(".bisect-error")?.textContent).toContain("bad object");
+    expect(button("Good")).toBeUndefined();
+    const end = button("End bisect");
+    expect(end).toBeDefined();
+    end!.click();
+    await flush();
+    expect(gitBisectReset).toHaveBeenCalledWith("/repo");
+    expect(events.changed).toBe(1);
+  });
 });

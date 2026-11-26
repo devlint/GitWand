@@ -769,7 +769,7 @@ const en = {
     commitPickerEmpty: "No commits found",
   },
 
-  // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
+  // ─── Guided bisect ─────────────────────────────────────
   bisect: {
     notInHead: "This commit is not in HEAD's history: check out a branch that contains it first.",
     continue: "Continue",
@@ -797,6 +797,8 @@ const en = {
     open: "Open commit",
     dirty: "Your uncommitted changes will follow you to the next commit.",
   },
+
+  // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
   rebase: {
     title: "Interactive rebase",
     button: "Rebase",
