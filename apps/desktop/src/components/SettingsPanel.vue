@@ -762,19 +762,32 @@ function onAIProviderChange(val: AIProvider) {
 // Ollama detection
 const ollamaAvailable = ref(false);
 const ollamaModels = ref<string[]>([]);
-/** Why the last Test click failed (the backend's message), "" otherwise. */
+/** Why the last check failed, "" when there is nothing more to say than "not connected". */
 const ollamaError = ref("");
+
+/** Loopback addresses never meet the backend's AI endpoint question. */
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    return host === "localhost" || host === "::1" || /^127\./.test(host);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Probe the Ollama server. On mount it is a background check: an address the
  * user has not allowed yet fails without a question. The Test button passes
- * `interactive`, so a remote address gets the backend's native question, and
- * a failure says why.
+ * `interactive`, so a remote address gets the backend's native question. A
+ * failure says why after Test, and for a remote address on mount too (the
+ * backend's message then says how to allow it); a local Ollama that is not
+ * running keeps the install hint.
  */
 async function detectOllama(interactive = false) {
   ollamaError.value = "";
+  const url = settings.value.aiOllamaUrl || "http://localhost:11434";
+  const explain = interactive || !isLoopbackUrl(url);
   try {
-    const url = settings.value.aiOllamaUrl || "http://localhost:11434";
     // Through the backend: the webview's CSP no longer reaches arbitrary hosts.
     const res = await aiHttpRequest("GET", `${url.replace(/\/+$/, "")}/api/tags`, "none", undefined, 2, {
       interactive,
@@ -788,12 +801,12 @@ async function detectOllama(interactive = false) {
     } else {
       ollamaAvailable.value = false;
       ollamaModels.value = [];
-      if (interactive) ollamaError.value = `HTTP ${res.status}`;
+      if (explain) ollamaError.value = t("settings.aiOllamaHttpError", res.status);
     }
   } catch (e) {
     ollamaAvailable.value = false;
     ollamaModels.value = [];
-    if (interactive) ollamaError.value = e instanceof Error ? e.message : String(e);
+    if (explain) ollamaError.value = e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -1073,9 +1086,9 @@ const usesApiModelField = computed(() =>
 );
 
 // A slow fetch for a previous provider/key must not overwrite a newer one.
-// `interactive`: only a load the user asked for (Refresh, the endpoint field
-// committed) may pop the backend's question for an address not allowed yet;
-// the loads on tab open and on a provider/key change fail instead.
+// `interactive`: only Refresh may pop the backend's question for an address
+// not allowed yet; the loads on tab open, on a provider/key change and on
+// leaving the endpoint field fail instead, with a message pointing at Refresh.
 let modelsRequest = 0;
 async function loadModels(interactive = false, provider: AIProvider = settings.value.aiProvider) {
   const request = ++modelsRequest;
@@ -1112,12 +1125,16 @@ watch(
 );
 onUnmounted(() => clearTimeout(modelsReloadTimer));
 
-/** Endpoint field committed: refetch, but only for a complete URL. */
+/**
+ * Endpoint field committed: refetch, but only for a complete URL. Not
+ * interactive: every blur would otherwise ask again for an address the user
+ * refused; Refresh asks.
+ */
 function onEndpointBlur() {
   if (!aiDetectDone || !isFetchableEndpoint(settings.value.aiApiEndpoint)) return;
   clearTimeout(modelsReloadTimer);
   modelOptions.value = [];
-  loadModels(true);
+  loadModels();
 }
 
 const currentModel = computed(() =>

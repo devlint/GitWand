@@ -25,12 +25,12 @@
 //!   request with a key bound to a server that does not check keys. Every
 //!   request passes `check_open_endpoint`: a loopback host, a known
 //!   provider, or an origin the user allowed in a native dialog
-//!   shown by this module (the webview cannot answer it), remembered in
-//!   `{data_local_dir}/gitwand/ai-open-endpoints.json`. This narrows what a
+//!   shown by this module (the webview cannot answer it), remembered in the
+//!   keychain next to the key (`OPEN_ENDPOINTS_ACCOUNT`, out of reach of the
+//!   webview's credential and file commands). This narrows what a
 //!   compromised webview can do with these two commands; it does not make the
 //!   webview trusted (see the IPC scoping follow-up in ROADMAP.md).
 
-use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 
 use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl, RequestBody};
@@ -39,6 +39,9 @@ use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl, R
 /// `credentials::BACKEND_ONLY_SERVICES`.
 pub(crate) const AI_KEY_SERVICE: &str = "gitwand:ai";
 const AI_KEY_ACCOUNT: &str = "api-key";
+/// Keychain account, under the same backend-only service, holding the origins
+/// the user allowed (`check_open_endpoint`), as a JSON array.
+const OPEN_ENDPOINTS_ACCOUNT: &str = "open-endpoints";
 
 /// Ceiling for a request that names no timeout of its own — the completion
 /// calls. A local model on CPU (Ollama) or a long generation can take many
@@ -165,35 +168,44 @@ fn is_loopback(target: &tauri::Url) -> bool {
 /// stored with `store: true`, the residual risk of a compromised webview).
 const KNOWN_PROVIDER_ORIGINS: &[&str] = &["https://api.anthropic.com", "https://api.openai.com"];
 
-fn open_endpoints_path() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("gitwand")
-        .join("ai-open-endpoints.json")
+/// Where the origins the user allowed are kept.
+trait OriginStore {
+    /// The allowed origins. Nothing stored yet is an empty list; an
+    /// unreadable or corrupt value is an error, so that it is never
+    /// overwritten with a single new origin.
+    fn load(&self) -> Result<Vec<String>, String>;
+    fn save(&self, origins: &[String]) -> Result<(), String>;
 }
 
-/// Origins the user allowed, from `path`. A missing file allows none; an
-/// unreadable or corrupt one is an error, so that it is never overwritten
-/// with a single new origin.
-fn load_open_endpoints(path: &Path) -> Result<Vec<String>, String> {
-    match std::fs::read_to_string(path) {
-        Ok(t) => {
-            serde_json::from_str(&t).map_err(|e| format!("cannot parse {}: {e}", path.display()))
+/// The app's store: a keychain entry under the backend-only `AI_KEY_SERVICE`,
+/// which the webview can neither read nor write (`credentials`), unlike a
+/// file in the data directory (`write_file` accepts any path inside a git
+/// work tree, and a dotfiles repository can hold that directory).
+struct KeychainOrigins;
+
+impl KeychainOrigins {
+    fn entry() -> Result<keyring::Entry, String> {
+        keyring::Entry::new(AI_KEY_SERVICE, OPEN_ENDPOINTS_ACCOUNT)
+            .map_err(|e| format!("keyring init failed: {}", e))
+    }
+}
+
+impl OriginStore for KeychainOrigins {
+    fn load(&self) -> Result<Vec<String>, String> {
+        match Self::entry()?.get_password() {
+            Ok(t) => serde_json::from_str(&t)
+                .map_err(|e| format!("cannot parse the allowed AI endpoints: {e}")),
+            Err(keyring::Error::NoEntry) => Ok(Vec::new()),
+            Err(e) => Err(format!("cannot read the allowed AI endpoints: {e}")),
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(e) => Err(format!("cannot read {}: {e}", path.display())),
     }
-}
 
-fn save_open_endpoints(path: &Path, origins: &[String]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    fn save(&self, origins: &[String]) -> Result<(), String> {
+        let text = serde_json::to_string(origins).map_err(|e| e.to_string())?;
+        Self::entry()?
+            .set_password(&text)
+            .map_err(|e| format!("cannot store the allowed AI endpoints: {e}"))
     }
-    let text = serde_json::to_string_pretty(origins).map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 /// In-process state of the gate.
@@ -236,10 +248,12 @@ impl Drop for QuestionOpen<'_> {
     }
 }
 
-fn not_allowed(locale: Option<&str>, origin: &str) -> String {
-    open_endpoint_prompt(locale)
-        .refused
-        .replace("{origin}", origin)
+/// Error for a request the gate stops: `probe` when no question was shown
+/// (a background load), so the message says how to get one.
+fn not_allowed(locale: Option<&str>, origin: &str, probe: bool) -> String {
+    let p = open_endpoint_prompt(locale);
+    let text = if probe { p.not_yet } else { p.refused };
+    text.replace("{origin}", origin)
 }
 
 /// The gate every AI request passes before repository content can go to
@@ -254,7 +268,7 @@ fn not_allowed(locale: Option<&str>, origin: &str) -> String {
 /// language of the refusal message.
 fn check_open_endpoint(
     target: &tauri::Url,
-    store: &Path,
+    store: &dyn OriginStore,
     ask: Option<&dyn Fn(&str) -> bool>,
     locale: Option<&str>,
 ) -> Result<(), String> {
@@ -265,9 +279,7 @@ fn check_open_endpoint(
     let mut state = lock_gate();
     let mut waited = false;
     loop {
-        if state.session.contains(&origin)
-            || load_open_endpoints(store).is_ok_and(|l| l.contains(&origin))
-        {
+        if state.session.contains(&origin) || store.load().is_ok_and(|l| l.contains(&origin)) {
             return Ok(());
         }
         if state.asking.contains(&origin) {
@@ -281,12 +293,12 @@ fn check_open_endpoint(
         }
         if waited {
             // The question this request waited on was answered no.
-            return Err(not_allowed(locale, &origin));
+            return Err(not_allowed(locale, &origin, false));
         }
         break;
     }
     let Some(ask) = ask else {
-        return Err(not_allowed(locale, &origin));
+        return Err(not_allowed(locale, &origin, true));
     };
     state.asking.push(origin.clone());
     drop(state);
@@ -300,9 +312,13 @@ fn check_open_endpoint(
             let mut state = lock_gate();
             state.session.push(origin.clone());
             // Persist; a store that cannot be read is left as it is.
-            let saved = load_open_endpoints(store).and_then(|mut list| {
-                list.push(origin.clone());
-                save_open_endpoints(store, &list)
+            // Read again right before writing: another GitWand process may
+            // have allowed an origin since this request loaded the list.
+            let saved = store.load().and_then(|mut list| {
+                if !list.contains(&origin) {
+                    list.push(origin.clone());
+                }
+                store.save(&list)
             });
             if let Err(e) = saved {
                 eprintln!("[gitwand] {origin} allowed for this session only: {e}");
@@ -313,7 +329,7 @@ fn check_open_endpoint(
     if allowed {
         Ok(())
     } else {
-        Err(not_allowed(locale, &origin))
+        Err(not_allowed(locale, &origin, false))
     }
 }
 
@@ -324,57 +340,68 @@ struct OpenEndpointPrompt {
     body: &'static str,
     allow: &'static str,
     deny: &'static str,
-    /// Error returned to the request the user (or a probe) did not allow.
+    /// Error returned to the request the user did not allow.
     refused: &'static str,
+    /// Error returned to a background load, which never asks.
+    not_yet: &'static str,
 }
 
 fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
     match locale.unwrap_or("en") {
         "fr" => OpenEndpointPrompt {
             title: "Autoriser ce serveur d'IA ?",
-            body: "GitWand va envoyer du contenu de votre dépôt (diffs, conflits) à :\n\n{origin}\n\nAutorisez-le seulement si c'est le serveur d'IA que vous avez configuré. Ce choix est retenu.",
+            body: "GitWand va envoyer du contenu de votre dépôt (diffs, conflits) à :\n\n{origin}\n\nAutorisez-le seulement si c'est le serveur d'IA que vous avez configuré. S'il est autorisé, GitWand ne le redemandera pas.",
             allow: "Autoriser",
             deny: "Refuser",
-            refused: "Les requêtes d'IA vers {origin} ne sont pas autorisées. Autorisez l'adresse quand GitWand le demande, ou utilisez un serveur local.",
+            refused: "Les requêtes d'IA vers {origin} ont été refusées. GitWand redemandera à la prochaine requête.",
+            not_yet: "{origin} n'est pas encore autorisé : utilisez Tester ou Actualiser dans Réglages > IA pour l'autoriser.",
         },
         "es" => OpenEndpointPrompt {
             title: "¿Permitir este servidor de IA?",
-            body: "GitWand va a enviar contenido de tu repositorio (diffs, conflictos) a:\n\n{origin}\n\nPermítelo solo si es el servidor de IA que configuraste. La decisión se recuerda.",
+            body: "GitWand va a enviar contenido de tu repositorio (diffs, conflictos) a:\n\n{origin}\n\nPermítelo solo si es el servidor de IA que configuraste. Si lo permites, GitWand no volverá a preguntar.",
             allow: "Permitir",
             deny: "Rechazar",
-            refused: "Las solicitudes de IA a {origin} no están permitidas. Permite la dirección cuando GitWand lo pregunte, o usa un servidor local.",
+            refused: "Las solicitudes de IA a {origin} fueron rechazadas. GitWand volverá a preguntar en la próxima solicitud.",
+            not_yet: "{origin} aún no está permitido: usa Probar o Actualizar en Ajustes > IA para permitirlo.",
         },
         "pt-BR" => OpenEndpointPrompt {
             title: "Permitir este servidor de IA?",
-            body: "O GitWand vai enviar conteúdo do seu repositório (diffs, conflitos) para:\n\n{origin}\n\nPermita apenas se for o servidor de IA que você configurou. A escolha fica salva.",
+            body: "O GitWand vai enviar conteúdo do seu repositório (diffs, conflitos) para:\n\n{origin}\n\nPermita apenas se for o servidor de IA que você configurou. Se permitido, o GitWand não perguntará de novo.",
             allow: "Permitir",
             deny: "Recusar",
-            refused: "As solicitações de IA para {origin} não estão permitidas. Permita o endereço quando o GitWand perguntar, ou use um servidor local.",
+            refused: "As solicitações de IA para {origin} foram recusadas. O GitWand perguntará de novo na próxima solicitação.",
+            not_yet: "{origin} ainda não está permitido: use Testar ou Atualizar em Configurações > IA para permiti-lo.",
         },
         "zh-CN" => OpenEndpointPrompt {
             title: "允许此 AI 服务器？",
-            body: "GitWand 将把仓库内容（差异、冲突）发送到：\n\n{origin}\n\n仅当它是你配置的 AI 服务器时才允许。此选择会被记住。",
+            body: "GitWand 将把仓库内容（差异、冲突）发送到：\n\n{origin}\n\n仅当它是你配置的 AI 服务器时才允许。允许后，GitWand 不会再次询问。",
             allow: "允许",
             deny: "拒绝",
-            refused: "不允许向 {origin} 发送 AI 请求。请在 GitWand 询问时允许该地址，或使用本地服务器。",
+            refused: "已拒绝向 {origin} 发送 AI 请求。下次请求时 GitWand 会再次询问。",
+            not_yet: "{origin} 尚未获得允许：请在 设置 > AI 中使用“测试”或“刷新”来允许它。",
         },
         _ => OpenEndpointPrompt {
             title: "Allow this AI server?",
-            body: "GitWand is about to send repository content (diffs, conflicts) to:\n\n{origin}\n\nAllow it only if this is the AI server you configured. Your choice is remembered.",
+            body: "GitWand is about to send repository content (diffs, conflicts) to:\n\n{origin}\n\nAllow it only if this is the AI server you configured. Once allowed, GitWand does not ask again.",
             allow: "Allow",
             deny: "Deny",
-            refused: "AI requests to {origin} are not allowed. Allow the address when GitWand asks, or use a local server.",
+            refused: "AI requests to {origin} were refused. GitWand asks again on the next request.",
+            not_yet: "{origin} is not allowed yet: use Test or Refresh in Settings > AI to allow it.",
         },
     }
 }
 
-/// Ask in a native dialog, which the webview can neither draw nor answer.
-/// Runs on a blocking thread (`ai_http_request` is in `spawn_blocking`).
-fn ask_open_endpoint(app: &tauri::AppHandle, locale: Option<&str>, origin: &str) -> bool {
+/// Ask in a native dialog, which the webview can neither draw nor answer,
+/// attached to the window the request came from so that it opens in front of
+/// it (on Windows a dialog without a parent can open behind the app). Runs on
+/// a blocking thread (`ai_http_request` is in `spawn_blocking`).
+fn ask_open_endpoint(window: &tauri::WebviewWindow, locale: Option<&str>, origin: &str) -> bool {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     let p = open_endpoint_prompt(locale);
-    app.dialog()
+    window
+        .dialog()
         .message(p.body.replace("{origin}", origin))
+        .parent(window)
         .title(p.title)
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
@@ -497,7 +524,7 @@ fn build_request_config(
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub(crate) async fn ai_http_request(
-    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     method: String,
     url: String,
     body: Option<String>,
@@ -507,13 +534,13 @@ pub(crate) async fn ai_http_request(
     interactive: Option<bool>,
 ) -> Result<AiHttpResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let ask = |o: &str| ask_open_endpoint(&app, locale.as_deref(), o);
+        let ask = |o: &str| ask_open_endpoint(&window, locale.as_deref(), o);
         let ask: Option<&dyn Fn(&str) -> bool> = match interactive {
             Some(false) => None,
             _ => Some(&ask),
         };
         let open_gate = |target: &tauri::Url| {
-            check_open_endpoint(target, &open_endpoints_path(), ask, locale.as_deref())
+            check_open_endpoint(target, &KeychainOrigins, ask, locale.as_deref())
         };
         ai_http_request_inner(
             &method,
@@ -715,6 +742,27 @@ mod tests {
         );
     }
 
+    use std::path::{Path, PathBuf};
+
+    /// A file-backed store for the tests (the app uses the keychain).
+    fn load_open_endpoints(path: &Path) -> Result<Vec<String>, String> {
+        match std::fs::read_to_string(path) {
+            Ok(t) => serde_json::from_str(&t).map_err(|e| e.to_string()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    impl OriginStore for PathBuf {
+        fn load(&self) -> Result<Vec<String>, String> {
+            load_open_endpoints(self)
+        }
+        fn save(&self, origins: &[String]) -> Result<(), String> {
+            std::fs::create_dir_all(self.parent().unwrap()).map_err(|e| e.to_string())?;
+            std::fs::write(self, serde_json::to_string(origins).unwrap()).map_err(|e| e.to_string())
+        }
+    }
+
     fn scratch_store(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("gitwand-ai-open-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -900,11 +948,17 @@ mod tests {
     #[test]
     fn the_refusal_is_in_the_app_language() {
         let store = scratch_store("locale");
-        let err =
+        let probe =
             check_open_endpoint(&url("http://10.0.0.8:1"), &store, None, Some("fr")).unwrap_err();
         assert!(
-            err.starts_with("Les requêtes d'IA vers http://10.0.0.8:1"),
-            "{err}"
+            probe.starts_with("http://10.0.0.8:1 n'est pas encore autorisé"),
+            "{probe}"
+        );
+        let refused = check_open_endpoint(&url("http://10.0.0.8:1"), &store, Some(&no), Some("fr"))
+            .unwrap_err();
+        assert!(
+            refused.starts_with("Les requêtes d'IA vers http://10.0.0.8:1 ont été refusées"),
+            "{refused}"
         );
     }
 
@@ -950,6 +1004,7 @@ mod tests {
             let p = open_endpoint_prompt(l);
             assert!(p.body.contains("{origin}"), "{l:?}");
             assert!(p.refused.contains("{origin}"), "{l:?}");
+            assert!(p.not_yet.contains("{origin}"), "{l:?}");
             assert!(!p.allow.is_empty() && !p.deny.is_empty() && !p.title.is_empty());
         }
     }

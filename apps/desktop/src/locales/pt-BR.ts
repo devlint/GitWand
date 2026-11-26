@@ -1443,6 +1443,7 @@ const ptBR: Locale = {
     aiOllamaTest: "Testar conexão",
     aiOllamaConnected: "Conectado — {0} modelo(s) disponível(is)",
     aiOllamaNotConnected: "Não conectado. Instale o Ollama em ollama.com",
+    aiOllamaHttpError: "O Ollama respondeu com HTTP {0}",
     // Aba IA — fallback LLM (v2.5 — .gitwandrc por repositório)
     ai: {
       fallback: {
