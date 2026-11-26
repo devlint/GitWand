@@ -41,7 +41,7 @@ pub(crate) const AI_KEY_SERVICE: &str = "gitwand:ai";
 const AI_KEY_ACCOUNT: &str = "api-key";
 /// Prefix of the keychain accounts, under the same backend-only service, that
 /// record the origins the user allowed (`check_open_endpoint_with`): one entry
-/// per origin, `open-endpoint:<origin>`.
+/// per origin, `open-endpoint:<origin as lowercase hex>` (`origin_account`).
 const OPEN_ENDPOINT_ACCOUNT_PREFIX: &str = "open-endpoint:";
 
 /// Ceiling for a request that names no timeout of its own — the completion
@@ -187,13 +187,19 @@ trait OriginStore: Sync {
 /// hold that directory).
 struct KeychainOrigins;
 
+/// Keychain account of an allowed origin. Hex, so it holds no `.` or `:`:
+/// Windows names a credential `{account}.{service}`, and an origin spelled
+/// out (`http://x.gitwand:8080`) could be split into another account and a
+/// `gitwand:`-prefixed service the webview's credential commands accept.
+fn origin_account(origin: &str) -> String {
+    let hex: String = origin.bytes().map(|b| format!("{b:02x}")).collect();
+    format!("{OPEN_ENDPOINT_ACCOUNT_PREFIX}{hex}")
+}
+
 impl KeychainOrigins {
     fn entry(origin: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(
-            AI_KEY_SERVICE,
-            &format!("{OPEN_ENDPOINT_ACCOUNT_PREFIX}{origin}"),
-        )
-        .map_err(|e| format!("keyring init failed: {}", e))
+        keyring::Entry::new(AI_KEY_SERVICE, &origin_account(origin))
+            .map_err(|e| format!("keyring init failed: {}", e))
     }
 }
 
@@ -379,7 +385,8 @@ fn check_open_endpoint_with(
         }
         if ask.is_none() {
             // A background load never waits on someone else's question.
-            return Err(not_allowed(locale, &origin, true));
+            let refused = state.refused.contains(&origin);
+            return Err(not_allowed(locale, &origin, !refused));
         }
         state.waiting.push(origin.clone());
         state = GATE_ANSWERED.wait(state).unwrap_or_else(|p| p.into_inner());
@@ -402,7 +409,9 @@ fn check_open_endpoint_with(
         }
     }
     let Some(ask) = ask else {
-        return Err(not_allowed(locale, &origin, true));
+        // "Refused" when the user did refuse it in this run, else "not yet".
+        let refused = state.refused.contains(&origin);
+        return Err(not_allowed(locale, &origin, !refused));
     };
     if !ask_again_if_refused && state.refused.contains(&origin) {
         return Err(not_allowed(locale, &origin, false));
@@ -452,7 +461,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
     match locale.unwrap_or("en") {
         "fr" => OpenEndpointPrompt {
             title: "Autoriser ce serveur d'IA ?",
-            body: "GitWand va envoyer du contenu de votre dépôt (diffs, conflits) à :\n\n{origin}\n\nAutorisez-le seulement si c'est le serveur d'IA que vous avez configuré. S'il est autorisé, GitWand ne le redemandera pas.",
+            body: "GitWand va envoyer des requêtes d'IA à :\n\n{origin}\n\nElles contiennent du contenu de votre dépôt (diffs, conflits) pour les actions d'IA, et votre clé d'API si une clé est enregistrée pour cette adresse. Autorisez-le seulement si c'est le serveur d'IA que vous avez configuré. S'il est autorisé, GitWand ne le redemandera pas.",
             allow: "Autoriser",
             deny: "Refuser",
             refused: "Les requêtes d'IA vers {origin} ont été refusées. Pour l'autoriser, utilisez Tester la connexion ou Rafraîchir dans Paramètres > IA.",
@@ -460,7 +469,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
         },
         "es" => OpenEndpointPrompt {
             title: "¿Permitir este servidor de IA?",
-            body: "GitWand va a enviar contenido de tu repositorio (diffs, conflictos) a:\n\n{origin}\n\nPermítelo solo si es el servidor de IA que configuraste. Si lo permites, GitWand no volverá a preguntar.",
+            body: "GitWand va a enviar solicitudes de IA a:\n\n{origin}\n\nContienen contenido de tu repositorio (diffs, conflictos) para las acciones de IA, y tu clave de API si hay una guardada para esta dirección. Permítelo solo si es el servidor de IA que configuraste. Si lo permites, GitWand no volverá a preguntar.",
             allow: "Permitir",
             deny: "Rechazar",
             refused: "Las solicitudes de IA a {origin} fueron rechazadas. Para permitirlo, usa Probar conexión o Actualizar en Ajustes > IA.",
@@ -468,7 +477,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
         },
         "pt-BR" => OpenEndpointPrompt {
             title: "Permitir este servidor de IA?",
-            body: "O GitWand vai enviar conteúdo do seu repositório (diffs, conflitos) para:\n\n{origin}\n\nPermita apenas se for o servidor de IA que você configurou. Se permitido, o GitWand não perguntará de novo.",
+            body: "O GitWand vai enviar solicitações de IA para:\n\n{origin}\n\nElas contêm conteúdo do seu repositório (diffs, conflitos) nas ações de IA, e sua chave de API se houver uma salva para este endereço. Permita apenas se for o servidor de IA que você configurou. Se permitido, o GitWand não perguntará de novo.",
             allow: "Permitir",
             deny: "Recusar",
             refused: "As solicitações de IA para {origin} foram recusadas. Para permiti-lo, use Testar conexão ou Atualizar em Configurações > IA.",
@@ -476,7 +485,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
         },
         "zh-CN" => OpenEndpointPrompt {
             title: "允许此 AI 服务器？",
-            body: "GitWand 将把仓库内容（差异、冲突）发送到：\n\n{origin}\n\n仅当它是你配置的 AI 服务器时才允许。允许后，GitWand 不会再次询问。",
+            body: "GitWand 将向以下地址发送 AI 请求：\n\n{origin}\n\nAI 操作会包含仓库内容（差异、冲突），如果为此地址保存了 API 密钥，也会包含该密钥。仅当它是你配置的 AI 服务器时才允许。允许后，GitWand 不会再次询问。",
             allow: "允许",
             deny: "拒绝",
             refused: "已拒绝向 {origin} 发送 AI 请求。如需允许，请在 设置 > AI 中使用“测试连接”或“刷新”。",
@@ -484,7 +493,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
         },
         _ => OpenEndpointPrompt {
             title: "Allow this AI server?",
-            body: "GitWand is about to send repository content (diffs, conflicts) to:\n\n{origin}\n\nAllow it only if this is the AI server you configured. Once allowed, GitWand does not ask again.",
+            body: "GitWand is about to send AI requests to:\n\n{origin}\n\nThey carry repository content (diffs, conflicts) for AI actions, and your API key if one is saved for this address. Allow it only if this is the AI server you configured. Once allowed, GitWand does not ask again.",
             allow: "Allow",
             deny: "Deny",
             refused: "AI requests to {origin} were refused. To allow it, use Test connection or Refresh in Settings > AI.",
@@ -987,6 +996,25 @@ mod tests {
         assert_eq!(AskMode::parse(Some("never")), AskMode::Never);
         assert_eq!(AskMode::parse(Some("always")), AskMode::Always);
         assert_eq!(AskMode::parse(None), AskMode::UnlessRefused);
+    }
+
+    #[test]
+    fn an_origin_account_cannot_be_split_into_another_service() {
+        let a = origin_account("http://x.gitwand:8080");
+        assert_eq!(
+            a,
+            "open-endpoint:687474703a2f2f782e67697477616e643a38303830"
+        );
+        assert!(!a[OPEN_ENDPOINT_ACCOUNT_PREFIX.len()..].contains(['.', ':']));
+    }
+
+    #[test]
+    fn a_probe_for_a_refused_origin_says_it_was_refused() {
+        let store = scratch_store("probe-refused");
+        let target = url("http://10.0.0.12:11434");
+        assert!(check_open_endpoint(&target, &store, Some(&no), None).is_err());
+        let err = check_open_endpoint(&target, &store, None, None).unwrap_err();
+        assert!(err.contains("were refused"), "{err}");
     }
 
     #[test]

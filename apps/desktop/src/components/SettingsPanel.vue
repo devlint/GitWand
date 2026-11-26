@@ -778,11 +778,15 @@ async function detectOllama(explicit = false) {
   ollamaModels.value = r.models;
   ollamaError.value = r.error;
 }
-// A message about the previous URL says nothing about the new one.
+// A result about the previous URL says nothing about the new one: drop it,
+// and let a probe still running for that URL land nowhere.
 watch(
   () => settings.value.aiOllamaUrl,
   () => {
+    ollamaRequest++;
     ollamaError.value = "";
+    ollamaAvailable.value = false;
+    ollamaModels.value = [];
   },
 );
 

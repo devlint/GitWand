@@ -44,10 +44,14 @@ const BACKEND_ONLY_SERVICES: &[&str] = &[crate::commands::ai_http::AI_KEY_SERVIC
 fn check_not_backend_only(service: &str) -> Result<(), String> {
     // Case-insensitive: Windows' Credential Manager matches target names
     // without regard to case, so `gitwand:AI` would reach `gitwand:ai`.
-    if BACKEND_ONLY_SERVICES
-        .iter()
-        .any(|s| s.eq_ignore_ascii_case(service))
-    {
+    // Also any service ending in `.<backend-only service>`: Windows names a
+    // credential `{account}.{service}`, so `x.gitwand:ai` with account `a`
+    // and `gitwand:ai` with account `a.x` would be the same credential.
+    let lower = service.to_ascii_lowercase();
+    if BACKEND_ONLY_SERVICES.iter().any(|s| {
+        let s = s.to_ascii_lowercase();
+        lower == s || lower.ends_with(&format!(".{s}"))
+    }) {
         return Err(format!(
             "`{}` is managed by the backend and cannot be accessed from the frontend",
             service
@@ -133,7 +137,12 @@ mod tests {
 
     #[test]
     fn a_backend_only_service_is_refused_in_any_case() {
-        for s in ["gitwand:ai", "gitwand:AI", "GitWand:Ai"] {
+        for s in [
+            "gitwand:ai",
+            "gitwand:AI",
+            "GitWand:Ai",
+            "gitwand:8080.gitwand:ai",
+        ] {
             assert!(check_not_backend_only(s).is_err(), "{s}");
         }
         assert!(check_not_backend_only("gitwand:github").is_ok());
