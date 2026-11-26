@@ -7,6 +7,7 @@ import ConflictEnginePage from './ConflictEnginePage.vue'
 import AiAgentsPage from './AiAgentsPage.vue'
 import AgentPage from './AgentPage.vue'
 import CompareMatrix from './CompareMatrix.vue'
+import NextHero from './NextHero.vue'
 import AdventCalendar from './advent/AdventCalendar.vue'
 import AdventNavLink from './advent/AdventNavLink.vue'
 import './custom.css'
@@ -24,6 +25,7 @@ export default {
     app.component('AiAgentsPage', AiAgentsPage)
     app.component('AgentPage', AgentPage)
     app.component('CompareMatrix', CompareMatrix)
+    app.component('NextHero', NextHero)
     app.component('AdventCalendar', AdventCalendar)
   },
 } satisfies Theme

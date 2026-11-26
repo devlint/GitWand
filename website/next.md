@@ -1,4 +1,5 @@
 ---
+layout: page
 title: What's next — GitWand v4
 description: Where GitWand is going. v4 turns the Git client into one working environment where coding agents are supervised and controlled, and their work is integrated with proof. What changes, what does not, and what happens to 3.x.
 head:
@@ -10,13 +11,13 @@ head:
       content: v4 turns GitWand into one working environment where coding agents are supervised, controlled and integrated with proof. What changes and what does not.
 ---
 
-# What's next: GitWand v4
+<NextHero />
+
+<div class="vp-doc nx-prose">
 
 _Last updated 2026-11-26. This page describes a direction, not a schedule. It carries no dates, and it says plainly what is decided and what is not._
 
-GitWand v4 is a break with the Git client you know. It becomes one working environment where coding agents are **supervised and controlled**, and where their work is **integrated with proof**.
-
-## Why
+## Why {#why}
 
 More and more code is written by agents, often several at a time, each in its own worktree. Writing is no longer the slow part. Integrating and verifying is: nobody can read everything five agents produce, and Git clients were all designed for one person making their own commits.
 
@@ -66,3 +67,11 @@ GitWand will keep a local journal of the resolutions it applies, so the engine's
 ## Have a say
 
 The complete plan, with the reasoning, is in the [roadmap](https://github.com/devlint/GitWand/blob/main/ROADMAP.md). If you rely on something in GitWand today and want to know where it goes in v4, or you think this direction is wrong, say so in the [discussions](https://github.com/devlint/GitWand/discussions). That is more useful now than once it is built.
+
+</div>
+
+<style>
+.nx-prose { max-width: 1240px; margin: 0 auto; padding: 48px clamp(20px, 4vw, 48px) 96px; }
+.nx-prose > * { max-width: 44rem; }
+.nx-prose > table { max-width: 52rem; }
+</style>
