@@ -20,6 +20,18 @@
 //!   changing the endpoint means entering the key again.
 //! - Because the webview no longer talks to arbitrary AI hosts itself, the CSP
 //!   `connect-src` can be limited to a short list of fixed hosts.
+//! - A request without the key (`auth: "none"`: Ollama, a keyless
+//!   OpenAI-compatible server) carries repository content too, and so does a
+//!   request with a key bound to a server that does not check keys. Every
+//!   request passes `check_open_endpoint_with`: a loopback host, a known
+//!   provider, or an origin the user allowed in a native dialog
+//!   shown by this module (the webview cannot answer it), remembered in the
+//!   keychain next to the key (`OPEN_ENDPOINT_ACCOUNT_PREFIX`, out of reach of the
+//!   webview's credential and file commands). This narrows what a
+//!   compromised webview can do with these two commands; it does not make the
+//!   webview trusted (see the IPC scoping follow-up in ROADMAP.md).
+
+use std::sync::{Condvar, Mutex};
 
 use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl, RequestBody};
 
@@ -27,6 +39,10 @@ use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl, R
 /// `credentials::BACKEND_ONLY_SERVICES`.
 pub(crate) const AI_KEY_SERVICE: &str = "gitwand:ai";
 const AI_KEY_ACCOUNT: &str = "api-key";
+/// Prefix of the keychain accounts, under the same backend-only service, that
+/// record the origins the user allowed (`check_open_endpoint_with`): one entry
+/// per origin, `open-endpoint:<SHA-256 of the origin, hex>` (`origin_account`).
+const OPEN_ENDPOINT_ACCOUNT_PREFIX: &str = "open-endpoint:";
 
 /// Ceiling for a request that names no timeout of its own — the completion
 /// calls. A local model on CPU (Ollama) or a long generation can take many
@@ -36,7 +52,7 @@ const COMPLETION_TIMEOUT_SECS: u64 = 30 * 60;
 /// an unreachable host fails fast even under the generous completion ceiling.
 const CONNECT_TIMEOUT_SECS: u64 = 30;
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Debug)]
 pub(crate) struct AiHttpResponse {
     pub status: i32,
     pub body: String,
@@ -133,6 +149,385 @@ fn check_key_binding(bound: Option<&str>, target: &tauri::Url) -> Result<(), Str
     }
 }
 
+/// Loopback hosts pass the gate without asking: a local Ollama (the default
+/// `http://localhost:11434`) is no exfiltration channel.
+fn is_loopback(target: &tauri::Url) -> bool {
+    let host = target.host_str().unwrap_or("");
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+/// The hosted providers GitWand defaults to pass the gate too: what reaches
+/// them is not readable by whoever chose the endpoint (a script in the
+/// webview with a key of its own could still read back an OpenAI completion
+/// stored with `store: true`, the residual risk of a compromised webview).
+const KNOWN_PROVIDER_ORIGINS: &[&str] = &["https://api.anthropic.com", "https://api.openai.com"];
+
+/// Where the origins the user allowed are kept, one entry per origin: no
+/// list to read, modify and write back (two GitWand processes allowing two
+/// origins at once keep both), and no size cap on a growing list (Windows'
+/// Credential Manager caps one entry at 2560 bytes).
+trait OriginStore: Sync {
+    /// Whether `origin` was allowed. A store that cannot be read is an error,
+    /// which the gate reads as "not allowed".
+    fn is_allowed(&self, origin: &str) -> Result<bool, String>;
+    fn allow(&self, origin: &str) -> Result<(), String>;
+}
+
+/// The app's store: one keychain entry per origin, under the backend-only
+/// `AI_KEY_SERVICE`, which the webview can neither read nor write
+/// (`credentials`), unlike a file in the data directory (`write_file`
+/// accepts any path inside a git work tree, and a dotfiles repository can
+/// hold that directory).
+struct KeychainOrigins;
+
+/// Keychain account of an allowed origin: a SHA-256 digest in hex. It holds
+/// no `.` or `:` (Windows names a credential `{account}.{service}`, and an
+/// origin spelled out, `http://x.gitwand:8080`, could be split into another
+/// account and a `gitwand:`-prefixed service the webview's credential
+/// commands accept), and its length is fixed (Windows caps a credential's
+/// user name at 513 characters, which a long origin in hex would exceed).
+fn origin_account(origin: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hex: String = Sha256::digest(origin.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("{OPEN_ENDPOINT_ACCOUNT_PREFIX}{hex}")
+}
+
+impl KeychainOrigins {
+    fn entry(origin: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(AI_KEY_SERVICE, &origin_account(origin))
+            .map_err(|e| format!("keyring init failed: {}", e))
+    }
+}
+
+impl OriginStore for KeychainOrigins {
+    fn is_allowed(&self, origin: &str) -> Result<bool, String> {
+        match Self::entry(origin)?.get_password() {
+            Ok(_) => Ok(true),
+            Err(keyring::Error::NoEntry) => Ok(false),
+            Err(e) => Err(format!("cannot read the allowed AI endpoints: {e}")),
+        }
+    }
+
+    fn allow(&self, origin: &str) -> Result<(), String> {
+        Self::entry(origin)?
+            .set_password("allowed")
+            .map_err(|e| format!("cannot store the allowed AI endpoint: {e}"))
+    }
+}
+
+/// How the last question for an origin ended, for the requests that waited
+/// on it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Answer {
+    Allowed,
+    Refused,
+    /// No answer: the dialog failed (its window closed, the plugin panicked).
+    Aborted,
+}
+
+/// In-process state of the gate. The keychain is never read or written under
+/// this lock: an OS unlock prompt there would stall every other request.
+struct GateState {
+    /// Origins whose question is on screen: a second request to one of them
+    /// waits for that answer instead of asking again. Requests to other
+    /// origins do not wait.
+    asking: Vec<String>,
+    /// The answer of the last question per origin, read by the requests that
+    /// waited on it. Cleared when a new question for that origin opens.
+    answers: Vec<(String, Answer)>,
+    /// One entry per request waiting on a question, by origin (lets a test
+    /// know a request is waiting rather than sleep).
+    waiting: Vec<String>,
+    /// Origins known to be allowed in this run: allowed here, or found in the
+    /// store. Also keeps an allowed origin working when the store cannot be
+    /// written.
+    session: Vec<String>,
+    /// Origins the user refused in this run. A later request to one of them
+    /// is refused without a new question (a batch of AI calls would ask once
+    /// per call otherwise), unless it asks again on purpose (`Ask::Always`:
+    /// Test connection, Refresh).
+    refused: Vec<String>,
+}
+
+static GATE: Mutex<GateState> = Mutex::new(GateState {
+    asking: Vec::new(),
+    answers: Vec::new(),
+    waiting: Vec::new(),
+    session: Vec::new(),
+    refused: Vec::new(),
+});
+static GATE_ANSWERED: Condvar = Condvar::new();
+
+fn lock_gate() -> std::sync::MutexGuard<'static, GateState> {
+    GATE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Ends a question however `ask` returns, a panic included (the dialog
+/// plugin unwraps a channel that can close while a window goes away): the
+/// origin leaves `asking`, its answer is recorded (`Aborted` unless set), and
+/// the waiting requests wake up rather than wait forever.
+struct QuestionOpen<'a> {
+    origin: &'a str,
+    answer: Answer,
+}
+
+impl Drop for QuestionOpen<'_> {
+    fn drop(&mut self) {
+        let mut state = lock_gate();
+        state.asking.retain(|o| o != self.origin);
+        state.answers.retain(|(o, _)| o != self.origin);
+        state.answers.push((self.origin.to_string(), self.answer));
+        match self.answer {
+            Answer::Allowed => {
+                state.session.push(self.origin.to_string());
+                state.refused.retain(|o| o != self.origin);
+            }
+            Answer::Refused => {
+                if !state.refused.iter().any(|o| o == self.origin) {
+                    state.refused.push(self.origin.to_string());
+                }
+            }
+            Answer::Aborted => {}
+        }
+        drop(state);
+        GATE_ANSWERED.notify_all();
+    }
+}
+
+/// Error for a request the gate stops: `probe` when no question was shown
+/// (a background load), so the message says how to get one.
+fn not_allowed(locale: Option<&str>, origin: &str, probe: bool) -> String {
+    let p = open_endpoint_prompt(locale);
+    let text = if probe { p.not_yet } else { p.refused };
+    text.replace("{origin}", origin)
+}
+
+/// When the gate may show its question for an origin not allowed yet.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AskMode {
+    /// Never (a background load): refused with a message saying how to
+    /// allow the origin.
+    Never,
+    /// Unless the user already refused this origin in this run (AI actions).
+    UnlessRefused,
+    /// Even after a refusal (Test connection, Refresh: the user asking).
+    Always,
+}
+
+impl AskMode {
+    /// From the command argument: `"never"`, `"always"`, anything else (or
+    /// nothing) is `UnlessRefused`.
+    fn parse(v: Option<&str>) -> AskMode {
+        match v {
+            Some("never") => AskMode::Never,
+            Some("always") => AskMode::Always,
+            _ => AskMode::UnlessRefused,
+        }
+    }
+}
+
+/// `check_open_endpoint_with`, asking again after a refusal (the tests' usual
+/// case).
+#[cfg(test)]
+fn check_open_endpoint(
+    target: &tauri::Url,
+    store: &dyn OriginStore,
+    ask: Option<&dyn Fn(&str) -> bool>,
+    locale: Option<&str>,
+) -> Result<(), String> {
+    check_open_endpoint_with(target, store, ask, true, locale)
+}
+
+/// The gate every AI request passes before repository content can go to
+/// `target`, whatever its auth (a key works with a server that does not check
+/// it, and keys bound before this gate existed were never asked about):
+/// loopback and the known providers pass; any other origin must have been
+/// allowed by the user. When it has not, `ask` shows the question (it gets
+/// the origin and answers whether the user allowed it), or, with `ask` =
+/// `None` (a background probe), the request is refused at once, without one
+/// and without waiting on a question already on screen. A refusal is kept for
+/// the run, not stored: the requests that waited on that question share it,
+/// later ones are refused without a question unless `ask_again_if_refused`
+/// (an explicit Test or Refresh). A question that got no answer (the dialog
+/// failed) is asked again by the next waiting request. `locale` is the
+/// language of the refusal message.
+fn check_open_endpoint_with(
+    target: &tauri::Url,
+    store: &dyn OriginStore,
+    ask: Option<&dyn Fn(&str) -> bool>,
+    ask_again_if_refused: bool,
+    locale: Option<&str>,
+) -> Result<(), String> {
+    let origin = target.origin().ascii_serialization();
+    if is_loopback(target) || KNOWN_PROVIDER_ORIGINS.contains(&origin.as_str()) {
+        return Ok(());
+    }
+    if lock_gate().session.contains(&origin) {
+        return Ok(());
+    }
+    // The keychain, outside the lock; a read error counts as "not allowed".
+    if store.is_allowed(&origin).unwrap_or(false) {
+        lock_gate().session.push(origin.clone());
+        return Ok(());
+    }
+
+    let mut state = lock_gate();
+    loop {
+        if state.session.contains(&origin) {
+            return Ok(());
+        }
+        if !state.asking.contains(&origin) {
+            break;
+        }
+        if ask.is_none() {
+            // A background load never waits on someone else's question.
+            let refused = state.refused.contains(&origin);
+            return Err(not_allowed(locale, &origin, !refused));
+        }
+        state.waiting.push(origin.clone());
+        state = GATE_ANSWERED.wait(state).unwrap_or_else(|p| p.into_inner());
+        if let Some(i) = state.waiting.iter().position(|o| o == &origin) {
+            state.waiting.remove(i);
+        }
+        if state.asking.contains(&origin) {
+            continue; // another question for it opened meanwhile
+        }
+        match state
+            .answers
+            .iter()
+            .find(|(o, _)| o == &origin)
+            .map(|(_, a)| *a)
+        {
+            Some(Answer::Allowed) => return Ok(()),
+            Some(Answer::Refused) => return Err(not_allowed(locale, &origin, false)),
+            // No answer: ask again below (or, for a probe, refuse).
+            Some(Answer::Aborted) | None => break,
+        }
+    }
+    let Some(ask) = ask else {
+        // "Refused" when the user did refuse it in this run, else "not yet".
+        let refused = state.refused.contains(&origin);
+        return Err(not_allowed(locale, &origin, !refused));
+    };
+    if !ask_again_if_refused && state.refused.contains(&origin) {
+        return Err(not_allowed(locale, &origin, false));
+    }
+    state.asking.push(origin.clone());
+    state.answers.retain(|(o, _)| o != &origin);
+    drop(state);
+
+    let mut open = QuestionOpen {
+        origin: &origin,
+        answer: Answer::Aborted,
+    };
+    let allowed = ask(&origin);
+    if allowed {
+        // Outside the lock, like every keychain access.
+        if let Err(e) = store.allow(&origin) {
+            eprintln!("[gitwand] {origin} allowed for this session only: {e}");
+        }
+    }
+    open.answer = if allowed {
+        Answer::Allowed
+    } else {
+        Answer::Refused
+    };
+    drop(open);
+    if allowed {
+        Ok(())
+    } else {
+        Err(not_allowed(locale, &origin, false))
+    }
+}
+
+/// Text of the native question, in the app's language (`locale` only picks
+/// the language; the origin shown is the one the request goes to).
+struct OpenEndpointPrompt {
+    title: &'static str,
+    body: &'static str,
+    allow: &'static str,
+    deny: &'static str,
+    /// Error returned to the request the user did not allow.
+    refused: &'static str,
+    /// Error returned to a background load, which never asks.
+    not_yet: &'static str,
+}
+
+fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
+    match locale.unwrap_or("en") {
+        "fr" => OpenEndpointPrompt {
+            title: "Autoriser ce serveur d'IA ?",
+            body: "GitWand va envoyer des requêtes d'IA à :\n\n{origin}\n\nElles contiennent du contenu de votre dépôt (diffs, conflits) pour les actions d'IA, et votre clé d'API si une clé est enregistrée pour cette adresse. Autorisez-le seulement si c'est le serveur d'IA que vous avez configuré. S'il est autorisé, GitWand ne le redemandera pas.",
+            allow: "Autoriser",
+            deny: "Refuser",
+            refused: "Les requêtes d'IA vers {origin} ont été refusées pour cette session. Dans Paramètres > IA, Tester la connexion (Ollama) ou Rafraîchir (liste des modèles) redemande.",
+            not_yet: "{origin} n'est pas encore autorisé. Dans Paramètres > IA, Tester la connexion (Ollama) ou Rafraîchir (liste des modèles) demande à l'autoriser.",
+        },
+        "es" => OpenEndpointPrompt {
+            title: "¿Permitir este servidor de IA?",
+            body: "GitWand va a enviar solicitudes de IA a:\n\n{origin}\n\nContienen contenido de tu repositorio (diffs, conflictos) para las acciones de IA, y tu clave de API si hay una guardada para esta dirección. Permítelo solo si es el servidor de IA que configuraste. Si lo permites, GitWand no volverá a preguntar.",
+            allow: "Permitir",
+            deny: "Rechazar",
+            refused: "Las solicitudes de IA a {origin} fueron rechazadas en esta sesión. En Ajustes > IA, Probar conexión (Ollama) o Actualizar (lista de modelos) vuelve a preguntar.",
+            not_yet: "{origin} aún no está permitido. En Ajustes > IA, Probar conexión (Ollama) o Actualizar (lista de modelos) pregunta si permitirlo.",
+        },
+        "pt-BR" => OpenEndpointPrompt {
+            title: "Permitir este servidor de IA?",
+            body: "O GitWand vai enviar solicitações de IA para:\n\n{origin}\n\nElas contêm conteúdo do seu repositório (diffs, conflitos) nas ações de IA, e sua chave de API se houver uma salva para este endereço. Permita apenas se for o servidor de IA que você configurou. Se permitido, o GitWand não perguntará de novo.",
+            allow: "Permitir",
+            deny: "Recusar",
+            refused: "As solicitações de IA para {origin} foram recusadas nesta sessão. Em Configurações > IA, Testar conexão (Ollama) ou Atualizar (lista de modelos) pergunta de novo.",
+            not_yet: "{origin} ainda não está permitido. Em Configurações > IA, Testar conexão (Ollama) ou Atualizar (lista de modelos) pergunta se deve permiti-lo.",
+        },
+        "zh-CN" => OpenEndpointPrompt {
+            title: "允许此 AI 服务器？",
+            body: "GitWand 将向以下地址发送 AI 请求：\n\n{origin}\n\nAI 操作会包含仓库内容（差异、冲突），如果为此地址保存了 API 密钥，也会包含该密钥。仅当它是你配置的 AI 服务器时才允许。允许后，GitWand 不会再次询问。",
+            allow: "允许",
+            deny: "拒绝",
+            refused: "本次会话已拒绝向 {origin} 发送 AI 请求。在 设置 > AI 中，“测试连接”（Ollama）或“刷新”（模型列表）会再次询问。",
+            not_yet: "{origin} 尚未获得允许。在 设置 > AI 中，“测试连接”（Ollama）或“刷新”（模型列表）会询问是否允许。",
+        },
+        _ => OpenEndpointPrompt {
+            title: "Allow this AI server?",
+            body: "GitWand is about to send AI requests to:\n\n{origin}\n\nThey carry repository content (diffs, conflicts) for AI actions, and your API key if one is saved for this address. Allow it only if this is the AI server you configured. Once allowed, GitWand does not ask again.",
+            allow: "Allow",
+            deny: "Deny",
+            refused: "AI requests to {origin} were refused for this session. In Settings > AI, Test connection (Ollama) or Refresh (model list) asks again.",
+            not_yet: "{origin} is not allowed yet. In Settings > AI, Test connection (Ollama) or Refresh (model list) asks to allow it.",
+        },
+    }
+}
+
+/// Ask in a native dialog, which the webview can neither draw nor answer,
+/// attached to the window the request came from so that it opens in front of
+/// it (on Windows a dialog without a parent can open behind the app). Runs on
+/// a blocking thread (`ai_http_request` is in `spawn_blocking`).
+fn ask_open_endpoint(window: &tauri::WebviewWindow, locale: Option<&str>, origin: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let p = open_endpoint_prompt(locale);
+    window
+        .dialog()
+        .message(p.body.replace("{origin}", origin))
+        .parent(window)
+        .title(p.title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            p.allow.to_string(),
+            p.deny.to_string(),
+        ))
+        .blocking_show()
+}
+
 /// Masked form shown in Settings: enough to recognise which key is stored,
 /// never enough to use it.
 fn key_hint(key: &str) -> String {
@@ -159,7 +554,8 @@ fn stored_value(key: &str, endpoint: Option<&str>) -> Result<String, String> {
 
 /// Store the AI API key in the keychain, bound to the origin of `endpoint`
 /// (an empty key clears it). Returns what the webview may know of what is now
-/// stored, `None` when nothing is.
+/// stored, `None` when nothing is. The requests that use it still pass
+/// `check_open_endpoint_with`.
 #[tauri::command]
 pub(crate) async fn ai_api_key_set(
     key: String,
@@ -236,19 +632,49 @@ fn build_request_config(
 
 /// Perform one AI provider HTTP request. `auth` selects how the stored key is
 /// attached: `"anthropic"` (x-api-key), `"bearer"`, or `"none"` (Ollama). The
-/// key is only ever attached to a request for the origin it is bound to.
-/// `timeout_secs` caps the whole request; without it, the generous completion
-/// ceiling applies (`COMPLETION_TIMEOUT_SECS`).
+/// key is only ever attached to a request for the origin it is bound to, and
+/// every request passes `check_open_endpoint_with`. `locale` is the app's
+/// language, for that question; `ask` is when it may be shown (`AskMode`:
+/// `"never"` for a background load, `"always"` for an explicit Test or
+/// Refresh, otherwise not after a refusal in this run). `timeout_secs` caps
+/// the whole request; without it, the generous completion ceiling applies
+/// (`COMPLETION_TIMEOUT_SECS`).
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub(crate) async fn ai_http_request(
+    window: tauri::WebviewWindow,
     method: String,
     url: String,
     body: Option<String>,
     auth: String,
     timeout_secs: Option<u64>,
+    locale: Option<String>,
+    ask: Option<String>,
 ) -> Result<AiHttpResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        ai_http_request_inner(&method, &url, body.as_deref(), &auth, timeout_secs)
+        let mode = AskMode::parse(ask.as_deref());
+        let question = |o: &str| ask_open_endpoint(&window, locale.as_deref(), o);
+        let ask: Option<&dyn Fn(&str) -> bool> = match mode {
+            AskMode::Never => None,
+            _ => Some(&question),
+        };
+        let open_gate = |target: &tauri::Url| {
+            check_open_endpoint_with(
+                target,
+                &KeychainOrigins,
+                ask,
+                mode == AskMode::Always,
+                locale.as_deref(),
+            )
+        };
+        ai_http_request_inner(
+            &method,
+            &url,
+            body.as_deref(),
+            &auth,
+            timeout_secs,
+            open_gate,
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -260,6 +686,7 @@ fn ai_http_request_inner(
     body: Option<&str>,
     auth: &str,
     timeout_secs: Option<u64>,
+    open_gate: impl FnOnce(&tauri::Url) -> Result<(), String>,
 ) -> Result<AiHttpResponse, String> {
     const MARKER: &str = "\n__GW_HTTP_STATUS__";
     let target = parse_endpoint(url)?;
@@ -271,6 +698,9 @@ fn ai_http_request_inner(
     // Kept alive until curl has exited: it reads the body from this file.
     let body_file = body.map(RequestBody::new).transpose()?;
     let cfg = build_request_config(method, &target, body_file.as_ref(), &headers)?;
+    // Last, whatever the auth: only a request that would actually go out
+    // asks the user (and gets its origin remembered).
+    open_gate(&target)?;
     let timeout = timeout_secs
         .unwrap_or(COMPLETION_TIMEOUT_SECS)
         .clamp(1, COMPLETION_TIMEOUT_SECS);
@@ -435,6 +865,373 @@ mod tests {
             auth_headers("bearer", Some("k")).unwrap(),
             vec!["Authorization: Bearer k".to_string()]
         );
+    }
+
+    use std::path::{Path, PathBuf};
+
+    /// A file-backed store for the tests (the app uses the keychain): a JSON
+    /// array; an unparsable file is a read error.
+    fn load_open_endpoints(path: &Path) -> Result<Vec<String>, String> {
+        match std::fs::read_to_string(path) {
+            Ok(t) => serde_json::from_str(&t).map_err(|e| e.to_string()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    impl OriginStore for PathBuf {
+        fn is_allowed(&self, origin: &str) -> Result<bool, String> {
+            Ok(load_open_endpoints(self)?.iter().any(|o| o == origin))
+        }
+        fn allow(&self, origin: &str) -> Result<(), String> {
+            let mut list = load_open_endpoints(self)?;
+            list.push(origin.to_string());
+            std::fs::create_dir_all(self.parent().unwrap()).map_err(|e| e.to_string())?;
+            std::fs::write(self, serde_json::to_string(&list).unwrap()).map_err(|e| e.to_string())
+        }
+    }
+
+    fn scratch_store(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("gitwand-ai-open-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d.join("ai-open-endpoints.json")
+    }
+
+    fn yes(_: &str) -> bool {
+        true
+    }
+    fn no(_: &str) -> bool {
+        false
+    }
+    fn never(o: &str) -> bool {
+        panic!("asked for {o}")
+    }
+
+    // The gate's session memory is process-wide: every test below uses
+    // origins of its own.
+
+    #[test]
+    fn loopback_and_known_providers_pass_without_asking() {
+        let store = scratch_store("loopback");
+        for u in [
+            "http://localhost:11434/api/chat",
+            "http://LOCALHOST:11434",
+            "http://127.0.0.1:11434",
+            "http://127.0.0.2:8080",
+            "http://[::1]:11434/api/chat",
+            "https://api.anthropic.com/v1/messages",
+            "https://api.openai.com/v1/models",
+        ] {
+            check_open_endpoint(&url(u), &store, Some(&never), None).unwrap();
+            check_open_endpoint(&url(u), &store, None, None).unwrap();
+        }
+        assert!(!store.exists(), "nothing is remembered for them");
+        for u in [
+            "http://localhost.evil.example",
+            "http://192.168.1.10:11434",
+            "https://ollama.example.com",
+            "http://0.0.0.0:11434",
+        ] {
+            assert!(!is_loopback(&url(u)), "{u}");
+        }
+        // Another scheme or port is another origin.
+        assert!(check_open_endpoint(&url("http://api.openai.com"), &store, None, None).is_err());
+    }
+
+    #[test]
+    fn another_origin_is_asked_once_then_remembered() {
+        let store = scratch_store("remember");
+        let asked = std::cell::RefCell::new(Vec::new());
+        let ask = |o: &str| {
+            asked.borrow_mut().push(o.to_string());
+            true
+        };
+        check_open_endpoint(
+            &url("http://10.0.0.1:11434/api/chat"),
+            &store,
+            Some(&ask),
+            None,
+        )
+        .unwrap();
+        assert_eq!(*asked.borrow(), vec!["http://10.0.0.1:11434".to_string()]);
+        // Same origin, other path: no second question.
+        check_open_endpoint(
+            &url("http://10.0.0.1:11434/v1/models"),
+            &store,
+            Some(&never),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            load_open_endpoints(&store).unwrap(),
+            vec!["http://10.0.0.1:11434".to_string()]
+        );
+        // Another port is another origin.
+        assert!(
+            check_open_endpoint(&url("http://10.0.0.1:8080"), &store, Some(&no), None).is_err()
+        );
+    }
+
+    #[test]
+    fn a_refusal_blocks_the_request_and_is_not_remembered() {
+        let store = scratch_store("refuse");
+        let target = url("https://refused.example/collect");
+        let err = check_open_endpoint(&target, &store, Some(&no), None).unwrap_err();
+        assert!(err.contains("https://refused.example"), "{err}");
+        assert!(load_open_endpoints(&store).unwrap().is_empty());
+        let asked = std::cell::Cell::new(false);
+        let ask = |_: &str| {
+            asked.set(true);
+            true
+        };
+        check_open_endpoint(&target, &store, Some(&ask), None).unwrap();
+        assert!(asked.get(), "asked again next time");
+    }
+
+    #[test]
+    fn a_refusal_holds_for_the_run_unless_asked_again_on_purpose() {
+        let store = scratch_store("refusal-run");
+        let target = url("http://10.0.0.10:11434");
+        assert!(check_open_endpoint_with(&target, &store, Some(&no), false, None).is_err());
+        // A batch's next call: refused without a question.
+        let err = check_open_endpoint_with(&target, &store, Some(&never), false, None).unwrap_err();
+        assert!(err.contains("were refused"), "{err}");
+        // Test / Refresh asks again; allowing clears the refusal.
+        check_open_endpoint_with(&target, &store, Some(&yes), true, None).unwrap();
+        check_open_endpoint_with(&target, &store, Some(&never), false, None).unwrap();
+        assert_eq!(AskMode::parse(Some("never")), AskMode::Never);
+        assert_eq!(AskMode::parse(Some("always")), AskMode::Always);
+        assert_eq!(AskMode::parse(None), AskMode::UnlessRefused);
+    }
+
+    #[test]
+    fn an_origin_account_cannot_be_split_into_another_service() {
+        let a = origin_account("http://x.gitwand:8080");
+        let digest = &a[OPEN_ENDPOINT_ACCOUNT_PREFIX.len()..];
+        assert_eq!(digest.len(), 64);
+        assert!(digest.chars().all(|c| c.is_ascii_hexdigit()));
+        // Fixed length, whatever the origin.
+        let long = format!("https://{}.example:8443", "a".repeat(400));
+        assert_eq!(origin_account(&long).len(), a.len());
+        assert_ne!(origin_account("http://x.gitwand:8081"), a);
+    }
+
+    #[test]
+    fn a_probe_for_a_refused_origin_says_it_was_refused() {
+        let store = scratch_store("probe-refused");
+        let target = url("http://10.0.0.12:11434");
+        assert!(check_open_endpoint(&target, &store, Some(&no), None).is_err());
+        let err = check_open_endpoint(&target, &store, None, None).unwrap_err();
+        assert!(err.contains("were refused"), "{err}");
+    }
+
+    #[test]
+    fn a_background_probe_does_not_wait_on_a_question_on_screen() {
+        use std::sync::mpsc;
+        let store = scratch_store("probe-wait");
+        let (opened_tx, opened_rx) = mpsc::channel::<()>();
+        let (answer_tx, answer_rx) = mpsc::channel::<bool>();
+        let s1 = store.clone();
+        let first = std::thread::spawn(move || {
+            let ask = move |_: &str| {
+                opened_tx.send(()).unwrap();
+                answer_rx.recv().unwrap()
+            };
+            check_open_endpoint(&url("http://10.0.0.11:11434"), &s1, Some(&ask), None)
+        });
+        opened_rx.recv().unwrap();
+        let err =
+            check_open_endpoint(&url("http://10.0.0.11:11434"), &store, None, None).unwrap_err();
+        assert!(err.contains("is not allowed yet"), "{err}");
+        answer_tx.send(true).unwrap();
+        first.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn a_background_probe_is_refused_without_a_question() {
+        let store = scratch_store("probe");
+        let target = url("http://10.0.0.2:11434/api/tags");
+        assert!(check_open_endpoint(&target, &store, None, None).is_err());
+        check_open_endpoint(&target, &store, Some(&yes), None).unwrap();
+        check_open_endpoint(&target, &store, None, None).unwrap();
+    }
+
+    #[test]
+    fn a_corrupt_store_is_left_alone_and_the_origin_allowed_for_the_session() {
+        let store = scratch_store("corrupt");
+        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+        std::fs::write(&store, "[\"http://10.0.0.3:1\", trunc").unwrap();
+        assert!(load_open_endpoints(&store).is_err());
+        let target = url("http://10.0.0.4:11434");
+        check_open_endpoint(&target, &store, Some(&yes), None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&store).unwrap(),
+            "[\"http://10.0.0.3:1\", trunc"
+        );
+        check_open_endpoint(&target, &store, Some(&never), None).unwrap();
+    }
+
+    /// Block until a request is waiting on `origin`'s question.
+    fn wait_until_waiting(origin: &str) {
+        let start = std::time::Instant::now();
+        while !lock_gate().waiting.iter().any(|o| o == origin) {
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "never waited"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn requests_waiting_on_a_question_share_its_answer() {
+        use std::sync::mpsc;
+        let store = scratch_store("concurrent");
+        let (opened_tx, opened_rx) = mpsc::channel::<()>();
+        let (answer_tx, answer_rx) = mpsc::channel::<bool>();
+        let s1 = store.clone();
+        let first = std::thread::spawn(move || {
+            let ask = move |_: &str| {
+                opened_tx.send(()).unwrap();
+                answer_rx.recv().unwrap()
+            };
+            check_open_endpoint(&url("http://10.0.0.5:11434"), &s1, Some(&ask), None)
+        });
+        opened_rx.recv().unwrap();
+        // Another origin does not wait for that question.
+        assert!(check_open_endpoint(&url("http://10.0.0.6:11434"), &store, None, None).is_err());
+        // The same origin waits, without a question of its own.
+        let s2 = store.clone();
+        let second = std::thread::spawn(move || {
+            check_open_endpoint(
+                &url("http://10.0.0.5:11434/api/chat"),
+                &s2,
+                Some(&never),
+                None,
+            )
+        });
+        wait_until_waiting("http://10.0.0.5:11434");
+        answer_tx.send(false).unwrap();
+        assert!(first.join().unwrap().is_err());
+        assert!(second.join().unwrap().is_err(), "shares the refusal");
+    }
+
+    #[test]
+    fn a_waiting_request_asks_again_when_the_question_got_no_answer() {
+        use std::sync::mpsc;
+        let store = scratch_store("aborted");
+        let (opened_tx, opened_rx) = mpsc::channel::<()>();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let s1 = store.clone();
+        let first = std::thread::spawn(move || {
+            let ask = move |_: &str| -> bool {
+                opened_tx.send(()).unwrap();
+                go_rx.recv().unwrap();
+                panic!("dialog channel closed")
+            };
+            check_open_endpoint(&url("http://10.0.0.9:11434"), &s1, Some(&ask), None)
+        });
+        opened_rx.recv().unwrap();
+        let s2 = store.clone();
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let asked2 = asked.clone();
+        let second = std::thread::spawn(move || {
+            let ask = move |_: &str| {
+                asked2.store(true, std::sync::atomic::Ordering::SeqCst);
+                true
+            };
+            check_open_endpoint(
+                &url("http://10.0.0.9:11434/api/chat"),
+                &s2,
+                Some(&ask),
+                None,
+            )
+        });
+        wait_until_waiting("http://10.0.0.9:11434");
+        go_tx.send(()).unwrap();
+        assert!(first.join().is_err(), "the first question panicked");
+        second.join().unwrap().expect("asked again and allowed");
+        assert!(asked.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_question_that_panics_does_not_block_the_next_request() {
+        let store = scratch_store("panic");
+        let target = url("http://10.0.0.7:11434");
+        let boom = |_: &str| -> bool { panic!("dialog channel closed") };
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            check_open_endpoint(&target, &store, Some(&boom), None)
+        }));
+        assert!(r.is_err());
+        assert!(!lock_gate()
+            .asking
+            .iter()
+            .any(|o| o == "http://10.0.0.7:11434"));
+        check_open_endpoint(&target, &store, Some(&yes), None).unwrap();
+    }
+
+    #[test]
+    fn the_refusal_is_in_the_app_language() {
+        let store = scratch_store("locale");
+        let probe =
+            check_open_endpoint(&url("http://10.0.0.8:1"), &store, None, Some("fr")).unwrap_err();
+        assert!(
+            probe.starts_with("http://10.0.0.8:1 n'est pas encore autorisé"),
+            "{probe}"
+        );
+        let refused = check_open_endpoint(&url("http://10.0.0.8:1"), &store, Some(&no), Some("fr"))
+            .unwrap_err();
+        assert!(
+            refused.starts_with("Les requêtes d'IA vers http://10.0.0.8:1 ont été refusées"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn a_request_that_cannot_go_out_never_reaches_the_gate() {
+        let err = ai_http_request_inner(
+            "DELETE",
+            "https://collector.example/v1/chat/completions",
+            None,
+            "none",
+            Some(1),
+            |_| panic!("asked for a request that fails anyway"),
+        )
+        .unwrap_err();
+        assert!(err.contains("Unsupported method"), "{err}");
+    }
+
+    #[test]
+    fn an_unauthenticated_request_is_gated_before_anything_runs() {
+        let err = ai_http_request_inner(
+            "POST",
+            "https://evil.example/collect",
+            Some("{}"),
+            "none",
+            Some(1),
+            |_| Err("refused".to_string()),
+        )
+        .unwrap_err();
+        assert_eq!(err, "refused");
+    }
+
+    #[test]
+    fn every_prompt_shows_the_origin() {
+        for l in [
+            None,
+            Some("en"),
+            Some("fr"),
+            Some("es"),
+            Some("pt-BR"),
+            Some("zh-CN"),
+            Some("de"),
+        ] {
+            let p = open_endpoint_prompt(l);
+            assert!(p.body.contains("{origin}"), "{l:?}");
+            assert!(p.refused.contains("{origin}"), "{l:?}");
+            assert!(p.not_yet.contains("{origin}"), "{l:?}");
+            assert!(!p.allow.is_empty() && !p.deny.is_empty() && !p.title.is_empty());
+        }
     }
 
     #[test]

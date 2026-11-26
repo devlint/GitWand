@@ -1451,6 +1451,8 @@ const fr: Locale = {
     aiOllamaTest: "Tester la connexion",
     aiOllamaConnected: "Connect\u00e9 \u2014 {0} mod\u00e8le(s) disponible(s)",
     aiOllamaNotConnected: "Non connect\u00e9. Installez Ollama sur ollama.com",
+    aiOllamaHttpError: "Ollama a r\u00e9pondu HTTP {0}",
+    aiOllamaChecking: "V\u00e9rification\u2026",
     // AI tab \u2014 LLM fallback (v2.5 \u2014 .gitwandrc par repo)
     ai: {
       fallback: {
