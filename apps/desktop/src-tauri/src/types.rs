@@ -365,6 +365,27 @@ pub struct RepoOperationState {
     pub total: u32,
 }
 
+/// A bisect in progress (`commands::bisect`).
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BisectStatus {
+    /// HEAD, the commit under test.
+    pub current: Option<String>,
+    /// What `git bisect reset` returns to (`BISECT_START`).
+    pub start: Option<String>,
+    pub bad: Option<String>,
+    pub good: Vec<String>,
+    pub skipped: Vec<String>,
+    /// `bisect_nr` / `bisect_steps`, once a bad and a good commit are known.
+    pub remaining: Option<u32>,
+    pub steps: Option<u32>,
+    /// Set once git cannot narrow further: one hash is the first bad commit,
+    /// several are left by skips.
+    pub candidates: Vec<String>,
+    /// (bad term, good term).
+    pub terms: (String, String),
+}
+
 // ─── Git branch ────────────────────────────────────────────────────
 #[derive(Serialize)]
 pub struct GitBranch {
