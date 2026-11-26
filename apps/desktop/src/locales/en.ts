@@ -770,6 +770,22 @@ const en = {
   },
 
   // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
+  bisect: {
+    title: "Bisecting",
+    testing: "Testing {0}",
+    left: "{0} commits left, about {1} steps",
+    counts: "{0} good · {1} bad · {2} skipped",
+    needEnds: "Mark a bad and a good commit to start narrowing down",
+    good: "Good",
+    bad: "Bad",
+    skip: "Skip",
+    end: "End bisect",
+    endHint: "Ends the bisect and checks out {0} again",
+    culprit: "First bad commit: {0}",
+    candidates: "The first bad commit is one of these {0}:",
+    open: "Open commit",
+    dirty: "Your uncommitted changes will follow you to the next commit.",
+  },
   rebase: {
     title: "Interactive rebase",
     button: "Rebase",

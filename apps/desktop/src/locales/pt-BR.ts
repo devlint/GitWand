@@ -759,6 +759,22 @@ const ptBR: Locale = {
   },
 
   // ─── Interactive Rebase ─────────────────────────────────
+  bisect: {
+    title: "Bisect em andamento",
+    testing: "Testando {0}",
+    left: "Restam {0} commits, cerca de {1} etapas",
+    counts: "{0} bons · {1} ruins · {2} pulados",
+    needEnds: "Marque um commit ruim e um bom para começar a afunilar",
+    good: "Bom",
+    bad: "Ruim",
+    skip: "Pular",
+    end: "Encerrar bisect",
+    endHint: "Encerra o bisect e volta para {0}",
+    culprit: "Primeiro commit ruim: {0}",
+    candidates: "O primeiro commit ruim é um destes {0}:",
+    open: "Abrir commit",
+    dirty: "Suas alterações não commitadas vão junto para o próximo commit.",
+  },
   rebase: {
     title: "Rebase interativo",
     button: "Rebase",

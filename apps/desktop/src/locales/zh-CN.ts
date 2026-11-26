@@ -771,6 +771,22 @@ const zhCN: Locale = {
     commitPickerEmpty: "未找到提交",
   },
 
+  bisect: {
+    title: "正在二分查找",
+    testing: "正在测试 {0}",
+    left: "还剩 {0} 个提交，约 {1} 步",
+    counts: "{0} 个好 · {1} 个坏 · {2} 个跳过",
+    needEnds: "标记一个坏提交和一个好提交以开始缩小范围",
+    good: "好",
+    bad: "坏",
+    skip: "跳过",
+    end: "结束二分查找",
+    endHint: "结束二分查找并重新检出 {0}",
+    culprit: "第一个坏提交：{0}",
+    candidates: "第一个坏提交是以下 {0} 个之一：",
+    open: "打开提交",
+    dirty: "未提交的更改会跟随你到下一个提交。",
+  },
   rebase: {
     title: "交互式变基",
     button: "变基",

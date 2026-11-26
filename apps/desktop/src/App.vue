@@ -50,6 +50,7 @@ const RebaseProgressBanner = defineAsyncComponent(() => import("./components/Reb
 // v3.14: stack banner, top of every view (GitHub QA: in the sidebar it was
 // only seen with the file panel open).
 const StackBanner = defineAsyncComponent(() => import("./components/StackBanner.vue"));
+const BisectBanner = defineAsyncComponent(() => import("./components/BisectBanner.vue"));
 const StashManager = defineAsyncComponent(() => import("./components/StashManager.vue"));
 const TimeMachinePanel = defineAsyncComponent(() => import("./components/TimeMachinePanel.vue"));
 import UndoToast from "./components/UndoToast.vue";
@@ -3223,6 +3224,27 @@ const showOperationBanner = computed(() =>
   repoFolderPath.value !== ""
 );
 
+// ─── Guided bisect ──────────────────────────────────────────────────
+const bisectHasTrackedChanges = computed(() =>
+  !!repoStatus.value && (repoStatus.value.staged.length > 0 || repoStatus.value.unstaged.length > 0),
+);
+
+/** A commit's subject when the loaded log has it. */
+function describeLoggedCommit(hash: string): string | null {
+  return repoLog.value.find((e) => e.hashFull === hash)?.message ?? null;
+}
+
+/** A bisect moved HEAD and refs/bisect: reload repo state, status and the forced log. */
+async function onBisectChanged() {
+  await refreshRepoState();
+  await repoRefresh(true);
+}
+
+function openBisectCommit(hash: string) {
+  selectCommit(hash);
+  viewMode.value = "history";
+}
+
 async function refreshRepoState() {
   if (!repoFolderPath.value) {
     repoOperationState.value = null;
@@ -5099,6 +5121,15 @@ onUnmounted(() => {
               :pending-split="pendingSplitAtHalt !== null"
               @split="onRebaseBannerSplit"
               @auto-resolve="onRebaseBannerAutoResolve" />
+
+            <!-- Guided bisect: a bisect in progress, from GitWand or a terminal. -->
+            <BisectBanner v-if="repoFolderPath && isBisect(repoOperationState)"
+              :cwd="repoFolderPath"
+              :refresh-key="repoOperationState"
+              :has-tracked-changes="bisectHasTrackedChanges"
+              :describe-commit="describeLoggedCommit"
+              @changed="onBisectChanged"
+              @open-commit="openBisectCommit" />
 
             <!-- v3.14 — stacked branches: restack / after-restack banner (renders nothing when idle) -->
             <StackBanner v-if="repoFolderPath" />

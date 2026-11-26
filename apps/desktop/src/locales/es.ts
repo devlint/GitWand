@@ -758,6 +758,22 @@ const es: Locale = {
   },
 
   // ─── Interactive Rebase ─────────────────────────────────
+  bisect: {
+    title: "Bisect en curso",
+    testing: "Probando {0}",
+    left: "Quedan {0} commits, unos {1} pasos",
+    counts: "{0} buenos · {1} malos · {2} omitidos",
+    needEnds: "Marca un commit malo y uno bueno para empezar a acotar",
+    good: "Bueno",
+    bad: "Malo",
+    skip: "Omitir",
+    end: "Terminar bisect",
+    endHint: "Termina el bisect y vuelve a {0}",
+    culprit: "Primer commit malo: {0}",
+    candidates: "El primer commit malo es uno de estos {0}:",
+    open: "Abrir commit",
+    dirty: "Tus cambios sin confirmar te seguirán al siguiente commit.",
+  },
   rebase: {
     title: "Rebase interactivo",
     button: "Rebase",

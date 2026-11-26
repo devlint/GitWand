@@ -763,6 +763,22 @@ const fr: Locale = {
   },
 
   // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
+  bisect: {
+    title: "Bisect en cours",
+    testing: "Test de {0}",
+    left: "{0} commits restants, environ {1} étapes",
+    counts: "{0} bons · {1} mauvais · {2} passés",
+    needEnds: "Marquez un commit mauvais et un bon pour commencer à resserrer",
+    good: "Bon",
+    bad: "Mauvais",
+    skip: "Passer",
+    end: "Terminer le bisect",
+    endHint: "Termine le bisect et revient sur {0}",
+    culprit: "Premier mauvais commit : {0}",
+    candidates: "Le premier mauvais commit est l'un de ces {0} :",
+    open: "Ouvrir le commit",
+    dirty: "Vos modifications non commitées vous suivront au commit suivant.",
+  },
   rebase: {
     title: "Rebase interactif",
     button: "Rebase",
