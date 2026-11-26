@@ -20,6 +20,14 @@
 //!   changing the endpoint means entering the key again.
 //! - Because the webview no longer talks to arbitrary AI hosts itself, the CSP
 //!   `connect-src` can be limited to a short list of fixed hosts.
+//! - A request without the key (`auth: "none"`: Ollama, a keyless
+//!   OpenAI-compatible server) carries repository content too, so it is not a
+//!   way around that CSP either: it may go to a loopback host, or to an origin
+//!   the user allowed in a native dialog shown by this module (the webview
+//!   cannot answer it), remembered in `{data_local_dir}/gitwand/ai-open-endpoints.json`.
+
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl, RequestBody};
 
@@ -36,7 +44,7 @@ const COMPLETION_TIMEOUT_SECS: u64 = 30 * 60;
 /// an unreachable host fails fast even under the generous completion ceiling.
 const CONNECT_TIMEOUT_SECS: u64 = 30;
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Debug)]
 pub(crate) struct AiHttpResponse {
     pub status: i32,
     pub body: String,
@@ -131,6 +139,140 @@ fn check_key_binding(bound: Option<&str>, target: &tauri::Url) -> Result<(), Str
                 .to_string(),
         ),
     }
+}
+
+/// Loopback hosts take unauthenticated requests without asking: a local
+/// Ollama (the default `http://localhost:11434`) is no exfiltration channel.
+fn is_loopback(target: &tauri::Url) -> bool {
+    let host = target.host_str().unwrap_or("");
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+fn open_endpoints_path() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("gitwand")
+        .join("ai-open-endpoints.json")
+}
+
+/// Origins allowed for unauthenticated requests. A missing or unreadable file
+/// allows none.
+fn load_open_endpoints(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+fn save_open_endpoints(path: &Path, origins: &[String]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    let text = serde_json::to_string_pretty(origins).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+/// Serialises the check-ask-remember sequence, so two requests to the same
+/// new origin ask once.
+static OPEN_ENDPOINTS_LOCK: Mutex<()> = Mutex::new(());
+
+/// Gate for an unauthenticated request: loopback passes, any other origin
+/// must have been allowed by the user, `ask` showing the question when it was
+/// not. `ask` gets the origin and answers whether the user allowed it.
+fn check_open_endpoint(
+    target: &tauri::Url,
+    store: &Path,
+    ask: impl FnOnce(&str) -> bool,
+) -> Result<(), String> {
+    if is_loopback(target) {
+        return Ok(());
+    }
+    let origin = target.origin().ascii_serialization();
+    let _guard = OPEN_ENDPOINTS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut allowed = load_open_endpoints(store);
+    if allowed.iter().any(|o| o == &origin) {
+        return Ok(());
+    }
+    if !ask(&origin) {
+        return Err(format!(
+            "AI requests to {} were not allowed. Allow them when GitWand asks, or use a local endpoint.",
+            origin
+        ));
+    }
+    allowed.push(origin);
+    save_open_endpoints(store, &allowed)
+}
+
+/// Text of the native question, in the app's language (`locale` only picks
+/// the language; the origin shown is the one the request goes to).
+struct OpenEndpointPrompt {
+    title: &'static str,
+    body: &'static str,
+    allow: &'static str,
+    deny: &'static str,
+}
+
+fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
+    match locale.unwrap_or("en") {
+        "fr" => OpenEndpointPrompt {
+            title: "Autoriser ce serveur d'IA ?",
+            body: "GitWand va envoyer du contenu de votre dépôt (diffs, conflits) sans clé d'API à :\n\n{origin}\n\nAutorisez-le seulement si c'est votre serveur Ollama ou compatible OpenAI. Ce choix est retenu.",
+            allow: "Autoriser",
+            deny: "Refuser",
+        },
+        "es" => OpenEndpointPrompt {
+            title: "¿Permitir este servidor de IA?",
+            body: "GitWand va a enviar contenido de tu repositorio (diffs, conflictos) sin clave de API a:\n\n{origin}\n\nPermítelo solo si es tu servidor Ollama o compatible con OpenAI. La decisión se recuerda.",
+            allow: "Permitir",
+            deny: "Rechazar",
+        },
+        "pt-BR" => OpenEndpointPrompt {
+            title: "Permitir este servidor de IA?",
+            body: "O GitWand vai enviar conteúdo do seu repositório (diffs, conflitos) sem chave de API para:\n\n{origin}\n\nPermita apenas se for o seu servidor Ollama ou compatível com OpenAI. A escolha fica salva.",
+            allow: "Permitir",
+            deny: "Recusar",
+        },
+        "zh-CN" => OpenEndpointPrompt {
+            title: "允许此 AI 服务器？",
+            body: "GitWand 将在不使用 API 密钥的情况下，把仓库内容（差异、冲突）发送到：\n\n{origin}\n\n仅当它是你的 Ollama 或 OpenAI 兼容服务器时才允许。此选择会被记住。",
+            allow: "允许",
+            deny: "拒绝",
+        },
+        _ => OpenEndpointPrompt {
+            title: "Allow this AI server?",
+            body: "GitWand is about to send repository content (diffs, conflicts) without an API key to:\n\n{origin}\n\nAllow it only if this is your Ollama or OpenAI-compatible server. Your choice is remembered.",
+            allow: "Allow",
+            deny: "Deny",
+        },
+    }
+}
+
+/// Ask in a native dialog, which the webview can neither draw nor answer.
+/// Runs on a blocking thread (`ai_http_request` is in `spawn_blocking`).
+fn ask_open_endpoint(app: &tauri::AppHandle, locale: Option<&str>, origin: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let p = open_endpoint_prompt(locale);
+    app.dialog()
+        .message(p.body.replace("{origin}", origin))
+        .title(p.title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            p.allow.to_string(),
+            p.deny.to_string(),
+        ))
+        .blocking_show()
 }
 
 /// Masked form shown in Settings: enough to recognise which key is stored,
@@ -236,19 +378,35 @@ fn build_request_config(
 
 /// Perform one AI provider HTTP request. `auth` selects how the stored key is
 /// attached: `"anthropic"` (x-api-key), `"bearer"`, or `"none"` (Ollama). The
-/// key is only ever attached to a request for the origin it is bound to.
-/// `timeout_secs` caps the whole request; without it, the generous completion
-/// ceiling applies (`COMPLETION_TIMEOUT_SECS`).
+/// key is only ever attached to a request for the origin it is bound to; a
+/// request without it goes to a loopback host or to an origin the user
+/// allowed (`check_open_endpoint`). `locale` is the app's language, for that
+/// question. `timeout_secs` caps the whole request; without it, the generous
+/// completion ceiling applies (`COMPLETION_TIMEOUT_SECS`).
 #[tauri::command]
 pub(crate) async fn ai_http_request(
+    app: tauri::AppHandle,
     method: String,
     url: String,
     body: Option<String>,
     auth: String,
     timeout_secs: Option<u64>,
+    locale: Option<String>,
 ) -> Result<AiHttpResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        ai_http_request_inner(&method, &url, body.as_deref(), &auth, timeout_secs)
+        let open_gate = |target: &tauri::Url| {
+            check_open_endpoint(target, &open_endpoints_path(), |origin| {
+                ask_open_endpoint(&app, locale.as_deref(), origin)
+            })
+        };
+        ai_http_request_inner(
+            &method,
+            &url,
+            body.as_deref(),
+            &auth,
+            timeout_secs,
+            open_gate,
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -260,9 +418,13 @@ fn ai_http_request_inner(
     body: Option<&str>,
     auth: &str,
     timeout_secs: Option<u64>,
+    open_gate: impl FnOnce(&tauri::Url) -> Result<(), String>,
 ) -> Result<AiHttpResponse, String> {
     const MARKER: &str = "\n__GW_HTTP_STATUS__";
     let target = parse_endpoint(url)?;
+    if auth == "none" {
+        open_gate(&target)?;
+    }
     let stored = if auth == "none" { None } else { read_key() };
     let headers = auth_headers(auth, stored.as_ref().map(|s| s.key.as_str()))?;
     if let Some(s) = stored.as_ref() {
@@ -435,6 +597,103 @@ mod tests {
             auth_headers("bearer", Some("k")).unwrap(),
             vec!["Authorization: Bearer k".to_string()]
         );
+    }
+
+    fn scratch_store(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("gitwand-ai-open-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d.join("ai-open-endpoints.json")
+    }
+
+    #[test]
+    fn loopback_hosts_pass_without_asking() {
+        let store = scratch_store("loopback");
+        for u in [
+            "http://localhost:11434/api/chat",
+            "http://LOCALHOST:11434",
+            "http://127.0.0.1:11434",
+            "http://127.0.0.2:8080",
+            "http://[::1]:11434/api/chat",
+        ] {
+            check_open_endpoint(&url(u), &store, |_| panic!("asked for {u}")).unwrap();
+        }
+        assert!(!store.exists(), "nothing is remembered for loopback");
+        for u in [
+            "http://localhost.evil.example",
+            "http://192.168.1.10:11434",
+            "https://ollama.example.com",
+            "http://0.0.0.0:11434",
+        ] {
+            assert!(!is_loopback(&url(u)), "{u}");
+        }
+    }
+
+    #[test]
+    fn another_origin_is_asked_once_then_remembered() {
+        let store = scratch_store("remember");
+        let target = url("http://192.168.1.10:11434/api/chat");
+        let mut asked = None;
+        check_open_endpoint(&target, &store, |o| {
+            asked = Some(o.to_string());
+            true
+        })
+        .unwrap();
+        assert_eq!(asked.as_deref(), Some("http://192.168.1.10:11434"));
+        // Same origin, other path: no second question.
+        check_open_endpoint(&url("http://192.168.1.10:11434/v1/models"), &store, |_| {
+            panic!("asked twice")
+        })
+        .unwrap();
+        // Another port is another origin.
+        assert!(check_open_endpoint(&url("http://192.168.1.10:8080"), &store, |_| false).is_err());
+    }
+
+    #[test]
+    fn a_refusal_blocks_the_request_and_is_not_remembered() {
+        let store = scratch_store("refuse");
+        let target = url("https://evil.example/collect");
+        let err = check_open_endpoint(&target, &store, |_| false).unwrap_err();
+        assert!(err.contains("https://evil.example"), "{err}");
+        assert!(load_open_endpoints(&store).is_empty());
+        // Asked again next time rather than refused silently.
+        let mut asked = false;
+        check_open_endpoint(&target, &store, |_| {
+            asked = true;
+            true
+        })
+        .unwrap();
+        assert!(asked);
+    }
+
+    #[test]
+    fn an_unauthenticated_request_is_gated_before_anything_runs() {
+        let err = ai_http_request_inner(
+            "POST",
+            "https://evil.example/collect",
+            Some("{}"),
+            "none",
+            Some(1),
+            |_| Err("refused".to_string()),
+        )
+        .unwrap_err();
+        assert_eq!(err, "refused");
+    }
+
+    #[test]
+    fn every_prompt_shows_the_origin() {
+        for l in [
+            None,
+            Some("en"),
+            Some("fr"),
+            Some("es"),
+            Some("pt-BR"),
+            Some("zh-CN"),
+            Some("de"),
+        ] {
+            let p = open_endpoint_prompt(l);
+            assert!(p.body.contains("{origin}"), "{l:?}");
+            assert!(!p.allow.is_empty() && !p.deny.is_empty() && !p.title.is_empty());
+        }
     }
 
     #[test]

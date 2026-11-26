@@ -3,6 +3,7 @@
 // Consumers should import directly from this file instead of backend.ts for these symbols.
 
 import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT } from "./backend-core";
+import { useI18n } from "../composables/useI18n";
 
 // ─── Claude Code CLI wrapper ─────────────────────────────
 //
@@ -530,7 +531,11 @@ export interface AiHttpResponse {
   body: string;
 }
 
-/** Perform one AI provider HTTP request through the backend. */
+/**
+ * Perform one AI provider HTTP request through the backend. A request without
+ * the key (`auth: "none"`) to a host other than loopback makes the backend ask
+ * the user, in a native dialog in the app's language, before anything is sent.
+ */
 export async function aiHttpRequest(
   method: "GET" | "POST",
   url: string,
@@ -546,6 +551,7 @@ export async function aiHttpRequest(
       body: payload,
       auth,
       timeoutSecs,
+      locale: useI18n().locale.value,
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/ai-http-request`, {
