@@ -1468,6 +1468,7 @@ const en = {
     aiOllamaConnected: "Connected \u2014 {0} model(s) available",
     aiOllamaNotConnected: "Not connected. Install Ollama at ollama.com",
     aiOllamaHttpError: "Ollama answered with HTTP {0}",
+    aiOllamaChecking: "Checking…",
     // AI tab \u2014 LLM fallback (v2.5 \u2014 .gitwandrc per-repo)
     ai: {
       fallback: {

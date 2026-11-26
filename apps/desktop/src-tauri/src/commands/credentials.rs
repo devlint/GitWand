@@ -62,6 +62,12 @@ fn check_not_backend_only(service: &str) -> Result<(), String> {
 
 /// Reject services outside the GitWand namespace (see `SERVICE_PREFIX`).
 fn check_service(service: &str) -> Result<(), String> {
+    // ASCII only: Windows' Credential Manager folds case with its own Unicode
+    // rules, so a look-alike (`gitwand:aı`, dotless i) could reach a
+    // backend-only service that `check_not_backend_only` compares in ASCII.
+    if !service.is_ascii() {
+        return Err("Refusing a keychain service name that is not ASCII".to_string());
+    }
     if !service.starts_with(SERVICE_PREFIX) || service.len() == SERVICE_PREFIX.len() {
         return Err(format!(
             "Refusing keychain access outside the `{}` namespace",
@@ -146,6 +152,8 @@ mod tests {
             assert!(check_not_backend_only(s).is_err(), "{s}");
         }
         assert!(check_not_backend_only("gitwand:github").is_ok());
+        assert!(check_service("gitwand:a\u{131}").is_err());
+        assert!(check_service("gitwand:github").is_ok());
     }
 
     #[test]

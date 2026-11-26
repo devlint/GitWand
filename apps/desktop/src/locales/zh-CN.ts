@@ -1522,6 +1522,7 @@ const zhCN: Locale = {
     aiOllamaConnected: "已连接 — {0} 个可用模型",
     aiOllamaNotConnected: "未连接。请在 ollama.com 安装 Ollama",
     aiOllamaHttpError: "Ollama 返回了 HTTP {0}",
+    aiOllamaChecking: "正在检查…",
     // AI 选项卡 — LLM 回退（v2.5 — 按仓库 .gitwandrc）
     ai: {
       fallback: {

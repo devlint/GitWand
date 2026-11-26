@@ -1443,6 +1443,7 @@ const es: Locale = {
     aiOllamaConnected: "Conectado — {0} modelo(s) disponible(s)",
     aiOllamaNotConnected: "No conectado. Instala Ollama en ollama.com",
     aiOllamaHttpError: "Ollama respondió con HTTP {0}",
+    aiOllamaChecking: "Comprobando…",
     // Pestaña IA — fallback LLM (v2.5 — .gitwandrc por repositorio)
     ai: {
       fallback: {

@@ -765,15 +765,22 @@ const ollamaAvailable = ref(false);
 const ollamaModels = ref<string[]>([]);
 /** Why the last check failed, "" when there is nothing more to say than "not connected". */
 const ollamaError = ref("");
+/** A check of a just-edited URL is pending: nothing is known about it yet. */
+const ollamaChecking = ref(false);
 
 // A slower probe for a previous URL must not overwrite a newer one.
 let ollamaRequest = 0;
 /** Probe Ollama (`probeOllama`); `explicit` is the Test button. */
 async function detectOllama(explicit = false) {
+  // An explicit Test replaces a background check still waiting to run: that
+  // one would fail at once ("not allowed yet") while the question is open,
+  // and its newer request number would drop the answer to the question.
+  if (explicit) clearTimeout(ollamaProbeTimer);
   const request = ++ollamaRequest;
   ollamaError.value = "";
   const r = await probeOllama(settings.value.aiOllamaUrl, explicit);
   if (request !== ollamaRequest) return;
+  ollamaChecking.value = false;
   ollamaAvailable.value = r.available;
   ollamaModels.value = r.models;
   ollamaError.value = r.error;
@@ -786,6 +793,12 @@ watch(
   () => settings.value.aiOllamaUrl,
   () => {
     ollamaRequest++;
+    // Nothing is known about the new URL yet: neither the previous server's
+    // models nor "not connected".
+    ollamaChecking.value = true;
+    ollamaAvailable.value = false;
+    ollamaModels.value = [];
+    ollamaError.value = "";
     clearTimeout(ollamaProbeTimer);
     ollamaProbeTimer = setTimeout(() => detectOllama(), 500);
   },
@@ -1073,6 +1086,9 @@ const usesApiModelField = computed(() =>
 // leaving the endpoint field fail instead, with a message pointing at Refresh.
 let modelsRequest = 0;
 async function loadModels(explicit = false, provider: AIProvider = settings.value.aiProvider) {
+  // Refresh replaces a background reload still waiting to run (see
+  // detectOllama).
+  if (explicit) clearTimeout(modelsReloadTimer);
   const request = ++modelsRequest;
   modelsError.value = "";
   modelsLoading.value = true;
@@ -2682,7 +2698,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 <!-- Selectable when the check failed with a reason (a remote
                      address not allowed yet): its Test button lives in the
                      Ollama section, which needs the provider selected. -->
-                <option value="ollama" :disabled="!ollamaAvailable && !ollamaError">
+                <option value="ollama" :disabled="!ollamaAvailable && !ollamaError && !ollamaChecking">
                   {{ t('settings.aiProviderOllama') }}{{ ollamaAvailable ? '' : t('settings.aiProviderOllamaNotFound')
                   }}
                 </option>
@@ -3197,6 +3213,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 </div>
                 <span class="sp-hint" :class="{ 'sp-hint--ok': ollamaAvailable }">
                   {{ ollamaAvailable ? t('settings.aiOllamaConnected', ollamaModels.length) :
+                    ollamaChecking ? t('settings.aiOllamaChecking') :
                     ollamaError || t('settings.aiOllamaNotConnected') }}
                 </span>
               </div>

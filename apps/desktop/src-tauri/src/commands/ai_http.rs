@@ -470,40 +470,40 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
             body: "GitWand va envoyer des requêtes d'IA à :\n\n{origin}\n\nElles contiennent du contenu de votre dépôt (diffs, conflits) pour les actions d'IA, et votre clé d'API si une clé est enregistrée pour cette adresse. Autorisez-le seulement si c'est le serveur d'IA que vous avez configuré. S'il est autorisé, GitWand ne le redemandera pas.",
             allow: "Autoriser",
             deny: "Refuser",
-            refused: "Les requêtes d'IA vers {origin} ont été refusées. Pour l'autoriser, utilisez Tester la connexion ou Rafraîchir dans Paramètres > IA.",
-            not_yet: "{origin} n'est pas encore autorisé : utilisez Tester la connexion ou Rafraîchir dans Paramètres > IA pour l'autoriser.",
+            refused: "Les requêtes d'IA vers {origin} ont été refusées pour cette session. Dans Paramètres > IA, Tester la connexion (Ollama) ou Rafraîchir (liste des modèles) redemande.",
+            not_yet: "{origin} n'est pas encore autorisé. Dans Paramètres > IA, Tester la connexion (Ollama) ou Rafraîchir (liste des modèles) demande à l'autoriser.",
         },
         "es" => OpenEndpointPrompt {
             title: "¿Permitir este servidor de IA?",
             body: "GitWand va a enviar solicitudes de IA a:\n\n{origin}\n\nContienen contenido de tu repositorio (diffs, conflictos) para las acciones de IA, y tu clave de API si hay una guardada para esta dirección. Permítelo solo si es el servidor de IA que configuraste. Si lo permites, GitWand no volverá a preguntar.",
             allow: "Permitir",
             deny: "Rechazar",
-            refused: "Las solicitudes de IA a {origin} fueron rechazadas. Para permitirlo, usa Probar conexión o Actualizar en Ajustes > IA.",
-            not_yet: "{origin} aún no está permitido: usa Probar conexión o Actualizar en Ajustes > IA para permitirlo.",
+            refused: "Las solicitudes de IA a {origin} fueron rechazadas en esta sesión. En Ajustes > IA, Probar conexión (Ollama) o Actualizar (lista de modelos) vuelve a preguntar.",
+            not_yet: "{origin} aún no está permitido. En Ajustes > IA, Probar conexión (Ollama) o Actualizar (lista de modelos) pregunta si permitirlo.",
         },
         "pt-BR" => OpenEndpointPrompt {
             title: "Permitir este servidor de IA?",
             body: "O GitWand vai enviar solicitações de IA para:\n\n{origin}\n\nElas contêm conteúdo do seu repositório (diffs, conflitos) nas ações de IA, e sua chave de API se houver uma salva para este endereço. Permita apenas se for o servidor de IA que você configurou. Se permitido, o GitWand não perguntará de novo.",
             allow: "Permitir",
             deny: "Recusar",
-            refused: "As solicitações de IA para {origin} foram recusadas. Para permiti-lo, use Testar conexão ou Atualizar em Configurações > IA.",
-            not_yet: "{origin} ainda não está permitido: use Testar conexão ou Atualizar em Configurações > IA para permiti-lo.",
+            refused: "As solicitações de IA para {origin} foram recusadas nesta sessão. Em Configurações > IA, Testar conexão (Ollama) ou Atualizar (lista de modelos) pergunta de novo.",
+            not_yet: "{origin} ainda não está permitido. Em Configurações > IA, Testar conexão (Ollama) ou Atualizar (lista de modelos) pergunta se deve permiti-lo.",
         },
         "zh-CN" => OpenEndpointPrompt {
             title: "允许此 AI 服务器？",
             body: "GitWand 将向以下地址发送 AI 请求：\n\n{origin}\n\nAI 操作会包含仓库内容（差异、冲突），如果为此地址保存了 API 密钥，也会包含该密钥。仅当它是你配置的 AI 服务器时才允许。允许后，GitWand 不会再次询问。",
             allow: "允许",
             deny: "拒绝",
-            refused: "已拒绝向 {origin} 发送 AI 请求。如需允许，请在 设置 > AI 中使用“测试连接”或“刷新”。",
-            not_yet: "{origin} 尚未获得允许：请在 设置 > AI 中使用“测试连接”或“刷新”来允许它。",
+            refused: "本次会话已拒绝向 {origin} 发送 AI 请求。在 设置 > AI 中，“测试连接”（Ollama）或“刷新”（模型列表）会再次询问。",
+            not_yet: "{origin} 尚未获得允许。在 设置 > AI 中，“测试连接”（Ollama）或“刷新”（模型列表）会询问是否允许。",
         },
         _ => OpenEndpointPrompt {
             title: "Allow this AI server?",
             body: "GitWand is about to send AI requests to:\n\n{origin}\n\nThey carry repository content (diffs, conflicts) for AI actions, and your API key if one is saved for this address. Allow it only if this is the AI server you configured. Once allowed, GitWand does not ask again.",
             allow: "Allow",
             deny: "Deny",
-            refused: "AI requests to {origin} were refused. To allow it, use Test connection or Refresh in Settings > AI.",
-            not_yet: "{origin} is not allowed yet: use Test connection or Refresh in Settings > AI to allow it.",
+            refused: "AI requests to {origin} were refused for this session. In Settings > AI, Test connection (Ollama) or Refresh (model list) asks again.",
+            not_yet: "{origin} is not allowed yet. In Settings > AI, Test connection (Ollama) or Refresh (model list) asks to allow it.",
         },
     }
 }
@@ -1042,7 +1042,7 @@ mod tests {
         opened_rx.recv().unwrap();
         let err =
             check_open_endpoint(&url("http://10.0.0.11:11434"), &store, None, None).unwrap_err();
-        assert!(err.contains("not allowed yet"), "{err}");
+        assert!(err.contains("is not allowed yet"), "{err}");
         answer_tx.send(true).unwrap();
         first.join().unwrap().unwrap();
     }

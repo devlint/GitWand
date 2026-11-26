@@ -2655,7 +2655,8 @@ fn gh_api_write(
     cmd.args(["api", "-X", method, path]).current_dir(cwd);
     let input = super::pr_edit::fields_json(fields);
     if input.is_some() {
-        cmd.args(["--input", "-"]);
+        // gh sets the JSON content type only for bodies it builds from -f/-F.
+        cmd.args(["-H", "Content-Type: application/json", "--input", "-"]);
     }
     let output =
         crate::git::output_with_timeout_input(cmd, GH_WRITE_TIMEOUT, input).map_err(|e| match e
