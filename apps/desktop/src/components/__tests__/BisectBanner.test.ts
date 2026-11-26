@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
-import { createApp, nextTick, h, type App } from "vue";
+import { createApp, nextTick, h, ref, type App } from "vue";
 
 vi.mock("../../utils/backend", () => ({
   gitBisectStatus: vi.fn(),
@@ -250,5 +250,27 @@ describe("BisectBanner", () => {
     button("Good")!.click();
     await flush();
     expect(host.querySelector(".bisect-error")?.textContent).toBe("No bisect is in progress.");
+  });
+  it("ignores an action's result once another repo is open", async () => {
+    const cwd = ref("/a");
+    vi.mocked(gitBisectStatus).mockImplementation(async (c: string) =>
+      status(c === "/a" ? {} : { current: H("c"), commits: [] }),
+    );
+    let finish!: (s: BisectStatus) => void;
+    vi.mocked(gitBisectMark).mockReturnValue(new Promise((r) => (finish = r)));
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    app = createApp({
+      render: () => h(BisectBanner, { cwd: cwd.value, refreshKey: 0, hasTrackedChanges: false }),
+    });
+    app.mount(host);
+    await flush();
+    button("Good")!.click();
+    cwd.value = "/b";
+    await flush();
+    finish(status({ current: H("d"), candidates: [H("d")] }));
+    await flush();
+    expect(host.textContent).toContain(H("c").slice(0, 7));
+    expect(host.textContent).not.toContain(H("d").slice(0, 7));
   });
 });

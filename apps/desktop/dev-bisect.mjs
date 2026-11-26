@@ -32,11 +32,11 @@ function gitDir(cwd) {
   return isAbsolute(d) ? d : join(cwd, d);
 }
 
-const isBisecting = (cwd) => existsSync(join(gitDir(cwd), "BISECT_LOG"));
+const isBisecting = (dir) => existsSync(join(dir, "BISECT_LOG"));
 
-function terms(cwd) {
+function terms(dir) {
   try {
-    const lines = readFileSync(join(gitDir(cwd), "BISECT_TERMS"), "utf-8")
+    const lines = readFileSync(join(dir, "BISECT_TERMS"), "utf-8")
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean);
@@ -98,18 +98,33 @@ function revList(cwd, sc, extra, bad, good) {
   ]);
 }
 
-/** The bisect part of `/api/git-repo-state`: its state object, or null. */
-export function devBisectRepoState(cwd) {
-  if (!isBisecting(cwd)) return null;
+/**
+ * The bisect part of `/api/git-repo-state`: its state object, or null. `dir`
+ * is the git dir the route already resolved: nothing is spawned when no
+ * bisect is running. `step` counts the marks, as in the Rust command.
+ */
+export function devBisectRepoState(cwd, dir = gitDir(cwd)) {
+  let log;
+  try {
+    log = readFileSync(join(dir, "BISECT_LOG"), "utf-8");
+  } catch {
+    return null;
+  }
   // `--no-checkout` bisects move BISECT_HEAD, not HEAD.
-  const head = headHash(cwd, existsSync(join(gitDir(cwd), "BISECT_HEAD")) ? "BISECT_HEAD" : "HEAD");
-  return { state: "bisect", hasConflict: false, operationHead: head, targetBranch: null, step: 0, total: 0 };
+  const head = headHash(cwd, existsSync(join(dir, "BISECT_HEAD")) ? "BISECT_HEAD" : "HEAD");
+  return { state: "bisect", hasConflict: false, operationHead: head, targetBranch: null, step: bisectMarks(log), total: 0 };
+}
+
+/** The marks a BISECT_LOG records: its `git bisect <term> <hash>` lines (not `start`). */
+export function bisectMarks(log) {
+  return log.split("\n").filter((l) => l.startsWith("git bisect ") && !l.startsWith("git bisect start")).length;
 }
 
 export function devBisectStatus(cwd) {
-  const [badTerm, goodTerm] = terms(cwd);
+  const dir = gitDir(cwd);
+  const [badTerm, goodTerm] = terms(dir);
   // As in the Rust command: ended while a reload was on its way.
-  if (!isBisecting(cwd)) {
+  if (!isBisecting(dir)) {
     return {
       active: false,
       current: null,
@@ -127,7 +142,7 @@ export function devBisectStatus(cwd) {
   }
   let start = null;
   try {
-    start = readFileSync(join(gitDir(cwd), "BISECT_START"), "utf-8").trim() || null;
+    start = readFileSync(join(dir, "BISECT_START"), "utf-8").trim() || null;
   } catch {
     // not started from GitWand's point of view
   }
@@ -147,7 +162,6 @@ export function devBisectStatus(cwd) {
   let remaining = null;
   let steps = null;
   let candidates = [];
-  const dir = gitDir(cwd);
   if (bad && good.length > 0) {
     const sc = scope(dir);
     const vars = revList(cwd, sc, ["--bisect-vars"], bad, good);
@@ -203,8 +217,7 @@ function describe(cwd, hashes) {
 const isHash = (s) => typeof s === "string" && /^([0-9a-f]{40}|[0-9a-f]{64})$/i.test(s);
 
 /** A rebase, merge, cherry-pick or revert in progress (what `git_repo_state` reports before bisect). */
-function otherOperation(cwd) {
-  const d = gitDir(cwd);
+function otherOperation(d) {
   return ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"].some((f) =>
     existsSync(join(d, f)),
   );
@@ -212,7 +225,8 @@ function otherOperation(cwd) {
 
 export function devBisectStart(cwd, bad, good) {
   if (!isHash(bad) || !isHash(good)) throw new Error("bisect:notHashes: A bisect starts from two full commit hashes.");
-  if (otherOperation(cwd) || isBisecting(cwd)) {
+  const dir = gitDir(cwd);
+  if (otherOperation(dir) || isBisecting(dir)) {
     throw new Error("bisect:busy: Another operation is in progress; finish it before starting a bisect.");
   }
   if (runOk(cwd, ["status", "--porcelain", "--untracked-files=no"]).trim()) {
@@ -239,10 +253,11 @@ export function devBisectStart(cwd, bad, good) {
 }
 
 export function devBisectMark(cwd, verdict) {
-  const [badTerm, goodTerm] = terms(cwd);
+  const dir = gitDir(cwd);
+  const [badTerm, goodTerm] = terms(dir);
   const term = verdict === "good" ? goodTerm : verdict === "bad" ? badTerm : verdict === "skip" || verdict === "next" ? verdict : null;
   if (!term) throw new Error(`bisect:verdict: Unknown bisect verdict: ${verdict}`);
-  if (!isBisecting(cwd)) throw new Error("bisect:notBisecting: No bisect is in progress.");
+  if (!isBisecting(dir)) throw new Error("bisect:notBisecting: No bisect is in progress.");
   try {
     runOk(cwd, ["bisect", term]);
   } catch (err) {
@@ -262,5 +277,5 @@ export function devBisectMark(cwd, verdict) {
 
 export function devBisectReset(cwd) {
   runOk(cwd, ["bisect", "reset"]);
-  if (isBisecting(cwd)) throw new Error("bisect:resetFailed: git could not end the bisect.");
+  if (isBisecting(gitDir(cwd))) throw new Error("bisect:resetFailed: git could not end the bisect.");
 }

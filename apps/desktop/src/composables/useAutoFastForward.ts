@@ -163,8 +163,9 @@ const DETACHED_BRANCH_NAMES = new Set(["HEAD", "(detached)", "(detached HEAD)", 
 
 /**
  * Facts from already-loaded state — no process is spawned. Advisory only:
- * a bisect is invisible here, and the status may lag the disk by one poll.
- * The git-backed check (`readAutoFfFacts`) and the Rust command catch both.
+ * the status and the operation state may lag the disk by one poll (a bisect
+ * started since, say). The git-backed check (`readAutoFfFacts`) and the Rust
+ * command catch that.
  */
 export function factsFromStatus(
   status: GitStatus,

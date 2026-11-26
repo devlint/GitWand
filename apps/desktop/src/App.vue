@@ -3232,7 +3232,9 @@ const bisectHasTrackedChanges = computed(() =>
 
 /**
  * Bumped by watcher events that can move a bisect (refs/bisect, HEAD, the
- * BISECT_* files): with HEAD, the banner's reload key. Not the whole
+ * BISECT_* files). The banner's reload key is this, HEAD and the mark count
+ * (`step`, read by `git_repo_state` after every status poll: a terminal mark
+ * that moves no HEAD, with the watcher off or on reftable). Not the whole
  * `repoOperationState`, which is a new object at every status reload (each
  * file save while testing a step).
  */
@@ -5143,7 +5145,7 @@ onUnmounted(() => {
             <!-- Guided bisect: a bisect in progress, from GitWand or a terminal. -->
             <BisectBanner v-if="repoFolderPath && isBisect(repoOperationState)"
               :cwd="repoFolderPath"
-              :refresh-key="`${repoOperationState?.operationHead ?? ''}:${bisectTick}`"
+              :refresh-key="`${repoOperationState?.operationHead ?? ''}:${repoOperationState?.step ?? 0}:${bisectTick}`"
               :has-tracked-changes="bisectHasTrackedChanges"
               @changed="onBisectChanged"
               @open-commit="openBisectCommit" />

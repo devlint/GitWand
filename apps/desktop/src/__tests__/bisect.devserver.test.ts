@@ -226,4 +226,11 @@ describe("dev-server bisect", { timeout: 30_000 }, () => {
     g("bisect", "start", "--no-checkout", sha("c8"), sha("c1"));
     expect(devBisectRepoState(path)?.operationHead).toBe(g("rev-parse", "BISECT_HEAD"));
   });
+  it("counts the marks in the repo state, as the backend does", () => {
+    const { path, g, sha } = linear(8);
+    devBisectStart(path, sha("c8"), sha("c1"));
+    const before = devBisectRepoState(path).step;
+    g("bisect", "skip");
+    expect(devBisectRepoState(path).step).toBe(before + 1);
+  });
 });

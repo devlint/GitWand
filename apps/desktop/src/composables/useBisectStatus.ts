@@ -68,11 +68,17 @@ export function useBisectStatus(opts: {
     if (busy.value) return;
     busy.value = true;
     error.value = "";
+    // Another repo opened meanwhile (the banner stays mounted): its result
+    // is not this repo's. A load started meanwhile is at least as fresh.
+    const cwd = opts.cwd();
+    const request = ++loadRequest;
     try {
       const next = await run();
-      if (next) status.value = next;
+      if (opts.cwd() !== cwd) return;
+      if (next && request === loadRequest) status.value = next.active ? next : null;
       opts.onChanged();
     } catch (e) {
+      if (opts.cwd() !== cwd) return;
       error.value = bisectErrorMessage(e);
       // git may have recorded the mark before failing (a checkout refused by
       // uncommitted changes): show what it holds now, keeping the error.

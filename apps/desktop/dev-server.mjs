@@ -5644,7 +5644,7 @@ async function handleRequest(req, res) {
             return jsonResponse(req, res, { state, hasConflict: hasConflict(), operationHead: readTrimmed(headFile), targetBranch: null, step: 0, total: 0 });
           }
         }
-        const bisect = devBisectRepoState(resolvedCwd);
+        const bisect = devBisectRepoState(resolvedCwd, gitDir);
         if (bisect) return jsonResponse(req, res, bisect);
         return jsonResponse(req, res, { state: "clean", hasConflict: false, operationHead: null, targetBranch: null, step: 0, total: 0 });
       } catch (err) {
