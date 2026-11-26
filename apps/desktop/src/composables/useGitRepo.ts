@@ -10,6 +10,7 @@ import {
   getGitDiff,
   getGitLog,
   getGitRevCount,
+  getGitRefsFingerprint,
   getGitUser,
   gitStage,
   gitUnstage,
@@ -617,6 +618,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     loading.value = true;
     error.value = null;
     folderPath.value = path;
+    _refsSeen = null;
 
     // Reset previous repo state
     selectedCommitHash.value = null;
@@ -649,6 +651,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    */
   function closeRepo() {
     folderPath.value = null;
+    _refsSeen = null;
     status.value = null;
     selectedFilePath.value = null;
     selectedFileStaged.value = false;
@@ -671,12 +674,60 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * views stay in sync with the repository state.
    */
   async function refresh(forceLog = false) {
+    await refreshWith(forceLog, null);
+  }
+
+  /** `refresh`, with a refs fingerprint already read before it (see `loadLog`). */
+  async function refreshWith(forceLog: boolean, refsFp: string | null) {
     if (!folderPath.value) return;
-    await Promise.all([loadStatus(folderPath.value), loadLog(undefined, forceLog)]);
+    await Promise.all([
+      loadStatus(folderPath.value),
+      loadLog(undefined, forceLog, false, refsFp),
+    ]);
     // Also refresh diff if a file is selected
     if (selectedFilePath.value) {
       await loadDiff(selectedFilePath.value, selectedFileStaged.value);
     }
+  }
+
+  /**
+   * Refresh after a watcher `head`/`refs` event. Such an event usually means
+   * decorations changed, possibly below the first page a plain refresh
+   * compares, so it forces the log (#266) — unless the refs fingerprint is
+   * the one the last forced reload saw: then the log cannot have changed (a
+   * second event batch for one `git branch`, an in-app action that already
+   * reloaded it, a Time Machine snapshot ref), and a forced reload would only
+   * restart the full-history prefetch for nothing. Status is still reloaded:
+   * an action that forced only the log (deleting a remote branch) leaves the
+   * upstream and ahead/behind to this event.
+   */
+  async function refreshOnRefsEvent() {
+    const repo = folderPath.value;
+    if (!repo) return;
+    // Pages started after this point read refs at least as new as `fp`.
+    const pagesBeforeRead = _pageSeq;
+    let fp: string | null = null;
+    try {
+      fp = await getGitRefsFingerprint(repo);
+    } catch {
+      // Unknown: reload, as before.
+    }
+    if (folderPath.value !== repo) return;
+    if (
+      fp !== null &&
+      _logLoadsInFlight === 0 &&
+      _refsSeen?.repo === repo &&
+      _refsSeen.fp === fp
+    ) {
+      // A scroll or prefetch page still in flight may have been read with
+      // refs that have moved and come back since: fetch it again.
+      refetchPageInFlight(pagesBeforeRead);
+      await loadStatus(repo);
+      if (selectedFilePath.value) await loadDiff(selectedFilePath.value, selectedFileStaged.value);
+      return;
+    }
+    // Read before the log that follows: loadLog can use it as its own.
+    await refreshWith(true, fp);
   }
 
   /**
@@ -740,6 +791,22 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // Set by a forced loadLog until a request applies; a superseded forced
   // reload thus hands its force to the request that supersedes it.
   let _logForcePending = false;
+  // Refs fingerprint (`getGitRefsFingerprint`) read before the last forced
+  // reload that replaced the log (`recordRefs`): the log shows exactly those
+  // refs. Any other replacement of the log forgets it (`replaceLog`), and a
+  // superseded or failed forced reload records nothing. A watcher
+  // refs/head event that finds the same fingerprint has nothing to reload
+  // (`refreshOnRefsEvent`).
+  let _refsSeen: { repo: string; fp: string } | null = null;
+  // loadLog calls running. One started before an event may apply rows read
+  // with refs the event's fingerprint no longer shows (a checkout and back):
+  // an event never skips while one runs (`refreshOnRefsEvent`).
+  let _logLoadsInFlight = 0;
+  // Scroll/prefetch pages started so far, and the latest one's number and
+  // size: `refetchPageInFlight` refetches it at the same size, and only when
+  // it started before the fingerprint it is judged against was read.
+  let _pageSeq = 0;
+  let _pageInFlight = { seq: 0, size: LOG_PAGE };
 
   /**
    * The log just took changed rows: a ref may have moved, and the Git Tree
@@ -751,8 +818,35 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (branches.value.length > 0) void loadBranches();
   }
 
-  /** Replace the whole log and invalidate in-flight pagination against the old one. */
+  /**
+   * A forced reload replaced the log with rows read after `fp` was; `null`
+   * (no fingerprint) leaves nothing recorded, never an older one.
+   */
+  function recordRefs(repo: string, fp: string | null) {
+    _refsSeen = fp === null ? null : { repo, fp };
+  }
+
+  /**
+   * Drop a scroll or prefetch page still in flight (read with refs that may
+   * no longer hold) and fetch it again at the same offset. Without the new
+   * request, the list components, which ask for a page only when the log's
+   * length changes, would never ask again in a filtered view or past the
+   * prefetch ceiling.
+   */
+  function refetchPageInFlight(startedBy = Infinity) {
+    if (!logLoadingMore.value || _pageInFlight.seq > startedBy) return;
+    _logGen++; // the dropped page's `finally` no longer owns the flag
+    logLoadingMore.value = false;
+    void loadMoreLog(_pageInFlight.size);
+  }
+
+  /**
+   * Replace the whole log and invalidate in-flight pagination against the old
+   * one. Forgets the recorded refs: the new rows may show other refs than the
+   * record (a forced reload records its own right after).
+   */
   function replaceLog(entries: GitLogEntry[]) {
+    _refsSeen = null;
     _logGen++;
     _prefetchToken++;
     logLoadingMore.value = false;
@@ -835,8 +929,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * @param viewChanged True when the filter/scope just changed: fetch only the
    *   first page (the current depth belongs to the old view — up to the whole
    *   prefetched history) and never keep the old view's entries.
+   * @param refsFpBefore A refs fingerprint the caller read just before this
+   *   call, used instead of reading one again (`refreshOnRefsEvent`).
    */
-  async function loadLog(count?: number, force = false, viewChanged = false) {
+  async function loadLog(
+    count?: number,
+    force = false,
+    viewChanged = false,
+    refsFpBefore: string | null = null,
+  ) {
     if (!folderPath.value) return;
     const epoch = _logViewEpoch;
     // Captured before the awaits: a repo switch while this fetch is in flight
@@ -848,7 +949,26 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (force) _logForcePending = true;
     const current = () =>
       req === _logRequest && epoch === _logViewEpoch && folderPath.value === repo;
+    _logLoadsInFlight++;
     try {
+      // A forced reload (or one inheriting a force) records the refs it saw,
+      // read BEFORE the log so the log is at least as new as the fingerprint.
+      // Known gap: a ref that moves and comes back between that read and the
+      // log's (two checkouts within milliseconds) leaves the log showing the
+      // intermediate state with the original fingerprint recorded, so the
+      // events for both moves are skipped. Reading again after the log cannot
+      // see it either; the next real ref move or manual refresh corrects it.
+      let refsFp: string | null = null;
+      if (_logForcePending) {
+        refsFp = refsFpBefore;
+        if (refsFp === null) {
+          try {
+            refsFp = await getGitRefsFingerprint(repo);
+          } catch {
+            // No fingerprint: the next refs event reloads, as before.
+          }
+        }
+      }
       const authorEmail =
         logAuthorFilter.value === "mine"
           ? (currentGitUser.value?.email ?? "")
@@ -928,6 +1048,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
             }
           }
           replaceLog(fresh);
+          if (forced) recordRefs(repo, refsFp);
           logHasMore.value = log.value.length < effectiveTotalCount();
           void prefetchAllPages();
           if (!viewChanged) refreshLoadedBranches();
@@ -946,6 +1067,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           replaceLog(entries);
           if (!viewChanged) refreshLoadedBranches();
         }
+        if (forced) recordRefs(repo, refsFp);
         // hasMore: in branch-only mode a full page is exactly `pageSize`. In
         // all-refs mode the backend appends stash start-points and filters the
         // `index on`/`untracked files on` pseudo-commits, so a full page returns
@@ -954,6 +1076,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         logHasMore.value = isCurrentBranchOnly
           ? entries.length >= pageSize
           : log.value.length < effectiveTotalCount();
+        // Same rows, recorded as showing the current refs: a scroll page still
+        // in flight was read with older ones and is fetched again.
+        if (unchanged && forced) refetchPageInFlight();
       }
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
@@ -962,6 +1087,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       }
     } catch (err: any) {
       error.value = `git log: ${err?.message ?? err}`;
+    } finally {
+      _logLoadsInFlight--;
     }
   }
 
@@ -972,6 +1099,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   async function loadMoreLog(pageSize: number = LOG_PAGE) {
     if (!folderPath.value || !logHasMore.value || logLoadingMore.value) return;
     logLoadingMore.value = true;
+    _pageInFlight = { seq: ++_pageSeq, size: pageSize };
     const epoch = _logViewEpoch;
     const gen = _logGen;
     try {
@@ -1921,6 +2049,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     openRepo,
     closeRepo,
     refresh,
+    refreshOnRefsEvent,
     selectFile,
     loadLog,
     loadMoreLog,

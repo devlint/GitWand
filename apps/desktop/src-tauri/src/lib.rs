@@ -1267,6 +1267,7 @@ pub fn run() {
             commands::read::read_commit_template,
             // ── v2.21.0 Monorepo Scope ──
             commands::read::git_rev_count,
+            commands::read::git_refs_fingerprint,
             commands::terminal::terminal_open,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,

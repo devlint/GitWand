@@ -19,7 +19,14 @@ import { join } from "node:path";
 vi.mock("../../utils/backend");
 
 import { useGitRepo } from "../useGitRepo";
-import { getGitBranches, getGitLog, getGitRevCount, type GitLogEntry } from "../../utils/backend";
+import {
+  getGitBranches,
+  getGitLog,
+  getGitRefsFingerprint,
+  getGitRevCount,
+  getGitStatus,
+  type GitLogEntry,
+} from "../../utils/backend";
 
 const GIT_TEST_TIMEOUT_MS = 60_000;
 
@@ -128,6 +135,19 @@ beforeEach(() => {
       await gate;
     }
     return result;
+  });
+  // Same inputs as dev-server.mjs `/api/git-refs-fingerprint` (read.rs
+  // `git_refs_fingerprint`), unhashed: only compared for equality.
+  vi.mocked(getGitRefsFingerprint).mockReset();
+  vi.mocked(getGitRefsFingerprint).mockImplementation(async (cwd) => {
+    const refs = git(cwd, ["for-each-ref", "--format=%(objectname) %(refname) %(symref)"])
+      .split("\n")
+      .filter((l) => l && !l.split(" ")[1].startsWith("refs/gitwand/snapshots/"));
+    return [
+      refs.join("\n"),
+      git(cwd, ["worktree", "list", "--porcelain"]),
+      git(cwd, ["stash", "list", "--format=%H"]),
+    ].join("\0");
   });
   vi.mocked(getGitRevCount).mockImplementation(async (cwd) =>
     Number(git(cwd, ["rev-list", "--count", "--all"]).trim()),
@@ -385,6 +405,324 @@ describe("loadLog follows ref moves that keep the top commit (#266)", () => {
       await repo.loadLog();
 
       expect(getGitBranches).not.toHaveBeenCalled();
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("refreshOnRefsEvent reloads only when the refs moved", () => {
+  /** First-page `git log` calls so far (the forced/plain reloads, not pages). */
+  const firstPageLoads = () =>
+    vi.mocked(getGitLog).mock.calls.filter((c) => (c[4] ?? 0) === 0).length;
+
+  it(
+    "skips an event whose refs the last forced reload already saw",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      const c2 = sha(dir, "c2");
+      // An in-app action: move a ref, then force the log itself.
+      git(dir, ["branch", "topic", c2]);
+      await repo.loadLog(undefined, true);
+      expect(refsOf(repo, c2)).toBe("topic");
+      const loads = firstPageLoads();
+
+      // The watcher event for that same move arrives afterwards.
+      await repo.refreshOnRefsEvent();
+
+      expect(firstPageLoads()).toBe(loads);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "forces the log once for a move, not again for a second event batch",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      const c2 = sha(dir, "c2");
+
+      git(dir, ["tag", "v0", c2]);
+      await repo.refreshOnRefsEvent();
+      expect(refsOf(repo, c2)).toBe("tag: v0");
+      const loads = firstPageLoads();
+
+      await repo.refreshOnRefsEvent();
+      expect(firstPageLoads()).toBe(loads);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "reloads on the first event after opening, with nothing recorded yet",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      const loads = firstPageLoads();
+
+      await repo.refreshOnRefsEvent();
+
+      expect(firstPageLoads()).toBeGreaterThan(loads);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "ignores a Time Machine snapshot ref",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true);
+      const loads = firstPageLoads();
+
+      git(dir, ["update-ref", "refs/gitwand/snapshots/1", sha(dir, "c3")]);
+      await repo.refreshOnRefsEvent();
+
+      expect(firstPageLoads()).toBe(loads);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "sees HEAD moving to another branch on the same commit",
+    async () => {
+      const dir = newRepo(5);
+      git(dir, ["branch", "side"]);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true);
+      const top = sha(dir, "c5");
+      expect(refsOf(repo, top)).toBe("HEAD -> main, side");
+
+      git(dir, ["checkout", "-q", "side"]);
+      await repo.refreshOnRefsEvent();
+
+      expect(refsOf(repo, top)).toBe("HEAD -> side, main");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "reads the fingerprint once before the log when an event reloads",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true);
+      git(dir, ["branch", "topic", sha(dir, "c2")]);
+      vi.mocked(getGitRefsFingerprint).mockClear();
+
+      await repo.refreshOnRefsEvent();
+
+      // The event's read is reused by the forced reload.
+      expect(getGitRefsFingerprint).toHaveBeenCalledTimes(1);
+      expect(refsOf(repo, sha(dir, "c2"))).toBe("topic");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "forgets an older record when a forced reload gets no fingerprint",
+    async () => {
+      const dir = newRepo(5);
+      git(dir, ["branch", "side"]);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true); // records the refs on main
+      const top = sha(dir, "c5");
+
+      git(dir, ["checkout", "-q", "side"]);
+      vi.mocked(getGitRefsFingerprint).mockRejectedValueOnce(new Error("boom"));
+      await repo.loadLog(undefined, true); // shows side, records nothing
+      expect(refsOf(repo, top)).toBe("HEAD -> side, main");
+
+      // Back to the refs of the first record: the event must still reload.
+      git(dir, ["checkout", "-q", "main"]);
+      await repo.refreshOnRefsEvent();
+
+      expect(refsOf(repo, top)).toBe("HEAD -> main, side");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "forgets the record when a plain reload replaces the log",
+    async () => {
+      const dir = newRepo(5);
+      git(dir, ["branch", "side"]);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true); // records the refs on main
+      const top = sha(dir, "c5");
+
+      git(dir, ["checkout", "-q", "side"]);
+      await repo.loadLog(); // the worktree handler's plain reload
+      expect(refsOf(repo, top)).toBe("HEAD -> side, main");
+
+      git(dir, ["checkout", "-q", "main"]);
+      await repo.refreshOnRefsEvent();
+
+      expect(refsOf(repo, top)).toBe("HEAD -> main, side");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "does not skip while an older log load is still running",
+    async () => {
+      const dir = newRepo(5);
+      git(dir, ["branch", "side"]);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true); // records the refs on main
+      const top = sha(dir, "c5");
+
+      // A plain load reads the log on `side`, its result held back.
+      git(dir, ["checkout", "-q", "side"]);
+      let release!: () => void;
+      firstPageGate = new Promise<void>((r) => (release = r));
+      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const plain = repo.loadLog();
+      await vi.waitFor(() => expect(vi.mocked(getGitLog).mock.calls.length).toBe(calls + 1));
+
+      // Back on main before the event runs: same refs as the record.
+      git(dir, ["checkout", "-q", "main"]);
+      await repo.refreshOnRefsEvent();
+      release();
+      await plain;
+
+      expect(refsOf(repo, top)).toBe("HEAD -> main, side");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps scrolling after a forced reload finds the same rows under a page in flight",
+    async () => {
+      const dir = newRepo(150);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      repo.logBranchFilter.value = "current";
+      await repo.loadLog();
+      expect(repo.log.value).toHaveLength(100);
+
+      // A scroll page in flight, held back.
+      let release!: () => void;
+      pageGate = new Promise<void>((r) => (release = r));
+      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const page = repo.loadMoreLog();
+      await vi.waitFor(() => expect(vi.mocked(getGitLog).mock.calls.length).toBe(calls + 1));
+
+      // A ref moves below the loaded rows: the forced reload finds them unchanged.
+      git(dir, ["update-ref", "refs/remotes/origin/old", sha(dir, "c1")]);
+      await repo.loadLog(undefined, true);
+      release();
+      await page;
+
+      // The dropped page is fetched again without another scroll.
+      await vi.waitFor(() => expect(repo.log.value).toHaveLength(150));
+      expect(repo.logLoadingMore.value).toBe(false);
+      expect(refsOf(repo, sha(dir, "c1"))).toBe("origin/old");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "still reloads status when it skips the log",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true);
+      vi.mocked(getGitStatus).mockClear();
+
+      await repo.refreshOnRefsEvent();
+
+      expect(getGitStatus).toHaveBeenCalledTimes(1);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "records nothing for a forced reload that failed",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      git(dir, ["branch", "topic", sha(dir, "c2")]);
+      vi.mocked(getGitLog).mockRejectedValueOnce(new Error("boom"));
+      await repo.loadLog(undefined, true);
+      expect(refsOf(repo, sha(dir, "c2"))).toBe("");
+
+      await repo.refreshOnRefsEvent();
+
+      expect(refsOf(repo, sha(dir, "c2"))).toBe("topic");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "records a forced reload in a filtered view",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      repo.logBranchFilter.value = "current";
+      await repo.loadLog(undefined, true);
+      const loads = firstPageLoads();
+
+      await repo.refreshOnRefsEvent();
+
+      expect(firstPageLoads()).toBe(loads);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "reloads as before when the fingerprint cannot be read",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog(undefined, true);
+      const loads = firstPageLoads();
+
+      vi.mocked(getGitRefsFingerprint).mockRejectedValue(new Error("boom"));
+      await repo.refreshOnRefsEvent();
+
+      expect(firstPageLoads()).toBeGreaterThan(loads);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "does not carry a record over to another repo",
+    async () => {
+      const a = newRepo(5);
+      const b = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, a);
+      await repo.openRepo(a);
+      await repo.loadLog(undefined, true);
+      await repo.openRepo(b);
+      await repo.loadLog();
+      await repo.openRepo(a);
+      await repo.loadLog();
+      const loads = firstPageLoads();
+
+      // `a`'s refs did not move, but its log was not reloaded with force since
+      // it was reopened: the event must still reload.
+      await repo.refreshOnRefsEvent();
+
+      expect(firstPageLoads()).toBeGreaterThan(loads);
     },
     GIT_TEST_TIMEOUT_MS,
   );
