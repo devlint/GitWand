@@ -785,6 +785,10 @@ async function detectOllama(interactive = false) {
       if (data.models && Array.isArray(data.models)) {
         ollamaModels.value = data.models.map((m: any) => m.name || m.model).filter(Boolean);
       }
+    } else {
+      ollamaAvailable.value = false;
+      ollamaModels.value = [];
+      if (interactive) ollamaError.value = `HTTP ${res.status}`;
     }
   } catch (e) {
     ollamaAvailable.value = false;
@@ -1069,13 +1073,16 @@ const usesApiModelField = computed(() =>
 );
 
 // A slow fetch for a previous provider/key must not overwrite a newer one.
+// `interactive`: only a load the user asked for (Refresh, the endpoint field
+// committed) may pop the backend's question for an address not allowed yet;
+// the loads on tab open and on a provider/key change fail instead.
 let modelsRequest = 0;
-async function loadModels(provider: AIProvider = settings.value.aiProvider) {
+async function loadModels(interactive = false, provider: AIProvider = settings.value.aiProvider) {
   const request = ++modelsRequest;
   modelsError.value = "";
   modelsLoading.value = true;
   try {
-    const list = await listModelsForProvider(provider, settings.value);
+    const list = await listModelsForProvider(provider, settings.value, { interactive });
     if (request === modelsRequest) modelOptions.value = list;
   } catch (e) {
     if (request === modelsRequest) {
@@ -1110,7 +1117,7 @@ function onEndpointBlur() {
   if (!aiDetectDone || !isFetchableEndpoint(settings.value.aiApiEndpoint)) return;
   clearTimeout(modelsReloadTimer);
   modelOptions.value = [];
-  loadModels();
+  loadModels(true);
 }
 
 const currentModel = computed(() =>
@@ -3134,7 +3141,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 <div class="sp-label-row">
                   <label class="sp-label" for="setting-ai-model">{{ t('settings.aiModelLabel') }}</label>
                   <span class="sp-label-aside">(<button class="sp-text-btn sp-label-aside__btn"
-                      :disabled="modelsLoading" @click="loadModels()">{{ t('settings.aiModelCliRefresh') }}</button>)</span>
+                      :disabled="modelsLoading" @click="loadModels(true)">{{ t('settings.aiModelCliRefresh') }}</button>)</span>
                 </div>
                 <select v-if="modelOptions.length > 0" id="setting-ai-model" class="sp-select"
                   :value="currentModel"

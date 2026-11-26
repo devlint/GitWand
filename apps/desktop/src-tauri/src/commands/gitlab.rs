@@ -1129,8 +1129,14 @@ fn gl_create_mr_run(
     let run = |extra: &[&str], input: Option<String>| {
         let mut cmd = hidden_cmd("glab");
         cmd.args(args).args(extra).current_dir(cwd);
-        output_with_timeout_input(cmd, GLAB_TIMEOUT, input)
-            .map_err(|e| format!("Failed to create MR: {}", e))
+        output_with_timeout_input(cmd, GLAB_TIMEOUT, input).map_err(|e| match e.kind() {
+            // glab may have created the MR before the deadline.
+            std::io::ErrorKind::TimedOut => format!(
+                "Failed to create MR: {}; it may have been created, reload the MR list before retrying",
+                e
+            ),
+            _ => format!("Failed to create MR: {}", e),
+        })
     };
     let output = run(&["--description-file", "-"], Some(body.clone()))?;
     if !output.status.success()

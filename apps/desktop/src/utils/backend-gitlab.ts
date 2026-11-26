@@ -2,7 +2,7 @@
 // Extracted from backend.ts as part of the v2.11 backend split to keep module size manageable.
 // Consumers should import directly from this file instead of backend.ts for these symbols.
 
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER } from "./backend-core";
+import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT } from "./backend-core";
 import {
   PullRequest,
   PullRequestDetail,
@@ -178,7 +178,9 @@ export async function glCreateMr(
     cwd, title, body,
     sourceBranch, targetBranch, draft,
     reviewers: reviewers ?? [],
-  });
+  // Up to two glab runs (GLAB_TIMEOUT each) when an old glab needs the
+  // description on argv: more than the default 30 s.
+  }, IPC_TIMEOUT.NETWORK);
   return mapGlPullRequest(raw);
 }
 

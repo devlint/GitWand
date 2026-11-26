@@ -538,7 +538,6 @@ fn ai_http_request_inner(
 ) -> Result<AiHttpResponse, String> {
     const MARKER: &str = "\n__GW_HTTP_STATUS__";
     let target = parse_endpoint(url)?;
-    open_gate(&target)?;
     let stored = if auth == "none" { None } else { read_key() };
     let headers = auth_headers(auth, stored.as_ref().map(|s| s.key.as_str()))?;
     if let Some(s) = stored.as_ref() {
@@ -547,6 +546,9 @@ fn ai_http_request_inner(
     // Kept alive until curl has exited: it reads the body from this file.
     let body_file = body.map(RequestBody::new).transpose()?;
     let cfg = build_request_config(method, &target, body_file.as_ref(), &headers)?;
+    // Last, whatever the auth: only a request that would actually go out
+    // asks the user (and gets its origin remembered).
+    open_gate(&target)?;
     let timeout = timeout_secs
         .unwrap_or(COMPLETION_TIMEOUT_SECS)
         .clamp(1, COMPLETION_TIMEOUT_SECS);
@@ -907,17 +909,17 @@ mod tests {
     }
 
     #[test]
-    fn a_request_with_a_key_is_gated_too() {
+    fn a_request_that_cannot_go_out_never_reaches_the_gate() {
         let err = ai_http_request_inner(
-            "POST",
+            "DELETE",
             "https://collector.example/v1/chat/completions",
-            Some("{}"),
-            "bearer",
+            None,
+            "none",
             Some(1),
-            |_| Err("refused".to_string()),
+            |_| panic!("asked for a request that fails anyway"),
         )
         .unwrap_err();
-        assert_eq!(err, "refused");
+        assert!(err.contains("Unsupported method"), "{err}");
     }
 
     #[test]

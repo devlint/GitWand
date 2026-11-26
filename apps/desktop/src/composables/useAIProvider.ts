@@ -466,10 +466,22 @@ function anthropicEfforts(capabilities: any): string[] {
 }
 
 /**
+ * How a model-list fetch treats an address the user has not allowed yet:
+ * `interactive: false` (a load the user did not ask for) fails rather than
+ * popping the backend's native question (see `aiHttpRequest`).
+ */
+export interface ModelListOptions {
+  interactive?: boolean;
+}
+
+/**
  * Fetch the models the Anthropic API key can use (`GET /v1/models`), newest
  * first as the API returns them.
  */
-export async function fetchAnthropicModels(endpoint: string): Promise<AIModelOption[]> {
+export async function fetchAnthropicModels(
+  endpoint: string,
+  opts: ModelListOptions = {},
+): Promise<AIModelOption[]> {
   const base = (endpoint || "https://api.anthropic.com").replace(/\/+$/, "");
   const models: AIModelOption[] = [];
   let afterId: string | undefined;
@@ -478,7 +490,7 @@ export async function fetchAnthropicModels(endpoint: string): Promise<AIModelOpt
     const url = new URL(`${base}/v1/models`);
     url.searchParams.set("limit", "1000");
     if (afterId) url.searchParams.set("after_id", afterId);
-    const res = await aiHttpRequest("GET", url.toString(), "anthropic", undefined, 10);
+    const res = await aiHttpRequest("GET", url.toString(), "anthropic", undefined, 10, opts);
     if (!isOk(res.status)) {
       throw new Error(`Anthropic API error ${res.status}: ${res.body}`);
     }
@@ -501,10 +513,13 @@ export async function fetchAnthropicModels(endpoint: string): Promise<AIModelOpt
  * Fetch the models an OpenAI-compatible endpoint serves (`GET /models`).
  * The endpoint reports ids only — no display name, no effort support.
  */
-export async function fetchOpenAICompatModels(endpoint: string): Promise<AIModelOption[]> {
+export async function fetchOpenAICompatModels(
+  endpoint: string,
+  opts: ModelListOptions = {},
+): Promise<AIModelOption[]> {
   const base = endpoint.replace(/\/+$/, "");
   const auth = isAiApiKeyConfigured() ? "bearer" : "none";
-  const res = await aiHttpRequest("GET", `${base}/models`, auth, undefined, 10);
+  const res = await aiHttpRequest("GET", `${base}/models`, auth, undefined, 10, opts);
   if (!isOk(res.status)) {
     throw new Error(`API error ${res.status}: ${res.body}`);
   }
@@ -525,14 +540,15 @@ export async function fetchOpenAICompatModels(endpoint: string): Promise<AIModel
 export async function listModelsForProvider(
   provider: AIProvider,
   s?: Pick<AISettings, "aiApiEndpoint">,
+  opts: ModelListOptions = {},
 ): Promise<AIModelOption[]> {
   switch (provider) {
     case "claude":
       if (!isAiApiKeyConfigured()) return CLAUDE_API_MODELS;
-      return fetchAnthropicModels(s?.aiApiEndpoint ?? "");
+      return fetchAnthropicModels(s?.aiApiEndpoint ?? "", opts);
     case "openai-compat":
       if (!s?.aiApiEndpoint) return [];
-      return fetchOpenAICompatModels(s.aiApiEndpoint);
+      return fetchOpenAICompatModels(s.aiApiEndpoint, opts);
     case "opencode-cli":
       return (await listOpencodeModels()).map((id) => ({ id, name: id, efforts: [] }));
     case "antigravity-cli":
