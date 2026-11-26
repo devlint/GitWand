@@ -394,7 +394,12 @@ export async function ghCreatePr(
       merge_state_status: string;
       checks_rollup: string;
       autoMerge?: AutoMergeState;
-    }>("gh_create_pr", { cwd, title, body, base, baseRepo: baseRepo || null, draft, reviewers });
+    }>(
+      "gh_create_pr",
+      { cwd, title, body, base, baseRepo: baseRepo || null, draft, reviewers },
+      // gh pr create gets up to 120 s on the Rust side (GH_CREATE_TIMEOUT).
+      IPC_TIMEOUT.NETWORK,
+    );
     return {
       number: raw.number,
       title: raw.title,

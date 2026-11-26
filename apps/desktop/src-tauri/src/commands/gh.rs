@@ -37,8 +37,12 @@ use std::time::{Duration, Instant};
 /// stats enrichment below was added.
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
 /// `gh pr create` resolves the head, may look up reviewers and creates the
-/// PR: more than one API call, so more room than `GH_TIMEOUT`.
+/// PR: more than one API call, so more room than `GH_TIMEOUT` (`ghCreatePr`
+/// waits on it with `IPC_TIMEOUT.NETWORK`).
 const GH_CREATE_TIMEOUT: Duration = Duration::from_secs(120);
+/// `gh api` writes (`gh_api_write`): ended just before the frontend's
+/// default 30 s IPC timeout gives up on them.
+const GH_WRITE_TIMEOUT: Duration = Duration::from_secs(28);
 /// Timeout for the best-effort `git fetch origin` that refreshes
 /// remote-tracking refs before the per-PR numstat diffs below.
 const GH_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -953,7 +957,7 @@ fn gh_pr_edit_inner(
     }) {
         return r;
     }
-    // `-f` sends each value as a raw string — no `@file` expansion, unlike `-F`.
+    // The fields go as a JSON body on stdin (`gh_api_write`).
     let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/pulls/{}", nwo, number);
     gh_api_write(&cwd, "PATCH", &path, &fields)?;
@@ -2657,8 +2661,17 @@ fn gh_api_write(
     if input.is_some() {
         cmd.args(["--input", "-"]);
     }
-    let output = crate::git::output_with_timeout_input(cmd, GH_TIMEOUT, input)
-        .map_err(|e| format!("gh api write: {}", e))?;
+    let output =
+        crate::git::output_with_timeout_input(cmd, GH_WRITE_TIMEOUT, input).map_err(|e| match e
+            .kind()
+        {
+            // The request may have reached GitHub before the deadline.
+            std::io::ErrorKind::TimedOut => format!(
+                "gh api write: {}; the change may have been applied, reload before retrying",
+                e
+            ),
+            _ => format!("gh api write: {}", e),
+        })?;
     gh_api_parse(
         output,
         &format!("gh api {}", method),

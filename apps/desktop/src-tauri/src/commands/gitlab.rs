@@ -2200,6 +2200,22 @@ pub(crate) async fn gl_delete_reaction(
 }
 
 #[cfg(test)]
+mod gl_create_mr_tests {
+    use super::is_unknown_flag;
+
+    #[test]
+    fn an_old_glab_without_description_file_is_recognised() {
+        let old = "Error: unknown flag: --description-file\nUsage: ...";
+        assert!(is_unknown_flag(old, "--description-file"));
+        assert!(!is_unknown_flag(
+            "unknown flag: --draft",
+            "--description-file"
+        ));
+        assert!(!is_unknown_flag("403 Forbidden", "--description-file"));
+    }
+}
+
+#[cfg(test)]
 mod gl_list_issues_tests {
     use super::gl_issue_to_issue;
 
@@ -2267,18 +2283,7 @@ mod gl_state_flag_tests {
 /// `gl_mergeable_state`, consumed by `gl_mr_to_detail`.
 #[cfg(test)]
 mod gl_mergeable_state_tests {
-    #[test]
-    fn an_old_glab_without_description_file_is_recognised() {
-        let old = "Error: unknown flag: --description-file\nUsage: ...";
-        assert!(is_unknown_flag(old, "--description-file"));
-        assert!(!is_unknown_flag(
-            "unknown flag: --draft",
-            "--description-file"
-        ));
-        assert!(!is_unknown_flag("403 Forbidden", "--description-file"));
-    }
-
-    use super::{gl_mergeable_state, is_unknown_flag};
+    use super::gl_mergeable_state;
     use serde_json::json;
 
     #[test]

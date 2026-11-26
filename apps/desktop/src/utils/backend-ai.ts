@@ -533,8 +533,10 @@ export interface AiHttpResponse {
 
 /**
  * Perform one AI provider HTTP request through the backend. A request without
- * the key (`auth: "none"`) to a host other than loopback makes the backend ask
- * the user, in a native dialog in the app's language, before anything is sent.
+ * the key (`auth: "none"`) to an address that is neither loopback nor a known
+ * provider makes the backend ask the user, in a native dialog in the app's
+ * language, before anything is sent. `interactive: false` (a background
+ * probe) gets an error instead of that question.
  */
 export async function aiHttpRequest(
   method: "GET" | "POST",
@@ -542,6 +544,7 @@ export async function aiHttpRequest(
   auth: AiHttpAuth,
   body?: unknown,
   timeoutSecs?: number,
+  opts: { interactive?: boolean } = {},
 ): Promise<AiHttpResponse> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   if (isTauri()) {
@@ -552,6 +555,7 @@ export async function aiHttpRequest(
       auth,
       timeoutSecs,
       locale: useI18n().locale.value,
+      interactive: opts.interactive ?? true,
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/ai-http-request`, {
@@ -581,7 +585,15 @@ export interface AiKeyInfo {
  * (an empty key clears it). Returns what is now stored, or null.
  */
 export async function aiApiKeySet(key: string, endpoint?: string): Promise<AiKeyInfo | null> {
-  if (isTauri()) return tauriInvoke<AiKeyInfo | null>("ai_api_key_set", { key, endpoint });
+  // No IPC timeout: binding the key to an address the user has not allowed
+  // yet waits for their answer in a native dialog (see aiHttpRequest).
+  if (isTauri()) {
+    return tauriInvoke<AiKeyInfo | null>(
+      "ai_api_key_set",
+      { key, endpoint, locale: useI18n().locale.value },
+      IPC_TIMEOUT.NONE,
+    );
+  }
   const res = await devFetch(`${DEV_SERVER}/api/ai-api-key`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

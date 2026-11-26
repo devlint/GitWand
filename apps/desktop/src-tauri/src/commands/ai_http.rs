@@ -21,13 +21,17 @@
 //! - Because the webview no longer talks to arbitrary AI hosts itself, the CSP
 //!   `connect-src` can be limited to a short list of fixed hosts.
 //! - A request without the key (`auth: "none"`: Ollama, a keyless
-//!   OpenAI-compatible server) carries repository content too, so it is not a
-//!   way around that CSP either: it may go to a loopback host, or to an origin
-//!   the user allowed in a native dialog shown by this module (the webview
-//!   cannot answer it), remembered in `{data_local_dir}/gitwand/ai-open-endpoints.json`.
+//!   OpenAI-compatible server) carries repository content too, and so does a
+//!   request with a key bound to a server that does not check keys. Both
+//!   pass `check_open_endpoint` (the request, or the binding): a loopback
+//!   host, a known provider, or an origin the user allowed in a native dialog
+//!   shown by this module (the webview cannot answer it), remembered in
+//!   `{data_local_dir}/gitwand/ai-open-endpoints.json`. This narrows what a
+//!   compromised webview can do with these two commands; it does not make the
+//!   webview trusted (see the IPC scoping follow-up in ROADMAP.md).
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl, RequestBody};
 
@@ -141,8 +145,8 @@ fn check_key_binding(bound: Option<&str>, target: &tauri::Url) -> Result<(), Str
     }
 }
 
-/// Loopback hosts take unauthenticated requests without asking: a local
-/// Ollama (the default `http://localhost:11434`) is no exfiltration channel.
+/// Loopback hosts pass the gate without asking: a local Ollama (the default
+/// `http://localhost:11434`) is no exfiltration channel.
 fn is_loopback(target: &tauri::Url) -> bool {
     let host = target.host_str().unwrap_or("");
     if host.eq_ignore_ascii_case("localhost") {
@@ -155,6 +159,12 @@ fn is_loopback(target: &tauri::Url) -> bool {
         .unwrap_or(false)
 }
 
+/// The hosted providers GitWand defaults to pass the gate too: what reaches
+/// them is not readable by whoever chose the endpoint (a script in the
+/// webview with a key of its own could still read back an OpenAI completion
+/// stored with `store: true`, the residual risk of a compromised webview).
+const KNOWN_PROVIDER_ORIGINS: &[&str] = &["https://api.anthropic.com", "https://api.openai.com"];
+
 fn open_endpoints_path() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -162,13 +172,17 @@ fn open_endpoints_path() -> PathBuf {
         .join("ai-open-endpoints.json")
 }
 
-/// Origins allowed for unauthenticated requests. A missing or unreadable file
-/// allows none.
-fn load_open_endpoints(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+/// Origins the user allowed, from `path`. A missing file allows none; an
+/// unreadable or corrupt one is an error, so that it is never overwritten
+/// with a single new origin.
+fn load_open_endpoints(path: &Path) -> Result<Vec<String>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => {
+            serde_json::from_str(&t).map_err(|e| format!("cannot parse {}: {e}", path.display()))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("cannot read {}: {e}", path.display())),
+    }
 }
 
 fn save_open_endpoints(path: &Path, origins: &[String]) -> Result<(), String> {
@@ -182,37 +196,95 @@ fn save_open_endpoints(path: &Path, origins: &[String]) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
-/// Serialises the check-ask-remember sequence, so two requests to the same
-/// new origin ask once.
-static OPEN_ENDPOINTS_LOCK: Mutex<()> = Mutex::new(());
+/// In-process state of the gate.
+struct GateState {
+    /// Origins whose question is on screen: a second request to one of them
+    /// waits for that answer instead of asking again. Requests to other
+    /// origins do not wait.
+    asking: Vec<String>,
+    /// Origins allowed during this run, so an allowed origin keeps working
+    /// when the store cannot be written (read-only data dir, corrupt file).
+    session: Vec<String>,
+}
 
-/// Gate for an unauthenticated request: loopback passes, any other origin
-/// must have been allowed by the user, `ask` showing the question when it was
-/// not. `ask` gets the origin and answers whether the user allowed it.
+static GATE: Mutex<GateState> = Mutex::new(GateState {
+    asking: Vec::new(),
+    session: Vec::new(),
+});
+static GATE_ANSWERED: Condvar = Condvar::new();
+
+fn not_allowed(origin: &str) -> String {
+    format!(
+        "AI requests to {} are not allowed. Allow the address when GitWand asks, or use a local endpoint.",
+        origin
+    )
+}
+
+/// The gate an AI request without the key, or a key binding, passes before
+/// repository content can go to `target`: loopback and the known providers
+/// pass; any other origin must have been allowed by the user. When it has
+/// not, `ask` shows the question (it gets the origin and answers whether the
+/// user allowed it), or, with `ask` = `None` (a background probe), the
+/// request is refused without one. A refusal is not remembered: the next
+/// request asks again, but the requests that were waiting on that question
+/// share its answer.
 fn check_open_endpoint(
     target: &tauri::Url,
     store: &Path,
-    ask: impl FnOnce(&str) -> bool,
+    ask: Option<&dyn Fn(&str) -> bool>,
 ) -> Result<(), String> {
-    if is_loopback(target) {
-        return Ok(());
-    }
     let origin = target.origin().ascii_serialization();
-    let _guard = OPEN_ENDPOINTS_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut allowed = load_open_endpoints(store);
-    if allowed.iter().any(|o| o == &origin) {
+    if is_loopback(target) || KNOWN_PROVIDER_ORIGINS.contains(&origin.as_str()) {
         return Ok(());
     }
-    if !ask(&origin) {
-        return Err(format!(
-            "AI requests to {} were not allowed. Allow them when GitWand asks, or use a local endpoint.",
-            origin
-        ));
+    let lock = || GATE.lock().unwrap_or_else(|p| p.into_inner());
+    let mut state = lock();
+    let mut waited = false;
+    loop {
+        if state.session.contains(&origin)
+            || load_open_endpoints(store).is_ok_and(|l| l.contains(&origin))
+        {
+            return Ok(());
+        }
+        if state.asking.contains(&origin) {
+            state = GATE_ANSWERED.wait(state).unwrap_or_else(|p| p.into_inner());
+            waited = true;
+            continue;
+        }
+        if waited {
+            // The question this request waited on was answered no.
+            return Err(not_allowed(&origin));
+        }
+        break;
     }
-    allowed.push(origin);
-    save_open_endpoints(store, &allowed)
+    let Some(ask) = ask else {
+        return Err(not_allowed(&origin));
+    };
+    state.asking.push(origin.clone());
+    drop(state);
+
+    let allowed = ask(&origin);
+
+    let mut state = lock();
+    state.asking.retain(|o| o != &origin);
+    if allowed {
+        state.session.push(origin.clone());
+        // Persist; a store that cannot be read is left as it is.
+        let saved = load_open_endpoints(store).and_then(|mut list| {
+            list.push(origin.clone());
+            save_open_endpoints(store, &list)
+        });
+        if let Err(e) = saved {
+            eprintln!("[gitwand] {origin} allowed for this session only: {e}");
+        }
+    }
+    drop(state);
+    GATE_ANSWERED.notify_all();
+    if allowed {
+        Ok(())
+    } else {
+        Err(not_allowed(&origin))
+    }
 }
 
 /// Text of the native question, in the app's language (`locale` only picks
@@ -228,31 +300,31 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
     match locale.unwrap_or("en") {
         "fr" => OpenEndpointPrompt {
             title: "Autoriser ce serveur d'IA ?",
-            body: "GitWand va envoyer du contenu de votre dépôt (diffs, conflits) sans clé d'API à :\n\n{origin}\n\nAutorisez-le seulement si c'est votre serveur Ollama ou compatible OpenAI. Ce choix est retenu.",
+            body: "GitWand va envoyer du contenu de votre dépôt (diffs, conflits) à :\n\n{origin}\n\nAutorisez-le seulement si c'est le serveur d'IA que vous avez configuré. Ce choix est retenu.",
             allow: "Autoriser",
             deny: "Refuser",
         },
         "es" => OpenEndpointPrompt {
             title: "¿Permitir este servidor de IA?",
-            body: "GitWand va a enviar contenido de tu repositorio (diffs, conflictos) sin clave de API a:\n\n{origin}\n\nPermítelo solo si es tu servidor Ollama o compatible con OpenAI. La decisión se recuerda.",
+            body: "GitWand va a enviar contenido de tu repositorio (diffs, conflictos) a:\n\n{origin}\n\nPermítelo solo si es el servidor de IA que configuraste. La decisión se recuerda.",
             allow: "Permitir",
             deny: "Rechazar",
         },
         "pt-BR" => OpenEndpointPrompt {
             title: "Permitir este servidor de IA?",
-            body: "O GitWand vai enviar conteúdo do seu repositório (diffs, conflitos) sem chave de API para:\n\n{origin}\n\nPermita apenas se for o seu servidor Ollama ou compatível com OpenAI. A escolha fica salva.",
+            body: "O GitWand vai enviar conteúdo do seu repositório (diffs, conflitos) para:\n\n{origin}\n\nPermita apenas se for o servidor de IA que você configurou. A escolha fica salva.",
             allow: "Permitir",
             deny: "Recusar",
         },
         "zh-CN" => OpenEndpointPrompt {
             title: "允许此 AI 服务器？",
-            body: "GitWand 将在不使用 API 密钥的情况下，把仓库内容（差异、冲突）发送到：\n\n{origin}\n\n仅当它是你的 Ollama 或 OpenAI 兼容服务器时才允许。此选择会被记住。",
+            body: "GitWand 将把仓库内容（差异、冲突）发送到：\n\n{origin}\n\n仅当它是你配置的 AI 服务器时才允许。此选择会被记住。",
             allow: "允许",
             deny: "拒绝",
         },
         _ => OpenEndpointPrompt {
             title: "Allow this AI server?",
-            body: "GitWand is about to send repository content (diffs, conflicts) without an API key to:\n\n{origin}\n\nAllow it only if this is your Ollama or OpenAI-compatible server. Your choice is remembered.",
+            body: "GitWand is about to send repository content (diffs, conflicts) to:\n\n{origin}\n\nAllow it only if this is the AI server you configured. Your choice is remembered.",
             allow: "Allow",
             deny: "Deny",
         },
@@ -301,11 +373,16 @@ fn stored_value(key: &str, endpoint: Option<&str>) -> Result<String, String> {
 
 /// Store the AI API key in the keychain, bound to the origin of `endpoint`
 /// (an empty key clears it). Returns what the webview may know of what is now
-/// stored, `None` when nothing is.
+/// stored, `None` when nothing is. Binding passes the same gate as a request
+/// without the key (`check_open_endpoint`): any key works with a server that
+/// does not check it, so a binding is as good as a keyless request to that
+/// origin. `locale` is the app's language, for the question.
 #[tauri::command]
 pub(crate) async fn ai_api_key_set(
+    app: tauri::AppHandle,
     key: String,
     endpoint: Option<String>,
+    locale: Option<String>,
 ) -> Result<Option<AiKeyInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let key = key.trim().to_string();
@@ -317,6 +394,14 @@ pub(crate) async fn ai_api_key_set(
             };
         }
         let value = stored_value(&key, endpoint.as_deref())?;
+        if let Some(origin) = StoredKey::parse(&value).and_then(|s| s.origin) {
+            let ask = |o: &str| ask_open_endpoint(&app, locale.as_deref(), o);
+            check_open_endpoint(
+                &parse_endpoint(&origin)?,
+                &open_endpoints_path(),
+                Some(&ask),
+            )?;
+        }
         entry
             .set_password(&value)
             .map_err(|e| format!("Failed to store AI API key: {}", e))?;
@@ -379,10 +464,12 @@ fn build_request_config(
 /// Perform one AI provider HTTP request. `auth` selects how the stored key is
 /// attached: `"anthropic"` (x-api-key), `"bearer"`, or `"none"` (Ollama). The
 /// key is only ever attached to a request for the origin it is bound to; a
-/// request without it goes to a loopback host or to an origin the user
-/// allowed (`check_open_endpoint`). `locale` is the app's language, for that
-/// question. `timeout_secs` caps the whole request; without it, the generous
-/// completion ceiling applies (`COMPLETION_TIMEOUT_SECS`).
+/// request without it passes `check_open_endpoint`. `locale` is the app's
+/// language, for that question; `interactive: false` (a background probe)
+/// refuses an origin not yet allowed instead of asking. `timeout_secs` caps
+/// the whole request; without it, the generous completion ceiling applies
+/// (`COMPLETION_TIMEOUT_SECS`).
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub(crate) async fn ai_http_request(
     app: tauri::AppHandle,
@@ -392,13 +479,16 @@ pub(crate) async fn ai_http_request(
     auth: String,
     timeout_secs: Option<u64>,
     locale: Option<String>,
+    interactive: Option<bool>,
 ) -> Result<AiHttpResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let open_gate = |target: &tauri::Url| {
-            check_open_endpoint(target, &open_endpoints_path(), |origin| {
-                ask_open_endpoint(&app, locale.as_deref(), origin)
-            })
+        let ask = |o: &str| ask_open_endpoint(&app, locale.as_deref(), o);
+        let ask: Option<&dyn Fn(&str) -> bool> = match interactive {
+            Some(false) => None,
+            _ => Some(&ask),
         };
+        let open_gate =
+            |target: &tauri::Url| check_open_endpoint(target, &open_endpoints_path(), ask);
         ai_http_request_inner(
             &method,
             &url,
@@ -605,8 +695,21 @@ mod tests {
         d.join("ai-open-endpoints.json")
     }
 
+    fn yes(_: &str) -> bool {
+        true
+    }
+    fn no(_: &str) -> bool {
+        false
+    }
+    fn never(o: &str) -> bool {
+        panic!("asked for {o}")
+    }
+
+    // The gate's session memory is process-wide: every test below uses
+    // origins of its own.
+
     #[test]
-    fn loopback_hosts_pass_without_asking() {
+    fn loopback_and_known_providers_pass_without_asking() {
         let store = scratch_store("loopback");
         for u in [
             "http://localhost:11434/api/chat",
@@ -614,10 +717,13 @@ mod tests {
             "http://127.0.0.1:11434",
             "http://127.0.0.2:8080",
             "http://[::1]:11434/api/chat",
+            "https://api.anthropic.com/v1/messages",
+            "https://api.openai.com/v1/models",
         ] {
-            check_open_endpoint(&url(u), &store, |_| panic!("asked for {u}")).unwrap();
+            check_open_endpoint(&url(u), &store, Some(&never)).unwrap();
+            check_open_endpoint(&url(u), &store, None).unwrap();
         }
-        assert!(!store.exists(), "nothing is remembered for loopback");
+        assert!(!store.exists(), "nothing is remembered for them");
         for u in [
             "http://localhost.evil.example",
             "http://192.168.1.10:11434",
@@ -626,43 +732,103 @@ mod tests {
         ] {
             assert!(!is_loopback(&url(u)), "{u}");
         }
+        // Another scheme or port is another origin.
+        assert!(check_open_endpoint(&url("http://api.openai.com"), &store, None).is_err());
     }
 
     #[test]
     fn another_origin_is_asked_once_then_remembered() {
         let store = scratch_store("remember");
-        let target = url("http://192.168.1.10:11434/api/chat");
-        let mut asked = None;
-        check_open_endpoint(&target, &store, |o| {
-            asked = Some(o.to_string());
+        let asked = std::cell::RefCell::new(Vec::new());
+        let ask = |o: &str| {
+            asked.borrow_mut().push(o.to_string());
             true
-        })
-        .unwrap();
-        assert_eq!(asked.as_deref(), Some("http://192.168.1.10:11434"));
+        };
+        check_open_endpoint(&url("http://10.0.0.1:11434/api/chat"), &store, Some(&ask)).unwrap();
+        assert_eq!(*asked.borrow(), vec!["http://10.0.0.1:11434".to_string()]);
         // Same origin, other path: no second question.
-        check_open_endpoint(&url("http://192.168.1.10:11434/v1/models"), &store, |_| {
-            panic!("asked twice")
-        })
+        check_open_endpoint(
+            &url("http://10.0.0.1:11434/v1/models"),
+            &store,
+            Some(&never),
+        )
         .unwrap();
+        assert_eq!(
+            load_open_endpoints(&store).unwrap(),
+            vec!["http://10.0.0.1:11434".to_string()]
+        );
         // Another port is another origin.
-        assert!(check_open_endpoint(&url("http://192.168.1.10:8080"), &store, |_| false).is_err());
+        assert!(check_open_endpoint(&url("http://10.0.0.1:8080"), &store, Some(&no)).is_err());
     }
 
     #[test]
     fn a_refusal_blocks_the_request_and_is_not_remembered() {
         let store = scratch_store("refuse");
-        let target = url("https://evil.example/collect");
-        let err = check_open_endpoint(&target, &store, |_| false).unwrap_err();
-        assert!(err.contains("https://evil.example"), "{err}");
-        assert!(load_open_endpoints(&store).is_empty());
-        // Asked again next time rather than refused silently.
-        let mut asked = false;
-        check_open_endpoint(&target, &store, |_| {
-            asked = true;
+        let target = url("https://refused.example/collect");
+        let err = check_open_endpoint(&target, &store, Some(&no)).unwrap_err();
+        assert!(err.contains("https://refused.example"), "{err}");
+        assert!(load_open_endpoints(&store).unwrap().is_empty());
+        let asked = std::cell::Cell::new(false);
+        let ask = |_: &str| {
+            asked.set(true);
             true
-        })
-        .unwrap();
-        assert!(asked);
+        };
+        check_open_endpoint(&target, &store, Some(&ask)).unwrap();
+        assert!(asked.get(), "asked again next time");
+    }
+
+    #[test]
+    fn a_background_probe_is_refused_without_a_question() {
+        let store = scratch_store("probe");
+        let target = url("http://10.0.0.2:11434/api/tags");
+        assert!(check_open_endpoint(&target, &store, None).is_err());
+        check_open_endpoint(&target, &store, Some(&yes)).unwrap();
+        check_open_endpoint(&target, &store, None).unwrap();
+    }
+
+    #[test]
+    fn a_corrupt_store_is_left_alone_and_the_origin_allowed_for_the_session() {
+        let store = scratch_store("corrupt");
+        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+        std::fs::write(&store, "[\"http://10.0.0.3:1\", trunc").unwrap();
+        assert!(load_open_endpoints(&store).is_err());
+        let target = url("http://10.0.0.4:11434");
+        check_open_endpoint(&target, &store, Some(&yes)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&store).unwrap(),
+            "[\"http://10.0.0.3:1\", trunc"
+        );
+        check_open_endpoint(&target, &store, Some(&never)).unwrap();
+    }
+
+    #[test]
+    fn requests_waiting_on_a_question_share_its_answer() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let store = scratch_store("concurrent");
+        let (opened_tx, opened_rx) = mpsc::channel::<()>();
+        let (answer_tx, answer_rx) = mpsc::channel::<bool>();
+        let s1 = store.clone();
+        let first = std::thread::spawn(move || {
+            let ask = move |_: &str| {
+                opened_tx.send(()).unwrap();
+                answer_rx.recv().unwrap()
+            };
+            check_open_endpoint(&url("http://10.0.0.5:11434"), &s1, Some(&ask))
+        });
+        opened_rx.recv().unwrap();
+        // Another origin does not wait for that question.
+        assert!(check_open_endpoint(&url("http://10.0.0.6:11434"), &store, None).is_err());
+        // The same origin waits, without a question of its own.
+        let s2 = store.clone();
+        let second = std::thread::spawn(move || {
+            check_open_endpoint(&url("http://10.0.0.5:11434/api/chat"), &s2, Some(&never))
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!second.is_finished(), "waits for the answer");
+        answer_tx.send(false).unwrap();
+        assert!(first.join().unwrap().is_err());
+        assert!(second.join().unwrap().is_err(), "shares the refusal");
     }
 
     #[test]

@@ -767,7 +767,10 @@ async function detectOllama() {
   try {
     const url = settings.value.aiOllamaUrl || "http://localhost:11434";
     // Through the backend: the webview's CSP no longer reaches arbitrary hosts.
-    const res = await aiHttpRequest("GET", `${url.replace(/\/+$/, "")}/api/tags`, "none", undefined, 2);
+    // A probe: an address not allowed yet fails here rather than asking.
+    const res = await aiHttpRequest("GET", `${url.replace(/\/+$/, "")}/api/tags`, "none", undefined, 2, {
+      interactive: false,
+    });
     if (res.status >= 200 && res.status < 300) {
       const data = JSON.parse(res.body);
       ollamaAvailable.value = true;
