@@ -36,6 +36,13 @@ use std::time::{Duration, Instant};
 /// devlint/GitWand#161 reported the 30s timeout reappearing once the per-PR
 /// stats enrichment below was added.
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
+/// `gh pr create` resolves the head, may look up reviewers and creates the
+/// PR: more than one API call, so more room than `GH_TIMEOUT` (`ghCreatePr`
+/// waits on it with `IPC_TIMEOUT.NETWORK`).
+const GH_CREATE_TIMEOUT: Duration = Duration::from_secs(120);
+/// `gh api` writes (`gh_api_write`). Their frontend wrappers wait with
+/// `IPC_TIMEOUT.NETWORK`, which also covers the lookups made before the write.
+const GH_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Timeout for the best-effort `git fetch origin` that refreshes
 /// remote-tracking refs before the per-PR numstat diffs below.
 const GH_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -389,8 +396,10 @@ fn gh_create_pr_inner(
         "create".to_string(),
         "--title".to_string(),
         title,
-        "--body".to_string(),
-        body,
+        // The body on stdin: on argv it hits Windows' ~32K command-line limit
+        // and any local user can read it with `ps`.
+        "--body-file".to_string(),
+        "-".to_string(),
     ];
 
     // Target repo: the caller-supplied one (cross-fork), else `origin` — as on
@@ -450,11 +459,17 @@ fn gh_create_pr_inner(
     }
 
     // Note: gh pr create doesn't support --json, but returns the URL.
-    let output = gh_cmd(target.as_ref())
-        .args(&args)
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("Failed to create PR: {}", e))?;
+    let mut cmd = gh_cmd(target.as_ref());
+    cmd.args(&args).current_dir(&cwd);
+    let output = crate::git::output_with_timeout_input(cmd, GH_CREATE_TIMEOUT, Some(body))
+        .map_err(|e| match e.kind() {
+            // gh may have created the PR before the deadline.
+            std::io::ErrorKind::TimedOut => format!(
+                "Failed to create PR: {}; it may have been created, reload the PR list before retrying",
+                e
+            ),
+            _ => format!("Failed to create PR: {}", e),
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -463,15 +478,17 @@ fn gh_create_pr_inner(
 
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    // Fetch the PR details using the URL.
-    let view_output = hidden_cmd("gh")
+    // Fetch the PR details using the URL. Under GH_TIMEOUT: the PR exists by
+    // now, and a hung view falls back to the minimal info below.
+    let mut view_cmd = hidden_cmd("gh");
+    view_cmd
         .args([
             "pr", "view",
             &url,
             "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,additions,deletions,labels,assignees,reviewRequests,reviewDecision,mergeStateStatus,statusCheckRollup,autoMergeRequest",
         ])
-        .current_dir(&cwd)
-        .output();
+        .current_dir(&cwd);
+    let view_output = output_with_timeout(view_cmd, GH_TIMEOUT);
 
     if let Ok(view) = view_output {
         if view.status.success() {
@@ -949,7 +966,7 @@ fn gh_pr_edit_inner(
     }) {
         return r;
     }
-    // `-f` sends each value as a raw string — no `@file` expansion, unlike `-F`.
+    // The fields go as a JSON body on stdin (`gh_api_write`).
     let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/pulls/{}", nwo, number);
     gh_api_write(&cwd, "PATCH", &path, &fields)?;
@@ -1618,20 +1635,7 @@ fn gh_issue_add_comment_inner(
     }
     let nwo = gh_base_nwo(&cwd)?;
     let path = format!("repos/{}/issues/{}/comments", nwo, number);
-    let field = format!("body={}", body);
-    let output = gh_api_cmd(&cwd)
-        .args(["api", &path, "-X", "POST", "-f", &field])
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("gh api add comment: {}", e))?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh api add comment failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let v: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("parse created comment: {}", e))?;
+    let v = gh_api_write(&cwd, "POST", &path, &[("body", &body)])?;
     Ok(github_api::map_comment(&v, true))
 }
 
@@ -2637,8 +2641,10 @@ pub(crate) fn gh_api_on(
     )
 }
 
-/// Run a mutating `gh api` call (`POST`/`DELETE`) with optional `-f key=value` fields.
-/// Returns the parsed JSON body, or `Null` for 204 No Content responses.
+/// Run a mutating `gh api` call (`POST`/`PATCH`/`PUT`/`DELETE`), `fields`
+/// sent as a JSON object of strings on stdin (`--input -`), never on argv
+/// (see `pr_edit::fields_json`). Returns the parsed JSON body, or `Null` for
+/// 204 No Content responses.
 fn gh_api_write(
     cwd: &str,
     method: &str,
@@ -2646,14 +2652,23 @@ fn gh_api_write(
     fields: &[(&str, &str)],
 ) -> Result<serde_json::Value, String> {
     let mut cmd = gh_api_cmd(cwd);
-    cmd.args(["api", "-X", method, path]);
-    for (k, v) in fields {
-        cmd.args(["-f", &format!("{}={}", k, v)]);
+    cmd.args(["api", "-X", method, path]).current_dir(cwd);
+    let input = super::pr_edit::fields_json(fields);
+    if input.is_some() {
+        // gh sets the JSON content type only for bodies it builds from -f/-F.
+        cmd.args(["-H", "Content-Type: application/json", "--input", "-"]);
     }
-    let output = cmd
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("gh api write: {}", e))?;
+    let output =
+        crate::git::output_with_timeout_input(cmd, GH_WRITE_TIMEOUT, input).map_err(|e| match e
+            .kind()
+        {
+            // The request may have reached GitHub before the deadline.
+            std::io::ErrorKind::TimedOut => format!(
+                "gh api write: {}; the change may have been applied, reload before retrying",
+                e
+            ),
+            _ => format!("gh api write: {}", e),
+        })?;
     gh_api_parse(
         output,
         &format!("gh api {}", method),

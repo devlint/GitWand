@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSy
 import { resolve, join, dirname, basename, sep, isAbsolute, relative } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { isUtf8 } from "node:buffer";
@@ -4916,6 +4917,41 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/git-refs-fingerprint?cwd=<path>
+    // Mirrors git_refs_fingerprint (read.rs): every ref but the Time Machine
+    // snapshots, every worktree's HEAD and branch, the stash entries. Only
+    // compared for equality.
+    if (url.pathname === "/api/git-refs-fingerprint" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        // Thousands of tags exceed the default 1 MiB output buffer.
+        const big = { cwd: resolvedCwd, encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 };
+        const refs = execFileSync(GIT, ["for-each-ref", "--format=%(objectname) %(refname) %(symref)"], big)
+          .split("\n")
+          .filter((line) => line && !line.split(" ").slice(1).join(" ").startsWith("refs/gitwand/snapshots/"));
+        const worktrees = execFileSync(GIT, ["worktree", "list", "--porcelain"], big);
+        let stashes = "";
+        try {
+          stashes = execFileSync(GIT, ["stash", "list", "--format=%H"], { ...big, stdio: ["ignore", "pipe", "ignore"] });
+        } catch (_) {
+          // As in the Rust command: no stash list, nothing to add.
+        }
+        const fp = createHash("sha256")
+          .update(refs.join("\n"))
+          .update("\0")
+          .update(worktrees)
+          .update("\0")
+          .update(stashes)
+          .digest("hex")
+          .slice(0, 16);
+        return jsonResponse(req, res, fp);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // GET /api/path-exists?cwd=<path>&rel=<relpath>
     // v2.21.0 monorepo scope — validate a persisted scope path still exists.
     if (url.pathname === "/api/path-exists" && req.method === "GET") {
@@ -8089,6 +8125,10 @@ async function handleRequest(req, res) {
     // POST /api/ai-http-request { method, url, body?, auth, timeoutSecs? }
     // Mirrors commands::ai_http::ai_http_request: validation, key binding and
     // error text included. Answers { status, body } whatever the upstream status.
+    // Not mirrored: the native question the app asks before a request to an
+    // origin that is neither loopback nor a known provider
+    // (`check_open_endpoint_with`). The dev server has no dialog to
+    // show, so under dev:web such a request goes out unasked.
     if (url.pathname === "/api/ai-http-request" && req.method === "POST") {
       const { method, url: target, body, auth, timeoutSecs } = await readBody(req);
       let parsed;

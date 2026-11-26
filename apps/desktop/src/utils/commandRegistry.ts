@@ -219,6 +219,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   git_bisect_start: { route: "/api/git-bisect-start" },
   git_bisect_mark: { route: "/api/git-bisect-mark" },
   git_bisect_reset: { route: "/api/git-bisect-reset" },
+  git_refs_fingerprint: { route: "/api/git-refs-fingerprint" },
   git_revert_commit: { route: "/api/git-revert-commit" },
   git_shortlog: { route: "/api/git-shortlog" },
   git_show: { route: "/api/git-show" },

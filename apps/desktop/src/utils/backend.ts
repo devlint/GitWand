@@ -787,6 +787,20 @@ export async function getGitRevCount(
   return typeof data === "number" ? data : (data.count ?? 0);
 }
 
+/**
+ * Fingerprint of what the Git Tree's all-refs log starts from and decorates:
+ * refs, every worktree's HEAD and branch, stash entries
+ * (`git_refs_fingerprint`). Compare for equality only.
+ */
+export async function getGitRefsFingerprint(cwd: string): Promise<string> {
+  if (isTauri()) {
+    return tauriInvoke<string>("git_refs_fingerprint", { cwd });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/git-refs-fingerprint?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`Failed to get the refs fingerprint: ${res.status}`);
+  return (await res.json()) as string;
+}
+
 // ─── Git stage / unstage ──────────────────────────────────────
 
 /**
@@ -4002,7 +4016,9 @@ export async function ghIssueAddComment(
   body: string,
   pr: boolean = false,
 ): Promise<IssueComment> {
-  if (isTauri()) return tauriInvoke<IssueComment>("gh_issue_add_comment", { cwd, number, body, pr });
+  if (isTauri()) {
+    return tauriInvoke<IssueComment>("gh_issue_add_comment", { cwd, number, body, pr }, IPC_TIMEOUT.NETWORK);
+  }
   const res = await devFetch(`${DEV_SERVER}/api/gh-issue-comment`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

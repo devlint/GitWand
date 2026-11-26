@@ -1161,6 +1161,73 @@ pub(crate) async fn git_rev_count(
     Ok(count)
 }
 
+// ─── Refs fingerprint ────────────────────────────────────────
+
+/// A fingerprint of what the all-refs Git Tree log (`git_log`) starts from
+/// and decorates: every ref with its target (Time Machine snapshot refs
+/// excluded, as in `git_log`), the HEAD of every worktree with the branch it
+/// is on (`git log --all` walks the other worktrees' HEADs too; an unborn
+/// branch still has its name), and the stash entries `git_log` adds as start
+/// points. A watcher `refs`/`head` event that leaves it unchanged (a second
+/// batch for one `git branch`, a snapshot ref, a read) needs no log reload.
+///
+/// Only compared for equality, in one process: not stable across versions.
+#[tauri::command]
+pub(crate) async fn git_refs_fingerprint(cwd: String) -> Result<String, String> {
+    let _repo = repo_lock::read(&cwd);
+    refs_fingerprint(&cwd)
+}
+
+fn refs_fingerprint(cwd: &str) -> Result<String, String> {
+    use std::hash::{Hash, Hasher};
+
+    let refs = git_cmd()
+        // %(symref): a symbolic ref (`origin/HEAD`) can change target
+        // without changing commit.
+        .args([
+            "for-each-ref",
+            "--format=%(objectname) %(refname) %(symref)",
+        ])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git for-each-ref: {}", e))?;
+    if !refs.status.success() {
+        return Err(String::from_utf8_lossy(&refs.stderr).trim().to_string());
+    }
+    // HEAD and branch of every worktree, this one included (an unborn HEAD
+    // reads as zeros, with its branch name).
+    let worktrees = git_cmd()
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git worktree list: {}", e))?;
+    if !worktrees.status.success() {
+        return Err(String::from_utf8_lossy(&worktrees.stderr)
+            .trim()
+            .to_string());
+    }
+    // Older stash entries are log start points too; no stash is an error.
+    let stashes = git_cmd()
+        .args(["stash", "list", "--format=%H"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git stash list: {}", e))?;
+
+    let snapshots = format!("{}/", crate::git::snapshot::SNAPSHOT_REF_PREFIX);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for line in String::from_utf8_lossy(&refs.stdout).lines() {
+        let refname = line.split_once(' ').map_or(line, |(_, r)| r);
+        if !refname.starts_with(&snapshots) {
+            line.hash(&mut hasher);
+        }
+    }
+    String::from_utf8_lossy(&worktrees.stdout).hash(&mut hasher);
+    if stashes.status.success() {
+        String::from_utf8_lossy(&stashes.stdout).hash(&mut hasher);
+    }
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
 // ─── Git repo state (rebase / merge in progress) ─────────────
 
 /// The marks a `BISECT_LOG` records: its `git bisect <term> <hash>` lines
@@ -4008,6 +4075,90 @@ mod pathspec_tests {
         assert!(out.status.success());
         assert_eq!(repo_state(&wt).state, "bisect");
         assert_eq!(repo_state(&repo.cwd()).state, "clean");
+    }
+
+    #[test]
+    fn refs_fingerprint_follows_refs_and_head_but_not_snapshots() {
+        let repo = TempRepo::new();
+        let fp = || refs_fingerprint(&repo.cwd()).expect("fingerprint failed");
+        // Unborn HEAD: still a fingerprint, and it follows the branch name.
+        let unborn = fp();
+        repo.git(&["checkout", "-q", "--orphan", "other"]);
+        assert_ne!(fp(), unborn);
+        repo.git(&["checkout", "-q", "--orphan", "main"]);
+        assert_eq!(fp(), unborn);
+        repo.write("a.txt", "v1");
+        repo.commit_all("c1");
+        let first = fp();
+        assert_ne!(first, unborn);
+        // Nothing moved: same fingerprint.
+        assert_eq!(fp(), first);
+
+        // A new branch on the same commit changes it.
+        repo.git(&["branch", "side"]);
+        let branched = fp();
+        assert_ne!(branched, first);
+
+        // HEAD moving to another branch on the same commit changes it.
+        repo.git(&["checkout", "-q", "side"]);
+        let on_side = fp();
+        assert_ne!(on_side, branched);
+
+        // Detaching HEAD at the same commit changes it too.
+        repo.git(&["checkout", "-q", "--detach"]);
+        assert_ne!(fp(), on_side);
+        repo.git(&["checkout", "-q", "side"]);
+        assert_eq!(fp(), on_side);
+
+        // A Time Machine snapshot ref does not.
+        repo.write("a.txt", "dirty");
+        crate::git::snapshot::create_snapshot_inner(&repo.cwd(), "manual", "snap")
+            .expect("snapshot failed")
+            .expect("expected a snapshot");
+        assert_eq!(fp(), on_side);
+
+        // A tag does.
+        repo.git(&["tag", "v1"]);
+        let tagged = fp();
+        assert_ne!(tagged, on_side);
+
+        // So does a second stash entry (only refs/stash is a ref).
+        repo.git(&["stash", "-q"]);
+        let one_stash = fp();
+        assert_ne!(one_stash, tagged);
+        repo.write("a.txt", "dirty again");
+        repo.git(&["stash", "-q"]);
+        let two = fp();
+        assert_ne!(two, one_stash);
+        repo.git(&["stash", "drop", "-q", "stash@{1}"]);
+        assert_ne!(fp(), two);
+
+        // And a commit on another worktree's detached HEAD.
+        // Inside the temporary repo, so it goes away with it.
+        let wt = format!("{}/wt", repo.cwd());
+        repo.git(&["worktree", "add", "-q", "--detach", &wt]);
+        let with_wt = fp();
+        let out = std::process::Command::new(git_binary())
+            .args(["commit", "-q", "--allow-empty", "-m", "detached"])
+            .current_dir(&wt)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert_ne!(fp(), with_wt);
+
+        // A symbolic ref changing target on the same commit.
+        repo.git(&[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/heads/main",
+        ]);
+        let sym = fp();
+        repo.git(&[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/heads/side",
+        ]);
+        assert_ne!(fp(), sym);
     }
 
     #[test]
