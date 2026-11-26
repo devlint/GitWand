@@ -4,6 +4,7 @@ import { AUTO_PATTERN_COUNT } from './patterns'
 import { data as blogPosts } from './blog.data'
 import { adventBadge, adventHomeCard, resolveNow, ADVENT_INDEX_PATH, type AdventHomeCard } from './advent/advent-state'
 import AdventSnow from './advent/AdventSnow.vue'
+import NextTeaser from './NextTeaser.vue'
 
 // Advent calendar badge: client-only so the server HTML keeps the normal badge.
 const advent = ref<{ text: string; href: string } | null>(null)
@@ -615,6 +616,10 @@ const t = computed(() => i18n[locale.value])
 // `t` sert les sections historiques, `nt` les nouvelles.
 const NC: Record<Locale, any> = {
   en: {
+    nextTitle: "This is the future of GitWand.",
+    nextBody: "v4 turns the Git client into one working environment, where coding agents are supervised and controlled and their work is integrated with proof. Here is the sketch, with part of it still under the cover.",
+    nextCta: "See where GitWand is going",
+    nextNote: "",
     badge: 'v3.14 — stacked branches: one restack for the whole stack when the parent moves or is squash-merged',
     h1a: 'The merge ends', h1b: 'without you', h1c: '.',
     sub: 'Eight deterministic patterns classify every hunk, settle the ones that carried no decision, and hand you back only what deserves your attention. Native, local, MIT.',
@@ -667,6 +672,10 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   fr: {
+    nextTitle: "Voici le futur de GitWand.",
+    nextBody: "La v4 fait du client Git un seul environnement de travail, où les agents de code sont supervisés et contrôlés, et où leur travail est intégré preuve à l’appui. En voici l’esquisse, dont une partie est encore sous le voile.",
+    nextCta: "Voir où va GitWand",
+    nextNote: "Page en anglais",
     badge: 'v3.14 — branches empilées : un seul restack pour toute la pile quand la parente bouge ou est mergée en squash',
     h1a: 'Le merge se termine', h1b: 'sans toi', h1c: '.',
     sub: 'Huit patterns déterministes classent chaque hunk, règlent ceux qui ne demandaient aucune décision, et te laissent uniquement ce qui vaut ton attention. Natif, local, MIT.',
@@ -719,6 +728,10 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   es: {
+    nextTitle: "Este es el futuro de GitWand.",
+    nextBody: "La v4 convierte el cliente Git en un único entorno de trabajo, donde los agentes de código se supervisan y se controlan, y su trabajo se integra con pruebas. Este es el boceto; una parte sigue bajo la lona.",
+    nextCta: "Ver hacia dónde va GitWand",
+    nextNote: "Página en inglés",
     badge: 'v3.14 — ramas apiladas: un solo restack para toda la pila cuando la rama padre cambia o se fusiona con squash',
     h1a: 'El merge termina', h1b: 'sin ti', h1c: '.',
     sub: 'Ocho patrones deterministas clasifican cada hunk, resuelven los que no exigían ninguna decisión y te devuelven solo lo que merece tu atención. Nativo, local, MIT.',
@@ -771,6 +784,10 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'pt-BR': {
+    nextTitle: "Este é o futuro do GitWand.",
+    nextBody: "A v4 transforma o cliente Git em um único ambiente de trabalho, onde os agentes de código são supervisionados e controlados, e o trabalho deles é integrado com provas. Este é o esboço; parte dele ainda está sob a capa.",
+    nextCta: "Ver para onde vai o GitWand",
+    nextNote: "Página em inglês",
     badge: 'v3.14 — branches empilhados: um único restack para toda a pilha quando o pai muda ou recebe squash merge',
     h1a: 'O merge termina', h1b: 'sem você', h1c: '.',
     sub: 'Oito padrões determinísticos classificam cada hunk, resolvem os que não exigiam decisão nenhuma e devolvem só o que merece a sua atenção. Nativo, local, MIT.',
@@ -823,6 +840,10 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'zh-CN': {
+    nextTitle: "这就是 GitWand 的未来。",
+    nextBody: "v4 把 Git 客户端变成一个统一的工作环境：编码代理在其中受到监督和控制，它们的工作在有据可查的情况下被集成。这是它的草图，其中一部分仍盖在罩布之下。",
+    nextCta: "看看 GitWand 的方向",
+    nextNote: "页面为英文",
     badge: 'v3.14 — 堆叠分支：父分支更新或被 squash 合并时，一次重新堆叠整个堆栈',
     h1a: '合并结束时', h1b: '不必再找你', h1c: '。',
     sub: '八种确定性模式为每个 hunk 分类，自动处理那些本就无需决策的部分，只把值得你关注的留给你。原生、本地、MIT。',
@@ -1130,6 +1151,9 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <!-- Annonce de la v4 : renvoie vers /next -->
+    <NextTeaser :title="nt.nextTitle" :body="nt.nextBody" :cta="nt.nextCta" :note="nt.nextNote" />
 
     <!-- ══════════════════════════════════════
          3 · DÉMO DE CONFLIT — le moment « ah oui »
