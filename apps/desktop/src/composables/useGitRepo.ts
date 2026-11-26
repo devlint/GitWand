@@ -717,7 +717,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       _refsSeen?.repo === repo &&
       _refsSeen.fp === fp
     ) {
+      // A scroll or prefetch page still in flight may have been read with
+      // refs that have moved and come back since: drop it (it is fetched
+      // again at the same offset), as a forced reload would have.
+      if (logLoadingMore.value) {
+        _logGen++;
+        logLoadingMore.value = false;
+      }
       await loadStatus(repo);
+      if (selectedFilePath.value) await loadDiff(selectedFilePath.value, selectedFileStaged.value);
       return;
     }
     // Read before the log that follows: loadLog can use it as its own.
@@ -1043,8 +1051,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           if (!viewChanged) refreshLoadedBranches();
         } else if (forced) {
           // Recorded below as showing the current refs: a scroll page still
-          // in flight was read with older ones, and must not land after.
+          // in flight was read with older ones, and must not land after. Its
+          // `finally` no longer owns the loading flag (as in replaceLog).
           _logGen++;
+          logLoadingMore.value = false;
         }
         if (forced) recordRefs(repo, refsFp);
         // hasMore: in branch-only mode a full page is exactly `pageSize`. In

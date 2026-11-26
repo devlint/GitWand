@@ -604,6 +604,37 @@ describe("refreshOnRefsEvent reloads only when the refs moved", () => {
   );
 
   it(
+    "keeps scrolling after a forced reload finds the same rows under a page in flight",
+    async () => {
+      const dir = newRepo(150);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      repo.logBranchFilter.value = "current";
+      await repo.loadLog();
+      expect(repo.log.value).toHaveLength(100);
+
+      // A scroll page in flight, held back.
+      let release!: () => void;
+      pageGate = new Promise<void>((r) => (release = r));
+      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const page = repo.loadMoreLog();
+      await vi.waitFor(() => expect(vi.mocked(getGitLog).mock.calls.length).toBe(calls + 1));
+
+      // A ref moves below the loaded rows: the forced reload finds them unchanged.
+      git(dir, ["update-ref", "refs/remotes/origin/old", sha(dir, "c1")]);
+      await repo.loadLog(undefined, true);
+      release();
+      await page;
+
+      expect(repo.logLoadingMore.value).toBe(false);
+      await repo.loadMoreLog();
+      expect(repo.log.value).toHaveLength(150);
+      expect(refsOf(repo, sha(dir, "c1"))).toBe("origin/old");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "still reloads status when it skips the log",
     async () => {
       const dir = newRepo(5);
