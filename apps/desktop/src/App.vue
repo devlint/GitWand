@@ -3240,6 +3240,41 @@ async function onBisectChanged() {
   await repoRefresh(true);
 }
 
+/** A bisect waiting for the user's confirmation (Git Tree context menu). */
+const bisectConfirm = ref<{ good: string; bad: string } | null>(null);
+const bisectStarting = ref(false);
+
+function askBisect(good: string, bad: string) {
+  bisectConfirm.value = { good, bad };
+}
+
+/** "Bisect from here": this commit is good, HEAD (found in the loaded log) is bad. */
+function askBisectFromHere(entry: GitLogEntry) {
+  const head = repoLog.value.find((e) => /(^|, )HEAD( ->|,|$)/.test(e.refs));
+  if (!head) {
+    showDetailToast(t("bisect.noHead"), null);
+    return;
+  }
+  askBisect(entry.hashFull, head.hashFull);
+}
+
+async function confirmBisect() {
+  const pair = bisectConfirm.value;
+  const cwd = repoFolderPath.value;
+  if (!pair || !cwd || bisectStarting.value) return;
+  bisectStarting.value = true;
+  try {
+    const { gitBisectStart } = await import("./utils/backend");
+    await gitBisectStart(cwd, pair.bad, pair.good);
+    bisectConfirm.value = null;
+    await onBisectChanged();
+  } catch (e) {
+    showDetailToast(t("bisect.startFailed"), e instanceof Error ? e.message : String(e));
+  } finally {
+    bisectStarting.value = false;
+  }
+}
+
 function openBisectCommit(hash: string) {
   selectCommit(hash);
   viewMode.value = "history";
@@ -5279,6 +5314,9 @@ onUnmounted(() => {
                   @tag-commit="handleTagCommit"
                   @cherry-pick-commit="handleCherryPickCommit"
                   @cherry-pick-commit-wip="handleCherryPickCommitAsWip"
+                  :operation-in-progress="repoOperationState !== null"
+                  @bisect-between="(good: string, bad: string) => askBisect(good, bad)"
+                  @bisect-from-here="askBisectFromHere"
                   @view-on-forge="handleViewOnForge"
                   :can-create-issue="createIssue.available.value" @create-issue="(entry: IssueCommitEntry) => createIssue.openFromCommit(entry)"
                   @delete-branch="handleDeleteBranchRequest"
@@ -5474,6 +5512,15 @@ onUnmounted(() => {
       :error="aiTaskCloseError" @cancel="onAiTaskCancel" @delete="onAiTaskDelete" @merge-back="onAiTaskMergeBack" />
 
     <!-- Close-project confirmation — guards against misclicks near the submenu caret -->
+    <BaseModal v-if="bisectConfirm" :title="t('bisect.confirmTitle')" size="sm" role="alertdialog"
+      @close="bisectConfirm = null">
+      <p class="ptc-desc">{{ t('bisect.confirmBody', bisectConfirm.good.slice(0, 7), bisectConfirm.bad.slice(0, 7), repoStatus?.branch || 'HEAD') }}</p>
+      <template #footer>
+        <button class="bm-btn bm-btn--ghost" @click="bisectConfirm = null">{{ t('project.cancel') }}</button>
+        <button class="bm-btn bm-btn--primary" :disabled="bisectStarting" @click="confirmBisect">{{ t('bisect.confirmStart') }}</button>
+      </template>
+    </BaseModal>
+
     <BaseModal v-if="closeProjectConfirm" :title="t('project.closeTitle')" size="sm" role="alertdialog"
       @close="closeProjectConfirm = null">
       <p class="ptc-desc">{{ t('project.closeBody', closeProjectConfirm.name) }}</p>

@@ -760,6 +760,14 @@ const ptBR: Locale = {
 
   // ─── Interactive Rebase ─────────────────────────────────
   bisect: {
+    menuBetween: "Bisect entre estes commits",
+    menuFromHere: "Bisect a partir daqui (este commit é bom)",
+    menuFromHereHint: "Encontrar o primeiro commit ruim entre este e o HEAD",
+    confirmTitle: "Iniciar um bisect?",
+    confirmBody: "Bisect entre o commit bom {0} e o ruim {1}? Sua cópia de trabalho vai para os commits que o git escolher; “Encerrar bisect” leva você de volta para {2}.",
+    confirmStart: "Iniciar bisect",
+    startFailed: "Não foi possível iniciar o bisect",
+    noHead: "O HEAD não está no histórico carregado",
     title: "Bisect em andamento",
     testing: "Testando {0}",
     left: "Restam {0} commits, cerca de {1} etapas",

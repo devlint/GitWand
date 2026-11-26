@@ -759,6 +759,14 @@ const es: Locale = {
 
   // ─── Interactive Rebase ─────────────────────────────────
   bisect: {
+    menuBetween: "Bisect entre estos commits",
+    menuFromHere: "Bisect desde aquí (este commit es bueno)",
+    menuFromHereHint: "Encontrar el primer commit malo entre este y HEAD",
+    confirmTitle: "¿Iniciar un bisect?",
+    confirmBody: "¿Bisect entre el commit bueno {0} y el malo {1}? Tu copia de trabajo pasará a los commits que elija git; «Terminar bisect» te devuelve a {2}.",
+    confirmStart: "Iniciar bisect",
+    startFailed: "No se pudo iniciar el bisect",
+    noHead: "HEAD no está en el historial cargado",
     title: "Bisect en curso",
     testing: "Probando {0}",
     left: "Quedan {0} commits, unos {1} pasos",

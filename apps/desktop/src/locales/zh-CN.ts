@@ -772,6 +772,14 @@ const zhCN: Locale = {
   },
 
   bisect: {
+    menuBetween: "在这两个提交之间二分查找",
+    menuFromHere: "从这里开始二分查找（此提交是好的）",
+    menuFromHereHint: "在此提交与 HEAD 之间找到第一个坏提交",
+    confirmTitle: "开始二分查找？",
+    confirmBody: "在好提交 {0} 和坏提交 {1} 之间二分查找？工作区将切换到 git 选择的提交；“结束二分查找”会带你回到 {2}。",
+    confirmStart: "开始二分查找",
+    startFailed: "无法开始二分查找",
+    noHead: "HEAD 不在已加载的历史中",
     title: "正在二分查找",
     testing: "正在测试 {0}",
     left: "还剩 {0} 个提交，约 {1} 步",

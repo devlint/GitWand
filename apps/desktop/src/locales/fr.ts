@@ -764,6 +764,14 @@ const fr: Locale = {
 
   // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
   bisect: {
+    menuBetween: "Bisect entre ces commits",
+    menuFromHere: "Bisect depuis ici (ce commit est bon)",
+    menuFromHereHint: "Trouver le premier mauvais commit entre celui-ci et HEAD",
+    confirmTitle: "Lancer un bisect ?",
+    confirmBody: "Bisect entre le bon commit {0} et le mauvais {1} ? Votre copie de travail passera sur les commits choisis par git ; « Terminer le bisect » vous ramène sur {2}.",
+    confirmStart: "Lancer le bisect",
+    startFailed: "Impossible de lancer le bisect",
+    noHead: "HEAD n'est pas dans l'historique chargé",
     title: "Bisect en cours",
     testing: "Test de {0}",
     left: "{0} commits restants, environ {1} étapes",

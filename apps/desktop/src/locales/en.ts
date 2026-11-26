@@ -771,6 +771,14 @@ const en = {
 
   // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
   bisect: {
+    menuBetween: "Bisect between these commits",
+    menuFromHere: "Bisect from here (this commit is good)",
+    menuFromHereHint: "Find the first bad commit between this one and HEAD",
+    confirmTitle: "Start a bisect?",
+    confirmBody: "Bisect between good {0} and bad {1}? Your working tree will move to the commits git picks; End bisect brings you back to {2}.",
+    confirmStart: "Start bisect",
+    startFailed: "Could not start the bisect",
+    noHead: "HEAD is not in the loaded history",
     title: "Bisecting",
     testing: "Testing {0}",
     left: "{0} commits left, about {1} steps",
