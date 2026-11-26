@@ -626,9 +626,9 @@ describe("refreshOnRefsEvent reloads only when the refs moved", () => {
       release();
       await page;
 
+      // The dropped page is fetched again without another scroll.
+      await vi.waitFor(() => expect(repo.log.value).toHaveLength(150));
       expect(repo.logLoadingMore.value).toBe(false);
-      await repo.loadMoreLog();
-      expect(repo.log.value).toHaveLength(150);
       expect(refsOf(repo, sha(dir, "c1"))).toBe("origin/old");
     },
     GIT_TEST_TIMEOUT_MS,

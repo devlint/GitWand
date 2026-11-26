@@ -718,12 +718,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       _refsSeen.fp === fp
     ) {
       // A scroll or prefetch page still in flight may have been read with
-      // refs that have moved and come back since: drop it (it is fetched
-      // again at the same offset), as a forced reload would have.
-      if (logLoadingMore.value) {
-        _logGen++;
-        logLoadingMore.value = false;
-      }
+      // refs that have moved and come back since: fetch it again.
+      refetchPageInFlight();
       await loadStatus(repo);
       if (selectedFilePath.value) await loadDiff(selectedFilePath.value, selectedFileStaged.value);
       return;
@@ -821,6 +817,20 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    */
   function recordRefs(repo: string, fp: string | null) {
     _refsSeen = fp === null ? null : { repo, fp };
+  }
+
+  /**
+   * Drop a scroll or prefetch page still in flight (read with refs that may
+   * no longer hold) and fetch it again at the same offset. Without the new
+   * request, the list components, which ask for a page only when the log's
+   * length changes, would never ask again in a filtered view or past the
+   * prefetch ceiling.
+   */
+  function refetchPageInFlight() {
+    if (!logLoadingMore.value) return;
+    _logGen++; // the dropped page's `finally` no longer owns the flag
+    logLoadingMore.value = false;
+    void loadMoreLog();
   }
 
   /**
@@ -1049,12 +1059,6 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         if (!unchanged) {
           replaceLog(entries);
           if (!viewChanged) refreshLoadedBranches();
-        } else if (forced) {
-          // Recorded below as showing the current refs: a scroll page still
-          // in flight was read with older ones, and must not land after. Its
-          // `finally` no longer owns the loading flag (as in replaceLog).
-          _logGen++;
-          logLoadingMore.value = false;
         }
         if (forced) recordRefs(repo, refsFp);
         // hasMore: in branch-only mode a full page is exactly `pageSize`. In
@@ -1065,6 +1069,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         logHasMore.value = isCurrentBranchOnly
           ? entries.length >= pageSize
           : log.value.length < effectiveTotalCount();
+        // Same rows, recorded as showing the current refs: a scroll page still
+        // in flight was read with older ones and is fetched again.
+        if (unchanged && forced) refetchPageInFlight();
       }
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
