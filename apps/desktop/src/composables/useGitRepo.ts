@@ -704,6 +704,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   async function refreshOnRefsEvent() {
     const repo = folderPath.value;
     if (!repo) return;
+    // Pages started after this point read refs at least as new as `fp`.
+    const pagesBeforeRead = _pageSeq;
     let fp: string | null = null;
     try {
       fp = await getGitRefsFingerprint(repo);
@@ -719,7 +721,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     ) {
       // A scroll or prefetch page still in flight may have been read with
       // refs that have moved and come back since: fetch it again.
-      refetchPageInFlight();
+      refetchPageInFlight(pagesBeforeRead);
       await loadStatus(repo);
       if (selectedFilePath.value) await loadDiff(selectedFilePath.value, selectedFileStaged.value);
       return;
@@ -800,6 +802,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // with refs the event's fingerprint no longer shows (a checkout and back):
   // an event never skips while one runs (`refreshOnRefsEvent`).
   let _logLoadsInFlight = 0;
+  // Scroll/prefetch pages started so far, and the latest one's number and
+  // size: `refetchPageInFlight` refetches it at the same size, and only when
+  // it started before the fingerprint it is judged against was read.
+  let _pageSeq = 0;
+  let _pageInFlight = { seq: 0, size: LOG_PAGE };
 
   /**
    * The log just took changed rows: a ref may have moved, and the Git Tree
@@ -826,11 +833,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * length changes, would never ask again in a filtered view or past the
    * prefetch ceiling.
    */
-  function refetchPageInFlight() {
-    if (!logLoadingMore.value) return;
+  function refetchPageInFlight(startedBy = Infinity) {
+    if (!logLoadingMore.value || _pageInFlight.seq > startedBy) return;
     _logGen++; // the dropped page's `finally` no longer owns the flag
     logLoadingMore.value = false;
-    void loadMoreLog();
+    void loadMoreLog(_pageInFlight.size);
   }
 
   /**
@@ -1092,6 +1099,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   async function loadMoreLog(pageSize: number = LOG_PAGE) {
     if (!folderPath.value || !logHasMore.value || logLoadingMore.value) return;
     logLoadingMore.value = true;
+    _pageInFlight = { seq: ++_pageSeq, size: pageSize };
     const epoch = _logViewEpoch;
     const gen = _logGen;
     try {
