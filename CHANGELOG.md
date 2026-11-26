@@ -16,8 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **AI summary.** Optional summary of what the commits do together; only commit subjects and per-path counts are sent.
   - **From a file's history.** Combine several versions of a file; the diff is limited to that file's paths, renames included.
 
+- **Guided bisect.** Find the commit that introduced a bug from the Git Tree.
+  - **Start.** Right-click two selected commits, *Bisect between these commits* (the older is good, the newer bad), or one commit, *Bisect from here* (it is good, HEAD is bad). A confirmation names both and the branch you will come back to. A tree with uncommitted changes to tracked files, another operation in progress, or a good commit that is not an ancestor of the bad one is refused with the reason.
+  - **Narrow down.** A banner shows the commit under test, how many commits are left and about how many steps, and the good/bad/skipped counts, with Good, Bad and Skip. Uncommitted changes follow you to the next commit (the banner says so); git refuses the checkout when they would be overwritten, and the banner shows its message.
+  - **Result.** The banner names the first bad commit and opens it in the Git Tree, or lists the candidates when skipped commits leave several.
+  - **Any bisect.** A bisect started in a terminal now shows in the banner too, custom terms (`--term-old`/`--term-new`) included, and *End bisect* (`git bisect reset`) brings you back to where it started; GitWand could not end one before. A bisect does not get the 3 s operation poll: it follows the repo watcher and its own actions.
+
 ### Changed
 
+- **The desktop main-bundle budget is raised to 996 KB** for the guided bisect's wrappers, strings and Git Tree wiring (measured at 995 KB); the banner is a lazy chunk.
 - **The desktop main-bundle budget is raised from 980 KB to 984 KB** for the combined-diff wrappers and strings; the view itself is a lazy chunk. It is then raised to 992 KB for the force-push decision and its refusal messages (measured at 991 KB).
 
 ### Fixed

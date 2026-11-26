@@ -81,8 +81,8 @@ describe("BisectBanner", () => {
     const text = host.textContent ?? "";
     expect(text).toContain("aaaaaaa");
     expect(text).toContain("Fix parser edge case");
-    expect(text).toContain("37 commits left, about 5 steps");
-    expect(text).toContain("2 good · 1 bad · 0 skipped");
+    expect(text).toContain("To test: 37 · steps left: ~5");
+    expect(text).toContain("Good: 2 · Bad: 1 · Skipped: 0");
   });
 
   it("asks for both ends", async () => {
@@ -108,7 +108,7 @@ describe("BisectBanner", () => {
     await flush();
     expect(events.changed).toBe(1);
     expect(button("Good")!.disabled).toBe(false);
-    expect(host.textContent).toContain("18 commits left, about 4 steps");
+    expect(host.textContent).toContain("To test: 18 · steps left: ~4");
   });
 
   it("shows a mark error inline", async () => {
