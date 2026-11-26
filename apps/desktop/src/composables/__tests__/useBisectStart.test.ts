@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import type { GitLogEntry } from "../../utils/backend";
+
+vi.mock("../../utils/backend", () => ({
+  gitBisectStart: vi.fn(),
+  gitBisectStatus: vi.fn(),
+  gitRepoState: vi.fn(),
+}));
+
+import { gitBisectStart, gitBisectStatus, type GitLogEntry } from "../../utils/backend";
 import { useBisectStart } from "../useBisectStart";
 
 const entry = (hashFull: string, parents: string[], refs = ""): GitLogEntry =>
@@ -71,5 +78,28 @@ describe("useBisectStart", () => {
     b.askFromHere(cut[0]);
     expect(notify).not.toHaveBeenCalled();
     expect(b.confirm.value).toEqual({ good: H("n"), bad: H("b"), ordered: true, keepOrder: true });
+  });
+  it("hands over to the banner when git started the bisect but the read after it failed", async () => {
+    vi.mocked(gitBisectStart).mockRejectedValue(new Error("rev-list failed"));
+    vi.mocked(gitBisectStatus).mockResolvedValue({ active: true } as never);
+    const notify = vi.fn();
+    const onStarted = vi.fn(async () => {});
+    const b = useBisectStart({ cwd: () => "/repo", log: () => log, notify, onStarted });
+    b.ask(H("a"), H("c"));
+    await b.start();
+    expect(b.confirm.value).toBeNull();
+    expect(onStarted).toHaveBeenCalledOnce();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("reports a start that git refused", async () => {
+    vi.mocked(gitBisectStart).mockRejectedValue(new Error("bisect:dirty: Commit or stash"));
+    vi.mocked(gitBisectStatus).mockResolvedValue({ active: false } as never);
+    const notify = vi.fn();
+    const b = useBisectStart({ cwd: () => "/repo", log: () => log, notify, onStarted: async () => {} });
+    b.ask(H("a"), H("c"));
+    await b.start();
+    expect(b.confirm.value).not.toBeNull();
+    expect(notify).toHaveBeenCalledOnce();
   });
 });

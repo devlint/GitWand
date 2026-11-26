@@ -128,7 +128,7 @@ import { useNetworkStatus } from "./composables/useNetworkStatus";
 import { useConnectivity } from "./composables/useConnectivity";
 import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
-import { useAutoFastForward } from "./composables/useAutoFastForward";
+import { DETACHED_BRANCH_NAMES, useAutoFastForward } from "./composables/useAutoFastForward";
 import { useRepoWatcher } from "./composables/useRepoWatcher";
 import { useTrackedIgnored, shouldRecheckTrackedIgnored } from "./composables/useTrackedIgnored";
 import { useWatcherRefreshQueue } from "./composables/useWatcherRefreshQueue";
@@ -3247,6 +3247,17 @@ async function onBisectChanged() {
   await repoRefresh(true);
 }
 
+/**
+ * Where End bisect returns to (what `BISECT_START` will record): the branch,
+ * or HEAD's short hash when it is detached.
+ */
+const bisectReturnsTo = computed(() => {
+  const branch = repoStatus.value?.branch ?? "";
+  if (branch && !DETACHED_BRANCH_NAMES.has(branch)) return branch;
+  const head = repoLog.value.find((e) => /(^|, )HEAD( ->|,|$)/.test(e.refs));
+  return head ? head.hashFull.slice(0, 7) : "HEAD";
+});
+
 /** Starting a bisect from the Git Tree context menu, behind a confirmation. */
 const bisectStart = useBisectStart({
   cwd: () => repoFolderPath.value ?? "",
@@ -3813,7 +3824,9 @@ async function onOperationAction(action: "continue" | "abort" | "skip") {
   // reports one in progress. A `--continue` that merely halted on a further
   // conflict leaves the state in place and so shows nothing, which is the
   // whole point of distinguishing the two (design §3).
-  if (action === "continue" && operationBefore === "merge" && repoOperationState.value === null) {
+  // A merge run inside a bisect leaves the bisect behind it: done all the same.
+  const after = repoOperationState.value;
+  if (action === "continue" && operationBefore === "merge" && (after === null || isBisect(after))) {
     showMergeSuccess.value = true;
   }
 }
@@ -5506,7 +5519,7 @@ onUnmounted(() => {
     <!-- Guided bisect: confirms both ends before git moves the working tree. -->
     <BaseModal v-if="bisectConfirm" :title="t('bisect.confirmTitle')" size="sm" role="alertdialog"
       @close="bisectStart.cancel()">
-      <p class="ptc-desc">{{ t(bisectConfirm.ordered ? 'bisect.confirmBody' : 'bisect.confirmBodyUnordered', bisectConfirm.good.slice(0, 7), bisectConfirm.bad.slice(0, 7), repoStatus?.branch || 'HEAD') }}</p>
+      <p class="ptc-desc">{{ t(bisectConfirm.ordered ? 'bisect.confirmBody' : 'bisect.confirmBodyUnordered', bisectConfirm.good.slice(0, 7), bisectConfirm.bad.slice(0, 7), bisectReturnsTo) }}</p>
       <template #footer>
         <button class="bm-btn bm-btn--ghost" @click="bisectStart.cancel()">{{ t('project.cancel') }}</button>
         <button class="bm-btn bm-btn--primary" :disabled="bisectStart.starting.value" @click="bisectStart.start()">{{ t('bisect.confirmStart') }}</button>

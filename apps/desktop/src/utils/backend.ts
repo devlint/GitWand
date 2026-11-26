@@ -1277,7 +1277,9 @@ export async function gitBisectStatus(cwd: string): Promise<BisectStatus> {
  * ancestor of it: never swapped.
  */
 export async function gitBisectStart(cwd: string, bad: string, good: string, keepOrder = false): Promise<BisectStatus> {
-  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_start", { cwd, bad, good, keepOrder });
+  // A checkout of the whole working tree, then the range walks: as long as a
+  // network command on a large repo, not a 30 s read.
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_start", { cwd, bad, good, keepOrder }, IPC_TIMEOUT.NETWORK);
   return bisectPost<BisectStatus>("/api/git-bisect-start", { cwd, bad, good, keepOrder });
 }
 
@@ -1290,7 +1292,7 @@ export async function gitBisectMark(
   verdict: BisectVerdict,
   expected: string | null = null,
 ): Promise<BisectStatus> {
-  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_mark", { cwd, verdict, expected });
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_mark", { cwd, verdict, expected }, IPC_TIMEOUT.NETWORK);
   return bisectPost<BisectStatus>("/api/git-bisect-mark", { cwd, verdict, expected });
 }
 
@@ -1300,7 +1302,7 @@ export async function gitBisectMark(
  */
 export async function gitBisectReset(cwd: string, stay = false): Promise<void> {
   if (isTauri()) {
-    await tauriInvoke("git_bisect_reset", { cwd, stay });
+    await tauriInvoke("git_bisect_reset", { cwd, stay }, IPC_TIMEOUT.NETWORK);
     return;
   }
   await bisectPost<null>("/api/git-bisect-reset", { cwd, stay });

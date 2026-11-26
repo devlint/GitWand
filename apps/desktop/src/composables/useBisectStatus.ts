@@ -34,7 +34,7 @@ export function useBisectStatus(opts: {
    * or the bisect moving on (a `git bisect next` in a terminal).
    */
   const actionError = ref("");
-  /** Where the bisect stood when `actionError` was set; null while setting it. */
+  /** Where the bisect stood at the first read after `actionError` was set. */
   let errorAt: string | null = null;
   const position = (st: BisectStatus) =>
     [st.current, st.pendingCheckout, st.bad, ...st.good, "|", ...st.skipped, "|", ...st.candidates].join(":");
@@ -56,10 +56,14 @@ export function useBisectStatus(opts: {
       if (!next.active || (errorAt !== null && position(next) !== errorAt)) {
         actionError.value = "";
         errorAt = null;
+      } else if (actionError.value && errorAt === null) {
+        // The first read since the error says where the bisect stands with
+        // it (the mark git recorded before failing included): the error
+        // stays until the bisect moves from there.
+        errorAt = position(next);
       }
     } catch (e) {
-      if (request !== loadRequest) return;
-      loadError.value = bisectErrorMessage(e);
+      if (request === loadRequest) loadError.value = bisectErrorMessage(e);
     }
   }
 
@@ -142,8 +146,9 @@ export function useBisectStatus(opts: {
       // git may have recorded the mark before failing (a checkout refused by
       // uncommitted changes): show what it holds now, with the error, which
       // stays until the bisect moves from there.
+      // That read sets where the error stands (`errorAt`); if it fails, the
+      // next successful one does, never the status from before the mark.
       await load();
-      if (opts.cwd() === cwd && status.value) errorAt = position(status.value);
       opts.onChanged();
     } finally {
       busy.value = false;

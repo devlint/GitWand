@@ -132,12 +132,14 @@ const BUDGETS = {
   // double-click and tab/branch guards), the `patchDiffArgs` pins and the
   // localized refusal messages (remote moved, destination unreadable).
   //
-  // Guided bisect: main measured at 997 KB (1,021,167 bytes): the four bisect
-  // wrappers in backend.ts, `operationKinds`, `bisectEndpoints`, the en
-  // `bisect` strings (with the translated refusals, `bisectError`), the Git
-  // Tree menu entries, `useBisectStart` (ancestry-ordered confirmation) and
-  // the App.vue wiring. The banner and `useBisectStatus` are a lazy chunk.
-  main_max_kb: 998,
+  // Guided bisect: main measured at 999 KB (1,022,830 bytes): the four bisect
+  // wrappers in backend.ts, `operationKinds` (with `movesBisect`),
+  // `bisectEndpoints`, the en `bisect` strings (with the translated refusals,
+  // `bisectError`), the Git Tree menu entries, `useBisectStart`
+  // (ancestry-ordered confirmation) and the App.vue wiring (the bisect poll
+  // while the watcher is down). The banner and `useBisectStatus` are a lazy
+  // chunk.
+  main_max_kb: 1000,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked

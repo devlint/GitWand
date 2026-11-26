@@ -9,6 +9,17 @@ import { inLoadedHistoryOf } from "../utils/bisectEndpoints";
 import { t } from "./useI18n";
 import { bisectErrorMessage } from "./bisectError";
 
+async function bisectIsActive(cwd: string): Promise<boolean> {
+  try {
+    const { gitBisectStatus } = await import("../utils/backend");
+    return (await gitBisectStatus(cwd)).active;
+  } catch {
+    // The status cannot be read: the repo state will tell.
+    const { gitRepoState } = await import("../utils/backend");
+    return (await gitRepoState(cwd).catch(() => null))?.state === "bisect";
+  }
+}
+
 export function useBisectStart(opts: {
   cwd: () => string;
   /** The loaded Git Tree log. */
@@ -79,7 +90,14 @@ export function useBisectStart(opts: {
       confirm.value = null;
       await opts.onStarted();
     } catch (e) {
-      opts.notify(t("bisect.startFailed"), bisectErrorMessage(e));
+      // git may have started it and only the status read after it failed:
+      // then the banner takes over (with that error), not a start failure.
+      if (await bisectIsActive(cwd)) {
+        confirm.value = null;
+        await opts.onStarted();
+      } else {
+        opts.notify(t("bisect.startFailed"), bisectErrorMessage(e));
+      }
     } finally {
       starting.value = false;
     }

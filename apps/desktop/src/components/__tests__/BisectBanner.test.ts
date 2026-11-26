@@ -339,4 +339,24 @@ describe("BisectBanner", () => {
     await flush();
     expect(gitBisectReset).toHaveBeenLastCalledWith("/repo", true);
   });
+  it("keeps an action's error when the read right after it fails", async () => {
+    vi.mocked(gitBisectStatus).mockResolvedValueOnce(status());
+    vi.mocked(gitBisectMark).mockRejectedValue(new Error("would be overwritten by checkout"));
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    const key = ref(0);
+    app = createApp({
+      render: () => h(BisectBanner, { cwd: "/repo", refreshKey: key.value, hasTrackedChanges: false }),
+    });
+    app.mount(host);
+    await flush();
+    vi.mocked(gitBisectStatus).mockRejectedValueOnce(new Error("index.lock"));
+    button("Good")!.click();
+    await flush();
+    // The mark was recorded: the next read shows it.
+    vi.mocked(gitBisectStatus).mockResolvedValue(status({ good: [H("1"), H("2"), H("a")] }));
+    key.value++;
+    await flush();
+    expect(host.textContent).toContain("would be overwritten");
+  });
 });
