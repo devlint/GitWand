@@ -129,7 +129,7 @@ describe("BisectBanner", () => {
     vi.mocked(gitBisectStatus).mockResolvedValue(status({ pendingCheckout: true }));
     vi.mocked(gitBisectMark).mockResolvedValue(status());
     const events = await mount();
-    expect(host.textContent).toContain("Marked. git could not check out the next commit");
+    expect(host.textContent).toContain("This commit is already marked.");
     expect(button("Good")).toBeUndefined();
     button("Continue")!.click();
     await flush();
@@ -272,5 +272,33 @@ describe("BisectBanner", () => {
     await flush();
     expect(host.textContent).toContain(H("c").slice(0, 7));
     expect(host.textContent).not.toContain(H("d").slice(0, 7));
+  });
+  it("offers no verdict when git has nothing left to test and no culprit", async () => {
+    vi.mocked(gitBisectStatus).mockResolvedValue(status({ remaining: 0, steps: 0 }));
+    await mount();
+    expect(host.textContent).toContain("git found no commit left to test");
+    expect(button("Good")).toBeUndefined();
+    expect(button("End bisect")).toBeDefined();
+  });
+
+  it("shows nothing of the previous repo when the next one's read fails", async () => {
+    const cwd = ref("/a");
+    vi.mocked(gitBisectStatus).mockImplementation(async (c: string) => {
+      if (c === "/a") return status();
+      throw new Error("bad object");
+    });
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    app = createApp({
+      render: () => h(BisectBanner, { cwd: cwd.value, refreshKey: 0, hasTrackedChanges: false }),
+    });
+    app.mount(host);
+    await flush();
+    expect(host.textContent).toContain("Fix parser edge case");
+    cwd.value = "/b";
+    await flush();
+    expect(host.textContent).not.toContain("Fix parser edge case");
+    expect(button("Good")).toBeUndefined();
+    expect(host.textContent).toContain("bad object");
   });
 });

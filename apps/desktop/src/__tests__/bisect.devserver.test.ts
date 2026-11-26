@@ -233,4 +233,22 @@ describe("dev-server bisect", { timeout: 30_000 }, () => {
     g("bisect", "skip");
     expect(devBisectRepoState(path).step).toBe(before + 1);
   });
+  it("names no culprit when git finds no testable commit", () => {
+    const { path, g, sha } = linear(1);
+    writeFileSync(join(path, "b.txt"), "1\n");
+    g("add", "-A");
+    g("commit", "-q", "--amend", "-m", "c1");
+    for (let i = 2; i <= 8; i++) {
+      writeFileSync(join(path, i === 6 ? "b.txt" : "a.txt"), `v${i}\n`);
+      g("add", "-A");
+      g("commit", "-q", "-m", `c${i}`);
+    }
+    g("bisect", "start", sha("c8"), sha("c1"), "--", "b.txt");
+    expect(g("rev-parse", "HEAD")).toBe(sha("c6"));
+    expect(() => devBisectMark(path, "good")).toThrow();
+    const st = devBisectStatus(path);
+    expect(st.candidates).toEqual([]);
+    expect(st.remaining).toBe(0);
+    expect(st.pendingCheckout).toBe(false);
+  });
 });

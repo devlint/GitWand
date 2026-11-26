@@ -29,7 +29,7 @@ const emit = defineEmits<{
 }>();
 
 const cwd = toRef(props, "cwd");
-const { status, busy, error, culprit, candidates, narrowing, pending, customTerms, info, mark, end } =
+const { status, busy, error, culprit, candidates, narrowing, pending, noResult, customTerms, info, mark, end } =
   useBisectStatus({
     cwd: () => cwd.value,
     refreshKey: () => props.refreshKey,
@@ -93,6 +93,7 @@ const label = (verdict: "good" | "bad") => {
         </span>
       </template>
       <span v-if="pending" class="bisect-note">{{ t('bisect.pending') }}</span>
+      <span v-else-if="noResult" class="bisect-note">{{ t('bisect.noTestable') }}</span>
       <span v-else-if="hasTrackedChanges && narrowing && status" class="bisect-note">{{ t('bisect.dirty') }}</span>
       <span v-if="error" class="bisect-error" role="alert">{{ error }}</span>
     </div>
@@ -100,7 +101,7 @@ const label = (verdict: "good" | "bad") => {
     <div class="bisect-actions">
       <template v-if="status">
         <button v-if="pending" class="btn btn--sm btn--primary" :disabled="busy" @click="mark('next')">{{ t('bisect.continue') }}</button>
-        <template v-else-if="narrowing">
+        <template v-else-if="narrowing && !noResult">
           <button class="btn btn--sm btn--success" :disabled="busy" @click="mark('good')">{{ label('good') }}</button>
           <button class="btn btn--sm btn--danger" :disabled="busy" @click="mark('bad')">{{ label('bad') }}</button>
           <button class="btn btn--sm btn--secondary" :disabled="busy" @click="mark('skip')">{{ t('bisect.skip') }}</button>

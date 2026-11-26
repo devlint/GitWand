@@ -761,7 +761,8 @@ const es: Locale = {
   bisect: {
     notInHead: "Este commit no está en el historial de HEAD: cambia antes a una rama que lo contenga.",
     continue: "Continuar",
-    pending: "Marcado. git no pudo pasar al siguiente commit: confirma o guarda tus cambios en un stash y luego Continuar.",
+    pending: "Este commit ya está marcado. Continuar pasa al siguiente commit por probar; si git se niega, haz commit o guarda en stash tus cambios primero.",
+    noTestable: "git no encuentra más commits por probar ni un primer commit malo (puede que las rutas del bisect no coincidan con ninguno). Termina el bisect para empezar de nuevo.",
     menuBetween: "Bisect entre estos commits",
     menuFromHere: "Bisect desde aquí (este commit es bueno)",
     menuFromHereHint: "Encontrar el primer commit malo entre este y HEAD",

@@ -172,11 +172,23 @@ export function devBisectStatus(cwd) {
     };
     steps = v("bisect_steps");
     // As in the Rust command: the range as git walks it, minus `bad` and the
-    // skipped commits still inside it.
-    const range = revList(cwd, sc, [], bad, good).split("\n").filter(Boolean);
-    const untested = range.filter((h) => h !== bad && !skipped.includes(h)).length;
+    // skipped commits still inside it; listed only when there are skips.
+    // `bad` is in it exactly when it tops a topo-ordered walk.
+    const badInRange = revList(cwd, sc, ["--topo-order", "-n", "1"], bad, good).trim() === bad;
+    let skippedInRange = [];
+    let untested;
+    if (skipped.length === 0) {
+      const count = Number(revList(cwd, sc, ["--count"], bad, good).trim()) || 0;
+      untested = Math.max(0, count - (badInRange ? 1 : 0));
+    } else {
+      const skips = new Set(skipped);
+      const range = revList(cwd, sc, [], bad, good).split("\n").filter(Boolean);
+      skippedInRange = range.filter((h) => h !== bad && skips.has(h));
+      untested = range.length - skippedInRange.length - (badInRange ? 1 : 0);
+    }
     remaining = untested;
-    if (untested === 0) candidates = [bad, ...range.filter((h) => h !== bad && skipped.includes(h))];
+    // An empty range with no skip is no result: nothing is named.
+    if (untested === 0 && (badInRange || skippedInRange.length > 0)) candidates = [bad, ...skippedInRange];
   }
   // `--no-checkout` bisects move BISECT_HEAD, not HEAD.
   const current = headHash(cwd, existsSync(join(dir, "BISECT_HEAD")) ? "BISECT_HEAD" : "HEAD");

@@ -9,6 +9,7 @@
 
 use crate::git::*;
 use crate::types::{BisectCommit, BisectStatus};
+use std::collections::HashSet;
 use std::process::Output;
 
 fn run(cwd: &str, args: &[&str]) -> Result<Output, String> {
@@ -268,26 +269,44 @@ fn read_status(cwd: &str) -> Result<BisectStatus, String> {
         // The commits git can still check out: the range, walked as git
         // walks it, minus `bad` and the skipped commits. `bisect_nr` ignores
         // skips; a skip ref can also point outside the range once later
-        // marks narrowed it, so only skips inside it count.
-        let range: Vec<String> = rev_list(cwd, &scope, &[], bad, &good)?
-            .lines()
-            .map(str::to_string)
-            .collect();
-        let untested = range
-            .iter()
-            .filter(|h| *h != bad && !skipped.contains(h))
-            .count();
+        // marks narrowed it, so only skips inside it count. The range is
+        // listed only when there are skips to intersect it with; otherwise
+        // it is counted.
+        //
+        // `bad` is in the range unless the paths leave it out (it touches
+        // none of them) or a good mark descends from it: the tip of a
+        // topo-ordered walk is `bad` exactly when it is in.
+        let tip = rev_list(cwd, &scope, &["--topo-order", "-n", "1"], bad, &good)?;
+        let bad_in_range = tip.trim() == bad;
+        let (untested, skipped_in_range) = if skipped.is_empty() {
+            let count: usize = rev_list(cwd, &scope, &["--count"], bad, &good)?
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            (count.saturating_sub(usize::from(bad_in_range)), Vec::new())
+        } else {
+            let skips: HashSet<&str> = skipped.iter().map(String::as_str).collect();
+            let range = rev_list(cwd, &scope, &[], bad, &good)?;
+            let mut len = 0;
+            let mut in_skip = Vec::new();
+            for h in range.lines() {
+                len += 1;
+                if h != bad && skips.contains(h) {
+                    in_skip.push(h.to_string());
+                }
+            }
+            let untested = len - in_skip.len() - usize::from(bad_in_range);
+            (untested, in_skip)
+        };
         remaining = Some(untested as u32);
 
         // Nothing left to test: `bad` is the first bad commit, or, when
-        // skipped commits remain in the range, one of them may be.
-        if untested == 0 {
+        // skipped commits remain in the range, one of them may be. An empty
+        // range with no skip is no result ("No testable commit found", or a
+        // good mark that descends from `bad`): nothing is named.
+        if untested == 0 && (bad_in_range || !skipped_in_range.is_empty()) {
             candidates.push(bad.clone());
-            candidates.extend(
-                range
-                    .into_iter()
-                    .filter(|h| h != bad && skipped.contains(h)),
-            );
+            candidates.extend(skipped_in_range);
         }
     }
 
@@ -720,6 +739,30 @@ mod tests {
         }
         assert_eq!(st.candidates, vec![c6]);
         assert_eq!(st.remaining, Some(0));
+    }
+
+    #[test]
+    fn no_testable_commit_names_no_culprit() {
+        // Only c1 and c6 touch b.txt: once c6 is good, git finds no commit
+        // to test and exits non-zero; c8 never touched b.txt.
+        let repo = TempRepo::linear(1);
+        repo.write("b.txt", "1\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "--amend", "-m", "c1"]);
+        for i in 2..=8 {
+            let file = if i == 6 { "b.txt" } else { "a.txt" };
+            repo.write(file, &format!("v{i}\n"));
+            repo.git(&["add", "-A"]);
+            repo.git(&["commit", "-q", "-m", &format!("c{i}")]);
+        }
+        let (c1, c6, c8) = (repo.sha("c1"), repo.sha("c6"), repo.sha("c8"));
+        repo.git(&["bisect", "start", &c8, &c1, "--", "b.txt"]);
+        assert_eq!(repo.head(), c6);
+        assert!(block(git_bisect_mark(repo.cwd(), "good".to_string())).is_err());
+        let st = status(&repo);
+        assert!(st.candidates.is_empty(), "{:?}", st.candidates);
+        assert_eq!(st.remaining, Some(0));
+        assert!(!st.pending_checkout);
     }
 
     #[test]

@@ -775,7 +775,8 @@ const zhCN: Locale = {
   bisect: {
     notInHead: "此提交不在 HEAD 的历史中：请先切换到包含它的分支。",
     continue: "继续",
-    pending: "已标记。git 无法检出下一个提交：请提交或暂存你的更改，然后点击继续。",
+    pending: "此提交已标记。“继续”会切换到下一个待测试的提交；如果 git 拒绝，请先提交或储藏你的修改。",
+    noTestable: "git 找不到剩余待测试的提交，也没有第一个坏提交（二分查找的路径可能与任何提交都不匹配）。结束二分查找后重新开始。",
     menuBetween: "在这两个提交之间二分查找",
     menuFromHere: "从这里开始二分查找（此提交是好的）",
     menuFromHereHint: "在此提交与 HEAD 之间找到第一个坏提交",

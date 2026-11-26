@@ -773,7 +773,8 @@ const en = {
   bisect: {
     notInHead: "This commit is not in HEAD's history: check out a branch that contains it first.",
     continue: "Continue",
-    pending: "Marked. git could not check out the next commit: commit or stash your changes, then Continue.",
+    pending: "This commit is already marked. Continue checks out the next one to test; if git refuses, commit or stash your changes first.",
+    noTestable: "git found no commit left to test and no first bad commit (the bisect's paths may match none). End bisect to start again.",
     menuBetween: "Bisect between these commits",
     menuFromHere: "Bisect from here (this commit is good)",
     menuFromHereHint: "Find the first bad commit between this one and HEAD",

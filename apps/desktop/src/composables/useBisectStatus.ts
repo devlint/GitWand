@@ -44,7 +44,37 @@ export function useBisectStatus(opts: {
     }
   }
 
-  watch(() => [opts.cwd(), opts.refreshKey()], () => load(), { immediate: true });
+  // Watcher ticks, HEAD and the mark count often change together (each
+  // action moves all three): a trigger while a load runs asks for one more
+  // load after it, not one each.
+  let loading = false;
+  let again = false;
+  function reload() {
+    if (loading) {
+      again = true;
+      return;
+    }
+    loading = true;
+    void load().finally(() => {
+      loading = false;
+      if (again) {
+        again = false;
+        reload();
+      }
+    });
+  }
+
+  watch(
+    () => opts.cwd(),
+    () => {
+      // Another repo: nothing of the previous one stays on screen, even when
+      // this one's read fails, and a read still running for it is dropped.
+      loadRequest++;
+      status.value = null;
+      error.value = "";
+    },
+  );
+  watch(() => [opts.cwd(), opts.refreshKey()], reload, { immediate: true });
 
   const culprit = computed(() =>
     status.value && status.value.candidates.length === 1 ? status.value.candidates[0] : null,
@@ -54,6 +84,10 @@ export function useBisectStatus(opts: {
   );
   const narrowing = computed(() => !culprit.value && candidates.value.length === 0);
   const pending = computed(() => narrowing.value && !!status.value?.pendingCheckout);
+  /** git has nothing left to test and no culprit (the paths match no commit left, say). */
+  const noResult = computed(
+    () => narrowing.value && !pending.value && status.value?.remaining === 0,
+  );
   /** [bad, good] when the bisect set its own terms (`--term-old/--term-new`). */
   const customTerms = computed(() => {
     const terms = status.value?.terms;
@@ -92,5 +126,5 @@ export function useBisectStatus(opts: {
   const mark = (verdict: BisectVerdict) => act(() => gitBisectMark(opts.cwd(), verdict));
   const end = () => act(() => gitBisectReset(opts.cwd()));
 
-  return { status, busy, error, culprit, candidates, narrowing, pending, customTerms, info, mark, end };
+  return { status, busy, error, culprit, candidates, narrowing, pending, noResult, customTerms, info, mark, end };
 }

@@ -762,7 +762,8 @@ const ptBR: Locale = {
   bisect: {
     notInHead: "Este commit não está no histórico do HEAD: mude antes para um branch que o contenha.",
     continue: "Continuar",
-    pending: "Marcado. O git não conseguiu passar para o próximo commit: faça commit ou stash das alterações e depois Continuar.",
+    pending: "Este commit já está marcado. Continuar vai para o próximo commit a testar; se o git recusar, faça commit ou stash das suas alterações antes.",
+    noTestable: "O git não encontrou mais commits a testar nem um primeiro commit ruim (os caminhos do bisect talvez não correspondam a nenhum). Encerre o bisect para recomeçar.",
     menuBetween: "Bisect entre estes commits",
     menuFromHere: "Bisect a partir daqui (este commit é bom)",
     menuFromHereHint: "Encontrar o primeiro commit ruim entre este e o HEAD",
