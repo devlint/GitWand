@@ -100,7 +100,10 @@ export function useBisectStart(opts: {
     } catch (e) {
       // git may have started it and only the status read after it failed:
       // then the banner takes over (with that error), not a start failure.
-      if (await bisectIsActive(cwd)) {
+      // Not for GitWand's own refusals (`bisect:<code>:`): a `bisect:busy`
+      // means another bisect (a terminal's) is running, not this one.
+      const refused = /^bisect:\w+:/.test(e instanceof Error ? e.message : String(e));
+      if (!refused && (await bisectIsActive(cwd))) {
         confirm.value = null;
         await opts.onStarted();
       } else {

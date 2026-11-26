@@ -291,7 +291,9 @@ export function devBisectMark(cwd, verdict, expected = null) {
   const term = verdict === "good" ? goodTerm : verdict === "bad" ? badTerm : verdict === "skip" || verdict === "next" ? verdict : null;
   if (!term) throw new Error(`bisect:verdict: Unknown bisect verdict: ${verdict}`);
   if (!isBisecting(dir)) throw new Error("bisect:notBisecting: No bisect is in progress.");
-  if (expected && verdict !== "next" && underTest(cwd, dir) !== String(expected).toLowerCase()) {
+  // As in the Rust command: any string is checked (an empty one too), only
+  // null or absent skips the check.
+  if (expected != null && verdict !== "next" && underTest(cwd, dir) !== String(expected).toLowerCase()) {
     throw new Error("bisect:moved: The commit under test has changed since it was shown.");
   }
   try {

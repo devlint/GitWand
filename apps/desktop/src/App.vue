@@ -4685,11 +4685,13 @@ watch(
 );
 
 // A rebase that ended (continued from the banner, or outside GitWand) may
-// complete a restack: covers the watcher being disabled.
+// complete a restack: covers the watcher being disabled. A rebase run inside
+// a bisect leaves the bisect behind it: ended all the same.
 watch(
   () => repoOperationState.value?.state ?? "clean",
   (now, before) => {
-    if ((before === "rebase" || before === "rebase_interactive") && now === "clean") refreshStacks();
+    const ended = now === "clean" || now === "bisect";
+    if ((before === "rebase" || before === "rebase_interactive") && ended) refreshStacks();
   },
 );
 

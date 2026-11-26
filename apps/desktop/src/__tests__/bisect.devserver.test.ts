@@ -263,6 +263,7 @@ describe("dev-server bisect", { timeout: 30_000 }, () => {
     devBisectStart(path, sha("c8"), sha("c1"));
     const shown = g("rev-parse", "HEAD");
     expect(() => devBisectMark(path, "bad", sha("c1"))).toThrow(/^bisect:moved:/);
+    expect(() => devBisectMark(path, "bad", "")).toThrow(/^bisect:moved:/);
     expect(devBisectMark(path, "skip", shown.toUpperCase()).skipped).toContain(shown);
   });
 

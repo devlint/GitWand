@@ -122,4 +122,15 @@ describe("useBisectStart", () => {
     });
     expect(detached.returnsTo.value).toBe(H("c").slice(0, 7));
   });
+  it("reports a refusal even when another bisect is now running", async () => {
+    vi.mocked(gitBisectStart).mockRejectedValue(new Error("bisect:busy: Another operation is in progress"));
+    vi.mocked(gitBisectStatus).mockResolvedValue({ active: true } as never);
+    const notify = vi.fn();
+    const onStarted = vi.fn(async () => {});
+    const b = useBisectStart({ cwd: () => "/repo", branch: () => "main", log: () => log, notify, onStarted });
+    b.ask(H("a"), H("c"));
+    await b.start();
+    expect(notify).toHaveBeenCalledOnce();
+    expect(onStarted).not.toHaveBeenCalled();
+  });
 });
