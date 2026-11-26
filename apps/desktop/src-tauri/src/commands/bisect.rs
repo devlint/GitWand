@@ -383,6 +383,16 @@ pub(crate) async fn git_bisect_start(
                 .to_string(),
         );
     }
+    // "Bisect from here" names HEAD as the bad end, read from the loaded
+    // Git Tree: refused once HEAD has moved since.
+    if keep_order == Some(true) {
+        let head = run_ok(&cwd, &["rev-parse", "--verify", "HEAD"])?;
+        if head.trim() != bad {
+            return Err(
+                "bisect:headMoved: HEAD has moved since the Git Tree was loaded.".to_string(),
+            );
+        }
+    }
     let (bad, good) = if is_ancestor(&cwd, &good, &bad)? {
         (bad, good)
     } else if keep_order == Some(true) {
@@ -603,8 +613,19 @@ mod tests {
         let (c1, c8) = (repo.sha("c1"), repo.sha("c8"));
         // "Bisect from here" on c8 with HEAD at c1: c8 is not in HEAD's
         // history, so it cannot be the good end of a bisect ending at HEAD.
+        repo.git(&["checkout", "-q", &c1]);
         let err = block(git_bisect_start(repo.cwd(), c1, c8, Some(true))).unwrap_err();
         assert!(err.starts_with("bisect:notInHead:"), "{err}");
+        assert!(!repo.bisecting());
+    }
+
+    #[test]
+    fn start_from_here_refuses_a_head_that_moved() {
+        let repo = TempRepo::linear(8);
+        let (c1, c7) = (repo.sha("c1"), repo.sha("c7"));
+        // The Git Tree still shows c7 as HEAD; HEAD is c8 now.
+        let err = block(git_bisect_start(repo.cwd(), c7, c1, Some(true))).unwrap_err();
+        assert!(err.starts_with("bisect:headMoved:"), "{err}");
         assert!(!repo.bisecting());
     }
 

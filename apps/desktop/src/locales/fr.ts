@@ -784,6 +784,7 @@ const fr: Locale = {
       verdict: "Réponse de bisect inconnue.",
       notBisecting: "Aucun bisect n'est en cours.",
       resetFailed: "git n'a pas pu terminer le bisect.",
+      headMoved: "HEAD a bougé depuis le chargement du Git Tree : réessayez une fois qu'il est à jour.",
     },
     noHead: "HEAD n'est pas dans l'historique chargé",
     title: "Bisect en cours",

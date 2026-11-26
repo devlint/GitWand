@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { IS_MAC } from "./utils/platform";
-import { isBisect, pollsRepoState, showsOperationBanner } from "./utils/operationKinds";
+import { isBisect, movesBisect, pollsRepoState, showsOperationBanner } from "./utils/operationKinds";
 import { useBisectStart } from "./composables/useBisectStart";
 import { ref, computed, watch, onMounted, onUnmounted, provide, defineAsyncComponent, nextTick } from "vue";
 
@@ -3232,9 +3232,10 @@ const bisectHasTrackedChanges = computed(() =>
 
 /**
  * Bumped by watcher events that can move a bisect (refs/bisect, HEAD, the
- * BISECT_* files). The banner's reload key is this, HEAD and the mark count
- * (`step`, read by `git_repo_state` after every status poll: a terminal mark
- * that moves no HEAD, with the watcher off or on reftable). Not the whole
+ * BISECT_* files; `movesBisect`, not a fetch). The banner's reload key is
+ * this, HEAD and the mark count (`step`, which `git_repo_state` reads: with
+ * the watcher down, the 3 s repo-state poll still runs for a bisect and
+ * catches a terminal mark that moves no HEAD). Not the whole
  * `repoOperationState`, which is a new object at every status reload (each
  * file save while testing a step).
  */
@@ -3385,19 +3386,6 @@ watch(
 // Also re-check whenever status changes (e.g. user stages a resolved file) so
 // the Continue button enables without waiting for the next 3-second tick.
 watch(repoStatus, () => { refreshRepoState(); }, { deep: false });
-
-// Start/stop the 3 s belt-and-suspenders poll based on whether an operation
-// is actually in progress. When idle, no interval runs at all.
-// Not for a bisect, which can stay open for hours: the watcher (`mergeState`,
-// `head`, `refs`) and its own actions refresh it.
-watch(repoOperationState, (op) => {
-  if (pollsRepoState(op) && !_rebaseStateInterval) {
-    _rebaseStateInterval = setInterval(refreshRepoState, 3_000);
-  } else if (!pollsRepoState(op) && _rebaseStateInterval) {
-    clearInterval(_rebaseStateInterval);
-    _rebaseStateInterval = null;
-  }
-});
 
 // ─── Stash manager panel ────────────────────────────────
 const showStash = ref(false);
@@ -4521,6 +4509,26 @@ const repoWatcher = useRepoWatcher({
   onHealthChange: (healthy) => poller.setWatcherHealthy(healthy),
 });
 
+// Start/stop the 3 s belt-and-suspenders poll based on whether an operation
+// is actually in progress. When idle, no interval runs at all.
+// A bisect, which can stay open for hours, only while the watcher is down
+// (`pollsRepoState`), and not while the window is hidden: its repo state
+// spawns no process, and the mark count it reads catches a terminal mark
+// that leaves HEAD and `git status` unchanged.
+function pollRepoState() {
+  if (isBisect(repoOperationState.value) && document.hidden) return;
+  void refreshRepoState();
+}
+watch([repoOperationState, repoWatcher.healthy], ([op, healthy]) => {
+  const polls = pollsRepoState(op, healthy);
+  if (polls && !_rebaseStateInterval) {
+    _rebaseStateInterval = setInterval(pollRepoState, 3_000);
+  } else if (!polls && _rebaseStateInterval) {
+    clearInterval(_rebaseStateInterval);
+    _rebaseStateInterval = null;
+  }
+});
+
 watch(
   [repoFolderPath, () => settings.value.liveRepoWatcher],
   ([path, enabled]) => {
@@ -4555,8 +4563,8 @@ repoWatcher.on(["worktree", "config", "head"], (ev) => {
 });
 
 // Guided bisect: reload the banner's status (see `bisectTick`).
-repoWatcher.on(["refs", "head", "mergeState"], () => {
-  if (isBisect(repoOperationState.value)) bisectTick.value++;
+repoWatcher.on(["refs", "head", "mergeState"], (ev) => {
+  if (isBisect(repoOperationState.value) && movesBisect(ev)) bisectTick.value++;
 });
 
 repoWatcher.on(["head", "refs"], () => {

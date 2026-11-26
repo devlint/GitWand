@@ -791,6 +791,7 @@ const en = {
       verdict: "Unknown bisect answer.",
       notBisecting: "No bisect is in progress.",
       resetFailed: "git could not end the bisect.",
+      headMoved: "HEAD has moved since the Git Tree was loaded: try again once it has refreshed.",
     },
     noHead: "HEAD is not in the loaded history",
     title: "Bisecting",

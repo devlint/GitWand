@@ -793,6 +793,7 @@ const zhCN: Locale = {
       verdict: "未知的二分查找答复。",
       notBisecting: "当前没有进行中的二分查找。",
       resetFailed: "git 无法结束二分查找。",
+      headMoved: "自 Git Tree 加载以来 HEAD 已移动：请在其刷新后重试。",
     },
     noHead: "HEAD 不在已加载的历史中",
     title: "正在二分查找",

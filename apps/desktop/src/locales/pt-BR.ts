@@ -780,6 +780,7 @@ const ptBR: Locale = {
       verdict: "Resposta de bisect desconhecida.",
       notBisecting: "Nenhum bisect em andamento.",
       resetFailed: "O git não conseguiu encerrar o bisect.",
+      headMoved: "O HEAD mudou desde que o Git Tree foi carregado: tente de novo quando ele for atualizado.",
     },
     noHead: "O HEAD não está no histórico carregado",
     title: "Bisect em andamento",

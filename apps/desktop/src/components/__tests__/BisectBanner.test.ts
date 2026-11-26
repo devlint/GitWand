@@ -306,4 +306,24 @@ describe("BisectBanner", () => {
     expect(button("Good")).toBeUndefined();
     expect(host.textContent).toContain("bad object");
   });
+  it("drops an action's error once the bisect moves on from there", async () => {
+    vi.mocked(gitBisectStatus).mockResolvedValue(status());
+    vi.mocked(gitBisectMark).mockRejectedValue(new Error("would be overwritten by checkout"));
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    const key = ref(0);
+    app = createApp({
+      render: () => h(BisectBanner, { cwd: "/repo", refreshKey: key.value, hasTrackedChanges: false }),
+    });
+    app.mount(host);
+    await flush();
+    button("Good")!.click();
+    await flush();
+    expect(host.textContent).toContain("would be overwritten");
+    // `git bisect next` in a terminal: another commit under test.
+    vi.mocked(gitBisectStatus).mockResolvedValue(status({ current: H("e") }));
+    key.value++;
+    await flush();
+    expect(host.textContent).not.toContain("would be overwritten");
+  });
 });

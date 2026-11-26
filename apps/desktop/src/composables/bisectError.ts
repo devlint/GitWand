@@ -15,6 +15,7 @@ const KEYS = {
   notBisecting: "bisect.errors.notBisecting",
   resetFailed: "bisect.errors.resetFailed",
   notInHead: "bisect.notInHead",
+  headMoved: "bisect.errors.headMoved",
 } as const;
 
 export function bisectErrorMessage(e: unknown): string {

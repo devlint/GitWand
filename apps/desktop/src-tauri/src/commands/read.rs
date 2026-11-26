@@ -1268,7 +1268,8 @@ pub(crate) async fn git_repo_state(cwd: String) -> Result<RepoOperationState, St
         } else {
             "HEAD"
         };
-        let head = git2::Repository::open(&cwd)
+        // `discover`, as git does: `cwd` may be a subdirectory of the worktree.
+        let head = git2::Repository::discover(&cwd)
             .ok()
             .and_then(|r| r.revparse_single(head_ref).ok().map(|o| o.id().to_string()));
         return Ok(RepoOperationState {

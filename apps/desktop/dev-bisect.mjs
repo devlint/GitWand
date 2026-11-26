@@ -253,6 +253,10 @@ export function devBisectStart(cwd, bad, good, keepOrder = false) {
     if (r.status === 1) return false;
     throw new Error((r.stderr || "").trim() || `git could not compare ${a} and ${b}`);
   };
+  // As in the Rust command: "Bisect from here" names HEAD as the bad end.
+  if (keepOrder && headHash(cwd) !== bad) {
+    throw new Error("bisect:headMoved: HEAD has moved since the Git Tree was loaded.");
+  }
   if (!isAncestor(good, bad)) {
     if (keepOrder) throw new Error("bisect:notInHead: The good commit is not in the history of the bad one.");
     if (!isAncestor(bad, good)) {

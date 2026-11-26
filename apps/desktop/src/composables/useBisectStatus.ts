@@ -28,11 +28,16 @@ export function useBisectStatus(opts: {
   /** The last read's error: cleared by the next read that succeeds. */
   const loadError = ref("");
   /**
-   * The last action's error (git refused a checkout, say): kept until the
-   * next action or repo, whatever reloads follow (a refused checkout still
-   * records the mark, which moves the mark count and reloads).
+   * The last action's error (git refused a checkout, say): kept through the
+   * reloads it causes (a refused checkout still records the mark, which
+   * moves the mark count and reloads), until the next action, another repo,
+   * or the bisect moving on (a `git bisect next` in a terminal).
    */
   const actionError = ref("");
+  /** Where the bisect stood when `actionError` was set; null while setting it. */
+  let errorAt: string | null = null;
+  const position = (st: BisectStatus) =>
+    `${st.current}:${st.pendingCheckout}:${st.candidates.length}:${st.good.length}:${st.skipped.length}`;
   const error = computed(() => actionError.value || loadError.value);
 
   // Only the latest load applies: an older one (a previous repo, an earlier
@@ -46,7 +51,10 @@ export function useBisectStatus(opts: {
       // Ended (in a terminal) before the repo state caught up: nothing to show.
       status.value = next.active ? next : null;
       loadError.value = "";
-      if (!next.active) actionError.value = "";
+      if (!next.active || (errorAt !== null && position(next) !== errorAt)) {
+        actionError.value = "";
+        errorAt = null;
+      }
     } catch (e) {
       if (request !== loadRequest) return;
       loadError.value = bisectErrorMessage(e);
@@ -82,6 +90,7 @@ export function useBisectStatus(opts: {
       status.value = null;
       loadError.value = "";
       actionError.value = "";
+      errorAt = null;
     },
   );
   watch(() => [opts.cwd(), opts.refreshKey()], reload, { immediate: true });
@@ -112,6 +121,7 @@ export function useBisectStatus(opts: {
     if (busy.value) return;
     busy.value = true;
     actionError.value = "";
+    errorAt = null;
     // Another repo opened meanwhile (the banner stays mounted): its result
     // is not this repo's. A load started meanwhile is at least as fresh.
     const cwd = opts.cwd();
@@ -124,9 +134,12 @@ export function useBisectStatus(opts: {
     } catch (e) {
       if (opts.cwd() !== cwd) return;
       actionError.value = bisectErrorMessage(e);
+      errorAt = null;
       // git may have recorded the mark before failing (a checkout refused by
-      // uncommitted changes): show what it holds now, with the error.
+      // uncommitted changes): show what it holds now, with the error, which
+      // stays until the bisect moves from there.
       await load();
+      if (opts.cwd() === cwd && status.value) errorAt = position(status.value);
       opts.onChanged();
     } finally {
       busy.value = false;
