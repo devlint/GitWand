@@ -1184,8 +1184,8 @@ export async function gitOperationAction(
 }
 
 export interface RepoOperationState {
-  /** "clean" | "rebase" | "rebase_interactive" | "merge" | "cherry_pick" | "revert" */
-  state: 'clean' | 'rebase' | 'rebase_interactive' | 'merge' | 'cherry_pick' | 'revert';
+  /** "clean" | "rebase" | "rebase_interactive" | "merge" | "cherry_pick" | "revert" | "bisect" */
+  state: 'clean' | 'rebase' | 'rebase_interactive' | 'merge' | 'cherry_pick' | 'revert' | 'bisect';
   /** True when there are still unresolved conflict markers in the working tree. */
   hasConflict: boolean;
   /** SHA of the commit being applied (REBASE_HEAD / MERGE_HEAD / …). */
@@ -1214,6 +1214,67 @@ export async function gitRepoState(cwd: string): Promise<RepoOperationState> {
   return res.json();
 }
 
+
+// ─── Guided bisect ────────────────────────────────────────────
+
+/** A bisect in progress (`git_bisect_status`, commands/bisect.rs). */
+export interface BisectStatus {
+  /** HEAD, the commit under test. */
+  current: string | null;
+  /** What End bisect returns to (branch name or hash). */
+  start: string | null;
+  bad: string | null;
+  good: string[];
+  skipped: string[];
+  /** Commits left and estimated steps, once a bad and a good commit are known. */
+  remaining: number | null;
+  steps: number | null;
+  /** Set once git cannot narrow further: one = the first bad commit, several = left by skips. */
+  candidates: string[];
+  /** [bad term, good term] ("bad"/"good" unless the bisect set its own). */
+  terms: [string, string];
+}
+
+export type BisectVerdict = "good" | "bad" | "skip";
+
+async function bisectPost<T>(route: string, body: Record<string, unknown>): Promise<T> {
+  const res = await devFetch(`${DEV_SERVER}${route}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error ?? `${route} failed: ${res.status}`);
+  return data as T;
+}
+
+export async function gitBisectStatus(cwd: string): Promise<BisectStatus> {
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_status", { cwd });
+  const res = await devFetch(`${DEV_SERVER}/api/git-bisect-status?cwd=${encodeURIComponent(cwd)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error ?? `bisect status failed: ${res.status}`);
+  return data as BisectStatus;
+}
+
+/** Start a bisect: `good` must be an ancestor of `bad` (full hashes). */
+export async function gitBisectStart(cwd: string, bad: string, good: string): Promise<BisectStatus> {
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_start", { cwd, bad, good });
+  return bisectPost<BisectStatus>("/api/git-bisect-start", { cwd, bad, good });
+}
+
+export async function gitBisectMark(cwd: string, verdict: BisectVerdict): Promise<BisectStatus> {
+  if (isTauri()) return tauriInvoke<BisectStatus>("git_bisect_mark", { cwd, verdict });
+  return bisectPost<BisectStatus>("/api/git-bisect-mark", { cwd, verdict });
+}
+
+/** End the bisect and check out what it started from. */
+export async function gitBisectReset(cwd: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_bisect_reset", { cwd });
+    return;
+  }
+  await bisectPost<null>("/api/git-bisect-reset", { cwd });
+}
 
 /**
  * Rebase the current branch onto `onto`, non-interactively.

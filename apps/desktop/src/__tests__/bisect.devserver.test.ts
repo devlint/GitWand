@@ -1,0 +1,103 @@
+/**
+ * Guided bisect — the dev-server mirror of `src-tauri/src/commands/bisect.rs`
+ * must follow the same rules, or manual QA in `dev:web` tests something other
+ * than what ships. Real git repos.
+ */
+import { describe, it, expect, afterEach } from "vitest";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  devBisectRepoState,
+  devBisectStatus,
+  devBisectStart,
+  devBisectMark,
+  devBisectReset,
+  // @ts-expect-error — plain ESM module without types, shared with dev-server.mjs
+} from "../../dev-bisect.mjs";
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+function linear(n: number) {
+  const path = realpathSync(mkdtempSync(join(tmpdir(), "gw-bisect-")));
+  dirs.push(path);
+  const g = (...a: string[]) => execFileSync("git", a, { cwd: path, encoding: "utf-8" }).trim();
+  g("init", "-q", "-b", "main");
+  g("config", "user.name", "T");
+  g("config", "user.email", "t@e.x");
+  g("config", "commit.gpgsign", "false");
+  for (let i = 1; i <= n; i++) {
+    writeFileSync(join(path, "a.txt"), `v${i}\n`);
+    g("add", "-A");
+    g("commit", "-q", "-m", `c${i}`);
+  }
+  const sha = (s: string) => g("log", "--all", "--format=%H", `--grep=^${s}$`);
+  return { path, g, sha };
+}
+
+describe("dev-server bisect", { timeout: 30_000 }, () => {
+  it("runs a bisect to the culprit and back, like the backend", () => {
+    const { path, g, sha } = linear(8);
+    const [c1, c5, c8] = [sha("c1"), sha("c5"), sha("c8")];
+    expect(devBisectRepoState(path)).toBeNull();
+
+    let st = devBisectStart(path, c8, c1);
+    expect(st.remaining).toBeGreaterThan(0);
+    expect(st.bad).toBe(c8);
+    expect(st.good).toEqual([c1]);
+    expect(st.start).toBe("main");
+    expect(st.terms).toEqual(["bad", "good"]);
+    expect(devBisectRepoState(path)?.state).toBe("bisect");
+    expect(() => devBisectStart(path, c8, c1)).toThrow();
+
+    for (let i = 0; i < 10 && st.candidates.length !== 1; i++) {
+      let bad = true;
+      try {
+        g("merge-base", "--is-ancestor", c5, "HEAD");
+      } catch {
+        bad = false;
+      }
+      st = devBisectMark(path, bad ? "bad" : "good");
+    }
+    expect(st.candidates).toEqual([c5]);
+
+    devBisectReset(path);
+    expect(devBisectRepoState(path)).toBeNull();
+    expect(g("symbolic-ref", "--short", "HEAD")).toBe("main");
+  });
+
+  it("refuses what the backend refuses", () => {
+    const { path, sha } = linear(4);
+    const [c1, c4] = [sha("c1"), sha("c4")];
+    writeFileSync(join(path, "a.txt"), "dirty\n");
+    expect(() => devBisectStart(path, c4, c1)).toThrow(/uncommitted/);
+    expect(() => devBisectStart(path, c4, "--foo")).toThrow();
+    expect(existsSync(join(path, ".git", "BISECT_LOG"))).toBe(false);
+    expect(() => devBisectMark(path, "maybe")).toThrow();
+  });
+
+  it("lists the candidates when only skipped commits are left", () => {
+    const { path, sha } = linear(4);
+    const [c1, c2, c3, c4] = [sha("c1"), sha("c2"), sha("c3"), sha("c4")];
+    let st = devBisectStart(path, c4, c1);
+    for (let i = 0; i < 5 && st.candidates.length === 0; i++) st = devBisectMark(path, "skip");
+    expect(st.candidates.length).toBeGreaterThan(1);
+    for (const c of [c2, c3, c4]) expect(st.candidates).toContain(c);
+  });
+
+  it("reads a terminal bisect with custom terms", () => {
+    const { path, g, sha } = linear(8);
+    const [c1, c8] = [sha("c1"), sha("c8")];
+    g("bisect", "start", "--term-new=broken", "--term-old=fixed", c8, c1);
+    const st = devBisectStatus(path);
+    expect(st.terms).toEqual(["broken", "fixed"]);
+    expect(st.bad).toBe(c8);
+    const head = g("rev-parse", "HEAD");
+    devBisectMark(path, "good");
+    expect(g("rev-parse", `refs/bisect/fixed-${head}`)).toBe(head);
+  });
+});

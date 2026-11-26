@@ -24,6 +24,7 @@ import { resolveBin } from "./dev-bin.mjs";
 import { devForkParentNwo, devParseGhBranchPr } from "./dev-gh-branch-pr.mjs";
 import { devPrNumber } from "./dev-pr-repo.mjs";
 import { devGitRestack, devPushBlock, devStackDeleteMergedParent, devStackRestackPlan, devStackSetParent, devStackStatus, devStackUnset, devValidateBranchName } from "./dev-stack-service.mjs";
+import { devBisectMark, devBisectRepoState, devBisectReset, devBisectStart, devBisectStatus } from "./dev-bisect.mjs";
 import { devCreateWorktree, devMergeBackCheck, devMergeBackFastForward, devMergeBackPrepare, devMergeBackSquash, devReadSettings, devRemovePrepare, devRemoveWorktree, devResolveBase, devSetupSpawn, devUnlockWorktree, devWorktreeGuard, devWorktreesDir, devWorktreeUrl, devRestoreAsWorktree } from "./dev-worktree-service.mjs";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
@@ -5546,6 +5547,48 @@ async function handleRequest(req, res) {
       }
     }
 
+    // ── Guided bisect — logic in dev-bisect.mjs (mirror of commands/bisect.rs).
+    // Errors → `{ error }`, 400.
+    if (url.pathname === "/api/git-bisect-status" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        return jsonResponse(req, res, devBisectStatus(resolve(cwd)));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 400);
+      }
+    }
+    if (url.pathname === "/api/git-bisect-start" && req.method === "POST") {
+      const body = await readBody(req);
+      const cwd = body.cwd;
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        return jsonResponse(req, res, devBisectStart(resolve(cwd), body.bad, body.good));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 400);
+      }
+    }
+    if (url.pathname === "/api/git-bisect-mark" && req.method === "POST") {
+      const body = await readBody(req);
+      const cwd = body.cwd;
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        return jsonResponse(req, res, devBisectMark(resolve(cwd), body.verdict));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 400);
+      }
+    }
+    if (url.pathname === "/api/git-bisect-reset" && req.method === "POST") {
+      const body = await readBody(req);
+      const cwd = body.cwd;
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        return jsonResponse(req, res, (devBisectReset(resolve(cwd)), null));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 400);
+      }
+    }
+
     // POST /api/git-repo-state  { cwd }
     if (url.pathname === "/api/git-repo-state" && req.method === "POST") {
       const { cwd } = await readBody(req);
@@ -5598,6 +5641,8 @@ async function handleRequest(req, res) {
             return jsonResponse(req, res, { state, hasConflict: hasConflict(), operationHead: readTrimmed(headFile), targetBranch: null, step: 0, total: 0 });
           }
         }
+        const bisect = devBisectRepoState(resolvedCwd);
+        if (bisect) return jsonResponse(req, res, bisect);
         return jsonResponse(req, res, { state: "clean", hasConflict: false, operationHead: null, targetBranch: null, step: 0, total: 0 });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
