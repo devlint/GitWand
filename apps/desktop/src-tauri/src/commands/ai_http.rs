@@ -41,7 +41,7 @@ pub(crate) const AI_KEY_SERVICE: &str = "gitwand:ai";
 const AI_KEY_ACCOUNT: &str = "api-key";
 /// Prefix of the keychain accounts, under the same backend-only service, that
 /// record the origins the user allowed (`check_open_endpoint_with`): one entry
-/// per origin, `open-endpoint:<origin as lowercase hex>` (`origin_account`).
+/// per origin, `open-endpoint:<SHA-256 of the origin, hex>` (`origin_account`).
 const OPEN_ENDPOINT_ACCOUNT_PREFIX: &str = "open-endpoint:";
 
 /// Ceiling for a request that names no timeout of its own — the completion
@@ -187,12 +187,18 @@ trait OriginStore: Sync {
 /// hold that directory).
 struct KeychainOrigins;
 
-/// Keychain account of an allowed origin. Hex, so it holds no `.` or `:`:
-/// Windows names a credential `{account}.{service}`, and an origin spelled
-/// out (`http://x.gitwand:8080`) could be split into another account and a
-/// `gitwand:`-prefixed service the webview's credential commands accept.
+/// Keychain account of an allowed origin: a SHA-256 digest in hex. It holds
+/// no `.` or `:` (Windows names a credential `{account}.{service}`, and an
+/// origin spelled out, `http://x.gitwand:8080`, could be split into another
+/// account and a `gitwand:`-prefixed service the webview's credential
+/// commands accept), and its length is fixed (Windows caps a credential's
+/// user name at 513 characters, which a long origin in hex would exceed).
 fn origin_account(origin: &str) -> String {
-    let hex: String = origin.bytes().map(|b| format!("{b:02x}")).collect();
+    use sha2::{Digest, Sha256};
+    let hex: String = Sha256::digest(origin.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     format!("{OPEN_ENDPOINT_ACCOUNT_PREFIX}{hex}")
 }
 
@@ -1001,11 +1007,13 @@ mod tests {
     #[test]
     fn an_origin_account_cannot_be_split_into_another_service() {
         let a = origin_account("http://x.gitwand:8080");
-        assert_eq!(
-            a,
-            "open-endpoint:687474703a2f2f782e67697477616e643a38303830"
-        );
-        assert!(!a[OPEN_ENDPOINT_ACCOUNT_PREFIX.len()..].contains(['.', ':']));
+        let digest = &a[OPEN_ENDPOINT_ACCOUNT_PREFIX.len()..];
+        assert_eq!(digest.len(), 64);
+        assert!(digest.chars().all(|c| c.is_ascii_hexdigit()));
+        // Fixed length, whatever the origin.
+        let long = format!("https://{}.example:8443", "a".repeat(400));
+        assert_eq!(origin_account(&long).len(), a.len());
+        assert_ne!(origin_account("http://x.gitwand:8081"), a);
     }
 
     #[test]

@@ -778,17 +778,19 @@ async function detectOllama(explicit = false) {
   ollamaModels.value = r.models;
   ollamaError.value = r.error;
 }
-// A result about the previous URL says nothing about the new one: drop it,
-// and let a probe still running for that URL land nowhere.
+// A result about the previous URL says nothing about the new one: a probe
+// still running for it lands nowhere (the counter), and the new URL is
+// checked once typing pauses, in the background (no question).
+let ollamaProbeTimer: ReturnType<typeof setTimeout> | undefined;
 watch(
   () => settings.value.aiOllamaUrl,
   () => {
     ollamaRequest++;
-    ollamaError.value = "";
-    ollamaAvailable.value = false;
-    ollamaModels.value = [];
+    clearTimeout(ollamaProbeTimer);
+    ollamaProbeTimer = setTimeout(() => detectOllama(), 500);
   },
 );
+onUnmounted(() => clearTimeout(ollamaProbeTimer));
 
 // API key — stored in the OS keychain, never read back: the panel only sees
 // a masked hint. The input holds a draft that is saved on change.
@@ -1082,7 +1084,8 @@ async function loadModels(explicit = false, provider: AIProvider = settings.valu
   } catch (e) {
     if (request === modelsRequest) {
       modelOptions.value = fallbackModelsForProvider(provider);
-      modelsError.value = (e as Error).message;
+      // Tauri rejects with the command's error string, not an Error.
+      modelsError.value = e instanceof Error ? e.message : String(e);
     }
   } finally {
     if (request === modelsRequest) modelsLoading.value = false;
@@ -2676,7 +2679,10 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                     t('settings.aiProviderAntigravityCliNotFound') : '' }}
                 </option>
                 <option value="openai-compat">{{ t('settings.aiProviderOpenAiCompat') }}</option>
-                <option value="ollama" :disabled="!ollamaAvailable">
+                <!-- Selectable when the check failed with a reason (a remote
+                     address not allowed yet): its Test button lives in the
+                     Ollama section, which needs the provider selected. -->
+                <option value="ollama" :disabled="!ollamaAvailable && !ollamaError">
                   {{ t('settings.aiProviderOllama') }}{{ ollamaAvailable ? '' : t('settings.aiProviderOllamaNotFound')
                   }}
                 </option>
