@@ -1405,6 +1405,23 @@ fn codex_cli_prompt_inner(
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Deadline for a model-listing command. The Settings picker gives up after
+/// 30 s; ending the child a little earlier means it never outlives the
+/// question it was answering.
+const MODEL_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
+
+/// Run a model-listing command under `MODEL_LIST_TIMEOUT`, killing it on
+/// expiry. The callers treat any error, a timeout included, as "no list".
+fn list_models_output(
+    binary: &str,
+    cli: AiCli,
+    args: &[&str],
+) -> std::io::Result<std::process::Output> {
+    let mut cmd = ai_cmd(binary, cli);
+    cmd.args(args);
+    output_with_timeout(cmd, MODEL_LIST_TIMEOUT)
+}
+
 /// Enumerate the models Antigravity offers (`agy models`). Each line is
 /// `<id>\t<display name>`; the effort level is baked into the id
 /// (`gemini-3.8-flash-high`), so there is no separate effort to pick. Returns
@@ -1423,7 +1440,7 @@ fn antigravity_list_models_inner() -> Result<Vec<AntigravityModel>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match ai_cmd(&binary, AiCli::Antigravity).arg("models").output() {
+    let output = match list_models_output(&binary, AiCli::Antigravity, &["models"]) {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()),
     };
@@ -1489,10 +1506,7 @@ fn codex_list_models_inner() -> Result<Vec<CodexModel>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match ai_cmd(&binary, AiCli::Codex)
-        .args(["debug", "models"])
-        .output()
-    {
+    let output = match list_models_output(&binary, AiCli::Codex, &["debug", "models"]) {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()),
     };
@@ -2023,7 +2037,7 @@ fn opencode_list_models_inner() -> Result<Vec<String>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match ai_cmd(&binary, AiCli::Opencode).arg("models").output() {
+    let output = match list_models_output(&binary, AiCli::Opencode, &["models"]) {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()),
     };
@@ -2230,10 +2244,7 @@ fn copilot_list_models_inner() -> Result<Vec<String>, String> {
         None => return Ok(Vec::new()),
     };
 
-    let output = match ai_cmd(&binary, AiCli::Copilot)
-        .args(["help", "config"])
-        .output()
-    {
+    let output = match list_models_output(&binary, AiCli::Copilot, &["help", "config"]) {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()),
     };
