@@ -94,6 +94,7 @@ import {
   isFetchableEndpoint,
   isStaleEffort,
   listModelsForProvider,
+  probeOllama,
   providerEfforts,
 } from "../composables/useAIProvider";
 import { useLogs, type LogEntry } from "../composables/useLogs";
@@ -119,7 +120,7 @@ import {
   refreshSettings as refreshSharedSettings,
   settingsRevision,
 } from "../composables/useSettings";
-import { gitCommitTemplatePath, openExternalUrl, aiHttpRequest, telemetryGetState, telemetrySetEnabled, softwareRenderingGetState, softwareRenderingSetEnabled } from "../utils/backend";
+import { gitCommitTemplatePath, openExternalUrl, telemetryGetState, telemetrySetEnabled, softwareRenderingGetState, softwareRenderingSetEnabled } from "../utils/backend";
 import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings, normalizeEndpointSetting } from "../composables/useAiApiKey";
 export type { AIProvider };
 
@@ -765,51 +766,25 @@ const ollamaModels = ref<string[]>([]);
 /** Why the last check failed, "" when there is nothing more to say than "not connected". */
 const ollamaError = ref("");
 
-/** Loopback addresses never meet the backend's AI endpoint question. */
-function isLoopbackUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
-    // IPv4 literals only, as the backend's `is_loopback`: `127.gpu.lan` is a name.
-    return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Probe the Ollama server. On mount it is a background check: an address the
- * user has not allowed yet fails without a question. The Test button passes
- * `interactive`, so a remote address gets the backend's native question. A
- * failure says why after Test, and for a remote address on mount too (the
- * backend's message then says how to allow it); a local Ollama that is not
- * running keeps the install hint.
- */
-async function detectOllama(interactive = false) {
+// A slower probe for a previous URL must not overwrite a newer one.
+let ollamaRequest = 0;
+/** Probe Ollama (`probeOllama`); `explicit` is the Test button. */
+async function detectOllama(explicit = false) {
+  const request = ++ollamaRequest;
   ollamaError.value = "";
-  const url = settings.value.aiOllamaUrl || "http://localhost:11434";
-  const explain = interactive || !isLoopbackUrl(url);
-  try {
-    // Through the backend: the webview's CSP no longer reaches arbitrary hosts.
-    const res = await aiHttpRequest("GET", `${url.replace(/\/+$/, "")}/api/tags`, "none", undefined, 2, {
-      interactive,
-    });
-    if (res.status >= 200 && res.status < 300) {
-      const data = JSON.parse(res.body);
-      ollamaAvailable.value = true;
-      if (data.models && Array.isArray(data.models)) {
-        ollamaModels.value = data.models.map((m: any) => m.name || m.model).filter(Boolean);
-      }
-    } else {
-      ollamaAvailable.value = false;
-      ollamaModels.value = [];
-      if (explain) ollamaError.value = t("settings.aiOllamaHttpError", res.status);
-    }
-  } catch (e) {
-    ollamaAvailable.value = false;
-    ollamaModels.value = [];
-    if (explain) ollamaError.value = e instanceof Error ? e.message : String(e);
-  }
+  const r = await probeOllama(settings.value.aiOllamaUrl, explicit);
+  if (request !== ollamaRequest) return;
+  ollamaAvailable.value = r.available;
+  ollamaModels.value = r.models;
+  ollamaError.value = r.error;
 }
+// A message about the previous URL says nothing about the new one.
+watch(
+  () => settings.value.aiOllamaUrl,
+  () => {
+    ollamaError.value = "";
+  },
+);
 
 // API key — stored in the OS keychain, never read back: the panel only sees
 // a masked hint. The input holds a draft that is saved on change.
@@ -1087,16 +1062,18 @@ const usesApiModelField = computed(() =>
 );
 
 // A slow fetch for a previous provider/key must not overwrite a newer one.
-// `interactive`: only Refresh may pop the backend's question for an address
+// `explicit`: only Refresh may pop the backend's question for an address
 // not allowed yet; the loads on tab open, on a provider/key change and on
 // leaving the endpoint field fail instead, with a message pointing at Refresh.
 let modelsRequest = 0;
-async function loadModels(interactive = false, provider: AIProvider = settings.value.aiProvider) {
+async function loadModels(explicit = false, provider: AIProvider = settings.value.aiProvider) {
   const request = ++modelsRequest;
   modelsError.value = "";
   modelsLoading.value = true;
   try {
-    const list = await listModelsForProvider(provider, settings.value, { interactive });
+    const list = await listModelsForProvider(provider, settings.value, {
+      ask: explicit ? "always" : "never",
+    });
     if (request === modelsRequest) modelOptions.value = list;
   } catch (e) {
     if (request === modelsRequest) {
@@ -1128,7 +1105,7 @@ onUnmounted(() => clearTimeout(modelsReloadTimer));
 
 /**
  * Endpoint field committed: refetch, but only for a complete URL. Not
- * interactive: every blur would otherwise ask again for an address the user
+ * explicit: every blur would otherwise ask again for an address the user
  * refused; Refresh asks.
  */
 function onEndpointBlur() {

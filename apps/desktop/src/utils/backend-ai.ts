@@ -532,11 +532,19 @@ export interface AiHttpResponse {
 }
 
 /**
+ * When the backend may ask the user to allow an AI address (`AskMode` in
+ * commands/ai_http.rs): `"never"` for a load the user did not ask for (it
+ * fails with a message saying how to allow the address), `"always"` for an
+ * explicit Test connection or Refresh, `"unlessRefused"` (the default) for AI
+ * actions, which are not asked about again once the user refused.
+ */
+export type AiAskMode = "never" | "unlessRefused" | "always";
+
+/**
  * Perform one AI provider HTTP request through the backend. A request to an
  * address that is neither loopback nor a known provider makes the backend ask
  * the user, in a native dialog in the app's language, before anything is sent
- * (once per address). `interactive: false` (a background
- * probe) gets an error instead of that question.
+ * (once per address, see `AiAskMode`).
  */
 export async function aiHttpRequest(
   method: "GET" | "POST",
@@ -544,7 +552,7 @@ export async function aiHttpRequest(
   auth: AiHttpAuth,
   body?: unknown,
   timeoutSecs?: number,
-  opts: { interactive?: boolean } = {},
+  opts: { ask?: AiAskMode } = {},
 ): Promise<AiHttpResponse> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   if (isTauri()) {
@@ -555,7 +563,7 @@ export async function aiHttpRequest(
       auth,
       timeoutSecs,
       locale: useI18n().locale.value,
-      interactive: opts.interactive ?? true,
+      ask: opts.ask ?? "unlessRefused",
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/ai-http-request`, {

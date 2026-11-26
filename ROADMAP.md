@@ -168,9 +168,9 @@ _Synthesis: none of the three addresses structured conflict-resolution AI (Stran
   - Claude Code still creates one empty `~/.claude/projects/<run-dir>/` folder per run (no flag avoids it; `--no-session-persistence` already drops the transcript)
   - the `ai-runs` sweep (24 h, at base setup) could remove a run directory still in use by a run older than that in another GitWand process
   - flaky test seen on 2026-10-10: `merge_back_without_a_recorded_base_still_works` under full-suite load (not reproduced in 15 runs of the `scratch` tests on 2026-11-26)
-  - `ai_http_request` under `pnpm dev:web` goes to any origin unasked: the dev server has no native dialog to mirror `check_open_endpoint`
+  - `ai_http_request` under `pnpm dev:web` goes to any origin unasked: the dev server has no native dialog to mirror `check_open_endpoint_with`
   - an OpenAI-compatible server without a key: the model list loads (`auth: "none"`), but `isAvailable` requires a key and `callOpenAICompat` always sends `bearer`, so completions are never offered. Support it end to end or say so in Settings
-  - allowed AI endpoints cannot be listed or revoked from Settings (they live in the keychain, `gitwand:ai` / `open-endpoints`)
+  - allowed AI endpoints cannot be listed or revoked from Settings (they live in the keychain, service `gitwand:ai`, one account `open-endpoint:<origin>` per origin); a refusal lasts until restart or an explicit Test connection / Refresh
   - an XSS in the webview still drives every IPC command: scope commands per window/capability, and give `read_file`/`write_file` a registry of repositories the user opened rather than the `.git`-ancestor check (a dotfiles repo at `$HOME` passes it)
   - `img-src` stays `https: http:` for self-hosted forge avatars — proxy or allowlist avatar hosts, then tighten it
   - parity-probe dispatch entries for `read_commit_template` and `ai_http_request` (`none` auth against a local fixture server)

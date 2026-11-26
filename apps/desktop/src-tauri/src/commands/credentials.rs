@@ -42,7 +42,12 @@ const BACKEND_ONLY_SERVICES: &[&str] = &[crate::commands::ai_http::AI_KEY_SERVIC
 
 /// Refuse the generic commands on a backend-only service.
 fn check_not_backend_only(service: &str) -> Result<(), String> {
-    if BACKEND_ONLY_SERVICES.contains(&service) {
+    // Case-insensitive: Windows' Credential Manager matches target names
+    // without regard to case, so `gitwand:AI` would reach `gitwand:ai`.
+    if BACKEND_ONLY_SERVICES
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(service))
+    {
         return Err(format!(
             "`{}` is managed by the backend and cannot be accessed from the frontend",
             service
@@ -125,6 +130,14 @@ pub(crate) async fn delete_credential(service: String, account: String) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_backend_only_service_is_refused_in_any_case() {
+        for s in ["gitwand:ai", "gitwand:AI", "GitWand:Ai"] {
+            assert!(check_not_backend_only(s).is_err(), "{s}");
+        }
+        assert!(check_not_backend_only("gitwand:github").is_ok());
+    }
 
     #[test]
     fn foreign_services_are_refused() {

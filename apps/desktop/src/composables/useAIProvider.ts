@@ -12,6 +12,7 @@ import {
   listCodexModels,
   detectClaudeCli,
   aiHttpRequest,
+  type AiAskMode,
 } from "../utils/backend";
 import { t } from "./useI18n";
 import { ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
@@ -466,12 +467,68 @@ function anthropicEfforts(capabilities: any): string[] {
 }
 
 /**
- * How a model-list fetch treats an address the user has not allowed yet:
- * `interactive: false` (a load the user did not ask for) fails rather than
- * popping the backend's native question (see `aiHttpRequest`).
+ * How a model-list fetch treats an address the user has not allowed yet
+ * (`AiAskMode`, see `aiHttpRequest`).
  */
 export interface ModelListOptions {
-  interactive?: boolean;
+  ask?: AiAskMode;
+}
+
+/**
+ * Whether `url` is a loopback address, which never meets the backend's AI
+ * endpoint question. IPv4 literals only, as the backend's `is_loopback`:
+ * `127.gpu.lan` is a name.
+ */
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
+  } catch {
+    return false;
+  }
+}
+
+/** Outcome of an Ollama probe, for the Settings status line. */
+export interface OllamaProbe {
+  available: boolean;
+  models: string[];
+  /** Why it failed, "" when "not connected" says it all. */
+  error: string;
+}
+
+/**
+ * Probe an Ollama server (`GET /api/tags`). `explicit` is the Test button:
+ * the backend may then ask to allow a remote address, even one refused
+ * earlier. A failure is explained after Test, and for a remote address on a
+ * background probe too (the backend's message then says how to allow it); a
+ * local Ollama that is not running keeps the install hint.
+ */
+export async function probeOllama(rawUrl: string, explicit: boolean): Promise<OllamaProbe> {
+  const url = (rawUrl || "http://localhost:11434").replace(/\/+$/, "");
+  const explain = explicit || !isLoopbackUrl(url);
+  try {
+    const res = await aiHttpRequest("GET", `${url}/api/tags`, "none", undefined, 2, {
+      ask: explicit ? "always" : "never",
+    });
+    if (isOk(res.status)) {
+      const data = JSON.parse(res.body);
+      const models = Array.isArray(data.models)
+        ? data.models.map((m: any) => m.name || m.model).filter(Boolean)
+        : [];
+      return { available: true, models, error: "" };
+    }
+    return {
+      available: false,
+      models: [],
+      error: explain ? t("settings.aiOllamaHttpError", res.status) : "",
+    };
+  } catch (e) {
+    return {
+      available: false,
+      models: [],
+      error: explain ? (e instanceof Error ? e.message : String(e)) : "",
+    };
+  }
 }
 
 /**

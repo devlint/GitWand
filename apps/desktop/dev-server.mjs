@@ -8043,7 +8043,7 @@ async function handleRequest(req, res) {
     // error text included. Answers { status, body } whatever the upstream status.
     // Not mirrored: the native question the app asks before a request to an
     // origin that is neither loopback nor a known provider
-    // (`check_open_endpoint`). The dev server has no dialog to
+    // (`check_open_endpoint_with`). The dev server has no dialog to
     // show, so under dev:web such a request goes out unasked.
     if (url.pathname === "/api/ai-http-request" && req.method === "POST") {
       const { method, url: target, body, auth, timeoutSecs } = await readBody(req);

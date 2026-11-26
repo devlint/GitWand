@@ -23,7 +23,7 @@
 //! - A request without the key (`auth: "none"`: Ollama, a keyless
 //!   OpenAI-compatible server) carries repository content too, and so does a
 //!   request with a key bound to a server that does not check keys. Every
-//!   request passes `check_open_endpoint`: a loopback host, a known
+//!   request passes `check_open_endpoint_with`: a loopback host, a known
 //!   provider, or an origin the user allowed in a native dialog
 //!   shown by this module (the webview cannot answer it), remembered in the
 //!   keychain next to the key (`OPEN_ENDPOINT_ACCOUNT_PREFIX`, out of reach of the
@@ -40,7 +40,7 @@ use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl, R
 pub(crate) const AI_KEY_SERVICE: &str = "gitwand:ai";
 const AI_KEY_ACCOUNT: &str = "api-key";
 /// Prefix of the keychain accounts, under the same backend-only service, that
-/// record the origins the user allowed (`check_open_endpoint`): one entry
+/// record the origins the user allowed (`check_open_endpoint_with`): one entry
 /// per origin, `open-endpoint:<origin>`.
 const OPEN_ENDPOINT_ACCOUNT_PREFIX: &str = "open-endpoint:";
 
@@ -240,6 +240,11 @@ struct GateState {
     /// store. Also keeps an allowed origin working when the store cannot be
     /// written.
     session: Vec<String>,
+    /// Origins the user refused in this run. A later request to one of them
+    /// is refused without a new question (a batch of AI calls would ask once
+    /// per call otherwise), unless it asks again on purpose (`Ask::Always`:
+    /// Test connection, Refresh).
+    refused: Vec<String>,
 }
 
 static GATE: Mutex<GateState> = Mutex::new(GateState {
@@ -247,6 +252,7 @@ static GATE: Mutex<GateState> = Mutex::new(GateState {
     answers: Vec::new(),
     waiting: Vec::new(),
     session: Vec::new(),
+    refused: Vec::new(),
 });
 static GATE_ANSWERED: Condvar = Condvar::new();
 
@@ -269,8 +275,17 @@ impl Drop for QuestionOpen<'_> {
         state.asking.retain(|o| o != self.origin);
         state.answers.retain(|(o, _)| o != self.origin);
         state.answers.push((self.origin.to_string(), self.answer));
-        if self.answer == Answer::Allowed {
-            state.session.push(self.origin.to_string());
+        match self.answer {
+            Answer::Allowed => {
+                state.session.push(self.origin.to_string());
+                state.refused.retain(|o| o != self.origin);
+            }
+            Answer::Refused => {
+                if !state.refused.iter().any(|o| o == self.origin) {
+                    state.refused.push(self.origin.to_string());
+                }
+            }
+            Answer::Aborted => {}
         }
         drop(state);
         GATE_ANSWERED.notify_all();
@@ -285,21 +300,60 @@ fn not_allowed(locale: Option<&str>, origin: &str, probe: bool) -> String {
     text.replace("{origin}", origin)
 }
 
+/// When the gate may show its question for an origin not allowed yet.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AskMode {
+    /// Never (a background load): refused with a message saying how to
+    /// allow the origin.
+    Never,
+    /// Unless the user already refused this origin in this run (AI actions).
+    UnlessRefused,
+    /// Even after a refusal (Test connection, Refresh: the user asking).
+    Always,
+}
+
+impl AskMode {
+    /// From the command argument: `"never"`, `"always"`, anything else (or
+    /// nothing) is `UnlessRefused`.
+    fn parse(v: Option<&str>) -> AskMode {
+        match v {
+            Some("never") => AskMode::Never,
+            Some("always") => AskMode::Always,
+            _ => AskMode::UnlessRefused,
+        }
+    }
+}
+
+/// `check_open_endpoint_with`, asking again after a refusal (the tests' usual
+/// case).
+#[cfg(test)]
+fn check_open_endpoint(
+    target: &tauri::Url,
+    store: &dyn OriginStore,
+    ask: Option<&dyn Fn(&str) -> bool>,
+    locale: Option<&str>,
+) -> Result<(), String> {
+    check_open_endpoint_with(target, store, ask, true, locale)
+}
+
 /// The gate every AI request passes before repository content can go to
 /// `target`, whatever its auth (a key works with a server that does not check
 /// it, and keys bound before this gate existed were never asked about):
 /// loopback and the known providers pass; any other origin must have been
 /// allowed by the user. When it has not, `ask` shows the question (it gets
 /// the origin and answers whether the user allowed it), or, with `ask` =
-/// `None` (a background probe), the request is refused without one. A
-/// refusal is not remembered: the next request asks again, but the requests
-/// that were waiting on that question share its answer; a question that got
-/// no answer (the dialog failed) is asked again by the next waiting request.
-/// `locale` is the language of the refusal message.
-fn check_open_endpoint(
+/// `None` (a background probe), the request is refused at once, without one
+/// and without waiting on a question already on screen. A refusal is kept for
+/// the run, not stored: the requests that waited on that question share it,
+/// later ones are refused without a question unless `ask_again_if_refused`
+/// (an explicit Test or Refresh). A question that got no answer (the dialog
+/// failed) is asked again by the next waiting request. `locale` is the
+/// language of the refusal message.
+fn check_open_endpoint_with(
     target: &tauri::Url,
     store: &dyn OriginStore,
     ask: Option<&dyn Fn(&str) -> bool>,
+    ask_again_if_refused: bool,
     locale: Option<&str>,
 ) -> Result<(), String> {
     let origin = target.origin().ascii_serialization();
@@ -322,6 +376,10 @@ fn check_open_endpoint(
         }
         if !state.asking.contains(&origin) {
             break;
+        }
+        if ask.is_none() {
+            // A background load never waits on someone else's question.
+            return Err(not_allowed(locale, &origin, true));
         }
         state.waiting.push(origin.clone());
         state = GATE_ANSWERED.wait(state).unwrap_or_else(|p| p.into_inner());
@@ -346,6 +404,9 @@ fn check_open_endpoint(
     let Some(ask) = ask else {
         return Err(not_allowed(locale, &origin, true));
     };
+    if !ask_again_if_refused && state.refused.contains(&origin) {
+        return Err(not_allowed(locale, &origin, false));
+    }
     state.asking.push(origin.clone());
     state.answers.retain(|(o, _)| o != &origin);
     drop(state);
@@ -394,7 +455,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
             body: "GitWand va envoyer du contenu de votre dépôt (diffs, conflits) à :\n\n{origin}\n\nAutorisez-le seulement si c'est le serveur d'IA que vous avez configuré. S'il est autorisé, GitWand ne le redemandera pas.",
             allow: "Autoriser",
             deny: "Refuser",
-            refused: "Les requêtes d'IA vers {origin} ont été refusées. GitWand redemandera à la prochaine requête.",
+            refused: "Les requêtes d'IA vers {origin} ont été refusées. Pour l'autoriser, utilisez Tester la connexion ou Rafraîchir dans Paramètres > IA.",
             not_yet: "{origin} n'est pas encore autorisé : utilisez Tester la connexion ou Rafraîchir dans Paramètres > IA pour l'autoriser.",
         },
         "es" => OpenEndpointPrompt {
@@ -402,7 +463,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
             body: "GitWand va a enviar contenido de tu repositorio (diffs, conflictos) a:\n\n{origin}\n\nPermítelo solo si es el servidor de IA que configuraste. Si lo permites, GitWand no volverá a preguntar.",
             allow: "Permitir",
             deny: "Rechazar",
-            refused: "Las solicitudes de IA a {origin} fueron rechazadas. GitWand volverá a preguntar en la próxima solicitud.",
+            refused: "Las solicitudes de IA a {origin} fueron rechazadas. Para permitirlo, usa Probar conexión o Actualizar en Ajustes > IA.",
             not_yet: "{origin} aún no está permitido: usa Probar conexión o Actualizar en Ajustes > IA para permitirlo.",
         },
         "pt-BR" => OpenEndpointPrompt {
@@ -410,7 +471,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
             body: "O GitWand vai enviar conteúdo do seu repositório (diffs, conflitos) para:\n\n{origin}\n\nPermita apenas se for o servidor de IA que você configurou. Se permitido, o GitWand não perguntará de novo.",
             allow: "Permitir",
             deny: "Recusar",
-            refused: "As solicitações de IA para {origin} foram recusadas. O GitWand perguntará de novo na próxima solicitação.",
+            refused: "As solicitações de IA para {origin} foram recusadas. Para permiti-lo, use Testar conexão ou Atualizar em Configurações > IA.",
             not_yet: "{origin} ainda não está permitido: use Testar conexão ou Atualizar em Configurações > IA para permiti-lo.",
         },
         "zh-CN" => OpenEndpointPrompt {
@@ -418,7 +479,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
             body: "GitWand 将把仓库内容（差异、冲突）发送到：\n\n{origin}\n\n仅当它是你配置的 AI 服务器时才允许。允许后，GitWand 不会再次询问。",
             allow: "允许",
             deny: "拒绝",
-            refused: "已拒绝向 {origin} 发送 AI 请求。下次请求时 GitWand 会再次询问。",
+            refused: "已拒绝向 {origin} 发送 AI 请求。如需允许，请在 设置 > AI 中使用“测试连接”或“刷新”。",
             not_yet: "{origin} 尚未获得允许：请在 设置 > AI 中使用“测试连接”或“刷新”来允许它。",
         },
         _ => OpenEndpointPrompt {
@@ -426,7 +487,7 @@ fn open_endpoint_prompt(locale: Option<&str>) -> OpenEndpointPrompt {
             body: "GitWand is about to send repository content (diffs, conflicts) to:\n\n{origin}\n\nAllow it only if this is the AI server you configured. Once allowed, GitWand does not ask again.",
             allow: "Allow",
             deny: "Deny",
-            refused: "AI requests to {origin} were refused. GitWand asks again on the next request.",
+            refused: "AI requests to {origin} were refused. To allow it, use Test connection or Refresh in Settings > AI.",
             not_yet: "{origin} is not allowed yet: use Test connection or Refresh in Settings > AI to allow it.",
         },
     }
@@ -479,7 +540,7 @@ fn stored_value(key: &str, endpoint: Option<&str>) -> Result<String, String> {
 /// Store the AI API key in the keychain, bound to the origin of `endpoint`
 /// (an empty key clears it). Returns what the webview may know of what is now
 /// stored, `None` when nothing is. The requests that use it still pass
-/// `check_open_endpoint`.
+/// `check_open_endpoint_with`.
 #[tauri::command]
 pub(crate) async fn ai_api_key_set(
     key: String,
@@ -557,9 +618,10 @@ fn build_request_config(
 /// Perform one AI provider HTTP request. `auth` selects how the stored key is
 /// attached: `"anthropic"` (x-api-key), `"bearer"`, or `"none"` (Ollama). The
 /// key is only ever attached to a request for the origin it is bound to, and
-/// every request passes `check_open_endpoint`. `locale` is the app's
-/// language, for that question; `interactive: false` (a background probe)
-/// refuses an origin not yet allowed instead of asking. `timeout_secs` caps
+/// every request passes `check_open_endpoint_with`. `locale` is the app's
+/// language, for that question; `ask` is when it may be shown (`AskMode`:
+/// `"never"` for a background load, `"always"` for an explicit Test or
+/// Refresh, otherwise not after a refusal in this run). `timeout_secs` caps
 /// the whole request; without it, the generous completion ceiling applies
 /// (`COMPLETION_TIMEOUT_SECS`).
 #[allow(clippy::too_many_arguments)]
@@ -572,16 +634,23 @@ pub(crate) async fn ai_http_request(
     auth: String,
     timeout_secs: Option<u64>,
     locale: Option<String>,
-    interactive: Option<bool>,
+    ask: Option<String>,
 ) -> Result<AiHttpResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let ask = |o: &str| ask_open_endpoint(&window, locale.as_deref(), o);
-        let ask: Option<&dyn Fn(&str) -> bool> = match interactive {
-            Some(false) => None,
-            _ => Some(&ask),
+        let mode = AskMode::parse(ask.as_deref());
+        let question = |o: &str| ask_open_endpoint(&window, locale.as_deref(), o);
+        let ask: Option<&dyn Fn(&str) -> bool> = match mode {
+            AskMode::Never => None,
+            _ => Some(&question),
         };
         let open_gate = |target: &tauri::Url| {
-            check_open_endpoint(target, &KeychainOrigins, ask, locale.as_deref())
+            check_open_endpoint_with(
+                target,
+                &KeychainOrigins,
+                ask,
+                mode == AskMode::Always,
+                locale.as_deref(),
+            )
         };
         ai_http_request_inner(
             &method,
@@ -902,6 +971,44 @@ mod tests {
         };
         check_open_endpoint(&target, &store, Some(&ask), None).unwrap();
         assert!(asked.get(), "asked again next time");
+    }
+
+    #[test]
+    fn a_refusal_holds_for_the_run_unless_asked_again_on_purpose() {
+        let store = scratch_store("refusal-run");
+        let target = url("http://10.0.0.10:11434");
+        assert!(check_open_endpoint_with(&target, &store, Some(&no), false, None).is_err());
+        // A batch's next call: refused without a question.
+        let err = check_open_endpoint_with(&target, &store, Some(&never), false, None).unwrap_err();
+        assert!(err.contains("were refused"), "{err}");
+        // Test / Refresh asks again; allowing clears the refusal.
+        check_open_endpoint_with(&target, &store, Some(&yes), true, None).unwrap();
+        check_open_endpoint_with(&target, &store, Some(&never), false, None).unwrap();
+        assert_eq!(AskMode::parse(Some("never")), AskMode::Never);
+        assert_eq!(AskMode::parse(Some("always")), AskMode::Always);
+        assert_eq!(AskMode::parse(None), AskMode::UnlessRefused);
+    }
+
+    #[test]
+    fn a_background_probe_does_not_wait_on_a_question_on_screen() {
+        use std::sync::mpsc;
+        let store = scratch_store("probe-wait");
+        let (opened_tx, opened_rx) = mpsc::channel::<()>();
+        let (answer_tx, answer_rx) = mpsc::channel::<bool>();
+        let s1 = store.clone();
+        let first = std::thread::spawn(move || {
+            let ask = move |_: &str| {
+                opened_tx.send(()).unwrap();
+                answer_rx.recv().unwrap()
+            };
+            check_open_endpoint(&url("http://10.0.0.11:11434"), &s1, Some(&ask), None)
+        });
+        opened_rx.recv().unwrap();
+        let err =
+            check_open_endpoint(&url("http://10.0.0.11:11434"), &store, None, None).unwrap_err();
+        assert!(err.contains("not allowed yet"), "{err}");
+        answer_tx.send(true).unwrap();
+        first.join().unwrap().unwrap();
     }
 
     #[test]
