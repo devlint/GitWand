@@ -787,6 +787,20 @@ export async function getGitRevCount(
   return typeof data === "number" ? data : (data.count ?? 0);
 }
 
+/**
+ * Fingerprint of every ref the Git Tree's all-refs log walks, plus HEAD's
+ * commit and branch (`git_refs_fingerprint`). Equal fingerprints mean the
+ * log's rows and decorations cannot have changed. Compare for equality only.
+ */
+export async function getGitRefsFingerprint(cwd: string): Promise<string> {
+  if (isTauri()) {
+    return tauriInvoke<string>("git_refs_fingerprint", { cwd });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/git-refs-fingerprint?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`Failed to get the refs fingerprint: ${res.status}`);
+  return (await res.json()) as string;
+}
+
 // ─── Git stage / unstage ──────────────────────────────────────
 
 /**

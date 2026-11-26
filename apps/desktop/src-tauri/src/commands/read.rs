@@ -1161,6 +1161,56 @@ pub(crate) async fn git_rev_count(
     Ok(count)
 }
 
+// ─── Refs fingerprint ────────────────────────────────────────
+
+/// A fingerprint of what decorates the Git Tree: every ref the all-refs log
+/// walks (Time Machine snapshot refs excluded, as in `git_log`) with its
+/// target, and HEAD (its commit and the branch it is on). Two equal
+/// fingerprints mean the log's rows and decorations cannot have changed, so a
+/// watcher `refs`/`head` event that leaves it unchanged (a second batch for
+/// one `git branch`, a snapshot ref, a read) needs no reload.
+///
+/// Only compared for equality, in one process: not stable across versions.
+#[tauri::command]
+pub(crate) async fn git_refs_fingerprint(cwd: String) -> Result<String, String> {
+    let _repo = repo_lock::read(&cwd);
+    refs_fingerprint(&cwd)
+}
+
+fn refs_fingerprint(cwd: &str) -> Result<String, String> {
+    use std::hash::{Hash, Hasher};
+
+    let refs = git_cmd()
+        .args(["for-each-ref", "--format=%(objectname) %(refname)"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git for-each-ref: {}", e))?;
+    if !refs.status.success() {
+        return Err(String::from_utf8_lossy(&refs.stderr).trim().to_string());
+    }
+    // An unborn HEAD (no commit yet) makes rev-parse fail: nothing to decorate.
+    let head = git_cmd()
+        .args(["rev-parse", "HEAD", "--symbolic-full-name", "HEAD"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git rev-parse: {}", e))?;
+
+    let snapshots = format!("{}/", crate::git::snapshot::SNAPSHOT_REF_PREFIX);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for line in String::from_utf8_lossy(&refs.stdout).lines() {
+        let refname = line.split_once(' ').map_or(line, |(_, r)| r);
+        if !refname.starts_with(&snapshots) {
+            line.hash(&mut hasher);
+        }
+    }
+    if head.status.success() {
+        String::from_utf8_lossy(&head.stdout).hash(&mut hasher);
+    } else {
+        "unborn".hash(&mut hasher);
+    }
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
 // ─── Git repo state (rebase / merge in progress) ─────────────
 
 /// Returns the current operation state of the repository by inspecting the
@@ -3879,6 +3929,47 @@ mod pathspec_tests {
             "snapshot commit leaked into git log --all"
         );
         assert_eq!(entries.len(), 1, "only the real commit should be listed");
+    }
+
+    #[test]
+    fn refs_fingerprint_follows_refs_and_head_but_not_snapshots() {
+        let repo = TempRepo::new();
+        let fp = || refs_fingerprint(&repo.cwd()).expect("fingerprint failed");
+        // Unborn HEAD: still a fingerprint.
+        let unborn = fp();
+        repo.write("a.txt", "v1");
+        repo.commit_all("c1");
+        let first = fp();
+        assert_ne!(first, unborn);
+        // Nothing moved: same fingerprint.
+        assert_eq!(fp(), first);
+
+        // A new branch on the same commit changes it.
+        repo.git(&["branch", "side"]);
+        let branched = fp();
+        assert_ne!(branched, first);
+
+        // HEAD moving to another branch on the same commit changes it.
+        repo.git(&["checkout", "-q", "side"]);
+        let on_side = fp();
+        assert_ne!(on_side, branched);
+
+        // Detaching HEAD at the same commit changes it too.
+        repo.git(&["checkout", "-q", "--detach"]);
+        assert_ne!(fp(), on_side);
+        repo.git(&["checkout", "-q", "side"]);
+        assert_eq!(fp(), on_side);
+
+        // A Time Machine snapshot ref does not.
+        repo.write("a.txt", "dirty");
+        crate::git::snapshot::create_snapshot_inner(&repo.cwd(), "manual", "snap")
+            .expect("snapshot failed")
+            .expect("expected a snapshot");
+        assert_eq!(fp(), on_side);
+
+        // A tag does.
+        repo.git(&["tag", "v1"]);
+        assert_ne!(fp(), on_side);
     }
 
     #[test]

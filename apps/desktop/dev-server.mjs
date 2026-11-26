@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSy
 import { resolve, join, dirname, basename, sep, isAbsolute, relative } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { isUtf8 } from "node:buffer";
@@ -4907,6 +4908,37 @@ async function handleRequest(req, res) {
           count = 0;
         }
         return jsonResponse(req, res, count);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/git-refs-fingerprint?cwd=<path>
+    // Mirrors git_refs_fingerprint (read.rs): every ref but the Time Machine
+    // snapshots, plus HEAD's commit and branch. Only compared for equality.
+    if (url.pathname === "/api/git-refs-fingerprint" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const refs = execFileSync(GIT, ["for-each-ref", "--format=%(objectname) %(refname)"], {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+        })
+          .split("\n")
+          .filter((line) => line && !line.split(" ").slice(1).join(" ").startsWith("refs/gitwand/snapshots/"));
+        let head = "unborn";
+        try {
+          head = execFileSync(GIT, ["rev-parse", "HEAD", "--symbolic-full-name", "HEAD"], {
+            cwd: resolvedCwd,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "ignore"],
+          });
+        } catch (_) {
+          // Unborn HEAD, as in the Rust command.
+        }
+        const fp = createHash("sha256").update(refs.join("\n")).update("\0").update(head).digest("hex").slice(0, 16);
+        return jsonResponse(req, res, fp);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }

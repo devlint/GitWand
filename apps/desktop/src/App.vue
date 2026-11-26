@@ -304,6 +304,7 @@ const {
   openRepo,
   closeRepo,
   refresh: repoRefresh,
+  refreshOnRefsEvent,
   selectFile: repoSelectFile,
   loadLog,
   loadMoreLog,
@@ -4517,9 +4518,10 @@ repoWatcher.on(["head", "refs"], () => {
   watcherRefreshQueue.schedule("head-refs", async () => {
     // A head/refs event means decorations changed, possibly below the first
     // page the non-forced compare can see (a branch moved deep in history, a
-    // tag on an old commit): force the log (#266). The forced reload also
-    // reloads an already-loaded branch list. Event-driven, not a poll tick.
-    await repoRefresh(true);
+    // tag on an old commit): force the log (#266), unless the refs are those
+    // the last forced reload saw (see refreshOnRefsEvent). The forced reload
+    // also reloads an already-loaded branch list. Event-driven, not a poll tick.
+    await refreshOnRefsEvent();
   });
 });
 

@@ -10,6 +10,7 @@ import {
   getGitDiff,
   getGitLog,
   getGitRevCount,
+  getGitRefsFingerprint,
   getGitUser,
   gitStage,
   gitUnstage,
@@ -617,6 +618,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     loading.value = true;
     error.value = null;
     folderPath.value = path;
+    _refsSeen = null;
 
     // Reset previous repo state
     selectedCommitHash.value = null;
@@ -649,6 +651,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    */
   function closeRepo() {
     folderPath.value = null;
+    _refsSeen = null;
     status.value = null;
     selectedFilePath.value = null;
     selectedFileStaged.value = false;
@@ -677,6 +680,29 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (selectedFilePath.value) {
       await loadDiff(selectedFilePath.value, selectedFileStaged.value);
     }
+  }
+
+  /**
+   * Refresh after a watcher `head`/`refs` event. Such an event usually means
+   * decorations changed, possibly below the first page a plain refresh
+   * compares, so it forces the log (#266) — unless the refs fingerprint is
+   * the one the last forced reload saw: then nothing the Git Tree shows has
+   * moved (a second event batch for one `git branch`, an in-app action that
+   * already reloaded, a Time Machine snapshot ref), and a forced reload would
+   * only restart the full-history prefetch for nothing.
+   */
+  async function refreshOnRefsEvent() {
+    const repo = folderPath.value;
+    if (!repo) return;
+    let fp: string | null = null;
+    try {
+      fp = await getGitRefsFingerprint(repo);
+    } catch {
+      // Unknown: reload, as before.
+    }
+    if (folderPath.value !== repo) return;
+    if (fp !== null && _refsSeen?.repo === repo && _refsSeen.fp === fp) return;
+    await refresh(true);
   }
 
   /**
@@ -740,6 +766,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // Set by a forced loadLog until a request applies; a superseded forced
   // reload thus hands its force to the request that supersedes it.
   let _logForcePending = false;
+  // Refs fingerprint (`getGitRefsFingerprint`) read before the last forced
+  // reload that applied: the log holds every ref move up to it. A watcher
+  // refs/head event that finds the same fingerprint has nothing to reload
+  // (`refreshOnRefsEvent`).
+  let _refsSeen: { repo: string; fp: string } | null = null;
 
   /**
    * The log just took changed rows: a ref may have moved, and the Git Tree
@@ -849,6 +880,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     const current = () =>
       req === _logRequest && epoch === _logViewEpoch && folderPath.value === repo;
     try {
+      // A forced reload (or one inheriting a force) records the refs it saw,
+      // read BEFORE the log so the log is at least as new as the fingerprint.
+      let refsFp: string | null = null;
+      if (_logForcePending) {
+        try {
+          refsFp = await getGitRefsFingerprint(repo);
+        } catch {
+          // No fingerprint: the next refs event reloads, as before.
+        }
+      }
       const authorEmail =
         logAuthorFilter.value === "mine"
           ? (currentGitUser.value?.email ?? "")
@@ -884,6 +925,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // applies, so concurrent calls never lose it.
       const forced = force || _logForcePending;
       _logForcePending = false;
+      // A forced reload below takes every row fresh (see the branches): the
+      // log now holds every ref move up to the fingerprint. A non-forced load
+      // never makes it older, so it leaves the record alone.
+      if (forced && refsFp !== null) _refsSeen = { repo, fp: refsFp };
 
       if (isCanon) {
         const cached = LOG_CACHE.get(repo);
@@ -1921,6 +1966,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     openRepo,
     closeRepo,
     refresh,
+    refreshOnRefsEvent,
     selectFile,
     loadLog,
     loadMoreLog,
