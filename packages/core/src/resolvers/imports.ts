@@ -493,31 +493,56 @@ export function tryResolveImportConflict(
     // already bound (both sides editing `{ a }` is not a clash on `a`).
     // A line that reads as no import binds nothing; an import whose bindings
     // cannot be read could bind anything (null).
-    const importLines = (lines: string[]) =>
-      lines.filter((l) => !isCommentLine(l)).map((l) => stripComments(l).trim()).filter(Boolean);
+    // Lines inside a `/* … */` spanning lines (a commented-out import) are skipped.
+    const importLines = (lines: string[]) => {
+      const code: string[] = [];
+      let inBlock = false;
+      for (const l of lines) {
+        const t = l.trim();
+        if (inBlock) {
+          if (t.includes("*/")) inBlock = false;
+          continue;
+        }
+        if (t.startsWith("/*") && !t.slice(2).includes("*/")) {
+          inBlock = true;
+          continue;
+        }
+        if (isCommentLine(l)) continue;
+        const c = stripComments(l).trim();
+        if (c) code.push(c);
+      }
+      return code;
+    };
     const baseCode = new Set(importLines(baseLines));
     const oursCode = importLines(oursLines).filter((l) => !baseCode.has(l));
     const theirsCode = importLines(theirsLines).filter((l) => !baseCode.has(l));
-    const bindingsOf = (lines: string[]): string[] | null => {
-      const names: string[] = [];
+    type Bound = { name: string; source: string };
+    const bindingsOf = (lines: string[]): Bound[] | null => {
+      const out: Bound[] = [];
       for (const l of lines) {
         const stmt = parseImport(l);
         if (stmt.kind === "unknown") continue;
         const bound = localBindings(stmt);
         if (bound === null) return null;
-        names.push(...bound);
+        out.push(...bound.map((name) => ({ name, source: stmt.source })));
       }
-      return names;
+      return out;
     };
-    const baseBound = new Set(bindingsOf([...baseCode]) ?? []);
+    const baseBindings = bindingsOf([...baseCode]) ?? [];
+    const baseBound = new Set(baseBindings.map((b) => b.name));
+    const baseSources = new Set(baseBindings.map((b) => b.source));
     const newNames = (mine: string[], other: string[]) =>
-      bindingsOf(mine.filter((l) => !other.includes(l)))?.filter((n) => !baseBound.has(n)) ?? null;
+      bindingsOf(mine.filter((l) => !other.includes(l)))?.filter((b) => !baseBound.has(b.name)) ?? null;
     const oursNew = newNames(oursCode, theirsCode);
     const theirsNew = newNames(theirsCode, oursCode);
+    // The same name added to the same base import on both sides is two edits
+    // of one line (the textual engine stops on it), not a double declaration.
     const clash =
       oursNew === null || theirsNew === null
         ? (oursNew?.length ?? 1) > 0 && (theirsNew?.length ?? 1) > 0
-        : oursNew.some((n) => theirsNew.includes(n));
+        : oursNew.some((o) =>
+            theirsNew.some((t) => t.name === o.name && !(t.source === o.source && baseSources.has(o.source))),
+          );
     return {
       mergedLines: null,
       ...(clash ? { conflict: true } : {}),
@@ -777,7 +802,7 @@ export function tryResolveImportConflict(
 
     // A re-indent is a change against a deletion.
     if (!ours) {
-      if (!theirsChanged && theirs?.indent === shifted(base.indent)) {
+      if (!theirsChanged && shifted(theirs?.indent) === shifted(base.indent)) {
         resolvedImports++; // theirs = base, ours supprimé → supprimer
       } else {
         unresolvedImports++;
@@ -792,7 +817,7 @@ export function tryResolveImportConflict(
     }
 
     if (!theirs) {
-      if (!oursChanged && ours.indent === shifted(base.indent)) {
+      if (!oursChanged && shifted(ours.indent) === shifted(base.indent)) {
         resolvedImports++; // ours = base, theirs supprimé → supprimer
       } else {
         unresolvedImports++;

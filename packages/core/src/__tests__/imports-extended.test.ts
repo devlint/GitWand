@@ -346,6 +346,33 @@ describe("tryResolveImportConflict — lignes import-like non parsables (garde a
     expect(r.mergedLines).toEqual(['  import y from "y";']);
   });
 
+  it("keeps a clean deletion by the side that also re-indented the block", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";', 'import y from "y";'],
+      ['  import y from "y";'],
+      ['import x from "x";', 'import y from "y";'],
+    );
+    expect(r.mergedLines).toEqual(['  import y from "y";']);
+  });
+
+  it("does not take the same name added to the same base import for a clash", () => {
+    const r = tryResolveImportConflict(
+      ["// deps", 'import { a } from "./lib";'],
+      ["// deps", 'import { a, b } from "./lib";'],
+      ["// deps", 'import { a, b, c } from "./lib";'],
+    );
+    expect(r.conflict).toBeUndefined();
+  });
+
+  it("skips an import commented out over several lines", () => {
+    const r = tryResolveImportConflict(
+      [],
+      ["/*", 'import { b } from "old";', "*/"],
+      ['import { b } from "new";'],
+    );
+    expect(r.conflict).toBeUndefined();
+  });
+
   it("does not take a doc comment for a binding clash", () => {
     const doc = tryResolveImportConflict(
       ['import a from "a";'],
