@@ -32,7 +32,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 - #315, known gap, accepted: a ref that moves and comes back between two reads leaves stale decorations until the next ref move or a manual refresh.
 - #314, not tested: Windows, a real `glab`, the native dialog in the packaged app (see the checklist below). Its leftovers are in lot C.
 - #265: a stale block reason can linger up to one fetch tick (30 s); a branch literally named `HEAD` or `unknown` is treated as detached.
-- **Bundle budget** — 1,002 KB after 3.15.0 (main chunk measured at 1,001 KB), then 1,005 KB for the lot A resolvers (measured at 1,004 KB: `@gitwand/core` is in the main chunk). These raises were the last ones: from v4.0 a feature lands in a lazy chunk.
+- **Bundle budget** — 1,002 KB after 3.15.0 (main chunk measured at 1,001 KB), then 1,005 KB for the lot A resolvers (measured at 1,004 KB: `@gitwand/core` is in the main chunk), and 1,007 KB for lot C (measured at 1,006 KB). These raises were the last ones: from v4.0 a feature lands in a lazy chunk.
 
 **3.15.x — lot A: resolvers** (wrong resolutions a user can see)
 
@@ -58,18 +58,12 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 
 **3.15.x — lot C: security & data safety**
 
-- #239 treats a pull later undone by a local reset as a local rewrite (the collaborator's commit was once a local tip), so Force Push is offered and would drop it. The `--force-if-includes` fallback (a force push whose destination tip cannot be read) has the same blind spot: that commit is in the branch's reflog, so git accepts the push. Judging it needs to tell "pulled, then reset away on purpose" from "rewritten". Explicit force pushes are not affected: they show the commits they will overwrite and lease that tip
-  - _Re-check first against the force-push fixes already in Unreleased (lease on the tip read at click time, `--force-if-includes` fallback): part of this may be closed._
-- Copilot is unverified (not installed when the follow-ups were written): its run directory, stdin support and lockdown; Antigravity (`agy` 1.0.13) still gets the prompt on argv, and its tools are not restricted
-- the user's own MCP servers still load for Codex and opencode (no confirmed switch: `-c 'mcp_servers={}'` does not remove them)
-- Windows: a grandchild of the `claude --help` probe can outlive it once the direct child has exited (needs a Job Object)
-- the `ai-runs` sweep (24 h, at base setup) could remove a run directory still in use by a run older than that in another GitWand process
-- `img-src` stays `https: http:` for self-hosted forge avatars — proxy or allowlist avatar hosts, then tighten it
-- #234: a background revalidation racing a save can briefly show the old title/body of a PR (confirmed still open when #314 merged)
-- curl reads the user's curlrc (`$CURL_HOME`, `$XDG_CONFIG_HOME`, `~`, `%APPDATA%` on Windows): `run_curl` (`curl_util.rs`) does not pass `-q` first, so a `location` line there makes an AI request follow a redirect with its bound key, and a `proxy` line reroutes forge and AI calls. Pass `-q` as curl's first argument for every caller, and consider which environment variables `run_curl` should pass through (seen in the lot B review)
-- `ai_http_request` under `pnpm dev:web` goes to any origin unasked: the dev server has no native dialog to mirror `check_open_endpoint_with` (from #314)
-- allowed AI endpoints cannot be listed or revoked from Settings (they live in the keychain, service `gitwand:ai`, one account `open-endpoint:<SHA-256 of the origin>` per origin); a refusal lasts until restart or an explicit Test connection / Refresh (from #314)
-- an OpenAI-compatible server without a key: the model list loads (`auth: "none"`), but `isAvailable` requires a key and `callOpenAICompat` always sends `bearer`, so completions are never offered. Support it end to end or say so in Settings (from #314)
+- _Done on `fix/security-data-safety`, unreleased (detail in CHANGELOG, Unreleased):_ curl reads no curlrc (`-q`); #239 (a reflog tip counts as a local rewrite only when left by a rebase or an amend); the `ai-runs` sweep keeps the run of a live process; #234 (a read started before a PR edit lays the edit over); dev:web's AI endpoint gate (`GITWAND_DEV_AI_ORIGINS`); OpenAI-compatible servers without a key; allowed AI endpoints listed and revoked in Settings; remote images through the backend (`gwimg:`), `img-src` closed; Antigravity prompt on stdin, in plan mode; no user MCP server for Codex (`--ignore-user-config`) and opencode (disabled by name); Windows `claude --help` probe in a Job Object.
+- Left from it:
+  - Copilot is unverified (not installed when lot C was done): its run directory, stdin support and lockdown
+  - Antigravity in plan mode: commands, file edits and `read_url_content` checked as denied (agy 1.5.4); `search_web` not checked. A plan-mode run may write its plan artifact where agy keeps them
+  - the `--force-if-includes` fallback (a force push whose destination tip cannot be read) keeps git's own blind spot for a pulled commit later reset away: it is in the branch's reflog, so git accepts the push
+  - not tested in the packaged app: the `gwimg:` image scheme (avatars, README badges, accepted PR images), the Settings endpoint list against the real keychain, the Windows Job Object (CI compiles it)
 
 ---
 
