@@ -582,8 +582,10 @@ export function tryResolveImportConflict(
     resultLines.push((stmt.indent ?? "") + stmt.raw);
     keptImports.push(stmt);
   };
+  // A merged import written over several lines stays one entry until it is
+  // sorted, so the sort moves it whole.
   const keepMerged = (text: string) => {
-    resultLines.push(...text.split("\n"));
+    resultLines.push(text);
     keptImports.push(parseImport(text.replace(/\n\s*/g, " ")));
   };
   let resolvedImports = 0;
@@ -677,22 +679,25 @@ export function tryResolveImportConflict(
       continue;
     }
 
-    // Les deux présents
+    // Les deux présents. Whitespace is not a change of the import (`raw` is
+    // trimmed), but a side that re-indented the line keeps its indentation.
+    const indent = ours.indent !== base.indent ? ours.indent : theirs.indent;
+    const at = (stmt: ImportStatement): ImportStatement => ({ ...stmt, indent });
     if (!oursChanged && !theirsChanged) {
-      keep(base);
+      keep(at(base));
       resolvedImports++;
     } else if (ours.raw === theirs.raw) {
-      keep(ours);
+      keep(at(ours));
       resolvedImports++;
     } else if (!oursChanged) {
-      keep(theirs);
+      keep(at(theirs));
       resolvedImports++;
     } else if (!theirsChanged) {
-      keep(ours);
+      keep(at(ours));
       resolvedImports++;
     } else if (ours.kind === "named" && theirs.kind === "named") {
       // Named imports du même module modifiés des deux côtés → merger les noms
-      const merged = mergeNamedImports(base, ours, theirs);
+      const merged = mergeNamedImports(base, at(ours), theirs);
       if (merged) {
         keepMerged(merged);
         resolvedImports++;
@@ -748,7 +753,7 @@ export function tryResolveImportConflict(
   }
 
   // Trier les imports dans le résultat (ordre source : types first, puis alphabétique)
-  const sortedResult = sortImportLines(resultLines);
+  const sortedResult = sortImportLines(resultLines).flatMap((entry) => entry.split("\n"));
 
   return {
     mergedLines: sortedResult,
@@ -833,7 +838,7 @@ function sortImportLines(
   // Séparer les commentaires / blancs des imports réels
   const parsed = lines.map((l) => ({
     line: l,
-    stmt: parseImport(l),
+    stmt: parseImport(l.replace(/\n\s*/g, " ")),
   }));
 
   const comments = parsed.filter((p) => p.stmt.kind === "unknown");

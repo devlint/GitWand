@@ -63,6 +63,19 @@ describe("useAllowedAiEndpoints", () => {
     expect(e.origins.value).toEqual(["https://b.example"]);
   });
 
+  it("clears an earlier error when a new load starts", async () => {
+    aiAllowedEndpoints.mockRejectedValueOnce(new Error("keychain locked"));
+    const e = useAllowedAiEndpoints();
+    await e.load();
+    expect(e.error.value).toBe("keychain locked");
+    let release!: (v: string[]) => void;
+    aiAllowedEndpoints.mockImplementationOnce(() => new Promise<string[]>((r) => (release = r)));
+    const next = e.load();
+    expect(e.error.value).toBeNull();
+    release([]);
+    await next;
+  });
+
   it("ignores a second revoke while one runs", async () => {
     const e = useAllowedAiEndpoints();
     await e.load();

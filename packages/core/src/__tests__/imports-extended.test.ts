@@ -51,13 +51,13 @@ describe("tryResolveImportConflict — extended", () => {
   });
 
   it("takes the module's own quote, not one in a comment of the line", () => {
+    // The comment holds a `from '…'` before the module's own `from "…"`.
     const r = tryResolveImportConflict(
       ['import { a } from "./lib";'],
       ['import { a, c } from "./lib";'],
       ['import { a, /* was: from \'old\' */ b } from "./lib";'],
     );
-    // Whatever the outcome, no line is rebuilt with the comment's quote.
-    for (const line of r.mergedLines ?? []) expect(line).not.toContain("'./lib'");
+    expect(r.mergedLines).toEqual([`import { /* was: from 'old' */ b, a, c } from "./lib";`]);
   });
 
   it("keeps the indentation of the import lines", () => {
@@ -68,6 +68,29 @@ describe("tryResolveImportConflict — extended", () => {
     );
     // Sorted by group: the package first, then the relative module.
     expect(r.mergedLines).toEqual(['  import x from "x";', '  import { a, b, c } from "./lib";']);
+  });
+
+  it("keeps the indentation a single side gave a line", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";', 'import { a } from "./lib";'],
+      ['  import x from "x";', 'import { a } from "./lib";'],
+      ['import x from "x";', 'import { a, b } from "./lib";'],
+    );
+    expect(r.mergedLines).toEqual(['  import x from "x";', 'import { a, b } from "./lib";']);
+  });
+
+  it("sorts a merged import written over several lines as one statement", () => {
+    const long = "aaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbb, cccccccccccccccccccc";
+    const r = tryResolveImportConflict(
+      [`import { ${long} } from "./a-rather-long-module-path";`, 'import x from "x";'],
+      [`import { ${long}, dddddddddddddddddddd } from "./a-rather-long-module-path";`, 'import x from "x";'],
+      [`import { ${long}, eeeeeeeeeeeeeeeeeeee } from "./a-rather-long-module-path";`, 'import x from "x";'],
+    );
+    const lines = r.mergedLines!;
+    // The package first, then the relative module, its lines together.
+    expect(lines[0]).toBe('import x from "x";');
+    expect(lines[1]).toBe("import {");
+    expect(lines.at(-1)).toBe('} from "./a-rather-long-module-path";');
   });
 
   it("should merge when ours adds a new module and theirs adds a different one", () => {

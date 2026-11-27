@@ -23,6 +23,8 @@ export function useAllowedAiEndpoints() {
     const mine = ++latest;
     inFlight++;
     loading.value = true;
+    // An earlier failure is not shown over a new read.
+    error.value = null;
     try {
       const answer = await aiAllowedEndpoints();
       if (mine === latest) {
