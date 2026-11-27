@@ -317,6 +317,35 @@ describe("tryResolveImportConflict — lignes import-like non parsables (garde a
     expect(result.conflict).toBeUndefined();
   });
 
+  it("does not take the same addition, or two edits of a base import, for a clash", () => {
+    const same = tryResolveImportConflict([], ["// polyfills", 'import a from "a";'], ['import a from "a";']);
+    expect(same.conflict).toBeUndefined();
+    const edits = tryResolveImportConflict(
+      ["// deps", 'import { a } from "./lib";'],
+      ["// deps", 'import { a, b } from "./lib";'],
+      ["// deps", 'import { a, c } from "./lib";'],
+    );
+    expect(edits.conflict).toBeUndefined();
+  });
+
+  it("counts an import whose bindings cannot be read as a possible clash", () => {
+    const r = tryResolveImportConflict(
+      ["// deps"],
+      ["// deps", 'const { x: { b } } = require("m");'],
+      ["// deps", 'import { b } from "n";'],
+    );
+    expect(r.conflict).toBe(true);
+  });
+
+  it("keeps a clean deletion when the other side re-indented the block", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";', 'import y from "y";'],
+      ['import y from "y";'],
+      ['  import x from "x";', '  import y from "y";'],
+    );
+    expect(r.mergedLines).toEqual(['  import y from "y";']);
+  });
+
   it("does not take a doc comment for a binding clash", () => {
     const doc = tryResolveImportConflict(
       ['import a from "a";'],

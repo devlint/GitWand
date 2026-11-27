@@ -420,6 +420,8 @@ function mergeNamedImports(
   const typePrefix = ours.isType ? "type " : "";
   const indent = ours.indent ?? "";
   // Quote and semicolon: ours', unless only theirs changed it from base.
+  // With no base (both sides added the import), ours' style is kept: the
+  // file's side being merged into.
   const hasSemi = (s: ImportStatement) => s.raw.endsWith(";");
   const semi = (base && hasSemi(ours) === hasSemi(base) ? hasSemi(theirs) : hasSemi(ours)) ? ";" : "";
 
@@ -486,12 +488,36 @@ export function tryResolveImportConflict(
     const baseSet = new Set(baseLines.map((l) => l.trim()));
     // (A multi-line import never gets here: its inner lines are not
     // import-like, and such a block left before this check.)
-    const addedBindings = (lines: string[]): string[] =>
-      lines
-        .filter((l) => !isCommentLine(l) && !baseSet.has(l.trim()))
-        .flatMap((l) => localBindings(parseImport(stripComments(l))) ?? []);
-    const theirsBound = addedBindings(theirsLines);
-    const clash = addedBindings(oursLines).some((n) => theirsBound.includes(n));
+    // Names a side binds anew: on its lines missing from the base (a line
+    // both sides added alike is one line, not two), minus what the base
+    // already bound (both sides editing `{ a }` is not a clash on `a`).
+    // A line that reads as no import binds nothing; an import whose bindings
+    // cannot be read could bind anything (null).
+    const importLines = (lines: string[]) =>
+      lines.filter((l) => !isCommentLine(l)).map((l) => stripComments(l).trim()).filter(Boolean);
+    const baseCode = new Set(importLines(baseLines));
+    const oursCode = importLines(oursLines).filter((l) => !baseCode.has(l));
+    const theirsCode = importLines(theirsLines).filter((l) => !baseCode.has(l));
+    const bindingsOf = (lines: string[]): string[] | null => {
+      const names: string[] = [];
+      for (const l of lines) {
+        const stmt = parseImport(l);
+        if (stmt.kind === "unknown") continue;
+        const bound = localBindings(stmt);
+        if (bound === null) return null;
+        names.push(...bound);
+      }
+      return names;
+    };
+    const baseBound = new Set(bindingsOf([...baseCode]) ?? []);
+    const newNames = (mine: string[], other: string[]) =>
+      bindingsOf(mine.filter((l) => !other.includes(l)))?.filter((n) => !baseBound.has(n)) ?? null;
+    const oursNew = newNames(oursCode, theirsCode);
+    const theirsNew = newNames(theirsCode, oursCode);
+    const clash =
+      oursNew === null || theirsNew === null
+        ? (oursNew?.length ?? 1) > 0 && (theirsNew?.length ?? 1) > 0
+        : oursNew.some((n) => theirsNew.includes(n));
     return {
       mergedLines: null,
       ...(clash ? { conflict: true } : {}),
@@ -751,7 +777,7 @@ export function tryResolveImportConflict(
 
     // A re-indent is a change against a deletion.
     if (!ours) {
-      if (!theirsChanged && theirs?.indent === base.indent) {
+      if (!theirsChanged && theirs?.indent === shifted(base.indent)) {
         resolvedImports++; // theirs = base, ours supprimé → supprimer
       } else {
         unresolvedImports++;
@@ -766,7 +792,7 @@ export function tryResolveImportConflict(
     }
 
     if (!theirs) {
-      if (!oursChanged && ours.indent === base.indent) {
+      if (!oursChanged && ours.indent === shifted(base.indent)) {
         resolvedImports++; // ours = base, theirs supprimé → supprimer
       } else {
         unresolvedImports++;
