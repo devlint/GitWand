@@ -184,6 +184,33 @@ function mergeStage(
   }
   const hasBase = (baseInstructions?.length ?? 0) > 0;
 
+  // Commentaires et lignes vides : leur nombre de copies se fusionne à trois
+  // voies, comme une valeur. Un côté resté au compte de la base cède à
+  // l'autre ; deux comptes changés autrement : moteur textuel. Sans base
+  // (diff2), le plus grand compte est gardé.
+  const countOf = (instructions: Instruction[]) => {
+    const counts = new Map<string, number>();
+    for (const instr of instructions) {
+      if (!repeatable(instr)) continue;
+      const key = instructionKey(instr);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const oursCount = countOf(oursInstructions);
+  const theirsCount = countOf(theirsInstructions);
+  const mergedCount = new Map<string, number>();
+  for (const key of new Set([...oursCount.keys(), ...theirsCount.keys(), ...(hasBase ? baseCount.keys() : [])])) {
+    if (!key.startsWith("COMMENT:") && key !== "BLANK") continue;
+    const o = oursCount.get(key) ?? 0;
+    const t = theirsCount.get(key) ?? 0;
+    const b = baseCount.get(key) ?? 0;
+    if (!hasBase) mergedCount.set(key, Math.max(o, t));
+    else if (o === t || t === b) mergedCount.set(key, o);
+    else if (o === b) mergedCount.set(key, t);
+    else return null;
+  }
+
   // ── Ordre : comparer l'ordre relatif des instructions présentes partout
   // (clés uniques, lignes vides exclues), pour savoir qui a réordonné.
   let driveByTheirs = false;
@@ -277,15 +304,18 @@ function mergeStage(
     }
 
     // Une instruction dont la clé est sa valeur (WORKDIR, destination d'un
-    // COPY/ADD) changée des deux côtés : l'ancienne clé disparaît des deux
-    // côtés et chacun ajoute la sienne. Les deux seraient gardées (la
-    // dernière gagnerait en silence) : moteur textuel.
+    // COPY/ADD) absente des deux côtés, avec une nouvelle de même sorte d'un
+    // côté au moins : changée des deux côtés (les deux seraient gardées, la
+    // dernière gagnant en silence) ou changée d'un côté et supprimée de
+    // l'autre. Moteur textuel.
     for (const key of baseRawByKey.keys()) {
       const kind = key.split(":")[0];
       if (!["WORKDIR", "COPY", "ADD"].includes(kind) || oursMap.has(key) || theirsMap.has(key)) continue;
       const addsOfKind = (mine: Map<string, Instruction>, other: Map<string, Instruction>) =>
         [...mine.entries()].some(([k, instr]) => instr.kind === kind && !baseRawByKey.has(k) && !other.has(k));
-      if (addsOfKind(oursMap, theirsMap) && addsOfKind(theirsMap, oursMap)) return null;
+      // Une seule des deux suffit : l'autre côté a supprimé l'instruction,
+      // celui-ci l'a changée (une suppression face à un changement).
+      if (addsOfKind(oursMap, theirsMap) || addsOfKind(theirsMap, oursMap)) return null;
     }
   }
 
@@ -302,7 +332,13 @@ function mergeStage(
 
   for (const instr of lead) {
     const key = instructionKey(instr);
-    leadCount.set(key, (leadCount.get(key) ?? 0) + 1);
+    const nth = (leadCount.get(key) ?? 0) + 1;
+    leadCount.set(key, nth);
+    if (repeatable(instr)) {
+      // Les premières copies du côté qui mène, dans la limite du compte fusionné.
+      if (nth <= (mergedCount.get(key) ?? 0)) out.push({ key, lines: instr.raw });
+      continue;
+    }
     const counterpart = otherMap.get(key);
     if (!counterpart) {
       const lines = oneSided(instr);
@@ -323,18 +359,28 @@ function mergeStage(
     const inLead = leadCount.get(key) ?? 0;
     let lines: string[] | "drop" | null;
     if (repeatable(instr)) {
-      // Commentaires et lignes vides se comptent par copie : la n-ième copie
-      // de ce côté est déjà dans la sortie si le côté qui mène en a au moins
-      // n ; sinon elle était dans la base (le côté qui mène l'a retirée) ou
-      // elle a été ajoutée de ce côté (gardée).
-      if (n <= inLead) continue;
-      lines = n <= (baseCount.get(key) ?? 0) ? "drop" : instr.raw;
+      // Les copies au-delà de celles du côté qui mène complètent le compte
+      // fusionné ; les autres sont déjà dans la sortie (ou retirées).
+      if (n <= inLead || n > (mergedCount.get(key) ?? 0)) continue;
+      lines = instr.raw;
     } else {
       if (inLead > 0) continue; // déjà traitée avec le côté qui mène
       lines = oneSided(instr);
     }
     if (lines === null) return null;
     if (lines === "drop") continue;
+
+    // Un commentaire décrit ce qui le suit : juste avant cette instruction
+    // si elle est dans la sortie (après les commentaires du même côté déjà
+    // placés là).
+    if (instr.kind === "COMMENT") {
+      const slot = otherList.slice(i + 1).find((x) => !repeatable(x));
+      const at = slot ? out.findIndex((e) => e.key === instructionKey(slot)) : -1;
+      if (at >= 0) {
+        out.splice(at, 0, { key, lines, otherIdx: i });
+        continue;
+      }
+    }
 
     // Ancre : l'instruction qui la précède de son côté et qui est déjà dans
     // la sortie — pas un commentaire ni une ligne vide, dont la clé peut se

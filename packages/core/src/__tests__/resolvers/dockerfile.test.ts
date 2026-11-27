@@ -524,6 +524,52 @@ describe("Dockerfile — review du lot A, passe 2", () => {
     const result = resolve(input, "Dockerfile");
     expect(result.stats.autoResolved).toBe(1);
     const lines = (result.mergedContent ?? "").split("\n");
-    expect(lines.filter((l) => l === "").length).toBeGreaterThanOrEqual(2);
+    expect(lines.filter((l) => l === "")).toHaveLength(2);
+    const d = lines.indexOf("ENV D=1");
+    expect(lines[d - 1]).toBe("");
+  });
+});
+
+describe("Dockerfile — review du lot A, passe 3", () => {
+  it("le côté qui mène garde une copie que l'autre a retirée : elle ne revient pas", () => {
+    const input = [`FROM node:20`, dockerHunk([`# --`, `ENV A=2`, `# --`], [`# --`, `ENV A=1`, `# --`], [`ENV A=1`, `# --`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect((result.mergedContent ?? "").match(/^# --$/gm)).toHaveLength(1);
+  });
+
+  it("chaque côté change le nombre de copies autrement : le résolveur Dockerfile passe la main, sans perdre l'ajout de ours", () => {
+    // ours ajoute une copie en fin, theirs retire celle de la base : le
+    // résolveur Dockerfile ne tranche pas (comptes 2 / 0 / base 1) ; le moteur
+    // textuel fusionne ces lignes distinctes.
+    const input = [`FROM node:20`, dockerHunk([`# --`, `ENV A=2`, `# --`], [`# --`, `ENV A=1`], [`ENV A=1`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.resolutions[0]?.resolutionReason).toMatch(/3-way LCS/);
+    expect(result.mergedContent).toBe([`FROM node:20`, `ENV A=2`, `# --`].join("\n"));
+  });
+
+  it("WORKDIR changé d'un côté et supprimé de l'autre : pas de résolution automatique", () => {
+    const input = [`FROM node:20`, dockerHunk([`WORKDIR /srv`, `ENV A=1`], [`WORKDIR /app`, `ENV A=1`], [`ENV A=2`])].join("\n");
+    expect(resolve(input, "Dockerfile").stats.autoResolved).toBe(0);
+  });
+
+  it("un commentaire ajouté reste juste avant l'instruction qu'il décrit", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV A=1`, `RUN y`, `CMD x`], [`ENV A=1`, `CMD x`], [`ENV A=1`, `# start`, `CMD x`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    const lines = (result.mergedContent ?? "").split("\n");
+    expect(lines[lines.indexOf("CMD x") - 1]).toBe("# start");
+  });
+
+  it("une ligne vide déplacée par le côté qui mène n'est pas prise pour celle de la base", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV A=1`, `ENV B=1`, ``, `ENV C=1`], [`ENV A=1`, ``, `ENV B=1`], [`ENV A=1`, `ENV B=1`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    // ours garde une ligne vide (déplacée), theirs l'a retirée : nombre de
+    // copies changé des deux côtés autrement ? ours = base (1), theirs = 0 →
+    // theirs gagne : aucune ligne vide. La garde porte sur le compte, pas
+    // sur l'égalité de deux lignes vides.
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("ENV C=1");
   });
 });

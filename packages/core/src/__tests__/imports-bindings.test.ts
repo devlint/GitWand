@@ -79,13 +79,9 @@ describe("imports — review du lot A", () => {
       [`const fs = require('fs');`, `const { readFile } = require('fs');`],
       [`import path from 'path';`],
     );
-    const merged = (result.mergedLines ?? []).join("\n");
-    if (result.mergedLines) {
-      expect(merged).toContain("const fs = require('fs');");
-      expect(merged).toContain("const { readFile } = require('fs');");
-    } else {
-      expect(result.conflict).toBeUndefined();
-    }
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBeUndefined();
+    expect(result.reason).toMatch(/same module twice/);
   });
 
   it("plusieurs déclarateurs sur une ligne require : prudence (collision supposée)", () => {
@@ -95,13 +91,24 @@ describe("imports — review du lot A", () => {
 });
 
 describe("imports — review du lot A, passe 2", () => {
-  it("un import named ajouté face à un require illisible du même module : pas de conflit affirmé", () => {
-    const result = tryResolveImportConflict([], [`import { readFile } from 'fs';`], [`const { a: { b } } = require('fs');`]);
-    expect(result.conflict).toBeUndefined();
+  it("un import named ajouté face à un require illisible du même module : prudence (collision supposée)", () => {
+    // Le moteur textuel garderait les deux lignes : si le motif illisible lie
+    // le même nom, il serait déclaré deux fois.
+    const result = tryResolveImportConflict([], [`import { b } from 'fs';`], [`const { a: { b } } = require('fs');`]);
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBe(true);
   });
 
   it("un second déclarateur après un accès membre : prudence (collision supposée)", () => {
     const result = tryResolveImportConflict([], [`const x = require('m').default, y = require('m2');`], [`import y from 'm';`]);
     expect(result.conflict).toBe(true);
+  });
+});
+
+describe("imports — review du lot A, passe 3", () => {
+  it("type contre valeur : la raison le dit", () => {
+    const result = tryResolveImportConflict([], [`import { X } from 'm';`], [`import type { X } from 'm';`]);
+    expect(result.reason).toMatch(/type/);
+    expect(result.reason).not.toMatch(/named vs named/);
   });
 });

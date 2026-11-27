@@ -481,23 +481,19 @@ export function tryResolveImportConflict(
     if (la === null || lb === null) return true; // liaisons inconnues : prudence
     return la.some((n) => lb.includes(n));
   };
-  // Collision connue : les deux listes de liaisons sont lues et partagent un nom.
-  const knownCollide = (a: ImportStatement, b: ImportStatement): boolean => {
-    const la = localBindings(a);
-    const lb = localBindings(b);
-    return la !== null && lb !== null && la.some((n) => lb.includes(n));
-  };
-  // Un import named face à une liaison illisible n'est pas affirmé en conflit
-  // (avant, un ajout named n'était jamais comparé) : le moteur textuel peut
-  // encore agir. Les autres formes restent prudentes.
-  const collisionReported = (a: ImportStatement, b: ImportStatement): boolean =>
-    a.kind === "named" || b.kind === "named" ? knownCollide(a, b) : bindingsCollide(a, b);
+  // Des liaisons illisibles comptent comme une collision : le moteur textuel
+  // garderait les deux lignes, et un nom lié des deux côtés serait déclaré
+  // deux fois.
+  const collisionReported = bindingsCollide;
   const kindMismatch = (a: ImportStatement, b: ImportStatement, source: string) => {
     unresolvedImports++;
+    const typeVsValue = a.kind === b.kind && a.isType !== b.isType;
     return {
       mergedLines: null,
       ...(collisionReported(a, b) ? { conflict: true } : {}),
-      reason: `Conflict on import '${source}': incompatible kinds (${a.kind} vs ${b.kind}).`,
+      reason: typeVsValue
+        ? `Conflict on import '${source}': the same ${a.kind} import as a type on one side and as a value on the other.`
+        : `Conflict on import '${source}': incompatible kinds (${a.kind} vs ${b.kind}).`,
       resolvedImports,
       unresolvedImports,
     };
