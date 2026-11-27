@@ -1820,9 +1820,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (!selectedPr.value || !forge.value.requestReviewers || !logins.length) return;
     try {
       await forge.value.requestReviewers(cwd.value, selectedPr.value.number, logins);
-      const detail = await forge.value.getPR(cwd.value, selectedPr.value.number).catch(() => null);
-      if (detail) {
-        prDetail.value = detail;
+      const repo = cwd.value;
+      const number = selectedPr.value.number;
+      const editsSeen = _editSeq;
+      const detail = await forge.value.getPR(repo, number).catch(() => null);
+      // #234: a title or description saved meanwhile is laid over it.
+      if (detail && selectedPr.value?.number === number && cwd.value === repo) {
+        prDetail.value = withEditsSince(repo, number, editsSeen, detail);
         persistDetailCache();
       }
       success.value = t("pr.reviews.reviewersRequested");

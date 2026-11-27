@@ -77,12 +77,13 @@ describe("OpenAI-compatible provider without a key", () => {
     expect(aiHttpRequest.mock.calls[1][2]).toBe("bearer");
   });
 
-  it("sends none when the stored key belongs to another endpoint", async () => {
+  it("is not available while the stored key belongs to another endpoint (stale setup)", () => {
     settings();
     keyConfigured = true;
     keyOrigin = "https://api.anthropic.com";
-    await useAIProvider().rawPrompt("sys", "user");
-    expect(aiHttpRequest.mock.calls[0][2]).toBe("none");
+    // No Claude CLI detected here, so nothing to fall back to either.
+    expect(useAIProvider().isAvailable.value).toBe(false);
+    expect(useAIProvider().toLlmEndpoint()).toBeNull();
   });
 
   it("says the stored key is tied to another endpoint when the server refuses", async () => {

@@ -155,7 +155,10 @@ const LOCAL_IMAGE_BASES = [
  */
 function resolvedImageUrl(src: string): string {
   try {
-    const u = new URL(src, "http://gitwand-local.invalid/");
+    // `http:host/x` / `https:host/x`: a page that is not on that scheme
+    // reads it as absolute; spell it so before resolving.
+    const spelled = src.trim().replace(/^(https?):(?![/\\]{2})[/\\]?/i, "$1://");
+    const u = new URL(spelled, "http://gitwand-local.invalid/");
     if (u.protocol === "http:" && !/^\s*http:/i.test(src)) u.protocol = "https:";
     return u.href;
   } catch {

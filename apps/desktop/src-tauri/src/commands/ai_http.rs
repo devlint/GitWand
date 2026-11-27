@@ -345,10 +345,12 @@ pub(crate) async fn ai_allowed_endpoints() -> Result<Vec<String>, String> {
         let listed = OriginIndex::app().map(|i| i.list()).unwrap_or_default();
         let mut origins: Vec<String> = listed
             .into_iter()
+            // Dropped only when the keychain says it is gone: a locked or
+            // unreadable keychain must not hide an origin it still allows.
             .filter(|o| {
                 KeychainOrigins::entry(o)
-                    .map(|e| e.get_password().is_ok())
-                    .unwrap_or(false)
+                    .map(|e| !matches!(e.get_password(), Err(keyring::Error::NoEntry)))
+                    .unwrap_or(true)
             })
             .collect();
         // Allowed in this run only (the keychain could not be written): listed

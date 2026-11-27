@@ -323,6 +323,8 @@ describe("GitHub attachments (#302)", () => {
       const out = safeHtml(`<img src="${src}" alt="x">`, { allowRemoteImages: true });
       expect(out, src).toContain(`src="${proxyImageUrl("https://img.example/x.png")}"`);
     }
+    const http = safeHtml(`<img src="http:img.example/x.png" alt="x">`, { allowRemoteImages: true });
+    expect(http).toContain(`src="${proxyImageUrl("http://img.example/x.png")}"`);
   });
 
   it("treats a proxy URL written in a PR as the remote image it points to", () => {

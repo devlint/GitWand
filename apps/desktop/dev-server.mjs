@@ -922,9 +922,12 @@ function sweepStaleRunDirs(base) {
 const devLockdownSeen = new Map();
 function devLockdownError(bin, helpArgs, flags, tooOld) {
   // Cached per binary identity, as help_mentions: an update in place is seen.
-  let id = null;
-  try { const st = statSync(bin); id = `${bin}|${st.size}|${st.mtimeMs}|${helpArgs.join(" ")}|${flags.join(" ")}`; } catch { /* on PATH: not cached */ }
-  if (id && devLockdownSeen.has(id)) return devLockdownSeen.get(id) ? null : tooOld;
+  // A bare name (not found by resolveBin): cached by name for 5 minutes.
+  const what = `${helpArgs.join(" ")}|${flags.join(" ")}`;
+  let id;
+  try { const st = statSync(bin); id = `${bin}|${st.size}|${st.mtimeMs}|${what}`; }
+  catch { id = `${bin}|${Math.floor(Date.now() / 300_000)}|${what}`; }
+  if (devLockdownSeen.has(id)) return devLockdownSeen.get(id) ? null : tooOld;
   const r = spawnSync(bin, helpArgs, { encoding: "utf-8", timeout: 10_000 });
   if (r.error || r.status === null) {
     return `Could not check the AI CLI's options (\`${basename(bin)} ${helpArgs.join(" ")}\` did not answer within 10 s): try again`;
@@ -932,7 +935,7 @@ function devLockdownError(bin, helpArgs, flags, tooOld) {
   const help = `${r.stdout || ""}${r.stderr || ""}`;
   const has = (f) => new RegExp(`(^|[^\\w-])${f.replace(/[-]/g, "\\-")}(?![\\w-])`, "m").test(help);
   const ok = flags.every(has);
-  if (id) devLockdownSeen.set(id, ok);
+  devLockdownSeen.set(id, ok);
   return ok ? null : tooOld;
 }
 /** True when a process with this pid exists (EPERM is a live process). */

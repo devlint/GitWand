@@ -28,7 +28,7 @@ const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 const FETCH_TIMEOUT_SECS: u64 = 20;
 const CONNECT_TIMEOUT_SECS: u64 = 10;
 /// Cache bounds: entries and total bytes, oldest dropped first.
-const CACHE_MAX_ENTRIES: usize = 256;
+const CACHE_MAX_ENTRIES: usize = 2048;
 const CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
 
 const MARKER: &[u8] = b"\n__GW_IMG__";
@@ -94,6 +94,24 @@ pub(crate) fn split_output(out: &[u8]) -> Option<(&[u8], u16, &str)> {
     Some((body, status.parse().ok()?, ctype))
 }
 
+/// Environment variables the image fetch passes on to curl (compared in
+/// upper case): nothing else of GitWand's environment reaches it.
+const CURL_ENV: &[&str] = &[
+    "PATH",
+    "SYSTEMROOT",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+];
+
 /// Room for curl's `-w` trailer past the largest image.
 const TRAILER_SLACK: usize = 1024;
 
@@ -108,7 +126,17 @@ fn run_curl_capped(
 ) -> Result<(Vec<u8>, bool, Option<i32>, String), String> {
     use std::io::{Read, Write};
     use std::process::Stdio;
-    let mut child = curl_command(args)
+    let mut cmd = curl_command(args);
+    // Only what curl needs (AGENTS.md: no secrets in a child's environment):
+    // its path, the proxy and CA settings, Windows' system variables.
+    cmd.env_clear();
+    for (key, value) in std::env::vars_os() {
+        let k = key.to_string_lossy().to_ascii_uppercase();
+        if CURL_ENV.contains(&k.as_str()) {
+            cmd.env(&key, value);
+        }
+    }
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -409,7 +437,13 @@ fn failure(message: String) -> tauri::http::Response<Vec<u8>> {
 pub(crate) fn respond(uri: &str) -> tauri::http::Response<Vec<u8>> {
     // No CORS header: an `<img>` needs none, and the bytes are not for a
     // script of any origin to read back.
-    let builder = tauri::http::Response::builder().header("X-Content-Type-Options", "nosniff");
+    // An SVG opened as a document (not as an `<img>`) runs no script.
+    let builder = tauri::http::Response::builder()
+        .header("X-Content-Type-Options", "nosniff")
+        .header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        );
     match serve(uri) {
         Ok(image) => builder
             .status(200)
@@ -694,6 +728,10 @@ mod tests {
         assert_eq!(r.status(), 200);
         assert_eq!(r.headers()["content-type"], "image/png");
         assert!(r.headers().get("access-control-allow-origin").is_none());
+        assert!(r.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("sandbox"));
         assert_eq!(r.body(), &png);
 
         let (port, h) = serve_once(http("200 OK", "text/html", b"<script>x</script>"));
