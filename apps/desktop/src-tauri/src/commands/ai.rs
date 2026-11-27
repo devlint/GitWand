@@ -2427,6 +2427,84 @@ pub(crate) async fn copilot_cli_prompt(
     .map_err(|e| e.to_string())?
 }
 
+/// What `copilot -p` is told: the prompt itself is in a file of the run's
+/// private directory (Copilot 1.0 reads no prompt from stdin outside
+/// `--fleet`), which it reads with its `view` tool.
+const COPILOT_PROMPT_FILE: &str = "prompt.md";
+const COPILOT_INSTRUCTION: &str =
+    "Read the file prompt.md in the current directory and do exactly what it asks. Reply with your answer only.";
+
+/// `copilot` arguments for a one-shot prompt, locked down. The prompt carries
+/// untrusted repo content; GitWand only wants a text answer:
+///
+/// - `--available-tools view`: the model sees one tool, the file viewer it
+///   needs for `prompt.md` (file access is confined to the run's directory
+///   and the temp directory). No shell, no write, no `web_fetch`, no MCP tool.
+/// - `--deny-tool` shell / write / url, should a later version add a tool
+///   `--available-tools` does not filter.
+/// - `--disable-builtin-mcps`: no GitHub MCP server, a way to post anywhere.
+/// - `--no-custom-instructions`, `--no-ask-user`, `-s` (the answer only).
+///
+/// Checked on Copilot CLI 1.0.117: a prompt asking for `touch` and a
+/// `web_fetch` ran neither.
+fn copilot_prompt_args(model: Option<&str>, effort: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "--no-color",
+        "-s",
+        "--no-ask-user",
+        "--no-custom-instructions",
+        "--disable-builtin-mcps",
+        "--available-tools",
+        "view",
+        "--deny-tool=shell",
+        "--deny-tool=write",
+        "--deny-tool=url",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    if let Some(e) = effort {
+        args.push("--reasoning-effort".to_string());
+        args.push(e.to_string());
+    }
+    args.push("-p".to_string());
+    args.push(COPILOT_INSTRUCTION.to_string());
+    args
+}
+
+/// Whether this `copilot` has the lockdown flags (`--available-tools`,
+/// `--disable-builtin-mcps`). Asked once per binary.
+fn copilot_supports_lockdown(binary: &str) -> bool {
+    use std::sync::Mutex;
+    static SEEN: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
+    if let Some((_, ok)) = SEEN
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .find(|(b, _)| b == binary)
+    {
+        return *ok;
+    }
+    let help = ai_cmd(binary, AiCli::Copilot)
+        .arg("--help")
+        .output()
+        .map(|o| {
+            let mut t = String::from_utf8_lossy(&o.stdout).into_owned();
+            t.push_str(&String::from_utf8_lossy(&o.stderr));
+            t
+        })
+        .unwrap_or_default();
+    let ok = help.contains("--available-tools") && help.contains("--disable-builtin-mcps");
+    SEEN.lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push((binary.to_string(), ok));
+    ok
+}
+
 fn copilot_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
@@ -2435,6 +2513,12 @@ fn copilot_cli_prompt_inner(
 ) -> Result<String, String> {
     let binary =
         resolve_copilot_binary().ok_or_else(|| "Binaire `copilot` introuvable".to_string())?;
+    if !copilot_supports_lockdown(&binary) {
+        return Err(
+            "This Copilot CLI cannot restrict its tools: update it with `copilot update`"
+                .to_string(),
+        );
+    }
 
     // Copilot CLI doesn't expose a separate system channel — prepend the
     // system prompt as a Markdown section, same shape as the other flows.
@@ -2445,33 +2529,21 @@ fn copilot_cli_prompt_inner(
         _ => prompt,
     };
 
-    // Strip NUL bytes — the prompt is passed as a CLI argument and an interior
-    // `\0` makes the spawn fail with "nul byte found in provided data".
-    let full_prompt = full_prompt.replace('\0', "");
-
-    // `_run_dir` lives until the end of the function: the CLI has exited.
-    let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Copilot)?;
-    // `--no-color` keeps stdout free of ANSI escapes. Flags precede the
-    // positional prompt passed via `-p`.
-    cmd.arg("--no-color");
-    // Safety: GitWand only wants a text answer back. Deny the tools that
-    // could mutate the user's machine (shell exec, file writes) and disable
-    // the interactive `ask_user` tool so a one-shot run can never block
-    // waiting for input. `COPILOT_ALLOW_ALL` is stripped from the inherited
-    // env so a stray variable can't silently re-enable every tool.
+    // `run_dir` lives until the end of the function: the CLI has exited.
+    let (mut cmd, run_dir) = ai_prompt_cmd(&binary, AiCli::Copilot)?;
+    // The prompt (repository content) in the private run directory, never
+    // on the argv where any local user can read it.
+    std::fs::write(run_dir.path().join(COPILOT_PROMPT_FILE), full_prompt)
+        .map_err(|e| format!("Failed to write the Copilot prompt: {e}"))?;
+    // A stray variable must not re-enable every tool.
     cmd.env_remove("COPILOT_ALLOW_ALL");
-    cmd.args(["--deny-tool=shell", "--deny-tool=write", "--no-ask-user"]);
-    if let Some(m) = model.as_ref() {
-        if !m.trim().is_empty() {
-            cmd.args(["--model", m.trim()]);
-        }
-    }
-    if let Some(e) = valid_effort(effort.as_ref()) {
-        cmd.args(["--reasoning-effort", e]);
-    }
-    cmd.args(["-p", full_prompt.as_str()]);
+    cmd.args(copilot_prompt_args(
+        model.as_deref(),
+        valid_effort(effort.as_ref()),
+    ));
 
     let output = cmd
+        .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| format!("Failed to run copilot CLI: {}", e))?;
 
@@ -3399,6 +3471,32 @@ mod neutral_dir_tests {
             .expect("OPENCODE_CONFIG_CONTENT is set");
         let v: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(v["mcp"].is_object());
+    }
+
+    #[test]
+    fn copilot_sees_only_its_file_viewer_and_never_the_prompt() {
+        let args = copilot_prompt_args(Some(" gpt-5 "), Some("high"));
+        let at = |flag: &str| args.iter().position(|a| a == flag).unwrap();
+        assert_eq!(args[at("--available-tools") + 1], "view");
+        for flag in [
+            "--disable-builtin-mcps",
+            "--no-custom-instructions",
+            "--no-ask-user",
+            "--deny-tool=shell",
+            "--deny-tool=write",
+            "--deny-tool=url",
+            "-s",
+        ] {
+            assert!(args.iter().any(|a| a == flag), "{flag}");
+        }
+        assert_eq!(args[at("--model") + 1], "gpt-5");
+        assert_eq!(args[at("--reasoning-effort") + 1], "high");
+        // `-p` last, with the fixed instruction: the prompt is in prompt.md.
+        assert_eq!(&args[args.len() - 2..], ["-p", COPILOT_INSTRUCTION]);
+        assert!(COPILOT_INSTRUCTION.contains(COPILOT_PROMPT_FILE));
+        assert!(!copilot_prompt_args(Some(" "), None)
+            .iter()
+            .any(|a| a == "--model" || a == "--reasoning-effort"));
     }
 
     #[test]

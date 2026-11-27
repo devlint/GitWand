@@ -984,7 +984,7 @@ function devOpencodeConfigContent() {
   return JSON.stringify(base);
 }
 
-function spawnAiSync(bin, args, opts, { gitRepo = false } = {}) {
+function spawnAiSync(bin, args, opts, { gitRepo = false, files = {} } = {}) {
   const base = aiRunsBase();
   const dir = mkdtempSync(join(base, "run-"));
   try {
@@ -992,6 +992,8 @@ function spawnAiSync(bin, args, opts, { gitRepo = false } = {}) {
       const g = spawnSync(GIT, ["init", "-q"], { cwd: dir });
       if (g.status !== 0) throw new Error(`AI working directory ${dir}: git init failed`);
     }
+    // Files the CLI reads from its run directory (Copilot's prompt.md).
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content, { mode: 0o600 });
     return spawnSync(bin, args, { ...opts, cwd: dir });
   } finally {
     // Best effort, like AiRunDir's Drop: never replaces the CLI's result.
@@ -8770,20 +8772,27 @@ async function handleRequest(req, res) {
         const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
           : (body.prompt || "");
-        const cpArgs = ["--no-color", "--deny-tool=shell", "--deny-tool=write", "--no-ask-user"];
+        // Mirrors copilot_prompt_args: only the file viewer, no built-in MCP,
+        // the prompt in the run directory's prompt.md, never on the argv.
+        const cpArgs = [
+          "--no-color", "-s", "--no-ask-user", "--no-custom-instructions", "--disable-builtin-mcps",
+          "--available-tools", "view", "--deny-tool=shell", "--deny-tool=write", "--deny-tool=url",
+        ];
         if (body.model && String(body.model).trim()) {
           cpArgs.push("--model", String(body.model).trim());
         }
         const cpEffort = validEffort(body.effort);
         if (cpEffort) cpArgs.push("--reasoning-effort", cpEffort);
-        cpArgs.push("-p", fullPrompt);
+        cpArgs.push("-p", "Read the file prompt.md in the current directory and do exactly what it asks. Reply with your answer only.");
         const cpEnv = aiSpawnEnv("copilot");
+        delete cpEnv.COPILOT_ALLOW_ALL;
         const r = spawnAiSync(COPILOT, cpArgs, { // fresh per-run dir — mirrors ai_prompt_cmd
           env: cpEnv,
           encoding: "utf-8",
+          input: "",
           timeout: 5 * 60 * 1000,
           maxBuffer: 20 * 1024 * 1024,
-        });
+        }, { files: { "prompt.md": fullPrompt } });
         if (r.status !== 0) {
           const detail = (r.stderr || r.stdout || "").trim() || "Copilot CLI a échoué sans message";
           return jsonResponse(req, res, { error: detail }, 500);
