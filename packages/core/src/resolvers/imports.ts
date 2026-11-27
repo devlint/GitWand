@@ -240,6 +240,7 @@ function hasTopLevelComma(rest: string): boolean {
     else if (c === ")" || c === "]" || c === "}") depth--;
     else if (c === "," && depth === 0) return true;
     else if (c === ";" && depth === 0) return false;
+    else if (c === "/" && (rest[i + 1] === "/" || rest[i + 1] === "*")) return false; // commentaire
   }
   return false;
 }
@@ -524,6 +525,16 @@ export function tryResolveImportConflict(
   const allKeys = new Set([...baseMap.keys(), ...oursMap.keys(), ...theirsMap.keys()]);
 
   const resultLines: string[] = [];
+  // Les imports gardés, pour la dernière garde sur les liaisons.
+  const keptImports: ImportStatement[] = [];
+  const keep = (stmt: ImportStatement) => {
+    resultLines.push(stmt.raw);
+    keptImports.push(stmt);
+  };
+  const keepMerged = (text: string) => {
+    resultLines.push(...text.split("\n"));
+    keptImports.push(parseImport(text.replace(/\n\s*/g, " ")));
+  };
   let resolvedImports = 0;
   let unresolvedImports = 0;
 
@@ -537,13 +548,13 @@ export function tryResolveImportConflict(
       if (ours && theirs) {
         if (ours.raw === theirs.raw) {
           // Même ajout → garder une fois
-          resultLines.push(ours.raw);
+          keep(ours);
           resolvedImports++;
         } else if (ours.kind === "named" && theirs.kind === "named") {
           // Named imports du même module ajoutés des deux côtés → merger les noms
           const merged = mergeNamedImports(undefined, ours, theirs);
           if (merged) {
-            resultLines.push(...merged.split("\n"));
+            keepMerged(merged);
             resolvedImports++;
           } else {
             unresolvedImports++;
@@ -563,13 +574,13 @@ export function tryResolveImportConflict(
         // Vérifier si theirs a un import du même module avec un kind incompatible
         const theirsClash = sameSourceClash(ours, theirsBySource);
         if (theirsClash) return kindMismatch(ours, theirsClash, ours.source);
-        resultLines.push(ours.raw);
+        keep(ours);
         resolvedImports++;
       } else if (theirs) {
         // Vérifier si ours a un import du même module avec un kind incompatible
         const oursClash = sameSourceClash(theirs, oursBySource);
         if (oursClash) return kindMismatch(oursClash, theirs, theirs.source);
-        resultLines.push(theirs.raw);
+        keep(theirs);
         resolvedImports++;
       }
       continue;
@@ -617,22 +628,22 @@ export function tryResolveImportConflict(
 
     // Les deux présents
     if (!oursChanged && !theirsChanged) {
-      resultLines.push(base.raw);
+      keep(base);
       resolvedImports++;
     } else if (ours.raw === theirs.raw) {
-      resultLines.push(ours.raw);
+      keep(ours);
       resolvedImports++;
     } else if (!oursChanged) {
-      resultLines.push(theirs.raw);
+      keep(theirs);
       resolvedImports++;
     } else if (!theirsChanged) {
-      resultLines.push(ours.raw);
+      keep(ours);
       resolvedImports++;
     } else if (ours.kind === "named" && theirs.kind === "named") {
       // Named imports du même module modifiés des deux côtés → merger les noms
       const merged = mergeNamedImports(base, ours, theirs);
       if (merged) {
-        resultLines.push(...merged.split("\n"));
+        keepMerged(merged);
         resolvedImports++;
       } else {
         unresolvedImports++;
@@ -651,6 +662,29 @@ export function tryResolveImportConflict(
         resolvedImports,
         unresolvedImports,
       };
+    }
+  }
+
+  // Dernière garde : deux imports gardés du même module qui lient le même nom
+  // (chaque côté a changé un import de base différent : `{ a, X }` d'un côté,
+  // `import X` de l'autre). Une paire déjà présente telle quelle dans la base
+  // n'est pas nouvelle et ne compte pas.
+  const kept = keptImports;
+  const baseRaws = new Set(baseImports.map((s) => s.raw.trim()));
+  for (let i = 0; i < kept.length; i++) {
+    for (let j = i + 1; j < kept.length; j++) {
+      const [a, b] = [kept[i], kept[j]];
+      if (a.source !== b.source || !a.source || a.raw === b.raw) continue;
+      if (baseRaws.has(a.raw) && baseRaws.has(b.raw)) continue;
+      if (bindingsCollide(a, b)) {
+        return {
+          mergedLines: null,
+          conflict: true,
+          reason: `Conflict on import '${a.source}': two imports kept from it bind the same name.`,
+          resolvedImports,
+          unresolvedImports: unresolvedImports + 1,
+        };
+      }
     }
   }
 

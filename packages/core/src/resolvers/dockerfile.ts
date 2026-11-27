@@ -133,6 +133,9 @@ function instructionKey(instr: Instruction): string {
   return instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
 }
 
+/** Instructions dont la clé est la valeur (chemin, destination). */
+const VALUE_KEYED = new Set<InstructionKind>(["WORKDIR", "COPY", "ADD"]);
+
 /** Une clé qui peut se répéter sans ambiguïté de sens (lignes vides, commentaires identiques). */
 const repeatable = (instr: Instruction) => instr.kind === "BLANK" || instr.kind === "COMMENT";
 
@@ -177,10 +180,12 @@ function mergeStage(
 
   const baseRawByKey = new Map<string, string | null>();
   const baseCount = new Map<string, number>();
+  const baseRawsByKey = new Map<string, string[]>();
   for (const instr of baseInstructions ?? []) {
     const key = instructionKey(instr);
     baseRawByKey.set(key, baseRawByKey.has(key) ? null : instr.raw.join("\n"));
     baseCount.set(key, (baseCount.get(key) ?? 0) + 1);
+    baseRawsByKey.set(key, [...(baseRawsByKey.get(key) ?? []), instr.raw.join("\n")]);
   }
   const hasBase = (baseInstructions?.length ?? 0) > 0;
 
@@ -236,9 +241,13 @@ function mergeStage(
    */
   const oneSided = (instr: Instruction): string[] | "drop" | null => {
     if (!hasBase) return instr.raw;
-    const baseRaw = baseRawByKey.get(instructionKey(instr));
-    if (typeof baseRaw !== "string") return instr.raw; // ajoutée, ou base ambiguë
-    return baseRaw === instr.raw.join("\n") ? "drop" : null;
+    const key = instructionKey(instr);
+    const baseRaws = baseRawsByKey.get(key);
+    if (!baseRaws) return instr.raw; // absente de la base : ajoutée
+    // Présente dans la base (une ou plusieurs copies, plusieurs `RUN`) : une
+    // copie restée telle quelle a été supprimée par l'autre côté ; sinon
+    // c'est une suppression face à un changement, ou une base ambiguë.
+    return baseRaws.includes(instr.raw.join("\n")) ? "drop" : null;
   };
 
   /** Lignes d'une instruction présente des deux côtés. */
@@ -278,7 +287,10 @@ function mergeStage(
     // commentaire décrit ce qui suit), `END` en fin de stage.
     const slotAt = (list: Instruction[], idx: number): string => {
       for (let k = idx + 1; k < list.length; k++) {
-        if (!repeatable(list[k])) return instructionKey(list[k]);
+        if (repeatable(list[k])) continue;
+        // La clé d'un WORKDIR ou d'un COPY/ADD est sa valeur : changée, elle
+        // ne situerait plus le commentaire. Sa sorte suffit.
+        return VALUE_KEYED.has(list[k].kind) ? list[k].kind : instructionKey(list[k]);
       }
       return "END";
     };
@@ -310,7 +322,7 @@ function mergeStage(
     // l'autre. Moteur textuel.
     for (const key of baseRawByKey.keys()) {
       const kind = key.split(":")[0];
-      if (!["WORKDIR", "COPY", "ADD"].includes(kind) || oursMap.has(key) || theirsMap.has(key)) continue;
+      if (!VALUE_KEYED.has(kind as InstructionKind) || oursMap.has(key) || theirsMap.has(key)) continue;
       const addsOfKind = (mine: Map<string, Instruction>, other: Map<string, Instruction>) =>
         [...mine.entries()].some(([k, instr]) => instr.kind === kind && !baseRawByKey.has(k) && !other.has(k));
       // Une seule des deux suffit : l'autre côté a supprimé l'instruction,
@@ -497,7 +509,10 @@ export function tryResolveDockerfileConflict(
     reason: "[dockerfile] A stage deleted on one side was changed on the other, falling back to the textual engine.",
   };
 
-  const resultLines: string[] = [];
+  // Les stages suivent l'ordre de ours ; un stage présent seulement dans
+  // theirs se place juste après celui qui le précède dans theirs (pas à la
+  // fin : un stage utilisé par `COPY --from=` doit venir avant).
+  const stageOut: { key: string; lines: string[]; theirsIdx?: number }[] = [];
   const seenStages = new Set<string>();
 
   for (const [idx, oursStage] of oursStages.entries()) {
@@ -509,7 +524,7 @@ export function tryResolveDockerfileConflict(
       // Stage seulement dans ours : ajouté, ou supprimé par theirs.
       const kept = oneSidedStage(oursStage, baseStageMap.get(key));
       if (kept === null) return stageConflict;
-      if (kept) for (const instr of oursStage) resultLines.push(...instr.raw);
+      if (kept) stageOut.push({ key, lines: oursStage.flatMap((i) => i.raw) });
       continue;
     }
 
@@ -520,16 +535,25 @@ export function tryResolveDockerfileConflict(
         reason: "[dockerfile] Irreducible conflict inside a stage, falling back to the textual engine.",
       };
     }
-    resultLines.push(...merged);
+    stageOut.push({ key, lines: merged });
   }
 
   // Stages seulement dans theirs : ajoutés, ou supprimés par ours.
-  for (const [key, stage] of theirsStageMap) {
+  for (const [tIdx, stage] of theirsStages.entries()) {
+    const key = theirsKeys[tIdx];
     if (seenStages.has(key)) continue;
     const kept = oneSidedStage(stage, baseStageMap.get(key));
     if (kept === null) return stageConflict;
-    if (kept) for (const instr of stage) resultLines.push(...instr.raw);
+    if (!kept) continue;
+    let pos = 0;
+    for (let j = tIdx - 1; j >= 0; j--) {
+      const found = stageOut.findIndex((e) => e.key === theirsKeys[j]);
+      if (found >= 0) { pos = found + 1; break; }
+    }
+    while (pos < stageOut.length && stageOut[pos].theirsIdx !== undefined && stageOut[pos].theirsIdx! < tIdx) pos++;
+    stageOut.splice(pos, 0, { key, lines: stage.flatMap((i) => i.raw), theirsIdx: tIdx });
   }
+  const resultLines = stageOut.flatMap((e) => e.lines);
 
   return {
     lines: resultLines,

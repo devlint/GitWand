@@ -112,3 +112,20 @@ describe("imports — review du lot A, passe 3", () => {
     expect(result.reason).not.toMatch(/named vs named/);
   });
 });
+
+describe("imports — review du lot A, passe 4", () => {
+  it("deux imports de base changés chacun d'un côté pour lier le même nom : collision signalée", () => {
+    const result = tryResolveImportConflict(
+      [`import { a } from 'm';`, `import Y from 'm';`],
+      [`import { a, X } from 'm';`, `import Y from 'm';`],
+      [`import { a } from 'm';`, `import X from 'm';`],
+    );
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBe(true);
+  });
+
+  it("une virgule dans un commentaire de fin de ligne n'est pas un second déclarateur", () => {
+    const result = tryResolveImportConflict([], [`const fs = require('fs') // fs, sync`], [`import { readFile } from 'fs';`]);
+    expect(result.conflict).toBeUndefined();
+  });
+});

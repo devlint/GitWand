@@ -573,3 +573,34 @@ describe("Dockerfile — review du lot A, passe 3", () => {
     expect(result.mergedContent).toContain("ENV C=1");
   });
 });
+
+describe("Dockerfile — review du lot A, passe 4", () => {
+  it("une instruction à clé répétée dans la base, supprimée de l'autre côté : elle ne revient pas", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV X=2`, `RUN a`], [`ENV X=1`, `RUN a`, `RUN b`], [`ENV X=1`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.mergedContent ?? "").not.toMatch(/^RUN a$/m);
+  });
+
+  it("commentaire réécrit d'un côté (WORKDIR changé dessous) et supprimé de l'autre : pas de résolution par le résolveur Dockerfile", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`# use srv`, `WORKDIR /srv`, `ENV A=1`],
+      [`# use app`, `WORKDIR /app`, `ENV A=1`],
+      [`WORKDIR /app`, `ENV A=2`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.resolutions[0]?.resolutionReason ?? "").not.toMatch(/Dockerfile merged by stage/);
+  });
+
+  it("un stage ajouté d'un côté se place avant le stage qui le suivait de ce côté", () => {
+    const input = dockerHunk(
+      [`FROM node:20 AS x`, `RUN 1`],
+      [`FROM node:18 AS x`, `RUN 1`],
+      [`FROM a AS y`, `RUN 9`, `FROM node:18 AS x`, `COPY --from=y /o /o`, `RUN 1`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe(
+      [`FROM a AS y`, `RUN 9`, `FROM node:20 AS x`, `COPY --from=y /o /o`, `RUN 1`].join("\n"),
+    );
+  });
+});
