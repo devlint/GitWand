@@ -31,6 +31,7 @@
 //!   compromised webview can do with these two commands; it does not make the
 //!   webview trusted (see the IPC scoping follow-up in ROADMAP.md).
 
+use std::path::PathBuf;
 use std::sync::{Condvar, Mutex};
 
 use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl, RequestBody};
@@ -178,6 +179,9 @@ trait OriginStore: Sync {
     /// which the gate reads as "not allowed".
     fn is_allowed(&self, origin: &str) -> Result<bool, String>;
     fn allow(&self, origin: &str) -> Result<(), String>;
+    /// Withdraw an allowed origin; forgetting one that is not allowed is not
+    /// an error.
+    fn forget(&self, origin: &str) -> Result<(), String>;
 }
 
 /// The app's store: one keychain entry per origin, under the backend-only
@@ -194,12 +198,76 @@ struct KeychainOrigins;
 /// commands accept), and its length is fixed (Windows caps a credential's
 /// user name at 513 characters, which a long origin in hex would exceed).
 fn origin_account(origin: &str) -> String {
+    format!("{OPEN_ENDPOINT_ACCOUNT_PREFIX}{}", origin_digest(origin))
+}
+
+/// SHA-256 of an origin, in hex: its keychain account and its index file name.
+fn origin_digest(origin: &str) -> String {
     use sha2::{Digest, Sha256};
-    let hex: String = Sha256::digest(origin.as_bytes())
+    Sha256::digest(origin.as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
-        .collect();
-    format!("{OPEN_ENDPOINT_ACCOUNT_PREFIX}{hex}")
+        .collect()
+}
+
+/// Which origins were allowed, for Settings to list and revoke them: the
+/// keychain entries are named by a digest, so they cannot be read back as
+/// origins. One file per origin (`<digest>.origin`, holding the origin), so
+/// two GitWand processes allowing two origins at once never overwrite each
+/// other. Display only: the gate never reads it, the keychain is what
+/// allows. A file whose content does not hash to its name is ignored.
+pub(crate) struct OriginIndex {
+    dir: PathBuf,
+}
+
+impl OriginIndex {
+    /// The app's index, in its local data directory.
+    pub(crate) fn app() -> Option<OriginIndex> {
+        dirs::data_local_dir().map(|d| OriginIndex {
+            dir: d.join("gitwand").join("ai-allowed-endpoints"),
+        })
+    }
+
+    fn file(&self, origin: &str) -> PathBuf {
+        self.dir.join(format!("{}.origin", origin_digest(origin)))
+    }
+
+    fn record(&self, origin: &str) -> Result<(), String> {
+        std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+        std::fs::write(self.file(origin), origin).map_err(|e| e.to_string())
+    }
+
+    fn has(&self, origin: &str) -> bool {
+        self.file(origin).is_file()
+    }
+
+    fn forget(&self, origin: &str) -> Result<(), String> {
+        match std::fs::remove_file(self.file(origin)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// The recorded origins, sorted.
+    fn list(&self) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
+        let mut out: Vec<String> = entries
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let digest = name.strip_suffix(".origin")?.to_string();
+                let origin = std::fs::read_to_string(e.path()).ok()?;
+                let origin = origin.trim().to_string();
+                (origin_digest(&origin) == digest).then_some(origin)
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
 }
 
 impl KeychainOrigins {
@@ -212,7 +280,15 @@ impl KeychainOrigins {
 impl OriginStore for KeychainOrigins {
     fn is_allowed(&self, origin: &str) -> Result<bool, String> {
         match Self::entry(origin)?.get_password() {
-            Ok(_) => Ok(true),
+            Ok(_) => {
+                // Allowed before the index existed: list it from now on.
+                if let Some(index) = OriginIndex::app() {
+                    if !index.has(origin) {
+                        let _ = index.record(origin);
+                    }
+                }
+                Ok(true)
+            }
             Err(keyring::Error::NoEntry) => Ok(false),
             Err(e) => Err(format!("cannot read the allowed AI endpoints: {e}")),
         }
@@ -221,8 +297,60 @@ impl OriginStore for KeychainOrigins {
     fn allow(&self, origin: &str) -> Result<(), String> {
         Self::entry(origin)?
             .set_password("allowed")
-            .map_err(|e| format!("cannot store the allowed AI endpoint: {e}"))
+            .map_err(|e| format!("cannot store the allowed AI endpoint: {e}"))?;
+        if let Some(index) = OriginIndex::app() {
+            if let Err(e) = index.record(origin) {
+                eprintln!("[gitwand] {origin} allowed but not listed in Settings: {e}");
+            }
+        }
+        Ok(())
     }
+
+    fn forget(&self, origin: &str) -> Result<(), String> {
+        match Self::entry(origin)?.delete_password() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("cannot remove the allowed AI endpoint: {e}")),
+        }
+    }
+}
+
+/// Withdraw `endpoint`'s origin: from the store, from the index and from
+/// this run's gate, so the next request to it asks again. Another GitWand
+/// process running now keeps it until it restarts.
+fn revoke_open_endpoint(
+    endpoint: &str,
+    store: &dyn OriginStore,
+    index: Option<&OriginIndex>,
+) -> Result<(), String> {
+    let origin = endpoint_origin(endpoint)?;
+    store.forget(&origin)?;
+    if let Some(index) = index {
+        index.forget(&origin)?;
+    }
+    let mut state = lock_gate();
+    state.session.retain(|o| o != &origin);
+    state.answers.retain(|(o, _)| o != &origin);
+    Ok(())
+}
+
+/// The origins allowed through the open-endpoint gate, sorted.
+#[tauri::command]
+pub(crate) async fn ai_allowed_endpoints() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        Ok(OriginIndex::app().map(|i| i.list()).unwrap_or_default())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Withdraw an allowed origin: the next request to it asks again.
+#[tauri::command]
+pub(crate) async fn ai_revoke_endpoint(origin: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        revoke_open_endpoint(&origin, &KeychainOrigins, OriginIndex::app().as_ref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// How the last question for an origin ended, for the requests that waited
@@ -889,6 +1017,64 @@ mod tests {
             std::fs::create_dir_all(self.parent().unwrap()).map_err(|e| e.to_string())?;
             std::fs::write(self, serde_json::to_string(&list).unwrap()).map_err(|e| e.to_string())
         }
+        fn forget(&self, origin: &str) -> Result<(), String> {
+            let mut list = load_open_endpoints(self)?;
+            list.retain(|o| o != origin);
+            std::fs::create_dir_all(self.parent().unwrap()).map_err(|e| e.to_string())?;
+            std::fs::write(self, serde_json::to_string(&list).unwrap()).map_err(|e| e.to_string())
+        }
+    }
+
+    #[test]
+    fn a_revoked_origin_is_asked_again() {
+        let store = scratch_store("revoke");
+        let index = OriginIndex {
+            dir: store.parent().unwrap().join("index"),
+        };
+        let target = url("https://llm.revoke.example/v1/chat");
+        // Allowed once: the index lists it, later requests pass unasked.
+        check_open_endpoint_with(&target, &store, Some(&yes), false, None).unwrap();
+        index.record("https://llm.revoke.example").unwrap();
+        assert_eq!(index.list(), ["https://llm.revoke.example"]);
+        check_open_endpoint_with(&target, &store, None, false, None).unwrap();
+
+        // Revoked by any endpoint of that origin: gone from the store, the
+        // index and this run's gate, so a background load is refused and an
+        // action asks again.
+        revoke_open_endpoint("https://LLM.revoke.example:443/other", &store, Some(&index)).unwrap();
+        assert!(!store.is_allowed("https://llm.revoke.example").unwrap());
+        assert!(index.list().is_empty());
+        assert!(check_open_endpoint_with(&target, &store, None, false, None).is_err());
+        let asked = std::sync::atomic::AtomicBool::new(false);
+        let ask = |_: &str| {
+            asked.store(true, std::sync::atomic::Ordering::SeqCst);
+            false
+        };
+        assert!(check_open_endpoint_with(&target, &store, Some(&ask), false, None).is_err());
+        assert!(asked.load(std::sync::atomic::Ordering::SeqCst));
+        let _ = std::fs::remove_dir_all(store.parent().unwrap());
+    }
+
+    #[test]
+    fn the_index_lists_only_files_that_match_their_name() {
+        let dir = std::env::temp_dir().join(format!("gitwand-ai-index-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let index = OriginIndex { dir: dir.clone() };
+        index.record("https://b.example").unwrap();
+        index.record("https://a.example").unwrap();
+        index.record("https://a.example").unwrap();
+        // A file planted under another origin's name is not listed.
+        std::fs::write(
+            dir.join(format!("{}.origin", origin_digest("https://c.example"))),
+            "https://evil.example",
+        )
+        .unwrap();
+        std::fs::write(dir.join("notes.txt"), "https://d.example").unwrap();
+        assert_eq!(index.list(), ["https://a.example", "https://b.example"]);
+        index.forget("https://a.example").unwrap();
+        index.forget("https://a.example").unwrap();
+        assert_eq!(index.list(), ["https://b.example"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn scratch_store(name: &str) -> PathBuf {

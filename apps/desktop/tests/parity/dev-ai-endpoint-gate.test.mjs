@@ -75,6 +75,20 @@ describe("dev-server: AI endpoint gate", { timeout: 15_000 }, () => {
     expect(data.error).toMatch(/^AI request failed/);
   });
 
+  it("lists the allowed origins, and a revoked one is refused again", async () => {
+    const list = async () => (await (await devAllowing.fetch("/api/ai-allowed-endpoints")).json()).origins;
+    expect(await list()).toEqual(["https://llm.example.invalid", "https://other.invalid"]);
+    const res = await devAllowing.fetch("/api/ai-revoke-endpoint", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Any endpoint of the origin revokes it.
+      body: JSON.stringify({ origin: "https://other.invalid/v1/models" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await list()).toEqual(["https://llm.example.invalid"]);
+    expect((await aiRequest(devAllowing, "https://other.invalid/v1/models")).status).toBe(403);
+  });
+
   it("does not let a listed origin's other port or scheme through", async () => {
     const { status } = await aiRequest(devAllowing, "http://llm.example.invalid/v1/models");
     expect(status).toBe(403);

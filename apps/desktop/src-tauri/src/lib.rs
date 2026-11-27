@@ -1255,6 +1255,8 @@ pub fn run() {
             commands::credentials::delete_credential,
             commands::ai_http::ai_api_key_set,
             commands::ai_http::ai_api_key_hint,
+            commands::ai_http::ai_allowed_endpoints,
+            commands::ai_http::ai_revoke_endpoint,
             commands::ai_http::ai_http_request,
             commands::telemetry::telemetry_get_state,
             commands::telemetry::telemetry_set_enabled,

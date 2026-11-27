@@ -989,13 +989,21 @@ function devAiOriginAllowed(u) {
   const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   const loopback =
     host === "localhost" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) || host === "::1";
-  if (loopback || DEV_KNOWN_AI_ORIGINS.includes(u.origin)) return true;
-  const allowed = String(process.env.GITWAND_DEV_AI_ORIGINS ?? "")
-    .split(",")
-    .map((o) => o.trim().replace(/\/+$/, ""))
-    .filter(Boolean);
-  return allowed.includes(u.origin);
+  return loopback || DEV_KNOWN_AI_ORIGINS.includes(u.origin) || devAllowedAiOrigins.has(u.origin);
 }
+/**
+ * dev:web stand-in for the origins allowed in the keychain: those
+ * GITWAND_DEV_AI_ORIGINS lists, normalised to an origin. Revoking one
+ * (`/api/ai-revoke-endpoint`) lasts until the dev server restarts.
+ */
+const devAllowedAiOrigins = new Set(
+  String(process.env.GITWAND_DEV_AI_ORIGINS ?? "")
+    .split(",")
+    .map((o) => {
+      try { return parseAiEndpoint(o.trim()).origin; } catch { return null; }
+    })
+    .filter(Boolean),
+);
 const devAiKeyInfo = () => (devAiApiKey ? { hint: aiKeyHint(devAiApiKey), origin: devAiApiKeyOrigin } : null);
 /** dev:web stand-in for the telemetry opt-out marker. */
 let devTelemetryEnabled = true;
@@ -8139,6 +8147,22 @@ async function handleRequest(req, res) {
         devAiApiKeyOrigin = origin;
         return jsonResponse(req, res, { info: devAiKeyInfo() });
       }
+    }
+
+    // GET /api/ai-allowed-endpoints -> { origins } — mirrors ai_allowed_endpoints.
+    if (url.pathname === "/api/ai-allowed-endpoints" && req.method === "GET") {
+      return jsonResponse(req, res, { origins: [...devAllowedAiOrigins].sort() });
+    }
+
+    // POST /api/ai-revoke-endpoint { origin } — mirrors ai_revoke_endpoint:
+    // any endpoint of the origin revokes it, an unknown one is not an error.
+    if (url.pathname === "/api/ai-revoke-endpoint" && req.method === "POST") {
+      const { origin } = await readBody(req);
+      let parsed;
+      try { parsed = parseAiEndpoint(String(origin ?? "").trim()); }
+      catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
+      devAllowedAiOrigins.delete(parsed.origin);
+      return jsonResponse(req, res, { ok: true });
     }
 
     // POST /api/ai-http-request { method, url, body?, auth, timeoutSecs? }
