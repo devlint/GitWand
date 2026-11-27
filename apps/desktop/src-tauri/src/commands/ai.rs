@@ -948,6 +948,13 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
+    // Windows: a kill-on-close Job Object holds the child and everything it
+    // starts from now on. Closing it (end of this function) kills a
+    // grandchild that outlived the child, which `taskkill /T` cannot find
+    // once the child has exited. A process started in the instant before the
+    // assignment escapes it; std cannot spawn suspended.
+    #[cfg(windows)]
+    let job = crate::commands::terminal::job::Job::assign(child.id()).ok();
     let mut out = child.stdout.take()?;
     // Read incrementally into a shared buffer, so what arrived is usable even
     // if EOF never comes (a grandchild still holding the pipe).
@@ -996,6 +1003,11 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
                 }
             }
         }
+        // The job still holds the grandchild: end it, the pipe closes.
+        #[cfg(windows)]
+        if let Some(job) = job.as_ref() {
+            job.terminate();
+        }
         let _ = rx.recv_timeout(Duration::from_secs(1));
     }
     status.filter(|s| s.success())?;
@@ -1017,10 +1029,8 @@ fn kill_tree(child: &mut std::process::Child) {
     }
     // Windows: `taskkill /T` walks the tree from the child, so it only reaches
     // the grandchildren while the child is still alive (the timeout path).
-    // Once the child has exited, a grandchild still holding stdout cannot be
-    // found this way; a Job Object would, but needs Win32 bindings this crate
-    // does not take on. `stdout_within` therefore never joins its reader: at
-    // worst that grandchild and a blocked thread are left behind.
+    // Once the child has exited, `stdout_within`'s Job Object ends what is
+    // left (see there).
     #[cfg(windows)]
     {
         let _ = hidden_cmd("taskkill")

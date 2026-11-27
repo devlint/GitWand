@@ -767,7 +767,7 @@ fn signal_groups(groups: &[libc::pid_t], signal: libc::c_int) {
 /// session's leader starts stays in it, and terminating or closing it kills
 /// the whole tree, grandchildren included (spec §8).
 #[cfg(windows)]
-mod job {
+pub(crate) mod job {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
@@ -778,7 +778,7 @@ mod job {
         OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
     };
 
-    pub(super) struct Job(HANDLE);
+    pub(crate) struct Job(HANDLE);
 
     // SAFETY: a job handle is a kernel object reference, usable from any thread.
     unsafe impl Send for Job {}
@@ -786,7 +786,7 @@ mod job {
 
     impl Job {
         /// Creates a kill-on-close job and puts `pid` in it.
-        pub(super) fn assign(pid: u32) -> Result<Job, String> {
+        pub(crate) fn assign(pid: u32) -> Result<Job, String> {
             // SAFETY: plain Win32 calls; every handle opened here is closed
             // on each path (the job's by `Drop`).
             unsafe {
@@ -826,7 +826,7 @@ mod job {
             }
         }
 
-        pub(super) fn terminate(&self) {
+        pub(crate) fn terminate(&self) {
             // SAFETY: the handle is open until `Drop`.
             unsafe {
                 TerminateJobObject(self.0, 1);
