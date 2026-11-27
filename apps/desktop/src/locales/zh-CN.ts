@@ -2347,6 +2347,8 @@ const zhCN: Locale = {
       reject: "拒绝 → 手动解决",
       accepted: "已接受",
     },
+    aiSuggestedExplanation: "AI 建议的解决方式",
+    aiSuggestedExplanationUnstructured: "AI 建议的解决方式（非结构化回复）",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

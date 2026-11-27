@@ -719,14 +719,14 @@ function parseAIResponse(raw: string): AISuggestion {
     const parsed = JSON.parse(jsonStr);
     return {
       resolvedContent: parsed.resolvedContent ?? parsed.resolved_content ?? raw,
-      explanation: parsed.explanation ?? "Résolution suggérée par l'IA",
+      explanation: parsed.explanation ?? t("mergeEditor.aiSuggestedExplanation"),
       confidence: parsed.confidence ?? "medium",
     };
   } catch {
     // If JSON parsing fails, use the raw text as the resolved content
     return {
       resolvedContent: raw,
-      explanation: "Résolution suggérée par l'IA (réponse non structurée)",
+      explanation: t("mergeEditor.aiSuggestedExplanationUnstructured"),
       confidence: "low",
     };
   }

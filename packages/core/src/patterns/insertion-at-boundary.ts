@@ -18,6 +18,7 @@
  */
 
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { scopeImpact, makeScore, normalizeLine } from "./utils.js";
 import { lcs } from "../diff/index.js";
 
@@ -146,6 +147,9 @@ const insertionAtBoundary: PatternPlugin = {
     return hasBase
       ? "Both branches only added lines without modifying the base. Resolution: union of the insertions, ours first."
       : "Both branches appear to have only added lines (diff2 heuristic). Resolution: union, ours first.";
+  },
+  explanationRef(h: ClassifyInput): ExplanationRef {
+    return { key: h.baseLines.length > 0 ? "insertion" : "insertionNoBase" };
   },
 
   passReason(h: ClassifyInput): string {

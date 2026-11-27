@@ -162,7 +162,7 @@ export function parseConflictMarkers(content: string): {
  * v1.4 : détecte automatiquement zdiff3 et ajuste `baseAvailability` en conséquence.
  */
 export function toConflictHunk(conflict: RawConflict): ConflictHunk {
-  const { type, confidence, explanation, trace } = classifyConflict(conflict);
+  const { type, confidence, explanation, explanationRef, trace } = classifyConflict(conflict);
 
   const isZdiff3 = detectZdiff3(conflict);
   const adjustedConfidence = isZdiff3
@@ -177,6 +177,7 @@ export function toConflictHunk(conflict: RawConflict): ConflictHunk {
     type,
     confidence: adjustedConfidence,
     explanation,
+    ...(explanationRef ? { explanationRef } : {}),
     trace,
     ...(isZdiff3 ? { zdiff3: true } : {}),
   };

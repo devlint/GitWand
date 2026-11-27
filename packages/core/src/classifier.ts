@@ -155,6 +155,7 @@ export function classifyConflict(hunk: ClassifyInput): ClassifyResult {
         type: pattern.type,
         confidence: pattern.confidence(hunk),
         explanation: pattern.explanation(hunk),
+        explanationRef: pattern.explanationRef?.(hunk),
         trace,
       };
     }

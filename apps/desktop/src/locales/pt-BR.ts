@@ -2338,6 +2338,8 @@ const ptBR: Locale = {
       reject: "Rejeitar → resolver manualmente",
       accepted: "Aceito",
     },
+    aiSuggestedExplanation: "Resolução sugerida pela IA",
+    aiSuggestedExplanationUnstructured: "Resolução sugerida pela IA (resposta não estruturada)",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

@@ -164,6 +164,8 @@ export {
   tryRefMerge,
 } from "./refactoring/index.js";
 export type { RefMergeResult } from "./refactoring/index.js";
+export { EXPLANATION_PARAMS } from "./explanation-keys.js";
+export type { ExplanationKey, ExplanationRef } from "./explanation-keys.js";
 
 // v2.5 — LLM fallback resolver (consommateurs souhaitant invoquer directement)
 export { tryLlmFallbackResolve } from "./resolvers/llm-fallback.js";

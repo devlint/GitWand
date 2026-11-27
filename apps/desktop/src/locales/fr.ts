@@ -2348,6 +2348,8 @@ const fr: Locale = {
       reject: "Rejeter → résolution manuelle",
       accepted: "Accepté",
     },
+    aiSuggestedExplanation: "Résolution suggérée par l'IA",
+    aiSuggestedExplanationUnstructured: "Résolution suggérée par l'IA (réponse non structurée)",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

@@ -2372,6 +2372,8 @@ const en = {
       reject: "Reject \u2192 resolve manually",
       accepted: "Accepted",
     },
+    aiSuggestedExplanation: "Resolution suggested by the AI",
+    aiSuggestedExplanationUnstructured: "Resolution suggested by the AI (unstructured answer)",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

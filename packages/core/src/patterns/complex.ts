@@ -1,4 +1,5 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { makeScore } from "./utils.js";
 
 /** Fallback — s'applique toujours, placé en fin de registre */
@@ -20,6 +21,9 @@ const complex: PatternPlugin = {
 
   explanation(_h: ClassifyInput): string {
     return "A genuine conflict that needs a human. Both branches modified this block differently.";
+  },
+  explanationRef(_h: ClassifyInput): ExplanationRef {
+    return { key: "complex" };
   },
 
   passReason(_h: ClassifyInput): string {

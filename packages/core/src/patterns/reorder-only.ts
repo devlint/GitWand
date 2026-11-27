@@ -10,6 +10,7 @@
  */
 
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { scopeImpact, makeScore, normalizeLine } from "./utils.js";
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -77,6 +78,9 @@ const reorderOnly: PatternPlugin = {
     return hasBase
       ? "Both branches contain the same lines in a different order. Resolution: take the theirs ordering, or ours when the base matches theirs."
       : "Both branches contain the same lines in a different order. Resolution: take the theirs ordering.";
+  },
+  explanationRef(h: ClassifyInput): ExplanationRef {
+    return { key: h.baseLines.length > 0 ? "reorder" : "reorderNoBase" };
   },
 
   passReason(_h: ClassifyInput): string {

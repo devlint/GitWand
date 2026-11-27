@@ -187,6 +187,7 @@ export function wrapStructuralResult(
         penalties: [],
       },
       explanation: "Resolved by a structural merge (tree-sitter AST)",
+      explanationRef: { key: "structuralMerge" as const },
       trace: {
         steps: [],
         selected: "complex" as const,

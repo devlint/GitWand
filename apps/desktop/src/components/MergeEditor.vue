@@ -27,6 +27,7 @@ import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
 import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
 import { useAcceptedReports } from "../composables/useAcceptedReports";
 import { acceptedLabel, reportFor as buildReport, type ProposalKind, type ResolutionReport } from "../utils/resolutionReport";
+import { hunkExplanation } from "../utils/hunkExplanation";
 // Async on purpose, and NOT a contradiction of the static-import justification
 // above: that one covers thin BaseModal wrappers with no heavy dependencies.
 // CodeEditor is the entry point to CodeMirror (~400 KB), and it sits behind a
@@ -1304,7 +1305,7 @@ useResizeObserver(contentEl, drawMinimap);
               v-if="hunkForSegment(seg) && seg.hunkIndex != null && showResolutionPreviewFor(seg.hunkIndex, hunkForSegment(seg)!)"
               :resolved-lines="resolutions[seg.hunkIndex]!.resolvedLines!"
               :hunk-id="seg.hunkIndex"
-              :explanation="hunkForSegment(seg)!.explanation"
+              :explanation="hunkExplanation(hunkForSegment(seg)!)"
               :confidence-score="hunkForSegment(seg)!.confidence.score"
               :confidence-label="hunkForSegment(seg)!.confidence.label"
               :can-report="canReport"
@@ -1566,7 +1567,7 @@ useResizeObserver(contentEl, drawMinimap);
               v-if="hunkForSegment(seg)?.explanation"
               class="hunk-explanation muted"
             >
-              {{ hunkForSegment(seg)!.explanation }}
+              {{ hunkExplanation(hunkForSegment(seg)!) }}
             </div>
           </div>
         </template>

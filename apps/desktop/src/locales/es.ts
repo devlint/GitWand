@@ -2338,6 +2338,8 @@ const es: Locale = {
       reject: "Rechazar → resolver manualmente",
       accepted: "Aceptado",
     },
+    aiSuggestedExplanation: "Resolución sugerida por la IA",
+    aiSuggestedExplanationUnstructured: "Resolución sugerida por la IA (respuesta no estructurada)",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

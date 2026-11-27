@@ -103,6 +103,7 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
     formatResolver: resolverUsed,
     confidence,
     explanation: `Hunk resolved semantically by the "${resolverUsed}" resolver (merged by the format's structure, not by lines).`,
+    explanationRef: { key: "formatSemantic", params: [resolverUsed] },
     trace: {
       ...hunk.trace,
       selected: "format_semantic",
@@ -134,6 +135,7 @@ function reclassifyFormatConflict(hunk: ConflictHunk, resolverUsed: string, reas
     type: "complex",
     confidence: complexPattern.confidence(input),
     explanation: complexPattern.explanation(input),
+    explanationRef: complexPattern.explanationRef?.(input),
     trace: {
       ...hunk.trace,
       selected: "complex",

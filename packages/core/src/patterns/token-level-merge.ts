@@ -1,4 +1,5 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin, TokenMergeTrace, TokenMergeLineDetail } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { makeScore, scopeImpact, tokenizeLine } from "./utils.js";
 
 /**
@@ -155,6 +156,12 @@ const tokenLevelMerge: PatternPlugin = {
     if (!result) return "Token-level merge proposed.";
     const { pass1Count, pass2Count } = result;
     return `Merge proposed: ${pass1Count} line${pass1Count === 1 ? "" : "s"} resolved line-by-line, ${pass2Count} line${pass2Count === 1 ? "" : "s"} merged token-by-token. Confirmation required before it is applied.`;
+  },
+  explanationRef(h: ClassifyInput): ExplanationRef {
+    const result = computeTokenMergeCached(h);
+    return result
+      ? { key: "tokenMerge", params: [result.pass1Count, result.pass2Count] }
+      : { key: "tokenMergeFallback" };
   },
 
   passReason(_h: ClassifyInput): string {
