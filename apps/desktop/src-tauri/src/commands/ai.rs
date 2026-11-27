@@ -1122,9 +1122,58 @@ fn random_token() -> String {
     format!("{:016x}{:08x}", h.finish(), std::process::id())
 }
 
+/// The pid a run directory's name ends with (`run-<16 hex><8 hex pid>`, see
+/// `random_token`), or `None` for any other name.
+fn run_dir_owner_pid(name: &str) -> Option<u32> {
+    let token = name.strip_prefix("run-")?;
+    if token.len() != 24 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(&token[16..], 16).ok()
+}
+
+/// True when a process with this pid exists. A reused pid keeps a stale
+/// directory a while longer, which is harmless; a live run is never removed.
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: signal 0 only checks the pid exists. EPERM is a live process.
+    let probed = unsafe { libc::kill(pid, 0) };
+    probed == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    const STILL_ACTIVE: u32 = 259;
+    // SAFETY: plain Win32 calls; the handle is closed before returning.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            // Access denied still means the process exists.
+            return std::io::Error::last_os_error().raw_os_error() == Some(5);
+        }
+        let mut code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        !ok || code == STILL_ACTIVE
+    }
+}
+
 /// Remove `run-*` directories older than `max_age` — leftovers of a run whose
 /// process was killed before its `AiRunDir` was dropped. Called when the base
 /// is prepared (`ai_runs_base`). Symlinks are removed as links, never followed.
+/// A directory whose owner process (the pid in its name) is still alive is
+/// kept whatever its age: another GitWand process may have a run in it that
+/// has lasted longer than `max_age`.
 fn sweep_stale_run_dirs(base: &std::path::Path, max_age: std::time::Duration) {
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
@@ -1142,6 +1191,10 @@ fn sweep_stale_run_dirs(base: &std::path::Path, max_age: std::time::Duration) {
             .and_then(|m| m.elapsed().ok())
             .is_some_and(|age| age > max_age);
         if !old {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy().into_owned();
+        if run_dir_owner_pid(&name).is_some_and(process_alive) {
             continue;
         }
         if meta.file_type().is_dir() {
@@ -3047,16 +3100,61 @@ mod neutral_dir_tests {
         std::fs::create_dir_all(base.join("run-old/.claude")).unwrap();
         std::fs::create_dir_all(base.join("keep-me")).unwrap();
         let fresh = AiRunDir::create(&base, false).unwrap();
-        // Everything counts as stale with a zero max age, except non-run names.
+        // Everything counts as stale with a zero max age, except non-run names
+        // and runs whose process is alive (this one's, here).
         std::thread::sleep(std::time::Duration::from_millis(20));
         sweep_stale_run_dirs(&base, std::time::Duration::from_millis(1));
         assert!(!base.join("run-old").exists());
         assert!(base.join("keep-me").exists());
-        assert!(!fresh.path().exists());
+        assert!(fresh.path().exists());
         // With an hour's grace, a live run is left alone.
         let live = AiRunDir::create(&base, false).unwrap();
         sweep_stale_run_dirs(&base, std::time::Duration::from_secs(3600));
         assert!(live.path().exists());
+    }
+
+    #[test]
+    fn an_old_run_dir_is_kept_while_its_process_lives() {
+        let scratch = Scratch::new("sweep-owner");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        // A run of a live process (this one) and one of a process that has
+        // exited (a child we reaped), both past the max age.
+        let live = format!("run-{:016x}{:08x}", 1u64, std::process::id());
+        let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" });
+        if cfg!(windows) {
+            child.args(["/C", "exit"]);
+        }
+        let mut child = child.spawn().unwrap();
+        let dead_pid = child.id();
+        child.wait().unwrap();
+        let dead = format!("run-{:016x}{:08x}", 2u64, dead_pid);
+        std::fs::create_dir_all(base.join(&live)).unwrap();
+        std::fs::create_dir_all(base.join(&dead)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        sweep_stale_run_dirs(&base, std::time::Duration::from_millis(1));
+        assert!(base.join(&live).exists(), "a live process's run was swept");
+        assert!(
+            !base.join(&dead).exists(),
+            "an exited process's run was kept"
+        );
+    }
+
+    #[test]
+    fn run_dir_names_give_their_owner_pid() {
+        assert_eq!(run_dir_owner_pid("run-0123456789abcdef0000002a"), Some(42));
+        assert_eq!(run_dir_owner_pid("run-old"), None);
+        assert_eq!(run_dir_owner_pid("keep-me"), None);
+        assert_eq!(run_dir_owner_pid("run-0123456789abcdef0000002g"), None);
+        let scratch = Scratch::new("pid-name");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        let made = AiRunDir::create(&base, false).unwrap();
+        let name = made
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(run_dir_owner_pid(&name), Some(std::process::id()));
     }
 
     #[test]

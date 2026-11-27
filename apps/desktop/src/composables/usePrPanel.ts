@@ -628,7 +628,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // Reset pagination — first page only
     hasMore.value = true;
     try {
-      const page = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: PAGE_SIZE, offset: 0 });
+      const repo = cwd.value;
+      const editsSeen = _editSeq;
+      const fetched = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: PAGE_SIZE, offset: 0 });
+      const page = fetched.map((pr) => withEditsSince(repo, pr.number, editsSeen, pr));
       prs.value = page;
       // If gh returned fewer than asked, there's nothing more to fetch.
       hasMore.value = page.length >= PAGE_SIZE;
@@ -901,6 +904,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const key = detailKey(cwd.value, pr.number);
     const repo = cwd.value;
     const gen = ++_detailGen;
+    const editsSeen = _editSeq;
     _lastDetailFetch = { number: pr.number, at: Date.now() };
     detailError.value = null;
     try {
@@ -914,7 +918,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // fetch started since (two can overlap: an older answer landing last
       // would move the head backwards, which reads as another push).
       if (selectedPr.value?.number !== pr.number || cwd.value !== repo || gen !== _detailGen) return true;
-      prDetail.value = detail;
+      prDetail.value = withEditsSince(repo, pr.number, editsSeen, detail);
       prComments.value = comments;
       prReviews.value = reviews;
 
@@ -925,7 +929,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         prDetail.value.comments = 0;
       }
 
-      cache.setDetail(key, { detail, comments, reviews, checks: prChecks.value, issueComments: prIssueComments.value });
+      cache.setDetail(key, { detail: prDetail.value!, comments, reviews, checks: prChecks.value, issueComments: prIssueComments.value });
       syncListRollup(pr.number, detail.checksStatus);
     } catch (err: any) {
       // Keep the cached bundle on screen if revalidation failed.
@@ -1021,6 +1025,27 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   /** Start of the last detail fetch, for which PR. */
   let _lastDetailFetch: { number: number; at: number } = { number: -1, at: 0 };
   let _detailGen = 0;
+
+  // #234 — edits written by `updatePr`, so a read started before one cannot
+  // put the old title or body back when it lands after it. Each edit takes
+  // the next sequence number; a read notes the number current when it
+  // starts and lays every later edit of its PR over what it got. A read
+  // started after an edit is the forge's own answer and is taken as is.
+  let _editSeq = 0;
+  const _prEdits = new Map<string, { seq: number; edit: PrEdit }[]>();
+  const editKey = (repo: string, number: number) => `${repo}#${number}`;
+  function withEditsSince<T extends { title?: string; body?: string }>(
+    repo: string,
+    number: number,
+    since: number,
+    value: T,
+  ): T {
+    const edits = _prEdits.get(editKey(repo, number));
+    if (!edits) return value;
+    let out = value;
+    for (const e of edits) if (e.seq > since) out = { ...out, ...e.edit };
+    return out;
+  }
   /** A detail fetch started this close before the checks request (or after it)
    *  sees the same CI state: no need for another when the checks finish. */
   const DETAIL_FRESH_MS = 2_000;
@@ -1536,7 +1561,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       return false;
     }
     try {
+      const repo = cwd.value;
       await forge.value.updatePR(cwd.value, number, edit);
+      const k = editKey(repo, number);
+      _prEdits.set(k, [...(_prEdits.get(k) ?? []), { seq: ++_editSeq, edit: { ...edit } }]);
       if (prDetail.value?.number === number) {
         prDetail.value = { ...prDetail.value, ...edit };
         persistDetailCache();

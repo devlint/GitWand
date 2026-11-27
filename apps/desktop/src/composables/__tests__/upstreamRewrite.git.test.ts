@@ -57,6 +57,7 @@ import {
   forcePushRejectionLine,
   forcePushTarget,
   fetchPushRemote,
+  leftThroughRewrite,
 } from "../useBranchUpdatePrompt";
 
 function git(cwd: string, args: string[]): string {
@@ -194,6 +195,45 @@ describe("isLocalRewriteOfUpstream", () => {
     git(me, ["switch", "-q", "-c", "local-only"]);
     expect(await isLocalRewriteOfUpstream(me, "local-only")).toBe(false);
   }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("isLocalRewriteOfUpstream — a pull undone by a reset (#239)", () => {
+  it("is false when a collaborator's pulled commit was reset away", async () => {
+    const { teammate, me } = setup();
+    // The collaborator's commit reaches the user by a fast-forward pull:
+    // it is then the local tip, so it is in the branch's reflog.
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["pull", "-q", "--ff-only"]);
+    // The user undoes the pull and commits their own work instead.
+    git(me, ["reset", "-q", "--hard", "HEAD~1"]);
+    commit(me, "h", "mine\n", "my own work");
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is true when the user's own pushed commit was amended", async () => {
+    const { me } = setup();
+    commit(me, "h", "mine\n", "my own work");
+    git(me, ["push", "-q", "origin", "feat"]);
+    writeFileSync(join(me, "h"), "mine, amended\n");
+    git(me, ["commit", "-q", "-a", "--amend", "-m", "my own work, amended"]);
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(true);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("leftThroughRewrite", () => {
+  const T = "a".repeat(40);
+  it("accepts a tip left by a rebase or an amend", () => {
+    expect(leftThroughRewrite(`b\trebase (finish): refs/heads/x onto c\n${T}\tcommit: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\trebase -i (finish): refs/heads/x onto c\n${T}\tcommit: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\tcommit (amend): x\n${T}\tcommit: x\n`, T)).toBe(true);
+  });
+  it("refuses a tip left by a reset, a pull or a plain commit, and the current tip", () => {
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tpull: Fast-forward\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\tpull: Merge made by the 'ort' strategy.\n${T}\tcommit: x\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\tcommit: y\n${T}\tcommit: x\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`${T}\tcommit: x\n`, T)).toBe(false);
+  });
 });
 
 describe("isLocalRewriteOfUpstream — remote merge commits", () => {

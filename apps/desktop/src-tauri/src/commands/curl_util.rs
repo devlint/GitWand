@@ -18,6 +18,17 @@ pub(crate) fn bearer_config(tok: &str) -> String {
     auth_header_config("Bearer", tok)
 }
 
+/// `curl` with `args`, after `-q`: curl then reads no curlrc (`$CURL_HOME`,
+/// `$XDG_CONFIG_HOME`, `~`, `%APPDATA%`, `%USERPROFILE%`). A `location` line
+/// there would make an AI request follow a redirect with the key bound to
+/// another origin, and a `proxy` line would reroute forge and AI calls. curl
+/// only honours `-q` as its very first argument.
+fn curl_command(args: &[String]) -> std::process::Command {
+    let mut cmd = hidden_cmd("curl");
+    cmd.arg("-q").args(args);
+    cmd
+}
+
 /// Spawn `curl` with `args`, feeding `stdin_config` to its stdin when
 /// provided (used with `--config -` so secrets stay off argv).
 pub(crate) fn run_curl(
@@ -25,9 +36,8 @@ pub(crate) fn run_curl(
     stdin_config: Option<&str>,
 ) -> Result<std::process::Output, String> {
     use std::process::Stdio;
-    let mut cmd = hidden_cmd("curl");
-    cmd.args(args)
-        .stdout(Stdio::piped())
+    let mut cmd = curl_command(args);
+    cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(match stdin_config {
             Some(_) => Stdio::piped(),
@@ -417,6 +427,115 @@ fn parse_response_headers(raw: &str) -> std::collections::HashMap<String, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn curl_reads_no_curlrc() {
+        let args = vec!["-s".to_string(), "https://example.invalid".to_string()];
+        let cmd = curl_command(&args);
+        let got: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(got, ["-q", "-s", "https://example.invalid"]);
+    }
+
+    /// End to end: a curlrc that would add a header is ignored. Served by a
+    /// one-shot local listener that echoes the request back.
+    #[test]
+    fn a_curlrc_header_never_reaches_the_server() {
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpListener;
+
+        let home = std::env::temp_dir().join(format!(
+            "gitwand-curlrc-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+        let rc = "header = \"X-From-Curlrc: leaked\"\n";
+        std::fs::write(home.join(".curlrc"), rc).unwrap();
+        std::fs::write(home.join("_curlrc"), rc).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Never hang the suite: give up on a connection that does not come.
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now() > deadline {
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    }
+                    Err(e) => panic!("accept: {e}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            let mut head = String::new();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                head.push_str(&line);
+            }
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                head.len(),
+                head
+            );
+            let _ = stream.write_all(reply.as_bytes());
+        });
+
+        let args = vec![
+            "-s".to_string(),
+            "--max-time".to_string(),
+            "10".to_string(),
+            format!("http://127.0.0.1:{port}/"),
+        ];
+        let mut cmd = curl_command(&args);
+        for var in [
+            "HOME",
+            "CURL_HOME",
+            "XDG_CONFIG_HOME",
+            "APPDATA",
+            "USERPROFILE",
+        ] {
+            cmd.env(var, &home);
+        }
+        // A proxy from the environment would take the request elsewhere.
+        for var in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            cmd.env_remove(var);
+        }
+        let out = cmd.output().expect("curl runs");
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(&home);
+
+        let echoed = String::from_utf8_lossy(&out.stdout).to_lowercase();
+        assert!(echoed.starts_with("get / http/1.1"), "got: {echoed}");
+        assert!(
+            !echoed.contains("x-from-curlrc"),
+            "curlrc was read: {echoed}"
+        );
+    }
 
     #[test]
     fn parse_headers_lowercases_and_skips_status_line() {

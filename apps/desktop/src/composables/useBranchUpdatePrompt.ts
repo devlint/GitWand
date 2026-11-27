@@ -78,8 +78,12 @@ export async function isUpstreamRewriteOnly(cwd: string): Promise<boolean> {
  * Either signal is enough:
  *
  * - the upstream tip was once this branch's own tip (it is in the branch's
- *   reflog): the remote only holds an older version of local history. This
+ *   reflog) and the branch left it through a rewrite (a rebase or an
+ *   amend): the remote only holds an older version of local history. This
  *   survives conflicts resolved during the rebase, which change patches.
+ *   Left any other way it proves nothing (#239): a collaborator's commit
+ *   that arrived by a pull, then was undone by a reset, was a local tip too,
+ *   and a force push would drop it.
  * - every commit only the upstream has still exists locally as a
  *   patch-equivalent commit (covers a never-checked-out remote tip). Merge
  *   commits are NOT skipped here: a remote-only merge can carry content of its
@@ -101,7 +105,7 @@ export async function probeLocalRewriteOfUpstream(
   try {
     const [upstream, reflog, upstreamOnly, refs] = await Promise.all([
       gitExec(cwd, ["rev-parse", "@{upstream}"]),
-      gitExec(cwd, ["reflog", "show", "--format=%H", `refs/heads/${branch}`]),
+      gitExec(cwd, ["reflog", "show", "--format=%H%x09%gs", `refs/heads/${branch}`]),
       gitExec(cwd, ["rev-list", "--cherry-pick", "--right-only", "HEAD...@{upstream}"]),
       gitExec(cwd, ["rev-parse", "--symbolic-full-name", "@{upstream}", "@{push}"]),
     ]);
@@ -113,13 +117,38 @@ export async function probeLocalRewriteOfUpstream(
     // judged here: never prefer a force push for it.
     const [upRef, pushRef] = refs.stdout.trim().split("\n");
     if (refs.exitCode !== 0 || !upRef || upRef !== pushRef) return { safe: false, upstream: tip };
-    if (reflog.exitCode === 0 && reflog.stdout.split("\n").some((h) => h.trim() === tip)) {
+    if (reflog.exitCode === 0 && leftThroughRewrite(reflog.stdout, tip)) {
       return { safe: true, upstream: tip };
     }
     return { safe: upstreamOnly.exitCode === 0 && upstreamOnly.stdout.trim() === "", upstream: tip };
   } catch {
     return { safe: false, upstream: null };
   }
+}
+
+/**
+ * True when the branch's reflog (`%H<TAB>%gs`, newest first) shows `tip` as a
+ * past value of the branch, left by a rewrite: the entry right after it
+ * (newer) is a rebase (`rebase (finish): …`, `rebase -i (finish): …`) or an
+ * amend (`commit (amend): …`). A reset, a pull, a merge or a plain commit on
+ * top does not count: the tip may be someone else's commit undone locally.
+ */
+export function leftThroughRewrite(reflog: string, tip: string): boolean {
+  const entries = reflog
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => {
+      const tab = l.indexOf("\t");
+      return tab < 0
+        ? { hash: l.trim(), subject: "" }
+        : { hash: l.slice(0, tab).trim(), subject: l.slice(tab + 1) };
+    });
+  for (let i = 1; i < entries.length; i++) {
+    if (entries[i].hash !== tip) continue;
+    const left = entries[i - 1].subject;
+    if (/^rebase\b/.test(left) || left.startsWith("commit (amend)")) return true;
+  }
+  return false;
 }
 
 /**
