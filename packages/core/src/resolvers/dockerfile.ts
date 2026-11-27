@@ -137,7 +137,7 @@ function instructionKey(instr: Instruction): string {
 /** `ENV A=1 B=2`, `LABEL a=1 b=1` : plus d'une affectation sur la ligne. */
 function assignsSeveral(instr: Instruction): boolean {
   const rest = instr.raw.map((l) => l.replace(/\\\s*$/, "").trim()).join(" ").replace(/^\S+\s+/, "");
-  return (rest.match(/(?:^|\s)[A-Za-z_][\w.-]*=/g) ?? []).length > 1;
+  return (rest.match(/(?:^|\s)(?:"[^"]*"|'[^']*'|[A-Za-z_][\w.-]*)=/g) ?? []).length > 1;
 }
 
 /** Instructions dont la clé est la valeur (chemin, destination). */
@@ -256,6 +256,15 @@ function mergeStage(
 
   const merged = mergeBody(oursSplit.body, theirsSplit.body, hasBase ? baseSplit.body : undefined);
   if (!merged) return null;
+
+  // Commentaires intacts : ceux de ours, ou de theirs si une instruction
+  // sous un commentaire a changé de clé (WORKDIR, destination) ou disparu
+  // côté theirs — le côté dont toutes les instructions sont dans la sortie.
+  if (untouched) {
+    const keys = new Set(merged.map((e) => e.key));
+    const placeable = (g: Map<string, string[][]>) => [...g.keys()].every((k) => k === "END" || keys.has(k));
+    if (!placeable(oursSplit.groups) && placeable(theirsSplit.groups)) source = theirsSplit;
+  }
 
   // ── Remettre chaque groupe juste avant son instruction.
   const out: string[] = [];
@@ -446,14 +455,20 @@ function mergeBody(
     if (lines === null) return null;
     if (lines === "drop") continue;
 
-    // Ancre : l'instruction qui la précède de son côté, déjà dans la sortie.
+    // Ancre : après la dernière (dans la sortie) des instructions qui la
+    // précèdent de son côté — pas seulement la plus proche : si le côté qui
+    // mène a réordonné, un `USER node` ajouté en fin reste après tout ce qui
+    // le précédait, `RUN` compris.
+    const sideIndex = new Map(otherList.map((x, k) => [instructionKey(x), k]));
     let pos = 0;
-    for (let j = i - 1; j >= 0; j--) {
-      const found = out.findIndex((e) => e.key === instructionKey(otherList[j]));
-      if (found >= 0) { pos = found + 1; break; }
-    }
+    out.forEach((e, k) => {
+      if ((sideIndex.get(e.key) ?? Infinity) < i) pos = k + 1;
+    });
     // Après les insertions précédentes du même côté au même endroit.
     while (pos < out.length && out[pos].otherIdx !== undefined && out[pos].otherIdx! < i) pos++;
+    // Et avant tout ce qui la suit de son côté ; sinon les deux côtés se
+    // contredisent sur sa place : moteur textuel.
+    if (out.slice(0, pos).some((e) => (sideIndex.get(e.key) ?? -Infinity) > i)) return null;
     out.splice(pos, 0, { key, lines, otherIdx: i });
   }
 
@@ -532,7 +547,9 @@ export function tryResolveDockerfileConflict(
   // Stages de base, appariés avec les mêmes clés (base vide : diff2, sans
   // base ; mergeStage garde alors « prefer theirs »).
   const baseStageMap = new Map<string, Instruction[]>();
-  if (baseLines.length > 0) {
+  // Une base sans instruction (lignes vides, commentaires) : comme pas de base.
+  const baseHasInstructions = parseDockerfileInstructions(baseLines).some((i) => !repeatable(i));
+  if (baseHasInstructions) {
     const baseStages = splitByStage(parseDockerfileInstructions(baseLines));
     const baseKeys = stageKeys(baseStages);
     // Une base qui n'a pas les mêmes stages sans alias ne s'apparie pas ; la

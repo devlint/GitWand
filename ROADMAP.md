@@ -42,6 +42,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 
 **3.15.x — lot B: test net** (before v4.0 moves code)
 
+- `packages/core` history tests (`llm-prompt-history.test.ts` › "inserts the history section…", "returns each side's commits since the merge base…") time out under full-suite load (7–8 s against the 5 s default; seen during the lot A review, 3 runs out of 3 pass alone): they spawn git, give them a longer timeout or a shared fixture
 - **Test the log view epoch** (follow-up to v3.12.0, #214) — the filter/scope change that drops in-flight log pages and the forced-reload depth (`forcedReloadDepth`) have no test; a `useGitRepo` test for "filter change while a page is in flight" would lock them in.
 - `FileExplorerPanel.test.ts` › "mounts an editor holding the file's content" fails under full-suite load (`an editor is mounted: expected null`, seen at the v3.15.0 release; 3 runs out of 3 pass alone): wait for the lazy editor instead of a fixed number of ticks
 - `merge_back_without_a_recorded_base_still_works` fails under full-suite load (seen 2026-10-10, not reproduced in 15 runs of the `scratch` tests on 2026-11-26; the `pullAutostash` half of that report is fixed in #314)

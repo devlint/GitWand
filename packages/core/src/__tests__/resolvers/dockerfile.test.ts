@@ -738,3 +738,35 @@ describe("Dockerfile — review du lot A, passe 9", () => {
     expect(result.mergedContent ?? "").not.toBe([`ENV A=1`, `FROM x`, `RUN 1`].join("\n"));
   });
 });
+
+describe("Dockerfile — review du lot A, passe 10", () => {
+  it("theirs réordonne, ours ajoute USER en fin : USER ne remonte jamais au-dessus d'un RUN", () => {
+    const input = [`FROM n`, dockerHunk([`RUN x`, `ENV A=1`, `USER node`], [`RUN x`, `ENV A=1`], [`ENV A=1`, `RUN x`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    // USER node reste après tout ce qui le précédait dans ours, RUN compris.
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe([`FROM n`, `ENV A=1`, `RUN x`, `USER node`].join("\n"));
+  });
+
+  it("LABEL à clés entre guillemets : compte comme plusieurs clés", () => {
+    const input = [`FROM n`, dockerHunk([`LABEL a=2`], [`LABEL a=1`], [`LABEL "a"=1 "b"=2`])].join("\n");
+    expect(resolve(input, "Dockerfile").resolutions[0]?.resolutionReason ?? "").not.toMatch(/Dockerfile merged by stage/);
+  });
+
+  it("commentaires intacts, instruction en dessous changée d'un côté : fusion automatique", () => {
+    const input = [`FROM n`, dockerHunk(
+      [`# dir`, `WORKDIR /app`, `RUN x`, `ENV B=2`],
+      [`# dir`, `WORKDIR /app`, `RUN x`, `ENV B=1`],
+      [`# dir`, `WORKDIR /srv`, `RUN x`, `ENV B=1`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe([`FROM n`, `# dir`, `WORKDIR /srv`, `RUN x`, `ENV B=2`].join("\n"));
+  });
+
+  it("une base faite de lignes vides compte comme pas de base", () => {
+    const input = [`<<<<<<< ours`, `FROM a AS b`, `RUN x`, `ENV A=1`, `||||||| base`, ``, `=======`, `FROM a AS b`, `RUN x`, `ENV B=1`, `>>>>>>> theirs`].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.resolutions[0]?.resolutionReason ?? "").not.toMatch(/does not have the same unaliased stages/);
+  });
+});

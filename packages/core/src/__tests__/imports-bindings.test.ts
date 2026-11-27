@@ -166,3 +166,16 @@ describe("imports — review du lot A, passe 9", () => {
     expect(result.reason).not.toMatch(/require vs require/);
   });
 });
+
+describe("imports — review du lot A, passe 10", () => {
+  it("un require multi-déclarateurs liant X face à `import X` d'un autre module : collision signalée", () => {
+    const result = tryResolveImportConflict([], [`const a = require('m'), X = require('n');`], [`import X from 'p';`]);
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBe(true);
+  });
+
+  it("un require('x') écrit dans un commentaire n'est pas un déclarateur de plus", () => {
+    const result = tryResolveImportConflict([], [`const fs = require('fs') // like require('path')`], [`import path from 'path';`]);
+    expect(result.conflict).toBeUndefined();
+  });
+});

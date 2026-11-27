@@ -436,8 +436,12 @@ export function tryResolveImportConflict(
   // premier module ; si l'autre côté importe (de nouveau) l'un des modules
   // nommés plus loin sur la ligne, un nom peut être lié deux fois sans que la
   // suite le voie : conflit (prudence).
+  // Commentaires retirés : un `require('x')` écrit dans un commentaire n'est
+  // pas un déclarateur.
   const requiredOnLine = (raw: string): string[] =>
-    [...raw.matchAll(/require\s*\(\s*['"](.+?)['"]\s*\)/g)].map((m) => m[1]);
+    [...raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/, "").matchAll(/require\s*\(\s*['"](.+?)['"]\s*\)/g)].map(
+      (m) => m[1],
+    );
   const baseRawSet = new Set(baseImports.map((s) => s.raw));
   const multiClash = (mine: ImportStatement[], other: ImportStatement[]): ImportStatement | undefined => {
     for (const s of mine) {
@@ -706,13 +710,10 @@ export function tryResolveImportConflict(
     for (let j = i + 1; j < kept.length; j++) {
       const [a, b] = [kept[i], kept[j]];
       if (!a.source || !b.source || a.raw === b.raw) continue;
-      // D'un autre module, seule une collision lue compte (des liaisons
-      // illisibles ne disent rien d'un import sans rapport).
-      if (a.source !== b.source) {
-        const la = localBindings(a);
-        const lb = localBindings(b);
-        if (la === null || lb === null || !la.some((n) => lb.includes(n))) continue;
-      }
+      // Des liaisons illisibles (déjà hors des imports inchangés depuis la
+      // base) comptent comme une collision, quel que soit le module : un
+      // `require` à plusieurs déclarateurs peut lier le nom d'un autre import.
+      if (a.source !== b.source && !bindingsCollide(a, b)) continue;
       // Un import resté tel quel depuis la base n'est le changement de personne
       // (comme dans `sameSourceClash`) : un `require` illisible inchangé ne
       // bloque pas une fusion que git ferait bien.
