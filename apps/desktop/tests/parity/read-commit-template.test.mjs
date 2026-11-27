@@ -30,6 +30,14 @@ async function nodeReadTemplate(dev, cwd) {
   return res.ok ? { ok: true, value: data } : { ok: false, error: data.error };
 }
 
+/** HOME for both sides (set in beforeAll): git reads the same global config. */
+let home = "";
+
+/** The Rust side, with the dev-server's HOME. */
+function probe(cwd) {
+  return runProbe("read-commit-template", { cwd }, { HOME: home });
+}
+
 /** Repos made by this file, removed in `afterAll`. */
 const repos = [];
 
@@ -45,9 +53,6 @@ describe("parity: read-commit-template", () => {
   /** @type {Awaited<ReturnType<typeof startDevServer>>} */
   let dev;
 
-  /** HOME for both sides, so a `~` template resolves somewhere this file controls. */
-  let home = "";
-
   beforeAll(async () => {
     home = realpathSync(mkdtempSync(join(tmpdir(), "gw-commit-template-home-")));
     dev = await startDevServer({ env: { HOME: home } });
@@ -61,7 +66,7 @@ describe("parity: read-commit-template", () => {
 
   it("an empty commit.template answers null on both sides", async () => {
     const cwd = repoWithTemplate("");
-    const rust = runProbe("read-commit-template", { cwd });
+    const rust = probe(cwd);
     const node = await nodeReadTemplate(dev, cwd);
     expect(rust.ok, rust.error).toBe(true);
     expect(node).toEqual({ ok: true, value: { content: null } });
@@ -73,7 +78,7 @@ describe("parity: read-commit-template", () => {
     const path = join(cwd, ".gitmessage");
     writeFileSync(path, "Subject\n\n# Why:\n# Refs: #\n", "utf-8");
     execFileSync("git", ["-C", cwd, "config", "commit.template", path]);
-    const rust = runProbe("read-commit-template", { cwd });
+    const rust = probe(cwd);
     const node = await nodeReadTemplate(dev, cwd);
     expect(node).toEqual({ ok: true, value: { content: "Subject\n\n# Why:\n# Refs: #\n" } });
     expect(rust).toMatchObject({ ok: true, value: node.value });
@@ -82,7 +87,7 @@ describe("parity: read-commit-template", () => {
   it("a template under ~ is read from HOME on both sides", async () => {
     writeFileSync(join(home, ".gitmessage"), "From home\n", "utf-8");
     const cwd = repoWithTemplate("~/.gitmessage");
-    const rust = runProbe("read-commit-template", { cwd }, { HOME: home });
+    const rust = probe(cwd);
     const node = await nodeReadTemplate(dev, cwd);
     expect(node).toEqual({ ok: true, value: { content: "From home\n" } });
     expect(rust).toMatchObject({ ok: true, value: node.value });
@@ -93,7 +98,7 @@ describe("parity: read-commit-template", () => {
     const dir = join(cwd, "template-dir");
     mkdirSync(dir);
     execFileSync("git", ["-C", cwd, "config", "commit.template", dir]);
-    const rust = runProbe("read-commit-template", { cwd });
+    const rust = probe(cwd);
     const node = await nodeReadTemplate(dev, cwd);
     expect(node.ok).toBe(false);
     expect(rust.ok).toBe(false);
@@ -106,7 +111,7 @@ describe("parity: read-commit-template", () => {
     const path = join(cwd, "huge.txt");
     writeFileSync(path, "x".repeat(64 * 1024 + 1), "utf-8");
     execFileSync("git", ["-C", cwd, "config", "commit.template", path]);
-    const rust = runProbe("read-commit-template", { cwd });
+    const rust = probe(cwd);
     const node = await nodeReadTemplate(dev, cwd);
     expect(node.ok).toBe(false);
     expect(rust.ok).toBe(false);
@@ -118,7 +123,7 @@ describe("parity: read-commit-template", () => {
     const cwd = repoWithTemplate("");
     const path = join(cwd, "missing.txt");
     execFileSync("git", ["-C", cwd, "config", "commit.template", path]);
-    const rust = runProbe("read-commit-template", { cwd });
+    const rust = probe(cwd);
     const node = await nodeReadTemplate(dev, cwd);
     // The OS error text differs between Rust and Node; the prefix is shared.
     const prefix = `Failed to read commit template ${path}: `;

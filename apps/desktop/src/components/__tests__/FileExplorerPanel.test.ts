@@ -248,23 +248,23 @@ async function openTab(path: string, pin = true) {
   await loadCodeMirror();
   await settle();
   const content = files[path];
-  if (content !== undefined) await untilEditorShows(content);
+  if (content !== undefined) await untilEditorShows(path, content);
 }
 
 /**
  * Wait, up to `ms`, for the editor to show `text` (the opened file's), or for
- * the tab to show its diff instead. The file's own text, not any text: every
+ * the tab to show `path`'s diff instead. The file's own text, not any text: every
  * tab shares one editor host, so after a first tab the host is never empty.
  * Every current caller gets its text; a tab restored with edits keeps the
  * file's text inside them. Fails with its own message after `ms`, well under
  * the 5 s test timeout.
  */
-async function untilEditorShows(text: string, ms = 1_500) {
+async function untilEditorShows(path: string, text: string, ms = 1_500) {
   // `.cm-content` draws each line as its own element: its text has no newlines.
   const flat = text.trimEnd().replace(/\n/g, "");
   const deadline = Date.now() + ms;
-  const done = () =>
-    (editorDoc() ?? "").includes(flat) || container.querySelector(".fe__diff") !== null;
+  // The diff must be this file's: the previous tab's may still be up.
+  const done = () => (editorDoc() ?? "").includes(flat) || diffPath() === path;
   while (!done() && Date.now() < deadline) {
     await settle(1);
   }
