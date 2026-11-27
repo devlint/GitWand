@@ -2712,7 +2712,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                  in the provider UI). -->
             <div
               v-if="claudeCliInfo?.found && ((settings.aiProvider === 'claude' && !aiKeyConfigured)
-                || (settings.aiProvider === 'openai-compat' && (!aiKeyConfigured || !settings.aiApiEndpoint)))"
+                || (settings.aiProvider === 'openai-compat' && !settings.aiApiEndpoint))"
               class="sp-row"
             >
               <span class="sp-hint">{{ t('settings.aiProviderCliFallbackHint') }}</span>
@@ -3138,6 +3138,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                     </svg>
                   </button>
                 </div>
+                <span v-if="!aiKeyConfigured" class="sp-hint">{{ t('settings.aiCompatApiKeyOptional') }}</span>
                 <div v-if="aiKeyConfigured" class="sp-key-stored">
                   <span class="sp-hint">{{ t('settings.aiApiKeyStored', maskedApiKey) }}</span>
                   <button class="sp-text-btn" @click="clearApiKey">{{ t('settings.aiAuthDisconnect') }}</button>

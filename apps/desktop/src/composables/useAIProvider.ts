@@ -229,6 +229,16 @@ async function callClaude(
 }
 
 /**
+ * How a request to an OpenAI-compatible endpoint is authenticated: with the
+ * stored key when there is one (the backend refuses it, saying why, when it
+ * is bound to another origin), without any otherwise (a local llama.cpp,
+ * vLLM or LM Studio server needs none).
+ */
+export function openAICompatAuth(): "bearer" | "none" {
+  return isAiApiKeyConfigured() ? "bearer" : "none";
+}
+
+/**
  * Call an OpenAI-compatible Chat Completions API.
  */
 async function callOpenAICompat(
@@ -237,7 +247,7 @@ async function callOpenAICompat(
   userPrompt: string,
 ): Promise<string> {
   const endpoint = settings.aiApiEndpoint.replace(/\/+$/, "");
-  const res = await aiHttpRequest("POST", `${endpoint}/chat/completions`, "bearer", {
+  const res = await aiHttpRequest("POST", `${endpoint}/chat/completions`, openAICompatAuth(), {
     model: settings.aiModel,
     max_tokens: 4096,
     messages: [
@@ -575,8 +585,7 @@ export async function fetchOpenAICompatModels(
   opts: ModelListOptions = {},
 ): Promise<AIModelOption[]> {
   const base = endpoint.replace(/\/+$/, "");
-  const auth = isAiApiKeyConfigured() ? "bearer" : "none";
-  const res = await aiHttpRequest("GET", `${base}/models`, auth, undefined, 10, opts);
+  const res = await aiHttpRequest("GET", `${base}/models`, openAICompatAuth(), undefined, 10, opts);
   if (!isOk(res.status)) {
     throw new Error(`API error ${res.status}: ${res.body}`);
   }
@@ -700,7 +709,8 @@ export function useAIProvider() {
     const s = settings.value;
     if (s.aiEnabled) {
       if (s.aiProvider === "claude" && isAiApiKeyConfigured()) return true;
-      if (s.aiProvider === "openai-compat" && isAiApiKeyConfigured() && s.aiApiEndpoint) return true;
+      // A key is optional: a local server often needs none (openAICompatAuth).
+      if (s.aiProvider === "openai-compat" && s.aiApiEndpoint) return true;
       if (s.aiProvider === "ollama") return true;
       if (s.aiProvider === "claude-code-cli") return true;
       if (s.aiProvider === "codex-cli") return true;
@@ -733,7 +743,7 @@ export function useAIProvider() {
         !s.aiEnabled ||
         s.aiProvider === "none" ||
         (s.aiProvider === "claude" && !isAiApiKeyConfigured()) ||
-        (s.aiProvider === "openai-compat" && (!isAiApiKeyConfigured() || !s.aiApiEndpoint));
+        (s.aiProvider === "openai-compat" && !s.aiApiEndpoint);
       const provider = misconfigured && _claudeCliAvailable.value
         ? "claude-code-cli"
         : s.aiProvider;
@@ -794,7 +804,7 @@ export function useAIProvider() {
       !s.aiEnabled ||
       s.aiProvider === "none" ||
       (s.aiProvider === "claude" && !isAiApiKeyConfigured()) ||
-      (s.aiProvider === "openai-compat" && (!isAiApiKeyConfigured() || !s.aiApiEndpoint));
+      (s.aiProvider === "openai-compat" && !s.aiApiEndpoint);
     const provider = misconfigured && _claudeCliAvailable.value
       ? "claude-code-cli"
       : s.aiProvider;
@@ -847,7 +857,7 @@ export function useAIProvider() {
     if (!s.aiEnabled || s.aiProvider === "none") return null;
     if (s.aiProvider === "mcp") return null; // wired in PLAN §5.2 (Phase 2)
     if (s.aiProvider === "claude" && !isAiApiKeyConfigured()) return null;
-    if (s.aiProvider === "openai-compat" && (!isAiApiKeyConfigured() || !s.aiApiEndpoint)) return null;
+    if (s.aiProvider === "openai-compat" && !s.aiApiEndpoint) return null;
     return {
       async call(prompt: string): Promise<string> {
         // Forward the core's prompt verbatim — it already contains the

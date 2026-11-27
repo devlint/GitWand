@@ -1560,6 +1560,7 @@ const zhCN: Locale = {
     aiCompatEndpoint: "API 端点",
     aiCompatEndpointHint: "兼容 OpenAI、Mistral、Groq、Azure 等。",
     aiCompatApiKey: "API 密钥",
+    aiCompatApiKeyOptional: "\u53ef\u9009\uff1a\u5bf9\u4e8e\u4e0d\u9700\u8981\u5bc6\u94a5\u7684\u670d\u52a1\u5668\uff08llama.cpp\u3001vLLM\u3001LM Studio\uff09\uff0c\u8bf7\u7559\u7a7a\u3002",
     aiOllamaUrl: "Ollama URL",
     aiOllamaTest: "测试连接",
     aiOllamaConnected: "已连接 — {0} 个可用模型",

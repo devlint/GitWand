@@ -979,6 +979,23 @@ function parseAiEndpoint(raw) {
   if (u.username || u.password) throw new Error("AI endpoint must not carry credentials");
   return u;
 }
+/** Hosted providers the app's gate lets through (`KNOWN_PROVIDER_ORIGINS`). */
+const DEV_KNOWN_AI_ORIGINS = ["https://api.anthropic.com", "https://api.openai.com"];
+/**
+ * The app's open-endpoint gate, without its question: loopback and the known
+ * providers pass, any other origin only when GITWAND_DEV_AI_ORIGINS lists it.
+ */
+function devAiOriginAllowed(u) {
+  const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const loopback =
+    host === "localhost" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) || host === "::1";
+  if (loopback || DEV_KNOWN_AI_ORIGINS.includes(u.origin)) return true;
+  const allowed = String(process.env.GITWAND_DEV_AI_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+  return allowed.includes(u.origin);
+}
 const devAiKeyInfo = () => (devAiApiKey ? { hint: aiKeyHint(devAiApiKey), origin: devAiApiKeyOrigin } : null);
 /** dev:web stand-in for the telemetry opt-out marker. */
 let devTelemetryEnabled = true;
@@ -8127,10 +8144,10 @@ async function handleRequest(req, res) {
     // POST /api/ai-http-request { method, url, body?, auth, timeoutSecs? }
     // Mirrors commands::ai_http::ai_http_request: validation, key binding and
     // error text included. Answers { status, body } whatever the upstream status.
-    // Not mirrored: the native question the app asks before a request to an
-    // origin that is neither loopback nor a known provider
-    // (`check_open_endpoint_with`). The dev server has no dialog to
-    // show, so under dev:web such a request goes out unasked.
+    // The open-endpoint gate (`check_open_endpoint_with`) passes loopback and
+    // the known providers, as in the app. The app asks about any other
+    // origin; the dev server has no dialog to show, so it refuses it unless
+    // GITWAND_DEV_AI_ORIGINS lists it (comma-separated origins).
     if (url.pathname === "/api/ai-http-request" && req.method === "POST") {
       const { method, url: target, body, auth, timeoutSecs } = await readBody(req);
       let parsed;
@@ -8138,6 +8155,11 @@ async function handleRequest(req, res) {
       catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
       if (method !== "GET" && method !== "POST") {
         return jsonResponse(req, res, { error: `Unsupported method: ${method}` }, 400);
+      }
+      if (!devAiOriginAllowed(parsed)) {
+        return jsonResponse(req, res, {
+          error: `dev:web refuses AI requests to ${parsed.origin}: the app would ask first, and this server cannot. Allow it with GITWAND_DEV_AI_ORIGINS=${parsed.origin}`,
+        }, 403);
       }
       const headers = { Accept: "application/json" };
       if (auth === "anthropic" || auth === "bearer") {

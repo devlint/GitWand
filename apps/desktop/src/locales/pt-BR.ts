@@ -1483,6 +1483,7 @@ const ptBR: Locale = {
     aiCompatEndpoint: "Endpoint da API",
     aiCompatEndpointHint: "Compatível com OpenAI, Mistral, Groq, Azure, etc.",
     aiCompatApiKey: "Chave de API",
+    aiCompatApiKeyOptional: "Opcional: deixe em branco para um servidor que n\u00e3o precisa de chave (llama.cpp, vLLM, LM Studio).",
     aiOllamaUrl: "URL do Ollama",
     aiOllamaTest: "Testar conexão",
     aiOllamaConnected: "Conectado — {0} modelo(s) disponível(is)",

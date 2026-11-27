@@ -1491,6 +1491,7 @@ const fr: Locale = {
     aiCompatEndpoint: "Endpoint API",
     aiCompatEndpointHint: "Compatible OpenAI, Mistral, Groq, Azure, etc.",
     aiCompatApiKey: "Cl\u00e9 API",
+    aiCompatApiKeyOptional: "Facultative : laissez-la vide pour un serveur qui n\u2019en demande pas (llama.cpp, vLLM, LM Studio).",
     aiOllamaUrl: "URL Ollama",
     aiOllamaTest: "Tester la connexion",
     aiOllamaConnected: "Connect\u00e9 \u2014 {0} mod\u00e8le(s) disponible(s)",

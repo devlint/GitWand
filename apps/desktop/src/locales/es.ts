@@ -1482,6 +1482,7 @@ const es: Locale = {
     aiCompatEndpoint: "Endpoint de API",
     aiCompatEndpointHint: "Compatible con OpenAI, Mistral, Groq, Azure, etc.",
     aiCompatApiKey: "Clave API",
+    aiCompatApiKeyOptional: "Opcional: d\u00e9jala vac\u00eda para un servidor que no la necesita (llama.cpp, vLLM, LM Studio).",
     aiOllamaUrl: "URL de Ollama",
     aiOllamaTest: "Probar conexión",
     aiOllamaConnected: "Conectado — {0} modelo(s) disponible(s)",

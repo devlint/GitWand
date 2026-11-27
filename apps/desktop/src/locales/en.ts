@@ -1506,6 +1506,7 @@ const en = {
     aiCompatEndpoint: "API endpoint",
     aiCompatEndpointHint: "Compatible with OpenAI, Mistral, Groq, Azure, etc.",
     aiCompatApiKey: "API key",
+    aiCompatApiKeyOptional: "Optional: leave it empty for a server that needs no key (llama.cpp, vLLM, LM Studio).",
     // AI tab — Ollama
     aiOllamaUrl: "Ollama URL",
     aiOllamaTest: "Test connection",
