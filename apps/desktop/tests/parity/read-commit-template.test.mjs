@@ -16,7 +16,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
-import { runProbe } from "./probe.mjs";
+import { isolatedEnv, runProbe } from "./probe.mjs";
 import { mkTempRepo } from "./fixtures.mjs";
 
 /** POST /api/read-commit-template, in the same {ok, value, error} shape as runProbe. */
@@ -30,12 +30,15 @@ async function nodeReadTemplate(dev, cwd) {
   return res.ok ? { ok: true, value: data } : { ok: false, error: data.error };
 }
 
-/** HOME for both sides (set in beforeAll): git reads the same global config. */
+/**
+ * HOME for both sides (set in beforeAll), so git reads the same global
+ * config; both children get only `isolatedEnv`, never the runner's secrets.
+ */
 let home = "";
 
 /** The Rust side, with the dev-server's HOME. */
 function probe(cwd) {
-  return runProbe("read-commit-template", { cwd }, { HOME: home });
+  return runProbe("read-commit-template", { cwd }, isolatedEnv({ HOME: home }), { inherit: false });
 }
 
 /** Repos made by this file, removed in `afterAll`. */
@@ -55,7 +58,7 @@ describe("parity: read-commit-template", () => {
 
   beforeAll(async () => {
     home = realpathSync(mkdtempSync(join(tmpdir(), "gw-commit-template-home-")));
-    dev = await startDevServer({ env: { HOME: home } });
+    dev = await startDevServer({ env: isolatedEnv({ HOME: home }), inherit: false });
   }, 15_000);
 
   afterAll(async () => {

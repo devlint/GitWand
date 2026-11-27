@@ -51,6 +51,11 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
   - `merge_back_without_a_recorded_base_still_works`: not reproduced in 45 runs of the `scratch` tests alongside the full Rust suite (none in 15 runs on 2026-11-26 either); left as is. The `scratch.rs` test repos now remove their parent dir, where the task worktrees are created, instead of leaving it in the temp dir
   - parity-probe entries and parity tests for `read_commit_template` (empty key, template, directory, over 64 KiB, missing file) and `ai_http_request` (`none` auth against a loopback server: GET, POST body and headers, error status, redirect not followed, refused URLs and method)
 
+- Found in the lot B review, production behaviour, not changed there (tests only): `read_commit_template` (Rust and dev-server alike)
+  - resolves a relative `commit.template` (`.gitmessage`) from the app's working directory, where git resolves it from the repository: join it onto the repo
+  - the dev-server reads a template that is not valid UTF-8 with U+FFFD where Rust refuses it (the #188 shape): decode with `fatal: true` and refuse the same way, with a Latin-1 parity case
+  - expands `~user/x` as `$HOME` + `user/x`: expand only a bare `~` or `~/`
+
 **3.15.x — lot C: security & data safety**
 
 - #239 treats a pull later undone by a local reset as a local rewrite (the collaborator's commit was once a local tip), so Force Push is offered and would drop it. The `--force-if-includes` fallback (a force push whose destination tip cannot be read) has the same blind spot: that commit is in the branch's reflog, so git accepts the push. Judging it needs to tell "pulled, then reset away on purpose" from "rewritten". Explicit force pushes are not affected: they show the commits they will overwrite and lease that tip

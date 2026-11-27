@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { startDevServer } from "./dev-server-runner.mjs";
-import { probePath } from "./probe.mjs";
+import { isolatedEnv, probePath } from "./probe.mjs";
 
 /** POST /api/ai-http-request, in the same {ok, value, error} shape as runProbe. */
 async function nodeAiRequest(dev, args) {
@@ -35,6 +35,8 @@ async function nodeAiRequest(dev, args) {
   const data = await res.json().catch(() => ({}));
   return res.ok ? { ok: true, value: data } : { ok: false, error: data.error };
 }
+
+const NO_PROXY_ENV = { NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
 
 /** An empty HOME / CURL_HOME for the probe, so no curlrc is read. */
 const curlHome = mkdtempSync(join(tmpdir(), "gw-parity-curl-home-"));
@@ -67,12 +69,9 @@ function runProbeAsync(args) {
   }
   return new Promise((resolve) => {
     // Only what the probe and curl need (AGENTS.md: no secrets in a child's
-    // environment), so no proxy variable either: curl honours them and fetch
-    // does not, and without them both reach the loopback fixture directly.
-    const env = { NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
-    for (const k of ["PATH", "Path", "SystemRoot", "TEMP", "TMP", "TMPDIR"]) {
-      if (process.env[k] !== undefined) env[k] = process.env[k];
-    }
+    // environment), so no proxy variable either: both sides reach the
+    // loopback fixture directly.
+    const env = isolatedEnv(NO_PROXY_ENV);
     // Nor the user's curlrc, wherever curl looks for it (CURL_HOME,
     // XDG_CONFIG_HOME, HOME, APPDATA, USERPROFILE): a `location` or `proxy`
     // line there would change curl's answer, and `run_curl` does not pass
@@ -119,7 +118,9 @@ describe("parity: ai-http-request", { timeout: CASE_TIMEOUT_MS }, () => {
   let base = "";
 
   beforeAll(async () => {
-    dev = await startDevServer();
+    // The same minimal environment: no proxy variable (Node 24's
+    // NODE_USE_ENV_PROXY would route fetch through one) and no secrets.
+    dev = await startDevServer({ env: isolatedEnv(NO_PROXY_ENV), inherit: false });
     upstream = createServer((req, res) => {
       let body = "";
       req.on("data", (d) => (body += d));

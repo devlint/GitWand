@@ -273,11 +273,18 @@ async function untilEditorShows(path: string, text: string, ms = EDITOR_WAIT_MS)
   const flat = text.trimEnd().replace(/\n/g, "");
   const deadline = Date.now() + ms;
   // The diff must be this file's: the previous tab's may still be up.
-  // An editor must be up: every string, the empty file's "" included, contains "".
-  const done = () => {
+  const explorer = useFileExplorer();
+  const isActive = () =>
+    explorer.tabsFor(REPO).find((t) => t.id === explorer.activeTabId(REPO))?.path === path;
+  // The tab must be the active one, then show this file: the editor host is
+  // shared, so the previous tab's text may still be there. An empty file
+  // needs an empty editor (every string contains "").
+  const shows = () => {
     const doc = editorDoc();
-    return (doc !== null && doc.includes(flat)) || diffPath() === path;
+    if (doc === null) return false;
+    return flat === "" ? doc === "" : doc.includes(flat);
   };
+  const done = () => isActive() && (shows() || diffPath() === path);
   while (!done() && Date.now() < deadline) {
     await settle(1);
   }

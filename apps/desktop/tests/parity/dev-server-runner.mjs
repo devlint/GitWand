@@ -54,9 +54,10 @@ async function waitForPort(port, deadline) {
  *  - `stop()` : coupe le process et attend sa fin.
  *
  * `env` s'ajoute à l'environnement du dev-server (hooks de test, ex.
- * `GITWAND_COMBINED_BUDGET_BYTES`).
+ * `GITWAND_COMBINED_BUDGET_BYTES`) ; avec `inherit: false`, il le remplace
+ * (voir `isolatedEnv` dans probe.mjs).
  */
-export async function startDevServer({ env } = {}) {
+export async function startDevServer({ env, inherit = true } = {}) {
   // On demande l'allocation d'un port libre via un listener éphémère, qu'on
   // ferme immédiatement après avoir récupéré son port. Ce n'est pas 100 %
   // race-free (un autre process pourrait réclamer ce port entre-temps) mais
@@ -79,7 +80,7 @@ export async function startDevServer({ env } = {}) {
 
   const child = spawn("node", [DEV_SERVER, "--port", String(port)], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, NO_COLOR: "1", ...env },
+    env: { ...(inherit ? process.env : {}), NO_COLOR: "1", ...env },
   });
 
   // Collecte les logs pour diagnostic si le process meurt avant d'être prêt.
