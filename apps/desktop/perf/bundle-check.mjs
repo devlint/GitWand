@@ -153,7 +153,9 @@ const BUDGETS = {
   // After the lot C review: 1,008 KB (the PR edit overlay's read tracking,
   // the image URL resolution in useSafeHtml, the local-network rule of the
   // OpenAI-compatible provider).
-  main_max_kb: 1009,
+  // QA follow-ups (#323): 1,010 KB — the imports resolver's indentation,
+  // quote and comment handling (`@gitwand/core` is in the main chunk).
+  main_max_kb: 1011,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked
