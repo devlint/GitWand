@@ -32,7 +32,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 - #315, known gap, accepted: a ref that moves and comes back between two reads leaves stale decorations until the next ref move or a manual refresh.
 - #314, not tested: Windows, a real `glab`, the native dialog in the packaged app (see the checklist below). Its leftovers are in lot C.
 - #265: a stale block reason can linger up to one fetch tick (30 s); a branch literally named `HEAD` or `unknown` is treated as detached.
-- **Bundle budget** — 1,002 KB after 3.15.0 (main chunk measured at 1,001 KB). These raises were the last ones: from v4.0 a feature lands in a lazy chunk.
+- **Bundle budget** — 1,002 KB after 3.15.0 (main chunk measured at 1,001 KB), then 1,005 KB for the lot A resolvers (measured at 1,004 KB: `@gitwand/core` is in the main chunk). These raises were the last ones: from v4.0 a feature lands in a lazy chunk.
 
 **3.15.x — lot A: resolvers** (wrong resolutions a user can see)
 
@@ -42,12 +42,19 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 
 **3.15.x — lot B: test net** (before v4.0 moves code)
 
-- `packages/core` history tests (`llm-prompt-history.test.ts` › "inserts the history section…", "returns each side's commits since the merge base…") time out under full-suite load (7–8 s against the 5 s default; seen during the lot A review, 3 runs out of 3 pass alone): they spawn git, give them a longer timeout or a shared fixture
-- **Test the log view epoch** (follow-up to v3.12.0, #214) — the filter/scope change that drops in-flight log pages and the forced-reload depth (`forcedReloadDepth`) have no test; a `useGitRepo` test for "filter change while a page is in flight" would lock them in.
-- `FileExplorerPanel.test.ts` › "mounts an editor holding the file's content" fails under full-suite load (`an editor is mounted: expected null`, seen at the v3.15.0 release; 3 runs out of 3 pass alone): wait for the lazy editor instead of a fixed number of ticks
-- `merge_back_without_a_recorded_base_still_works` fails under full-suite load (seen 2026-10-10, not reproduced in 15 runs of the `scratch` tests on 2026-11-26; the `pullAutostash` half of that report is fixed in #314)
-- `FileExplorerPanel — editor wiring > mounts an editor holding the file's content` failed once in CI on 2026-11-26 (#316) and passed on re-run: it asserts `.cm-editor` after `openTab()` + `settle()` without awaiting `loadCodeMirror()`, which is lazy. Await it before asserting
-- parity-probe dispatch entries for `read_commit_template` and `ai_http_request` (`none` auth against a local fixture server)
+- _Done on `fix/test-net`, unreleased (tests only, nothing user-visible):_
+  - `packages/core` history tests that spawn git get a 30 s timeout (`GIT_TEST_TIMEOUT`), and the prompt-history tests share one read-only repo instead of building four (they took 7–8 s against the 5 s default under the full suite's load)
+  - the log view epoch (#214) is tested: a scroll page or a `loadLog` result fetched for the view a filter change left is dropped, a forced reload refetches down to the viewed row plus a page (one page with no viewed row), and a filter change fetches one page and forgets the old view's depth. Removing the request-number, log-generation or anchor-reset guard, or the depth formula, fails a test; the epoch counter itself cannot be pinned: every view change also starts a newer request and bumps the log generation, which drop the same results
+  - `FileExplorerPanel` tests await the lazy CodeMirror chunk and the file's text in the editor instead of a fixed number of ticks (the two roadmap entries for that flake were one)
+  - parity `stack.test.mjs` › "stack-status is identical for every fixture state" gets 120 s (eleven stack fixtures: 17 s alone, 76 s against its 60 s in the full parity run on a loaded machine)
+  - `useStacks-realBackend` › "retries a failed after-restack handling…" gets 60 s (it spawns git synchronously at every step: 35 s against its 30 s under heavy load, seen during this lot)
+  - `merge_back_without_a_recorded_base_still_works`: not reproduced in 45 runs of the `scratch` tests alongside the full Rust suite (none in 15 runs on 2026-11-26 either); left as is. The `scratch.rs` test repos now remove their parent dir, where the task worktrees are created, instead of leaving it in the temp dir
+  - parity-probe entries and parity tests for `read_commit_template` (empty key, template, directory, over 64 KiB, missing file) and `ai_http_request` (`none` auth against a loopback server: GET, POST body and headers, error status, redirect not followed, refused URLs and method)
+
+- Found in the lot B review, production behaviour, not changed there (tests only): `read_commit_template` (Rust and dev-server alike)
+  - resolves a relative `commit.template` (`.gitmessage`) from the app's working directory, where git resolves it from the repository: join it onto the repo
+  - the dev-server reads a template that is not valid UTF-8 with U+FFFD where Rust refuses it (the #188 shape): decode with `fatal: true` and refuse the same way, with a Latin-1 parity case
+  - expands `~user/x` as `$HOME` + `user/x`: expand only a bare `~` or `~/`
 
 **3.15.x — lot C: security & data safety**
 
@@ -59,6 +66,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 - the `ai-runs` sweep (24 h, at base setup) could remove a run directory still in use by a run older than that in another GitWand process
 - `img-src` stays `https: http:` for self-hosted forge avatars — proxy or allowlist avatar hosts, then tighten it
 - #234: a background revalidation racing a save can briefly show the old title/body of a PR (confirmed still open when #314 merged)
+- curl reads the user's curlrc (`$CURL_HOME`, `$XDG_CONFIG_HOME`, `~`, `%APPDATA%` on Windows): `run_curl` (`curl_util.rs`) does not pass `-q` first, so a `location` line there makes an AI request follow a redirect with its bound key, and a `proxy` line reroutes forge and AI calls. Pass `-q` as curl's first argument for every caller, and consider which environment variables `run_curl` should pass through (seen in the lot B review)
 - `ai_http_request` under `pnpm dev:web` goes to any origin unasked: the dev server has no native dialog to mirror `check_open_endpoint_with` (from #314)
 - allowed AI endpoints cannot be listed or revoked from Settings (they live in the keychain, service `gitwand:ai`, one account `open-endpoint:<SHA-256 of the origin>` per origin); a refusal lasts until restart or an explicit Test connection / Refresh (from #314)
 - an OpenAI-compatible server without a key: the model list loads (`auth: "none"`), but `isAvailable` requires a key and `callOpenAICompat` always sends `bearer`, so completions are never offered. Support it end to end or say so in Settings (from #314)

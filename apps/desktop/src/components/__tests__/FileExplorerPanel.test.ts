@@ -133,7 +133,7 @@ import FileExplorerPanel from "../FileExplorerPanel.vue";
 import { useFileExplorer } from "../../composables/useFileExplorer";
 import { useWorkspaceScope } from "../../composables/useWorkspaceScope";
 import { useLogs } from "../../composables/useLogs";
-import { loadCodeMirror } from "../../utils/codemirrorLibs";
+import { detectLanguageExtension, loadCodeMirror } from "../../utils/codemirrorLibs";
 import { useTheme } from "../../composables/useTheme";
 import { clipboardWriteText, getGitDiff, listRepoDir, pathExists, readFile, revealInFileManager, writeFile } from "../../utils/backend";
 
@@ -219,6 +219,14 @@ function deferred<T>() {
 }
 
 /**
+ * How long `openTab` waits for the editor, and the tests' timeout above it
+ * (a test may open several tabs). Cold lazy chunks under full-suite load are
+ * what this file waits on; the default 5 s left no room for them.
+ */
+const EDITOR_WAIT_MS = 5_000;
+vi.setConfig({ testTimeout: 20_000 });
+
+/**
  * Let every pending microtask AND macrotask drain.
  *
  * `nextTick` alone is not enough here: mounting awaits the dynamic CodeMirror
@@ -241,7 +249,46 @@ async function settle(rounds = 25) {
  */
 async function openTab(path: string, pin = true) {
   await useFileExplorer().openTab(REPO, REPO, path, pin);
+  // CodeMirror is a lazy chunk: the first test of the file pays for its cold
+  // import, which a fixed number of ticks did not always cover under the
+  // full suite's load. Await the same cached promises the panel awaits, then
+  // wait for the editor of a readable file to show its text.
+  await loadCodeMirror();
+  await detectLanguageExtension(path); // the grammar, also a lazy chunk, cached per language
   await settle();
+  const content = files[path];
+  if (content !== undefined) await untilEditorShows(path, content);
+}
+
+/**
+ * Wait, up to `ms`, for the editor to show `text` (the opened file's), or for
+ * the tab to show `path`'s diff instead. The file's own text, not any text: every
+ * tab shares one editor host, so after a first tab the host is never empty.
+ * Every current caller gets its text; a tab restored with edits keeps the
+ * file's text inside them. Fails with its own message after `ms`, before
+ * the test's own timeout.
+ */
+async function untilEditorShows(path: string, text: string, ms = EDITOR_WAIT_MS) {
+  // `.cm-content` draws each line as its own element: its text has no newlines.
+  const flat = text.trimEnd().replace(/\n/g, "");
+  const deadline = Date.now() + ms;
+  // The diff must be this file's: the previous tab's may still be up.
+  const explorer = useFileExplorer();
+  const isActive = () =>
+    explorer.tabsFor(REPO).find((t) => t.id === explorer.activeTabId(REPO))?.path === path;
+  // The tab must be the active one, then show this file: the editor host is
+  // shared, so the previous tab's text may still be there. An empty file
+  // needs an empty editor (every string contains "").
+  const shows = () => {
+    const doc = editorDoc();
+    if (doc === null) return false;
+    return flat === "" ? doc === "" : doc.includes(flat);
+  };
+  const done = () => isActive() && (shows() || diffPath() === path);
+  while (!done() && Date.now() < deadline) {
+    await settle(1);
+  }
+  if (!done()) throw new Error(`the editor never showed the opened file (${JSON.stringify(flat.slice(0, 40))})`);
 }
 
 /** The live EditorView's text, or null when no editor is mounted. */

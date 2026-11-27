@@ -22,6 +22,13 @@ export const HERMETIC_GIT_ENV = {
   GIT_COMMITTER_DATE: "2026-09-01T12:00:00Z",
 };
 
+/**
+ * Timeout for a test (or hook) that spawns git. Alone each one takes well
+ * under a second, but under the full suite's load the history tests took
+ * 7–8 s against vitest's 5 s default.
+ */
+export const GIT_TEST_TIMEOUT = 30_000;
+
 export interface Repo {
   dir: string;
   git(args: string[], opts?: { allowFail?: boolean }): string;

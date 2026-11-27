@@ -79,5 +79,7 @@ describe("useStacks against the real stack service (wave 3, item 7)", () => {
     // Handled: a third refresh does not offer again.
     await s.refresh(cwd);
     expect(offerPush).toHaveBeenCalledTimes(2);
-  }, 30_000);
+    // Every step spawns git synchronously: under heavy load (the Rust suite
+    // running alongside) this took 35 s, so 30 s was not enough.
+  }, 60_000);
 });

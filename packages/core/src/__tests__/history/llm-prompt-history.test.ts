@@ -1,12 +1,16 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveAsync } from "../../resolver/index.js";
 import type { LlmEndpoint } from "../../types.js";
-import { makeRepo, type Repo } from "../utils/git-repo.js";
+import { makeRepo, GIT_TEST_TIMEOUT, type Repo } from "../utils/git-repo.js";
 
+// One repo for the whole file: every test only reads it (the runner runs
+// `git log` / `git diff`), and building it spawns about ten git processes.
 let repo: Repo;
-afterEach(() => repo?.cleanup());
+let fixture: { content: string; oursSha: string; theirsSha: string };
+beforeAll(() => { fixture = setup(); }, GIT_TEST_TIMEOUT);
+afterAll(() => repo?.cleanup());
 
 const lines = (...l: string[]) => l.join("\n") + "\n";
 
@@ -35,9 +39,9 @@ function setup(): { content: string; oursSha: string; theirsSha: string } {
   };
 }
 
-describe("llm_proposed prompt — history", () => {
+describe("llm_proposed prompt — history", { timeout: GIT_TEST_TIMEOUT }, () => {
   it("inserts the history section between the context and the hunk", async () => {
-    const { content, oursSha, theirsSha } = setup();
+    const { content, oursSha, theirsSha } = fixture;
     const endpoint = capturing();
     const result = await resolveAsync(content, "cfg.txt", {
       llmFallback: { enabled: true, endpoint },
@@ -58,7 +62,7 @@ describe("llm_proposed prompt — history", () => {
   });
 
   it("sends the unchanged prompt and marks history disabled without a runner", async () => {
-    const { content, oursSha, theirsSha } = setup();
+    const { content, oursSha, theirsSha } = fixture;
     const endpoint = capturing();
     const result = await resolveAsync(content, "cfg.txt", {
       llmFallback: { enabled: true, endpoint },
@@ -71,7 +75,7 @@ describe("llm_proposed prompt — history", () => {
   });
 
   it("respects history.enabled: false even with a runner", async () => {
-    const { content, oursSha, theirsSha } = setup();
+    const { content, oursSha, theirsSha } = fixture;
     const endpoint = capturing();
     await resolveAsync(content, "cfg.txt", {
       llmFallback: { enabled: true, endpoint, history: { enabled: false } },
@@ -83,7 +87,7 @@ describe("llm_proposed prompt — history", () => {
   });
 
   it("still asks the model, with the unavailable line, when SHAs are missing", async () => {
-    const { content } = setup();
+    const { content } = fixture;
     const endpoint = capturing();
     await resolveAsync(content, "cfg.txt", {
       llmFallback: { enabled: true, endpoint },
