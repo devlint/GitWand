@@ -34,6 +34,12 @@ async function nodeAiRequest(dev, args) {
   return res.ok ? { ok: true, value: data } : { ok: false, error: data.error };
 }
 
+/** Each request's own curl/fetch timeout, and the probe's hard stop after it. */
+const REQUEST_TIMEOUT_SECS = 3;
+const PROBE_KILL_MS = 5_000;
+/** Above both requests of a case, run one after the other. */
+const CASE_TIMEOUT_MS = 15_000;
+
 /** Run one request through both backends. */
 async function both(dev, args) {
   const rust = await runProbeAsync(args);
@@ -55,13 +61,20 @@ function runProbeAsync(args) {
     );
   }
   return new Promise((resolve) => {
-    const child = spawn(bin, ["ai-http-request"], { stdio: ["pipe", "pipe", "pipe"] });
+    // curl honours the proxy variables and fetch does not: without them both
+    // reach the loopback fixture directly.
+    const env = { ...process.env, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+    for (const k of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]) delete env[k];
+    const child = spawn(bin, ["ai-http-request"], { stdio: ["pipe", "pipe", "pipe"], env });
+    // Never outlive the test: a hung probe would hold the fixture's socket.
+    const killer = setTimeout(() => child.kill("SIGKILL"), PROBE_KILL_MS);
     child.on("error", (e) => resolve({ ok: false, error: `spawn failed: ${e.message}`, exitCode: null }));
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (err += d));
     child.on("close", (code) => {
+      clearTimeout(killer);
       let parsed;
       try {
         parsed = JSON.parse(out);
@@ -75,7 +88,7 @@ function runProbeAsync(args) {
   });
 }
 
-describe("parity: ai-http-request", () => {
+describe("parity: ai-http-request", { timeout: CASE_TIMEOUT_MS }, () => {
   /** @type {Awaited<ReturnType<typeof startDevServer>>} */
   let dev;
   /** @type {import("node:http").Server} */
@@ -120,7 +133,7 @@ describe("parity: ai-http-request", () => {
   });
 
   it("a GET answers the same status and body", async () => {
-    const { rust, node } = await both(dev, { method: "GET", url: `${base}/v1/models`, auth: "none", timeoutSecs: 10 });
+    const { rust, node } = await both(dev, { method: "GET", url: `${base}/v1/models`, auth: "none", timeoutSecs: REQUEST_TIMEOUT_SECS });
     expect(node.ok, node.error).toBe(true);
     expect(rust).toMatchObject({ ok: true, value: node.value });
     expect(JSON.parse(node.value.body)).toEqual({
@@ -141,7 +154,7 @@ describe("parity: ai-http-request", () => {
       url: `${base}/v1/chat/completions`,
       body: payload,
       auth: "none",
-      timeoutSecs: 10,
+      timeoutSecs: REQUEST_TIMEOUT_SECS,
     });
     expect(node.ok, node.error).toBe(true);
     expect(rust).toMatchObject({ ok: true, value: node.value });
@@ -149,13 +162,13 @@ describe("parity: ai-http-request", () => {
   });
 
   it("an upstream error status is answered, not thrown", async () => {
-    const { rust, node } = await both(dev, { method: "GET", url: `${base}/missing`, auth: "none", timeoutSecs: 10 });
+    const { rust, node } = await both(dev, { method: "GET", url: `${base}/missing`, auth: "none", timeoutSecs: REQUEST_TIMEOUT_SECS });
     expect(node).toEqual({ ok: true, value: { status: 404, body: JSON.stringify({ error: "not found" }) } });
     expect(rust).toMatchObject({ ok: true, value: node.value });
   });
 
   it("a redirect is not followed", async () => {
-    const { rust, node } = await both(dev, { method: "GET", url: `${base}/redirect`, auth: "none", timeoutSecs: 10 });
+    const { rust, node } = await both(dev, { method: "GET", url: `${base}/redirect`, auth: "none", timeoutSecs: REQUEST_TIMEOUT_SECS });
     expect(node).toEqual({ ok: true, value: { status: 302, body: "" } });
     expect(rust).toMatchObject({ ok: true, value: node.value });
   });
@@ -166,7 +179,7 @@ describe("parity: ai-http-request", () => {
     ["a URL with whitespace", { method: "GET", url: "http://127.0.0.1:9/a b" }],
     ["an unsupported method", { method: "DELETE", url: "http://127.0.0.1:9/" }],
   ])("%s is refused with the same message", async (_label, args) => {
-    const { rust, node } = await both(dev, { ...args, auth: "none", timeoutSecs: 10 });
+    const { rust, node } = await both(dev, { ...args, auth: "none", timeoutSecs: REQUEST_TIMEOUT_SECS });
     expect(node.ok).toBe(false);
     expect(rust.ok).toBe(false);
     expect(rust.error).toBe(node.error);

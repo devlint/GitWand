@@ -252,13 +252,16 @@ async function openTab(path: string, pin = true) {
 }
 
 /**
- * Wait, up to `ms`, for the mounted editor to hold `text`. Well under the
+ * Wait, up to `ms`, for the mounted editor to hold `text`, or for the tab to
+ * show its diff instead (no editor text to wait for then). Well under the
  * 5 s test timeout, so a missing editor fails on the test's own assertion,
  * not on a timeout.
  */
 async function untilEditorShows(text: string, ms = 1_500) {
   const deadline = Date.now() + ms;
-  while (!(editorDoc() ?? "").includes(text) && Date.now() < deadline) {
+  const done = () =>
+    (editorDoc() ?? "").includes(text) || container.querySelector(".fe__diff") !== null;
+  while (!done() && Date.now() < deadline) {
     await settle(1);
   }
 }
