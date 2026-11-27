@@ -54,6 +54,11 @@ const RE_NAMESPACE      = /^\*\s+as\s+\w+$/;
 // { X, Y } or { X as Y }
 const RE_NAMED_BLOCK    = /^\{([^}]*)\}$/;
 
+/** The quote an import statement writes its module in (`'`, `"`), `'` if none is found. */
+function quoteOf(raw: string): string {
+  return /\bfrom\s*(['"])/.exec(raw)?.[1] ?? "'";
+}
+
 /**
  * Vérifie si une ligne est un import (ou commentaire/blanc tolérés dans un bloc d'imports).
  */
@@ -296,7 +301,8 @@ function aggregateNamedImports(stmts: ImportStatement[]): ImportStatement[] {
       const indent = existing.raw.match(/^(\s*)/)?.[1] ?? "";
       const semi = existing.raw.endsWith(";") ? ";" : "";
       const typePrefix = existing.isType ? "type " : "";
-      const newRaw = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from '${stmt.source}'${semi}`;
+      const q = quoteOf(existing.raw);
+      const newRaw = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from ${q}${stmt.source}${q}${semi}`;
       namedBySource.set(key, {
         raw: newRaw,
         source: existing.source,
@@ -370,13 +376,15 @@ function mergeNamedImports(
 
   if (sortedNames.length === 0) return null; // tous les noms supprimés
 
-  const oneLiner = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from '${ours.source}'${semi}`;
+  // The file's own quotes (ours' line), not a house style.
+  const q = quoteOf(ours.raw);
+  const oneLiner = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from ${q}${ours.source}${q}${semi}`;
   if (oneLiner.length <= 100 || sortedNames.length <= 3) return oneLiner;
 
   const lines = [
     `${indent}import ${typePrefix}{`,
     ...sortedNames.map((n) => `${indent}  ${n},`),
-    `${indent}} from '${ours.source}'${semi}`,
+    `${indent}} from ${q}${ours.source}${q}${semi}`,
   ];
   return lines.join("\n");
 }

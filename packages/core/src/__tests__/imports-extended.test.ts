@@ -27,6 +27,29 @@ describe("tryResolveImportConflict — extended", () => {
     expect(merged).toContain("useState");
   });
 
+  it("keeps the file's quotes on a merged named import", () => {
+    const double = tryResolveImportConflict(
+      ['import { a } from "./lib";'],
+      ['import { a, c } from "./lib";'],
+      ['import { a, b } from "./lib";'],
+    );
+    expect(double.mergedLines).toEqual(['import { a, b, c } from "./lib";']);
+    const single = tryResolveImportConflict(
+      ["import { a } from './lib';"],
+      ["import { a, c } from './lib';"],
+      ["import { a, b } from './lib';"],
+    );
+    expect(single.mergedLines).toEqual(["import { a, b, c } from './lib';"]);
+    // The multi-line form too.
+    const long = "aaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbb, cccccccccccccccccccc";
+    const multi = tryResolveImportConflict(
+      [`import { ${long} } from "./a-rather-long-module-path";`],
+      [`import { ${long}, dddddddddddddddddddd } from "./a-rather-long-module-path";`],
+      [`import { ${long}, eeeeeeeeeeeeeeeeeeee } from "./a-rather-long-module-path";`],
+    );
+    expect(multi.mergedLines?.join("\n")).toContain('} from "./a-rather-long-module-path";');
+  });
+
   it("should merge when ours adds a new module and theirs adds a different one", () => {
     const base = [
       'import React from "react";',
