@@ -65,6 +65,8 @@ export function withoutFormatResolver(hunk: ConflictHunk): ConflictHunk {
   const key = rest.explanationRef?.key;
   if (key === undefined || !CLAIMS_A_RESOLUTION.has(key)) return rest;
   const input = { ...rest, endLine: rest.startLine };
+  // The type stays (a held-back format_semantic hunk is still classified and
+  // traced as one: min-confidence-score's contract); only the claim goes.
   return { ...rest, explanation: complexPattern.explanation(input), explanationRef: complexPattern.explanationRef?.(input) };
 }
 

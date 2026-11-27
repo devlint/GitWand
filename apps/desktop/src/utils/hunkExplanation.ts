@@ -14,7 +14,7 @@
  * rendered from it updates once it lands.
  */
 import { shallowReactive, watch } from "vue";
-import { EXPLANATION_PARAMS, type ExplanationKey, type ConflictHunk } from "@gitwand/core";
+import type { ExplanationKey, ConflictHunk } from "@gitwand/core";
 import { useI18n } from "../composables/useI18n";
 
 type Dictionary = Record<ExplanationKey, string>;
@@ -28,6 +28,9 @@ const LOADERS: Record<string, () => Promise<{ default: Dictionary }>> = {
 
 const dictionaries = shallowReactive<Record<string, Dictionary>>({});
 const pending = new Map<string, Promise<void>>();
+/** When a language's load last failed: it is retried once this long has passed. */
+const failedAt = new Map<string, number>();
+const RETRY_AFTER_MS = 30_000;
 
 /** Loads the dictionary of `code` (once); resolves when it is there, or at once for English. */
 export function loadExplanations(code: string): Promise<void> {
@@ -38,9 +41,11 @@ export function loadExplanations(code: string): Promise<void> {
     p = load()
       .then((m) => {
         dictionaries[code] = m.default;
+        failedAt.delete(code);
       })
       .catch(() => {
-        // Left in English; a later language change tries again.
+        // Left in English for now; `hunkExplanation` tries again later.
+        failedAt.set(code, Date.now());
       })
       .finally(() => pending.delete(code));
     pending.set(code, p);
@@ -53,8 +58,17 @@ watch(locale, (code) => void loadExplanations(code), { immediate: true });
 
 export function hunkExplanation(hunk: Pick<ConflictHunk, "explanation" | "explanationRef">): string {
   const ref = hunk.explanationRef;
-  if (!ref || !Object.prototype.hasOwnProperty.call(EXPLANATION_PARAMS, ref.key)) return hunk.explanation;
-  const template = dictionaries[locale.value]?.[ref.key];
+  if (!ref) return hunk.explanation;
+  const code = locale.value;
+  const dict = dictionaries[code];
+  if (!dict) {
+    // A failed load is retried, not more often than every RETRY_AFTER_MS.
+    const failed = failedAt.get(code);
+    if (failed !== undefined && Date.now() - failed >= RETRY_AFTER_MS) void loadExplanations(code);
+    return hunk.explanation;
+  }
+  // Own keys only: an unknown key (an older or newer core) keeps the English text.
+  const template = Object.prototype.hasOwnProperty.call(dict, ref.key) ? dict[ref.key] : undefined;
   if (!template) return hunk.explanation;
   // One pass: a parameter holding `{1}` is not substituted again.
   const params = ref.params ?? [];

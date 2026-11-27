@@ -121,6 +121,16 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
 }
 
 /**
+ * A format-aware resolution that was not applied (policy, confidence gate).
+ * The hunk stays classified `format_semantic`, naming no resolver and not
+ * claiming the merge — except an `llm_proposed` one, returned as it came so
+ * that the LLM fallback still gets it.
+ */
+function heldBack(hunk: ConflictHunk, effective: ConflictHunk): ConflictHunk {
+  return hunk.type === "llm_proposed" ? hunk : withoutFormatResolver(effective);
+}
+
+/**
  * Un résolveur format-aware a établi un vrai conflit (ex. imports : le même
  * module importé sous deux formes). La classification textuelle — par exemple
  * `insertion_at_boundary`, qui garderait les deux lignes — ne tient plus : le
@@ -267,7 +277,7 @@ function resolveHunk(
       if (effective.type === "format_semantic" && !fmtCfg.allowNonOverlapping) {
         return {
           // Not applied: no resolver produced this hunk's resolution.
-          hunk: withoutFormatResolver(effective),
+          hunk: heldBack(hunk, effective),
           lines: null,
           reason: `Semantic merge (${dispatch.resolverUsed}) disabled by the "${fmtPolicy}" policy — it combines content from both sides.`,
         };
@@ -285,7 +295,7 @@ function resolveHunk(
             ? `below the minConfidenceScore of ${fmtGate.required}`
             : `insufficient (minimum required: ${fmtGate.required}, policy: ${fmtPolicy})`;
         return {
-          hunk: withoutFormatResolver(effective),
+          hunk: heldBack(hunk, effective),
           lines: null,
           reason: `Confidence ${effective.confidence.label} (score: ${effective.confidence.score}) is ${because} to apply the format-aware resolution.`,
         };

@@ -134,6 +134,8 @@ describe("explanationRef", () => {
     );
     const result = resolve(content, "config.json", { policy: "strict" });
     expect(result.resolutions[0].autoResolved).toBe(false);
+    // Still classified format_semantic, but not claiming the merge.
+    expect(result.hunks[0].explanationRef).toEqual({ key: "complex" });
     for (const h of [result.hunks[0], result.resolutions[0].hunk]) {
       expect(h.explanationRef?.key).not.toBe("formatSemantic");
       expect(h.explanation).not.toContain("resolved semantically");
@@ -147,6 +149,9 @@ describe("explanationRef", () => {
       expect(h.explanationRef).toEqual({ key: "complex" });
       expect(h.explanation).not.toBe("claimed");
     }
+    // The type stays (a held-back hunk is still classified format_semantic).
+    const fmt = withoutFormatResolver({ ...base, type: "format_semantic", explanationRef: { key: "formatSemantic", params: ["json"] } });
+    expect(fmt.type).toBe("format_semantic");
     // Any other explanation is kept.
     const kept = withoutFormatResolver({ ...base, explanationRef: { key: "oneSideOurs" } });
     expect(kept.explanationRef).toEqual({ key: "oneSideOurs" });
@@ -166,4 +171,61 @@ describe("explanationRef", () => {
     expect(result.hunks[0].explanationRef?.key).toBe("formatSemantic");
     expect(calls).toBe(0);
   });
+
+  it("still sends a hunk whose format merge the policy refused to the LLM fallback", async () => {
+    const content = conflict(
+      ["{", '  "name": "app",', '  "alpha": 1', "}"],
+      ["{", '  "name": "app"', "}"],
+      ["{", '  "name": "app",', '  "beta": 2', "}"],
+    );
+    let calls = 0;
+    const endpoint = { async call() { calls++; return "CANNOT_RESOLVE"; } };
+    const result = await resolveAsync(content, "config.json", { policy: "strict", llmFallback: { enabled: true, endpoint }, validationLevel: "off" });
+    expect(calls).toBe(1);
+    expect(result.hunks[0].type).toBe("llm_proposed");
+    expect(result.hunks[0].explanationRef).toEqual({ key: "complex" });
+  });
+
+  // Every branch of every pattern: the key names the same text as the English
+  // explanation (a distinctive part of it), so the two cannot drift apart.
+  const ENGLISH: Partial<Record<string, string>> = {
+    sameChange: "exactly the same edit",
+    whitespaceOnly: "only in whitespace",
+    nonOverlapping: "different regions",
+    complex: "genuine conflict",
+    oneSideTheirs: "Only the incoming branch",
+    oneSideOurs: "Only the current branch",
+    deleteOurs: "current branch (ours) deleted this block and the other",
+    deleteTheirs: "incoming branch (theirs) deleted this block and the other",
+    deleteOursNoBase: "current branch (ours) deleted this block. Without a base",
+    deleteTheirsNoBase: "incoming branch (theirs) deleted this block. Without a base",
+    insertion: "without modifying the base",
+    insertionNoBase: "diff2 heuristic",
+    reorder: "or ours when the base matches",
+    reorderNoBase: "Resolution: take the theirs ordering.",
+    valueOnly: "differing volatile value",
+  };
+  const branches: ClassifyInput[] = [
+    input(["a2"], ["a"], ["a2"]),
+    input(["a"], ["a"], ["a2"]),
+    input(["a2"], ["a"], ["a"]),
+    input([], ["a"], ["a"]),
+    input(["a"], ["a"], []),
+    input([], [], ["a"]),
+    input(["a"], [], []),
+    input(["  x = 1;"], ["y"], ["x = 1;"]),
+    input(["a", "b"], ["a"], ["a", "c"]),
+    input(["a", "b"], [], ["a", "c"]),
+    input(["b", "a"], ["a", "b"], ["a", "b", "c"].slice(0, 2).reverse()),
+    input(["x", "y"], [], ["y", "x"]),
+    input(['  "version": "1.2.4"'], ['  "version": "1.2.3"'], ['  "version": "1.2.5"']),
+    input(["function f() { return 1; }"], ["function f() { return 0; }"], ["const g = () => 2;"]),
+  ];
+  for (const [i, h] of branches.entries()) {
+    it(`branch ${i}: the key and the English explanation say the same`, () => {
+      const r = classifyConflict(h);
+      const part = ENGLISH[r.explanationRef!.key];
+      if (part !== undefined) expect(r.explanation).toContain(part);
+    });
+  }
 });
