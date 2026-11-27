@@ -8149,6 +8149,44 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/image-proxy?u=<url> — mirrors the `gwimg:` scheme
+    // (commands/image_proxy.rs): http(s) only, no credentials, 5 MiB and 20 s
+    // at most, served only when the answer is an image.
+    if (url.pathname === "/api/image-proxy" && req.method === "GET") {
+      const target = url.searchParams.get("u") ?? "";
+      let u;
+      try {
+        if (/[\s\x00-\x1f\x7f]/.test(target)) throw new Error("control characters");
+        u = new URL(target);
+        if ((u.protocol !== "http:" && u.protocol !== "https:") || !u.hostname) throw new Error("not http(s)");
+        if (u.username || u.password) throw new Error("credentials");
+      } catch (e) {
+        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+        return res.end(`bad image URL: ${e.message}`);
+      }
+      try {
+        const upstream = await fetch(u.href, {
+          headers: { Accept: "image/*" },
+          redirect: "follow",
+          signal: AbortSignal.timeout(20_000),
+        });
+        const type = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+        if (!upstream.ok || !/^image\/[a-z0-9.+-]+$/.test(type)) throw new Error(`answered ${upstream.status} ${type}`);
+        const body = Buffer.from(await upstream.arrayBuffer());
+        if (body.length === 0 || body.length > 5 * 1024 * 1024) throw new Error("empty or oversized");
+        res.writeHead(200, {
+          "Content-Type": type,
+          "Cache-Control": "max-age=3600",
+          "X-Content-Type-Options": "nosniff",
+          "Access-Control-Allow-Origin": "*",
+        });
+        return res.end(body);
+      } catch (e) {
+        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+        return res.end(`image request failed: ${e.message}`);
+      }
+    }
+
     // GET /api/ai-allowed-endpoints -> { origins } — mirrors ai_allowed_endpoints.
     if (url.pathname === "/api/ai-allowed-endpoints" && req.method === "GET") {
       return jsonResponse(req, res, { origins: [...devAllowedAiOrigins].sort() });

@@ -901,7 +901,17 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_clipboard_manager::init());
+        .plugin(tauri_plugin_clipboard_manager::init())
+        // Remote images, fetched by the backend (`img-src` stays closed).
+        .register_asynchronous_uri_scheme_protocol(
+            commands::image_proxy::SCHEME,
+            |_ctx, request, responder| {
+                let uri = request.uri().to_string();
+                std::thread::spawn(move || {
+                    responder.respond(commands::image_proxy::respond(&uri));
+                });
+            },
+        );
 
     // Anonymous launch telemetry (release builds with --features telemetry
     // only). Registered conditionally because APTABASE_APP_KEY and the

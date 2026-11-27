@@ -6,6 +6,7 @@
  * remembered for that project only.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { originalImageUrl } from "../../utils/imageProxy";
 import { createApp, nextTick, type App } from "vue";
 
 // A README with an HTML header block (badges), which DashboardView renders
@@ -82,7 +83,10 @@ describe("DashboardView — README remote images", () => {
 
     expect(el.querySelector(".rin__btn")).toBeNull();
     expect(el.querySelectorAll(".readme-formatted .md-img-blocked")).toHaveLength(0);
-    const srcs = [...el.querySelectorAll(".readme-formatted img")].map((i) => i.getAttribute("src"));
+    // Shown through the backend's image proxy: compare the remote URLs behind it.
+    const srcs = [...el.querySelectorAll(".readme-formatted img")].map((i) =>
+      originalImageUrl(i.getAttribute("src") ?? ""),
+    );
     expect(srcs).toEqual([
       "https://img.shields.io/badge/a-b-green.svg",
       "https://example.com/shot.png",

@@ -69,6 +69,17 @@ describe("usePrAttachments", () => {
     expect(s.resolveImage("https://example.com/x.png")).toBeNull();
   });
 
+  it("judges a failing image by the remote URL behind the image proxy", async () => {
+    ghPrAttachmentUrls.mockResolvedValue(priv(signed(A)));
+    const s = setup([md(A)]);
+    // Images are shown through the backend's proxy (`gwimg:`, or the dev
+    // server under dev:web): the src the error carries is the proxied one.
+    s.onImageError(imgError(`gwimg://localhost/?u=${encodeURIComponent(asset(A))}`));
+    expect(ghPrAttachmentUrls).toHaveBeenCalledWith("/repo", 7);
+    await flush();
+    expect(s.resolveImage(asset(A))).toBe(signed(A));
+  });
+
   it("public repository: originals are kept, and later failures fetch nothing", async () => {
     ghPrAttachmentUrls.mockResolvedValue(pub(signed(A), signed(B)));
     const s = setup([md(A), md(B)]);

@@ -30,6 +30,7 @@
  * Without a signed URL (before the fetch lands, a failed fetch, no GitHub
  * account) the original URL is kept.
  */
+import { originalImageUrl } from "../utils/imageProxy";
 import { computed, getCurrentScope, onScopeDispose, shallowRef, watch, type InjectionKey, type Ref } from "vue";
 import { ghPrAttachmentUrls } from "../utils/backend";
 import {
@@ -265,7 +266,9 @@ export function usePrAttachments(opts: {
     if (!opts.enabled.value) return;
     const el = e.target as Element | null;
     if (el?.tagName !== "IMG") return;
-    const src = el.getAttribute("src");
+    const shown = el.getAttribute("src");
+    // Images are proxied (`gwimg:`): judge the remote URL behind it.
+    const src = shown ? originalImageUrl(shown) : null;
     const k = src ? attachmentKey(src) : null;
     // Only the PR's stored bodies are in its body_html: an attachment pasted
     // in the editor, say, cannot be signed by fetching.

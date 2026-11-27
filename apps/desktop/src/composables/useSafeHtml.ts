@@ -28,6 +28,7 @@
  * image mime types.
  */
 
+import { originalImageUrl, proxyImageUrl } from "../utils/imageProxy";
 import DOMPurify from "dompurify";
 import { openExternalUrl } from "../utils/backend";
 import { markdownToHtml } from "../utils/markdown";
@@ -170,7 +171,8 @@ function hardenLinksAndImages(node: Element) {
     }
   }
   if (node.tagName === "IMG") {
-    let src = node.getAttribute("src") ?? "";
+    // Already proxied (a second sanitising pass): decide on the original.
+    let src = originalImageUrl(node.getAttribute("src") ?? "");
     // Decide on what the browser will actually fetch, not on the raw text.
     let norm = normalizeUrlText(src);
     const resolved = src && imageResolver ? imageResolver(norm) : null;
@@ -194,6 +196,9 @@ function hardenLinksAndImages(node: Element) {
       node.setAttribute("class", "md-img-blocked");
       if (!node.getAttribute("alt")) node.setAttribute("alt", t("common.remoteImageBlocked"));
       node.setAttribute("title", `${t("common.remoteImageBlocked")} — ${src.trim()}`);
+    } else if (src && isRemoteImageSrc(norm)) {
+      // Allowed: fetched by the backend, not the webview (`img-src` is closed).
+      node.setAttribute("src", proxyImageUrl(norm));
     }
   }
 }
