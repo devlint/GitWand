@@ -36,11 +36,13 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 
 **3.15.x — lot A: resolvers** (wrong resolutions a user can see)
 
-- Dockerfile resolver: a one-sided deletion inside a stage comes back (an instruction only on the other side is always kept); all `COMMENT` lines share one key, so a comment can replace another; `mergeStage` emits in ours' order, so a reorder on theirs is lost. All three predate #278
-- imports resolver: `oursBySource`/`theirsBySource` keep only the last import per module, so `{ a, X }` + `import type { T }` against `import X` still keeps both and declares `X` twice; `require` bindings are not parsed, so any `require` against an import of the same module is treated as a collision (conservative)
+- _Done on `fix/resolvers-dockerfile-imports`, unreleased (detail in CHANGELOG, Unreleased)._ Dockerfile resolver: one-sided deletions, comments matched by text, theirs' reorder kept; imports resolver: every import of a module compared, `require` bindings read.
+- Textual engine, "pure insertions" pattern: the union of insertions from both sides puts them after the base lines, so in a Dockerfile an instruction inserted before `USER node` on each side lands after it (seen during the lot A review; the Dockerfile resolver now settles that case itself, but other files reach the pattern). Insert each side's lines at their position
+- Dockerfile resolver: stages come out in ours' order, so a reorder of whole stages made on theirs is lost (instructions inside a stage are handled)
 
 **3.15.x — lot B: test net** (before v4.0 moves code)
 
+- `packages/core` history tests (`llm-prompt-history.test.ts` › "inserts the history section…", "returns each side's commits since the merge base…") time out under full-suite load (7–8 s against the 5 s default; seen during the lot A review, 3 runs out of 3 pass alone): they spawn git, give them a longer timeout or a shared fixture
 - **Test the log view epoch** (follow-up to v3.12.0, #214) — the filter/scope change that drops in-flight log pages and the forced-reload depth (`forcedReloadDepth`) have no test; a `useGitRepo` test for "filter change while a page is in flight" would lock them in.
 - `FileExplorerPanel.test.ts` › "mounts an editor holding the file's content" fails under full-suite load (`an editor is mounted: expected null`, seen at the v3.15.0 release; 3 runs out of 3 pass alone): wait for the lazy editor instead of a fixed number of ticks
 - `merge_back_without_a_recorded_base_still_works` fails under full-suite load (seen 2026-10-10, not reproduced in 15 runs of the `scratch` tests on 2026-11-26; the `pullAutostash` half of that report is fixed in #314)

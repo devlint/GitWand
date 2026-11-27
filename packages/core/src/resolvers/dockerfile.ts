@@ -10,7 +10,8 @@
  * - COPY/ADD : merge si destinations distinctes ; conflit si même dest
  * - RUN    : conservatif — fallback si conflit
  * - WORKDIR, EXPOSE, USER : prefer theirs si conflit
- * - COMMENT, BLANK : préserver depuis theirs
+ * - COMMENT, BLANK : fusionnés par emplacement (l'instruction qu'ils précèdent)
+ * - la base (diff3) départage changements, suppressions et réordonnancements
  */
 
 // ─── Types ─────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ type InstructionKind =
   | "ENTRYPOINT"
   | "WORKDIR"
   | "EXPOSE"
+  | "VOLUME"
   | "USER"
   | "LABEL"
   | "COMMENT"
@@ -123,130 +125,354 @@ function parseDockerfileInstructions(lines: string[]): Instruction[] {
 // ─── Merge d'un stage ─────────────────────────────────────────
 
 /**
+ * Clé d'appariement d'une instruction : `kind:key` (alias, destination, nom
+ * de variable), le texte pour un commentaire (sinon tous les commentaires
+ * partagent une clé et l'un remplace l'autre), `kind` seul sinon.
+ */
+function instructionKey(instr: Instruction): string {
+  if (instr.kind === "COMMENT") return `COMMENT:${instr.raw.join("\n").trim()}`;
+  return instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
+}
+
+/** `ENV A=1 B=2`, `LABEL a=1 b=1` : plus d'une affectation sur la ligne. */
+function assignsSeveral(instr: Instruction): boolean {
+  const rest = instr.raw.map((l) => l.replace(/\\\s*$/, "").trim()).join(" ").replace(/^\S+\s+/, "");
+  return (rest.match(/(?:^|\s)(?:"[^"]*"|'[^']*'|[A-Za-z_][\w.-]*)=/g) ?? []).length > 1;
+}
+
+/** Instructions dont la clé est la valeur (chemin, destination). */
+const VALUE_KEYED = new Set<InstructionKind>(["WORKDIR", "COPY", "ADD"]);
+
+/** Une clé qui peut se répéter sans ambiguïté de sens (lignes vides, commentaires identiques). */
+const repeatable = (instr: Instruction) => instr.kind === "BLANK" || instr.kind === "COMMENT";
+
+/**
+ * Sépare un stage en instructions et en groupes de commentaires/lignes vides,
+ * chaque groupe rattaché à l'instruction qu'il précède (sa clé, unique d'un
+ * même côté), `END` en fin de stage.
+ */
+function splitRepeatables(instructions: Instruction[]): {
+  body: Instruction[];
+  groups: Map<string, string[][]>;
+  text: string;
+  textOnly: string;
+} {
+  const body: Instruction[] = [];
+  const groups = new Map<string, string[][]>();
+  let pending: string[][] = [];
+  for (const instr of instructions) {
+    if (repeatable(instr)) {
+      pending.push(instr.raw);
+      continue;
+    }
+    body.push(instr);
+    if (pending.length > 0) groups.set(instructionKey(instr), pending);
+    pending = [];
+  }
+  if (pending.length > 0) groups.set("END", pending);
+  // Signature : chaque commentaire ou ligne vide avec l'instruction qu'il
+  // précède. Le texte seul ne suffit pas (le même séparateur ajouté de chaque
+  // côté à un endroit différent) ; une instruction insérée sous un
+  // commentaire compte donc aussi comme un changement de ce côté.
+  return {
+    body,
+    groups,
+    text: JSON.stringify([...groups.entries()]),
+    // Le texte seul, dans l'ordre : identique des trois côtés, personne n'a
+    // touché aux commentaires (seules des instructions ont bougé autour).
+    textOnly: JSON.stringify([...groups.values()]),
+  };
+}
+
+/**
  * Fusionne deux listes d'instructions d'un même stage Dockerfile.
  * Retourne les lignes fusionnées ou null si un conflit irréductible est détecté.
  *
- * `baseInstructions` (stage de base apparié, absent en diff2) : quand une
- * instruction diffère entre les deux côtés et qu'un côté est resté égal à la
- * base, c'est l'autre côté qui l'a changée — on garde son changement au lieu
- * d'appliquer « prefer theirs », qui effaçait en silence une modification
- * faite seulement côté ours. Seules les clés uniques dans le stage de base
- * servent (plusieurs `RUN` partagent la clé `RUN` : ambigu).
+ * Commentaires et lignes vides : un côté dont les commentaires et lignes vides
+ * sont restés ceux de la base, chacun devant la même instruction, ne les a
+ * pas touchés ; ceux de l'autre côté
+ * sont pris en entier, chacun remis devant l'instruction qu'il précède. Si
+ * les deux côtés les ont changés autrement : moteur textuel (qui fusionne
+ * souvent ces lignes distinctes sans aide). Sans base, union des deux côtés,
+ * sauf deux groupes différents devant la même instruction.
+ *
+ * `baseInstructions` (stage de base apparié, absent en diff2) départage les
+ * instructions :
+ * - une instruction qui diffère et dont un côté est resté égal à la base :
+ *   c'est l'autre côté qui l'a changée, on garde son changement ; changée des
+ *   deux côtés autrement : stratégie par instruction (« prefer theirs » pour
+ *   FROM, ENV/ARG, WORKDIR, EXPOSE, USER… ; RUN, CMD, COPY/ADD : moteur
+ *   textuel) ;
+ * - une instruction présente d'un seul côté et dans la base : l'autre côté
+ *   l'a supprimée. Restée égale à la base, elle disparaît ; modifiée, c'est
+ *   un conflit modification/suppression (moteur textuel). Sans base, elle est
+ *   gardée ;
+ * - une instruction dont la clé est sa valeur (WORKDIR, destination d'un
+ *   COPY/ADD) absente des deux côtés, avec une nouvelle de même sorte des deux
+ *   côtés (changée des deux côtés), ou d'un seul côté au même endroit
+ *   (changée d'un côté, supprimée de l'autre) — moteur textuel ;
+ * - l'ordre : si seul theirs a réordonné les instructions communes, son ordre
+ *   est gardé ; si les deux côtés les ont réordonnées autrement, moteur
+ *   textuel. Une instruction présente d'un seul côté s'insère juste après
+ *   celle qui la précède de son côté.
  */
 function mergeStage(
   oursInstructions: Instruction[],
   theirsInstructions: Instruction[],
   baseInstructions?: Instruction[],
 ): string[] | null {
-  // Indexer theirs par (kind, key)
-  // Une clé répétée côté theirs (plusieurs `RUN`, deux `COPY` vers la même
-  // destination) ne garderait que la dernière instruction dans la map, et les
-  // précédentes seraient perdues : on laisse le moteur textuel. Les lignes
-  // vides et commentaires partagent aussi une clé mais ne portent pas de sens.
-  const theirsMap = new Map<string, Instruction>();
-  for (const instr of theirsInstructions) {
-    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
-    if (theirsMap.has(mapKey) && instr.kind !== "BLANK" && instr.kind !== "COMMENT") return null;
-    theirsMap.set(mapKey, instr);
-  }
+  const oursSplit = splitRepeatables(oursInstructions);
+  const theirsSplit = splitRepeatables(theirsInstructions);
+  const baseSplit = splitRepeatables(baseInstructions ?? []);
+  const hasBase = (baseInstructions?.length ?? 0) > 0;
 
-  const baseRawByKey = new Map<string, string | null>();
-  for (const instr of baseInstructions ?? []) {
-    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
-    baseRawByKey.set(mapKey, baseRawByKey.has(mapKey) ? null : instr.raw.join("\n"));
-  }
-
-  const result: string[] = [];
-  const seen = new Set<string>();
-
-  // Même garde côté ours : avec une clé répétée, la même instruction theirs
-  // serait appariée plusieurs fois (et sortirait en double).
-  const oursKeys = new Set<string>();
-  for (const instr of oursInstructions) {
-    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
-    if (oursKeys.has(mapKey) && instr.kind !== "BLANK" && instr.kind !== "COMMENT") return null;
-    oursKeys.add(mapKey);
-  }
-
-  for (const oursInstr of oursInstructions) {
-    const mapKey = oursInstr.key ? `${oursInstr.kind}:${oursInstr.key}` : oursInstr.kind;
-    const theirsInstr = theirsMap.get(mapKey);
-
-    if (!theirsInstr) {
-      // Instruction seulement dans ours → inclure
-      result.push(...oursInstr.raw);
-      seen.add(mapKey);
-      continue;
+  // ── Quel côté fournit les commentaires et lignes vides.
+  let source: { groups: Map<string, string[][]> } = oursSplit;
+  const untouched =
+    oursSplit.textOnly === theirsSplit.textOnly && (!hasBase || oursSplit.textOnly === baseSplit.textOnly);
+  if (!untouched && oursSplit.text !== theirsSplit.text) {
+    if (!hasBase) {
+      // diff2 : rien ne dit qui a changé quoi. Union des groupes tant que les
+      // deux côtés n'en placent pas un, différent, devant la même instruction.
+      const union = new Map(oursSplit.groups);
+      for (const [key, group] of theirsSplit.groups) {
+        const text = JSON.stringify(group);
+        const mine = union.get(key);
+        if (mine && JSON.stringify(mine) !== text) return null;
+        // Le même groupe devant une autre instruction de l'autre côté : le
+        // garder aux deux endroits le dédoublerait.
+        const elsewhere = [...oursSplit.groups].some(([k, g]) => k !== key && JSON.stringify(g) === text);
+        if (!mine && elsewhere) return null;
+        union.set(key, group);
+      }
+      source = { groups: union };
+    } else {
+      const oursChanged = oursSplit.text !== baseSplit.text;
+      const theirsChanged = theirsSplit.text !== baseSplit.text;
+      if (oursChanged && theirsChanged) return null;
+      if (theirsChanged) source = theirsSplit;
     }
+  }
 
-    seen.add(mapKey);
+  const merged = mergeBody(oursSplit.body, theirsSplit.body, hasBase ? baseSplit.body : undefined);
+  if (!merged) return null;
+
+  // Commentaires intacts : ceux de ours, ou de theirs si une instruction
+  // sous un commentaire a changé de clé (WORKDIR, destination) ou disparu
+  // côté theirs — le côté dont toutes les instructions sont dans la sortie.
+  if (untouched) {
+    const keys = new Set(merged.map((e) => e.key));
+    const placeable = (g: Map<string, string[][]>) => [...g.keys()].every((k) => k === "END" || keys.has(k));
+    if (!placeable(oursSplit.groups) && placeable(theirsSplit.groups)) source = theirsSplit;
+  }
+
+  // ── Remettre chaque groupe juste avant son instruction.
+  const out: string[] = [];
+  const placed = new Set<string>();
+  for (const entry of merged) {
+    const group = source.groups.get(entry.key);
+    if (group && !placed.has(entry.key)) {
+      for (const raw of group) out.push(...raw);
+      placed.add(entry.key);
+    }
+    out.push(...entry.lines);
+  }
+  for (const raw of source.groups.get("END") ?? []) out.push(...raw);
+  placed.add("END");
+  // Un groupe dont l'instruction n'est plus dans la sortie (supprimée, ou
+  // changée par l'autre côté) : on ne sait plus où il va, moteur textuel.
+  for (const key of source.groups.keys()) if (!placed.has(key)) return null;
+  return out;
+}
+
+/** Fusionne les instructions (sans commentaires ni lignes vides) d'un stage. */
+function mergeBody(
+  oursInstructions: Instruction[],
+  theirsInstructions: Instruction[],
+  baseInstructions?: Instruction[],
+): { key: string; lines: string[] }[] | null {
+  // Une clé répétée d'un côté (plusieurs `RUN`, deux `COPY` vers la même
+  // destination) ne garderait que la dernière instruction dans la map, et les
+  // précédentes seraient perdues ou appariées plusieurs fois : moteur textuel.
+  const indexSide = (instructions: Instruction[]): Map<string, Instruction> | null => {
+    const map = new Map<string, Instruction>();
+    for (const instr of instructions) {
+      const key = instructionKey(instr);
+      if (map.has(key)) return null;
+      map.set(key, instr);
+    }
+    return map;
+  };
+  const oursMap = indexSide(oursInstructions);
+  const theirsMap = indexSide(theirsInstructions);
+  if (!oursMap || !theirsMap) return null;
+
+  const hasBase = baseInstructions !== undefined;
+  const baseRawByKey = new Map<string, string | null>();
+  const baseRawsByKey = new Map<string, string[]>();
+  for (const instr of baseInstructions ?? []) {
+    const key = instructionKey(instr);
+    baseRawByKey.set(key, baseRawByKey.has(key) ? null : instr.raw.join("\n"));
+    baseRawsByKey.set(key, [...(baseRawsByKey.get(key) ?? []), instr.raw.join("\n")]);
+  }
+
+  if (hasBase) {
+    // Clé = valeur (WORKDIR, COPY/ADD) absente des deux côtés, remplacée au
+    // même endroit (même instruction avant elle) par une nouvelle de même
+    // sorte d'un côté au moins : un changement, des deux côtés ou face à une
+    // suppression. Une instruction de même sorte ajoutée ailleurs n'en est
+    // pas un.
+    const base = baseInstructions ?? [];
+    const prevKey = (list: Instruction[], idx: number) => (idx > 0 ? instructionKey(list[idx - 1]) : "START");
+    for (const [bIdx, baseInstr] of base.entries()) {
+      const key = instructionKey(baseInstr);
+      if (!VALUE_KEYED.has(baseInstr.kind) || oursMap.has(key) || theirsMap.has(key)) continue;
+      const before = prevKey(base, bIdx);
+      const newOfKind = (mine: Instruction[], other: Map<string, Instruction>) =>
+        mine
+          .map((instr, idx) => ({ instr, idx }))
+          .filter(({ instr }) => {
+            const k = instructionKey(instr);
+            return instr.kind === baseInstr.kind && !baseRawByKey.has(k) && !other.has(k);
+          });
+      const oursNew = newOfKind(oursInstructions, theirsMap);
+      const theirsNew = newOfKind(theirsInstructions, oursMap);
+      // Une nouvelle de chaque côté, où qu'elle soit : changée des deux côtés
+      // (deux valeurs gardées, la dernière gagnant en silence).
+      if (oursNew.length > 0 && theirsNew.length > 0) return null;
+      // D'un seul côté, au même endroit : changée face à une suppression.
+      const replacedHere = (found: { instr: Instruction; idx: number }[], mine: Instruction[]) =>
+        found.some(({ idx }) => prevKey(mine, idx) === before);
+      if (replacedHere(oursNew, oursInstructions) || replacedHere(theirsNew, theirsInstructions)) return null;
+    }
+  }
+
+  // ── Ordre : comparer l'ordre relatif des instructions présentes partout
+  // (clés uniques), pour savoir qui a réordonné.
+  let driveByTheirs = false;
+  if (hasBase) {
+    const common = (key: string) =>
+      typeof baseRawByKey.get(key) === "string" && oursMap.has(key) && theirsMap.has(key);
+    const order = (instructions: Instruction[]) =>
+      instructions.map(instructionKey).filter(common).join("\u0000");
+    const baseOrder = order(baseInstructions ?? []);
+    const oursOrder = order(oursInstructions);
+    const theirsOrder = order(theirsInstructions);
+    const oursMoved = oursOrder !== baseOrder;
+    const theirsMoved = theirsOrder !== baseOrder;
+    if (oursMoved && theirsMoved && oursOrder !== theirsOrder) return null;
+    driveByTheirs = theirsMoved && !oursMoved;
+  }
+
+  /**
+   * Lignes d'une instruction présente d'un seul côté : gardée, supprimée
+   * (l'autre côté l'a retirée sans que celui-ci la change), ou conflit.
+   */
+  const oneSided = (instr: Instruction): string[] | "drop" | null => {
+    if (!hasBase) return instr.raw;
+    const baseRaws = baseRawsByKey.get(instructionKey(instr));
+    if (!baseRaws) return instr.raw; // absente de la base : ajoutée
+    // Présente dans la base (une ou plusieurs copies, plusieurs `RUN`) : une
+    // copie restée telle quelle a été supprimée par l'autre côté ; sinon
+    // c'est une suppression face à un changement, ou une base ambiguë.
+    return baseRaws.includes(instr.raw.join("\n")) ? "drop" : null;
+  };
+
+  /** Lignes d'une instruction présente des deux côtés. */
+  const twoSided = (oursInstr: Instruction, theirsInstr: Instruction): string[] | null => {
     const oursRaw = oursInstr.raw.join("\n");
     const theirsRaw = theirsInstr.raw.join("\n");
+    if (oursRaw === theirsRaw) return oursInstr.raw;
 
-    if (oursRaw === theirsRaw) {
-      // Identiques → inclure une fois
-      result.push(...oursInstr.raw);
-      continue;
-    }
-
-    // Changement d'un seul côté → le garder.
-    const baseRaw = baseRawByKey.get(mapKey);
+    const baseRaw = baseRawByKey.get(instructionKey(oursInstr));
     if (typeof baseRaw === "string") {
-      if (baseRaw === theirsRaw) {
-        result.push(...oursInstr.raw);
-        continue;
-      }
-      if (baseRaw === oursRaw) {
-        result.push(...theirsInstr.raw);
-        continue;
-      }
+      // Changement d'un seul côté → le garder.
+      if (baseRaw === theirsRaw) return oursInstr.raw;
+      if (baseRaw === oursRaw) return theirsInstr.raw;
     }
 
-    // Conflit : stratégie par instruction
+    // Changée des deux côtés autrement (ou sans base) : stratégie par instruction.
     switch (oursInstr.kind) {
-      case "FROM":
-        // prefer theirs (image de base plus récente)
-        result.push(...theirsInstr.raw);
-        break;
-
-      case "ENV":
-      case "ARG":
-        // prefer theirs (valeur entrante)
-        result.push(...theirsInstr.raw);
-        break;
-
-      case "WORKDIR":
-      case "EXPOSE":
-      case "USER":
-        // prefer theirs
-        result.push(...theirsInstr.raw);
-        break;
-
       case "COPY":
       case "ADD":
         // Même destination → conflit irréductible
         return null;
-
       case "RUN":
       case "CMD":
       case "ENTRYPOINT":
         // Conservatif → fallback
         return null;
-
+      case "ENV":
+      case "ARG":
+      case "LABEL":
+        // Plusieurs affectations sur une ligne (`ENV A=1 B=2`, `LABEL a=1 b=1`) :
+        // « prefer theirs » perdrait le changement de ours sur une autre clé.
+        // Moteur textuel.
+        if (assignsSeveral(oursInstr) || assignsSeveral(theirsInstr)) return null;
+        return theirsInstr.raw;
+      case "EXPOSE":
+      case "VOLUME":
+        // Additives (clé = la sorte seule) : ajoutées des deux côtés sans base,
+        // les deux restent ; changées des deux côtés depuis la base, moteur
+        // textuel.
+        return typeof baseRaw === "string" ? null : [...oursInstr.raw, ...theirsInstr.raw];
       default:
-        // prefer theirs
-        result.push(...theirsInstr.raw);
+        // FROM (image de base plus récente), ENV/ARG (valeur entrante),
+        // WORKDIR, EXPOSE, USER… : prefer theirs
+        return theirsInstr.raw;
     }
+  };
+
+  // Le côté dont on suit l'ordre ; une instruction présente seulement de
+  // l'autre côté s'insère juste après celle qui la précède de son côté (pas à
+  // la fin : un `RUN` ajouté avant `USER node` doit rester avant).
+  const [lead, leadIsOurs] = driveByTheirs ? [theirsInstructions, false] : [oursInstructions, true];
+  const otherMap = leadIsOurs ? theirsMap : oursMap;
+  const otherList = leadIsOurs ? theirsInstructions : oursInstructions;
+
+  type Entry = { key: string; lines: string[]; otherIdx?: number };
+  const out: Entry[] = [];
+
+  for (const instr of lead) {
+    const key = instructionKey(instr);
+    const counterpart = otherMap.get(key);
+    if (!counterpart) {
+      const lines = oneSided(instr);
+      if (lines === null) return null;
+      if (lines !== "drop") out.push({ key, lines });
+      continue;
+    }
+    const lines = leadIsOurs ? twoSided(instr, counterpart) : twoSided(counterpart, instr);
+    if (!lines) return null;
+    out.push({ key, lines });
   }
 
-  // Instructions seulement dans theirs
-  for (const [mapKey, instr] of theirsMap) {
-    if (!seen.has(mapKey)) {
-      result.push(...instr.raw);
-    }
+  const leadKeys = new Set(lead.map(instructionKey));
+  for (const [i, instr] of otherList.entries()) {
+    const key = instructionKey(instr);
+    if (leadKeys.has(key)) continue; // déjà traitée avec le côté qui mène
+    const lines = oneSided(instr);
+    if (lines === null) return null;
+    if (lines === "drop") continue;
+
+    // Ancre : après la dernière (dans la sortie) des instructions qui la
+    // précèdent de son côté — pas seulement la plus proche : si le côté qui
+    // mène a réordonné, un `USER node` ajouté en fin reste après tout ce qui
+    // le précédait, `RUN` compris.
+    const sideIndex = new Map(otherList.map((x, k) => [instructionKey(x), k]));
+    let pos = 0;
+    out.forEach((e, k) => {
+      if ((sideIndex.get(e.key) ?? Infinity) < i) pos = k + 1;
+    });
+    // Après les insertions précédentes du même côté au même endroit.
+    while (pos < out.length && out[pos].otherIdx !== undefined && out[pos].otherIdx! < i) pos++;
+    // Et avant tout ce qui la suit de son côté ; sinon les deux côtés se
+    // contredisent sur sa place : moteur textuel.
+    if (out.slice(0, pos).some((e) => (sideIndex.get(e.key) ?? -Infinity) > i)) return null;
+    out.splice(pos, 0, { key, lines, otherIdx: i });
   }
 
-  return result;
+  return out.map(({ key, lines }) => ({ key, lines }));
 }
 
 // ─── Résolution ──────────────────────────────────────────────
@@ -318,19 +544,43 @@ export function tryResolveDockerfileConflict(
   const theirsStageMap = new Map<string, Instruction[]>();
   theirsStages.forEach((stage, idx) => theirsStageMap.set(theirsKeys[idx], stage));
 
-  // Stages de base, appariés avec les mêmes clés — seulement si la base a le
-  // même nombre de stages sans alias (sinon la position ne dit rien) et n'est
-  // pas vide (diff2). Sans base, mergeStage garde « prefer theirs ».
+  // Stages de base, appariés avec les mêmes clés (base vide : diff2, sans
+  // base ; mergeStage garde alors « prefer theirs »).
   const baseStageMap = new Map<string, Instruction[]>();
-  if (baseLines.length > 0) {
+  // Une base sans instruction (lignes vides, commentaires) : comme pas de base.
+  const baseHasInstructions = parseDockerfileInstructions(baseLines).some((i) => !repeatable(i));
+  if (baseHasInstructions) {
     const baseStages = splitByStage(parseDockerfileInstructions(baseLines));
     const baseKeys = stageKeys(baseStages);
-    if (countUnaliased(baseKeys) === countUnaliased(oursKeys)) {
-      baseStages.forEach((stage, idx) => baseStageMap.set(baseKeys[idx], stage));
+    // Une base qui n'a pas les mêmes stages sans alias ne s'apparie pas ; la
+    // fusion sans base (diff2) perdrait un changement d'un seul côté au profit
+    // de « prefer theirs » : moteur textuel.
+    if (countUnaliased(baseKeys) !== countUnaliased(oursKeys)) {
+      return {
+        lines: null,
+        reason: "[dockerfile] The base does not have the same unaliased stages as the two sides, falling back to the textual engine.",
+      };
     }
+    baseStages.forEach((stage, idx) => baseStageMap.set(baseKeys[idx], stage));
   }
 
-  const resultLines: string[] = [];
+  // Un stage présent d'un seul côté : gardé s'il n'est pas dans la base
+  // (ajouté) ; s'il y est, l'autre côté l'a supprimé — retiré s'il est resté
+  // tel quel, conflit (null) s'il a été modifié.
+  const oneSidedStage = (stage: Instruction[], baseStage: Instruction[] | undefined): boolean | null => {
+    if (!baseStage) return true;
+    const raw = (instructions: Instruction[]) => instructions.map((i) => i.raw.join("\n")).join("\n");
+    return raw(stage) === raw(baseStage) ? false : null;
+  };
+  const stageConflict: FormatResult = {
+    lines: null,
+    reason: "[dockerfile] A stage deleted on one side was changed on the other, falling back to the textual engine.",
+  };
+
+  // Les stages suivent l'ordre de ours ; un stage présent seulement dans
+  // theirs se place juste après celui qui le précède dans theirs (pas à la
+  // fin : un stage utilisé par `COPY --from=` doit venir avant).
+  const stageOut: { key: string; lines: string[]; theirsIdx?: number }[] = [];
   const seenStages = new Set<string>();
 
   for (const [idx, oursStage] of oursStages.entries()) {
@@ -339,8 +589,10 @@ export function tryResolveDockerfileConflict(
     seenStages.add(key);
 
     if (!theirsStage) {
-      // Stage seulement dans ours → inclure
-      for (const instr of oursStage) resultLines.push(...instr.raw);
+      // Stage seulement dans ours : ajouté, ou supprimé par theirs.
+      const kept = oneSidedStage(oursStage, baseStageMap.get(key));
+      if (kept === null) return stageConflict;
+      if (kept) stageOut.push({ key, lines: oursStage.flatMap((i) => i.raw) });
       continue;
     }
 
@@ -351,15 +603,25 @@ export function tryResolveDockerfileConflict(
         reason: "[dockerfile] Irreducible conflict inside a stage, falling back to the textual engine.",
       };
     }
-    resultLines.push(...merged);
+    stageOut.push({ key, lines: merged });
   }
 
-  // Stages seulement dans theirs → les ajouter
-  for (const [key, stage] of theirsStageMap) {
-    if (!seenStages.has(key)) {
-      for (const instr of stage) resultLines.push(...instr.raw);
+  // Stages seulement dans theirs : ajoutés, ou supprimés par ours.
+  for (const [tIdx, stage] of theirsStages.entries()) {
+    const key = theirsKeys[tIdx];
+    if (seenStages.has(key)) continue;
+    const kept = oneSidedStage(stage, baseStageMap.get(key));
+    if (kept === null) return stageConflict;
+    if (!kept) continue;
+    let pos = 0;
+    for (let j = tIdx - 1; j >= 0; j--) {
+      const found = stageOut.findIndex((e) => e.key === theirsKeys[j]);
+      if (found >= 0) { pos = found + 1; break; }
     }
+    while (pos < stageOut.length && stageOut[pos].theirsIdx !== undefined && stageOut[pos].theirsIdx! < tIdx) pos++;
+    stageOut.splice(pos, 0, { key, lines: stage.flatMap((i) => i.raw), theirsIdx: tIdx });
   }
+  const resultLines = stageOut.flatMap((e) => e.lines);
 
   return {
     lines: resultLines,
