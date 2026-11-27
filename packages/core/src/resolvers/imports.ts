@@ -101,6 +101,36 @@ function hasInlineComment(line: string): boolean {
   return /^(?:import|export)\s/.test(t) && /\/[*/]/.test(t.replace(/(['"])(?:(?!\1).)*\1/g, '""'));
 }
 
+/**
+ * The line without its comments (`/* … *\/`, a trailing `// …`), read outside
+ * the quoted strings: `"//esm.sh/react"` and `"./a/*"` are module names.
+ */
+function stripComments(line: string): string {
+  let out = "";
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      out += c;
+      if (c === "\\" && i + 1 < line.length) out += line[++i];
+      else if (c === quote) quote = null;
+    } else if (c === "'" || c === '"' || c === "`") {
+      quote = c;
+      out += c;
+    } else if (c === "/" && line[i + 1] === "/") {
+      break;
+    } else if (c === "/" && line[i + 1] === "*") {
+      const end = line.indexOf("*/", i + 2);
+      if (end < 0) break;
+      out += " ";
+      i = end + 1;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
 function parseTrimmed(t: string): ImportStatement {
 
   // Side-effect import
@@ -168,9 +198,8 @@ export function extractImportSources(content: string): string[] {
   const seen = new Set<string>();
   for (const line of content.split("\n")) {
     if (!isImportLike(line)) continue;
-    // A block comment can hold a `from "…"` the patterns would take for the module.
-    // A trailing `// …` after the module string (and its `;`) goes too.
-    const stmt = parseImport(line.replace(/\/\*.*?\*\//g, " ").replace(/(['"]\s*;?)\s*\/\/.*$/, "$1"));
+    // A comment can hold a `from "…"` the patterns would take for the module.
+    const stmt = parseImport(stripComments(line));
     if (stmt.source) seen.add(stmt.source);
   }
   return [...seen];
@@ -448,16 +477,32 @@ export function tryResolveImportConflict(
   // read as the module, and a rebuilt line would drop it: not merged here.
   // Comments are not carried through a merge (only imports are written back):
   // a block holding one, inline or on its own line (`// @ts-ignore`), is left
-  // to the textual engine — and to the user when both sides added imports,
-  // whose union could bind a name twice with nothing here to check it.
+  // to the textual engine — and to the user when the imports each side added
+  // bind a same name (or one cannot be read), which a textual union would
+  // declare twice.
   const isCommentLine = (l: string) => /^\s*(?:\/\/|\/\*|\*)/.test(l);
   if ([baseLines, oursLines, theirsLines].some((lines) => lines.some((l) => hasInlineComment(l) || isCommentLine(l)))) {
     const baseSet = new Set(baseLines.map((l) => l.trim()));
-    const adds = (lines: string[]) => lines.some((l) => /^\s*(?:import|export|const|let|var)\s/.test(l) && !baseSet.has(l.trim()));
-    const both = adds(oursLines) && adds(theirsLines);
+    const addedBindings = (lines: string[]): string[] | null => {
+      const names: string[] = [];
+      for (const l of lines) {
+        const code = stripComments(l).trim();
+        if (code === "" || baseSet.has(l.trim())) continue;
+        const bound = localBindings(parseImport(code));
+        if (bound === null) return null;
+        names.push(...bound);
+      }
+      return names;
+    };
+    const oursBound = addedBindings(oursLines);
+    const theirsBound = addedBindings(theirsLines);
+    const clash =
+      oursBound === null || theirsBound === null
+        ? (oursBound?.length ?? 1) > 0 && (theirsBound?.length ?? 1) > 0
+        : oursBound.some((n) => theirsBound.includes(n));
     return {
       mergedLines: null,
-      ...(both ? { conflict: true } : {}),
+      ...(clash ? { conflict: true } : {}),
       reason: "The import block holds a comment, which a rebuilt block would drop, so it is left to the textual engine.",
       resolvedImports: 0,
       unresolvedImports: 1,

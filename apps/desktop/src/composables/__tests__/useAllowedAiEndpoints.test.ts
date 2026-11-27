@@ -121,6 +121,34 @@ describe("useAllowedAiEndpoints", () => {
     expect(e.revoking.value).toBeNull();
   });
 
+  it("shows an older load's answer when the newer load fails", async () => {
+    const e = useAllowedAiEndpoints();
+    await e.load();
+    let releaseOld!: (v: string[]) => void;
+    aiAllowedEndpoints.mockImplementationOnce(() => new Promise<string[]>((r) => (releaseOld = r)));
+    const old = e.load();
+    aiAllowedEndpoints.mockRejectedValueOnce(new Error("keychain locked"));
+    await e.load();
+    releaseOld(["https://b.example"]);
+    await old;
+    expect(e.origins.value).toEqual(["https://b.example"]);
+    expect(e.error.value).toBe("keychain locked");
+  });
+
+  it("clears an earlier revoke failure as soon as a new revoke starts", async () => {
+    const e = useAllowedAiEndpoints();
+    await e.load();
+    aiRevokeEndpoint.mockRejectedValueOnce(new Error("revoke denied"));
+    await e.revoke("https://a.example");
+    expect(e.error.value).toBe("revoke denied");
+    let release!: () => void;
+    aiRevokeEndpoint.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+    const next = e.revoke("https://b.example");
+    expect(e.error.value).toBeNull();
+    release();
+    await next;
+  });
+
   it("ignores a second revoke while one runs", async () => {
     const e = useAllowedAiEndpoints();
     await e.load();

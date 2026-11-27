@@ -14,9 +14,12 @@ export function useAllowedAiEndpoints() {
   const revoking = ref<string | null>(null);
   const error = ref<string | null>(null);
 
-  // Loads can overlap (Settings opened, then a revoke): only the latest one
-  // writes its answer, and `loading` holds until none is in flight.
+  // Loads can overlap (Settings opened, then a revoke): the list takes the
+  // most recent answer that arrived (never an older one over a newer one),
+  // only the latest load reports its failure, and `loading` holds until none
+  // is in flight.
   let latest = 0;
+  let applied = 0;
   let inFlight = 0;
   // The last revoke's failure. It is shown over any read error until a read
   // started after the revoke's own reload has ended succeeds: that read shows
@@ -32,8 +35,11 @@ export function useAllowedAiEndpoints() {
     error.value = revokeFailure;
     try {
       const answer = await aiAllowedEndpoints();
-      if (mine === latest) {
+      if (mine > applied) {
+        applied = mine;
         origins.value = answer;
+      }
+      if (mine === latest) {
         if (mine > revokeFailureUntil) revokeFailure = null;
         error.value = revokeFailure;
       }
@@ -50,6 +56,8 @@ export function useAllowedAiEndpoints() {
     revoking.value = origin;
     revokeFailure = null;
     revokeFailureUntil = Infinity;
+    // An earlier failure is not shown while this revoke runs.
+    error.value = null;
     try {
       try {
         await aiRevokeEndpoint(origin);

@@ -64,5 +64,7 @@ describe("extractImportSources", () => {
     ).toEqual(["./x", "./z"]);
     expect(extractImportSources('import x from "./a"; // from "./b"')).toEqual(["./a"]);
     expect(extractImportSources('import x from "https://deno.land/x/a.ts";')).toEqual(["https://deno.land/x/a.ts"]);
+    expect(extractImportSources('import x from "//esm.sh/react";')).toEqual(["//esm.sh/react"]);
+    expect(extractImportSources('import x from "./a/*"; // */')).toEqual(["./a/*"]);
   });
 });

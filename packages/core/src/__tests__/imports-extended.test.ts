@@ -307,6 +307,16 @@ describe("tryResolveImportConflict — lignes import-like non parsables (garde a
     expect(result.mergedLines!.join("\n")).toContain('"./b"');
   });
 
+  it("leaves a commented block to the textual engine when the additions bind different names", () => {
+    const result = tryResolveImportConflict(
+      ["// @ts-nocheck", 'import a from "a";'],
+      ["// @ts-nocheck", 'import a from "a";', 'import b from "b";'],
+      ["// @ts-nocheck", 'import c from "c";', 'import a from "a";'],
+    );
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBeUndefined();
+  });
+
   it("hands a commented block where both sides added imports to the user", () => {
     const result = tryResolveImportConflict(
       [],
