@@ -127,7 +127,7 @@ function parseImport(line: string): ImportStatement {
     // `names` : le motif de liaison tel qu'écrit (`fs`, `{ a, b: c }`). Un
     // autre déclarateur après le `require(…)` (`, b = require('n')`) n'est
     // pas lu : motif vide, donc liaisons inconnues (prudence).
-    const moreDeclarators = /^\s*,/.test(t.slice(requireMatch[0].length));
+    const moreDeclarators = hasTopLevelComma(t.slice(requireMatch[0].length));
     const pattern = moreDeclarators ? "" : requireMatch[1].trim();
     return { raw: t, source: requireMatch[2], kind: "require", names: [pattern], isType: false };
   }
@@ -219,6 +219,29 @@ function localBindings(stmt: ImportStatement): string[] | null {
     default:
       return null;
   }
+}
+
+/**
+ * Une virgule hors parenthèses, crochets, accolades et chaînes : un autre
+ * déclarateur (`require('m').default, y = …`).
+ */
+function hasTopLevelComma(rest: string): boolean {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < rest.length; i++) {
+    const c = rest[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === "`") quote = c;
+    else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === "," && depth === 0) return true;
+    else if (c === ";" && depth === 0) return false;
+  }
+  return false;
 }
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
@@ -458,11 +481,22 @@ export function tryResolveImportConflict(
     if (la === null || lb === null) return true; // liaisons inconnues : prudence
     return la.some((n) => lb.includes(n));
   };
+  // Collision connue : les deux listes de liaisons sont lues et partagent un nom.
+  const knownCollide = (a: ImportStatement, b: ImportStatement): boolean => {
+    const la = localBindings(a);
+    const lb = localBindings(b);
+    return la !== null && lb !== null && la.some((n) => lb.includes(n));
+  };
+  // Un import named face à une liaison illisible n'est pas affirmé en conflit
+  // (avant, un ajout named n'était jamais comparé) : le moteur textuel peut
+  // encore agir. Les autres formes restent prudentes.
+  const collisionReported = (a: ImportStatement, b: ImportStatement): boolean =>
+    a.kind === "named" || b.kind === "named" ? knownCollide(a, b) : bindingsCollide(a, b);
   const kindMismatch = (a: ImportStatement, b: ImportStatement, source: string) => {
     unresolvedImports++;
     return {
       mergedLines: null,
-      ...(bindingsCollide(a, b) ? { conflict: true } : {}),
+      ...(collisionReported(a, b) ? { conflict: true } : {}),
       reason: `Conflict on import '${source}': incompatible kinds (${a.kind} vs ${b.kind}).`,
       resolvedImports,
       unresolvedImports,
@@ -485,7 +519,7 @@ export function tryResolveImportConflict(
     const candidates = (other.get(added.source) ?? []).filter(
       (s) => importKey(s) !== importKey(added) && !isUntouchedBase(s),
     );
-    const colliding = candidates.find((s) => bindingsCollide(added, s));
+    const colliding = candidates.find((s) => collisionReported(added, s));
     if (colliding) return colliding;
     return added.kind !== "named" ? candidates.find((s) => s.kind !== added.kind) : undefined;
   };

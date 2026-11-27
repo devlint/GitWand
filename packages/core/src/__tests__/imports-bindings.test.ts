@@ -93,3 +93,15 @@ describe("imports — review du lot A", () => {
     expect(result.conflict).toBe(true);
   });
 });
+
+describe("imports — review du lot A, passe 2", () => {
+  it("un import named ajouté face à un require illisible du même module : pas de conflit affirmé", () => {
+    const result = tryResolveImportConflict([], [`import { readFile } from 'fs';`], [`const { a: { b } } = require('fs');`]);
+    expect(result.conflict).toBeUndefined();
+  });
+
+  it("un second déclarateur après un accès membre : prudence (collision supposée)", () => {
+    const result = tryResolveImportConflict([], [`const x = require('m').default, y = require('m2');`], [`import y from 'm';`]);
+    expect(result.conflict).toBe(true);
+  });
+});

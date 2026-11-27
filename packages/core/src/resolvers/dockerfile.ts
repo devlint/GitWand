@@ -176,9 +176,11 @@ function mergeStage(
   if (!oursMap || !theirsMap) return null;
 
   const baseRawByKey = new Map<string, string | null>();
+  const baseCount = new Map<string, number>();
   for (const instr of baseInstructions ?? []) {
     const key = instructionKey(instr);
     baseRawByKey.set(key, baseRawByKey.has(key) ? null : instr.raw.join("\n"));
+    baseCount.set(key, (baseCount.get(key) ?? 0) + 1);
   }
   const hasBase = (baseInstructions?.length ?? 0) > 0;
 
@@ -243,17 +245,48 @@ function mergeStage(
     }
   };
 
-  // Un commentaire de base réécrit de chaque côté (supprimé des deux côtés,
-  // un nouveau commentaire de chaque côté) : deux versions contradictoires
-  // seraient gardées, moteur textuel.
   if (hasBase) {
-    const isComment = (k: string) => k.startsWith("COMMENT:");
-    const rewrittenByBoth = [...baseRawByKey.keys()].some(
-      (k) => isComment(k) && !oursMap.has(k) && !theirsMap.has(k),
-    );
-    const addedOnlyBy = (mine: Map<string, Instruction>, other: Map<string, Instruction>) =>
-      [...mine.keys()].some((k) => isComment(k) && !baseRawByKey.has(k) && !other.has(k));
-    if (rewrittenByBoth && addedOnlyBy(oursMap, theirsMap) && addedOnlyBy(theirsMap, oursMap)) return null;
+    const base = baseInstructions ?? [];
+    // L'emplacement d'un commentaire : l'instruction qu'il précède (un
+    // commentaire décrit ce qui suit), `END` en fin de stage.
+    const slotAt = (list: Instruction[], idx: number): string => {
+      for (let k = idx + 1; k < list.length; k++) {
+        if (!repeatable(list[k])) return instructionKey(list[k]);
+      }
+      return "END";
+    };
+    const newCommentSlots = (mine: Instruction[], other: Map<string, Instruction>) => {
+      const slots = new Set<string>();
+      mine.forEach((instr, idx) => {
+        const key = instructionKey(instr);
+        if (instr.kind === "COMMENT" && !baseCount.has(key) && !other.has(key)) slots.add(slotAt(mine, idx));
+      });
+      return slots;
+    };
+    const oursNew = newCommentSlots(oursInstructions, theirsMap);
+    const theirsNew = newCommentSlots(theirsInstructions, oursMap);
+    // Un commentaire de base absent des deux côtés, avec un nouveau
+    // commentaire au même emplacement d'un côté : réécrit d'un côté et
+    // supprimé (ou réécrit autrement) de l'autre. Deux versions, ou une
+    // suppression face à un changement : moteur textuel.
+    for (const [idx, instr] of base.entries()) {
+      const key = instructionKey(instr);
+      if (instr.kind !== "COMMENT" || oursMap.has(key) || theirsMap.has(key)) continue;
+      const slot = slotAt(base, idx);
+      if (oursNew.has(slot) || theirsNew.has(slot)) return null;
+    }
+
+    // Une instruction dont la clé est sa valeur (WORKDIR, destination d'un
+    // COPY/ADD) changée des deux côtés : l'ancienne clé disparaît des deux
+    // côtés et chacun ajoute la sienne. Les deux seraient gardées (la
+    // dernière gagnerait en silence) : moteur textuel.
+    for (const key of baseRawByKey.keys()) {
+      const kind = key.split(":")[0];
+      if (!["WORKDIR", "COPY", "ADD"].includes(kind) || oursMap.has(key) || theirsMap.has(key)) continue;
+      const addsOfKind = (mine: Map<string, Instruction>, other: Map<string, Instruction>) =>
+        [...mine.entries()].some(([k, instr]) => instr.kind === kind && !baseRawByKey.has(k) && !other.has(k));
+      if (addsOfKind(oursMap, theirsMap) && addsOfKind(theirsMap, oursMap)) return null;
+    }
   }
 
   // Le côté dont on suit l'ordre ; les instructions présentes seulement de
@@ -288,20 +321,28 @@ function mergeStage(
     const n = (otherCount.get(key) ?? 0) + 1;
     otherCount.set(key, n);
     const inLead = leadCount.get(key) ?? 0;
-    // Déjà traitée avec le côté qui mène — sauf un commentaire répété plus
-    // souvent de ce côté (deux `# ----` ajoutés ne se fondent pas en un).
-    // Les lignes vides gardent celles du côté qui mène.
-    if (instr.kind === "COMMENT" ? n <= inLead : inLead > 0 || (instr.kind === "BLANK" && n > 1)) continue;
-    const lines = oneSided(instr);
+    let lines: string[] | "drop" | null;
+    if (repeatable(instr)) {
+      // Commentaires et lignes vides se comptent par copie : la n-ième copie
+      // de ce côté est déjà dans la sortie si le côté qui mène en a au moins
+      // n ; sinon elle était dans la base (le côté qui mène l'a retirée) ou
+      // elle a été ajoutée de ce côté (gardée).
+      if (n <= inLead) continue;
+      lines = n <= (baseCount.get(key) ?? 0) ? "drop" : instr.raw;
+    } else {
+      if (inLead > 0) continue; // déjà traitée avec le côté qui mène
+      lines = oneSided(instr);
+    }
     if (lines === null) return null;
     if (lines === "drop") continue;
 
     // Ancre : l'instruction qui la précède de son côté et qui est déjà dans
-    // la sortie (pas une ligne vide, dont la clé ne situe rien).
+    // la sortie — pas un commentaire ni une ligne vide, dont la clé peut se
+    // répéter et ne situe rien.
     let pos = 0;
     for (let j = i - 1; j >= 0; j--) {
+      if (repeatable(otherList[j])) continue;
       const anchorKey = instructionKey(otherList[j]);
-      if (anchorKey === "BLANK") continue;
       let found = -1;
       for (let k = out.length - 1; k >= 0; k--) {
         if (out[k].key === anchorKey) { found = k; break; }

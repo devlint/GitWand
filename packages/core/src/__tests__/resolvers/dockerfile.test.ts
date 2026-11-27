@@ -468,3 +468,62 @@ describe("Dockerfile — review du lot A", () => {
     expect(resolve(input, "Dockerfile").stats.autoResolved).toBe(0);
   });
 });
+
+describe("Dockerfile — review du lot A, passe 2", () => {
+  it("un commentaire déjà présent une fois dans la base, ajouté une seconde fois d'un côté : les deux copies restent, à leur place", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`# ----`, `ENV A=2`],
+      [`# ----`, `ENV A=1`],
+      [`# ----`, `ENV A=1`, `# ----`, `ENV Z=1`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    const merged = result.mergedContent ?? "";
+    expect(merged.match(/^# ----$/gm)).toHaveLength(2);
+    expect(merged.indexOf("ENV A=2")).toBeLessThan(merged.indexOf("ENV Z=1"));
+  });
+
+  it("WORKDIR changé différemment de chaque côté : pas de résolution automatique", () => {
+    const input = [`FROM node:20`, dockerHunk([`WORKDIR /srv`], [`WORKDIR /app`], [`WORKDIR /opt`])].join("\n");
+    expect(resolve(input, "Dockerfile").stats.autoResolved).toBe(0);
+  });
+
+  it("WORKDIR changé d'un seul côté : ce changement est gardé, une seule fois", () => {
+    const input = [`FROM node:20`, dockerHunk([`WORKDIR /srv`, `ENV A=1`], [`WORKDIR /app`, `ENV A=1`], [`WORKDIR /app`, `ENV A=2`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent?.match(/^WORKDIR /gm)).toHaveLength(1);
+    expect(result.mergedContent).toContain("WORKDIR /srv");
+  });
+
+  it("un commentaire supprimé d'un côté et réécrit de l'autre : pas de résolution automatique", () => {
+    const input = [`FROM node:20`, dockerHunk([`# b`, `ENV A=1`], [`# a`, `ENV A=1`], [`ENV A=2`])].join("\n");
+    expect(resolve(input, "Dockerfile").stats.autoResolved).toBe(0);
+  });
+
+  it("les deux côtés retirent le même commentaire et en ajoutent d'autres ailleurs : fusion automatique", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`ENV A=1`, `# deps`, `RUN make`, `CMD ["x"]`],
+      [`# obsolete`, `ENV A=1`, `RUN make`, `CMD ["x"]`],
+      [`ENV A=1`, `RUN make`, `# build`, `CMD ["x"]`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    const merged = result.mergedContent ?? "";
+    expect(merged).toContain("# deps");
+    expect(merged).toContain("# build");
+    expect(merged).not.toContain("# obsolete");
+  });
+
+  it("une ligne vide ajoutée par le côté qui ne mène pas est gardée", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`ENV A=1`, ``, `ENV B=1`, `ENV C=1`],
+      [`ENV A=1`, ``, `ENV B=1`],
+      [`ENV A=1`, ``, `ENV B=1`, ``, `ENV D=1`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    const lines = (result.mergedContent ?? "").split("\n");
+    expect(lines.filter((l) => l === "").length).toBeGreaterThanOrEqual(2);
+  });
+});
