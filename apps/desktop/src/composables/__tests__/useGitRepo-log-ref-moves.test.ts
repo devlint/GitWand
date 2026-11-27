@@ -731,16 +731,34 @@ describe("refreshOnRefsEvent reloads only when the refs moved", () => {
 });
 
 describe("the log view epoch (#214)", () => {
-  /** The page size of every getGitLog call made since `from`. */
-  function logCallSizes(from: number): number[] {
-    return vi.mocked(getGitLog).mock.calls.slice(from).map((c) => c[1] as number);
+  /** getGitLog calls made for `dir`: a call another test left running is not counted. */
+  function logCalls(dir: string) {
+    return vi.mocked(getGitLog).mock.calls.filter((c) => c[0] === dir);
   }
+  /** The page size of every getGitLog call for `dir` after the first `from`. */
+  function logCallSizes(dir: string, from: number): number[] {
+    return logCalls(dir).slice(from).map((c) => c[1] as number);
+  }
+
+  // A forced reload restarts the background prefetch. Close the repo before
+  // the outer afterEach deletes it, so the prefetch stops instead of retrying
+  // a deleted directory for the rest of the file.
+  let opened: ReturnType<typeof useGitRepo>[] = [];
+  function openRepo() {
+    const repo = useGitRepo();
+    opened.push(repo);
+    return repo;
+  }
+  afterEach(async () => {
+    for (const repo of opened.splice(0)) repo.folderPath.value = null;
+    await nextTick();
+  });
 
   it(
     "drops a scroll page fetched for the view a filter change left",
     async () => {
       const dir = newRepo(150);
-      const repo = useGitRepo();
+      const repo = openRepo();
       await open(repo, dir);
       repo.logBranchFilter.value = "current";
       await repo.loadLog();
@@ -749,9 +767,9 @@ describe("the log view epoch (#214)", () => {
       // A scroll page of the "current branch" view goes out and is held.
       let release!: () => void;
       pageGate = new Promise<void>((r) => (release = r));
-      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const calls = logCalls(dir).length;
       const page = repo.loadMoreLog();
-      await vi.waitFor(() => expect(vi.mocked(getGitLog).mock.calls.length).toBe(calls + 1));
+      await vi.waitFor(() => expect(logCalls(dir).length).toBe(calls + 1));
 
       // The view changes meanwhile: its first page replaces the log.
       await repo.setLogAuthorFilter("mine");
@@ -774,7 +792,7 @@ describe("the log view epoch (#214)", () => {
     "drops a loadLog result read for the view a filter change left",
     async () => {
       const dir = newRepo(5);
-      const repo = useGitRepo();
+      const repo = openRepo();
       await open(repo, dir);
       repo.logBranchFilter.value = "current";
       await repo.loadLog();
@@ -782,9 +800,9 @@ describe("the log view epoch (#214)", () => {
       // A reload of the old view reads the log, then is held.
       let release!: () => void;
       firstPageGate = new Promise<void>((r) => (release = r));
-      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const calls = logCalls(dir).length;
       const stale = repo.loadLog();
-      await vi.waitFor(() => expect(vi.mocked(getGitLog).mock.calls.length).toBe(calls + 1));
+      await vi.waitFor(() => expect(logCalls(dir).length).toBe(calls + 1));
 
       // A commit lands, then the view changes and reads it.
       commitOn(dir, sha(dir, "c5"), "refs/heads/main", "c6");
@@ -804,7 +822,7 @@ describe("the log view epoch (#214)", () => {
     "a forced reload refetches down to the viewed row plus a page, not the whole log",
     async () => {
       const dir = newRepo(600);
-      const repo = useGitRepo();
+      const repo = openRepo();
       await open(repo, dir);
       await repo.loadLog();
       await vi.waitFor(() => expect(repo.logHasMore.value).toBe(false), { timeout: 20_000 });
@@ -812,10 +830,10 @@ describe("the log view epoch (#214)", () => {
 
       // The user scrolled down to row 250.
       repo.setLogViewAnchor(repo.log.value[249].hashFull);
-      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const calls = logCalls(dir).length;
       await repo.loadLog(undefined, true);
 
-      expect(logCallSizes(calls)).toEqual([350]);
+      expect(logCallSizes(dir, calls)).toEqual([350]);
       expect(repo.log.value).toHaveLength(350);
       expect(repo.log.value[249].message).toBe("c351");
     },
@@ -826,15 +844,15 @@ describe("the log view epoch (#214)", () => {
     "a forced reload with no viewed row refetches one page",
     async () => {
       const dir = newRepo(600);
-      const repo = useGitRepo();
+      const repo = openRepo();
       await open(repo, dir);
       await repo.loadLog();
       await vi.waitFor(() => expect(repo.logHasMore.value).toBe(false), { timeout: 20_000 });
 
-      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const calls = logCalls(dir).length;
       await repo.loadLog(undefined, true);
 
-      expect(logCallSizes(calls)).toEqual([100]);
+      expect(logCallSizes(dir, calls)).toEqual([100]);
       expect(repo.log.value).toHaveLength(100);
     },
     GIT_TEST_TIMEOUT_MS,
@@ -844,15 +862,15 @@ describe("the log view epoch (#214)", () => {
     "a filter change fetches one page and forgets the old view's depth",
     async () => {
       const dir = newRepo(600);
-      const repo = useGitRepo();
+      const repo = openRepo();
       await open(repo, dir);
       await repo.loadLog();
       await vi.waitFor(() => expect(repo.logHasMore.value).toBe(false), { timeout: 20_000 });
       repo.setLogViewAnchor(repo.log.value[499].hashFull);
 
-      let calls = vi.mocked(getGitLog).mock.calls.length;
+      let calls = logCalls(dir).length;
       await repo.setLogBranchFilter("current");
-      expect(logCallSizes(calls)).toEqual([100]);
+      expect(logCallSizes(dir, calls)).toEqual([100]);
       expect(repo.log.value).toHaveLength(100);
 
       // Back on the full view (restored from the session cache), the anchor
@@ -860,9 +878,9 @@ describe("the log view epoch (#214)", () => {
       // 600 rows down to it.
       await repo.setLogBranchFilter("all");
       expect(repo.log.value).toHaveLength(600);
-      calls = vi.mocked(getGitLog).mock.calls.length;
+      calls = logCalls(dir).length;
       await repo.loadLog(undefined, true);
-      expect(logCallSizes(calls)).toEqual([100]);
+      expect(logCallSizes(dir, calls)).toEqual([100]);
     },
     GIT_TEST_TIMEOUT_MS,
   );
