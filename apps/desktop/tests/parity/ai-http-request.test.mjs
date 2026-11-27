@@ -18,6 +18,7 @@
 
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { probePath } from "./probe.mjs";
@@ -45,8 +46,17 @@ async function both(dev, args) {
  * it the fixture server the probe is talking to: spawn it asynchronously.
  */
 function runProbeAsync(args) {
+  const bin = probePath();
+  if (!existsSync(bin)) {
+    throw new Error(
+      `parity-probe binary not found at ${bin}\n` +
+        "Build it first with: cargo build --example parity-probe\n" +
+        "Or set PARITY_PROBE=<path> to an already-built binary.",
+    );
+  }
   return new Promise((resolve) => {
-    const child = spawn(probePath(), ["ai-http-request"], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(bin, ["ai-http-request"], { stdio: ["pipe", "pipe", "pipe"] });
+    child.on("error", (e) => resolve({ ok: false, error: `spawn failed: ${e.message}`, exitCode: null }));
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));

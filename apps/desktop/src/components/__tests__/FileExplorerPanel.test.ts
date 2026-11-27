@@ -251,8 +251,12 @@ async function openTab(path: string, pin = true) {
   if (content !== undefined) await untilEditorShows(content.trimEnd());
 }
 
-/** Wait, up to `ms`, for the mounted editor to hold `text`. */
-async function untilEditorShows(text: string, ms = 5_000) {
+/**
+ * Wait, up to `ms`, for the mounted editor to hold `text`. Well under the
+ * 5 s test timeout, so a missing editor fails on the test's own assertion,
+ * not on a timeout.
+ */
+async function untilEditorShows(text: string, ms = 1_500) {
   const deadline = Date.now() + ms;
   while (!(editorDoc() ?? "").includes(text) && Date.now() < deadline) {
     await settle(1);

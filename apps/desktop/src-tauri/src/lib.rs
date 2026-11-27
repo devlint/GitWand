@@ -300,11 +300,12 @@ pub fn read_commit_template_parity(cwd: String) -> Result<Option<String>, String
     tauri::async_runtime::block_on(commands::read::read_commit_template(cwd))
 }
 
-/// Parity entry point for `ai_http_request`, without its open-endpoint gate:
-/// the dev-server cannot show the native question that gate may ask, and
-/// says so. The harness only sends `auth: "none"` requests to a loopback
-/// fixture server, so no key is read from the keychain and the gate would
-/// let them through anyway. Answers `{ status, body }`, as the command.
+/// Parity entry point for `ai_http_request`. Its open-endpoint gate, whose
+/// native question the dev-server cannot mirror (and says so), is replaced by
+/// a loopback-only one: the gate lets loopback through without asking, and
+/// the probe refuses every other origin rather than reach it unasked. Only
+/// `auth: "none"`, so no key is read from the keychain. Answers
+/// `{ status, body }`, as the command.
 pub fn ai_http_request_parity(
     method: String,
     url: String,
@@ -322,7 +323,13 @@ pub fn ai_http_request_parity(
         body.as_deref(),
         &auth,
         timeout_secs,
-        |_| Ok(()),
+        |target| {
+            if commands::ai_http::is_loopback(target) {
+                Ok(())
+            } else {
+                Err("parity probe: ai_http_request only reaches loopback".to_string())
+            }
+        },
     )?;
     serde_json::to_value(res).map_err(|e| e.to_string())
 }

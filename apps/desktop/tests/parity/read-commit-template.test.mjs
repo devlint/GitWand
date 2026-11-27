@@ -12,7 +12,7 @@
 
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { runProbe } from "./probe.mjs";
@@ -29,9 +29,13 @@ async function nodeReadTemplate(dev, cwd) {
   return res.ok ? { ok: true, value: data } : { ok: false, error: data.error };
 }
 
+/** Repos made by this file, removed in `afterAll`. */
+const repos = [];
+
 /** A repo whose local `commit.template` is `value`. */
 function repoWithTemplate(value) {
   const cwd = mkTempRepo("gw-commit-template-");
+  repos.push(cwd);
   execFileSync("git", ["-C", cwd, "config", "commit.template", value]);
   return cwd;
 }
@@ -46,6 +50,7 @@ describe("parity: read-commit-template", () => {
 
   afterAll(async () => {
     await dev?.stop();
+    for (const cwd of repos.splice(0)) rmSync(cwd, { recursive: true, force: true });
   });
 
   it("an empty commit.template answers null on both sides", async () => {
@@ -88,6 +93,8 @@ describe("parity: read-commit-template", () => {
     execFileSync("git", ["-C", cwd, "config", "commit.template", path]);
     const rust = runProbe("read-commit-template", { cwd });
     const node = await nodeReadTemplate(dev, cwd);
+    expect(node.ok).toBe(false);
+    expect(rust.ok).toBe(false);
     expect(rust.error).toBe(`Commit template is not a small regular file: ${path}`);
     expect(node.error).toBe(rust.error);
   });

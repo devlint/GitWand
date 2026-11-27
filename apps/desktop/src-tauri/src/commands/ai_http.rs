@@ -151,7 +151,7 @@ fn check_key_binding(bound: Option<&str>, target: &tauri::Url) -> Result<(), Str
 
 /// Loopback hosts pass the gate without asking: a local Ollama (the default
 /// `http://localhost:11434`) is no exfiltration channel.
-fn is_loopback(target: &tauri::Url) -> bool {
+pub(crate) fn is_loopback(target: &tauri::Url) -> bool {
     let host = target.host_str().unwrap_or("");
     if host.eq_ignore_ascii_case("localhost") {
         return true;
