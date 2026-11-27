@@ -5,6 +5,7 @@
  * the end, resolved by.
  */
 import type { ConflictHunk, HunkResolution } from "../types.js";
+import type { ExplanationKey } from "../explanation-keys.js";
 import { applyPostMergeRiskPenalty } from "./validate-parse-tree.js";
 import complexPattern from "../patterns/complex.js";
 
@@ -50,16 +51,19 @@ export function forgetRetractedFormatResolvers(
   };
 }
 
+/** Explanations that say a mechanism resolved the hunk (not a proposal of the pattern). */
+const CLAIMS_A_RESOLUTION = new Set<ExplanationKey>(["formatSemantic", "llmProposed", "structuralMerge"]);
+
 /**
  * #301 — A hunk whose format-aware resolution was not applied names no
  * resolver. Nor does its explanation: one that says the hunk was resolved by
- * a format resolver or proposed by the LLM goes back to the genuine-conflict
- * one, in both forms (`explanation`, `explanationRef`).
+ * a format resolver, a structural merge or the LLM goes back to the
+ * genuine-conflict one, in both forms (`explanation`, `explanationRef`).
  */
 export function withoutFormatResolver(hunk: ConflictHunk): ConflictHunk {
   const { formatResolver: _unused, ...rest } = hunk;
   const key = rest.explanationRef?.key;
-  if (key !== "formatSemantic" && key !== "llmProposed") return rest;
+  if (key === undefined || !CLAIMS_A_RESOLUTION.has(key)) return rest;
   const input = { ...rest, endLine: rest.startLine };
   return { ...rest, explanation: complexPattern.explanation(input), explanationRef: complexPattern.explanationRef?.(input) };
 }

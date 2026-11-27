@@ -315,8 +315,8 @@ const props = defineProps<{
  * manual: a guard, a retraction…), which is English audit text.
  */
 function hunkTitle(h: PreviewHunk): string {
-  const text = h.messageKey ? t(h.messageKey) : hunkExplanation(h);
-  const head = `${h.confidenceScore}% (${h.confidenceLabel}) — ${text}`;
+  if (h.messageKey) return `${h.confidenceScore}% (${h.confidenceLabel}) — ${t(h.messageKey)}`;
+  const head = `${h.confidenceScore}% (${h.confidenceLabel}) — ${hunkExplanation(h)}`;
   return !h.reason || h.reason === h.explanation ? head : `${head}\n${h.reason}`;
 }
 

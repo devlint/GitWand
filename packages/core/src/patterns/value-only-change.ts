@@ -5,27 +5,23 @@ import { makeScore, detectValueOnlyChange } from "./utils.js";
 /**
  * `detect`, `confidence`, `explanation`, `explanationRef` and `passReason` are
  * called one after the other on the same hunk: the detection runs once per
- * hunk (keyed by the input's reference, as token-level-merge does).
+ * hunk content.
  */
-let _lastInput: ClassifyInput | null = null;
-let _lastLines: [string[], string[], string[]] | null = null;
+let _lastKey: string | null = null;
 let _lastResult: ReturnType<typeof detectValueOnlyChange> = null;
+
 /** Forgets the cached detection (called at the start of each classification). */
 export function resetValueOnlyCache(): void {
-  _lastInput = null;
-  _lastLines = null;
+  _lastKey = null;
   _lastResult = null;
 }
 
 function detectCached(h: ClassifyInput): ReturnType<typeof detectValueOnlyChange> {
-  // Keyed on the input and its line arrays: a caller that swaps an array on
-  // the same input gets a fresh detection.
-  const same =
-    _lastInput === h && _lastLines !== null &&
-    _lastLines[0] === h.oursLines && _lastLines[1] === h.theirsLines && _lastLines[2] === h.baseLines;
-  if (!same) {
-    _lastInput = h;
-    _lastLines = [h.oursLines, h.theirsLines, h.baseLines];
+  // Keyed on the lines' contents: an input edited in place gets a fresh
+  // detection. Joining is cheap next to the token comparison it saves.
+  const key = `${h.baseLines.length > 0 ? 1 : 0}\u0000${h.oursLines.join("\n")}\u0000${h.theirsLines.join("\n")}`;
+  if (key !== _lastKey) {
+    _lastKey = key;
     _lastResult = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
   }
   return _lastResult;

@@ -283,7 +283,7 @@ export function useMergePreview(cwd: () => string) {
           confidenceScore: 0,
           confidenceLabel: "low",
           reason: "No content to analyse: the conflict could not be simulated.",
-          explanation: "No content to analyse: the conflict could not be simulated.",
+          explanation: "",
           messageKey: "mergePreview.notSimulated",
         }],
         });

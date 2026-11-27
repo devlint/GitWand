@@ -254,7 +254,9 @@ function resolveHunk(
   if (!generatedGate) {
     const dispatch = dispatchFormatAware(hunk, filePath, options);
     if (dispatch.status === "resolved") {
-      const effective = hunk.type === "complex"
+      // `llm_proposed` is what `complex` becomes while the LLM fallback is on:
+      // resolved here, the LLM never sees it, so it is a format-semantic hunk.
+      const effective = hunk.type === "complex" || hunk.type === "llm_proposed"
         ? reclassifyFormatSemantic(hunk, dispatch.resolverUsed)
         : boostFormatValidated(hunk, dispatch.resolverUsed);
       const { policy: fmtPolicy, cfg: fmtCfg } = computeEffectivePolicy(filePath, options);

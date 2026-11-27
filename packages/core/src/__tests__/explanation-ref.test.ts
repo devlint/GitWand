@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { classifyConflict } from "../classifier.js";
-import { resolve, EXPLANATION_PARAMS } from "../index.js";
+import { resolve, resolveAsync, EXPLANATION_PARAMS } from "../index.js";
 import { runLlmFallbackPhase } from "../resolver/llm-pipeline.js";
 import { withoutFormatResolver } from "../resolver/retract.js";
 import type { ClassifyInput, ConflictHunk, PatternPlugin } from "../types.js";
@@ -110,8 +110,9 @@ describe("explanationRef", () => {
   it("recomputes the value-only count when a line array of the same input changes", () => {
     const h = input(['  "version": "1.2.4"'], ['  "version": "1.2.3"'], ['  "version": "1.2.5"']);
     expect(p7.explanationRef!(h)).toEqual({ key: "valueOnly", params: [1] });
-    h.oursLines = ['  "version": "1.2.4", "build": "a1"'];
-    h.theirsLines = ['  "version": "1.2.5", "build": "b2"'];
+    // Edited in place, same arrays.
+    h.oursLines[0] = '  "version": "1.2.4", "build": "a1"';
+    h.theirsLines[0] = '  "version": "1.2.5", "build": "b2"';
     const after = p7.explanationRef!(h);
     expect(after).not.toEqual({ key: "valueOnly", params: [1] });
   });
@@ -141,7 +142,7 @@ describe("explanationRef", () => {
 
   it("puts a withdrawn LLM or format resolution back to the genuine-conflict explanation", () => {
     const base = resolve(conflict(["x = 1"], ["x = 0"], ["x = 2"]), "a.txt").hunks[0];
-    for (const key of ["llmProposed", "formatSemantic"] as const) {
+    for (const key of ["llmProposed", "formatSemantic", "structuralMerge"] as const) {
       const h = withoutFormatResolver({ ...base, explanation: "claimed", explanationRef: { key, ...(key === "formatSemantic" ? { params: ["json"] } : {}) } });
       expect(h.explanationRef).toEqual({ key: "complex" });
       expect(h.explanation).not.toBe("claimed");
@@ -149,5 +150,20 @@ describe("explanationRef", () => {
     // Any other explanation is kept.
     const kept = withoutFormatResolver({ ...base, explanationRef: { key: "oneSideOurs" } });
     expect(kept.explanationRef).toEqual({ key: "oneSideOurs" });
+  });
+
+  it("calls a format merge a format merge, not an LLM proposal, with the LLM fallback on", async () => {
+    const content = conflict(
+      ["{", '  "name": "app",', '  "alpha": 1', "}"],
+      ["{", '  "name": "app"', "}"],
+      ["{", '  "name": "app",', '  "beta": 2', "}"],
+    );
+    let calls = 0;
+    const endpoint = { async call() { calls++; return "CANNOT_RESOLVE"; } };
+    const result = await resolveAsync(content, "config.json", { llmFallback: { enabled: true, endpoint }, validationLevel: "off" });
+    expect(result.resolutions[0].autoResolved).toBe(true);
+    expect(result.hunks[0].type).toBe("format_semantic");
+    expect(result.hunks[0].explanationRef?.key).toBe("formatSemantic");
+    expect(calls).toBe(0);
   });
 });
