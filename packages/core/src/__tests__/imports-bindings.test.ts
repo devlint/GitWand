@@ -145,3 +145,11 @@ describe("imports — review du lot A, passe 6", () => {
     expect(result.conflict).toBe(true);
   });
 });
+
+describe("imports — review du lot A, passe 7", () => {
+  it("un require à plusieurs déclarateurs : un import d'un module nommé après le premier est une collision possible", () => {
+    const result = tryResolveImportConflict([], [`const fs = require('fs'), path = require('path');`], [`import path from 'path';`]);
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBe(true);
+  });
+});

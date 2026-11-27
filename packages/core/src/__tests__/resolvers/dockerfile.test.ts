@@ -658,3 +658,26 @@ describe("Dockerfile — review du lot A, passe 6", () => {
     expect(result.mergedContent).toBe([`FROM n`, `ENV A=2`, `WORKDIR /x`].join("\n"));
   });
 });
+
+describe("Dockerfile — review du lot A, passe 7", () => {
+  it("sans base (diff2), un commentaire ajouté d'un seul côté se fusionne comme avant", () => {
+    const input = [`<<<<<<< ours`, `FROM a`, `RUN x`, `# health`, `HEALTHCHECK CMD x`, `=======`, `FROM a`, `RUN x`, `USER n`, `>>>>>>> theirs`].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("# health\nHEALTHCHECK CMD x");
+    expect(result.mergedContent).toContain("USER n");
+  });
+
+  it("un stage ajouté par theirs se place avant le commentaire qui annonce le stage suivant", () => {
+    const input = dockerHunk(
+      [`FROM a AS one`, `RUN x`, `USER z`, `# second`, `FROM b AS two`, `RUN y`],
+      [`FROM a AS one`, `RUN x`, `# second`, `FROM b AS two`, `RUN y`],
+      [`FROM a AS one`, `RUN x`, `FROM c AS mid`, `RUN m`, `# second`, `FROM b AS two`, `RUN y`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe(
+      [`FROM a AS one`, `RUN x`, `USER z`, `FROM c AS mid`, `RUN m`, `# second`, `FROM b AS two`, `RUN y`].join("\n"),
+    );
+  });
+});

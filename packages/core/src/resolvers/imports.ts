@@ -432,6 +432,34 @@ export function tryResolveImportConflict(
   const oursImports   = aggregateNamedImports(oursLines.map(parseImport).filter((s) => s.kind !== "unknown"));
   const theirsImports = aggregateNamedImports(theirsLines.map(parseImport).filter((s) => s.kind !== "unknown"));
 
+  // Un `require` à plusieurs déclarateurs nouveau d'un côté ne dit que son
+  // premier module ; si l'autre côté importe (de nouveau) l'un des modules
+  // nommés plus loin sur la ligne, un nom peut être lié deux fois sans que la
+  // suite le voie : conflit (prudence).
+  const requiredOnLine = (raw: string): string[] =>
+    [...raw.matchAll(/require\s*\(\s*['"](.+?)['"]\s*\)/g)].map((m) => m[1]);
+  const baseRawSet = new Set(baseImports.map((s) => s.raw));
+  const multiClash = (mine: ImportStatement[], other: ImportStatement[]): ImportStatement | undefined => {
+    for (const s of mine) {
+      if (s.kind !== "require" || baseRawSet.has(s.raw)) continue;
+      const modules = requiredOnLine(s.raw).slice(1);
+      if (modules.length === 0) continue;
+      const hit = other.find((o) => modules.includes(o.source) && !baseRawSet.has(o.raw));
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  const multiHit = multiClash(oursImports, theirsImports) ?? multiClash(theirsImports, oursImports);
+  if (multiHit) {
+    return {
+      mergedLines: null,
+      conflict: true,
+      reason: `Conflict on import '${multiHit.source}': it is also required on a line with several declarators, whose bindings are not all read.`,
+      resolvedImports: 0,
+      unresolvedImports: 1,
+    };
+  }
+
   // Deux imports d'un même côté avec la même clé (deux `require` du même
   // module, deux imports par défaut) : la map n'en garderait qu'un et l'autre
   // disparaîtrait du résultat. Seuls les imports named sont agrégés.

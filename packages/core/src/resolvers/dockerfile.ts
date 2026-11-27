@@ -178,8 +178,8 @@ function splitRepeatables(instructions: Instruction[]): {
  * pas touchés ; ceux de l'autre côté
  * sont pris en entier, chacun remis devant l'instruction qu'il précède. Si
  * les deux côtés les ont changés autrement : moteur textuel (qui fusionne
- * souvent ces lignes distinctes sans aide). Sans base, les deux côtés doivent
- * avoir les mêmes.
+ * souvent ces lignes distinctes sans aide). Sans base, union des deux côtés,
+ * sauf deux groupes différents devant la même instruction.
  *
  * `baseInstructions` (stage de base apparié, absent en diff2) départage les
  * instructions :
@@ -212,13 +212,24 @@ function mergeStage(
   const hasBase = (baseInstructions?.length ?? 0) > 0;
 
   // ── Quel côté fournit les commentaires et lignes vides.
-  let source = oursSplit;
+  let source: { groups: Map<string, string[][]> } = oursSplit;
   if (oursSplit.text !== theirsSplit.text) {
-    if (!hasBase) return null;
-    const oursChanged = oursSplit.text !== baseSplit.text;
-    const theirsChanged = theirsSplit.text !== baseSplit.text;
-    if (oursChanged && theirsChanged) return null;
-    if (theirsChanged) source = theirsSplit;
+    if (!hasBase) {
+      // diff2 : rien ne dit qui a changé quoi. Union des groupes tant que les
+      // deux côtés n'en placent pas un, différent, devant la même instruction.
+      const union = new Map(oursSplit.groups);
+      for (const [key, group] of theirsSplit.groups) {
+        const mine = union.get(key);
+        if (mine && JSON.stringify(mine) !== JSON.stringify(group)) return null;
+        union.set(key, group);
+      }
+      source = { groups: union };
+    } else {
+      const oursChanged = oursSplit.text !== baseSplit.text;
+      const theirsChanged = theirsSplit.text !== baseSplit.text;
+      if (oursChanged && theirsChanged) return null;
+      if (theirsChanged) source = theirsSplit;
+    }
   }
 
   const merged = mergeBody(oursSplit.body, theirsSplit.body, hasBase ? baseSplit.body : undefined);
