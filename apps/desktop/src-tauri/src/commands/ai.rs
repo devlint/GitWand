@@ -187,6 +187,9 @@ pub(crate) struct AiEnvContext {
     /// Variable names the user's own config points the CLI at — Codex
     /// `env_key` (custom providers), opencode `{env:NAME}`.
     config_refs: Vec<String>,
+    /// MCP servers the user's opencode config declares, disabled for
+    /// GitWand's runs (`opencode_config_content`).
+    opencode_mcp: Vec<String>,
 }
 
 /// A truthy flag value as Claude Code reads it (`1`, `true`, …).
@@ -311,6 +314,129 @@ fn parse_opencode_env_refs(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// JSON from JSONC (opencode accepts both): `//` and `/* */` comments and
+/// trailing commas dropped, strings left as they are.
+fn jsonc_to_json(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if c == '\\' {
+                if let Some(n) = chars.next() {
+                    out.push(n);
+                }
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                for n in chars.by_ref() {
+                    if n == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut prev = ' ';
+                for n in chars.by_ref() {
+                    if prev == '*' && n == '/' {
+                        break;
+                    }
+                    prev = n;
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    // Trailing commas: a `,` followed (after blanks) by `}` or `]`.
+    let mut cleaned = String::with_capacity(out.len());
+    let bytes: Vec<char> = out.chars().collect();
+    let mut in_string = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_string {
+            cleaned.push(c);
+            if c == '\\' && i + 1 < bytes.len() {
+                cleaned.push(bytes[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == '"' {
+                in_string = false;
+            }
+        } else if c == '"' {
+            in_string = true;
+            cleaned.push(c);
+        } else if c == ',' {
+            let next = bytes[i + 1..].iter().find(|n| !n.is_whitespace());
+            if !matches!(next, Some('}') | Some(']')) {
+                cleaned.push(c);
+            }
+        } else {
+            cleaned.push(c);
+        }
+        i += 1;
+    }
+    cleaned
+}
+
+/// The MCP servers an opencode config (JSON or JSONC) declares under `mcp`.
+fn opencode_mcp_names(text: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(&jsonc_to_json(text))
+        .ok()
+        .and_then(|v| {
+            v.get("mcp")?
+                .as_object()
+                .map(|o| o.keys().cloned().collect())
+        })
+        .unwrap_or_default()
+}
+
+/// `OPENCODE_CONFIG_CONTENT` for a GitWand run: the user's own inline config
+/// (`inherited`, kept) with every MCP server it or the config files declare
+/// (`names`) disabled. opencode merges it over the files (checked on 1.17.11:
+/// a server so disabled is not even started).
+fn opencode_config_content(inherited: Option<&str>, names: &[String]) -> String {
+    let mut base = inherited
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&jsonc_to_json(t)).ok())
+        .filter(|v| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut all: Vec<String> = names.to_vec();
+    if let Some(own) = base.get("mcp").and_then(|m| m.as_object()) {
+        all.extend(own.keys().cloned());
+    }
+    all.sort();
+    all.dedup();
+    let obj = base.as_object_mut().expect("an object");
+    let mcp = obj.entry("mcp").or_insert_with(|| serde_json::json!({}));
+    if !mcp.is_object() {
+        *mcp = serde_json::json!({});
+    }
+    let mcp = mcp.as_object_mut().expect("an object");
+    for name in all {
+        let entry = mcp.entry(name).or_insert_with(|| serde_json::json!({}));
+        if !entry.is_object() {
+            *entry = serde_json::json!({});
+        }
+        entry
+            .as_object_mut()
+            .expect("an object")
+            .insert("enabled".to_string(), serde_json::Value::Bool(false));
+    }
+    base.to_string()
+}
+
 /// Build the context for `cli` from `env` (GitWand's environment) and the
 /// user-level / system-level config files it locates.
 fn ai_env_context(cli: AiCli, env: &dyn Fn(&str) -> Option<String>) -> AiEnvContext {
@@ -405,6 +531,7 @@ fn ai_env_context_with(
             for f in files {
                 if let Some(text) = read(f) {
                     ctx.config_refs.extend(parse_opencode_env_refs(&text));
+                    ctx.opencode_mcp.extend(opencode_mcp_names(&text));
                 }
             }
         }
@@ -1422,6 +1549,12 @@ fn codex_cli_prompt_inner(
     // content: pin the sandbox to read-only (no writes, no network) whatever
     // the user's own Codex config says.
     cmd.args(["--sandbox", "read-only"]);
+    // No user config: its MCP servers and plugins would be callable by a
+    // prompt-injected diff, and `-c mcp_servers.X.enabled=false` cannot
+    // reach the servers the ChatGPT app adds (checked on codex-cli 0.147).
+    // Auth still comes from CODEX_HOME; a custom provider or profile in
+    // config.toml no longer applies to GitWand's calls.
+    cmd.arg("--ignore-user-config");
     // v2.17 — explicit model. Flags must precede the positional `-` on
     // `codex exec`, so push `--model <m>` before it.
     if let Some(m) = model.as_ref() {
@@ -2128,6 +2261,14 @@ fn opencode_run_cmd(
     );
     // Belt and braces with the per-run directory (see opencode_cli_prompt_inner).
     cmd.env("OPENCODE_DISABLE_PROJECT_CONFIG", "1");
+    // The user's MCP servers would be callable by a prompt-injected diff:
+    // disabled by name, over their own inline config if they have one.
+    let ctx = cached_ai_env_context(AiCli::Opencode);
+    let inherited = std::env::var("OPENCODE_CONFIG_CONTENT").ok();
+    cmd.env(
+        "OPENCODE_CONFIG_CONTENT",
+        opencode_config_content(inherited.as_deref(), &ctx.opencode_mcp),
+    );
     // Model is `provider/model` form; flags precede the positional message.
     if let Some(m) = model {
         if !m.trim().is_empty() {
@@ -3189,6 +3330,65 @@ mod neutral_dir_tests {
         let live = AiRunDir::create(&base, false).unwrap();
         sweep_stale_run_dirs(&base, std::time::Duration::from_secs(3600));
         assert!(live.path().exists());
+    }
+
+    #[test]
+    fn jsonc_becomes_json_without_touching_strings() {
+        let text = r#"{
+  // a comment
+  "a": "http://x // not a comment", /* block */
+  "b": [1, 2,],
+  "c": { "d": "e\" , }", },
+}"#;
+        let v: serde_json::Value = serde_json::from_str(&jsonc_to_json(text)).unwrap();
+        assert_eq!(v["a"], "http://x // not a comment");
+        assert_eq!(v["b"], serde_json::json!([1, 2]));
+        assert_eq!(v["c"]["d"], "e\" , }");
+    }
+
+    #[test]
+    fn opencode_mcp_servers_are_read_and_disabled_by_name() {
+        let cfg = r#"{
+  // servers
+  "mcp": { "fs": { "type": "local", "command": ["x"] }, "web": { "type": "remote", "url": "https://x" }, },
+  "model": "anthropic/claude",
+}"#;
+        assert_eq!(opencode_mcp_names(cfg), ["fs", "web"]);
+        assert!(opencode_mcp_names("not json").is_empty());
+        assert!(opencode_mcp_names(r#"{"model":"m"}"#).is_empty());
+
+        // The user's inline config is kept, its own servers disabled too.
+        let inherited = r#"{"model":"openai/x","mcp":{"inline":{"type":"local","command":["y"]}}}"#;
+        let out: serde_json::Value = serde_json::from_str(&opencode_config_content(
+            Some(inherited),
+            &["fs".to_string(), "web".to_string()],
+        ))
+        .unwrap();
+        assert_eq!(out["model"], "openai/x");
+        for name in ["fs", "web", "inline"] {
+            assert_eq!(out["mcp"][name]["enabled"], false, "{name}");
+        }
+        assert_eq!(out["mcp"]["inline"]["command"], serde_json::json!(["y"]));
+
+        // Nothing inherited (or unreadable): only the disables.
+        let bare: serde_json::Value =
+            serde_json::from_str(&opencode_config_content(Some("{oops"), &["fs".to_string()]))
+                .unwrap();
+        assert_eq!(bare, serde_json::json!({"mcp": {"fs": {"enabled": false}}}));
+        assert_eq!(opencode_config_content(None, &[]), r#"{"mcp":{}}"#);
+    }
+
+    #[test]
+    fn the_opencode_run_carries_the_mcp_disables() {
+        let dir = std::env::temp_dir();
+        let cmd = opencode_run_cmd("opencode", None, &dir);
+        let content = cmd
+            .get_envs()
+            .find(|(k, _)| *k == "OPENCODE_CONFIG_CONTENT")
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+            .expect("OPENCODE_CONFIG_CONTENT is set");
+        let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(v["mcp"].is_object());
     }
 
     #[test]

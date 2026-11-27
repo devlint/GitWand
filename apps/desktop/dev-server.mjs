@@ -915,6 +915,75 @@ function sweepStaleRunDirs(base) {
  * when the CLI needs one (Codex), removed afterwards whatever happens — never
  * the repository, never a directory another run could have left files in.
  */
+/** JSON from JSONC: comments and trailing commas dropped. Mirrors `jsonc_to_json`. */
+function devJsoncToJson(text) {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      out += c;
+      if (c === "\\") { out += text[++i] ?? ""; continue; }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      out += "\n";
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i - 1] === "*" && text[i] === "/")) i++;
+      continue;
+    }
+    out += c;
+  }
+  let cleaned = "";
+  inString = false;
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i];
+    if (inString) {
+      cleaned += c;
+      if (c === "\\") { cleaned += out[++i] ?? ""; continue; }
+      if (c === '"') inString = false;
+    } else if (c === '"') { inString = true; cleaned += c; }
+    else if (c === "," && /^\s*[}\]]/.test(out.slice(i + 1))) { /* trailing comma */ }
+    else cleaned += c;
+  }
+  return cleaned;
+}
+
+/**
+ * OPENCODE_CONFIG_CONTENT for a GitWand run: the user's inline config kept,
+ * every MCP server it or the opencode config files declare disabled.
+ * Mirrors `opencode_config_content` + the config files `ai_env_context` reads.
+ */
+function devOpencodeConfigContent() {
+  const parse = (text) => { try { return JSON.parse(devJsoncToJson(text)); } catch { return null; } };
+  const files = [];
+  if (process.env.OPENCODE_CONFIG?.trim()) files.push(process.env.OPENCODE_CONFIG);
+  const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
+  for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) files.push(join(configHome, "opencode", name));
+  const names = new Set();
+  for (const f of files) {
+    let text;
+    try { text = readFileSync(f, "utf-8"); } catch { continue; }
+    const v = parse(text);
+    if (v?.mcp && typeof v.mcp === "object") Object.keys(v.mcp).forEach((n) => names.add(n));
+  }
+  const inherited = process.env.OPENCODE_CONFIG_CONTENT ? parse(process.env.OPENCODE_CONFIG_CONTENT) : null;
+  const base = inherited && typeof inherited === "object" && !Array.isArray(inherited) ? inherited : {};
+  if (!base.mcp || typeof base.mcp !== "object" || Array.isArray(base.mcp)) base.mcp = {};
+  Object.keys(base.mcp).forEach((n) => names.add(n));
+  for (const n of [...names].sort()) {
+    const entry = base.mcp[n] && typeof base.mcp[n] === "object" ? base.mcp[n] : {};
+    base.mcp[n] = { ...entry, enabled: false };
+  }
+  return JSON.stringify(base);
+}
+
 function spawnAiSync(bin, args, opts, { gitRepo = false } = {}) {
   const base = aiRunsBase();
   const dir = mkdtempSync(join(base, "run-"));
@@ -8476,7 +8545,9 @@ async function handleRequest(req, res) {
           : (body.prompt || "");
         // v2.17 — model flag precedes the positional prompt on `codex exec`.
         // Read-only sandbox, prompt on stdin (`-`). Mirrors codex_cli_prompt_inner.
-        const codexArgs = ["exec", "--sandbox", "read-only"];
+        // --ignore-user-config: no MCP server or plugin from the user's
+        // config. Mirrors codex_cli_prompt_inner.
+        const codexArgs = ["exec", "--sandbox", "read-only", "--ignore-user-config"];
         if (body.model && String(body.model).trim()) {
           codexArgs.push("--model", String(body.model).trim());
         }
@@ -8597,6 +8668,7 @@ async function handleRequest(req, res) {
             ...aiSpawnEnv("opencode"),
             OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","webfetch":"deny"}',
             OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+            OPENCODE_CONFIG_CONTENT: devOpencodeConfigContent(),
           },
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
