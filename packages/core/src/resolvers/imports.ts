@@ -37,12 +37,16 @@ export interface ImportStatement {
   names: string[];
   /** `true` si c'est un `import type` TypeScript */
   isType: boolean;
+  /** Leading whitespace of the source line (`raw` is trimmed). */
+  indent?: string;
+  /** The quote the module is written in (`'`, `"`), for an `import … from` line. */
+  quote?: string;
 }
 
 // ─── Patterns de détection ────────────────────────────────
 
 // import ... from 'module' ou "module"
-const RE_IMPORT_FROM    = /^import\s+(type\s+)?(.+?)\s+from\s+['"](.+?)['"]\s*;?\s*$/;
+const RE_IMPORT_FROM    = /^import\s+(type\s+)?(.+?)\s+from\s+(['"])(.+?)\3\s*;?\s*$/;
 // import 'module' (side-effect)
 const RE_IMPORT_SIDE    = /^import\s+['"](.+?)['"]\s*;?\s*$/;
 // const X = require('module')
@@ -54,10 +58,6 @@ const RE_NAMESPACE      = /^\*\s+as\s+\w+$/;
 // { X, Y } or { X as Y }
 const RE_NAMED_BLOCK    = /^\{([^}]*)\}$/;
 
-/** The quote an import statement writes its module in (`'`, `"`), `'` if none is found. */
-function quoteOf(raw: string): string {
-  return /\bfrom\s*(['"])/.exec(raw)?.[1] ?? "'";
-}
 
 /**
  * Vérifie si une ligne est un import (ou commentaire/blanc tolérés dans un bloc d'imports).
@@ -87,7 +87,12 @@ export function isImportBlock(lines: string[]): boolean {
  * Parse une ligne d'import en `ImportStatement`.
  */
 function parseImport(line: string): ImportStatement {
-  const t = line.trim();
+  const stmt = parseTrimmed(line.trim());
+  stmt.indent = /^\s*/.exec(line)?.[0] ?? "";
+  return stmt;
+}
+
+function parseTrimmed(t: string): ImportStatement {
 
   // Side-effect import
   const sideMatch = t.match(RE_IMPORT_SIDE);
@@ -100,11 +105,12 @@ function parseImport(line: string): ImportStatement {
   if (fromMatch) {
     const isType = Boolean(fromMatch[1]);
     const specifier = fromMatch[2].trim();
-    const source = fromMatch[3];
+    const quote = fromMatch[3];
+    const source = fromMatch[4];
 
     if (RE_NAMESPACE.test(specifier)) {
       const alias = specifier.replace(/^\*\s+as\s+/, "");
-      return { raw: t, source, kind: "namespace", names: [alias], isType };
+      return { raw: t, source, kind: "namespace", names: [alias], isType, quote };
     }
 
     const namedMatch = specifier.match(RE_NAMED_BLOCK);
@@ -113,11 +119,11 @@ function parseImport(line: string): ImportStatement {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
-      return { raw: t, source, kind: "named", names, isType };
+      return { raw: t, source, kind: "named", names, isType, quote };
     }
 
     // Default import (possibly with named: `import X, { Y }`)
-    return { raw: t, source, kind: "default", names: [specifier], isType };
+    return { raw: t, source, kind: "default", names: [specifier], isType, quote };
   }
 
   // Re-export
@@ -298,17 +304,18 @@ function aggregateNamedImports(stmts: ImportStatement[]): ImportStatement[] {
       // Fusionner les noms
       const merged = new Set([...existing.names, ...stmt.names]);
       const sortedNames = [...merged].sort();
-      const indent = existing.raw.match(/^(\s*)/)?.[1] ?? "";
       const semi = existing.raw.endsWith(";") ? ";" : "";
       const typePrefix = existing.isType ? "type " : "";
-      const q = quoteOf(existing.raw);
-      const newRaw = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from ${q}${stmt.source}${q}${semi}`;
+      const q = existing.quote ?? "'";
+      const newRaw = `import ${typePrefix}{ ${sortedNames.join(", ")} } from ${q}${stmt.source}${q}${semi}`;
       namedBySource.set(key, {
         raw: newRaw,
         source: existing.source,
         kind: "named",
         names: sortedNames,
         isType: existing.isType,
+        indent: existing.indent,
+        quote: existing.quote,
       });
     } else {
       namedBySource.set(key, stmt);
@@ -371,13 +378,13 @@ function mergeNamedImports(
 
   const sortedNames = [...merged].sort();
   const typePrefix = ours.isType ? "type " : "";
-  const indent = ours.raw.match(/^(\s*)/)?.[1] ?? "";
+  const indent = ours.indent ?? "";
   const semi = ours.raw.endsWith(";") ? ";" : "";
 
   if (sortedNames.length === 0) return null; // tous les noms supprimés
 
   // The file's own quotes (ours' line), not a house style.
-  const q = quoteOf(ours.raw);
+  const q = ours.quote ?? "'";
   const oneLiner = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from ${q}${ours.source}${q}${semi}`;
   if (oneLiner.length <= 100 || sortedNames.length <= 3) return oneLiner;
 
@@ -572,7 +579,7 @@ export function tryResolveImportConflict(
   // Les imports gardés, pour la dernière garde sur les liaisons.
   const keptImports: ImportStatement[] = [];
   const keep = (stmt: ImportStatement) => {
-    resultLines.push(stmt.raw);
+    resultLines.push((stmt.indent ?? "") + stmt.raw);
     keptImports.push(stmt);
   };
   const keepMerged = (text: string) => {

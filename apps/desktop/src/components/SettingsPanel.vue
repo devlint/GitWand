@@ -3441,7 +3441,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
             <div class="sp-row">
               <span class="sp-label">{{ t('settings.aiAllowedEndpoints') }}</span>
               <span class="sp-hint">{{ t('settings.aiAllowedEndpointsHint') }}</span>
-              <p v-if="allowedAi.origins.value.length === 0" class="sp-hint">
+              <p v-if="allowedAi.origins.value.length === 0 && (allowedAi.loading.value || !allowedAi.error.value)" class="sp-hint">
                 {{ allowedAi.loading.value ? t('common.loading') : t('settings.aiAllowedEndpointsEmpty') }}
               </p>
               <ul v-else class="sp-allowed-endpoints">

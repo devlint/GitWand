@@ -14,15 +14,26 @@ export function useAllowedAiEndpoints() {
   const revoking = ref<string | null>(null);
   const error = ref<string | null>(null);
 
+  // Loads can overlap (Settings opened, then a revoke): only the latest one
+  // writes its answer, and `loading` holds until none is in flight.
+  let latest = 0;
+  let inFlight = 0;
+
   async function load(): Promise<void> {
+    const mine = ++latest;
+    inFlight++;
     loading.value = true;
     try {
-      origins.value = await aiAllowedEndpoints();
-      error.value = null;
+      const answer = await aiAllowedEndpoints();
+      if (mine === latest) {
+        origins.value = answer;
+        error.value = null;
+      }
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (mine === latest) error.value = e instanceof Error ? e.message : String(e);
     } finally {
-      loading.value = false;
+      inFlight--;
+      loading.value = inFlight > 0;
     }
   }
 

@@ -50,6 +50,26 @@ describe("tryResolveImportConflict — extended", () => {
     expect(multi.mergedLines?.join("\n")).toContain('} from "./a-rather-long-module-path";');
   });
 
+  it("takes the module's own quote, not one in a comment of the line", () => {
+    const r = tryResolveImportConflict(
+      ['import { a } from "./lib";'],
+      ['import { a, c } from "./lib";'],
+      ['import { a, /* was: from \'old\' */ b } from "./lib";'],
+    );
+    // Whatever the outcome, no line is rebuilt with the comment's quote.
+    for (const line of r.mergedLines ?? []) expect(line).not.toContain("'./lib'");
+  });
+
+  it("keeps the indentation of the import lines", () => {
+    const r = tryResolveImportConflict(
+      ['  import { a } from "./lib";', '  import x from "x";'],
+      ['  import { a, c } from "./lib";', '  import x from "x";'],
+      ['  import { a, b } from "./lib";', '  import x from "x";'],
+    );
+    // Sorted by group: the package first, then the relative module.
+    expect(r.mergedLines).toEqual(['  import x from "x";', '  import { a, b, c } from "./lib";']);
+  });
+
   it("should merge when ours adds a new module and theirs adds a different one", () => {
     const base = [
       'import React from "react";',

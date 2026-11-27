@@ -46,6 +46,23 @@ describe("useAllowedAiEndpoints", () => {
     expect(aiAllowedEndpoints).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps loading until the last load lands, and takes only the latest answer", async () => {
+    let releaseOld!: (v: string[]) => void;
+    aiAllowedEndpoints.mockImplementationOnce(() => new Promise<string[]>((r) => (releaseOld = r)));
+    const e = useAllowedAiEndpoints();
+    const old = e.load();
+    let releaseNew!: (v: string[]) => void;
+    aiAllowedEndpoints.mockImplementationOnce(() => new Promise<string[]>((r) => (releaseNew = r)));
+    const fresh = e.load();
+    releaseNew(["https://b.example"]);
+    await fresh;
+    expect(e.loading.value).toBe(true);
+    releaseOld(["https://a.example", "https://b.example"]);
+    await old;
+    expect(e.loading.value).toBe(false);
+    expect(e.origins.value).toEqual(["https://b.example"]);
+  });
+
   it("ignores a second revoke while one runs", async () => {
     const e = useAllowedAiEndpoints();
     await e.load();
