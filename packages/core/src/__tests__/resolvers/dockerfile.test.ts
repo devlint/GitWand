@@ -571,7 +571,8 @@ describe("Dockerfile — review du lot A, passe 4", () => {
   it("une instruction à clé répétée dans la base, supprimée de l'autre côté : elle ne revient pas", () => {
     const input = [`FROM node:20`, dockerHunk([`ENV X=2`, `RUN a`], [`ENV X=1`, `RUN a`, `RUN b`], [`ENV X=1`])].join("\n");
     const result = resolve(input, "Dockerfile");
-    expect(result.mergedContent ?? "").not.toMatch(/^RUN a$/m);
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe([`FROM node:20`, `ENV X=2`].join("\n"));
   });
 
   it("commentaire réécrit d'un côté (WORKDIR changé dessous) et supprimé de l'autre : pas de résolution par le résolveur Dockerfile", () => {
@@ -638,7 +639,10 @@ describe("Dockerfile — review du lot A, passe 6", () => {
       [`ENV A=1`, `# runtime`, `EXPOSE 80`, `USER node`],
     )].join("\n");
     const result = resolve(input, "Dockerfile");
-    if (result.mergedContent) expect(result.mergedContent.match(/^# runtime$/gm)).toHaveLength(1);
+    // Personne n'a touché au commentaire (même texte des trois côtés) : il
+    // reste une fois, au-dessus de l'instruction qu'il précède dans ours.
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe([`FROM n`, `ENV A=1`, `EXPOSE 80`, `# runtime`, `RUN x`, `USER node`].join("\n"));
   });
 
   it("theirs supprime un commentaire sous lequel ours insère : la suppression n'est pas perdue en silence", () => {
@@ -711,5 +715,26 @@ describe("Dockerfile — review du lot A, passe 8", () => {
     const result = resolve(input, "Dockerfile");
     expect(result.stats.autoResolved).toBe(1);
     expect(result.mergedContent).toBe([`FROM n`, `# dir`, `WORKDIR /srv`, `# install deps`, `RUN npm ci`].join("\n"));
+  });
+});
+
+describe("Dockerfile — review du lot A, passe 9", () => {
+  it("LABEL à plusieurs clés changé des deux côtés : rien de perdu en silence", () => {
+    const input = [`FROM n`, dockerHunk([`LABEL a=1 b=2`], [`LABEL a=1 b=1`], [`LABEL a=2 b=1`])].join("\n");
+    expect(resolve(input, "Dockerfile").resolutions[0]?.resolutionReason ?? "").not.toMatch(/Dockerfile merged by stage/);
+  });
+
+  it("EXPOSE ajouté différemment de chaque côté (absent de la base) : les deux ports restent", () => {
+    const input = [`FROM n`, dockerHunk([`ENV A=1`, `EXPOSE 80`], [`ENV A=1`], [`ENV A=1`, `EXPOSE 81`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("EXPOSE 80");
+    expect(result.mergedContent).toContain("EXPOSE 81");
+  });
+
+  it("la base a moins de stages sans alias que les deux côtés : pas de repli silencieux en diff2", () => {
+    const input = dockerHunk([`ENV A=2`, `FROM x`, `RUN 1`], [`ENV A=1`], [`ENV A=1`, `FROM x`, `RUN 1`]);
+    const result = resolve(input, "Dockerfile");
+    expect(result.mergedContent ?? "").not.toBe([`ENV A=1`, `FROM x`, `RUN 1`].join("\n"));
   });
 });

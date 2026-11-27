@@ -133,7 +133,7 @@ function instructionKey(instr: Instruction): string {
   return instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
 }
 
-/** `ENV A=1 B=2` : plus d'une affectation sur la ligne. */
+/** `ENV A=1 B=2`, `LABEL a=1 b=1` : plus d'une affectation sur la ligne. */
 function assignsSeveral(instr: Instruction): boolean {
   const rest = instr.raw.map((l) => l.replace(/\\\s*$/, "").trim()).join(" ").replace(/^\S+\s+/, "");
   return (rest.match(/(?:^|\s)[A-Za-z_][\w.-]*=/g) ?? []).length > 1;
@@ -154,6 +154,7 @@ function splitRepeatables(instructions: Instruction[]): {
   body: Instruction[];
   groups: Map<string, string[][]>;
   text: string;
+  textOnly: string;
 } {
   const body: Instruction[] = [];
   const groups = new Map<string, string[][]>();
@@ -172,7 +173,14 @@ function splitRepeatables(instructions: Instruction[]): {
   // précède. Le texte seul ne suffit pas (le même séparateur ajouté de chaque
   // côté à un endroit différent) ; une instruction insérée sous un
   // commentaire compte donc aussi comme un changement de ce côté.
-  return { body, groups, text: JSON.stringify([...groups.entries()]) };
+  return {
+    body,
+    groups,
+    text: JSON.stringify([...groups.entries()]),
+    // Le texte seul, dans l'ordre : identique des trois côtés, personne n'a
+    // touché aux commentaires (seules des instructions ont bougé autour).
+    textOnly: JSON.stringify([...groups.values()]),
+  };
 }
 
 /**
@@ -219,7 +227,9 @@ function mergeStage(
 
   // ── Quel côté fournit les commentaires et lignes vides.
   let source: { groups: Map<string, string[][]> } = oursSplit;
-  if (oursSplit.text !== theirsSplit.text) {
+  const untouched =
+    oursSplit.textOnly === theirsSplit.textOnly && (!hasBase || oursSplit.textOnly === baseSplit.textOnly);
+  if (!untouched && oursSplit.text !== theirsSplit.text) {
     if (!hasBase) {
       // diff2 : rien ne dit qui a changé quoi. Union des groupes tant que les
       // deux côtés n'en placent pas un, différent, devant la même instruction.
@@ -384,11 +394,18 @@ function mergeBody(
         return null;
       case "ENV":
       case "ARG":
-        // Plusieurs variables sur une ligne (`ENV A=1 B=2`, clé = la première) :
-        // « prefer theirs » perdrait le changement de ours sur une autre
-        // variable. Moteur textuel.
+      case "LABEL":
+        // Plusieurs affectations sur une ligne (`ENV A=1 B=2`, `LABEL a=1 b=1`) :
+        // « prefer theirs » perdrait le changement de ours sur une autre clé.
+        // Moteur textuel.
         if (assignsSeveral(oursInstr) || assignsSeveral(theirsInstr)) return null;
         return theirsInstr.raw;
+      case "EXPOSE":
+      case "VOLUME":
+        // Additives (clé = la sorte seule) : ajoutées des deux côtés sans base,
+        // les deux restent ; changées des deux côtés depuis la base, moteur
+        // textuel.
+        return typeof baseRaw === "string" ? null : [...oursInstr.raw, ...theirsInstr.raw];
       default:
         // FROM (image de base plus récente), ENV/ARG (valeur entrante),
         // WORKDIR, EXPOSE, USER… : prefer theirs
@@ -511,16 +528,22 @@ export function tryResolveDockerfileConflict(
   const theirsStageMap = new Map<string, Instruction[]>();
   theirsStages.forEach((stage, idx) => theirsStageMap.set(theirsKeys[idx], stage));
 
-  // Stages de base, appariés avec les mêmes clés — seulement si la base a le
-  // même nombre de stages sans alias (sinon la position ne dit rien) et n'est
-  // pas vide (diff2). Sans base, mergeStage garde « prefer theirs ».
+  // Stages de base, appariés avec les mêmes clés (base vide : diff2, sans
+  // base ; mergeStage garde alors « prefer theirs »).
   const baseStageMap = new Map<string, Instruction[]>();
   if (baseLines.length > 0) {
     const baseStages = splitByStage(parseDockerfileInstructions(baseLines));
     const baseKeys = stageKeys(baseStages);
-    if (countUnaliased(baseKeys) === countUnaliased(oursKeys)) {
-      baseStages.forEach((stage, idx) => baseStageMap.set(baseKeys[idx], stage));
+    // Une base qui n'a pas les mêmes stages sans alias ne s'apparie pas ; la
+    // fusion sans base (diff2) perdrait un changement d'un seul côté au profit
+    // de « prefer theirs » : moteur textuel.
+    if (countUnaliased(baseKeys) !== countUnaliased(oursKeys)) {
+      return {
+        lines: null,
+        reason: "[dockerfile] The base does not have the same unaliased stages as the two sides, falling back to the textual engine.",
+      };
     }
+    baseStages.forEach((stage, idx) => baseStageMap.set(baseKeys[idx], stage));
   }
 
   // Un stage présent d'un seul côté : gardé s'il n'est pas dans la base

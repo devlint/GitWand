@@ -524,7 +524,9 @@ export function tryResolveImportConflict(
       ...(bindingsCollide(a, b) ? { conflict: true } : {}),
       reason: typeVsValue
         ? `Conflict on import '${source}': the same ${a.kind} import as a type on one side and as a value on the other.`
-        : `Conflict on import '${source}': incompatible kinds (${a.kind} vs ${b.kind}).`,
+        : a.kind === b.kind
+          ? `Conflict on import '${source}': each side imports it with different bindings.`
+          : `Conflict on import '${source}': incompatible kinds (${a.kind} vs ${b.kind}).`,
       resolvedImports,
       unresolvedImports,
     };
@@ -703,7 +705,14 @@ export function tryResolveImportConflict(
   for (let i = 0; i < kept.length; i++) {
     for (let j = i + 1; j < kept.length; j++) {
       const [a, b] = [kept[i], kept[j]];
-      if (a.source !== b.source || !a.source || a.raw === b.raw) continue;
+      if (!a.source || !b.source || a.raw === b.raw) continue;
+      // D'un autre module, seule une collision lue compte (des liaisons
+      // illisibles ne disent rien d'un import sans rapport).
+      if (a.source !== b.source) {
+        const la = localBindings(a);
+        const lb = localBindings(b);
+        if (la === null || lb === null || !la.some((n) => lb.includes(n))) continue;
+      }
       // Un import resté tel quel depuis la base n'est le changement de personne
       // (comme dans `sameSourceClash`) : un `require` illisible inchangé ne
       // bloque pas une fusion que git ferait bien.
@@ -712,7 +721,9 @@ export function tryResolveImportConflict(
         return {
           mergedLines: null,
           conflict: true,
-          reason: `Conflict on import '${a.source}': two imports kept from it bind the same name.`,
+          reason: a.source === b.source
+            ? `Conflict on import '${a.source}': two imports kept from it bind the same name.`
+            : `Conflict on imports '${a.source}' and '${b.source}': both bind the same name.`,
           resolvedImports,
           unresolvedImports: unresolvedImports + 1,
         };

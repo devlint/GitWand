@@ -153,3 +153,16 @@ describe("imports — review du lot A, passe 7", () => {
     expect(result.conflict).toBe(true);
   });
 });
+
+describe("imports — review du lot A, passe 9", () => {
+  it("le même nom local lié depuis deux modules différents : collision signalée", () => {
+    const result = tryResolveImportConflict([], [`import { a as X } from 'm';`], [`import X from 'n';`]);
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBe(true);
+  });
+
+  it("deux require du même module avec des liaisons différentes : la raison ne parle pas de formes incompatibles", () => {
+    const result = tryResolveImportConflict([], [`const { a } = require('m');`], [`const { b } = require('m');`]);
+    expect(result.reason).not.toMatch(/require vs require/);
+  });
+});

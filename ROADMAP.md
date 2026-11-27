@@ -37,6 +37,8 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 **3.15.x — lot A: resolvers** (wrong resolutions a user can see)
 
 - _Done on `fix/resolvers-dockerfile-imports`, unreleased (detail in CHANGELOG, Unreleased)._ Dockerfile resolver: one-sided deletions, comments matched by text, theirs' reorder kept; imports resolver: every import of a module compared, `require` bindings read.
+- Textual engine, "pure insertions" pattern: the union of insertions from both sides puts them after the base lines, so in a Dockerfile an instruction inserted before `USER node` on each side lands after it (seen during the lot A review; the Dockerfile resolver now settles that case itself, but other files reach the pattern). Insert each side's lines at their position
+- Dockerfile resolver: stages come out in ours' order, so a reorder of whole stages made on theirs is lost (instructions inside a stage are handled)
 
 **3.15.x — lot B: test net** (before v4.0 moves code)
 
