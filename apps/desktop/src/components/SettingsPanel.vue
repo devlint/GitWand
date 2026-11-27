@@ -3444,7 +3444,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
               <p v-if="allowedAi.origins.value.length === 0 && (allowedAi.loading.value || !allowedAi.error.value)" class="sp-hint">
                 {{ allowedAi.loading.value ? t('common.loading') : t('settings.aiAllowedEndpointsEmpty') }}
               </p>
-              <ul v-else class="sp-allowed-endpoints">
+              <ul v-else-if="allowedAi.origins.value.length > 0" class="sp-allowed-endpoints">
                 <li v-for="origin in allowedAi.origins.value" :key="origin" class="sp-allowed-endpoint">
                   <code class="mono">{{ origin }}</code>
                   <button class="sp-text-btn" :disabled="allowedAi.revoking.value !== null"

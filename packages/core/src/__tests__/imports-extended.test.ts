@@ -50,14 +50,51 @@ describe("tryResolveImportConflict — extended", () => {
     expect(multi.mergedLines?.join("\n")).toContain('} from "./a-rather-long-module-path";');
   });
 
-  it("takes the module's own quote, not one in a comment of the line", () => {
-    // The comment holds a `from '…'` before the module's own `from "…"`.
-    const r = tryResolveImportConflict(
-      ['import { a } from "./lib";'],
-      ['import { a, c } from "./lib";'],
-      ['import { a, /* was: from \'old\' */ b } from "./lib";'],
+  it("leaves an import line holding a comment to the textual engine", () => {
+    // A comment can hold a `from "…"` (in either quote) the patterns would
+    // take for the module.
+    for (const comment of [`/* was: from 'old' */`, `/* from "y" */`]) {
+      const r = tryResolveImportConflict(
+        ['import { a } from "./lib";'],
+        ['import { a, c } from "./lib";'],
+        [`import { a, ${comment} b } from "./lib";`],
+      );
+      expect(r.mergedLines).toBeNull();
+    }
+    // A URL module is not a comment.
+    const url = tryResolveImportConflict(
+      ['import { a } from "https://deno.land/x/lib.ts";'],
+      ['import { a, c } from "https://deno.land/x/lib.ts";'],
+      ['import { a, b } from "https://deno.land/x/lib.ts";'],
     );
-    expect(r.mergedLines).toEqual([`import { /* was: from 'old' */ b, a, c } from "./lib";`]);
+    expect(url.mergedLines).toEqual(['import { a, b, c } from "https://deno.land/x/lib.ts";']);
+  });
+
+  it("takes the quote and semicolon theirs alone changed", () => {
+    const r = tryResolveImportConflict(
+      ["import { a } from './lib'"],
+      ["import { a, c } from './lib'"],
+      ['import { a, b } from "./lib";'],
+    );
+    expect(r.mergedLines).toEqual(['import { a, b, c } from "./lib";']);
+  });
+
+  it("leaves two different re-indentations of a line to the textual engine", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";'],
+      ['  import x from "x";'],
+      ['    import x from "x";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
+  it("gives a line the other side added the block's new indentation", () => {
+    const r = tryResolveImportConflict(
+      ['import a from "a";'],
+      ['  import a from "a";'],
+      ['import a from "a";', 'import b from "b";'],
+    );
+    expect(r.mergedLines).toEqual(['  import a from "a";', '  import b from "b";']);
   });
 
   it("keeps the indentation of the import lines", () => {

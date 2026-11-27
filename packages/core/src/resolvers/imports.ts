@@ -93,6 +93,12 @@ function parseImport(line: string): ImportStatement {
 }
 
 function parseTrimmed(t: string): ImportStatement {
+  // A comment inside an import line (`{ a, /* from "y" */ b }`, `…; // x`) can
+  // hold a \`from "…"\` the patterns would read as the module: such a line is
+  // not parsed. Module strings are blanked first, so \`"https://…"\` is no comment.
+  if (/^(?:import|export)\s/.test(t) && /\/[*/]/.test(t.replace(/(['"])(?:(?!\1).)*\1/g, '""'))) {
+    return { raw: t, source: "", kind: "unknown", names: [], isType: false };
+  }
 
   // Side-effect import
   const sideMatch = t.match(RE_IMPORT_SIDE);
@@ -379,12 +385,14 @@ function mergeNamedImports(
   const sortedNames = [...merged].sort();
   const typePrefix = ours.isType ? "type " : "";
   const indent = ours.indent ?? "";
-  const semi = ours.raw.endsWith(";") ? ";" : "";
+  // Quote and semicolon: ours', unless only theirs changed it from base.
+  const hasSemi = (s: ImportStatement) => s.raw.endsWith(";");
+  const semi = (base && hasSemi(ours) === hasSemi(base) ? hasSemi(theirs) : hasSemi(ours)) ? ";" : "";
 
   if (sortedNames.length === 0) return null; // tous les noms supprimés
 
-  // The file's own quotes (ours' line), not a house style.
-  const q = ours.quote ?? "'";
+  // The file's own quotes, not a house style.
+  const q = (base && ours.quote === base.quote ? theirs.quote : ours.quote) ?? "'";
   const oneLiner = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from ${q}${ours.source}${q}${semi}`;
   if (oneLiner.length <= 100 || sortedNames.length <= 3) return oneLiner;
 
@@ -578,8 +586,26 @@ export function tryResolveImportConflict(
   const resultLines: string[] = [];
   // Les imports gardés, pour la dernière garde sur les liaisons.
   const keptImports: ImportStatement[] = [];
+  // One side re-indented the whole block (every one of its imports moved from
+  // the base's single indentation to one new one) and the other did not: the
+  // lines the other side kept or added at the base's indentation follow it.
+  const uniformIndent = (stmts: ImportStatement[]): string | undefined => {
+    const set = new Set(stmts.map((x) => x.indent ?? ""));
+    return set.size === 1 ? [...set][0] : undefined;
+  };
+  const baseIndent = uniformIndent(baseImports);
+  const oursIndent = uniformIndent(oursImports);
+  const theirsIndent = uniformIndent(theirsImports);
+  const blockIndent =
+    baseIndent === undefined ? undefined
+    : oursIndent !== undefined && oursIndent !== baseIndent && theirsIndent === baseIndent ? oursIndent
+    : theirsIndent !== undefined && theirsIndent !== baseIndent && oursIndent === baseIndent ? theirsIndent
+    : undefined;
+  const shifted = (indent: string | undefined): string =>
+    blockIndent !== undefined && (indent ?? "") === baseIndent ? blockIndent : (indent ?? "");
+
   const keep = (stmt: ImportStatement) => {
-    resultLines.push((stmt.indent ?? "") + stmt.raw);
+    resultLines.push(shifted(stmt.indent) + stmt.raw);
     keptImports.push(stmt);
   };
   // A merged import written over several lines stays one entry until it is
@@ -605,7 +631,7 @@ export function tryResolveImportConflict(
           resolvedImports++;
         } else if (ours.kind === "named" && theirs.kind === "named") {
           // Named imports du même module ajoutés des deux côtés → merger les noms
-          const merged = mergeNamedImports(undefined, ours, theirs);
+          const merged = mergeNamedImports(undefined, { ...ours, indent: shifted(ours.indent) }, theirs);
           if (merged) {
             keepMerged(merged);
             resolvedImports++;
@@ -681,7 +707,16 @@ export function tryResolveImportConflict(
 
     // Les deux présents. Whitespace is not a change of the import (`raw` is
     // trimmed), but a side that re-indented the line keeps its indentation.
-    const indent = ours.indent !== base.indent ? ours.indent : theirs.indent;
+    if (ours.indent !== base.indent && theirs.indent !== base.indent && ours.indent !== theirs.indent) {
+      unresolvedImports++;
+      return {
+        mergedLines: null,
+        reason: `Conflict on import '${base.source}': both sides re-indented it differently.`,
+        resolvedImports,
+        unresolvedImports,
+      };
+    }
+    const indent = shifted(ours.indent !== base.indent ? ours.indent : theirs.indent);
     const at = (stmt: ImportStatement): ImportStatement => ({ ...stmt, indent });
     if (!oursChanged && !theirsChanged) {
       keep(at(base));
