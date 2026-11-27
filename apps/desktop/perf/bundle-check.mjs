@@ -140,7 +140,12 @@ const BUDGETS = {
   // (ancestry-ordered confirmation) and the App.vue wiring (the bisect poll
   // while the watcher is down). The banner and `useBisectStatus` are a lazy
   // chunk.
-  main_max_kb: 1002,
+  //
+  // 3.15.x lot A (Dockerfile and imports resolvers): main measured at
+  // 1,004 KB. `@gitwand/core` is bundled into main, and the two resolvers
+  // now merge deletions, comments, reorders and every import of a module
+  // three-way instead of falling back to the text engine.
+  main_max_kb: 1005,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked
