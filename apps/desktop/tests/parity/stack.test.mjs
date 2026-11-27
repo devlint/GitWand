@@ -217,7 +217,9 @@ describe("parity: stacked branches", () => {
       squashed: ["parent_merged", "cherry", true],
       "merge-commit": ["parent_merged", "merge_commit", true],
     });
-  }, 60_000);
+    // Eleven stack fixtures, each a few dozen git spawns: 17 s alone, 76 s
+    // in the full parity run on a loaded machine (lot B).
+  }, 120_000);
 
   it("a parent that gained commits after its merge is not merged (I-1)", async () => {
     const { rustCwd, nodeCwd } = twoFixtures("merge-commit-grew");

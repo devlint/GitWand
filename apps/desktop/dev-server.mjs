@@ -5834,7 +5834,8 @@ async function handleRequest(req, res) {
       if (r.status !== 0) return jsonResponse(req, res, { path: null });
       const raw = (r.stdout || "").trim();
       if (!raw) return jsonResponse(req, res, { path: null });
-      const home = process.env.HOME || process.env.USERPROFILE || "";
+      // As Rust's `var("HOME").or_else(USERPROFILE)`: a set but empty HOME is used.
+      const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
       const expanded = raw.startsWith("~") ? home + raw.slice(1) : raw;
       return jsonResponse(req, res, { path: expanded });
     }
@@ -5848,7 +5849,8 @@ async function handleRequest(req, res) {
       const r = spawnSync(GIT, ["config", "commit.template"], { cwd: resolve(cwd), encoding: "utf-8" });
       const raw = r.status === 0 ? (r.stdout || "").trim() : "";
       if (!raw) return jsonResponse(req, res, { content: null });
-      const home = process.env.HOME || process.env.USERPROFILE || "";
+      // As Rust's `var("HOME").or_else(USERPROFILE)`: a set but empty HOME is used.
+      const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
       const path = raw.startsWith("~") ? home + raw.slice(1) : raw;
       try {
         const st = statSync(path);

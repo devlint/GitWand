@@ -12,7 +12,8 @@
 
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { runProbe } from "./probe.mjs";
@@ -44,13 +45,18 @@ describe("parity: read-commit-template", () => {
   /** @type {Awaited<ReturnType<typeof startDevServer>>} */
   let dev;
 
+  /** HOME for both sides, so a `~` template resolves somewhere this file controls. */
+  let home = "";
+
   beforeAll(async () => {
-    dev = await startDevServer();
+    home = realpathSync(mkdtempSync(join(tmpdir(), "gw-commit-template-home-")));
+    dev = await startDevServer({ env: { HOME: home } });
   }, 15_000);
 
   afterAll(async () => {
     await dev?.stop();
     for (const cwd of repos.splice(0)) rmSync(cwd, { recursive: true, force: true });
+    if (home) rmSync(home, { recursive: true, force: true });
   });
 
   it("an empty commit.template answers null on both sides", async () => {
@@ -70,6 +76,15 @@ describe("parity: read-commit-template", () => {
     const rust = runProbe("read-commit-template", { cwd });
     const node = await nodeReadTemplate(dev, cwd);
     expect(node).toEqual({ ok: true, value: { content: "Subject\n\n# Why:\n# Refs: #\n" } });
+    expect(rust).toMatchObject({ ok: true, value: node.value });
+  });
+
+  it("a template under ~ is read from HOME on both sides", async () => {
+    writeFileSync(join(home, ".gitmessage"), "From home\n", "utf-8");
+    const cwd = repoWithTemplate("~/.gitmessage");
+    const rust = runProbe("read-commit-template", { cwd }, { HOME: home });
+    const node = await nodeReadTemplate(dev, cwd);
+    expect(node).toEqual({ ok: true, value: { content: "From home\n" } });
     expect(rust).toMatchObject({ ok: true, value: node.value });
   });
 

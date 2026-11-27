@@ -294,8 +294,8 @@ pub fn read_file_parity(cwd: String, path: String) -> Result<String, String> {
 }
 
 /// Parity entry point for `read_commit_template`. The path comes from git
-/// config on both sides, `~` is expanded the same way, and only a small
-/// regular file is read.
+/// config on both sides, a leading `~` is expanded from HOME (then
+/// USERPROFILE), and only a small regular file is read.
 pub fn read_commit_template_parity(cwd: String) -> Result<Option<String>, String> {
     tauri::async_runtime::block_on(commands::read::read_commit_template(cwd))
 }

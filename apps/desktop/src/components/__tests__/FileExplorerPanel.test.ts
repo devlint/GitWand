@@ -256,8 +256,8 @@ async function openTab(path: string, pin = true) {
  * the tab to show its diff instead. The file's own text, not any text: every
  * tab shares one editor host, so after a first tab the host is never empty.
  * Every current caller gets its text; a tab restored with edits keeps the
- * file's text inside them. Well under the 5 s test timeout, so a missing
- * editor fails on the test's own assertions, not on a timeout.
+ * file's text inside them. Fails with its own message after `ms`, well under
+ * the 5 s test timeout.
  */
 async function untilEditorShows(text: string, ms = 1_500) {
   // `.cm-content` draws each line as its own element: its text has no newlines.
@@ -268,6 +268,7 @@ async function untilEditorShows(text: string, ms = 1_500) {
   while (!done() && Date.now() < deadline) {
     await settle(1);
   }
+  if (!done()) throw new Error(`the editor never showed the opened file (${JSON.stringify(flat.slice(0, 40))})`);
 }
 
 /** The live EditorView's text, or null when no editor is mounted. */
