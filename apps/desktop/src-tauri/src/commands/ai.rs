@@ -1046,7 +1046,13 @@ fn output_within(
         }
         let _ = all_done(Duration::from_secs(1));
     }
-    status.filter(|s| s.success())?;
+    // A `--help` read with stderr is wanted whatever the exit status (some
+    // CLIs exit non-zero after printing it); other reads only on success.
+    // A run killed at the timeout gives nothing either way.
+    let status = status?;
+    if !with_stderr && !status.success() {
+        return None;
+    }
     let buf = collected.lock().ok()?.clone();
     (!buf.is_empty()).then(|| String::from_utf8_lossy(&buf).into_owned())
 }
@@ -3797,6 +3803,11 @@ mod neutral_dir_tests {
         );
         let out = stdout_within(cmd(), std::time::Duration::from_secs(5)).unwrap();
         assert!(!out.contains("--input-format"));
+        // A help printed by a CLI that then exits non-zero is still read.
+        let mut failing = std::process::Command::new("sh");
+        failing.args(["-c", "echo --mode >&2; exit 2"]);
+        let help = output_within(failing, std::time::Duration::from_secs(5), true).unwrap();
+        assert!(help.contains("--mode"));
     }
 
     #[cfg(unix)]

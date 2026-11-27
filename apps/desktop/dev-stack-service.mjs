@@ -1347,7 +1347,8 @@ function finalize(repo, top, p, hints, mine) {
       }
     }
     for (const b of empty) {
-      const out = run(repo, ["update-ref", `refs/heads/${b}`, p.onto, p.old_base]);
+      // Mirrors restack.rs: a reflog subject read as a rewrite.
+      const out = run(repo, ["update-ref", "-m", `rebase (restack): ${b} onto ${p.onto}`, `refs/heads/${b}`, p.onto, p.old_base]);
       if (!ok(out)) fail(`could not move ${b} onto the restacked stack: ${trimmed(out.stderr)}`);
     }
   }

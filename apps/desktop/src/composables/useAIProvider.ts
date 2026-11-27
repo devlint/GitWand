@@ -15,7 +15,7 @@ import {
   type AiAskMode,
 } from "../utils/backend";
 import { t } from "./useI18n";
-import { ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
+import { aiApiKeyBoundTo, ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
 
 /**
  * AI provider types matching SettingsPanel configuration.
@@ -229,13 +229,15 @@ async function callClaude(
 }
 
 /**
- * How a request to an OpenAI-compatible endpoint is authenticated: with the
- * stored key when there is one (the backend refuses it, saying why, when it
- * is bound to another origin), without any otherwise (a local llama.cpp,
- * vLLM or LM Studio server needs none).
+ * How a request to the OpenAI-compatible `endpoint` is authenticated: with
+ * the stored key when it is bound to that endpoint's origin, without any
+ * otherwise. A local llama.cpp, vLLM or LM Studio server needs none, and a
+ * key kept for another provider (an Anthropic key) must not make every
+ * request to it fail. Waits for the key's state to be known.
  */
-export function openAICompatAuth(): "bearer" | "none" {
-  return isAiApiKeyConfigured() ? "bearer" : "none";
+export async function openAICompatAuth(endpoint: string): Promise<"bearer" | "none"> {
+  await ensureAiApiKeyLoaded();
+  return aiApiKeyBoundTo(endpoint) ? "bearer" : "none";
 }
 
 /**
@@ -247,7 +249,7 @@ async function callOpenAICompat(
   userPrompt: string,
 ): Promise<string> {
   const endpoint = settings.aiApiEndpoint.replace(/\/+$/, "");
-  const res = await aiHttpRequest("POST", `${endpoint}/chat/completions`, openAICompatAuth(), {
+  const res = await aiHttpRequest("POST", `${endpoint}/chat/completions`, await openAICompatAuth(endpoint), {
     model: settings.aiModel,
     max_tokens: 4096,
     messages: [
@@ -585,7 +587,7 @@ export async function fetchOpenAICompatModels(
   opts: ModelListOptions = {},
 ): Promise<AIModelOption[]> {
   const base = endpoint.replace(/\/+$/, "");
-  const res = await aiHttpRequest("GET", `${base}/models`, openAICompatAuth(), undefined, 10, opts);
+  const res = await aiHttpRequest("GET", `${base}/models`, await openAICompatAuth(base), undefined, 10, opts);
   if (!isOk(res.status)) {
     throw new Error(`API error ${res.status}: ${res.body}`);
   }

@@ -69,6 +69,14 @@ describe("dev-server: image proxy", { timeout: 15_000 }, () => {
     expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG);
   });
 
+  it("lets no foreign page read it", async () => {
+    const res = await dev.fetch(`/api/image-proxy?u=${encodeURIComponent(`${base}/a.png`)}`, {
+      headers: { Origin: "https://evil.example" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
   it("refuses an answer that is not an image, and an error status", async () => {
     expect((await get(`${base}/page`)).status).toBe(502);
     expect((await get(`${base}/missing.png`)).status).toBe(502);

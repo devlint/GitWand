@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSy
 import { resolve, join, dirname, basename, sep, isAbsolute, relative } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { isUtf8 } from "node:buffer";
@@ -905,16 +905,21 @@ function sweepStaleRunDirs(base) {
     const p = join(base, n);
     try {
       const st = lstatSync(p);
-      if (Date.now() - st.mtimeMs > 24 * 60 * 60_000) rmSync(p, { recursive: true, force: true });
+      const age = Date.now() - st.mtimeMs;
+      if (age <= 24 * 60 * 60_000) continue;
+      // Mirrors sweep_stale_run_dirs: a live owner (the pid in the name, the
+      // app's or a dev server's) keeps it, for up to 7 days (a reused pid).
+      const m = /^run-[0-9a-f]{16}([0-9a-f]{8})$/i.exec(n);
+      if (m && age < 7 * 24 * 60 * 60_000 && devProcessAlive(parseInt(m[1], 16))) continue;
+      rmSync(p, { recursive: true, force: true });
     } catch { /* gone */ }
   }
 }
-/**
- * Mirrors `ai_prompt_cmd` + `AiRunDir` (ai.rs): run an AI CLI in a fresh
- * private directory of its own (mkdtemp: exclusive, 0700), a git repository
- * when the CLI needs one (Codex), removed afterwards whatever happens — never
- * the repository, never a directory another run could have left files in.
- */
+/** True when a process with this pid exists (EPERM is a live process). */
+function devProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e?.code === "EPERM"; }
+}
 /** JSON from JSONC: comments and trailing commas dropped. Mirrors `jsonc_to_json`. */
 function devJsoncToJson(text) {
   let out = "";
@@ -986,9 +991,16 @@ function devOpencodeConfigContent() {
   return JSON.stringify(base);
 }
 
+/**
+ * Mirrors `ai_prompt_cmd` + `AiRunDir` (ai.rs): run an AI CLI in a fresh
+ * private directory of its own (exclusive, 0700, named `run-<16 hex><8 hex pid>` as `random_token`), a git repository
+ * when the CLI needs one (Codex), removed afterwards whatever happens — never
+ * the repository, never a directory another run could have left files in.
+ */
 function spawnAiSync(bin, args, opts, { gitRepo = false, files = {} } = {}) {
   const base = aiRunsBase();
-  const dir = mkdtempSync(join(base, "run-"));
+  const dir = join(base, `run-${randomBytes(8).toString("hex")}${process.pid.toString(16).padStart(8, "0")}`);
+  mkdirSync(dir, { mode: 0o700 }); // fails on any existing entry
   try {
     if (gitRepo) {
       const g = spawnSync(GIT, ["init", "-q"], { cwd: dir });
@@ -8261,10 +8273,12 @@ async function handleRequest(req, res) {
         const body = Buffer.concat(parts);
         if (body.length === 0) throw new Error("empty image");
         res.writeHead(200, {
+          // CORS of the dev server's allowed origins only; its JSON
+          // Content-Type is replaced by the image's.
+          ...corsHeaders(req),
           "Content-Type": type,
           "Cache-Control": "max-age=3600",
           "X-Content-Type-Options": "nosniff",
-          "Access-Control-Allow-Origin": "*",
         });
         return res.end(body);
       } catch (e) {

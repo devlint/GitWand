@@ -245,6 +245,10 @@ describe("leftThroughRewrite", () => {
     expect(leftThroughRewrite(`b\tcommit: y\n${T}\tcommit: x\n`, T)).toBe(true);
     expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tcherry-pick: x\n`, T)).toBe(true);
     expect(leftThroughRewrite(`b\tpull --rebase (finish): refs/heads/x onto c\n${T}\tpull: Fast-forward\n`, T)).toBe(true);
+    // A stack restack: git's `rebase (update-refs)`, or GitWand's own for a
+    // layer with no commit of its own.
+    expect(leftThroughRewrite(`b\trebase (restack): x onto c\n${T}\t\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\trebase (update-refs): refs/heads/x\n${T}\t\n`, T)).toBe(true);
   });
   it("refuses a tip that arrived from elsewhere and was left by a reset or a commit, a merge made here, and the current tip", () => {
     expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tpull: Fast-forward\n`, T)).toBe(false);

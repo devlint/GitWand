@@ -4,12 +4,15 @@
  * the provider is available with an endpoint alone, and its requests go out
  * with `auth: "none"`. With a stored key they carry it (`bearer`). Before,
  * the model list loaded but completions required a key and always sent
- * `bearer`, so such a server was never usable.
+ * `bearer`, so such a server was never usable. A key stored for another
+ * origin is not sent (the backend would refuse the whole request).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const aiHttpRequest = vi.fn();
 let keyConfigured = false;
+/** Origin the stored key is bound to, when one is stored. */
+let keyOrigin: string | null = null;
 
 vi.mock("../../utils/backend", async () => {
   const actual = await vi.importActual<typeof import("../../utils/backend")>("../../utils/backend");
@@ -18,6 +21,7 @@ vi.mock("../../utils/backend", async () => {
 vi.mock("../useAiApiKey", () => ({
   ensureAiApiKeyLoaded: vi.fn(async () => {}),
   isAiApiKeyConfigured: () => keyConfigured,
+  aiApiKeyBoundTo: (endpoint: string) => keyConfigured && keyOrigin === new URL(endpoint).origin,
 }));
 
 import { useAIProvider, fetchOpenAICompatModels } from "../useAIProvider";
@@ -39,6 +43,7 @@ describe("OpenAI-compatible provider without a key", () => {
   beforeEach(() => {
     localStorage.clear();
     keyConfigured = false;
+    keyOrigin = null;
     aiHttpRequest.mockReset().mockResolvedValue({
       status: 200,
       body: JSON.stringify({ choices: [{ message: { content: "ok" } }], data: [{ id: "m" }] }),
@@ -66,8 +71,17 @@ describe("OpenAI-compatible provider without a key", () => {
     ]);
 
     keyConfigured = true;
+    keyOrigin = "http://localhost:8080";
     await useAIProvider().rawPrompt("sys", "user");
     expect(aiHttpRequest.mock.calls[1][2]).toBe("bearer");
+  });
+
+  it("sends none when the stored key belongs to another endpoint", async () => {
+    settings();
+    keyConfigured = true;
+    keyOrigin = "https://api.anthropic.com";
+    await useAIProvider().rawPrompt("sys", "user");
+    expect(aiHttpRequest.mock.calls[0][2]).toBe("none");
   });
 
   it("offers the core an LLM endpoint without a key", () => {

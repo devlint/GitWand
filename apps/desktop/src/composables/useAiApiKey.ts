@@ -239,6 +239,16 @@ export function endpointOrigin(endpoint: string | null | undefined): string | nu
   }
 }
 
+/**
+ * True when a key is stored and bound to `endpoint`'s origin: the only case
+ * the backend attaches it there. Synchronous; load the hint first
+ * (`ensureAiApiKeyLoaded`).
+ */
+export function aiApiKeyBoundTo(endpoint: string | null | undefined): boolean {
+  if (hint.value === null || origin.value === null) return false;
+  return origin.value === endpointOrigin(endpoint);
+}
+
 export function useAiApiKey() {
   void ensureAiApiKeyLoaded();
   return {

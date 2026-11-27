@@ -907,7 +907,9 @@ pub fn run() {
             commands::image_proxy::SCHEME,
             |_ctx, request, responder| {
                 let uri = request.uri().to_string();
-                std::thread::spawn(move || {
+                // The blocking pool, not a thread per image: a list of
+                // hundreds of avatars waits there for its fetch slots.
+                tauri::async_runtime::spawn_blocking(move || {
                     responder.respond(commands::image_proxy::respond(&uri));
                 });
             },

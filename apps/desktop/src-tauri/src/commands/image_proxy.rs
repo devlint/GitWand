@@ -312,9 +312,16 @@ fn serve_with(url: &str, fetch: impl FnOnce(&str) -> Result<Image, String>) -> O
         f.running += 1;
         flight
     };
+    // Whatever happens next, a panic in the fetch included, the slot is
+    // freed and the requests waiting on this flight get an answer.
+    let mut landing = Landing {
+        url,
+        flight: &flight,
+        outcome: Err("image fetch failed".to_string()),
+    };
     // Fetched outside every lock: other images are served meanwhile.
-    let outcome: Outcome = fetch(url).map(Arc::new);
-    match &outcome {
+    landing.outcome = fetch(url).map(Arc::new);
+    match &landing.outcome {
         Ok(image) => lock_cache().put(url.to_string(), image.clone()),
         Err(e) => {
             lock_fetching()
@@ -322,15 +329,32 @@ fn serve_with(url: &str, fetch: impl FnOnce(&str) -> Result<Image, String>) -> O
                 .push((url.to_string(), std::time::Instant::now(), e.clone()))
         }
     }
-    {
-        let mut f = lock_fetching();
-        f.running -= 1;
-        f.flights.retain(|(u, _)| u != url);
+    landing.outcome.clone()
+}
+
+/// Ends a flight when dropped: frees its fetch slot, removes it, and hands
+/// its outcome (a failure unless set) to the requests waiting on it.
+struct Landing<'a> {
+    url: &'a str,
+    flight: &'a Flight,
+    outcome: Outcome,
+}
+
+impl Drop for Landing<'_> {
+    fn drop(&mut self) {
+        {
+            let mut f = lock_fetching();
+            f.running = f.running.saturating_sub(1);
+            f.flights.retain(|(u, _)| u != self.url);
+        }
+        SLOT_FREED.notify_one();
+        *self
+            .flight
+            .outcome
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(self.outcome.clone());
+        self.flight.done.notify_all();
     }
-    SLOT_FREED.notify_one();
-    *flight.outcome.lock().unwrap_or_else(|p| p.into_inner()) = Some(outcome.clone());
-    flight.done.notify_all();
-    outcome
 }
 
 /// The HTTP response for a `gwimg:` request.
@@ -468,6 +492,25 @@ mod tests {
         assert!(err.contains("404"));
         let again = serve_with(bad, |_| panic!("fetched again within the failure TTL"));
         assert_eq!(again.unwrap_err(), err);
+    }
+
+    #[test]
+    fn a_panicking_fetch_frees_its_slot_and_answers_its_waiters() {
+        let url = "https://panic.example/a.png";
+        let waiter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            serve_with(url, |_| panic!("not the waiter's fetch"))
+        });
+        let first = std::thread::spawn(move || {
+            serve_with(url, |_| {
+                std::thread::sleep(Duration::from_millis(200));
+                panic!("fetch blew up")
+            })
+        });
+        assert!(first.join().is_err());
+        // The waiter got an answer rather than hanging.
+        assert!(waiter.join().unwrap().is_err());
+        assert!(lock_fetching().flights.iter().all(|(u, _)| u != url));
     }
 
     #[test]

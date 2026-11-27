@@ -208,6 +208,15 @@ function hardenLinksAndImages(node: Element) {
 let hooksInstalled = false;
 function ensureHooks() {
   if (hooksInstalled) return;
+  // DOMPurify's URI check drops a `gwimg:` src (the app's image proxy)
+  // before `afterSanitizeAttributes` runs, so a second sanitising pass over
+  // HTML this module produced lost its images. Keep it: the hook judges it
+  // as the remote image it points to (`originalImageUrl`).
+  DOMPurify.addHook("uponSanitizeAttribute", (node: Element, data) => {
+    if (node.tagName === "IMG" && data.attrName === "src" && /^gwimg:/i.test(data.attrValue.trim())) {
+      data.forceKeepAttr = true;
+    }
+  });
   DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
     hardenLinksAndImages(node);
   });

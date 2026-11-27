@@ -309,6 +309,15 @@ describe("GitHub attachments (#302)", () => {
     expect(hasBlockedRemoteImages(safeHtml(once, gh))).toBe(false);
   });
 
+  it("keeps the app's gwimg: image URL through a second pass, judged as its original", () => {
+    // What the first pass writes in the app (jsdom is not Tauri: build it).
+    const app = (u: string) => `gwimg://localhost/?u=${encodeURIComponent(u)}`;
+    expect(safeHtml(`<img src="${app(asset)}" alt="x">`, gh)).toContain(`src="${proxyImageUrl(asset)}"`);
+    // Not allowed: blocked like the remote image it points to.
+    const blocked = safeHtml(`<img src="${app("https://tracker.example/p.png")}" alt="t">`);
+    expect(hasBlockedRemoteImages(blocked)).toBe(true);
+  });
+
   it("treats a proxy URL written in a PR as the remote image it points to", () => {
     const crafted = proxyImageUrl("https://tracker.example/p.png");
     const out = safeHtml(`<img src="${crafted}" alt="t">`);
