@@ -52,12 +52,22 @@ export function forgetRetractedFormatResolvers(
 }
 
 /** Explanations that say a mechanism resolved the hunk (not a proposal of the pattern). */
-const CLAIMS_A_RESOLUTION = new Set<ExplanationKey>(["formatSemantic", "llmProposed", "structuralMerge"]);
+const CLAIMS_A_RESOLUTION = new Set<ExplanationKey>([
+  "formatSemantic",
+  "llmProposed",
+  "structuralMerge",
+  // "Resolved through the RefMerge pipeline".
+  "refactoringRenames",
+  "refactoringMoves",
+  "refactoringBoth",
+  "refactoringDetected",
+  "refactoringFallback",
+]);
 
 /**
  * #301 — A hunk whose format-aware resolution was not applied names no
  * resolver. Nor does its explanation: one that says the hunk was resolved by
- * a format resolver, a structural merge or the LLM goes back to the
+ * a format resolver, a structural merge, RefMerge or the LLM goes back to the
  * genuine-conflict one, in both forms (`explanation`, `explanationRef`).
  */
 export function withoutFormatResolver(hunk: ConflictHunk): ConflictHunk {

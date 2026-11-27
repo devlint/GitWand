@@ -121,6 +121,17 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
 }
 
 /**
+ * An `llm_proposed` hunk is a complex one the LLM would have been asked
+ * about: its confidence is the LLM placeholder (non-determinism penalties).
+ * A format resolver that merges it starts from the complex classification.
+ */
+function asComplex(hunk: ConflictHunk): ConflictHunk {
+  if (hunk.type !== "llm_proposed") return hunk;
+  const input: ClassifyInput = { ...hunk, endLine: hunk.startLine };
+  return { ...hunk, type: "complex", confidence: complexPattern.confidence(input) };
+}
+
+/**
  * A format-aware resolution that was not applied (policy, confidence gate).
  * The hunk stays classified `format_semantic`, naming no resolver and not
  * claiming the merge — except an `llm_proposed` one, returned as it came so
@@ -267,7 +278,7 @@ function resolveHunk(
       // `llm_proposed` is what `complex` becomes while the LLM fallback is on:
       // resolved here, the LLM never sees it, so it is a format-semantic hunk.
       const effective = hunk.type === "complex" || hunk.type === "llm_proposed"
-        ? reclassifyFormatSemantic(hunk, dispatch.resolverUsed)
+        ? reclassifyFormatSemantic(asComplex(hunk), dispatch.resolverUsed)
         : boostFormatValidated(hunk, dispatch.resolverUsed);
       const { policy: fmtPolicy, cfg: fmtCfg } = computeEffectivePolicy(filePath, options);
       const fmtMinConfidence = computeEffectiveMinConfidence(fmtCfg, options);

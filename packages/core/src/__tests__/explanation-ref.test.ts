@@ -108,13 +108,12 @@ describe("explanationRef", () => {
   });
 
   it("recomputes the value-only count when a line array of the same input changes", () => {
-    const h = input(['  "version": "1.2.4"'], ['  "version": "1.2.3"'], ['  "version": "1.2.5"']);
+    const h = input(['  "a": "1.0.1",', '  "b": "2.0.0"'], ['  "a": "1.0.0",', '  "b": "2.0.0"'], ['  "a": "1.0.2",', '  "b": "2.0.0"']);
     expect(p7.explanationRef!(h)).toEqual({ key: "valueOnly", params: [1] });
-    // Edited in place, same arrays.
-    h.oursLines[0] = '  "version": "1.2.4", "build": "a1"';
-    h.theirsLines[0] = '  "version": "1.2.5", "build": "b2"';
-    const after = p7.explanationRef!(h);
-    expect(after).not.toEqual({ key: "valueOnly", params: [1] });
+    // Edited in place, same arrays: a second value now differs.
+    h.oursLines[1] = '  "b": "2.0.1"';
+    h.theirsLines[1] = '  "b": "2.0.2"';
+    expect(p7.explanationRef!(h)).toEqual({ key: "valueOnly", params: [2] });
   });
 
   it("gives an unsent llm_proposed hunk the genuine-conflict explanation", async () => {
@@ -144,8 +143,9 @@ describe("explanationRef", () => {
 
   it("puts a withdrawn LLM or format resolution back to the genuine-conflict explanation", () => {
     const base = resolve(conflict(["x = 1"], ["x = 0"], ["x = 2"]), "a.txt").hunks[0];
-    for (const key of ["llmProposed", "formatSemantic", "structuralMerge"] as const) {
-      const h = withoutFormatResolver({ ...base, explanation: "claimed", explanationRef: { key, ...(key === "formatSemantic" ? { params: ["json"] } : {}) } });
+    for (const key of ["llmProposed", "formatSemantic", "structuralMerge", "refactoringRenames", "refactoringFallback"] as const) {
+      const params = key === "formatSemantic" ? ["json"] : key === "refactoringRenames" ? [1] : undefined;
+      const h = withoutFormatResolver({ ...base, explanation: "claimed", explanationRef: { key, ...(params ? { params } : {}) } });
       expect(h.explanationRef).toEqual({ key: "complex" });
       expect(h.explanation).not.toBe("claimed");
     }
@@ -170,6 +170,8 @@ describe("explanationRef", () => {
     expect(result.hunks[0].type).toBe("format_semantic");
     expect(result.hunks[0].explanationRef?.key).toBe("formatSemantic");
     expect(calls).toBe(0);
+    // Not the LLM placeholder's confidence.
+    expect(result.hunks[0].confidence.penalties.join(" ")).not.toMatch(/LLM/);
   });
 
   it("still sends a hunk whose format merge the policy refused to the LLM fallback", async () => {
@@ -216,11 +218,15 @@ describe("explanationRef", () => {
     input(["  x = 1;"], ["y"], ["x = 1;"]),
     input(["a", "b"], ["a"], ["a", "c"]),
     input(["a", "b"], [], ["a", "c"]),
-    input(["b", "a"], ["a", "b"], ["a", "b", "c"].slice(0, 2).reverse()),
+    input(["b", "a", "c"], ["a", "b", "c"], ["c", "a", "b"]),
     input(["x", "y"], [], ["y", "x"]),
     input(['  "version": "1.2.4"'], ['  "version": "1.2.3"'], ['  "version": "1.2.5"']),
     input(["function f() { return 1; }"], ["function f() { return 0; }"], ["const g = () => 2;"]),
   ];
+  it("covers the reorder-with-base branch", () => {
+    expect(classifyConflict(branches[10]).explanationRef).toEqual({ key: "reorder" });
+  });
+
   for (const [i, h] of branches.entries()) {
     it(`branch ${i}: the key and the English explanation say the same`, () => {
       const r = classifyConflict(h);
