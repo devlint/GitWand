@@ -27,6 +27,7 @@ type InstructionKind =
   | "ENTRYPOINT"
   | "WORKDIR"
   | "EXPOSE"
+  | "VOLUME"
   | "USER"
   | "LABEL"
   | "COMMENT"
