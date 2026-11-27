@@ -240,7 +240,13 @@ function hasTopLevelComma(rest: string): boolean {
     else if (c === ")" || c === "]" || c === "}") depth--;
     else if (c === "," && depth === 0) return true;
     else if (c === ";" && depth === 0) return false;
-    else if (c === "/" && (rest[i + 1] === "/" || rest[i + 1] === "*")) return false; // commentaire
+    else if (c === "/" && rest[i + 1] === "/") return false; // commentaire de fin de ligne
+    else if (c === "/" && rest[i + 1] === "*") {
+      // Commentaire bloc : sauté, un déclarateur peut suivre.
+      const close = rest.indexOf("*/", i + 2);
+      if (close < 0) return false;
+      i = close + 1;
+    }
   }
   return false;
 }

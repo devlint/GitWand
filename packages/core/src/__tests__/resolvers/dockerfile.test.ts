@@ -501,18 +501,16 @@ describe("Dockerfile — review du lot A, passe 2", () => {
     expect(resolve(input, "Dockerfile").stats.autoResolved).toBe(0);
   });
 
-  it("les deux côtés retirent le même commentaire et en ajoutent d'autres ailleurs : fusion automatique", () => {
+  it("les deux côtés retirent le même commentaire et en ajoutent d'autres ailleurs : laissé au moteur textuel, rien de perdu en silence", () => {
     const input = [`FROM node:20`, dockerHunk(
       [`ENV A=1`, `# deps`, `RUN make`, `CMD ["x"]`],
       [`# obsolete`, `ENV A=1`, `RUN make`, `CMD ["x"]`],
       [`ENV A=1`, `RUN make`, `# build`, `CMD ["x"]`],
     )].join("\n");
+    // Les deux côtés ont changé les commentaires : le résolveur Dockerfile
+    // ne choisit pas ; ici le moteur textuel ne tranche pas non plus.
     const result = resolve(input, "Dockerfile");
-    expect(result.stats.autoResolved).toBe(1);
-    const merged = result.mergedContent ?? "";
-    expect(merged).toContain("# deps");
-    expect(merged).toContain("# build");
-    expect(merged).not.toContain("# obsolete");
+    expect(result.stats.autoResolved).toBe(0);
   });
 
   it("une ligne vide ajoutée par le côté qui ne mène pas est gardée", () => {
@@ -560,15 +558,12 @@ describe("Dockerfile — review du lot A, passe 3", () => {
     expect(lines[lines.indexOf("CMD x") - 1]).toBe("# start");
   });
 
-  it("une ligne vide déplacée par le côté qui mène n'est pas prise pour celle de la base", () => {
+  it("une ligne vide déplacée d'un côté et retirée de l'autre : laissée à l'utilisateur, jamais prise pour celle de la base", () => {
+    // ours déplace la ligne vide (devant ENV C), theirs la retire : les deux
+    // côtés ont changé les lignes vides, le résolveur Dockerfile ne choisit pas.
     const input = [`FROM node:20`, dockerHunk([`ENV A=1`, `ENV B=1`, ``, `ENV C=1`], [`ENV A=1`, ``, `ENV B=1`], [`ENV A=1`, `ENV B=1`])].join("\n");
     const result = resolve(input, "Dockerfile");
-    // ours garde une ligne vide (déplacée), theirs l'a retirée : nombre de
-    // copies changé des deux côtés autrement ? ours = base (1), theirs = 0 →
-    // theirs gagne : aucune ligne vide. La garde porte sur le compte, pas
-    // sur l'égalité de deux lignes vides.
-    expect(result.stats.autoResolved).toBe(1);
-    expect(result.mergedContent).toContain("ENV C=1");
+    expect(result.stats.autoResolved).toBe(0);
   });
 });
 
@@ -624,5 +619,42 @@ describe("Dockerfile — review du lot A, passe 5", () => {
     const result = resolve(input, "Dockerfile");
     expect(result.stats.autoResolved).toBe(1);
     expect(result.mergedContent).toBe([`FROM node:20`, `ENV A=2`, ``, `# ---`, `ENV B=1`].join("\n"));
+  });
+});
+
+describe("Dockerfile — review du lot A, passe 6", () => {
+  it("un commentaire au-dessus de chacun de deux COPY : aucun ne disparaît ni ne change de place", () => {
+    const stage = (env: string) => [`# deps`, `COPY package.json /app/`, `RUN npm ci`, ``, `COPY . /app/src/`, env];
+    const input = [`FROM node:20`, dockerHunk(stage(`ENV A=2`), stage(`ENV A=1`), stage(`ENV A=1`))].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe([`FROM node:20`, ...stage(`ENV A=2`)].join("\n"));
+  });
+
+  it("une instruction insérée sous un commentaire de chaque côté : le commentaire n'est jamais dédoublé", () => {
+    const input = [`FROM n`, dockerHunk(
+      [`ENV A=1`, `# runtime`, `RUN x`, `USER node`],
+      [`ENV A=1`, `# runtime`, `USER node`],
+      [`ENV A=1`, `# runtime`, `EXPOSE 80`, `USER node`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    if (result.mergedContent) expect(result.mergedContent.match(/^# runtime$/gm)).toHaveLength(1);
+  });
+
+  it("theirs supprime un commentaire sous lequel ours insère : la suppression n'est pas perdue en silence", () => {
+    const input = [`FROM n`, dockerHunk(
+      [`ENV A=1`, `# runtime`, `RUN x`, `USER node`],
+      [`ENV A=1`, `# runtime`, `USER node`],
+      [`ENV A=1`, `USER node`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.resolutions[0]?.resolutionReason ?? "").not.toMatch(/Dockerfile merged by stage/);
+  });
+
+  it("les deux côtés retirent le même WORKDIR, un seul en ajoute un autre ailleurs : fusion automatique", () => {
+    const input = [`FROM n`, dockerHunk([`ENV A=2`], [`WORKDIR /app`, `ENV A=1`], [`ENV A=1`, `WORKDIR /x`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe([`FROM n`, `ENV A=2`, `WORKDIR /x`].join("\n"));
   });
 });

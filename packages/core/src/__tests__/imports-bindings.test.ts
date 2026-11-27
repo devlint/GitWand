@@ -138,3 +138,10 @@ describe("imports — review du lot A, passe 5", () => {
     expect(result.mergedLines).not.toBeNull();
   });
 });
+
+describe("imports — review du lot A, passe 6", () => {
+  it("un commentaire bloc devant un second déclarateur ne le cache pas", () => {
+    const result = tryResolveImportConflict([], [`const x = require('m') /* a, b */, y = require('n');`], [`import y from 'm';`]);
+    expect(result.conflict).toBe(true);
+  });
+});
