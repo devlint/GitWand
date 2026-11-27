@@ -35,8 +35,12 @@ export function proxyImageUrl(url: string): string;
 export function proxyImageUrl(url: string | null | undefined): string | null;
 export function proxyImageUrl(url: string | null | undefined): string | null {
   if (!url) return url ?? null;
-  const trimmed = url.trim();
-  if (isProxied(trimmed) || !/^https?:\/\//i.test(trimmed)) return url;
+  let trimmed = url.trim();
+  if (isProxied(trimmed)) return url;
+  // Scheme-relative (`//host/x.png`): the CSP no longer lets the window load
+  // it; fetch it over https through the proxy.
+  if (trimmed.startsWith("//")) trimmed = `https:${trimmed}`;
+  if (!/^https?:\/\//i.test(trimmed)) return url;
   const encoded = encodeURIComponent(trimmed);
   return isTauri() ? `${schemeBase()}?u=${encoded}` : `${DEV_SERVER}/api/image-proxy?u=${encoded}`;
 }

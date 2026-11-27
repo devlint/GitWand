@@ -419,6 +419,16 @@ fn opencode_config_content(inherited: Option<&str>, names: &[String]) -> String 
     all.sort();
     all.dedup();
     let obj = base.as_object_mut().expect("an object");
+    // No tool at all (MCP ones included): GitWand wants a text answer.
+    // opencode takes `"*"` as a glob over tool names.
+    let tools = obj.entry("tools").or_insert_with(|| serde_json::json!({}));
+    if !tools.is_object() {
+        *tools = serde_json::json!({});
+    }
+    tools
+        .as_object_mut()
+        .expect("an object")
+        .insert("*".to_string(), serde_json::Value::Bool(false));
     let mcp = obj.entry("mcp").or_insert_with(|| serde_json::json!({}));
     if !mcp.is_object() {
         *mcp = serde_json::json!({});
@@ -1057,6 +1067,17 @@ fn output_within(
     (!buf.is_empty()).then(|| String::from_utf8_lossy(&buf).into_owned())
 }
 
+/// `flag` as a whole option name in `help`: `--mode` is not found in
+/// `--model`, nor in `--modes`.
+fn help_has_flag(help: &str, flag: &str) -> bool {
+    let is_name = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    help.match_indices(flag).any(|(i, _)| {
+        let before = help[..i].chars().next_back();
+        let after = help[i + flag.len()..].chars().next();
+        !before.is_some_and(is_name) && !after.is_some_and(is_name)
+    })
+}
+
 /// Whether `binary --help` (stdout or stderr, 10 s at most) mentions every
 /// flag of `flags`: the options a lockdown relies on. Cached per binary
 /// identity (path, size, mtime), so `agy update` / `copilot update` in place
@@ -1079,7 +1100,7 @@ fn help_mentions(binary: &str, cli: AiCli, flags: &[&str]) -> bool {
     let Some(help) = output_within(cmd, std::time::Duration::from_secs(10), true) else {
         return false;
     };
-    let ok = flags.iter().all(|f| help.contains(f));
+    let ok = flags.iter().all(|f| help_has_flag(&help, f));
     SEEN.lock()
         .unwrap_or_else(|p| p.into_inner())
         .push((key, ok));
@@ -2324,12 +2345,17 @@ fn opencode_run_cmd(
     // Belt and braces with the per-run directory (see opencode_cli_prompt_inner).
     cmd.env("OPENCODE_DISABLE_PROJECT_CONFIG", "1");
     // The user's MCP servers would be callable by a prompt-injected diff:
-    // disabled by name, over their own inline config if they have one.
+    // disabled by name, over their own inline config if they have one. The
+    // names come from opencode's resolved config (every source it reads:
+    // OPENCODE_CONFIG_DIR, a remote config…) and from the files GitWand
+    // reads itself.
     let ctx = cached_ai_env_context(AiCli::Opencode);
     let inherited = std::env::var("OPENCODE_CONFIG_CONTENT").ok();
+    let mut names = ctx.opencode_mcp.clone();
+    names.extend(opencode_resolved_mcp_names(binary, run_dir));
     cmd.env(
         "OPENCODE_CONFIG_CONTENT",
-        opencode_config_content(inherited.as_deref(), &ctx.opencode_mcp),
+        opencode_config_content(inherited.as_deref(), &names),
     );
     // Model is `provider/model` form; flags precede the positional message.
     if let Some(m) = model {
@@ -2338,6 +2364,27 @@ fn opencode_run_cmd(
         }
     }
     cmd
+}
+
+/// The MCP servers in opencode's resolved config (`opencode debug config`,
+/// 15 s at most), read in the run's directory with the run's environment
+/// (project config off, the user's inline config). Empty when it cannot be
+/// read: the config files GitWand reads itself then decide.
+fn opencode_resolved_mcp_names(binary: &str, run_dir: &std::path::Path) -> Vec<String> {
+    let mut cmd = ai_prompt_cmd_in(binary, AiCli::Opencode, run_dir);
+    cmd.env("OPENCODE_DISABLE_PROJECT_CONFIG", "1");
+    cmd.args(["debug", "config"]);
+    output_within(cmd, std::time::Duration::from_secs(15), false)
+        .map(|out| opencode_debug_config_mcp_names(&out))
+        .unwrap_or_default()
+}
+
+/// The `mcp` keys of `opencode debug config`'s output (a JSON object, after
+/// whatever opencode prints before it).
+fn opencode_debug_config_mcp_names(out: &str) -> Vec<String> {
+    out.find('{')
+        .map(|i| opencode_mcp_names(&out[i..]))
+        .unwrap_or_default()
 }
 
 /// Enumerate the models opencode knows about (`opencode models`). Each line
@@ -3483,8 +3530,18 @@ mod neutral_dir_tests {
         let bare: serde_json::Value =
             serde_json::from_str(&opencode_config_content(Some("{oops"), &["fs".to_string()]))
                 .unwrap();
-        assert_eq!(bare, serde_json::json!({"mcp": {"fs": {"enabled": false}}}));
-        assert_eq!(opencode_config_content(None, &[]), r#"{"mcp":{}}"#);
+        assert_eq!(
+            bare,
+            serde_json::json!({"tools": {"*": false}, "mcp": {"fs": {"enabled": false}}})
+        );
+        let empty: serde_json::Value =
+            serde_json::from_str(&opencode_config_content(None, &[])).unwrap();
+        assert_eq!(empty, serde_json::json!({"tools": {"*": false}, "mcp": {}}));
+        assert_eq!(
+            opencode_debug_config_mcp_names("\u{1b}[0m\n{\"mcp\":{\"b\":{\"type\":\"local\"}}}"),
+            ["b"]
+        );
+        assert!(opencode_debug_config_mcp_names("Error: nothing").is_empty());
     }
 
     #[test]
@@ -3783,6 +3840,17 @@ mod neutral_dir_tests {
             "OPENCODE_DISABLE_PROJECT_CONFIG".to_string(),
             "1".to_string()
         )));
+    }
+
+    #[test]
+    fn help_flags_match_whole_option_names() {
+        let help = "  --model <m>   the model\n  --input-format=text\n  -p, --print\n";
+        assert!(!help_has_flag(help, "--mode"));
+        assert!(help_has_flag(help, "--model"));
+        assert!(help_has_flag(help, "--input-format"));
+        assert!(help_has_flag(help, "--print"));
+        assert!(help_has_flag("--mode plan", "--mode"));
+        assert!(!help_has_flag("--modes", "--mode"));
     }
 
     #[cfg(unix)]

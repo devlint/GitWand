@@ -906,11 +906,10 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(
             commands::image_proxy::SCHEME,
             |_ctx, request, responder| {
-                let uri = request.uri().to_string();
-                // The blocking pool, not a thread per image: a list of
-                // hundreds of avatars waits there for its fetch slots.
-                tauri::async_runtime::spawn_blocking(move || {
-                    responder.respond(commands::image_proxy::respond(&uri));
+                // A few dedicated workers, not a thread per image nor the
+                // shared blocking pool (see image_proxy::enqueue).
+                commands::image_proxy::enqueue(request.uri().to_string(), move |r| {
+                    responder.respond(r)
                 });
             },
         );

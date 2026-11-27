@@ -357,6 +357,54 @@ impl Drop for Landing<'_> {
     }
 }
 
+/// Workers answering `gwimg:` requests: a few dedicated threads, so images
+/// waiting for a fetch slot never hold the shared blocking pool that Tauri
+/// commands run on.
+const WORKERS: usize = 8;
+
+type Job = Box<dyn FnOnce() + Send>;
+
+/// Queue `uri` and hand its response to `reply` from a worker. A panic while
+/// serving it still answers (502), so no image request stays open.
+pub(crate) fn enqueue(
+    uri: String,
+    reply: impl FnOnce(tauri::http::Response<Vec<u8>>) + Send + 'static,
+) {
+    use std::sync::mpsc::{channel, Sender};
+    use std::sync::OnceLock;
+    static QUEUE: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
+    let queue = QUEUE.get_or_init(|| {
+        let (tx, rx) = channel::<Job>();
+        let rx = Arc::new(Mutex::new(rx));
+        for _ in 0..WORKERS {
+            let rx = rx.clone();
+            std::thread::spawn(move || loop {
+                let job = match rx.lock().unwrap_or_else(|p| p.into_inner()).recv() {
+                    Ok(job) => job,
+                    Err(_) => return,
+                };
+                job();
+            });
+        }
+        Mutex::new(tx)
+    });
+    let job: Job = Box::new(move || {
+        let response = std::panic::catch_unwind(|| respond(&uri))
+            .unwrap_or_else(|_| failure("image request failed".to_string()));
+        reply(response);
+    });
+    let _ = queue.lock().unwrap_or_else(|p| p.into_inner()).send(job);
+}
+
+fn failure(message: String) -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(502)
+        .header("X-Content-Type-Options", "nosniff")
+        .header("Content-Type", "text/plain; charset=utf-8")
+        .body(message.into_bytes())
+        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
 /// The HTTP response for a `gwimg:` request.
 pub(crate) fn respond(uri: &str) -> tauri::http::Response<Vec<u8>> {
     let builder = tauri::http::Response::builder()
@@ -492,6 +540,20 @@ mod tests {
         assert!(err.contains("404"));
         let again = serve_with(bad, |_| panic!("fetched again within the failure TTL"));
         assert_eq!(again.unwrap_err(), err);
+    }
+
+    #[test]
+    fn queued_requests_are_answered_by_the_workers() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for _ in 0..20 {
+            let tx = tx.clone();
+            enqueue("gwimg://localhost/".to_string(), move |r| {
+                let _ = tx.send(r.status().as_u16());
+            });
+        }
+        for _ in 0..20 {
+            assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), 502);
+        }
     }
 
     #[test]

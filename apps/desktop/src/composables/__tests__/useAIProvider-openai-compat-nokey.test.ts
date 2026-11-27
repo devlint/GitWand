@@ -22,6 +22,7 @@ vi.mock("../useAiApiKey", () => ({
   ensureAiApiKeyLoaded: vi.fn(async () => {}),
   isAiApiKeyConfigured: () => keyConfigured,
   aiApiKeyBoundTo: (endpoint: string) => keyConfigured && keyOrigin === new URL(endpoint).origin,
+  aiApiKeyOrigin: () => (keyConfigured ? keyOrigin : null),
 }));
 
 import { useAIProvider, fetchOpenAICompatModels } from "../useAIProvider";
@@ -82,6 +83,14 @@ describe("OpenAI-compatible provider without a key", () => {
     keyOrigin = "https://api.anthropic.com";
     await useAIProvider().rawPrompt("sys", "user");
     expect(aiHttpRequest.mock.calls[0][2]).toBe("none");
+  });
+
+  it("says the stored key is tied to another endpoint when the server refuses", async () => {
+    settings();
+    keyConfigured = true;
+    keyOrigin = "https://api.groq.com";
+    aiHttpRequest.mockResolvedValueOnce({ status: 401, body: "unauthorized" });
+    await expect(useAIProvider().rawPrompt("sys", "user")).rejects.toThrow(/api\.groq\.com/);
   });
 
   it("offers the core an LLM endpoint without a key", () => {

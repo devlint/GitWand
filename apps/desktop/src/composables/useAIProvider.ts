@@ -15,7 +15,7 @@ import {
   type AiAskMode,
 } from "../utils/backend";
 import { t } from "./useI18n";
-import { aiApiKeyBoundTo, ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
+import { aiApiKeyBoundTo, aiApiKeyOrigin, ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
 
 /**
  * AI provider types matching SettingsPanel configuration.
@@ -241,6 +241,20 @@ export async function openAICompatAuth(endpoint: string): Promise<"bearer" | "no
 }
 
 /**
+ * The error for a refused OpenAI-compatible request: when the server wants
+ * a key and the stored one is bound to another endpoint (so it was not
+ * sent), say so rather than leave a bare 401.
+ */
+export function compatAuthError(endpoint: string, status: number, body: string): string {
+  const base = `API error ${status}: ${body}`;
+  const bound = aiApiKeyOrigin();
+  if ((status === 401 || status === 403) && bound !== null && !aiApiKeyBoundTo(endpoint)) {
+    return `${t("settings.aiApiKeyBoundElsewhere", bound)} (${base})`;
+  }
+  return base;
+}
+
+/**
  * Call an OpenAI-compatible Chat Completions API.
  */
 async function callOpenAICompat(
@@ -259,7 +273,7 @@ async function callOpenAICompat(
   });
 
   if (!isOk(res.status)) {
-    throw new Error(`API error ${res.status}: ${res.body}`);
+    throw new Error(compatAuthError(endpoint, res.status, res.body));
   }
 
   const data = JSON.parse(res.body);
@@ -589,7 +603,7 @@ export async function fetchOpenAICompatModels(
   const base = endpoint.replace(/\/+$/, "");
   const res = await aiHttpRequest("GET", `${base}/models`, await openAICompatAuth(base), undefined, 10, opts);
   if (!isOk(res.status)) {
-    throw new Error(`API error ${res.status}: ${res.body}`);
+    throw new Error(compatAuthError(base, res.status, res.body));
   }
   const body = JSON.parse(res.body);
   return (body.data ?? [])

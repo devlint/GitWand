@@ -337,7 +337,17 @@ fn revoke_open_endpoint(
 #[tauri::command]
 pub(crate) async fn ai_allowed_endpoints() -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        Ok(OriginIndex::app().map(|i| i.list()).unwrap_or_default())
+        // Only what the keychain still allows: a request that read it just
+        // before a revoke may record its origin again just after.
+        let listed = OriginIndex::app().map(|i| i.list()).unwrap_or_default();
+        Ok(listed
+            .into_iter()
+            .filter(|o| {
+                KeychainOrigins::entry(o)
+                    .map(|e| e.get_password().is_ok())
+                    .unwrap_or(false)
+            })
+            .collect())
     })
     .await
     .map_err(|e| e.to_string())?

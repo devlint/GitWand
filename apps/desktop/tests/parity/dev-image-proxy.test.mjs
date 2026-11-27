@@ -41,6 +41,12 @@ describe("dev-server: image proxy", { timeout: 15_000 }, () => {
         };
         return push();
       }
+      const hop = /^\/hop(\d+)$/.exec(req.url ?? "");
+      if (hop) {
+        const n = Number(hop[1]);
+        res.writeHead(302, { Location: n === 0 ? "/a.png" : `/hop${n - 1}` });
+        return res.end();
+      }
       if (req.url === "/page") {
         res.writeHead(200, { "Content-Type": "text/html" });
         return res.end("<script>alert(1)</script>");
@@ -80,6 +86,18 @@ describe("dev-server: image proxy", { timeout: 15_000 }, () => {
   it("refuses an answer that is not an image, and an error status", async () => {
     expect((await get(`${base}/page`)).status).toBe(502);
     expect((await get(`${base}/missing.png`)).status).toBe(502);
+  });
+
+  it("follows 3 redirects, not 4", async () => {
+    expect((await get(`${base}/hop2`)).status).toBe(200); // hop2 → hop1 → hop0 → a.png
+    expect((await get(`${base}/hop3`)).status).toBe(502);
+  });
+
+  it("refuses a request a cross-site page made", async () => {
+    const res = await dev.fetch(`/api/image-proxy?u=${encodeURIComponent(`${base}/a.png`)}`, {
+      headers: { "Sec-Fetch-Site": "cross-site" },
+    });
+    expect(res.status).toBe(403);
   });
 
   it("stops a streamed answer past 5 MiB", async () => {

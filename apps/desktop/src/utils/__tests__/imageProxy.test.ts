@@ -42,6 +42,12 @@ describe("proxyImageUrl", () => {
     expect(proxyImageUrl(null)).toBeNull();
   });
 
+  it("fetches a scheme-relative URL over https", () => {
+    expect(proxyImageUrl("//img.shields.io/badge/x.svg")).toBe(
+      `http://localhost:3001/api/image-proxy?u=${encodeURIComponent("https://img.shields.io/badge/x.svg")}`,
+    );
+  });
+
   it("does not proxy twice", () => {
     const once = proxyImageUrl(REMOTE);
     expect(proxyImageUrl(once)).toBe(once);

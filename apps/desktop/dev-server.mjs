@@ -967,13 +967,28 @@ function devJsoncToJson(text) {
  * every MCP server it or the opencode config files declare disabled.
  * Mirrors `opencode_config_content` + the config files `ai_env_context` reads.
  */
-function devOpencodeConfigContent() {
+function devOpencodeConfigContent(opencodeBin) {
   const parse = (text) => { try { return JSON.parse(devJsoncToJson(text)); } catch { return null; } };
+  // opencode's resolved config first: every source it reads (mirrors
+  // opencode_resolved_mcp_names).
+  const resolvedNames = [];
+  if (opencodeBin) {
+    try {
+      const r = spawnAiSync(opencodeBin, ["debug", "config"], {
+        env: { ...aiSpawnEnv("opencode"), OPENCODE_DISABLE_PROJECT_CONFIG: "1" },
+        encoding: "utf-8",
+        timeout: 15_000,
+      });
+      const out = String(r.stdout || "");
+      const v = r.status === 0 && out.includes("{") ? parse(out.slice(out.indexOf("{"))) : null;
+      if (v?.mcp && typeof v.mcp === "object") resolvedNames.push(...Object.keys(v.mcp));
+    } catch { /* the files below decide */ }
+  }
   const files = [];
   if (process.env.OPENCODE_CONFIG?.trim()) files.push(process.env.OPENCODE_CONFIG);
   const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
   for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) files.push(join(configHome, "opencode", name));
-  const names = new Set();
+  const names = new Set(resolvedNames);
   for (const f of files) {
     let text;
     try { text = readFileSync(f, "utf-8"); } catch { continue; }
@@ -982,6 +997,9 @@ function devOpencodeConfigContent() {
   }
   const inherited = process.env.OPENCODE_CONFIG_CONTENT ? parse(process.env.OPENCODE_CONFIG_CONTENT) : null;
   const base = inherited && typeof inherited === "object" && !Array.isArray(inherited) ? inherited : {};
+  // No tool at all, MCP ones included (mirrors opencode_config_content).
+  if (!base.tools || typeof base.tools !== "object" || Array.isArray(base.tools)) base.tools = {};
+  base.tools["*"] = false;
   if (!base.mcp || typeof base.mcp !== "object" || Array.isArray(base.mcp)) base.mcp = {};
   Object.keys(base.mcp).forEach((n) => names.add(n));
   for (const n of [...names].sort()) {
@@ -8238,6 +8256,13 @@ async function handleRequest(req, res) {
     // (commands/image_proxy.rs): http(s) only, no credentials, 5 MiB and 20 s
     // at most, served only when the answer is an image.
     if (url.pathname === "/api/image-proxy" && req.method === "GET") {
+      // Images of the dev page only: another site the developer has open
+      // could otherwise make this server fetch internal URLs. Browsers send
+      // Sec-Fetch-Site; a request without it (tests, curl) is not a page.
+      if (req.headers["sec-fetch-site"] === "cross-site") {
+        res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+        return res.end("cross-site image request refused");
+      }
       const target = url.searchParams.get("u") ?? "";
       let u;
       try {
@@ -8250,11 +8275,20 @@ async function handleRequest(req, res) {
         return res.end(`bad image URL: ${e.message}`);
       }
       try {
-        const upstream = await fetch(u.href, {
-          headers: { Accept: "image/*" },
-          redirect: "follow",
-          signal: AbortSignal.timeout(20_000),
-        });
+        // Redirects followed by hand: 3 at most, http(s) only, as curl's
+        // --max-redirs 3 --proto-redir =http,https in the app.
+        const signal = AbortSignal.timeout(20_000);
+        let upstream;
+        let next = u;
+        for (let hop = 0; ; hop++) {
+          upstream = await fetch(next.href, { headers: { Accept: "image/*" }, redirect: "manual", signal });
+          const location = upstream.status >= 300 && upstream.status < 400 ? upstream.headers.get("location") : null;
+          if (!location) break;
+          if (hop >= 3) throw new Error("too many redirects");
+          next = new URL(location, next);
+          if (next.protocol !== "http:" && next.protocol !== "https:") throw new Error("redirect to a non-http(s) URL");
+          if (next.username || next.password) throw new Error("redirect with credentials");
+        }
         const type = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
         if (!upstream.ok || !/^image\/[a-z0-9.+-]+$/.test(type)) throw new Error(`answered ${upstream.status} ${type}`);
         // Read as it comes and stop past 5 MiB: a chunked answer announces
@@ -8699,7 +8733,7 @@ async function handleRequest(req, res) {
             ...aiSpawnEnv("opencode"),
             OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","webfetch":"deny"}',
             OPENCODE_DISABLE_PROJECT_CONFIG: "1",
-            OPENCODE_CONFIG_CONTENT: devOpencodeConfigContent(),
+            OPENCODE_CONFIG_CONTENT: devOpencodeConfigContent(OPENCODE),
           },
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
