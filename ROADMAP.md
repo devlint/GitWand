@@ -47,6 +47,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
   - the log view epoch (#214) is tested: a scroll page or a `loadLog` result fetched for the view a filter change left is dropped, a forced reload refetches down to the viewed row plus a page (one page with no viewed row), and a filter change fetches one page and forgets the old view's depth. Each guard was removed once to check a test fails
   - `FileExplorerPanel` tests await the lazy CodeMirror chunk and the file's text in the editor instead of a fixed number of ticks (the two roadmap entries for that flake were one)
   - `useStacks-realBackend` › "retries a failed after-restack handling…" gets 60 s (it spawns git synchronously at every step: 35 s against its 30 s under heavy load, seen during this lot)
+  - `merge_back_without_a_recorded_base_still_works`: not reproduced in 45 runs of the `scratch` tests alongside the full Rust suite (none in 15 runs on 2026-11-26 either); left as is. The `scratch.rs` test repos now remove their parent dir, where the task worktrees are created, instead of leaving it in the temp dir
   - parity-probe entries and parity tests for `read_commit_template` (empty key, template, directory, over 64 KiB, missing file) and `ai_http_request` (`none` auth against a loopback server: GET, POST body and headers, error status, redirect not followed, refused URLs and method)
 
 **3.15.x — lot C: security & data safety**

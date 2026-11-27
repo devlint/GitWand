@@ -740,7 +740,10 @@ mod tests {
 
     impl Drop for TempRepo {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.path);
+            // The parent, not only `repo/`: the scratch worktrees a test
+            // creates are its siblings and would be left in the temp dir.
+            let parent = self.path.parent().unwrap_or(&self.path);
+            let _ = std::fs::remove_dir_all(parent);
         }
     }
 
