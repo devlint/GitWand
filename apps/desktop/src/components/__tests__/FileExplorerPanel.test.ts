@@ -241,7 +241,22 @@ async function settle(rounds = 25) {
  */
 async function openTab(path: string, pin = true) {
   await useFileExplorer().openTab(REPO, REPO, path, pin);
+  // CodeMirror is a lazy chunk: the first test of the file pays for its cold
+  // import, which a fixed number of ticks did not always cover under the
+  // full suite's load. Await the same cached promise the panel awaits, then
+  // wait for the editor of a readable file to show it.
+  await loadCodeMirror();
   await settle();
+  const content = files[path];
+  if (content !== undefined) await untilEditorShows(content.trimEnd());
+}
+
+/** Wait, up to `ms`, for the mounted editor to hold `text`. */
+async function untilEditorShows(text: string, ms = 5_000) {
+  const deadline = Date.now() + ms;
+  while (!(editorDoc() ?? "").includes(text) && Date.now() < deadline) {
+    await settle(1);
+  }
 }
 
 /** The live EditorView's text, or null when no editor is mounted. */

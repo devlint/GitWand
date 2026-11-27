@@ -4,6 +4,8 @@
 // time (apps/desktop/src/CLAUDE.md § Tests Vitest).
 /**
  * #266 — the Git Tree log follows ref moves that keep the top commit.
+ * #214 — the log view epoch: a filter change drops what the old view still
+ * had in flight, and a forced reload refetches down to the viewed depth.
  *
  * The IPC wrapper module is mocked, but `getGitLog` / `getGitRevCount` run the
  * same `git log` / `git rev-list` the dev-server routes run, against a real
@@ -723,6 +725,144 @@ describe("refreshOnRefsEvent reloads only when the refs moved", () => {
       await repo.refreshOnRefsEvent();
 
       expect(firstPageLoads()).toBeGreaterThan(loads);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("the log view epoch (#214)", () => {
+  /** The page size of every getGitLog call made since `from`. */
+  function logCallSizes(from: number): number[] {
+    return vi.mocked(getGitLog).mock.calls.slice(from).map((c) => c[1] as number);
+  }
+
+  it(
+    "drops a scroll page fetched for the view a filter change left",
+    async () => {
+      const dir = newRepo(150);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      repo.logBranchFilter.value = "current";
+      await repo.loadLog();
+      expect(repo.log.value).toHaveLength(100);
+
+      // A scroll page of the "current branch" view goes out and is held.
+      let release!: () => void;
+      pageGate = new Promise<void>((r) => (release = r));
+      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const page = repo.loadMoreLog();
+      await vi.waitFor(() => expect(vi.mocked(getGitLog).mock.calls.length).toBe(calls + 1));
+
+      // The view changes meanwhile: its first page replaces the log.
+      await repo.setLogAuthorFilter("mine");
+      expect(repo.log.value).toHaveLength(100);
+
+      release();
+      await page;
+
+      // The old view's page is not appended, and its end does not clear the
+      // flag of the new view: scrolling goes on from the new view's rows.
+      expect(repo.log.value).toHaveLength(100);
+      expect(repo.logLoadingMore.value).toBe(false);
+      await repo.loadMoreLog();
+      expect(repo.log.value.map((e) => e.hashFull)).toEqual(realGitLog(dir, 1000, false).map((e) => e.hashFull));
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "drops a loadLog result read for the view a filter change left",
+    async () => {
+      const dir = newRepo(5);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      repo.logBranchFilter.value = "current";
+      await repo.loadLog();
+
+      // A reload of the old view reads the log, then is held.
+      let release!: () => void;
+      firstPageGate = new Promise<void>((r) => (release = r));
+      const calls = vi.mocked(getGitLog).mock.calls.length;
+      const stale = repo.loadLog();
+      await vi.waitFor(() => expect(vi.mocked(getGitLog).mock.calls.length).toBe(calls + 1));
+
+      // A commit lands, then the view changes and reads it.
+      commitOn(dir, sha(dir, "c5"), "refs/heads/main", "c6");
+      await repo.setLogAuthorFilter("mine");
+      expect(repo.log.value[0].message).toBe("c6");
+
+      release();
+      await stale;
+
+      expect(repo.log.value[0].message).toBe("c6");
+      expect(repo.log.value).toHaveLength(6);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "a forced reload refetches down to the viewed row plus a page, not the whole log",
+    async () => {
+      const dir = newRepo(600);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      await vi.waitFor(() => expect(repo.logHasMore.value).toBe(false), { timeout: 20_000 });
+      expect(repo.log.value).toHaveLength(600);
+
+      // The user scrolled down to row 250.
+      repo.setLogViewAnchor(repo.log.value[249].hashFull);
+      const calls = vi.mocked(getGitLog).mock.calls.length;
+      await repo.loadLog(undefined, true);
+
+      expect(logCallSizes(calls)).toEqual([350]);
+      expect(repo.log.value).toHaveLength(350);
+      expect(repo.log.value[249].message).toBe("c351");
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "a forced reload with no viewed row refetches one page",
+    async () => {
+      const dir = newRepo(600);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      await vi.waitFor(() => expect(repo.logHasMore.value).toBe(false), { timeout: 20_000 });
+
+      const calls = vi.mocked(getGitLog).mock.calls.length;
+      await repo.loadLog(undefined, true);
+
+      expect(logCallSizes(calls)).toEqual([100]);
+      expect(repo.log.value).toHaveLength(100);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "a filter change fetches one page and forgets the old view's depth",
+    async () => {
+      const dir = newRepo(600);
+      const repo = useGitRepo();
+      await open(repo, dir);
+      await repo.loadLog();
+      await vi.waitFor(() => expect(repo.logHasMore.value).toBe(false), { timeout: 20_000 });
+      repo.setLogViewAnchor(repo.log.value[499].hashFull);
+
+      let calls = vi.mocked(getGitLog).mock.calls.length;
+      await repo.setLogBranchFilter("current");
+      expect(logCallSizes(calls)).toEqual([100]);
+      expect(repo.log.value).toHaveLength(100);
+
+      // Back on the full view (restored from the session cache), the anchor
+      // of before is forgotten: a forced reload refetches one page, not the
+      // 600 rows down to it.
+      await repo.setLogBranchFilter("all");
+      expect(repo.log.value).toHaveLength(600);
+      calls = vi.mocked(getGitLog).mock.calls.length;
+      await repo.loadLog(undefined, true);
+      expect(logCallSizes(calls)).toEqual([100]);
     },
     GIT_TEST_TIMEOUT_MS,
   );

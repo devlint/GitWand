@@ -293,6 +293,40 @@ pub fn read_file_parity(cwd: String, path: String) -> Result<String, String> {
     tauri::async_runtime::block_on(commands::files::read_file(cwd, path))
 }
 
+/// Parity entry point for `read_commit_template`. The path comes from git
+/// config on both sides, `~` is expanded the same way, and only a small
+/// regular file is read.
+pub fn read_commit_template_parity(cwd: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::block_on(commands::read::read_commit_template(cwd))
+}
+
+/// Parity entry point for `ai_http_request`, without its open-endpoint gate:
+/// the dev-server cannot show the native question that gate may ask, and
+/// says so. The harness only sends `auth: "none"` requests to a loopback
+/// fixture server, so no key is read from the keychain and the gate would
+/// let them through anyway. Answers `{ status, body }`, as the command.
+pub fn ai_http_request_parity(
+    method: String,
+    url: String,
+    body: Option<String>,
+    auth: String,
+    timeout_secs: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    // Never reach for the user's stored key from a test binary.
+    if auth != "none" {
+        return Err("parity probe: ai_http_request only runs with auth \"none\"".to_string());
+    }
+    let res = commands::ai_http::ai_http_request_inner(
+        &method,
+        &url,
+        body.as_deref(),
+        &auth,
+        timeout_secs,
+        |_| Ok(()),
+    )?;
+    serde_json::to_value(res).map_err(|e| e.to_string())
+}
+
 /// Parity entry point for `list_repo_dir` (v3.11.2). Rust classifies ignored
 /// entries in process with libgit2; the dev-server shells out to
 /// `git check-ignore`. Two mechanisms answering one question is exactly what

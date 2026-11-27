@@ -32,7 +32,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 - #315, known gap, accepted: a ref that moves and comes back between two reads leaves stale decorations until the next ref move or a manual refresh.
 - #314, not tested: Windows, a real `glab`, the native dialog in the packaged app (see the checklist below). Its leftovers are in lot C.
 - #265: a stale block reason can linger up to one fetch tick (30 s); a branch literally named `HEAD` or `unknown` is treated as detached.
-- **Bundle budget** — 1,002 KB after 3.15.0 (main chunk measured at 1,001 KB). These raises were the last ones: from v4.0 a feature lands in a lazy chunk.
+- **Bundle budget** — 1,002 KB after 3.15.0 (main chunk measured at 1,001 KB), then 1,005 KB for the lot A resolvers (measured at 1,004 KB: `@gitwand/core` is in the main chunk). These raises were the last ones: from v4.0 a feature lands in a lazy chunk.
 
 **3.15.x — lot A: resolvers** (wrong resolutions a user can see)
 
@@ -42,12 +42,12 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 
 **3.15.x — lot B: test net** (before v4.0 moves code)
 
-- `packages/core` history tests (`llm-prompt-history.test.ts` › "inserts the history section…", "returns each side's commits since the merge base…") time out under full-suite load (7–8 s against the 5 s default; seen during the lot A review, 3 runs out of 3 pass alone): they spawn git, give them a longer timeout or a shared fixture
-- **Test the log view epoch** (follow-up to v3.12.0, #214) — the filter/scope change that drops in-flight log pages and the forced-reload depth (`forcedReloadDepth`) have no test; a `useGitRepo` test for "filter change while a page is in flight" would lock them in.
-- `FileExplorerPanel.test.ts` › "mounts an editor holding the file's content" fails under full-suite load (`an editor is mounted: expected null`, seen at the v3.15.0 release; 3 runs out of 3 pass alone): wait for the lazy editor instead of a fixed number of ticks
-- `merge_back_without_a_recorded_base_still_works` fails under full-suite load (seen 2026-10-10, not reproduced in 15 runs of the `scratch` tests on 2026-11-26; the `pullAutostash` half of that report is fixed in #314)
-- `FileExplorerPanel — editor wiring > mounts an editor holding the file's content` failed once in CI on 2026-11-26 (#316) and passed on re-run: it asserts `.cm-editor` after `openTab()` + `settle()` without awaiting `loadCodeMirror()`, which is lazy. Await it before asserting
-- parity-probe dispatch entries for `read_commit_template` and `ai_http_request` (`none` auth against a local fixture server)
+- _Done on `fix/test-net`, unreleased (tests only, nothing user-visible):_
+  - `packages/core` history tests that spawn git get a 30 s timeout (`GIT_TEST_TIMEOUT`), and the prompt-history tests share one read-only repo instead of building four (they took 7–8 s against the 5 s default under the full suite's load)
+  - the log view epoch (#214) is tested: a scroll page or a `loadLog` result fetched for the view a filter change left is dropped, a forced reload refetches down to the viewed row plus a page (one page with no viewed row), and a filter change fetches one page and forgets the old view's depth. Each guard was removed once to check a test fails
+  - `FileExplorerPanel` tests await the lazy CodeMirror chunk and the file's text in the editor instead of a fixed number of ticks (the two roadmap entries for that flake were one)
+  - `useStacks-realBackend` › "retries a failed after-restack handling…" gets 60 s (it spawns git synchronously at every step: 35 s against its 30 s under heavy load, seen during this lot)
+  - parity-probe entries and parity tests for `read_commit_template` (empty key, template, directory, over 64 KiB, missing file) and `ai_http_request` (`none` auth against a loopback server: GET, POST body and headers, error status, redirect not followed, refused URLs and method)
 
 **3.15.x — lot C: security & data safety**
 

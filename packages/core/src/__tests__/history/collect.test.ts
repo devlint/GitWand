@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { collectHunkHistory, createHistoryCache, HistoryTimeout } from "../../history/collect.js";
 import { parseConflictMarkers } from "../../parser.js";
 import type { GitRunner, HistoryRefs } from "../../history/types.js";
-import { makeRepo, type Repo } from "../utils/git-repo.js";
+import { makeRepo, GIT_TEST_TIMEOUT, type Repo } from "../utils/git-repo.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -39,7 +39,7 @@ function mergeConflict(r: Repo) {
   r.git(["commit", "-qam", "ours: suffix c"]);
 }
 
-describe("collectHunkHistory — merge", () => {
+describe("collectHunkHistory — merge", { timeout: GIT_TEST_TIMEOUT }, () => {
   it("returns each side's commits since the merge base, with range diffs", async () => {
     repo = makeRepo();
     mergeConflict(repo);
@@ -75,7 +75,7 @@ describe("collectHunkHistory — merge", () => {
   });
 });
 
-describe("collectHunkHistory — rebase and cherry-pick", () => {
+describe("collectHunkHistory — rebase and cherry-pick", { timeout: GIT_TEST_TIMEOUT }, () => {
   it("rebase: theirs is the replayed commit", async () => {
     repo = makeRepo();
     mergeConflict(repo);
@@ -101,7 +101,7 @@ describe("collectHunkHistory — rebase and cherry-pick", () => {
   });
 });
 
-describe("collectHunkHistory — revert", () => {
+describe("collectHunkHistory — revert", { timeout: GIT_TEST_TIMEOUT }, () => {
   it("theirs is exactly the reverted commit, even when it shifted the lines", async () => {
     repo = makeRepo();
     repo.write("f.txt", lines("a", "b", "c", "d", "e"));
@@ -125,7 +125,7 @@ describe("collectHunkHistory — revert", () => {
   });
 });
 
-describe("collectHunkHistory — degraded cases", () => {
+describe("collectHunkHistory — degraded cases", { timeout: GIT_TEST_TIMEOUT }, () => {
   it("no-sha when a SHA is missing, without calling git", async () => {
     const never: GitRunner = () => { throw new Error("must not be called"); };
     const h = await collectHunkHistory(never, {

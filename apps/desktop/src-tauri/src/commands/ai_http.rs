@@ -680,7 +680,7 @@ pub(crate) async fn ai_http_request(
     .map_err(|e| e.to_string())?
 }
 
-fn ai_http_request_inner(
+pub(crate) fn ai_http_request_inner(
     method: &str,
     url: &str,
     body: Option<&str>,
