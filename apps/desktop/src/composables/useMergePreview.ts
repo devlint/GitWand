@@ -178,6 +178,10 @@ export function useMergePreview(cwd: () => string) {
   ): Promise<void> {
     const core = await engine();
     const options = await buildPreviewOptions(operation);
+    // The explanation helper and the UI language's dictionary load with the
+    // preview, not in the main bundle; the reasons below are written once.
+    const { hunkExplanation, explanationsReady } = await import("../utils/hunkExplanation");
+    await explanationsReady();
     const files: PreviewFileResult[] = [];
 
     for (const raw of rawFiles) {
@@ -242,7 +246,7 @@ export function useMergePreview(cwd: () => string) {
               autoResolved: false,
               confidenceScore: h.confidence.score,
               confidenceLabel: h.confidence.label,
-              reason: h.explanation,
+              reason: hunkExplanation(h),
             }));
 
         files.push({

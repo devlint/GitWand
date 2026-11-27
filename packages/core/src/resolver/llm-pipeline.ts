@@ -30,6 +30,7 @@ import type {
 import type { StructuralLoaderOptions } from "../structural/index.js";
 import { parseConflictMarkers } from "../parser.js";
 import { tryLlmFallbackResolve } from "../resolvers/llm-fallback.js";
+import llmProposedPattern from "../patterns/llm-proposed.js";
 import { checkParseTreeValid } from "./validate-parse-tree.js";
 import { validateMergedContent } from "./validation.js";
 import {
@@ -195,9 +196,13 @@ export async function runLlmFallbackPhase(
 
     if (llmResult.lines !== null) {
       // Résolution acceptée — mettre à jour le hunk et la résolution
+      // The explanation follows the new type (it said "complex" before).
+      const input = { ...updatedHunks[idx], endLine: updatedHunks[idx].startLine };
       const updatedHunk: ConflictHunk = {
         ...updatedHunks[idx],
         type: "llm_proposed",
+        explanation: llmProposedPattern.explanation(input),
+        explanationRef: llmProposedPattern.explanationRef?.(input),
         trace: {
           ...updatedHunks[idx].trace,
           selected: "llm_proposed",

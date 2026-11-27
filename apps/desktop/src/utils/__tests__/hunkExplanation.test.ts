@@ -1,12 +1,11 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { EXPLANATION_PARAMS } from "@gitwand/core";
-import en from "../../locales/en";
 import fr from "../../locales/explain/fr";
 import es from "../../locales/explain/es";
 import ptBR from "../../locales/explain/pt-BR";
 import zhCN from "../../locales/explain/zh-CN";
 import { useI18n } from "../../composables/useI18n";
-import { hunkExplanation } from "../hunkExplanation";
+import { hunkExplanation, loadExplanations } from "../hunkExplanation";
 
 const DICTIONARIES = { fr, es, "pt-BR": ptBR, "zh-CN": zhCN } as const;
 
@@ -24,7 +23,7 @@ describe("explanation dictionaries", () => {
 });
 
 describe("hunkExplanation", () => {
-  const { setLocale, t } = useI18n();
+  const { setLocale } = useI18n();
   const hunk = {
     explanation: 'Hunk resolved semantically by the "json" resolver (merged by the format\'s structure, not by lines).',
     explanationRef: { key: "formatSemantic" as const, params: ["json"] },
@@ -39,15 +38,23 @@ describe("hunkExplanation", () => {
 
   it("shows the translation, with its parameters, under another UI language", async () => {
     setLocale("fr");
-    await vi.waitFor(() => expect(t("common.cancel")).not.toBe(en.common.cancel));
+    await loadExplanations("fr");
     expect(hunkExplanation(hunk)).toBe(
       "Bloc résolu sémantiquement par le résolveur « json » (fusion selon la structure du format, pas ligne à ligne).",
     );
   });
 
+  it("substitutes the parameters in one pass", async () => {
+    setLocale("fr");
+    await loadExplanations("fr");
+    expect(
+      hunkExplanation({ explanation: "x", explanationRef: { key: "refactoringBoth", params: ["{1}", 2] } }),
+    ).toContain("{1} renommage(s)");
+  });
+
   it("falls back to the English text without a known key", async () => {
     setLocale("fr");
-    await vi.waitFor(() => expect(t("common.cancel")).not.toBe(en.common.cancel));
+    await loadExplanations("fr");
     expect(hunkExplanation({ explanation: "Some text." })).toBe("Some text.");
     expect(
       hunkExplanation({ explanation: "Some text.", explanationRef: { key: "notAKey" as never } }),

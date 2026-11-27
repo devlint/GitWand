@@ -307,6 +307,9 @@ describe("resolveAsync — avec llmFallback enabled et endpoint mock", () => {
     expect(result.stats.autoResolved).toBe(1);
     expect(result.mergedContent).not.toBeNull();
     expect(result.hunks[0].type).toBe("llm_proposed");
+    // The explanation follows the new type, in both forms.
+    expect(result.hunks[0].explanationRef).toEqual({ key: "llmProposed" });
+    expect(result.hunks[0].explanation).toBe(llmProposed.explanation(result.hunks[0] as never));
   });
 
   it("la DecisionTrace contient llmTrace quand résolu par LLM", async () => {

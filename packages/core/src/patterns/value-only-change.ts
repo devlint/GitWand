@@ -2,6 +2,21 @@ import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js"
 import type { ExplanationRef } from "../explanation-keys.js";
 import { makeScore, detectValueOnlyChange } from "./utils.js";
 
+/**
+ * `detect`, `confidence`, `explanation`, `explanationRef` and `passReason` are
+ * called one after the other on the same hunk: the detection runs once per
+ * hunk (keyed by the input's reference, as token-level-merge does).
+ */
+let _lastInput: ClassifyInput | null = null;
+let _lastResult: ReturnType<typeof detectValueOnlyChange> = null;
+function detectCached(h: ClassifyInput): ReturnType<typeof detectValueOnlyChange> {
+  if (_lastInput !== h) {
+    _lastInput = h;
+    _lastResult = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
+  }
+  return _lastResult;
+}
+
 const valueOnlyChange: PatternPlugin = {
   type: "value_only_change",
   priority: 60,
@@ -13,27 +28,27 @@ const valueOnlyChange: PatternPlugin = {
 
   detect(h: ClassifyInput): boolean {
     if (h.oursLines.length !== h.theirsLines.length) return false;
-    return detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0) !== null;
+    return detectCached(h) !== null;
   },
 
   confidence(h: ClassifyInput): ConfidenceScore {
-    const result = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
+    const result = detectCached(h);
     if (result) return result.confidenceScore;
     // Fallback (ne devrait pas être appelé si detect() retourne false)
     return makeScore(0, 100, 0, [], ["Internal error: confidence() called without a match"]);
   },
 
   explanation(h: ClassifyInput): string {
-    const result = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
+    const result = detectCached(h);
     return result?.explanation ?? "Differing volatile values.";
   },
   explanationRef(h: ClassifyInput): ExplanationRef {
-    const result = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
+    const result = detectCached(h);
     return result ? { key: "valueOnly", params: [result.diffCount] } : { key: "valueOnlyFallback" };
   },
 
   passReason(h: ClassifyInput): string {
-    const result = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
+    const result = detectCached(h);
     return result?.traceReason ?? "Atomic values identified as volatile.";
   },
 
