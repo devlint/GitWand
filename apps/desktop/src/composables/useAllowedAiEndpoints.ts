@@ -51,16 +51,19 @@ export function useAllowedAiEndpoints() {
     revokeFailure = null;
     revokeFailureUntil = Infinity;
     try {
-      await aiRevokeEndpoint(origin);
-    } catch (e) {
-      revokeFailure = e instanceof Error ? e.message : String(e);
+      try {
+        await aiRevokeEndpoint(origin);
+      } catch (e) {
+        revokeFailure = e instanceof Error ? e.message : String(e);
+      }
+      // What is stored now, whatever happened; a failed revoke keeps its
+      // message. No other revoke starts before this reload ends.
+      error.value = revokeFailure;
+      await load();
+      revokeFailureUntil = latest;
     } finally {
       revoking.value = null;
     }
-    // What is stored now, whatever happened; a failed revoke keeps its message.
-    error.value = revokeFailure;
-    await load();
-    revokeFailureUntil = latest;
   }
 
   return { origins, loading, revoking, error, load, revoke };

@@ -169,7 +169,8 @@ export function extractImportSources(content: string): string[] {
   for (const line of content.split("\n")) {
     if (!isImportLike(line)) continue;
     // A block comment can hold a `from "…"` the patterns would take for the module.
-    const stmt = parseImport(line.replace(/\/\*.*?\*\//g, " "));
+    // A trailing `// …` after the module string (and its `;`) goes too.
+    const stmt = parseImport(line.replace(/\/\*.*?\*\//g, " ").replace(/(['"]\s*;?)\s*\/\/.*$/, "$1"));
     if (stmt.source) seen.add(stmt.source);
   }
   return [...seen];
@@ -445,10 +446,19 @@ export function tryResolveImportConflict(
     lines.some((l) => !isBenignUnknown(l) && parseImport(l).kind === "unknown");
   // A comment inside an import line can hold a `from "…"` the patterns would
   // read as the module, and a rebuilt line would drop it: not merged here.
-  if ([baseLines, oursLines, theirsLines].some((lines) => lines.some(hasInlineComment))) {
+  // Comments are not carried through a merge (only imports are written back):
+  // a block holding one, inline or on its own line (`// @ts-ignore`), is left
+  // to the textual engine — and to the user when both sides added imports,
+  // whose union could bind a name twice with nothing here to check it.
+  const isCommentLine = (l: string) => /^\s*(?:\/\/|\/\*|\*)/.test(l);
+  if ([baseLines, oursLines, theirsLines].some((lines) => lines.some((l) => hasInlineComment(l) || isCommentLine(l)))) {
+    const baseSet = new Set(baseLines.map((l) => l.trim()));
+    const adds = (lines: string[]) => lines.some((l) => /^\s*(?:import|export|const|let|var)\s/.test(l) && !baseSet.has(l.trim()));
+    const both = adds(oursLines) && adds(theirsLines);
     return {
       mergedLines: null,
-      reason: "An import line holds a comment, which a rebuilt line would drop, so the block falls back to the textual engine.",
+      ...(both ? { conflict: true } : {}),
+      reason: "The import block holds a comment, which a rebuilt block would drop, so it is left to the textual engine.",
       resolvedImports: 0,
       unresolvedImports: 1,
     };
@@ -642,8 +652,10 @@ export function tryResolveImportConflict(
         // Indentations compared once a block re-indent is applied to both.
         if (shifted(ours.indent) !== shifted(theirs.indent)) {
           unresolvedImports++;
+          // Not for the textual engine either: it would keep both lines.
           return {
             mergedLines: null,
+            conflict: true,
             reason: `Conflict on import '${ours.source}': added at two indentations.`,
             resolvedImports,
             unresolvedImports,

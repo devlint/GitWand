@@ -106,6 +106,21 @@ describe("useAllowedAiEndpoints", () => {
     expect(e.error.value).toBeNull();
   });
 
+  it("ignores a second revoke until the first one's reload has ended", async () => {
+    const e = useAllowedAiEndpoints();
+    await e.load();
+    let release!: (v: string[]) => void;
+    aiAllowedEndpoints.mockImplementationOnce(() => new Promise<string[]>((r) => (release = r)));
+    const first = e.revoke("https://a.example");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(e.revoking.value).toBe("https://a.example");
+    await e.revoke("https://b.example");
+    expect(aiRevokeEndpoint).toHaveBeenCalledTimes(1);
+    release(["https://b.example"]);
+    await first;
+    expect(e.revoking.value).toBeNull();
+  });
+
   it("ignores a second revoke while one runs", async () => {
     const e = useAllowedAiEndpoints();
     await e.load();

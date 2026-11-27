@@ -286,13 +286,39 @@ describe("tryResolveImportConflict — lignes import-like non parsables (garde a
     expect(result.mergedLines).toBeNull();
   });
 
-  it("les commentaires et lignes vides restent tolérés (comportement existant inchangé)", () => {
+  it("leaves a block holding a comment line to the textual engine, which keeps it", () => {
+    // Only imports are written back: merging here would drop `// utils`.
     const result = tryResolveImportConflict(
       ['import { a } from "./a";'],
       ["// utils", 'import { a } from "./a";', ""],
       ['import { a } from "./a";', 'import { b } from "./b";'],
     );
-    expect(result.mergedLines).not.toBeNull();
+    expect(result.mergedLines).toBeNull();
+    // One side added imports: the textual engine may take it over.
+    expect(result.conflict).toBeUndefined();
+  });
+
+  it("blank lines alone are still tolerated", () => {
+    const result = tryResolveImportConflict(
+      ['import { a } from "./a";'],
+      ['import { a } from "./a";', ""],
+      ['import { a } from "./a";', 'import { b } from "./b";'],
+    );
     expect(result.mergedLines!.join("\n")).toContain('"./b"');
+  });
+
+  it("hands a commented block where both sides added imports to the user", () => {
+    const result = tryResolveImportConflict(
+      [],
+      ['import { a } from "x"; // used by foo'],
+      ['import { a, b } from "x";'],
+    );
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBe(true);
+  });
+
+  it("hands the same module added at two indentations to the user", () => {
+    const result = tryResolveImportConflict([], ['  import { a } from "x";'], ['    import { a, b } from "x";']);
+    expect(result.conflict).toBe(true);
   });
 });

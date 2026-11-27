@@ -62,5 +62,7 @@ describe("extractImportSources", () => {
     expect(
       extractImportSources('import { a, /* legacy */ b } from "./x";\nimport { c, /* from "y" */ d } from "./z";'),
     ).toEqual(["./x", "./z"]);
+    expect(extractImportSources('import x from "./a"; // from "./b"')).toEqual(["./a"]);
+    expect(extractImportSources('import x from "https://deno.land/x/a.ts";')).toEqual(["https://deno.land/x/a.ts"]);
   });
 });
