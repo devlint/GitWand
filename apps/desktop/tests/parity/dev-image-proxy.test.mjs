@@ -75,11 +75,11 @@ describe("dev-server: image proxy", { timeout: 15_000 }, () => {
     expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG);
   });
 
-  it("lets no foreign page read it", async () => {
+  it("lets no foreign page use it", async () => {
     const res = await dev.fetch(`/api/image-proxy?u=${encodeURIComponent(`${base}/a.png`)}`, {
       headers: { Origin: "https://evil.example" },
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
   });
 
@@ -98,6 +98,10 @@ describe("dev-server: image proxy", { timeout: 15_000 }, () => {
       headers: { "Sec-Fetch-Site": "cross-site" },
     });
     expect(res.status).toBe(403);
+    const otherPort = await dev.fetch(`/api/image-proxy?u=${encodeURIComponent(`${base}/a.png`)}`, {
+      headers: { "Sec-Fetch-Site": "same-site", Referer: "http://localhost:8080/page" },
+    });
+    expect(otherPort.status).toBe(403);
   });
 
   it("stops a streamed answer past 5 MiB", async () => {

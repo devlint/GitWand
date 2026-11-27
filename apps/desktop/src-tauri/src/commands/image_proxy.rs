@@ -407,9 +407,9 @@ fn failure(message: String) -> tauri::http::Response<Vec<u8>> {
 
 /// The HTTP response for a `gwimg:` request.
 pub(crate) fn respond(uri: &str) -> tauri::http::Response<Vec<u8>> {
-    let builder = tauri::http::Response::builder()
-        .header("X-Content-Type-Options", "nosniff")
-        .header("Access-Control-Allow-Origin", "*");
+    // No CORS header: an `<img>` needs none, and the bytes are not for a
+    // script of any origin to read back.
+    let builder = tauri::http::Response::builder().header("X-Content-Type-Options", "nosniff");
     match serve(uri) {
         Ok(image) => builder
             .status(200)
@@ -682,6 +682,7 @@ mod tests {
         h.join().unwrap();
         assert_eq!(r.status(), 200);
         assert_eq!(r.headers()["content-type"], "image/png");
+        assert!(r.headers().get("access-control-allow-origin").is_none());
         assert_eq!(r.body(), &png);
 
         let (port, h) = serve_once(http("200 OK", "text/html", b"<script>x</script>"));

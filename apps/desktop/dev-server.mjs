@@ -967,12 +967,13 @@ function devJsoncToJson(text) {
  * every MCP server it or the opencode config files declare disabled.
  * Mirrors `opencode_config_content` + the config files `ai_env_context` reads.
  */
+let devOpencodeResolved = { at: 0, names: [] };
 function devOpencodeConfigContent(opencodeBin) {
   const parse = (text) => { try { return JSON.parse(devJsoncToJson(text)); } catch { return null; } };
   // opencode's resolved config first: every source it reads (mirrors
-  // opencode_resolved_mcp_names).
-  const resolvedNames = [];
-  if (opencodeBin) {
+  // opencode_resolved_mcp_names), read once a minute at most.
+  const resolvedNames = Date.now() - devOpencodeResolved.at < 60_000 ? [...devOpencodeResolved.names] : [];
+  if (opencodeBin && Date.now() - devOpencodeResolved.at >= 60_000) {
     try {
       const r = spawnAiSync(opencodeBin, ["debug", "config"], {
         env: { ...aiSpawnEnv("opencode"), OPENCODE_DISABLE_PROJECT_CONFIG: "1" },
@@ -982,6 +983,7 @@ function devOpencodeConfigContent(opencodeBin) {
       const out = String(r.stdout || "");
       const v = r.status === 0 && out.includes("{") ? parse(out.slice(out.indexOf("{"))) : null;
       if (v?.mcp && typeof v.mcp === "object") resolvedNames.push(...Object.keys(v.mcp));
+      if (v) devOpencodeResolved = { at: Date.now(), names: [...resolvedNames] };
     } catch { /* the files below decide */ }
   }
   const files = [];
@@ -8259,9 +8261,16 @@ async function handleRequest(req, res) {
       // Images of the dev page only: another site the developer has open
       // could otherwise make this server fetch internal URLs. Browsers send
       // Sec-Fetch-Site; a request without it (tests, curl) is not a page.
-      if (req.headers["sec-fetch-site"] === "cross-site") {
+      // A page that names itself (Origin, Referer) must be the dev page's;
+      // another localhost port is same-site, so that header alone does not
+      // tell. An image without a referrer (no-referrer, as Avatar asks) from
+      // another local site still passes: dev-only.
+      const fromPage = req.headers.origin || (() => {
+        try { return req.headers.referer ? new URL(req.headers.referer).origin : null; } catch { return null; }
+      })();
+      if (req.headers["sec-fetch-site"] === "cross-site" || (fromPage && !ALLOWED_ORIGINS.has(fromPage))) {
         res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
-        return res.end("cross-site image request refused");
+        return res.end("image request from another page refused");
       }
       const target = url.searchParams.get("u") ?? "";
       let u;
@@ -8612,6 +8621,14 @@ async function handleRequest(req, res) {
         // Read-only sandbox, prompt on stdin (`-`). Mirrors codex_cli_prompt_inner.
         // --ignore-user-config: no MCP server or plugin from the user's
         // config. Mirrors codex_cli_prompt_inner.
+        // Mirrors the Rust check: a Codex without --ignore-user-config is
+        // refused rather than run with the user's MCP servers.
+        const help = spawnSync(CODEX, ["exec", "--help"], { encoding: "utf-8", timeout: 10_000 });
+        if (!/(^|[^\w-])--ignore-user-config(?![\w-])/m.test(`${help.stdout || ""}${help.stderr || ""}`)) {
+          return jsonResponse(req, res, {
+            error: "This Codex CLI cannot run without your config.toml: update it (`npm i -g @openai/codex` or your package manager)",
+          }, 500);
+        }
         const codexArgs = ["exec", "--sandbox", "read-only", "--ignore-user-config"];
         if (body.model && String(body.model).trim()) {
           codexArgs.push("--model", String(body.model).trim());

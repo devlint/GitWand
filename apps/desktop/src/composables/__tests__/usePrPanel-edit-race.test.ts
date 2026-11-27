@@ -92,6 +92,24 @@ describe("usePrPanel — a read racing a save (#234)", () => {
     expect(p.prDetail.value?.title).toBe("renamed on the forge");
   });
 
+  it("a next-page load started before the save keeps the saved title", async () => {
+    // A full first page, so there is a next one to load.
+    ghListPrs.mockResolvedValueOnce(Array.from({ length: 10 }, (_, i) => detail({ number: 100 + i })));
+    const p = usePrPanel(ref("/repo"));
+    await p.loadPrs();
+    await p.selectPr({ number: 1 } as any);
+
+    const held = deferred<unknown>();
+    ghListPrs.mockReturnValueOnce(held.promise);
+    const more = p.loadMorePrs();
+    await flush();
+
+    await p.updatePr(1, { title: "new title" });
+    held.resolve([detail()]);
+    await more;
+    expect(p.prs.value.find((pr) => pr.number === 1)?.title).toBe("new title");
+  });
+
   it("a list load started before the save keeps the saved title", async () => {
     const p = usePrPanel(ref("/repo"));
     await p.loadPrs();

@@ -779,7 +779,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
     loadingMore.value = true;
     try {
-      const page = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: pageSize, offset: prs.value.length });
+      // #234: a save landing while this page is in flight is laid over it.
+      const repo = cwd.value;
+      const editsSeen = _editSeq;
+      const fetched = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: pageSize, offset: prs.value.length });
+      const page = fetched.map((pr) => withEditsSince(repo, pr.number, editsSeen, pr));
       if (page.length === 0) {
         hasMore.value = false;
       } else {

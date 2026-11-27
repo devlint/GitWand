@@ -323,13 +323,16 @@ fn revoke_open_endpoint(
     index: Option<&OriginIndex>,
 ) -> Result<(), String> {
     let origin = endpoint_origin(endpoint)?;
+    // This run's gate first: whatever fails below, the next request asks.
+    {
+        let mut state = lock_gate();
+        state.session.retain(|o| o != &origin);
+        state.answers.retain(|(o, _)| o != &origin);
+    }
     store.forget(&origin)?;
     if let Some(index) = index {
         index.forget(&origin)?;
     }
-    let mut state = lock_gate();
-    state.session.retain(|o| o != &origin);
-    state.answers.retain(|(o, _)| o != &origin);
     Ok(())
 }
 
@@ -1062,6 +1065,23 @@ mod tests {
         };
         assert!(check_open_endpoint_with(&target, &store, Some(&ask), false, None).is_err());
         assert!(asked.load(std::sync::atomic::Ordering::SeqCst));
+        let _ = std::fs::remove_dir_all(store.parent().unwrap());
+    }
+
+    #[test]
+    fn a_revoke_whose_index_fails_still_asks_again() {
+        let store = scratch_store("revoke-index-fails");
+        let target = url("https://llm.revoke-fails.example/v1");
+        check_open_endpoint_with(&target, &store, Some(&yes), false, None).unwrap();
+        // An index whose directory is a file: removing from it fails.
+        let blocker = store.parent().unwrap().join("not-a-dir");
+        std::fs::write(&blocker, "x").unwrap();
+        let index = OriginIndex { dir: blocker };
+        assert!(
+            revoke_open_endpoint("https://llm.revoke-fails.example", &store, Some(&index)).is_err()
+        );
+        // The gate forgot it all the same: a background load is refused.
+        assert!(check_open_endpoint_with(&target, &store, None, false, None).is_err());
         let _ = std::fs::remove_dir_all(store.parent().unwrap());
     }
 
