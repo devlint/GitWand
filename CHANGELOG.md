@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Dockerfile resolver no longer brings back what one side deleted, nor drops a comment or a reorder.** Inside a stage, an instruction present on one side only was always kept, so one the other side had deleted came back; it is now dropped when the side that kept it left it as it was in the base, and a deletion against a change is left to you. Every comment shared one key, so one comment could replace another; comments are now matched by their text. The output followed ours' order, so a reorder made on theirs was lost; theirs' order is kept when only theirs reordered, and two different reorders are left to you. Without a base (diff2) nothing changes.
+- **The imports resolver sees every import of a module.** With `import X from 'm'` on one side and `import { a, X } from 'm'` plus `import type { T } from 'm'` on the other, only the last import of the module was compared, so no clash was seen and the textual engine kept both lines, declaring `X` twice; the clash is now reported. The names a `require` binds (`const fs = require(…)`, `const { a, b: c } = require(…)`) are now read, so a `require` facing an import of the same module is a conflict only when they bind the same name.
+
 ## [3.15.0] - 2026-11-27
 
 ### Added

@@ -36,8 +36,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 
 **3.15.x — lot A: resolvers** (wrong resolutions a user can see)
 
-- Dockerfile resolver: a one-sided deletion inside a stage comes back (an instruction only on the other side is always kept); all `COMMENT` lines share one key, so a comment can replace another; `mergeStage` emits in ours' order, so a reorder on theirs is lost. All three predate #278
-- imports resolver: `oursBySource`/`theirsBySource` keep only the last import per module, so `{ a, X }` + `import type { T }` against `import X` still keeps both and declares `X` twice; `require` bindings are not parsed, so any `require` against an import of the same module is treated as a collision (conservative)
+- _Done on `fix/resolvers-dockerfile-imports`, unreleased (detail in CHANGELOG, Unreleased)._ Dockerfile resolver: one-sided deletions, comments matched by text, theirs' reorder kept; imports resolver: every import of a module compared, `require` bindings read.
 
 **3.15.x — lot B: test net** (before v4.0 moves code)
 
