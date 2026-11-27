@@ -18,7 +18,9 @@
 
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer } from "node:http";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { probePath } from "./probe.mjs";
@@ -33,6 +35,9 @@ async function nodeAiRequest(dev, args) {
   const data = await res.json().catch(() => ({}));
   return res.ok ? { ok: true, value: data } : { ok: false, error: data.error };
 }
+
+/** An empty HOME / CURL_HOME for the probe, so no curlrc is read. */
+const curlHome = mkdtempSync(join(tmpdir(), "gw-parity-curl-home-"));
 
 /** Each request's own curl/fetch timeout, and the probe's hard stop after it. */
 const REQUEST_TIMEOUT_SECS = 3;
@@ -65,6 +70,10 @@ function runProbeAsync(args) {
     // reach the loopback fixture directly.
     const env = { ...process.env, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
     for (const k of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]) delete env[k];
+    // Nor the user's ~/.curlrc (a `location` or `proxy` line would change
+    // curl's answer): `run_curl` does not pass `-q` yet (ROADMAP, lot C).
+    env.HOME = curlHome;
+    env.CURL_HOME = curlHome;
     const child = spawn(bin, ["ai-http-request"], { stdio: ["pipe", "pipe", "pipe"], env });
     // Never outlive the test: a hung probe would hold the fixture's socket.
     const killer = setTimeout(() => child.kill("SIGKILL"), PROBE_KILL_MS);
@@ -133,6 +142,7 @@ describe("parity: ai-http-request", { timeout: CASE_TIMEOUT_MS }, () => {
   afterAll(async () => {
     await dev?.stop();
     await new Promise((r) => upstream?.close(r));
+    rmSync(curlHome, { recursive: true, force: true });
   });
 
   it("a GET answers the same status and body", async () => {

@@ -247,19 +247,24 @@ async function openTab(path: string, pin = true) {
   // wait for the editor of a readable file to show its text.
   await loadCodeMirror();
   await settle();
-  if (files[path] !== undefined) await untilEditorShows();
+  const content = files[path];
+  if (content !== undefined) await untilEditorShows(content);
 }
 
 /**
- * Wait, up to `ms`, for an editor holding text, or for the tab to show its
- * diff instead. Any text, not the file's: a tab restored with unsaved edits,
- * or a read still held by a test, legitimately shows something else. The
- * test's own assertions then check what it shows. Well under the 5 s test
- * timeout, so a missing editor fails on those assertions, not on a timeout.
+ * Wait, up to `ms`, for the editor to show `text` (the opened file's), or for
+ * the tab to show its diff instead. The file's own text, not any text: every
+ * tab shares one editor host, so after a first tab the host is never empty.
+ * Every current caller gets its text; a tab restored with edits keeps the
+ * file's text inside them. Well under the 5 s test timeout, so a missing
+ * editor fails on the test's own assertions, not on a timeout.
  */
-async function untilEditorShows(ms = 1_500) {
+async function untilEditorShows(text: string, ms = 1_500) {
+  // `.cm-content` draws each line as its own element: its text has no newlines.
+  const flat = text.trimEnd().replace(/\n/g, "");
   const deadline = Date.now() + ms;
-  const done = () => (editorDoc() ?? "") !== "" || container.querySelector(".fe__diff") !== null;
+  const done = () =>
+    (editorDoc() ?? "").includes(flat) || container.querySelector(".fe__diff") !== null;
   while (!done() && Date.now() < deadline) {
     await settle(1);
   }
