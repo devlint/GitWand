@@ -5,6 +5,32 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.15.0 — November 2026
+
+### Several commits, reviewed as one change
+
+Select commits in the Git Tree, even ones that are not next to each other: ⌘-click (Ctrl-click on Windows and Linux) toggles one, ⇧-click selects a range, and a chip shows how many are picked. *Combined diff* then shows what they change together. GitWand replays them onto their common base with `git merge-tree`, so the result is the net change, not a pile of patches: a line one commit adds and another removes does not show up at all. A file that cannot be replayed cleanly is shown commit by commit, with the unselected commits that stand in the way named.
+
+Every line carries the commit that wrote it, with a marker in the gutter that jumps to that commit. An optional AI summary says what the commits do together; it is sent commit subjects and per-file line counts, never your code. The same view opens from a file's history, to combine several versions of one file, renames included.
+
+### Find the commit that broke it
+
+Right-click a commit in the Git Tree and pick *Bisect from here*: that commit is known good, HEAD is bad, and git starts checking out commits between them. Select two commits instead and pick *Bisect between these commits*. A banner then shows the commit under test with its subject, how many are left and roughly how many steps, and asks Good, Bad or Skip. When git has narrowed it down, the banner names the first bad commit, with its author and date, and opens it in the Git Tree; if skipped commits leave several candidates, it lists them.
+
+The banner also follows a bisect you started in a terminal, as it moves, including one limited to some paths, run with `--first-parent` or `--no-checkout`, or using its own terms. *End bisect* takes you back to where it started, and *End here* finishes it on the current commit when the branch it started from is gone. If uncommitted changes stop git from checking out the next commit, your answer is still recorded and *Continue* picks up once they are out of the way.
+
+### AI requests go only where you said
+
+Ollama, an OpenAI-compatible server or any other address you configured received repository content without being asked first. The default local Ollama address, Anthropic and OpenAI work as before; any other address gets nothing until you allow it in a system dialog, once per address, and what you allowed is kept in the system keychain next to your API key.
+
+### Force pushes that only overwrite what you saw
+
+A force push used to compare with the remote-tracking branch, which the background fetch keeps current, so a collaborator's commit pushed after you decided could be overwritten without a warning. GitWand now fetches when you click, shows how many remote commits the push replaces, and leases exactly the commit it showed you: anything pushed after that is refused. Force pushes also reach a branch pushed under another name, instead of failing every time.
+
+### Fixes
+
+On a fork, pull request reads, comments and reviews act on the pull request the list shows, the parent's, never on a fork's own pull request with the same number. Checking out a pull request no longer rewrites a local `pr-<number>` branch that holds your own work. The PR list loads past its first 100 pull requests. Diffs are no longer broken by git settings such as `diff.noprefix`, `color.ui=always` or an external diff tool, and the secrets scan reports files with spaces in their names under their real name. Long pull request descriptions and comments go to `gh` and `glab` on standard input, out of reach of the Windows command-line limit and of `ps`. Listing a CLI provider's models gives up after 25 seconds and stops what it started. The Git Tree no longer reloads its whole history when a ref event changes nothing it shows.
+
 ## v3.14.0 — November 2026
 
 ### Stacked branches, restacked for you

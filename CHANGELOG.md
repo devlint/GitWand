@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-11-27
+
 ### Added
 
 - **Combined diffs.** Select several commits in the Git Tree, even non-consecutive, and review them as one change.
@@ -1815,7 +1817,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.14.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.15.0...HEAD
+[3.15.0]: https://github.com/devlint/GitWand/compare/v3.14.0...v3.15.0
 [3.14.0]: https://github.com/devlint/GitWand/compare/v3.13.3...v3.14.0
 [3.13.3]: https://github.com/devlint/GitWand/compare/v3.13.2...v3.13.3
 [3.13.2]: https://github.com/devlint/GitWand/compare/v3.13.1...v3.13.2
