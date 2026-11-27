@@ -150,7 +150,10 @@ const BUDGETS = {
   // image proxy rewrite (`imageProxy`, used by the eager Avatar and
   // useSafeHtml), the PR edit overlay of #234 (usePrPanel), the en strings
   // of the allowed AI endpoints and of the optional OpenAI-compatible key.
-  main_max_kb: 1007,
+  // After the lot C review: 1,008 KB (the PR edit overlay's read tracking,
+  // the image URL resolution in useSafeHtml, the local-network rule of the
+  // OpenAI-compatible provider).
+  main_max_kb: 1009,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked

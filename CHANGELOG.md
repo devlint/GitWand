@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Codex runs without your `config.toml`.** GitWand's calls to Codex now pass `--ignore-user-config`, so your MCP servers and plugins (the ChatGPT app's computer-use server among them) cannot be called by a prompt-injected diff; `-c mcp_servers.X.enabled=false` does not reach the servers the ChatGPT app adds. Your Codex sign-in still applies, and so does the model chosen in GitWand; a custom provider or profile set in `config.toml` no longer applies to GitWand's calls.
 - **Antigravity needs a recent `agy`.** Its prompt now goes on stdin and it runs in plan mode (see Fixed); an `agy` without `--input-format` and `--mode` (1.0.x) is refused with a message to run `agy update`.
-- **An OpenAI-compatible server no longer needs a key.** A local llama.cpp, vLLM or LM Studio server is usable with an endpoint alone: requests carry your stored key when there is one, none otherwise. Settings says the key is optional.
-- **The desktop main-bundle budget is raised to 1,005 KB for the resolvers, then to 1,007 KB** for the image proxy, the PR edit overlay and the new Settings strings (measured at 1,006 KB).
+- **An OpenAI-compatible server on your machine or local network no longer needs a key.** A llama.cpp, vLLM or LM Studio server (localhost, a private address, a `.local` name) is usable with its endpoint alone; requests carry your stored key only when it is tied to that endpoint. A hosted endpoint still needs its key, and without one GitWand keeps falling back to the Claude Code CLI. Settings says the key is optional.
+- **The desktop main-bundle budget is raised to 1,005 KB for the resolvers, then to 1,009 KB** for the image proxy, the PR edit overlay and the new Settings strings (measured at 1,008 KB).
 
 ### Fixed
 

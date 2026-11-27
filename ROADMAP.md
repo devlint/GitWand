@@ -32,7 +32,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 - #315, known gap, accepted: a ref that moves and comes back between two reads leaves stale decorations until the next ref move or a manual refresh.
 - #314, not tested: Windows, a real `glab`, the native dialog in the packaged app (see the checklist below). Its leftovers are in lot C.
 - #265: a stale block reason can linger up to one fetch tick (30 s); a branch literally named `HEAD` or `unknown` is treated as detached.
-- **Bundle budget** — 1,002 KB after 3.15.0 (main chunk measured at 1,001 KB), then 1,005 KB for the lot A resolvers (measured at 1,004 KB: `@gitwand/core` is in the main chunk), and 1,007 KB for lot C (measured at 1,006 KB). These raises were the last ones: from v4.0 a feature lands in a lazy chunk.
+- **Bundle budget** — 1,002 KB after 3.15.0 (main chunk measured at 1,001 KB), then 1,005 KB for the lot A resolvers (measured at 1,004 KB: `@gitwand/core` is in the main chunk), and 1,009 KB for lot C (measured at 1,008 KB). These raises were the last ones: from v4.0 a feature lands in a lazy chunk.
 
 **3.15.x — lot A: resolvers** (wrong resolutions a user can see)
 

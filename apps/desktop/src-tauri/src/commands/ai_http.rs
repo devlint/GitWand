@@ -323,17 +323,22 @@ fn revoke_open_endpoint(
     index: Option<&OriginIndex>,
 ) -> Result<(), String> {
     let origin = endpoint_origin(endpoint)?;
-    // This run's gate first: whatever fails below, the next request asks.
-    {
+    let forget_in_gate = || {
         let mut state = lock_gate();
         state.session.retain(|o| o != &origin);
         state.answers.retain(|(o, _)| o != &origin);
-    }
-    store.forget(&origin)?;
+    };
+    // This run's gate first: whatever fails below, the next request asks.
+    forget_in_gate();
+    let stored = store.forget(&origin);
+    let indexed = index.map_or(Ok(()), |i| i.forget(&origin));
+    // Again once the keychain entry is gone: a request that read it just
+    // before put the origin back in this run's gate meanwhile.
+    forget_in_gate();
     if let Some(index) = index {
-        index.forget(&origin)?;
+        let _ = index.forget(&origin);
     }
-    Ok(())
+    stored.and(indexed)
 }
 
 /// The origins allowed through the open-endpoint gate, sorted.

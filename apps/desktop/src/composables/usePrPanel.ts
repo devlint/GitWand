@@ -629,9 +629,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     hasMore.value = true;
     try {
       const repo = cwd.value;
-      const editsSeen = _editSeq;
-      const fetched = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: PAGE_SIZE, offset: 0 });
-      const page = fetched.map((pr) => withEditsSince(repo, pr.number, editsSeen, pr));
+      const editsSeen = beginRead();
+      const fetched = await readFailsEnd(editsSeen, forge.value.listPRs(cwd.value, { state: filterState.value, limit: PAGE_SIZE, offset: 0 }));
+      // List rows carry the title only.
+      const page = fetched.map((pr) => withEditsSince(repo, pr.number, editsSeen, pr, ["title"]));
+      endRead(editsSeen);
       prs.value = page;
       // If gh returned fewer than asked, there's nothing more to fetch.
       hasMore.value = page.length >= PAGE_SIZE;
@@ -781,9 +783,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     try {
       // #234: a save landing while this page is in flight is laid over it.
       const repo = cwd.value;
-      const editsSeen = _editSeq;
-      const fetched = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: pageSize, offset: prs.value.length });
-      const page = fetched.map((pr) => withEditsSince(repo, pr.number, editsSeen, pr));
+      const editsSeen = beginRead();
+      const fetched = await readFailsEnd(editsSeen, forge.value.listPRs(cwd.value, { state: filterState.value, limit: pageSize, offset: prs.value.length }));
+      const page = fetched.map((pr) => withEditsSince(repo, pr.number, editsSeen, pr, ["title"]));
+      endRead(editsSeen);
       if (page.length === 0) {
         hasMore.value = false;
       } else {
@@ -908,7 +911,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const key = detailKey(cwd.value, pr.number);
     const repo = cwd.value;
     const gen = ++_detailGen;
-    const editsSeen = _editSeq;
+    const editsSeen = beginRead();
     _lastDetailFetch = { number: pr.number, at: Date.now() };
     detailError.value = null;
     try {
@@ -942,6 +945,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     } finally {
       detailLoading.value = false;
       detailRefreshing.value = false;
+      endRead(editsSeen);
     }
     return true;
   }
@@ -1043,12 +1047,46 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     number: number,
     since: number,
     value: T,
+    only?: (keyof PrEdit)[],
   ): T {
     const edits = _prEdits.get(editKey(repo, number));
     if (!edits) return value;
     let out = value;
-    for (const e of edits) if (e.seq > since) out = { ...out, ...e.edit };
+    for (const e of edits) {
+      if (e.seq <= since) continue;
+      const edit = only
+        ? Object.fromEntries(Object.entries(e.edit).filter(([k]) => (only as string[]).includes(k)))
+        : e.edit;
+      out = { ...out, ...edit };
+    }
     return out;
+  }
+  // Reads in flight, by the edit sequence they started at: edits no read
+  // can still need (at or below the oldest one, or all once none runs) are
+  // dropped, so `_prEdits` does not grow for the panel's life.
+  const _readsSeen = new Map<number, number>();
+  function beginRead(): number {
+    const seen = _editSeq;
+    _readsSeen.set(seen, (_readsSeen.get(seen) ?? 0) + 1);
+    return seen;
+  }
+  function endRead(seen: number): void {
+    const left = (_readsSeen.get(seen) ?? 1) - 1;
+    if (left <= 0) _readsSeen.delete(seen);
+    else _readsSeen.set(seen, left);
+    const floor = _readsSeen.size ? Math.min(..._readsSeen.keys()) : _editSeq;
+    for (const [k, list] of _prEdits) {
+      const kept = list.filter((e) => e.seq > floor);
+      if (kept.length) _prEdits.set(k, kept);
+      else _prEdits.delete(k);
+    }
+  }
+  /** `p`, ending the read when it fails (a read that lands ends it itself, once its edits are laid over). */
+  function readFailsEnd<T>(seen: number, p: Promise<T>): Promise<T> {
+    return p.catch((e) => {
+      endRead(seen);
+      throw e;
+    });
   }
   /** A detail fetch started this close before the checks request (or after it)
    *  sees the same CI state: no need for another when the checks finish. */
@@ -1822,13 +1860,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       await forge.value.requestReviewers(cwd.value, selectedPr.value.number, logins);
       const repo = cwd.value;
       const number = selectedPr.value.number;
-      const editsSeen = _editSeq;
+      const editsSeen = beginRead();
       const detail = await forge.value.getPR(repo, number).catch(() => null);
       // #234: a title or description saved meanwhile is laid over it.
       if (detail && selectedPr.value?.number === number && cwd.value === repo) {
         prDetail.value = withEditsSince(repo, number, editsSeen, detail);
         persistDetailCache();
       }
+      endRead(editsSeen);
       success.value = t("pr.reviews.reviewersRequested");
     } catch (err: any) {
       if (err instanceof ForgeNotImplementedError) return;

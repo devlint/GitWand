@@ -110,6 +110,22 @@ describe("usePrPanel — a read racing a save (#234)", () => {
     expect(p.prs.value.find((pr) => pr.number === 1)?.title).toBe("new title");
   });
 
+  it("list rows take the saved title, not the description", async () => {
+    const p = usePrPanel(ref("/repo"));
+    await p.loadPrs();
+    await p.selectPr({ number: 1 } as any);
+    const held = deferred<unknown>();
+    ghListPrs.mockReturnValueOnce(held.promise);
+    const load = p.loadPrs();
+    await flush();
+    await p.updatePr(1, { title: "new title", body: "a long new description" });
+    held.resolve([detail({ body: undefined })]);
+    await load;
+    const row = p.prs.value.find((pr) => pr.number === 1) as any;
+    expect(row.title).toBe("new title");
+    expect(row.body).toBeUndefined();
+  });
+
   it("a list load started before the save keeps the saved title", async () => {
     const p = usePrPanel(ref("/repo"));
     await p.loadPrs();

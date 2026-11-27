@@ -230,21 +230,31 @@ async function callClaude(
 
 /**
  * An OpenAI-compatible provider that can be used: a key bound to its
- * endpoint, or an endpoint of the user's own choosing without one (a local
- * llama.cpp, vLLM or LM Studio server needs none). The endpoint setting is
- * shared with the claude provider and defaults to Anthropic's, which serves
- * no OpenAI-compatible API: left there with no key bound to it, the setup is
- * incomplete and the Claude Code CLI fallback applies. A key bound to another
- * origin is not sent (`openAICompatAuth`); a 401 then says so
- * (`compatAuthError`).
+ * endpoint, or, without one, an endpoint on this machine or the local
+ * network (a llama.cpp, vLLM or LM Studio server needs none). A hosted
+ * endpoint with no key bound to it (the default, Anthropic's, shared with the
+ * claude provider; a key cleared or tied elsewhere) is an incomplete setup:
+ * the Claude Code CLI fallback applies, as before keyless servers were
+ * supported. A key bound to another origin is never sent
+ * (`openAICompatAuth`).
  */
 export function openAICompatUsable(endpoint: string | null | undefined): boolean {
   if (!endpoint) return false;
   if (aiApiKeyBoundTo(endpoint)) return true;
-  return endpointOrigin(endpoint) !== ANTHROPIC_ORIGIN;
+  return isLocalNetworkEndpoint(endpoint);
 }
 
-const ANTHROPIC_ORIGIN = "https://api.anthropic.com";
+/** Loopback, a private (RFC 1918 / ULA / link-local) address, or a `.local` name. */
+export function isLocalNetworkEndpoint(endpoint: string): boolean {
+  const origin = endpointOrigin(endpoint);
+  if (!origin) return false;
+  const host = new URL(origin).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+  if (/^127\.|^10\.|^192\.168\.|^169\.254\./.test(host)) return true;
+  const m = /^172\.(\d+)\./.exec(host);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
+  return host === "::1" || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe80:/.test(host);
+}
 
 /**
  * How a request to the OpenAI-compatible `endpoint` is authenticated: with

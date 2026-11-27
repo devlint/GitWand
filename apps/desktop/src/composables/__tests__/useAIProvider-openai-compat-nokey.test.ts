@@ -59,6 +59,24 @@ describe("OpenAI-compatible provider without a key", () => {
     expect(useAIProvider().isAvailable.value).toBe(true);
   });
 
+  it("needs a bound key for a hosted endpoint, none for the local network", () => {
+    for (const hosted of ["https://api.groq.com/openai/v1", "https://api.openai.com/v1"]) {
+      settings({ aiApiEndpoint: hosted });
+      expect(useAIProvider().isAvailable.value, hosted).toBe(false);
+    }
+    for (const local of ["http://192.168.1.20:8000/v1", "http://10.0.0.5/v1", "http://llm.local:1234/v1", "http://[::1]:8080/v1", "http://172.20.0.2/v1"]) {
+      settings({ aiApiEndpoint: local });
+      expect(useAIProvider().isAvailable.value, local).toBe(true);
+    }
+    settings({ aiApiEndpoint: "http://172.40.0.2/v1" });
+    expect(useAIProvider().isAvailable.value).toBe(false);
+    // A key bound to the hosted endpoint makes it usable.
+    settings({ aiApiEndpoint: "https://api.groq.com/openai/v1" });
+    keyConfigured = true;
+    keyOrigin = "https://api.groq.com";
+    expect(useAIProvider().isAvailable.value).toBe(true);
+  });
+
   it("is not usable left on the default Anthropic endpoint without a bound key", () => {
     // The endpoint setting is shared with the claude provider.
     settings({ aiApiEndpoint: "https://api.anthropic.com" });

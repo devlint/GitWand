@@ -979,31 +979,33 @@ fn output_within(
     // assignment escapes it; std cannot spawn suspended.
     #[cfg(windows)]
     let job = crate::commands::terminal::job::Job::assign(child.id()).ok();
-    // Read incrementally into a shared buffer, so what arrived is usable even
-    // if EOF never comes (a grandchild still holding the pipe).
-    let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    // Read incrementally, one buffer per stream (joined stdout then stderr:
+    // interleaved chunks could split an option name), so what arrived is
+    // usable even if EOF never comes (a grandchild still holding the pipe).
+    let out_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let err_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let mut readers = 0;
-    let mut spawn_reader = |mut pipe: Box<dyn Read + Send>| {
-        let collected = collected.clone();
-        let tx = tx.clone();
-        readers += 1;
-        std::thread::spawn(move || {
-            let mut chunk = [0u8; 8192];
-            while let Ok(n) = pipe.read(&mut chunk) {
-                if n == 0 {
-                    break;
+    let mut spawn_reader =
+        |mut pipe: Box<dyn Read + Send>, collected: std::sync::Arc<std::sync::Mutex<Vec<u8>>>| {
+            let tx = tx.clone();
+            readers += 1;
+            std::thread::spawn(move || {
+                let mut chunk = [0u8; 8192];
+                while let Ok(n) = pipe.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    if let Ok(mut c) = collected.lock() {
+                        c.extend_from_slice(&chunk[..n]);
+                    }
                 }
-                if let Ok(mut c) = collected.lock() {
-                    c.extend_from_slice(&chunk[..n]);
-                }
-            }
-            let _ = tx.send(());
-        });
-    };
-    spawn_reader(Box::new(child.stdout.take()?));
+                let _ = tx.send(());
+            });
+        };
+    spawn_reader(Box::new(child.stdout.take()?), out_buf.clone());
     if let Some(err) = child.stderr.take() {
-        spawn_reader(Box::new(err));
+        spawn_reader(Box::new(err), err_buf.clone());
     }
     drop(tx);
     // Every reader at EOF within `wait` (counting those already done).
@@ -1063,7 +1065,8 @@ fn output_within(
     if !with_stderr && !status.success() {
         return None;
     }
-    let buf = collected.lock().ok()?.clone();
+    let mut buf = out_buf.lock().ok()?.clone();
+    buf.extend_from_slice(&err_buf.lock().ok()?);
     (!buf.is_empty()).then(|| String::from_utf8_lossy(&buf).into_owned())
 }
 
