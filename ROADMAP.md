@@ -6,11 +6,11 @@
 
 ## What's Next
 
-_Ordered by priority, last verified 2026-11-26 (v3.14.0 shipped; Combined Diffs merged, unreleased; #314 and #315 open; `feat/guided-bisect` built, no PR yet). On 2026-11-26 the plan was re-cut. Two tracks now run side by side: 3.x finishes the work in progress and then takes fixes only (v3.15 and its patches; the performance release planned as v3.16 moved to the v4 track); v4 maps the app from top to bottom and prepares the new way of working and the new interface. Everything else moves to that v4.x line, because the main bundle is at 992/992 KB and every feature now raises its budget. The former "Later (unscheduled)" list is gone: each item is either placed in a version below, on the real-machine checklist, or in [Not planned](#not-planned-with-what-would-bring-it-back) with the condition that would bring it back. Agent Workspaces II (was v3.16) is split between v4.0 (the workspace, agent supervision and control) and v4.2 (the view across tasks); Stacked Branches II (was v3.18) moved to v4.4; Voice Input (was v3.17) is not planned; Blast Radius moved from v4.0 to v4.3 and is renamed Code Intelligence, after the agent work that gives it its use case. Full renumbering history: `git log -p -- roadmap.md`._
+_Ordered by priority, last verified 2026-11-26 (v3.14.0 shipped; Combined Diffs, #314, #315 and #317 (guided bisect) merged, unreleased). On 2026-11-26 the plan was re-cut. Two tracks now run side by side: 3.x finishes the work in progress and then takes fixes only (v3.15 and its patches; the performance release planned as v3.16 moved to the v4 track); v4 maps the app from top to bottom and prepares the new way of working and the new interface. Everything else moves to that v4.x line, because the main bundle is at 992/992 KB and every feature now raises its budget. The former "Later (unscheduled)" list is gone: each item is either placed in a version below, on the real-machine checklist, or in [Not planned](#not-planned-with-what-would-bring-it-back) with the condition that would bring it back. Agent Workspaces II (was v3.16) is split between v4.0 (the workspace, agent supervision and control) and v4.2 (the view across tasks); Stacked Branches II (was v3.18) moved to v4.4; Voice Input (was v3.17) is not planned; Blast Radius moved from v4.0 to v4.3 and is renamed Code Intelligence, after the agent work that gives it its use case. Full renumbering history: `git log -p -- roadmap.md`._
 
 | Version | Codename | Why now |
 |---------|----------|---------|
-| **v3.15.0** | Ship & harden (last 3.x minor) | Combined Diffs, #315, #314 and guided bisect are ready; three parallel fix lots follow as 3.15.x patches. After that 3.x takes fixes only |
+| **v3.15.0** | Ship & harden (last 3.x minor) | Combined Diffs, #315, #314 and guided bisect (#317) are merged; what is left before the tag is the release itself, then three parallel fix lots as 3.15.x patches. After that 3.x takes fixes only |
 | **v4.0.0** | The workspace | A break: one working environment where CLI agents are supervised and controlled — task sidebar, Session / Files / Integration, repository instruments. The map of the app is how it gets built |
 | **v4.1.0** | Resolution engine | The engine's written principles, the journal of resolutions, local accuracy, opt-in shared counters |
 | **v4.2.0** | Integrate | The merge queue across tasks: cross-worktree conflict prediction, proposed order — on the Conflict Predictor that already exists |
@@ -30,9 +30,9 @@ _v3.14.0 (stacked branches: declare a stack, restack after a parent change or a 
 **3.15.0 — ship what is ready**
 
 - **Combined Diffs** — merged, unreleased (multi-commit, non-contiguous aggregated diff; detail in CHANGELOG, Unreleased).
-- **#315 — the Git Tree skips refs events that change nothing it shows** (`git_refs_fingerprint`). Closes the Git Tree follow-up from #278 (full log reload on every refs event, ≈750 ms on a 74k-commit repo). Known gap, accepted: a ref that moves and comes back between two reads leaves stale decorations until the next ref move or a manual refresh.
-- **#314 — hardening batch**: AI endpoint gate (closes the `ai_http_request` `auth: "none"` follow-up from #244), PR/MR bodies on stdin (#234), model-listing timeouts that kill the process tree (#237), `pullAutostash` fixture retry. To check at merge: the #234 case where a background revalidation racing a save briefly shows the old title/body is not in its description. Not tested: Windows, a real `glab`, the native dialog in the packaged app (see the checklist below).
-- **#317 — guided bisect** (Gitoryx): start from the Git Tree (two commits, or "from here" to HEAD), Good / Bad / Skip from a banner that also follows a bisect started in a terminal (paths, `--first-parent`, `--no-checkout`, custom terms), remaining commits and steps, culprit or skipped candidates opened in the Git Tree, End bisect (End here when the start branch is gone). QA done in `dev:web` and in the Tauri app (macOS debug build). `git bisect run` moves to v4.4.
+- **#315 — the Git Tree skips refs events that change nothing it shows** (`git_refs_fingerprint`), merged 2026-11-26. Closes the Git Tree follow-up from #278 (full log reload on every refs event, ≈750 ms on a 74k-commit repo). Known gap, accepted: a ref that moves and comes back between two reads leaves stale decorations until the next ref move or a manual refresh.
+- **#314 — hardening batch**, merged 2026-11-26: AI endpoint gate (closes the `ai_http_request` `auth: "none"` follow-up from #244), PR/MR bodies on stdin (#234), model-listing timeouts that kill the process tree (#237), `pullAutostash` fixture retry. Its leftovers are in lot C below. Not tested: Windows, a real `glab`, the native dialog in the packaged app (see the checklist below).
+- **#317 — guided bisect** (Gitoryx), merged 2026-11-27: start from the Git Tree (two commits, or "from here" to HEAD), Good / Bad / Skip from a banner that also follows a bisect started in a terminal (paths, `--first-parent`, `--no-checkout`, custom terms), remaining commits and steps, culprit or skipped candidates opened in the Git Tree, End bisect (End here when the start branch is gone). QA done in `dev:web` and in the Tauri app (macOS debug build). `git bisect run` moves to v4.4.
 - #265: a stale block reason can linger up to one fetch tick (30 s); a branch literally named `HEAD` or `unknown` is treated as detached (the invisible bisect is closed by #317, which reports it in the repo state)
 - **Bundle budget** — #317 raises it from 992 to 1,002 KB (main chunk measured at 1,001 KB with #314 and #315 merged: bisect wrappers, strings and Git Tree wiring; the banner is a lazy chunk). The raises these three need are the last ones: from v4.0 a feature lands in a lazy chunk.
 
@@ -45,6 +45,7 @@ _v3.14.0 (stacked branches: declare a stack, restack after a parent change or a 
 
 - **Test the log view epoch** (follow-up to v3.12.0, #214) — the filter/scope change that drops in-flight log pages and the forced-reload depth (`forcedReloadDepth`) have no test; a `useGitRepo` test for "filter change while a page is in flight" would lock them in.
 - `merge_back_without_a_recorded_base_still_works` fails under full-suite load (seen 2026-10-10, not reproduced in 15 runs of the `scratch` tests on 2026-11-26; the `pullAutostash` half of that report is fixed in #314)
+- `FileExplorerPanel — editor wiring > mounts an editor holding the file's content` failed once in CI on 2026-11-26 (#316) and passed on re-run: it asserts `.cm-editor` after `openTab()` + `settle()` without awaiting `loadCodeMirror()`, which is lazy. Await it before asserting
 - parity-probe dispatch entries for `read_commit_template` and `ai_http_request` (`none` auth against a local fixture server)
 
 **3.15.x — lot C: security & data safety**
@@ -56,6 +57,7 @@ _v3.14.0 (stacked branches: declare a stack, restack after a parent change or a 
 - Windows: a grandchild of the `claude --help` probe can outlive it once the direct child has exited (needs a Job Object)
 - the `ai-runs` sweep (24 h, at base setup) could remove a run directory still in use by a run older than that in another GitWand process
 - `img-src` stays `https: http:` for self-hosted forge avatars — proxy or allowlist avatar hosts, then tighten it
+- #234: a background revalidation racing a save can briefly show the old title/body of a PR (confirmed still open when #314 merged)
 - `ai_http_request` under `pnpm dev:web` goes to any origin unasked: the dev server has no native dialog to mirror `check_open_endpoint_with` (from #314)
 - allowed AI endpoints cannot be listed or revoked from Settings (they live in the keychain, service `gitwand:ai`, one account `open-endpoint:<SHA-256 of the origin>` per origin); a refusal lasts until restart or an explicit Test connection / Refresh (from #314)
 - an OpenAI-compatible server without a key: the model list loads (`auth: "none"`), but `isAvailable` requires a key and `callOpenAICompat` always sends `bearer`, so completions are never offered. Support it end to end or say so in Settings (from #314)
@@ -173,6 +175,18 @@ _A new working environment, not a rearranged one: GitWand supervises and control
   - file status (added/deleted/renamed) is still derived in several places with different coverage (`parse_diff_hunks`, `parse_multi_file_diff`, `devParseDiffHunks`, the dev-server `git-show` loop)
   - combined `@@@` hunk header numbers differ (Rust old 1,1 / new 0,1; core and the dev-server 0,1,0,1), and `isPureMove` on a combined hunk
   - strict hunk counts cut a hunk whose header undercounts its body; no forge path in the app sends such diffs today
+
+**Rebuild what the workspace touches** (added 2026-11-27)
+
+_The map counts and locates; this is what is done with it. The rule that bounds it: refactor only what the new environment touches. A view lodged in the new shell goes through a clean domain interface, and the old code is deleted once nothing calls it. The rest does not move. No behaviour change in a refactoring commit; the parity tests are the net._
+
+- **Commands filed by domain** — `commands/ops.rs` holds 86 of the 347 commands. Split it along the map, one module per domain, with one naming rule.
+- **One interface for the forges** — GitHub, GitLab, Azure DevOps, Bitbucket and Gitea add up to 152 commands written side by side, forge by forge. One set of forge commands with five implementations behind it: the frontend stops knowing which forge it talks to, and most of the 105 commands with no `dev:web` route stop needing one each.
+- **Decide what `dev:web` runs** — `dev-server.mjs` is 11,497 lines, a second backend kept in step with the Rust one by hand and by parity tests. Study having `dev:web` call the real Rust backend, started beside it, before choosing: it would remove the duplicate and what guards it, at the cost of needing the Rust toolchain for frontend work.
+- **Structured errors** — a command returns a typed error (kind, what was computed, what is missing), not a sentence; same discipline as the structured refusals of principle 6.
+- **One place that spawns processes** — every child process gets a timeout and a kill of its whole tree, as #314 did case by case for the model-listing commands.
+- **The largest files** — `App.vue` (6,652 lines) is replaced by the new shell rather than split; `SettingsPanel.vue` (5,047) is cut by domain, and settings get one declaration instead of the two that AGENTS.md asks to keep in sync.
+- **Guards, so it does not grow back** — a lint rule forbids imports across domains except through a domain's interface; a size ceiling per file; the bundle check extended to one budget per lazy chunk.
 
 **Remove (breaking)**
 
