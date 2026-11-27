@@ -133,6 +133,12 @@ function instructionKey(instr: Instruction): string {
   return instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
 }
 
+/** `ENV A=1 B=2` : plus d'une affectation sur la ligne. */
+function assignsSeveral(instr: Instruction): boolean {
+  const rest = instr.raw.map((l) => l.replace(/\\\s*$/, "").trim()).join(" ").replace(/^\S+\s+/, "");
+  return (rest.match(/(?:^|\s)[A-Za-z_][\w.-]*=/g) ?? []).length > 1;
+}
+
 /** Instructions dont la clé est la valeur (chemin, destination). */
 const VALUE_KEYED = new Set<InstructionKind>(["WORKDIR", "COPY", "ADD"]);
 
@@ -193,9 +199,9 @@ function splitRepeatables(instructions: Instruction[]): {
  *   un conflit modification/suppression (moteur textuel). Sans base, elle est
  *   gardée ;
  * - une instruction dont la clé est sa valeur (WORKDIR, destination d'un
- *   COPY/ADD) absente des deux côtés, remplacée au même endroit par une de
- *   même sorte d'un côté au moins : changée des deux côtés, ou changée d'un
- *   côté et supprimée de l'autre — moteur textuel ;
+ *   COPY/ADD) absente des deux côtés, avec une nouvelle de même sorte des deux
+ *   côtés (changée des deux côtés), ou d'un seul côté au même endroit
+ *   (changée d'un côté, supprimée de l'autre) — moteur textuel ;
  * - l'ordre : si seul theirs a réordonné les instructions communes, son ordre
  *   est gardé ; si les deux côtés les ont réordonnées autrement, moteur
  *   textuel. Une instruction présente d'un seul côté s'insère juste après
@@ -219,8 +225,13 @@ function mergeStage(
       // deux côtés n'en placent pas un, différent, devant la même instruction.
       const union = new Map(oursSplit.groups);
       for (const [key, group] of theirsSplit.groups) {
+        const text = JSON.stringify(group);
         const mine = union.get(key);
-        if (mine && JSON.stringify(mine) !== JSON.stringify(group)) return null;
+        if (mine && JSON.stringify(mine) !== text) return null;
+        // Le même groupe devant une autre instruction de l'autre côté : le
+        // garder aux deux endroits le dédoublerait.
+        const elsewhere = [...oursSplit.groups].some(([k, g]) => k !== key && JSON.stringify(g) === text);
+        if (!mine && elsewhere) return null;
         union.set(key, group);
       }
       source = { groups: union };
@@ -297,12 +308,22 @@ function mergeBody(
       const key = instructionKey(baseInstr);
       if (!VALUE_KEYED.has(baseInstr.kind) || oursMap.has(key) || theirsMap.has(key)) continue;
       const before = prevKey(base, bIdx);
-      const replacedHere = (mine: Instruction[], other: Map<string, Instruction>) =>
-        mine.some((instr, idx) => {
-          const k = instructionKey(instr);
-          return instr.kind === baseInstr.kind && !baseRawByKey.has(k) && !other.has(k) && prevKey(mine, idx) === before;
-        });
-      if (replacedHere(oursInstructions, theirsMap) || replacedHere(theirsInstructions, oursMap)) return null;
+      const newOfKind = (mine: Instruction[], other: Map<string, Instruction>) =>
+        mine
+          .map((instr, idx) => ({ instr, idx }))
+          .filter(({ instr }) => {
+            const k = instructionKey(instr);
+            return instr.kind === baseInstr.kind && !baseRawByKey.has(k) && !other.has(k);
+          });
+      const oursNew = newOfKind(oursInstructions, theirsMap);
+      const theirsNew = newOfKind(theirsInstructions, oursMap);
+      // Une nouvelle de chaque côté, où qu'elle soit : changée des deux côtés
+      // (deux valeurs gardées, la dernière gagnant en silence).
+      if (oursNew.length > 0 && theirsNew.length > 0) return null;
+      // D'un seul côté, au même endroit : changée face à une suppression.
+      const replacedHere = (found: { instr: Instruction; idx: number }[], mine: Instruction[]) =>
+        found.some(({ idx }) => prevKey(mine, idx) === before);
+      if (replacedHere(oursNew, oursInstructions) || replacedHere(theirsNew, theirsInstructions)) return null;
     }
   }
 
@@ -361,6 +382,13 @@ function mergeBody(
       case "ENTRYPOINT":
         // Conservatif → fallback
         return null;
+      case "ENV":
+      case "ARG":
+        // Plusieurs variables sur une ligne (`ENV A=1 B=2`, clé = la première) :
+        // « prefer theirs » perdrait le changement de ours sur une autre
+        // variable. Moteur textuel.
+        if (assignsSeveral(oursInstr) || assignsSeveral(theirsInstr)) return null;
+        return theirsInstr.raw;
       default:
         // FROM (image de base plus récente), ENV/ARG (valeur entrante),
         // WORKDIR, EXPOSE, USER… : prefer theirs

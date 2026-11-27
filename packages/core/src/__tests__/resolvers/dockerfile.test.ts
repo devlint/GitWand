@@ -681,3 +681,35 @@ describe("Dockerfile — review du lot A, passe 7", () => {
     );
   });
 });
+
+describe("Dockerfile — review du lot A, passe 8", () => {
+  it("WORKDIR changé des deux côtés, chacun avec une instruction ajoutée juste avant : pas de résolution automatique", () => {
+    const input = [`FROM node`, dockerHunk([`ENV X=1`, `WORKDIR /srv`], [`WORKDIR /app`], [`ENV Y=1`, `WORKDIR /x`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.mergedContent?.match(/^WORKDIR /gm) ?? []).not.toHaveLength(2);
+    expect(result.stats.autoResolved).toBe(0);
+  });
+
+  it("sans base, le même commentaire devant une instruction différente de chaque côté n'est jamais dédoublé", () => {
+    const input = [`FROM n`, `<<<<<<< ours`, `# deps`, `RUN npm ci`, `=======`, `# deps`, `ENV X=1`, `RUN npm ci`, `>>>>>>> theirs`].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect((result.mergedContent ?? "").match(/^# deps$/gm) ?? []).not.toHaveLength(2);
+  });
+
+  it("ENV à plusieurs variables changé des deux côtés : pas de « prefer theirs », rien de perdu en silence", () => {
+    const input = [`FROM n`, dockerHunk([`ENV A=1 B=3`], [`ENV A=1 B=2`], [`ENV A=2 B=2`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.resolutions[0]?.resolutionReason ?? "").not.toMatch(/Dockerfile merged by stage/);
+  });
+
+  it("WORKDIR changé sous un commentaire d'un côté, commentaire réécrit ailleurs de l'autre : fusion automatique", () => {
+    const input = [`FROM n`, dockerHunk(
+      [`# dir`, `WORKDIR /srv`, `# deps`, `RUN npm ci`],
+      [`# dir`, `WORKDIR /app`, `# deps`, `RUN npm ci`],
+      [`# dir`, `WORKDIR /app`, `# install deps`, `RUN npm ci`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe([`FROM n`, `# dir`, `WORKDIR /srv`, `# install deps`, `RUN npm ci`].join("\n"));
+  });
+});
