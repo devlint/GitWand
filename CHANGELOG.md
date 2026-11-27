@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Force Push is no longer proposed for a collaborator's commit you pulled, then reset away (#239).** A branch whose upstream tip was once its own tip counted as rewritten locally, so the update prompt offered Force Push, which would have dropped that commit. That tip now counts only when the branch left it through a rebase or an amend; otherwise Sync stays the default.
+- **Force Push is no longer proposed for a collaborator's commit you pulled, then reset away (#239).** A branch whose upstream tip was once its own tip counted as rewritten locally, so the update prompt offered Force Push, which would have dropped that commit. That tip now counts only when it was a commit made here (a commit, cherry-pick, revert or `git am`), or when the branch left it through a rebase, a pull that rebased or an amend; a tip that arrived by a pull, a fast-forward rebase or a branch creation does not, and Sync stays the default.
 - **A PR's title or description no longer flips back after you edit it (#234).** A background refresh read before the save and landing after it showed the old text again until the next refresh.
 - **Remote images are fetched by GitWand, not the window.** Avatars, README badges and the images of a PR you accepted go through the backend (http(s) only, image types only, 5 MiB and 20 s at most), so the window's content security policy no longer allows images from any `https:` or `http:` host.
 - **curl ignores your `.curlrc`.** A `location` or `proxy` line there could make an AI request follow a redirect with its key, or route forge and AI calls through another host.

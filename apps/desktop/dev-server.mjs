@@ -927,7 +927,10 @@ function devLockdownError(bin, helpArgs, flags, tooOld, cli) {
   let id;
   try { const st = statSync(bin); id = `${bin}|${st.size}|${st.mtimeMs}|${what}`; }
   catch { id = `${bin}|${Math.floor(Date.now() / 300_000)}|${what}`; }
-  if (devLockdownSeen.has(id)) return devLockdownSeen.get(id) ? null : tooOld;
+  const seen = devLockdownSeen.get(id);
+  // A "missing" answer is checked again after 5 minutes (an update behind a
+  // shim leaves the file unchanged), as RECHECK_MISSING_AFTER in Rust.
+  if (seen && (seen.ok || Date.now() - seen.at < 300_000)) return seen.ok ? null : tooOld;
   // The run's own filtered environment: no secret reaches the CLI.
   const r = spawnSync(bin, helpArgs, { encoding: "utf-8", timeout: 10_000, env: aiSpawnEnv(cli) });
   if (r.error?.code === "ENOENT") return `Binaire \`${basename(bin)}\` introuvable`;
@@ -937,7 +940,7 @@ function devLockdownError(bin, helpArgs, flags, tooOld, cli) {
   const help = `${r.stdout || ""}${r.stderr || ""}`;
   const has = (f) => new RegExp(`(^|[^\\w-])${f.replace(/[-]/g, "\\-")}(?![\\w-])`, "m").test(help);
   const ok = flags.every(has);
-  devLockdownSeen.set(id, ok);
+  devLockdownSeen.set(id, { ok, at: Date.now() });
   return ok ? null : tooOld;
 }
 /** True when a process with this pid exists (EPERM is a live process). */
@@ -945,6 +948,29 @@ function devProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e) { return e?.code === "EPERM"; }
 }
+/** The image proxy's CSP, as image_proxy.rs sends on gwimg: answers. */
+const DEV_IMAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
+/**
+ * The first JSON object of `text` from offset 0 (strings and escapes
+ * respected), or null: a log line may follow it.
+ */
+function devFirstJsonObject(text) {
+  let depth = 0, inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return text.slice(0, i + 1);
+  }
+  return null;
+}
+
 /** JSON from JSONC: comments and trailing commas dropped. Mirrors `jsonc_to_json`. */
 function devJsoncToJson(text) {
   let out = "";
@@ -1011,11 +1037,16 @@ function devOpencodeConfigContent(opencodeBin) {
       let v = null;
       let at = 0;
       for (const line of out.split(/(?<=\n)/)) {
-        if (line.trimStart().startsWith("{")) { v = parse(out.slice(at)); if (v) break; }
+        if (line.trimStart().startsWith("{")) {
+          const first = devFirstJsonObject(devJsoncToJson(out.slice(at)).trimStart());
+          v = first ? parse(first) : null;
+          if (v) break;
+        }
         at += line.length;
       }
       if (v?.mcp && typeof v.mcp === "object") resolvedNames.push(...Object.keys(v.mcp));
-      if (v) devOpencodeResolved = { at: Date.now(), names: [...resolvedNames] };
+      // A failed or unreadable read is cached too (empty), as in Rust.
+      devOpencodeResolved = { at: Date.now(), names: [...resolvedNames] };
     } catch { /* the files below decide */ }
   }
   const files = [];
@@ -8312,7 +8343,7 @@ async function handleRequest(req, res) {
         if ((u.protocol !== "http:" && u.protocol !== "https:") || !u.hostname) throw new Error("not http(s)");
         if (u.username || u.password) throw new Error("credentials");
       } catch (e) {
-        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8", "Content-Security-Policy": DEV_IMAGE_CSP });
         return res.end(`bad image URL: ${e.message}`);
       }
       try {
@@ -8355,10 +8386,12 @@ async function handleRequest(req, res) {
           "Content-Type": type,
           "Cache-Control": "max-age=3600",
           "X-Content-Type-Options": "nosniff",
+          // As gwimg: an SVG opened as a page runs nothing on this origin.
+          "Content-Security-Policy": DEV_IMAGE_CSP,
         });
         return res.end(body);
       } catch (e) {
-        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8", "Content-Security-Policy": DEV_IMAGE_CSP });
         return res.end(`image request failed: ${e.message}`);
       }
     }

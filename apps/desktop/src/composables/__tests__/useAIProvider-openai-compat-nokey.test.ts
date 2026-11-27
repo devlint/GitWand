@@ -19,6 +19,9 @@ vi.mock("../../utils/backend", async () => {
   return { ...actual, aiHttpRequest: (...a: unknown[]) => aiHttpRequest(...a) };
 });
 vi.mock("../useAiApiKey", () => ({
+  endpointOrigin: (e: string) => {
+    try { return new URL(e).origin; } catch { return null; }
+  },
   ensureAiApiKeyLoaded: vi.fn(async () => {}),
   isAiApiKeyConfigured: () => keyConfigured,
   aiApiKeyBoundTo: (endpoint: string) => keyConfigured && keyOrigin === new URL(endpoint).origin,
@@ -54,6 +57,13 @@ describe("OpenAI-compatible provider without a key", () => {
   it("is available with an endpoint alone", () => {
     settings();
     expect(useAIProvider().isAvailable.value).toBe(true);
+  });
+
+  it("is not usable left on the default Anthropic endpoint without a bound key", () => {
+    // The endpoint setting is shared with the claude provider.
+    settings({ aiApiEndpoint: "https://api.anthropic.com" });
+    expect(useAIProvider().isAvailable.value).toBe(false);
+    expect(useAIProvider().toLlmEndpoint()).toBeNull();
   });
 
   it("is not available without an endpoint", () => {

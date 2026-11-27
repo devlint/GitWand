@@ -366,7 +366,10 @@ fn serve_with(url: &str, fetch: impl FnOnce(&str) -> Result<Image, String>) -> O
 /// A failure that the same request would get again: the server's 4xx, an
 /// answer that is not an image, an oversized or empty one.
 fn is_definitive(error: &str) -> bool {
-    error.starts_with("image request answered 4")
+    // 408 and 429 are temporary: fetched again at the next request.
+    (error.starts_with("image request answered 4")
+        && !error.starts_with("image request answered 408")
+        && !error.starts_with("image request answered 429"))
         || error.starts_with("not an image")
         || error.contains("larger than 5 MiB")
         || error.starts_with("empty or oversized")
@@ -593,6 +596,10 @@ mod tests {
             })
         });
         assert_eq!(again.unwrap().bytes, [9]);
+
+        assert!(!is_definitive("image request answered 429"));
+        assert!(!is_definitive("image request answered 408"));
+        assert!(is_definitive("image request answered 404"));
 
         // A definitive failure answers the next requests without a new fetch.
         let bad = "https://share.example/missing.png";

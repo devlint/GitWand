@@ -2454,8 +2454,12 @@ fn opencode_debug_config_mcp_names(out: &str) -> Vec<String> {
     let mut at = 0;
     for line in out.split_inclusive('\n') {
         if line.trim_start().starts_with('{') {
-            let rest = &out[at..];
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&jsonc_to_json(rest)) {
+            // The first JSON value only: a log line may follow it too.
+            let rest = jsonc_to_json(&out[at..]);
+            let first = serde_json::Deserializer::from_str(&rest)
+                .into_iter::<serde_json::Value>()
+                .next();
+            if let Some(Ok(v)) = first {
                 return v
                     .get("mcp")
                     .and_then(|m| m.as_object())
@@ -3621,6 +3625,11 @@ mod neutral_dir_tests {
         assert_eq!(
             opencode_debug_config_mcp_names("\u{1b}[0m\n{\"mcp\":{\"b\":{\"type\":\"local\"}}}"),
             ["b"]
+        );
+        // A log line after the JSON.
+        assert_eq!(
+            opencode_debug_config_mcp_names("{\"mcp\": {\"d\": {}}}\nINFO shutting down\n"),
+            ["d"]
         );
         // A log line with a brace before the JSON.
         assert_eq!(

@@ -96,6 +96,7 @@ import {
   listModelsForProvider,
   probeOllama,
   providerEfforts,
+  openAICompatUsable,
 } from "../composables/useAIProvider";
 import { useLogs, type LogEntry } from "../composables/useLogs";
 import { useIdentity } from "../composables/useIdentity";
@@ -2723,7 +2724,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                  in the provider UI). -->
             <div
               v-if="claudeCliInfo?.found && ((settings.aiProvider === 'claude' && !aiKeyConfigured)
-                || (settings.aiProvider === 'openai-compat' && !settings.aiApiEndpoint))"
+                || (settings.aiProvider === 'openai-compat' && !openAICompatUsable(settings.aiApiEndpoint)))"
               class="sp-row"
             >
               <span class="sp-hint">{{ t('settings.aiProviderCliFallbackHint') }}</span>

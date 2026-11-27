@@ -72,6 +72,7 @@ describe("dev-server: image proxy", { timeout: 15_000 }, () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("image/png");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("content-security-policy")).toContain("sandbox");
     expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG);
   });
 

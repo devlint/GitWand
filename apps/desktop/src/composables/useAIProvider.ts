@@ -15,7 +15,7 @@ import {
   type AiAskMode,
 } from "../utils/backend";
 import { t } from "./useI18n";
-import { aiApiKeyBoundTo, aiApiKeyOrigin, ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
+import { aiApiKeyBoundTo, aiApiKeyOrigin, endpointOrigin, ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
 
 /**
  * AI provider types matching SettingsPanel configuration.
@@ -229,15 +229,22 @@ async function callClaude(
 }
 
 /**
- * An OpenAI-compatible provider that can be used: an endpoint. A key is
- * optional (a local llama.cpp, vLLM or LM Studio server needs none), and a
- * stored key bound to another origin (an Anthropic key kept from the claude
- * provider) is simply not sent (`openAICompatAuth`); if the server then
- * wants one, its 401 says the key belongs elsewhere (`compatAuthError`).
+ * An OpenAI-compatible provider that can be used: a key bound to its
+ * endpoint, or an endpoint of the user's own choosing without one (a local
+ * llama.cpp, vLLM or LM Studio server needs none). The endpoint setting is
+ * shared with the claude provider and defaults to Anthropic's, which serves
+ * no OpenAI-compatible API: left there with no key bound to it, the setup is
+ * incomplete and the Claude Code CLI fallback applies. A key bound to another
+ * origin is not sent (`openAICompatAuth`); a 401 then says so
+ * (`compatAuthError`).
  */
 export function openAICompatUsable(endpoint: string | null | undefined): boolean {
-  return !!endpoint;
+  if (!endpoint) return false;
+  if (aiApiKeyBoundTo(endpoint)) return true;
+  return endpointOrigin(endpoint) !== ANTHROPIC_ORIGIN;
 }
+
+const ANTHROPIC_ORIGIN = "https://api.anthropic.com";
 
 /**
  * How a request to the OpenAI-compatible `endpoint` is authenticated: with
