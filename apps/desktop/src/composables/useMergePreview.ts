@@ -25,7 +25,7 @@ import {
 // always mounted), which is the same reason `engine()` is lazy above: a static
 // value import from `@gitwand/core` here puts part of the package back into
 // the boot chunk, and the main bundle has single-digit KB of budget headroom.
-import type { GitWandOptions, MergeContext } from "@gitwand/core";
+import type { ExplanationRef, GitWandOptions, MergeContext } from "@gitwand/core";
 // `resolve` is loaded lazily via `engine()` — this composable sits on an
 // eager path (AppHeader → BranchSelector → useMergePreview, always mounted),
 // so a static import here would put the ~244 KB raw / ~73 KB gzip resolution
@@ -33,6 +33,7 @@ import type { GitWandOptions, MergeContext } from "@gitwand/core";
 // See ../utils/coreEngine.ts.
 import { engine } from "../utils/coreEngine.js";
 import { useResolutionSelection } from "./useResolutionSelection";
+import { t } from "./useI18n";
 
 // ─── Opérations prédictibles (v2.20.0) ───────────────────
 //
@@ -83,6 +84,13 @@ export interface PreviewHunk {
    * garde le résumé petit sur un gros merge.
    */
   reason: string;
+  /**
+   * The hunk's explanation, English, and its translatable form: the panel
+   * shows `hunkExplanation()` of them at render time, so it follows the UI
+   * language (`reason` above is core's English audit text).
+   */
+  explanation: string;
+  explanationRef?: ExplanationRef;
 }
 
 export interface PreviewFileResult {
@@ -178,10 +186,6 @@ export function useMergePreview(cwd: () => string) {
   ): Promise<void> {
     const core = await engine();
     const options = await buildPreviewOptions(operation);
-    // The explanation helper and the UI language's dictionary load with the
-    // preview, not in the main bundle; the reasons below are written once.
-    const { hunkExplanation, explanationsReady } = await import("../utils/hunkExplanation");
-    await explanationsReady();
     const files: PreviewFileResult[] = [];
 
     for (const raw of rawFiles) {
@@ -239,6 +243,8 @@ export function useMergePreview(cwd: () => string) {
               confidenceScore: r.hunk.confidence.score,
               confidenceLabel: r.hunk.confidence.label,
               reason: r.resolutionReason,
+              explanation: r.hunk.explanation,
+              explanationRef: r.hunk.explanationRef,
             }))
           : result.hunks.map(h => ({
               startLine: h.startLine,
@@ -246,7 +252,9 @@ export function useMergePreview(cwd: () => string) {
               autoResolved: false,
               confidenceScore: h.confidence.score,
               confidenceLabel: h.confidence.label,
-              reason: hunkExplanation(h),
+              reason: h.explanation,
+              explanation: h.explanation,
+              explanationRef: h.explanationRef,
             }));
 
         files.push({
@@ -272,6 +280,7 @@ export function useMergePreview(cwd: () => string) {
           confidenceScore: 0,
           confidenceLabel: "low",
           reason: "No content to analyse: the conflict could not be simulated.",
+          explanation: t("mergePreview.notSimulated"),
         }],
         });
       }

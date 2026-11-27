@@ -75,6 +75,10 @@ Quand on ajoute un nouveau champ de settings, il DOIT être ajouté dans les **d
 5 langues supportées : EN (défaut), FR, ES, PT-BR, ZH-CN.
 
 - Toute string user-visible doit avoir une clé dans **tous** les fichiers `src/locales/`
+- Exception : l'explication d'un hunk de conflit (`explanationRef` de `@gitwand/core`)
+  se traduit dans `src/locales/explain/<code>.ts` (fr, es, pt-BR, zh-CN ; l'anglais est
+  l'`explanation` de core), chargés à la demande par `utils/hunkExplanation.ts`. Ne pas
+  les importer statiquement depuis le chunk principal (voir AGENTS.md, section i18n).
 - Ne jamais hardcoder du texte directement dans les templates
 - Utiliser le composable `useI18n.ts` :
 

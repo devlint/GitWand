@@ -31,6 +31,7 @@ import type { StructuralLoaderOptions } from "../structural/index.js";
 import { parseConflictMarkers } from "../parser.js";
 import { tryLlmFallbackResolve } from "../resolvers/llm-fallback.js";
 import llmProposedPattern from "../patterns/llm-proposed.js";
+import complexPattern from "../patterns/complex.js";
 import { checkParseTreeValid } from "./validate-parse-tree.js";
 import { validateMergedContent } from "./validation.js";
 import {
@@ -196,7 +197,7 @@ export async function runLlmFallbackPhase(
 
     if (llmResult.lines !== null) {
       // Résolution acceptée — mettre à jour le hunk et la résolution
-      // The explanation follows the new type (it said "complex" before).
+      // Set explicitly: the explanation always matches the type it ends with.
       const input = { ...updatedHunks[idx], endLine: updatedHunks[idx].startLine };
       const updatedHunk: ConflictHunk = {
         ...updatedHunks[idx],
@@ -218,9 +219,15 @@ export async function runLlmFallbackPhase(
         resolutionReason: llmResult.reason,
       };
     } else {
-      // Résolution refusée — enrichir la trace avec llmTrace pour l'audit
+      // Résolution refusée — enrichir la trace avec llmTrace pour l'audit.
+      // The type stays llm_proposed (the tier stats count the attempt), but the
+      // hunk is unresolved: its explanation is the genuine-conflict one, not
+      // "proposed by the LLM".
+      const input = { ...updatedHunks[idx], endLine: updatedHunks[idx].startLine };
       const updatedHunk: ConflictHunk = {
         ...updatedHunks[idx],
+        explanation: complexPattern.explanation(input),
+        explanationRef: complexPattern.explanationRef?.(input),
         trace: {
           ...updatedHunks[idx].trace,
           summary: `${updatedHunks[idx].trace.summary} | LLM rejected: ${llmResult.reason}`,

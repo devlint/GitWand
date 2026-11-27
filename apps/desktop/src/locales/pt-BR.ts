@@ -756,6 +756,7 @@ const ptBR: Locale = {
     commitPicker: "Commit para cherry-pick",
     commitPickerLoading: "Carregando commits…",
     commitPickerEmpty: "Nenhum commit encontrado",
+    notSimulated: "Nenhum conteúdo para analisar: não foi possível simular o conflito.",
   },
 
   // ─── Guided bisect ─────────────────────────────────────

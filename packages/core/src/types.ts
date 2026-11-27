@@ -1,10 +1,11 @@
-import type { ExplanationRef } from "./explanation-keys.js";
 /**
  * GitWand Core Types
  *
  * Représente les structures de données pour l'analyse
  * et la résolution automatique de conflits Git.
  */
+
+import type { ExplanationRef } from "./explanation-keys.js";
 
 /** Les trois versions d'un fichier en conflit */
 export interface MergeInput {

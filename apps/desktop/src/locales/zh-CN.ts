@@ -769,6 +769,7 @@ const zhCN: Locale = {
     commitPicker: "要拣选的提交",
     commitPickerLoading: "正在加载提交…",
     commitPickerEmpty: "未找到提交",
+    notSimulated: "没有可分析的内容：无法模拟该冲突。",
   },
 
   // ─── Guided bisect ─────────────────────────────────────

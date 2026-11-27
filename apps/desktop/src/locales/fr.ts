@@ -760,6 +760,7 @@ const fr: Locale = {
     commitPicker: "Commit à cherry-picker",
     commitPickerLoading: "Chargement des commits…",
     commitPickerEmpty: "Aucun commit trouvé",
+    notSimulated: "Aucun contenu à analyser : le conflit n'a pas pu être simulé.",
   },
 
   // ─── Guided bisect ─────────────────────────────────────

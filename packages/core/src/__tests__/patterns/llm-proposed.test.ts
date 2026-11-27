@@ -340,6 +340,10 @@ describe("resolveAsync — avec llmFallback enabled et endpoint mock", () => {
     // La trace LLM est quand même attachée pour l'audit
     expect(result.resolutions[0].hunk.trace.llmTrace).toBeDefined();
     expect(result.resolutions[0].hunk.trace.llmTrace!.accepted).toBe(false);
+    // Unresolved: the type keeps the attempt, the explanation says it is a
+    // genuine conflict, not "proposed by the LLM".
+    expect(result.hunks[0].type).toBe("llm_proposed");
+    expect(result.hunks[0].explanationRef).toEqual({ key: "complex" });
   });
 
   it("les hunks déjà résolus (non-complex) ne sont pas re-classifiés llm_proposed", async () => {

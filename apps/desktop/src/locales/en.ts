@@ -767,6 +767,7 @@ const en = {
     commitPicker: "Commit to cherry-pick",
     commitPickerLoading: "Loading commits…",
     commitPickerEmpty: "No commits found",
+    notSimulated: "No content to analyse: the conflict could not be simulated.",
   },
 
   // ─── Guided bisect ─────────────────────────────────────

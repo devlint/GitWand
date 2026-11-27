@@ -131,7 +131,7 @@
             :key="i"
             class="preview-hunk"
             :class="hunkClass(h)"
-            :title="`${h.confidenceScore}% (${h.confidenceLabel}) — ${h.reason}`"
+            :title="hunkTitle(h)"
           >
             <!-- A bar, not a number: the score is only actionable on the rows
                  the bar is holding back, and those show it below. -->
@@ -266,6 +266,7 @@ import type { MergePreviewSummary, PreviewFileResult, PreviewFileStatus, Preview
 import type { ScratchWorktree } from "../utils/backend.js";
 import { useAIProvider } from "../composables/useAIProvider.js";
 import { useMergeRisk } from "../composables/useMergeRisk.js";
+import { hunkExplanation } from "../utils/hunkExplanation";
 import AiSparkle from "./AiSparkle.vue";
 import MergeApplyReport from "./MergeApplyReport.vue";
 import type { ApplyOutcome } from "../composables/useApplyFromPreview.js";
@@ -307,6 +308,16 @@ const props = defineProps<{
    */
   embedded?: boolean;
 }>();
+
+/**
+ * A hunk's tooltip: its explanation in the UI language; for a hunk left to
+ * the user, core's reason too (why it is manual: a guard, a retraction…),
+ * which is English audit text.
+ */
+function hunkTitle(h: PreviewHunk): string {
+  const head = `${h.confidenceScore}% (${h.confidenceLabel}) — ${hunkExplanation(h)}`;
+  return h.autoResolved || !h.reason || h.reason === h.explanation ? head : `${head}\n${h.reason}`;
+}
 
 const emit = defineEmits<{
   close: [];

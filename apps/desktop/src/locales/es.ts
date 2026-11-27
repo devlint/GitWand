@@ -755,6 +755,7 @@ const es: Locale = {
     commitPicker: "Commit a cherry-pick",
     commitPickerLoading: "Cargando commits…",
     commitPickerEmpty: "No se encontraron commits",
+    notSimulated: "No hay contenido que analizar: no se pudo simular el conflicto.",
   },
 
   // ─── Guided bisect ─────────────────────────────────────

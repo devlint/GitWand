@@ -3,9 +3,12 @@
  *
  * `explanation` stays the English text every consumer reads (CLI, MCP, VS Code,
  * reports). Next to it, `explanationRef` names the same text as a key plus its
- * positional parameters, so an app can show it in the user's language: the
- * desktop locales have one string per key under `explain`, with `{0}`, `{1}`…
- * for the parameters. A consumer that does not know a key shows `explanation`.
+ * positional parameters, so an app can show it in the user's language. The
+ * desktop app translates them in `apps/desktop/src/locales/explain/<code>.ts`
+ * (one dictionary per non-English language; English is `explanation` itself),
+ * with `{0}`, `{1}`… for the parameters. A key added here must be added to each
+ * of those dictionaries (they do not compile otherwise). A consumer that does
+ * not know a key shows `explanation`.
  *
  * `EXPLANATION_PARAMS` maps each key to the number of parameters it takes.
  */
