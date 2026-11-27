@@ -124,8 +124,12 @@ function parseImport(line: string): ImportStatement {
   // CommonJS require
   const requireMatch = t.match(RE_REQUIRE);
   if (requireMatch) {
-    // `names` : le motif de liaison tel qu'écrit (`fs`, `{ a, b: c }`).
-    return { raw: t, source: requireMatch[2], kind: "require", names: [requireMatch[1].trim()], isType: false };
+    // `names` : le motif de liaison tel qu'écrit (`fs`, `{ a, b: c }`). Un
+    // autre déclarateur après le `require(…)` (`, b = require('n')`) n'est
+    // pas lu : motif vide, donc liaisons inconnues (prudence).
+    const moreDeclarators = /^\s*,/.test(t.slice(requireMatch[0].length));
+    const pattern = moreDeclarators ? "" : requireMatch[1].trim();
+    return { raw: t, source: requireMatch[2], kind: "require", names: [pattern], isType: false };
   }
 
   // Fallback : inconnu (commentaire, blank, multi-line…)
@@ -398,6 +402,27 @@ export function tryResolveImportConflict(
   const oursImports   = aggregateNamedImports(oursLines.map(parseImport).filter((s) => s.kind !== "unknown"));
   const theirsImports = aggregateNamedImports(theirsLines.map(parseImport).filter((s) => s.kind !== "unknown"));
 
+  // Deux imports d'un même côté avec la même clé (deux `require` du même
+  // module, deux imports par défaut) : la map n'en garderait qu'un et l'autre
+  // disparaîtrait du résultat. Seuls les imports named sont agrégés.
+  const repeatsAKey = (imports: ImportStatement[]): boolean => {
+    const keys = new Set<string>();
+    for (const s of imports) {
+      const key = importKey(s);
+      if (keys.has(key)) return true;
+      keys.add(key);
+    }
+    return false;
+  };
+  if (repeatsAKey(baseImports) || repeatsAKey(oursImports) || repeatsAKey(theirsImports)) {
+    return {
+      mergedLines: null,
+      reason: "A side imports the same module twice in the same form, so it falls back to the textual engine rather than drop one.",
+      resolvedImports: 0,
+      unresolvedImports: 1,
+    };
+  }
+
   // Indexer par clé
   const baseMap   = new Map(baseImports.map((s) => [importKey(s), s]));
   const oursMap   = new Map(oursImports.map((s) => [importKey(s), s]));
@@ -446,7 +471,7 @@ export function tryResolveImportConflict(
 
   /**
    * L'import de l'autre côté, du même module, qui rend `added` incompatible :
-   * une autre forme (`kind`), pas un import de base laissé tel quel. Parmi
+   * une autre clé (forme ou type/valeur), pas un import de base laissé tel quel. Parmi
    * plusieurs, celui dont les liaisons entrent en collision passe en premier,
    * pour que le conflit soit signalé. Un ajout `named` n'est pas comparé
    * (`import X` + `import { Y }` coexistent), sauf collision de liaisons.
@@ -455,12 +480,14 @@ export function tryResolveImportConflict(
     added: ImportStatement,
     other: Map<string, ImportStatement[]>,
   ): ImportStatement | undefined => {
+    // Une autre clé : autre forme, ou même forme en type d'un côté et en
+    // valeur de l'autre (`{ X }` / `type { X }`, qui déclarent tous deux X).
     const candidates = (other.get(added.source) ?? []).filter(
-      (s) => s.kind !== added.kind && !isUntouchedBase(s),
+      (s) => importKey(s) !== importKey(added) && !isUntouchedBase(s),
     );
     const colliding = candidates.find((s) => bindingsCollide(added, s));
     if (colliding) return colliding;
-    return added.kind !== "named" ? candidates[0] : undefined;
+    return added.kind !== "named" ? candidates.find((s) => s.kind !== added.kind) : undefined;
   };
 
   // Ensemble de toutes les clés

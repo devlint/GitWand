@@ -243,40 +243,77 @@ function mergeStage(
     }
   };
 
+  // Un commentaire de base réécrit de chaque côté (supprimé des deux côtés,
+  // un nouveau commentaire de chaque côté) : deux versions contradictoires
+  // seraient gardées, moteur textuel.
+  if (hasBase) {
+    const isComment = (k: string) => k.startsWith("COMMENT:");
+    const rewrittenByBoth = [...baseRawByKey.keys()].some(
+      (k) => isComment(k) && !oursMap.has(k) && !theirsMap.has(k),
+    );
+    const addedOnlyBy = (mine: Map<string, Instruction>, other: Map<string, Instruction>) =>
+      [...mine.keys()].some((k) => isComment(k) && !baseRawByKey.has(k) && !other.has(k));
+    if (rewrittenByBoth && addedOnlyBy(oursMap, theirsMap) && addedOnlyBy(theirsMap, oursMap)) return null;
+  }
+
   // Le côté dont on suit l'ordre ; les instructions présentes seulement de
-  // l'autre côté viennent ensuite.
+  // l'autre côté s'insèrent juste après celle qui les précède de leur côté
+  // (pas à la fin : un `RUN` ajouté avant `USER node` doit rester avant).
   const [lead, leadIsOurs] = driveByTheirs ? [theirsInstructions, false] : [oursInstructions, true];
   const otherMap = leadIsOurs ? theirsMap : oursMap;
   const otherList = leadIsOurs ? theirsInstructions : oursInstructions;
 
-  const result: string[] = [];
-  const seen = new Set<string>();
+  type Entry = { key: string; lines: string[]; otherIdx?: number };
+  const out: Entry[] = [];
+  const leadCount = new Map<string, number>();
 
   for (const instr of lead) {
     const key = instructionKey(instr);
+    leadCount.set(key, (leadCount.get(key) ?? 0) + 1);
     const counterpart = otherMap.get(key);
-    seen.add(key);
     if (!counterpart) {
       const lines = oneSided(instr);
       if (lines === null) return null;
-      if (lines !== "drop") result.push(...lines);
+      if (lines !== "drop") out.push({ key, lines });
       continue;
     }
     const lines = leadIsOurs ? twoSided(instr, counterpart) : twoSided(counterpart, instr);
     if (!lines) return null;
-    result.push(...lines);
+    out.push({ key, lines });
   }
 
-  for (const instr of otherList) {
+  const otherCount = new Map<string, number>();
+  for (const [i, instr] of otherList.entries()) {
     const key = instructionKey(instr);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const n = (otherCount.get(key) ?? 0) + 1;
+    otherCount.set(key, n);
+    const inLead = leadCount.get(key) ?? 0;
+    // Déjà traitée avec le côté qui mène — sauf un commentaire répété plus
+    // souvent de ce côté (deux `# ----` ajoutés ne se fondent pas en un).
+    // Les lignes vides gardent celles du côté qui mène.
+    if (instr.kind === "COMMENT" ? n <= inLead : inLead > 0 || (instr.kind === "BLANK" && n > 1)) continue;
     const lines = oneSided(instr);
     if (lines === null) return null;
-    if (lines !== "drop") result.push(...lines);
+    if (lines === "drop") continue;
+
+    // Ancre : l'instruction qui la précède de son côté et qui est déjà dans
+    // la sortie (pas une ligne vide, dont la clé ne situe rien).
+    let pos = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const anchorKey = instructionKey(otherList[j]);
+      if (anchorKey === "BLANK") continue;
+      let found = -1;
+      for (let k = out.length - 1; k >= 0; k--) {
+        if (out[k].key === anchorKey) { found = k; break; }
+      }
+      if (found >= 0) { pos = found + 1; break; }
+    }
+    // Après les insertions précédentes du même côté au même endroit.
+    while (pos < out.length && out[pos].otherIdx !== undefined && out[pos].otherIdx! < i) pos++;
+    out.splice(pos, 0, { key, lines, otherIdx: i });
   }
 
-  return result;
+  return out.flatMap((e) => e.lines);
 }
 
 // ─── Résolution ──────────────────────────────────────────────
@@ -360,6 +397,19 @@ export function tryResolveDockerfileConflict(
     }
   }
 
+  // Un stage présent d'un seul côté : gardé s'il n'est pas dans la base
+  // (ajouté) ; s'il y est, l'autre côté l'a supprimé — retiré s'il est resté
+  // tel quel, conflit (null) s'il a été modifié.
+  const oneSidedStage = (stage: Instruction[], baseStage: Instruction[] | undefined): boolean | null => {
+    if (!baseStage) return true;
+    const raw = (instructions: Instruction[]) => instructions.map((i) => i.raw.join("\n")).join("\n");
+    return raw(stage) === raw(baseStage) ? false : null;
+  };
+  const stageConflict: FormatResult = {
+    lines: null,
+    reason: "[dockerfile] A stage deleted on one side was changed on the other, falling back to the textual engine.",
+  };
+
   const resultLines: string[] = [];
   const seenStages = new Set<string>();
 
@@ -369,8 +419,10 @@ export function tryResolveDockerfileConflict(
     seenStages.add(key);
 
     if (!theirsStage) {
-      // Stage seulement dans ours → inclure
-      for (const instr of oursStage) resultLines.push(...instr.raw);
+      // Stage seulement dans ours : ajouté, ou supprimé par theirs.
+      const kept = oneSidedStage(oursStage, baseStageMap.get(key));
+      if (kept === null) return stageConflict;
+      if (kept) for (const instr of oursStage) resultLines.push(...instr.raw);
       continue;
     }
 
@@ -384,11 +436,12 @@ export function tryResolveDockerfileConflict(
     resultLines.push(...merged);
   }
 
-  // Stages seulement dans theirs → les ajouter
+  // Stages seulement dans theirs : ajoutés, ou supprimés par ours.
   for (const [key, stage] of theirsStageMap) {
-    if (!seenStages.has(key)) {
-      for (const instr of stage) resultLines.push(...instr.raw);
-    }
+    if (seenStages.has(key)) continue;
+    const kept = oneSidedStage(stage, baseStageMap.get(key));
+    if (kept === null) return stageConflict;
+    if (kept) for (const instr of stage) resultLines.push(...instr.raw);
   }
 
   return {

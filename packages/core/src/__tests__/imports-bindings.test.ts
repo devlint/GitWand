@@ -59,3 +59,37 @@ describe("imports — liaisons d'un require", () => {
     expect(result.conflict).toBe(true);
   });
 });
+
+describe("imports — review du lot A", () => {
+  it("`import { X }` d'un côté, `import type { X }` de l'autre : collision signalée", () => {
+    const result = tryResolveImportConflict([], [`import { X } from 'm';`], [`import type { X } from 'm';`]);
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBe(true);
+  });
+
+  it("`import X` d'un côté, `import type X` de l'autre : collision signalée", () => {
+    const result = tryResolveImportConflict([], [`import X from 'm';`], [`import type X from 'm';`]);
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBe(true);
+  });
+
+  it("deux require du même module d'un côté : aucun n'est perdu", () => {
+    const result = tryResolveImportConflict(
+      [],
+      [`const fs = require('fs');`, `const { readFile } = require('fs');`],
+      [`import path from 'path';`],
+    );
+    const merged = (result.mergedLines ?? []).join("\n");
+    if (result.mergedLines) {
+      expect(merged).toContain("const fs = require('fs');");
+      expect(merged).toContain("const { readFile } = require('fs');");
+    } else {
+      expect(result.conflict).toBeUndefined();
+    }
+  });
+
+  it("plusieurs déclarateurs sur une ligne require : prudence (collision supposée)", () => {
+    const result = tryResolveImportConflict([], [`const a = require('m'), b = require('n');`], [`import c from 'm';`]);
+    expect(result.conflict).toBe(true);
+  });
+});

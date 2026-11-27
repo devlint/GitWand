@@ -400,3 +400,71 @@ describe("Dockerfile — ordre des instructions", () => {
     expect(result.stats.autoResolved).toBe(0);
   });
 });
+
+describe("Dockerfile — review du lot A", () => {
+  it("theirs réordonne, ours ajoute une instruction : elle reste à sa place (avant USER)", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`ENV A=1`, `ENV B=1`, `RUN apt-get install -y curl`, `USER node`],
+      [`ENV A=1`, `ENV B=1`, `USER node`],
+      [`ENV B=1`, `ENV A=1`, `USER node`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    const merged = result.mergedContent ?? "";
+    expect(merged.indexOf("RUN apt-get")).toBeLessThan(merged.indexOf("USER node"));
+    expect(merged.indexOf("ENV B=1")).toBeLessThan(merged.indexOf("ENV A=1"));
+  });
+
+  it("ours mène, theirs ajoute une instruction : elle reste à sa place (avant USER)", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`ENV A=2`, `USER node`],
+      [`ENV A=1`, `USER node`],
+      [`ENV A=1`, `RUN make`, `USER node`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    const merged = result.mergedContent ?? "";
+    expect(merged.indexOf("RUN make")).toBeLessThan(merged.indexOf("USER node"));
+  });
+
+  it("un stage entier supprimé d'un côté et inchangé de l'autre ne revient pas", () => {
+    const input = dockerHunk(
+      [`FROM node:20 AS build`, `RUN npm ci`, `FROM node:20 AS test`, `RUN npm test`],
+      [`FROM node:18 AS build`, `RUN npm ci`, `FROM node:20 AS test`, `RUN npm test`],
+      [`FROM node:18 AS build`, `RUN npm ci`],
+    );
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("FROM node:20 AS build");
+    expect(result.mergedContent).not.toContain("AS test");
+  });
+
+  it("un stage supprimé d'un côté et modifié de l'autre : pas de résolution automatique", () => {
+    const input = dockerHunk(
+      [`FROM node:20 AS build`, `RUN npm ci`, `FROM node:22 AS test`, `RUN npm test`],
+      [`FROM node:18 AS build`, `RUN npm ci`, `FROM node:20 AS test`, `RUN npm test`],
+      [`FROM node:18 AS build`, `RUN npm ci`],
+    );
+    expect(resolve(input, "Dockerfile").stats.autoResolved).toBe(0);
+  });
+
+  it("un même commentaire ajouté deux fois d'un seul côté reste en double", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`ENV A=2`],
+      [`ENV A=1`],
+      [`ENV A=1`, `# ----`, `ENV Z=1`, `# ----`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect((result.mergedContent ?? "").match(/^# ----$/gm)).toHaveLength(2);
+  });
+
+  it("le même commentaire de base réécrit autrement de chaque côté : pas de résolution automatique", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`# Uses node 22`, `ENV A=1`],
+      [`# Uses node 20`, `ENV A=1`],
+      [`# Uses node 21`, `ENV A=1`],
+    )].join("\n");
+    expect(resolve(input, "Dockerfile").stats.autoResolved).toBe(0);
+  });
+});
