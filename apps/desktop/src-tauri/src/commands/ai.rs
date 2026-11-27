@@ -1086,18 +1086,20 @@ fn help_has_flag(help: &str, flag: &str) -> bool {
 fn help_mentions(binary: &str, cli: AiCli, help_args: &[&str], flags: &[&str]) -> Option<bool> {
     use std::sync::Mutex;
     type Key = ((String, u64, Option<std::time::SystemTime>), String);
-    static SEEN: Mutex<Vec<(Key, bool)>> = Mutex::new(Vec::new());
+    // A "missing" answer is kept 5 minutes only: an update behind a shim
+    // (npm `.cmd`, volta, asdf) leaves the resolved file unchanged.
+    const RECHECK_MISSING_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+    static SEEN: Mutex<Vec<(Key, bool, std::time::Instant)>> = Mutex::new(Vec::new());
     let key: Key = (
         binary_identity(binary),
         format!("{} | {}", help_args.join(" "), flags.join(" ")),
     );
-    if let Some((_, ok)) = SEEN
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .iter()
-        .find(|(k, _)| *k == key)
     {
-        return Some(*ok);
+        let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
+        seen.retain(|(_, ok, at)| *ok || at.elapsed() < RECHECK_MISSING_AFTER);
+        if let Some((_, ok, _)) = seen.iter().find(|(k, _, _)| *k == key) {
+            return Some(*ok);
+        }
     }
     let mut cmd = ai_cmd(binary, cli);
     cmd.args(help_args);
@@ -1106,7 +1108,7 @@ fn help_mentions(binary: &str, cli: AiCli, help_args: &[&str], flags: &[&str]) -
     let ok = flags.iter().all(|f| help_has_flag(&help, f));
     SEEN.lock()
         .unwrap_or_else(|p| p.into_inner())
-        .push((key, ok));
+        .push((key, ok, std::time::Instant::now()));
     Some(ok)
 }
 
@@ -2432,10 +2434,12 @@ fn opencode_resolved_mcp_names(binary: &str, run_dir: &std::path::Path) -> Vec<S
     let mut cmd = ai_prompt_cmd_in(binary, AiCli::Opencode, run_dir);
     cmd.env("OPENCODE_DISABLE_PROJECT_CONFIG", "1");
     cmd.args(["debug", "config"]);
-    let Some(out) = output_within(cmd, Duration::from_secs(15), false) else {
-        return Vec::new(); // not cached: the next run tries again
-    };
-    let names = opencode_debug_config_mcp_names(&out);
+    // A failed or hung read is cached too (empty): the files GitWand reads
+    // and the all-tools-off setting then decide, without a 15 s wait on
+    // every prompt.
+    let names = output_within(cmd, Duration::from_secs(15), false)
+        .map(|out| opencode_debug_config_mcp_names(&out))
+        .unwrap_or_default();
     let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
     cache.retain(|(k, _, _)| *k != id);
     cache.push((id, Instant::now(), names.clone()));

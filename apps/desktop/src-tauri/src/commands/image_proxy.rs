@@ -351,13 +351,26 @@ fn serve_with(url: &str, fetch: impl FnOnce(&str) -> Result<Image, String>) -> O
     landing.outcome = fetch(url).map(Arc::new);
     match &landing.outcome {
         Ok(image) => lock_cache().put(url.to_string(), image.clone()),
-        Err(e) => {
+        // Only a definitive answer is remembered: a timeout, a dropped
+        // connection or a 5xx is fetched again at the next request.
+        Err(e) if is_definitive(e) => {
             lock_fetching()
                 .failures
                 .push((url.to_string(), std::time::Instant::now(), e.clone()))
         }
+        Err(_) => {}
     }
     landing.outcome.clone()
+}
+
+/// A failure that the same request would get again: the server's 4xx, an
+/// answer that is not an image, an oversized or empty one.
+fn is_definitive(error: &str) -> bool {
+    error.starts_with("image request answered 4")
+        || error.starts_with("not an image")
+        || error.contains("larger than 5 MiB")
+        || error.starts_with("empty or oversized")
+        || error.contains("(63)")
 }
 
 /// Ends a flight when dropped: frees its fetch slot, removes it, and hands
@@ -568,7 +581,20 @@ mod tests {
         }
         assert_eq!(FETCHES.load(Ordering::SeqCst), 1);
 
-        // A failure answers the next requests without a new fetch.
+        // A transient failure is fetched again at the next request.
+        let flaky = "https://share.example/flaky.png";
+        let _ = serve_with(flaky, |_| {
+            Err("curl request failed (exit 28): timeout".into())
+        });
+        let again = serve_with(flaky, |_| {
+            Ok(Image {
+                content_type: "image/png".into(),
+                bytes: vec![9],
+            })
+        });
+        assert_eq!(again.unwrap().bytes, [9]);
+
+        // A definitive failure answers the next requests without a new fetch.
         let bad = "https://share.example/missing.png";
         let err = serve_with(bad, |_| Err("image request answered 404".into())).unwrap_err();
         assert!(err.contains("404"));

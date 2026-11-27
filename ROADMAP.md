@@ -64,6 +64,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
   - Antigravity in plan mode: commands, file edits and `read_url_content` checked as denied (agy 1.5.4); `search_web` not checked. A plan-mode run may write its plan artifact where agy keeps them
   - the `--force-if-includes` fallback (a force push whose destination tip cannot be read) keeps git's own blind spot for a pulled commit later reset away: it is in the branch's reflog, so git accepts the push
   - #239's reflog rule only counts a tip a commit, cherry-pick, revert or `am` made here set, or one a rebase / `pull … (finish)` / amend left. A tip set by a rebase, a branch creation or a fast-forward merge is not counted (any of them can set a collaborator's commit: a fast-forward `git rebase origin/x` writes `rebase (finish)`), so after undoing such a commit and committing again, Sync stays the default unless the patch-equivalence check passes; Force Push stays available, with its confirmation
+  - `worktreeService.devserver.test.ts` › "merges back like the backend…" timed out once at 30 s under the full desktop suite during the lot C review (12/12 alone): same load pattern as lot B's flakes
   - not tested in the packaged app: the `gwimg:` image scheme (avatars, README badges, accepted PR images), the Settings endpoint list against the real keychain, the Windows Job Object (CI compiles it)
 
 ---

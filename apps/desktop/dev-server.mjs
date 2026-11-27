@@ -920,7 +920,7 @@ function sweepStaleRunDirs(base) {
  * flag, else the error to answer (too old, or the probe did not answer).
  */
 const devLockdownSeen = new Map();
-function devLockdownError(bin, helpArgs, flags, tooOld) {
+function devLockdownError(bin, helpArgs, flags, tooOld, cli) {
   // Cached per binary identity, as help_mentions: an update in place is seen.
   // A bare name (not found by resolveBin): cached by name for 5 minutes.
   const what = `${helpArgs.join(" ")}|${flags.join(" ")}`;
@@ -928,7 +928,9 @@ function devLockdownError(bin, helpArgs, flags, tooOld) {
   try { const st = statSync(bin); id = `${bin}|${st.size}|${st.mtimeMs}|${what}`; }
   catch { id = `${bin}|${Math.floor(Date.now() / 300_000)}|${what}`; }
   if (devLockdownSeen.has(id)) return devLockdownSeen.get(id) ? null : tooOld;
-  const r = spawnSync(bin, helpArgs, { encoding: "utf-8", timeout: 10_000 });
+  // The run's own filtered environment: no secret reaches the CLI.
+  const r = spawnSync(bin, helpArgs, { encoding: "utf-8", timeout: 10_000, env: aiSpawnEnv(cli) });
+  if (r.error?.code === "ENOENT") return `Binaire \`${basename(bin)}\` introuvable`;
   if (r.error || r.status === null) {
     return `Could not check the AI CLI's options (\`${basename(bin)} ${helpArgs.join(" ")}\` did not answer within 10 s): try again`;
   }
@@ -8655,7 +8657,7 @@ async function handleRequest(req, res) {
         // Mirrors the Rust check: a Codex without --ignore-user-config is
         // refused rather than run with the user's MCP servers.
         const cxRefusal = devLockdownError(CODEX, ["exec", "--help"], ["--ignore-user-config"],
-          "This Codex CLI cannot run without your config.toml: update it (`npm i -g @openai/codex` or your package manager)");
+          "This Codex CLI cannot run without your config.toml: update it (`npm i -g @openai/codex` or your package manager)", "codex");
         if (cxRefusal) return jsonResponse(req, res, { error: cxRefusal }, 500);
         const codexArgs = ["exec", "--sandbox", "read-only", "--ignore-user-config"];
         if (body.model && String(body.model).trim()) {
@@ -8878,7 +8880,7 @@ async function handleRequest(req, res) {
         const body = await readBody(req);
         const COPILOT = resolveBin("copilot");
         const cpRefusal = devLockdownError(COPILOT, ["--help"], ["--available-tools", "--disable-builtin-mcps"],
-          "This Copilot CLI cannot restrict its tools: update it with `copilot update`");
+          "This Copilot CLI cannot restrict its tools: update it with `copilot update`", "copilot");
         if (cpRefusal) return jsonResponse(req, res, { error: cpRefusal }, 500);
         const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
@@ -9013,7 +9015,7 @@ async function handleRequest(req, res) {
         const body = await readBody(req);
         const AGY = resolveBin("agy");
         const agyRefusal = devLockdownError(AGY, ["--help"], ["--input-format", "--mode"],
-          "This Antigravity CLI cannot read a prompt from stdin nor run in plan mode: update it with `agy update`");
+          "This Antigravity CLI cannot read a prompt from stdin nor run in plan mode: update it with `agy update`", "antigravity");
         if (agyRefusal) return jsonResponse(req, res, { error: agyRefusal }, 500);
         const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`

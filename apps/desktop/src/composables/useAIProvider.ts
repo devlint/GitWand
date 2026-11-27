@@ -229,14 +229,14 @@ async function callClaude(
 }
 
 /**
- * An OpenAI-compatible provider that can be used: an endpoint, and no stored
- * key that belongs elsewhere. No key at all is a keyless (local) server; a
- * key bound to another origin, or to none, means the setup is stale, and
- * the Claude Code CLI fallback applies as for any misconfigured provider.
+ * An OpenAI-compatible provider that can be used: an endpoint. A key is
+ * optional (a local llama.cpp, vLLM or LM Studio server needs none), and a
+ * stored key bound to another origin (an Anthropic key kept from the claude
+ * provider) is simply not sent (`openAICompatAuth`); if the server then
+ * wants one, its 401 says the key belongs elsewhere (`compatAuthError`).
  */
 export function openAICompatUsable(endpoint: string | null | undefined): boolean {
-  if (!endpoint) return false;
-  return !isAiApiKeyConfigured() || aiApiKeyBoundTo(endpoint);
+  return !!endpoint;
 }
 
 /**

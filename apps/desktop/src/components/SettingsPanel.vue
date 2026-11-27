@@ -2723,8 +2723,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                  in the provider UI). -->
             <div
               v-if="claudeCliInfo?.found && ((settings.aiProvider === 'claude' && !aiKeyConfigured)
-                || (settings.aiProvider === 'openai-compat'
-                  && (!settings.aiApiEndpoint || aiKey.boundElsewhere(settings.aiApiEndpoint))))"
+                || (settings.aiProvider === 'openai-compat' && !settings.aiApiEndpoint))"
               class="sp-row"
             >
               <span class="sp-hint">{{ t('settings.aiProviderCliFallbackHint') }}</span>
