@@ -133,7 +133,7 @@ import FileExplorerPanel from "../FileExplorerPanel.vue";
 import { useFileExplorer } from "../../composables/useFileExplorer";
 import { useWorkspaceScope } from "../../composables/useWorkspaceScope";
 import { useLogs } from "../../composables/useLogs";
-import { loadCodeMirror } from "../../utils/codemirrorLibs";
+import { detectLanguageExtension, loadCodeMirror } from "../../utils/codemirrorLibs";
 import { useTheme } from "../../composables/useTheme";
 import { clipboardWriteText, getGitDiff, listRepoDir, pathExists, readFile, revealInFileManager, writeFile } from "../../utils/backend";
 
@@ -243,9 +243,10 @@ async function openTab(path: string, pin = true) {
   await useFileExplorer().openTab(REPO, REPO, path, pin);
   // CodeMirror is a lazy chunk: the first test of the file pays for its cold
   // import, which a fixed number of ticks did not always cover under the
-  // full suite's load. Await the same cached promise the panel awaits, then
+  // full suite's load. Await the same cached promises the panel awaits, then
   // wait for the editor of a readable file to show its text.
   await loadCodeMirror();
+  await detectLanguageExtension(path); // the grammar, also a lazy chunk, cached per language
   await settle();
   const content = files[path];
   if (content !== undefined) await untilEditorShows(path, content);

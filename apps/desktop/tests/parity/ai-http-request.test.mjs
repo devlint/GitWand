@@ -70,10 +70,10 @@ function runProbeAsync(args) {
     // reach the loopback fixture directly.
     const env = { ...process.env, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
     for (const k of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]) delete env[k];
-    // Nor the user's curlrc (CURL_HOME, XDG_CONFIG_HOME, HOME, APPDATA,
-    // USERPROFILE: a
-    // `location` or `proxy` line would change
-    // curl's answer): `run_curl` does not pass `-q` yet (ROADMAP, lot C).
+    // Nor the user's curlrc, wherever curl looks for it (CURL_HOME,
+    // XDG_CONFIG_HOME, HOME, APPDATA, USERPROFILE): a `location` or `proxy`
+    // line there would change curl's answer, and `run_curl` does not pass
+    // `-q` yet (ROADMAP, lot C).
     env.HOME = curlHome;
     env.CURL_HOME = curlHome;
     env.XDG_CONFIG_HOME = curlHome;
@@ -82,7 +82,10 @@ function runProbeAsync(args) {
     const child = spawn(bin, ["ai-http-request"], { stdio: ["pipe", "pipe", "pipe"], env });
     // Never outlive the test: a hung probe would hold the fixture's socket.
     const killer = setTimeout(() => child.kill("SIGKILL"), PROBE_KILL_MS);
-    child.on("error", (e) => resolve({ ok: false, error: `spawn failed: ${e.message}`, exitCode: null }));
+    child.on("error", (e) => {
+      clearTimeout(killer);
+      resolve({ ok: false, error: `spawn failed: ${e.message}`, exitCode: null });
+    });
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));
