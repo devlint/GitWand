@@ -19,7 +19,7 @@
  *  - `import * as X from 'y'`
  *  - `import 'y'` (side-effect import)
  *  - `import type { X } from 'y'` (TypeScript)
- *  - `const X = require('y')`  (CommonJS — détecté mais pas déstructuré)
+ *  - `const X = require('y')`, `const { a, b: c } = require('y')`  (CommonJS — liaisons lues)
  *  - `export { X } from 'y'`  (re-exports)
  */
 
@@ -46,7 +46,7 @@ const RE_IMPORT_FROM    = /^import\s+(type\s+)?(.+?)\s+from\s+['"](.+?)['"]\s*;?
 // import 'module' (side-effect)
 const RE_IMPORT_SIDE    = /^import\s+['"](.+?)['"]\s*;?\s*$/;
 // const X = require('module')
-const RE_REQUIRE        = /^(?:const|let|var)\s+\S.+?=\s*require\s*\(['"](.+?)['"]\)/;
+const RE_REQUIRE        = /^(?:const|let|var)\s+(\S.*?)\s*=\s*require\s*\(['"](.+?)['"]\)/;
 // export { X } from 'module'
 const RE_EXPORT_FROM    = /^export\s+(?:type\s+)?(?:[\w{*,\s]+)\s+from\s+['"](.+?)['"]\s*;?\s*$/;
 // import * as X from 'module'
@@ -124,7 +124,8 @@ function parseImport(line: string): ImportStatement {
   // CommonJS require
   const requireMatch = t.match(RE_REQUIRE);
   if (requireMatch) {
-    return { raw: t, source: requireMatch[1], kind: "require", names: [], isType: false };
+    // `names` : le motif de liaison tel qu'écrit (`fs`, `{ a, b: c }`).
+    return { raw: t, source: requireMatch[2], kind: "require", names: [requireMatch[1].trim()], isType: false };
   }
 
   // Fallback : inconnu (commentaire, blank, multi-line…)
@@ -183,10 +184,11 @@ function importKey(stmt: ImportStatement): string {
 }
 
 /**
- * Noms locaux déclarés par un import, ou `null` si on ne sait pas les lire
- * (`require` : la liaison `const X =` n'est pas parsée).
+ * Noms locaux déclarés par un import, ou `null` si on ne sait pas les lire.
  * `{ a, b as c, type d }` → a, c, d ; `X` → X ; `X, { Y }` → X, Y ;
- * `X, * as NS` → X, NS ; `* as NS` → NS ; side-effect et re-export → aucun.
+ * `X, * as NS` → X, NS ; `* as NS` → NS ; side-effect et re-export → aucun ;
+ * `require` : `const X = require(…)` → X, `const { a, b: c = 1 } = require(…)`
+ * → a, c ; un motif imbriqué ou un tableau → null (prudence).
  */
 function localBindings(stmt: ImportStatement): string[] | null {
   const fromSpecifier = (spec: string): string[] =>
@@ -208,9 +210,29 @@ function localBindings(stmt: ImportStatement): string[] | null {
     case "side-effect":
     case "export":
       return [];
+    case "require":
+      return requireBindings(stmt.names[0] ?? "");
     default:
       return null;
   }
+}
+
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/** Noms liés par le motif d'un `require` ; `null` quand on ne sait pas le lire. */
+function requireBindings(pattern: string): string[] | null {
+  const p = pattern.trim();
+  if (IDENTIFIER.test(p)) return [p];
+  const object = p.match(/^\{([^{}[\]]*)\}$/);
+  if (!object) return null; // tableau, motif imbriqué
+  const names: string[] = [];
+  for (const part of object[1].split(",").map((s) => s.trim()).filter(Boolean)) {
+    // `...rest`, `a`, `a = 1`, `a: b`, `a: b = 1`
+    const name = part.replace(/^\.\.\./, "").split("=")[0].split(":").pop()!.trim();
+    if (!IDENTIFIER.test(name)) return null;
+    names.push(name);
+  }
+  return names;
 }
 
 /**
@@ -381,9 +403,17 @@ export function tryResolveImportConflict(
   const oursMap   = new Map(oursImports.map((s) => [importKey(s), s]));
   const theirsMap = new Map(theirsImports.map((s) => [importKey(s), s]));
 
-  // Indexer par source (pour détecter les conflits cross-kind : namespace vs default, même source)
-  const oursBySource   = new Map(oursImports.map((s) => [s.source, s]));
-  const theirsBySource = new Map(theirsImports.map((s) => [s.source, s]));
+  // Indexer par source (pour détecter les conflits cross-kind : namespace vs
+  // default, même source). Toutes les déclarations d'un module comptent : un
+  // côté peut en avoir plusieurs (`{ a, X }` et `type { T }`), et n'en garder
+  // qu'une cachait la collision avec les autres.
+  const bySource = (imports: ImportStatement[]) => {
+    const map = new Map<string, ImportStatement[]>();
+    for (const s of imports) map.set(s.source, [...(map.get(s.source) ?? []), s]);
+    return map;
+  };
+  const oursBySource   = bySource(oursImports);
+  const theirsBySource = bySource(theirsImports);
 
   // Un import identique à la base n'a pas été touché par ce côté. Quand l'autre
   // côté change la forme de ce même module (`{ x }` → `x`), c'est un changement
@@ -412,6 +442,25 @@ export function tryResolveImportConflict(
       resolvedImports,
       unresolvedImports,
     };
+  };
+
+  /**
+   * L'import de l'autre côté, du même module, qui rend `added` incompatible :
+   * une autre forme (`kind`), pas un import de base laissé tel quel. Parmi
+   * plusieurs, celui dont les liaisons entrent en collision passe en premier,
+   * pour que le conflit soit signalé. Un ajout `named` n'est pas comparé
+   * (`import X` + `import { Y }` coexistent), sauf collision de liaisons.
+   */
+  const sameSourceClash = (
+    added: ImportStatement,
+    other: Map<string, ImportStatement[]>,
+  ): ImportStatement | undefined => {
+    const candidates = (other.get(added.source) ?? []).filter(
+      (s) => s.kind !== added.kind && !isUntouchedBase(s),
+    );
+    const colliding = candidates.find((s) => bindingsCollide(added, s));
+    if (colliding) return colliding;
+    return added.kind !== "named" ? candidates[0] : undefined;
   };
 
   // Ensemble de toutes les clés
@@ -455,18 +504,14 @@ export function tryResolveImportConflict(
         }
       } else if (ours) {
         // Vérifier si theirs a un import du même module avec un kind incompatible
-        const theirsSameSource = theirsBySource.get(ours.source);
-        if (theirsSameSource && theirsSameSource.kind !== ours.kind && ours.kind !== "named" && !isUntouchedBase(theirsSameSource)) {
-          return kindMismatch(ours, theirsSameSource, ours.source);
-        }
+        const theirsClash = sameSourceClash(ours, theirsBySource);
+        if (theirsClash) return kindMismatch(ours, theirsClash, ours.source);
         resultLines.push(ours.raw);
         resolvedImports++;
       } else if (theirs) {
         // Vérifier si ours a un import du même module avec un kind incompatible
-        const oursSameSource = oursBySource.get(theirs.source);
-        if (oursSameSource && oursSameSource.kind !== theirs.kind && theirs.kind !== "named" && !isUntouchedBase(oursSameSource)) {
-          return kindMismatch(oursSameSource, theirs, theirs.source);
-        }
+        const oursClash = sameSourceClash(theirs, oursBySource);
+        if (oursClash) return kindMismatch(oursClash, theirs, theirs.source);
         resultLines.push(theirs.raw);
         resolvedImports++;
       }
