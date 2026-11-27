@@ -343,14 +343,20 @@ pub(crate) async fn ai_allowed_endpoints() -> Result<Vec<String>, String> {
         // Only what the keychain still allows: a request that read it just
         // before a revoke may record its origin again just after.
         let listed = OriginIndex::app().map(|i| i.list()).unwrap_or_default();
-        Ok(listed
+        let mut origins: Vec<String> = listed
             .into_iter()
             .filter(|o| {
                 KeychainOrigins::entry(o)
                     .map(|e| e.get_password().is_ok())
                     .unwrap_or(false)
             })
-            .collect())
+            .collect();
+        // Allowed in this run only (the keychain could not be written): listed
+        // too, so it can be revoked.
+        origins.extend(lock_gate().session.iter().cloned());
+        origins.sort();
+        origins.dedup();
+        Ok(origins)
     })
     .await
     .map_err(|e| e.to_string())?

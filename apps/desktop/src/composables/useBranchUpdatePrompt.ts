@@ -131,7 +131,7 @@ export async function probeLocalRewriteOfUpstream(
  * a past value of the branch that was local history:
  *
  * - set by a commit made here (`commit: …`, `commit (amend): …`,
- *   `commit (initial): …`, a cherry-pick): the user's own commit, whatever
+ *   `commit (initial): …`, a cherry-pick, a revert, `git am`): the user's own commit, whatever
  *   happened to it since (undo last commit then a new one, a squash by
  *   `reset --soft`). Not one set by a rebase: a fast-forward rebase onto
  *   the upstream also writes `rebase (finish)`;
@@ -165,7 +165,7 @@ export function leftThroughRewrite(reflog: string, tip: string): boolean {
   // `rebase (finish)` too, setting the tip to a collaborator's commit.
   const madeHere = (subject: string) =>
     (/^commit\b/.test(subject) && !subject.startsWith("commit (merge)")) ||
-    /^cherry-pick\b/.test(subject);
+    /^(cherry-pick|revert|am)\b/.test(subject);
   for (let i = 1; i < entries.length; i++) {
     if (entries[i].hash !== tip) continue;
     if (madeHere(entries[i].subject) || rewrite(entries[i - 1].subject)) return true;

@@ -147,6 +147,22 @@ const LOCAL_IMAGE_BASES = [
  * backslash forms, `scheme:host` shorthands, absolute URLs of any scheme, and
  * anything unparsable all count as remote.
  */
+/**
+ * `src` as the webview resolves it from its own page (`tauri://` or
+ * `http://tauri.localhost`, never `https:`): `https:host/x` is absolute
+ * there, `//host/x` and `/\host/x` take the host. Fetched over https unless
+ * written `http:`.
+ */
+function resolvedImageUrl(src: string): string {
+  try {
+    const u = new URL(src, "http://gitwand-local.invalid/");
+    if (u.protocol === "http:" && !/^\s*http:/i.test(src)) u.protocol = "https:";
+    return u.href;
+  } catch {
+    return src;
+  }
+}
+
 function isRemoteImageSrc(src: string): boolean {
   try {
     return LOCAL_IMAGE_BASES.some((base) => new URL(src, base).origin !== base.origin);
@@ -198,7 +214,9 @@ function hardenLinksAndImages(node: Element) {
       node.setAttribute("title", `${t("common.remoteImageBlocked")} — ${src.trim()}`);
     } else if (src && isRemoteImageSrc(norm)) {
       // Allowed: fetched by the backend, not the webview (`img-src` is closed).
-      node.setAttribute("src", proxyImageUrl(norm));
+      // Proxy what the browser would fetch: `https:host/x`, `/\host/x`,
+      // `//host/x` all resolve to an absolute URL first.
+      node.setAttribute("src", proxyImageUrl(resolvedImageUrl(norm)));
     }
   }
 }

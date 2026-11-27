@@ -256,6 +256,8 @@ describe("leftThroughRewrite", () => {
     expect(leftThroughRewrite(`b\tcommit: y\nc\treset: moving to HEAD~1\n${T}\tcommit: x\n`, T)).toBe(true);
     expect(leftThroughRewrite(`b\tcommit: y\n${T}\tcommit: x\n`, T)).toBe(true);
     expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tcherry-pick: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\trevert: Revert "x"\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tam: x\n`, T)).toBe(true);
     expect(leftThroughRewrite(`b\tpull --rebase (finish): refs/heads/x onto c\n${T}\tpull: Fast-forward\n`, T)).toBe(true);
     // A stack restack: git's `rebase (update-refs)`, or GitWand's own for a
     // layer with no commit of its own.

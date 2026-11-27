@@ -318,6 +318,13 @@ describe("GitHub attachments (#302)", () => {
     expect(hasBlockedRemoteImages(blocked)).toBe(true);
   });
 
+  it("proxies the URL the browser would fetch for odd remote spellings", () => {
+    for (const src of ["https:img.example/x.png", "//img.example/x.png", "/\\img.example/x.png"]) {
+      const out = safeHtml(`<img src="${src}" alt="x">`, { allowRemoteImages: true });
+      expect(out, src).toContain(`src="${proxyImageUrl("https://img.example/x.png")}"`);
+    }
+  });
+
   it("treats a proxy URL written in a PR as the remote image it points to", () => {
     const crafted = proxyImageUrl("https://tracker.example/p.png");
     const out = safeHtml(`<img src="${crafted}" alt="t">`);

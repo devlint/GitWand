@@ -919,14 +919,21 @@ function sweepStaleRunDirs(base) {
  * Mirrors `require_lockdown_flags`: null when `bin <helpArgs>` lists every
  * flag, else the error to answer (too old, or the probe did not answer).
  */
+const devLockdownSeen = new Map();
 function devLockdownError(bin, helpArgs, flags, tooOld) {
+  // Cached per binary identity, as help_mentions: an update in place is seen.
+  let id = null;
+  try { const st = statSync(bin); id = `${bin}|${st.size}|${st.mtimeMs}|${helpArgs.join(" ")}|${flags.join(" ")}`; } catch { /* on PATH: not cached */ }
+  if (id && devLockdownSeen.has(id)) return devLockdownSeen.get(id) ? null : tooOld;
   const r = spawnSync(bin, helpArgs, { encoding: "utf-8", timeout: 10_000 });
   if (r.error || r.status === null) {
     return `Could not check the AI CLI's options (\`${basename(bin)} ${helpArgs.join(" ")}\` did not answer within 10 s): try again`;
   }
   const help = `${r.stdout || ""}${r.stderr || ""}`;
   const has = (f) => new RegExp(`(^|[^\\w-])${f.replace(/[-]/g, "\\-")}(?![\\w-])`, "m").test(help);
-  return flags.every(has) ? null : tooOld;
+  const ok = flags.every(has);
+  if (id) devLockdownSeen.set(id, ok);
+  return ok ? null : tooOld;
 }
 /** True when a process with this pid exists (EPERM is a live process). */
 function devProcessAlive(pid) {
@@ -993,8 +1000,15 @@ function devOpencodeConfigContent(opencodeBin) {
         encoding: "utf-8",
         timeout: 15_000,
       });
-      const out = String(r.stdout || "");
-      const v = r.status === 0 && out.includes("{") ? parse(out.slice(out.indexOf("{"))) : null;
+      // The JSON starts on a line of its own; a log line before it may hold
+      // a brace too. Mirrors opencode_debug_config_mcp_names.
+      const out = r.status === 0 ? String(r.stdout || "") : "";
+      let v = null;
+      let at = 0;
+      for (const line of out.split(/(?<=\n)/)) {
+        if (line.trimStart().startsWith("{")) { v = parse(out.slice(at)); if (v) break; }
+        at += line.length;
+      }
       if (v?.mcp && typeof v.mcp === "object") resolvedNames.push(...Object.keys(v.mcp));
       if (v) devOpencodeResolved = { at: Date.now(), names: [...resolvedNames] };
     } catch { /* the files below decide */ }

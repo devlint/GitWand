@@ -2445,9 +2445,26 @@ fn opencode_resolved_mcp_names(binary: &str, run_dir: &std::path::Path) -> Vec<S
 /// The `mcp` keys of `opencode debug config`'s output (a JSON object, after
 /// whatever opencode prints before it).
 fn opencode_debug_config_mcp_names(out: &str) -> Vec<String> {
-    out.find('{')
-        .map(|i| opencode_mcp_names(&out[i..]))
-        .unwrap_or_default()
+    // The JSON starts on a line of its own; a log line before it may hold a
+    // brace too (`WARN {service=config}`). Try each line opening with `{`.
+    let mut at = 0;
+    for line in out.split_inclusive('\n') {
+        if line.trim_start().starts_with('{') {
+            let rest = &out[at..];
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&jsonc_to_json(rest)) {
+                return v
+                    .get("mcp")
+                    .and_then(|m| m.as_object())
+                    .map(|o| o.keys().cloned().collect())
+                    .unwrap_or_default();
+            }
+        }
+        at += line.len();
+    }
+    if !out.trim().is_empty() {
+        eprintln!("[ai] opencode debug config gave no readable JSON; its MCP servers are disabled from the config files only (all tools stay off)");
+    }
+    Vec::new()
 }
 
 /// Enumerate the models opencode knows about (`opencode models`). Each line
@@ -3601,13 +3618,21 @@ mod neutral_dir_tests {
             opencode_debug_config_mcp_names("\u{1b}[0m\n{\"mcp\":{\"b\":{\"type\":\"local\"}}}"),
             ["b"]
         );
+        // A log line with a brace before the JSON.
+        assert_eq!(
+            opencode_debug_config_mcp_names(
+                "WARN {service=config} slow\n{\n  \"mcp\": {\"c\": {}}\n}\n"
+            ),
+            ["c"]
+        );
         assert!(opencode_debug_config_mcp_names("Error: nothing").is_empty());
     }
 
     #[test]
     fn the_opencode_run_carries_the_mcp_disables() {
         let dir = std::env::temp_dir();
-        let cmd = opencode_run_cmd("opencode", None, &dir);
+        // A binary that does not exist: no real opencode runs in a test.
+        let cmd = opencode_run_cmd("/nonexistent/opencode", None, &dir);
         let content = cmd
             .get_envs()
             .find(|(k, _)| *k == "OPENCODE_CONFIG_CONTENT")
@@ -3882,7 +3907,11 @@ mod neutral_dir_tests {
 
     #[test]
     fn opencode_runs_in_the_given_dir_without_project_config() {
-        let cmd = opencode_run_cmd("opencode", None, std::path::Path::new("/neutral"));
+        let cmd = opencode_run_cmd(
+            "/nonexistent/opencode",
+            None,
+            std::path::Path::new("/neutral"),
+        );
         assert_eq!(
             cmd.get_current_dir(),
             Some(std::path::Path::new("/neutral"))
