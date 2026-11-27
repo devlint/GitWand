@@ -8,10 +8,17 @@ import { makeScore, detectValueOnlyChange } from "./utils.js";
  * hunk (keyed by the input's reference, as token-level-merge does).
  */
 let _lastInput: ClassifyInput | null = null;
+let _lastLines: [string[], string[], string[]] | null = null;
 let _lastResult: ReturnType<typeof detectValueOnlyChange> = null;
 function detectCached(h: ClassifyInput): ReturnType<typeof detectValueOnlyChange> {
-  if (_lastInput !== h) {
+  // Keyed on the input and its line arrays: a caller that swaps an array on
+  // the same input gets a fresh detection.
+  const same =
+    _lastInput === h && _lastLines !== null &&
+    _lastLines[0] === h.oursLines && _lastLines[1] === h.theirsLines && _lastLines[2] === h.baseLines;
+  if (!same) {
     _lastInput = h;
+    _lastLines = [h.oursLines, h.theirsLines, h.baseLines];
     _lastResult = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
   }
   return _lastResult;

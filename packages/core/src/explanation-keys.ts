@@ -44,7 +44,10 @@ export const EXPLANATION_PARAMS = {
   refactoringFallback: 0,
   /** {0}: the format resolver's name (`json`, `imports`…). */
   formatSemantic: 1,
-  /** {0}: what the generated file is (`npm lockfile`…). */
+  /**
+   * {0}: what the generated file is (`npm lockfile`, `dist/ build output`,
+   * `user pattern: <glob>`): technical names, shown untranslated.
+   */
   generatedFile: 1,
   structuralMerge: 0,
 } as const;

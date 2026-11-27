@@ -51,11 +51,6 @@ export function loadExplanations(code: string): Promise<void> {
 const { locale } = useI18n();
 watch(locale, (code) => void loadExplanations(code), { immediate: true });
 
-/** Resolves once the current UI language's dictionary is loaded (for text written once, not rendered). */
-export function explanationsReady(): Promise<void> {
-  return loadExplanations(locale.value);
-}
-
 export function hunkExplanation(hunk: Pick<ConflictHunk, "explanation" | "explanationRef">): string {
   const ref = hunk.explanationRef;
   if (!ref || !Object.prototype.hasOwnProperty.call(EXPLANATION_PARAMS, ref.key)) return hunk.explanation;

@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyConflict } from "../classifier.js";
 import { resolve, EXPLANATION_PARAMS } from "../index.js";
+import { runLlmFallbackPhase } from "../resolver/llm-pipeline.js";
 import type { ClassifyInput, ConflictHunk, PatternPlugin } from "../types.js";
 import p0 from "../patterns/same-change.js";
 import p1 from "../patterns/delete-no-change.js";
@@ -103,5 +104,23 @@ describe("explanationRef", () => {
     const hunk = resolve(content, "package-lock.json").hunks[0];
     expect(hunk.type).toBe("generated_file");
     expect(hunk.explanationRef).toEqual({ key: "generatedFile", params: ["npm lockfile"] });
+  });
+
+  it("recomputes the value-only count when a line array of the same input changes", () => {
+    const h = input(['  "version": "1.2.4"'], ['  "version": "1.2.3"'], ['  "version": "1.2.5"']);
+    expect(p7.explanationRef!(h)).toEqual({ key: "valueOnly", params: [1] });
+    h.oursLines = ['  "version": "1.2.4", "build": "a1"'];
+    h.theirsLines = ['  "version": "1.2.5", "build": "b2"'];
+    const after = p7.explanationRef!(h);
+    expect(after).not.toEqual({ key: "valueOnly", params: [1] });
+  });
+
+  it("gives an unsent llm_proposed hunk the genuine-conflict explanation", async () => {
+    const result = resolve(conflict(["x = 1"], ["x = 0"], ["x = 2"]), "a.txt");
+    const llmHunk = { ...result.hunks[0], type: "llm_proposed" as const, explanationRef: { key: "llmProposed" as const } };
+    const faked = { ...result, hunks: [llmHunk], resolutions: [{ ...result.resolutions[0], hunk: llmHunk, autoResolved: false }] };
+    const out = await runLlmFallbackPhase("", faked, "a.txt", { llmFallback: { enabled: false } } as never);
+    expect(out.hunks[0].explanationRef).toEqual({ key: "complex" });
+    expect(out.resolutions[0].hunk.explanationRef).toEqual({ key: "complex" });
   });
 });

@@ -114,6 +114,23 @@ function reconstructMergedContent(
   return { content: outputLines.join("\n"), allResolved };
 }
 
+/** Unresolved `llm_proposed` hunks the LLM never saw get the genuine-conflict explanation. */
+function withUnsentLlmExplained(result: MergeResult): MergeResult {
+  const explain = (h: ConflictHunk): ConflictHunk => {
+    const input = { ...h, endLine: h.startLine };
+    return { ...h, explanation: complexPattern.explanation(input), explanationRef: complexPattern.explanationRef?.(input) };
+  };
+  const unresolved = new Set(
+    result.resolutions.filter((r) => !r.autoResolved && r.hunk.type === "llm_proposed").map((r) => r.hunk),
+  );
+  if (unresolved.size === 0) return result;
+  return {
+    ...result,
+    hunks: result.hunks.map((h) => (unresolved.has(h) ? explain(h) : h)),
+    resolutions: result.resolutions.map((r) => (unresolved.has(r.hunk) ? { ...r, hunk: explain(r.hunk) } : r)),
+  };
+}
+
 /**
  * Applique le fallback LLM sur les hunks `complex` non résolus.
  *
@@ -134,7 +151,9 @@ export async function runLlmFallbackPhase(
   const llmConfig: LlmFallbackConfig = options.llmFallback ?? { enabled: false };
 
   if (!llmConfig.enabled || !llmConfig.endpoint) {
-    return result;
+    // Not reached from resolveAsync (llm_proposed needs an endpoint), but a
+    // hunk the LLM never saw must not say it proposed a resolution.
+    return withUnsentLlmExplained(result);
   }
 
   const contextLines = llmConfig.contextLines ?? 50;

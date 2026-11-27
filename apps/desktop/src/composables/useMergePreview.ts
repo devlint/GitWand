@@ -33,7 +33,7 @@ import type { ExplanationRef, GitWandOptions, MergeContext } from "@gitwand/core
 // See ../utils/coreEngine.ts.
 import { engine } from "../utils/coreEngine.js";
 import { useResolutionSelection } from "./useResolutionSelection";
-import { t } from "./useI18n";
+import type { LocaleKey } from "../locales";
 
 // ─── Opérations prédictibles (v2.20.0) ───────────────────
 //
@@ -91,6 +91,8 @@ export interface PreviewHunk {
    */
   explanation: string;
   explanationRef?: ExplanationRef;
+  /** A message of the app itself (not core's), shown with `t()` at render instead. */
+  messageKey?: LocaleKey;
 }
 
 export interface PreviewFileResult {
@@ -280,7 +282,8 @@ export function useMergePreview(cwd: () => string) {
           confidenceScore: 0,
           confidenceLabel: "low",
           reason: "No content to analyse: the conflict could not be simulated.",
-          explanation: t("mergePreview.notSimulated"),
+          explanation: "No content to analyse: the conflict could not be simulated.",
+          messageKey: "mergePreview.notSimulated",
         }],
         });
       }
