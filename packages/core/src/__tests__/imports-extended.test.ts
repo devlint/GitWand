@@ -317,6 +317,16 @@ describe("tryResolveImportConflict — lignes import-like non parsables (garde a
     expect(result.conflict).toBeUndefined();
   });
 
+  it("does not take a doc comment for a binding clash", () => {
+    const doc = tryResolveImportConflict(
+      ['import a from "a";'],
+      ['import a from "a";', "/**", " * Polyfills", " */", 'import "core-js";'],
+      ['import a from "a";', 'import b from "b";'],
+    );
+    expect(doc.mergedLines).toBeNull();
+    expect(doc.conflict).toBeUndefined();
+  });
+
   it("hands a commented block where both sides added imports to the user", () => {
     const result = tryResolveImportConflict(
       [],
@@ -325,6 +335,7 @@ describe("tryResolveImportConflict — lignes import-like non parsables (garde a
     );
     expect(result.mergedLines).toBeNull();
     expect(result.conflict).toBe(true);
+    expect(result.reason).toMatch(/bind the same name/);
   });
 
   it("hands the same module added at two indentations to the user", () => {

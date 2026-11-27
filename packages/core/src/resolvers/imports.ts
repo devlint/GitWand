@@ -478,32 +478,26 @@ export function tryResolveImportConflict(
   // Comments are not carried through a merge (only imports are written back):
   // a block holding one, inline or on its own line (`// @ts-ignore`), is left
   // to the textual engine — and to the user when the imports each side added
-  // bind a same name (or one cannot be read), which a textual union would
-  // declare twice.
+  // bind a same name, which a textual union would declare twice. Lines that
+  // read as no import (a comment's continuation, a fragment left over) bind
+  // nothing here, as for the unparsable fallback below.
   const isCommentLine = (l: string) => /^\s*(?:\/\/|\/\*|\*)/.test(l);
   if ([baseLines, oursLines, theirsLines].some((lines) => lines.some((l) => hasInlineComment(l) || isCommentLine(l)))) {
     const baseSet = new Set(baseLines.map((l) => l.trim()));
-    const addedBindings = (lines: string[]): string[] | null => {
-      const names: string[] = [];
-      for (const l of lines) {
-        const code = stripComments(l).trim();
-        if (code === "" || baseSet.has(l.trim())) continue;
-        const bound = localBindings(parseImport(code));
-        if (bound === null) return null;
-        names.push(...bound);
-      }
-      return names;
-    };
-    const oursBound = addedBindings(oursLines);
+    // (A multi-line import never gets here: its inner lines are not
+    // import-like, and such a block left before this check.)
+    const addedBindings = (lines: string[]): string[] =>
+      lines
+        .filter((l) => !isCommentLine(l) && !baseSet.has(l.trim()))
+        .flatMap((l) => localBindings(parseImport(stripComments(l))) ?? []);
     const theirsBound = addedBindings(theirsLines);
-    const clash =
-      oursBound === null || theirsBound === null
-        ? (oursBound?.length ?? 1) > 0 && (theirsBound?.length ?? 1) > 0
-        : oursBound.some((n) => theirsBound.includes(n));
+    const clash = addedBindings(oursLines).some((n) => theirsBound.includes(n));
     return {
       mergedLines: null,
       ...(clash ? { conflict: true } : {}),
-      reason: "The import block holds a comment, which a rebuilt block would drop, so it is left to the textual engine.",
+      reason: clash
+        ? "The import block holds a comment, and the imports each side added bind the same name: left to you."
+        : "The import block holds a comment, which a rebuilt block would drop, so it is left to the textual engine.",
       resolvedImports: 0,
       unresolvedImports: 1,
     };

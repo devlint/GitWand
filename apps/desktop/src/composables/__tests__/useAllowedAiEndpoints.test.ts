@@ -135,6 +135,21 @@ describe("useAllowedAiEndpoints", () => {
     expect(e.error.value).toBe("keychain locked");
   });
 
+  it("drops the answer of a load started before a revoke ended", async () => {
+    const e = useAllowedAiEndpoints();
+    await e.load();
+    let releaseOld!: (v: string[]) => void;
+    aiAllowedEndpoints.mockImplementationOnce(() => new Promise<string[]>((r) => (releaseOld = r)));
+    const old = e.load();
+    // The revoke succeeds; its own reload fails.
+    aiAllowedEndpoints.mockRejectedValueOnce(new Error("keychain locked"));
+    await e.revoke("https://a.example");
+    // The read before the revoke answers last: it is not taken.
+    releaseOld(["https://stale.example"]);
+    await old;
+    expect(e.origins.value).not.toContain("https://stale.example");
+  });
+
   it("clears an earlier revoke failure as soon as a new revoke starts", async () => {
     const e = useAllowedAiEndpoints();
     await e.load();

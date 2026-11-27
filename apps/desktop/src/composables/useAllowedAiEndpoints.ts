@@ -20,6 +20,9 @@ export function useAllowedAiEndpoints() {
   // is in flight.
   let latest = 0;
   let applied = 0;
+  // Loads started before the last revoke ended read what it changed: their
+  // answers are dropped.
+  let staleUpTo = 0;
   let inFlight = 0;
   // The last revoke's failure. It is shown over any read error until a read
   // started after the revoke's own reload has ended succeeds: that read shows
@@ -35,7 +38,7 @@ export function useAllowedAiEndpoints() {
     error.value = revokeFailure;
     try {
       const answer = await aiAllowedEndpoints();
-      if (mine > applied) {
+      if (mine > applied && mine > staleUpTo) {
         applied = mine;
         origins.value = answer;
       }
@@ -64,6 +67,7 @@ export function useAllowedAiEndpoints() {
       } catch (e) {
         revokeFailure = e instanceof Error ? e.message : String(e);
       }
+      staleUpTo = latest;
       // What is stored now, whatever happened; a failed revoke keeps its
       // message. No other revoke starts before this reload ends.
       error.value = revokeFailure;
