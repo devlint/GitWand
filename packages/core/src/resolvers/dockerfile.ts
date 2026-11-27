@@ -10,7 +10,8 @@
  * - COPY/ADD : merge si destinations distinctes ; conflit si même dest
  * - RUN    : conservatif — fallback si conflit
  * - WORKDIR, EXPOSE, USER : prefer theirs si conflit
- * - COMMENT, BLANK : préserver depuis theirs
+ * - COMMENT : appariés par leur texte ; BLANK : préservées
+ * - la base (diff3) départage changements, suppressions et réordonnancements
  */
 
 // ─── Types ─────────────────────────────────────────────────────
@@ -123,127 +124,156 @@ function parseDockerfileInstructions(lines: string[]): Instruction[] {
 // ─── Merge d'un stage ─────────────────────────────────────────
 
 /**
+ * Clé d'appariement d'une instruction : `kind:key` (alias, destination, nom
+ * de variable), le texte pour un commentaire (sinon tous les commentaires
+ * partagent une clé et l'un remplace l'autre), `kind` seul sinon.
+ */
+function instructionKey(instr: Instruction): string {
+  if (instr.kind === "COMMENT") return `COMMENT:${instr.raw.join("\n").trim()}`;
+  return instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
+}
+
+/** Une clé qui peut se répéter sans ambiguïté de sens (lignes vides, commentaires identiques). */
+const repeatable = (instr: Instruction) => instr.kind === "BLANK" || instr.kind === "COMMENT";
+
+/**
  * Fusionne deux listes d'instructions d'un même stage Dockerfile.
  * Retourne les lignes fusionnées ou null si un conflit irréductible est détecté.
  *
- * `baseInstructions` (stage de base apparié, absent en diff2) : quand une
- * instruction diffère entre les deux côtés et qu'un côté est resté égal à la
- * base, c'est l'autre côté qui l'a changée — on garde son changement au lieu
- * d'appliquer « prefer theirs », qui effaçait en silence une modification
- * faite seulement côté ours. Seules les clés uniques dans le stage de base
- * servent (plusieurs `RUN` partagent la clé `RUN` : ambigu).
+ * `baseInstructions` (stage de base apparié, absent en diff2) départage :
+ * - une instruction qui diffère et dont un côté est resté égal à la base :
+ *   c'est l'autre côté qui l'a changée, on garde son changement (au lieu de
+ *   « prefer theirs », qui effaçait en silence une modification de ours) ;
+ * - une instruction présente d'un seul côté et dans la base : l'autre côté
+ *   l'a supprimée. Restée égale à la base, elle disparaît ; modifiée, c'est
+ *   un conflit modification/suppression (moteur textuel). Sans base, elle est
+ *   gardée (rien ne dit si elle a été ajoutée ou supprimée) ;
+ * - l'ordre : si seul theirs a réordonné les instructions communes, son ordre
+ *   est gardé ; si les deux côtés les ont réordonnées autrement, moteur
+ *   textuel.
+ * Seules les clés uniques dans le stage de base servent (plusieurs `RUN`
+ * partagent la clé `RUN` : ambigu).
  */
 function mergeStage(
   oursInstructions: Instruction[],
   theirsInstructions: Instruction[],
   baseInstructions?: Instruction[],
 ): string[] | null {
-  // Indexer theirs par (kind, key)
-  // Une clé répétée côté theirs (plusieurs `RUN`, deux `COPY` vers la même
+  // Une clé répétée d'un côté (plusieurs `RUN`, deux `COPY` vers la même
   // destination) ne garderait que la dernière instruction dans la map, et les
-  // précédentes seraient perdues : on laisse le moteur textuel. Les lignes
-  // vides et commentaires partagent aussi une clé mais ne portent pas de sens.
-  const theirsMap = new Map<string, Instruction>();
-  for (const instr of theirsInstructions) {
-    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
-    if (theirsMap.has(mapKey) && instr.kind !== "BLANK" && instr.kind !== "COMMENT") return null;
-    theirsMap.set(mapKey, instr);
-  }
+  // précédentes seraient perdues ou appariées plusieurs fois : moteur textuel.
+  const indexSide = (instructions: Instruction[]): Map<string, Instruction> | null => {
+    const map = new Map<string, Instruction>();
+    for (const instr of instructions) {
+      const key = instructionKey(instr);
+      if (map.has(key) && !repeatable(instr)) return null;
+      map.set(key, instr);
+    }
+    return map;
+  };
+  const oursMap = indexSide(oursInstructions);
+  const theirsMap = indexSide(theirsInstructions);
+  if (!oursMap || !theirsMap) return null;
 
   const baseRawByKey = new Map<string, string | null>();
   for (const instr of baseInstructions ?? []) {
-    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
-    baseRawByKey.set(mapKey, baseRawByKey.has(mapKey) ? null : instr.raw.join("\n"));
+    const key = instructionKey(instr);
+    baseRawByKey.set(key, baseRawByKey.has(key) ? null : instr.raw.join("\n"));
+  }
+  const hasBase = (baseInstructions?.length ?? 0) > 0;
+
+  // ── Ordre : comparer l'ordre relatif des instructions présentes partout
+  // (clés uniques, lignes vides exclues), pour savoir qui a réordonné.
+  let driveByTheirs = false;
+  if (hasBase) {
+    const common = (key: string) =>
+      typeof baseRawByKey.get(key) === "string" && oursMap.has(key) && theirsMap.has(key) && !key.startsWith("BLANK");
+    const order = (instructions: Instruction[]) => {
+      const keys = instructions.map(instructionKey).filter(common);
+      return keys.filter((k, i) => keys.indexOf(k) === i).join("\u0000");
+    };
+    const baseOrder = order(baseInstructions ?? []);
+    const oursOrder = order(oursInstructions);
+    const theirsOrder = order(theirsInstructions);
+    const oursMoved = oursOrder !== baseOrder;
+    const theirsMoved = theirsOrder !== baseOrder;
+    if (oursMoved && theirsMoved && oursOrder !== theirsOrder) return null;
+    driveByTheirs = theirsMoved && !oursMoved;
   }
 
-  const result: string[] = [];
-  const seen = new Set<string>();
+  /**
+   * Lignes d'une instruction présente d'un seul côté : gardée, supprimée
+   * (l'autre côté l'a retirée sans que celui-ci la change), ou conflit.
+   */
+  const oneSided = (instr: Instruction): string[] | "drop" | null => {
+    if (!hasBase) return instr.raw;
+    const baseRaw = baseRawByKey.get(instructionKey(instr));
+    if (typeof baseRaw !== "string") return instr.raw; // ajoutée, ou base ambiguë
+    return baseRaw === instr.raw.join("\n") ? "drop" : null;
+  };
 
-  // Même garde côté ours : avec une clé répétée, la même instruction theirs
-  // serait appariée plusieurs fois (et sortirait en double).
-  const oursKeys = new Set<string>();
-  for (const instr of oursInstructions) {
-    const mapKey = instr.key ? `${instr.kind}:${instr.key}` : instr.kind;
-    if (oursKeys.has(mapKey) && instr.kind !== "BLANK" && instr.kind !== "COMMENT") return null;
-    oursKeys.add(mapKey);
-  }
-
-  for (const oursInstr of oursInstructions) {
-    const mapKey = oursInstr.key ? `${oursInstr.kind}:${oursInstr.key}` : oursInstr.kind;
-    const theirsInstr = theirsMap.get(mapKey);
-
-    if (!theirsInstr) {
-      // Instruction seulement dans ours → inclure
-      result.push(...oursInstr.raw);
-      seen.add(mapKey);
-      continue;
-    }
-
-    seen.add(mapKey);
+  /** Lignes d'une instruction présente des deux côtés. */
+  const twoSided = (oursInstr: Instruction, theirsInstr: Instruction): string[] | null => {
     const oursRaw = oursInstr.raw.join("\n");
     const theirsRaw = theirsInstr.raw.join("\n");
-
-    if (oursRaw === theirsRaw) {
-      // Identiques → inclure une fois
-      result.push(...oursInstr.raw);
-      continue;
-    }
+    if (oursRaw === theirsRaw) return oursInstr.raw;
 
     // Changement d'un seul côté → le garder.
-    const baseRaw = baseRawByKey.get(mapKey);
+    const baseRaw = baseRawByKey.get(instructionKey(oursInstr));
     if (typeof baseRaw === "string") {
-      if (baseRaw === theirsRaw) {
-        result.push(...oursInstr.raw);
-        continue;
-      }
-      if (baseRaw === oursRaw) {
-        result.push(...theirsInstr.raw);
-        continue;
-      }
+      if (baseRaw === theirsRaw) return oursInstr.raw;
+      if (baseRaw === oursRaw) return theirsInstr.raw;
     }
 
     // Conflit : stratégie par instruction
     switch (oursInstr.kind) {
-      case "FROM":
-        // prefer theirs (image de base plus récente)
-        result.push(...theirsInstr.raw);
-        break;
-
-      case "ENV":
-      case "ARG":
-        // prefer theirs (valeur entrante)
-        result.push(...theirsInstr.raw);
-        break;
-
-      case "WORKDIR":
-      case "EXPOSE":
-      case "USER":
-        // prefer theirs
-        result.push(...theirsInstr.raw);
-        break;
-
       case "COPY":
       case "ADD":
         // Même destination → conflit irréductible
         return null;
-
       case "RUN":
       case "CMD":
       case "ENTRYPOINT":
         // Conservatif → fallback
         return null;
-
       default:
-        // prefer theirs
-        result.push(...theirsInstr.raw);
+        // FROM (image de base plus récente), ENV/ARG (valeur entrante),
+        // WORKDIR, EXPOSE, USER… : prefer theirs
+        return theirsInstr.raw;
     }
+  };
+
+  // Le côté dont on suit l'ordre ; les instructions présentes seulement de
+  // l'autre côté viennent ensuite.
+  const [lead, leadIsOurs] = driveByTheirs ? [theirsInstructions, false] : [oursInstructions, true];
+  const otherMap = leadIsOurs ? theirsMap : oursMap;
+  const otherList = leadIsOurs ? theirsInstructions : oursInstructions;
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  for (const instr of lead) {
+    const key = instructionKey(instr);
+    const counterpart = otherMap.get(key);
+    seen.add(key);
+    if (!counterpart) {
+      const lines = oneSided(instr);
+      if (lines === null) return null;
+      if (lines !== "drop") result.push(...lines);
+      continue;
+    }
+    const lines = leadIsOurs ? twoSided(instr, counterpart) : twoSided(counterpart, instr);
+    if (!lines) return null;
+    result.push(...lines);
   }
 
-  // Instructions seulement dans theirs
-  for (const [mapKey, instr] of theirsMap) {
-    if (!seen.has(mapKey)) {
-      result.push(...instr.raw);
-    }
+  for (const instr of otherList) {
+    const key = instructionKey(instr);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const lines = oneSided(instr);
+    if (lines === null) return null;
+    if (lines !== "drop") result.push(...lines);
   }
 
   return result;

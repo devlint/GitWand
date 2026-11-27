@@ -315,3 +315,88 @@ describe("Dockerfile — instructions de même clé côté ours", () => {
     expect(result.mergedContent?.match(/MAINTAINER x/g)).toHaveLength(1);
   });
 });
+
+// ─── Suppressions, commentaires et ordre (lot 3.15.x A) ─────────────────────
+// Régressions : une instruction supprimée d'un seul côté revenait (une
+// instruction présente d'un seul côté était toujours gardée) ; tous les
+// commentaires partageaient la clé `COMMENT`, si bien qu'un commentaire pouvait
+// en remplacer un autre ; la sortie suivait l'ordre de ours, si bien qu'un
+// réordonnancement fait côté theirs était perdu.
+
+describe("Dockerfile — suppression d'un seul côté", () => {
+  it("theirs supprime une instruction que ours n'a pas touchée : elle ne revient pas", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV A=2`, `ENV B=1`], [`ENV A=1`, `ENV B=1`], [`ENV A=1`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("ENV A=2");
+    expect(result.mergedContent).not.toContain("ENV B=1");
+  });
+
+  it("ours supprime une instruction que theirs n'a pas touchée : elle ne revient pas", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV A=1`], [`ENV A=1`, `ENV B=1`], [`ENV A=2`, `ENV B=1`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("ENV A=2");
+    expect(result.mergedContent).not.toContain("ENV B=1");
+  });
+
+  it("supprimée d'un côté, modifiée de l'autre : pas de résolution automatique", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV A=2`, `ENV B=3`], [`ENV A=1`, `ENV B=1`], [`ENV A=1`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(0);
+  });
+
+  it("sans base (diff2), une instruction d'un seul côté est gardée comme avant", () => {
+    const input = [`FROM node:20`, `<<<<<<< ours`, `ENV A=2`, `ENV B=1`, `=======`, `ENV A=1`, `>>>>>>> theirs`].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("ENV B=1");
+  });
+});
+
+describe("Dockerfile — commentaires", () => {
+  it("un commentaire ajouté de chaque côté : aucun ne remplace l'autre", () => {
+    const input = [`FROM node:20`, dockerHunk([`# build deps`, `RUN make`], [`RUN make`], [`# cache layer`, `RUN make`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("# build deps");
+    expect(result.mergedContent).toContain("# cache layer");
+  });
+
+  it("un commentaire supprimé d'un côté ne revient pas", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV A=2`], [`# old note`, `ENV A=1`], [`# old note`, `ENV A=1`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toContain("ENV A=2");
+    expect(result.mergedContent).not.toContain("# old note");
+  });
+});
+
+describe("Dockerfile — ordre des instructions", () => {
+  it("theirs réordonne, ours garde l'ordre de la base : l'ordre de theirs est gardé", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV A=2`, `ENV B=1`], [`ENV A=1`, `ENV B=1`], [`ENV B=1`, `ENV A=1`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    const merged = result.mergedContent ?? "";
+    expect(merged).toContain("ENV A=2");
+    expect(merged.indexOf("ENV B=1")).toBeLessThan(merged.indexOf("ENV A=2"));
+  });
+
+  it("ours réordonne, theirs garde l'ordre de la base : l'ordre de ours est gardé", () => {
+    const input = [`FROM node:20`, dockerHunk([`ENV B=1`, `ENV A=1`], [`ENV A=1`, `ENV B=1`], [`ENV A=2`, `ENV B=1`])].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    const merged = result.mergedContent ?? "";
+    expect(merged.indexOf("ENV B=1")).toBeLessThan(merged.indexOf("ENV A=2"));
+  });
+
+  it("chaque côté réordonne autrement : pas de résolution automatique", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`ENV C=1`, `ENV A=1`, `ENV B=1`],
+      [`ENV A=1`, `ENV B=1`, `ENV C=1`],
+      [`ENV B=1`, `ENV A=1`, `ENV C=2`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(0);
+  });
+});
