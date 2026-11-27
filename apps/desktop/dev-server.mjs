@@ -8823,22 +8823,33 @@ async function handleRequest(req, res) {
         const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
           : (body.prompt || "");
-        const agyArgs = [];
+        // Mirrors antigravity_cli_prompt: plan mode (a headless run denies
+        // commands, edits and URL fetches there), the prompt as one
+        // stream-json turn on stdin, never on the argv.
+        const agyArgs = ["--mode", "plan", "--input-format", "stream-json", "--output-format", "stream-json"];
         if (body.model && String(body.model).trim()) {
           agyArgs.push("--model", String(body.model).trim());
         }
-        agyArgs.push("-p", fullPrompt);
+        agyArgs.push("-p=");
         const r = spawnAiSync(AGY, agyArgs, { // fresh per-run dir — mirrors ai_prompt_cmd
           env: aiSpawnEnv("antigravity"),
           encoding: "utf-8",
+          input: JSON.stringify({ event: "user", message: { content: fullPrompt } }) + "\n",
           timeout: 5 * 60 * 1000,
           maxBuffer: 20 * 1024 * 1024,
         });
-        if (r.status !== 0) {
-          const detail = (r.stderr || r.stdout || "").trim() || "Antigravity CLI a échoué sans message";
-          return jsonResponse(req, res, { error: detail }, 500);
+        let result = null;
+        for (const line of String(r.stdout || "").split("\n")) {
+          try {
+            const v = JSON.parse(line.trim());
+            if (v?.event === "result") result = v.result;
+          } catch { /* not JSON */ }
         }
-        return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(r.stdout);
+        if (r.status === 0 && result?.status === "SUCCESS") {
+          return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(result.response ?? "");
+        }
+        const detail = result?.error || (r.stderr || "").trim() || "Antigravity CLI a échoué sans message";
+        return jsonResponse(req, res, { error: detail }, 500);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }

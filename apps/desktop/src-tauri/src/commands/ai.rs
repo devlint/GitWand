@@ -1699,6 +1699,12 @@ fn detect_antigravity_cli_inner() -> Result<AntigravityCliInfo, String> {
 /// Antigravity exposes no separate system channel, so the system prompt is
 /// prepended as a Markdown section — same portable shape as the Claude /
 /// Codex / opencode / Copilot flows. Auth is managed by Antigravity itself.
+///
+/// The prompt holds repository content: it goes on stdin, as one
+/// `stream-json` turn, never on the argv where any local user can read it.
+/// The run is in `plan` mode: a headless run cannot ask, so `agy` denies
+/// terminal commands, file edits and URL fetches there, where its default
+/// (Auto) mode would run a command a prompt-injected diff asked for.
 #[tauri::command]
 pub(crate) async fn antigravity_cli_prompt(
     prompt: String,
@@ -1712,6 +1718,85 @@ pub(crate) async fn antigravity_cli_prompt(
     .map_err(|e| e.to_string())?
 }
 
+/// `agy` arguments for a headless prompt read from stdin, in plan mode.
+fn antigravity_prompt_args(model: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "--mode",
+        "plan",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    // An empty `-p` value: the turn comes from stdin. Last, so `-p` never
+    // takes a flag as its prompt.
+    args.push("-p=".to_string());
+    args
+}
+
+/// The single `stream-json` turn `agy` reads from stdin.
+fn antigravity_stream_input(prompt: &str) -> String {
+    format!(
+        "{}\n",
+        serde_json::json!({ "event": "user", "message": { "content": prompt } })
+    )
+}
+
+/// The answer in `agy`'s `stream-json` output: its `result` event.
+fn antigravity_stream_result(stdout: &str) -> Result<String, String> {
+    let result = stdout
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l.trim()).ok())
+        .rfind(|v| v["event"] == "result")
+        .ok_or_else(|| "Antigravity CLI gave no result".to_string())?;
+    let r = &result["result"];
+    if r["status"] == "SUCCESS" {
+        return Ok(r["response"].as_str().unwrap_or_default().to_string());
+    }
+    Err(r["error"]
+        .as_str()
+        .filter(|e| !e.is_empty())
+        .unwrap_or("Antigravity CLI failed")
+        .to_string())
+}
+
+/// Whether this `agy` reads a prompt from stdin and has a plan mode
+/// (`--input-format`, `--mode`; 1.5 has both, 1.0.13 had neither). Asked
+/// once per binary.
+fn antigravity_supports_headless(binary: &str) -> bool {
+    use std::sync::Mutex;
+    static SEEN: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
+    if let Some((_, ok)) = SEEN
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .find(|(b, _)| b == binary)
+    {
+        return *ok;
+    }
+    let help = ai_cmd(binary, AiCli::Antigravity)
+        .arg("--help")
+        .output()
+        .map(|o| {
+            let mut t = String::from_utf8_lossy(&o.stdout).into_owned();
+            t.push_str(&String::from_utf8_lossy(&o.stderr));
+            t
+        })
+        .unwrap_or_default();
+    let ok = help.contains("--input-format") && help.contains("--mode");
+    SEEN.lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push((binary.to_string(), ok));
+    ok
+}
+
 fn antigravity_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
@@ -1719,6 +1804,12 @@ fn antigravity_cli_prompt_inner(
 ) -> Result<String, String> {
     let binary =
         resolve_antigravity_binary().ok_or_else(|| "Binaire `agy` introuvable".to_string())?;
+    if !antigravity_supports_headless(&binary) {
+        return Err(
+            "This Antigravity CLI cannot read a prompt from stdin nor run in plan mode: update it with `agy update`"
+                .to_string(),
+        );
+    }
 
     let full_prompt = match system_prompt {
         Some(sys) if !sys.trim().is_empty() => {
@@ -1727,36 +1818,23 @@ fn antigravity_cli_prompt_inner(
         _ => prompt,
     };
 
-    // Strip NUL bytes — the prompt is passed as a CLI argument and an interior
-    // `\0` makes the spawn fail with "nul byte found in provided data".
-    let full_prompt = full_prompt.replace('\0', "");
-
     // `_run_dir` lives until the end of the function: the CLI has exited.
     let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Antigravity)?;
-    // Flags precede the positional prompt passed via `-p`.
-    if let Some(m) = model.as_ref() {
-        if !m.trim().is_empty() {
-            cmd.args(["--model", m.trim()]);
-        }
-    }
-    cmd.args(["-p", full_prompt.as_str()]);
+    cmd.args(antigravity_prompt_args(model.as_deref()));
 
-    let output = cmd
-        .output()
+    let output = output_with_stdin(cmd, antigravity_stream_input(&full_prompt))
         .map_err(|e| format!("Failed to run antigravity CLI: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if stderr.is_empty() { stdout } else { stderr };
-        return Err(if detail.is_empty() {
-            "Antigravity CLI a échoué sans message".to_string()
-        } else {
-            detail
-        });
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if output.status.success() {
+        return antigravity_stream_result(&stdout);
     }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    // A failed run: the result event's error first, then stderr.
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(antigravity_stream_result(&stdout)
+        .err()
+        .filter(|e| e != "Antigravity CLI gave no result")
+        .or_else(|| (!stderr.is_empty()).then_some(stderr))
+        .unwrap_or_else(|| "Antigravity CLI a échoué sans message".to_string()))
 }
 
 // ─── opencode CLI provider (v2.17) ───────────────────────────────────────
@@ -3111,6 +3189,47 @@ mod neutral_dir_tests {
         let live = AiRunDir::create(&base, false).unwrap();
         sweep_stale_run_dirs(&base, std::time::Duration::from_secs(3600));
         assert!(live.path().exists());
+    }
+
+    #[test]
+    fn antigravity_reads_its_prompt_from_stdin_in_plan_mode() {
+        let args = antigravity_prompt_args(Some(" gemini-3-pro "));
+        assert_eq!(
+            args,
+            [
+                "--mode",
+                "plan",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--model",
+                "gemini-3-pro",
+                "-p="
+            ]
+        );
+        assert_eq!(antigravity_prompt_args(Some("  ")).last().unwrap(), "-p=");
+        // The prompt is in the stdin turn, escaped, never in the arguments.
+        let secret = "diff --git a/x\n\"quoted\" \u{0}line";
+        let input = antigravity_stream_input(secret);
+        assert!(input.ends_with('\n') && input.lines().count() == 1);
+        let v: serde_json::Value = serde_json::from_str(input.trim()).unwrap();
+        assert_eq!(v["event"], "user");
+        assert_eq!(v["message"]["content"], secret);
+        assert!(!args.iter().any(|a| a.contains("diff --git")));
+    }
+
+    #[test]
+    fn antigravity_answers_come_from_the_result_event() {
+        let ok = concat!(
+            "{\"event\":\"init\",\"init\":{}}\n",
+            "{\"event\":\"step_update\",\"step_update\":{\"text_delta\":\"O\"}}\n",
+            "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"OK\\n\"}}\n"
+        );
+        assert_eq!(antigravity_stream_result(ok).unwrap(), "OK\n");
+        let failed = "{\"event\":\"result\",\"result\":{\"status\":\"ERROR\",\"response\":\"\",\"error\":\"quota\"}}";
+        assert_eq!(antigravity_stream_result(failed).unwrap_err(), "quota");
+        assert!(antigravity_stream_result("warning: nothing\n").is_err());
     }
 
     #[test]
