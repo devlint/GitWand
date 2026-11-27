@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Settings › AI lists the AI endpoints you allowed, and revokes them.** GitWand asks before sending a request to an AI endpoint other than your own machine, Anthropic or OpenAI, and remembers a Yes in the system keychain, where it could not be read back. The endpoints you allow from now on (and those allowed before, the next time they are used) are listed, each with a Revoke button: the next request to it asks again. The list shows that it is loading rather than empty while it is read, and a failed revoke keeps its message.
+- **Settings › AI lists the AI endpoints you allowed, and revokes them.** GitWand asks before sending a request to an AI endpoint other than your own machine, Anthropic or OpenAI, and remembers a Yes in the system keychain, where it could not be read back. The endpoints you allow from now on (and those allowed before, the next time they are used) are listed, each with a Revoke button: the next request to it asks again. The list shows that it is loading rather than empty while it is read, and a failed revoke keeps its message until the list is read again.
 
 ### Changed
 

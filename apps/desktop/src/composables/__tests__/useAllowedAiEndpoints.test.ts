@@ -94,6 +94,18 @@ describe("useAllowedAiEndpoints", () => {
     expect(e.error.value).toBe("keychain locked");
   });
 
+  it("shows a failed revoke's message over a failed reload, until a later read succeeds", async () => {
+    const e = useAllowedAiEndpoints();
+    await e.load();
+    aiRevokeEndpoint.mockRejectedValueOnce(new Error("revoke denied"));
+    aiAllowedEndpoints.mockRejectedValueOnce(new Error("keychain locked"));
+    await e.revoke("https://a.example");
+    expect(e.error.value).toBe("revoke denied");
+    // Keychain unlocked, Settings reloads: the list is what is stored.
+    await e.load();
+    expect(e.error.value).toBeNull();
+  });
+
   it("ignores a second revoke while one runs", async () => {
     const e = useAllowedAiEndpoints();
     await e.load();

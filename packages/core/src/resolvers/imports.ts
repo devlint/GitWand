@@ -445,8 +445,15 @@ export function tryResolveImportConflict(
     lines.some((l) => !isBenignUnknown(l) && parseImport(l).kind === "unknown");
   // A comment inside an import line can hold a `from "…"` the patterns would
   // read as the module, and a rebuilt line would drop it: not merged here.
-  const commented = [baseLines, oursLines, theirsLines].some((lines) => lines.some(hasInlineComment));
-  if (commented || hasUnparsableContent(oursLines) || hasUnparsableContent(theirsLines)) {
+  if ([baseLines, oursLines, theirsLines].some((lines) => lines.some(hasInlineComment))) {
+    return {
+      mergedLines: null,
+      reason: "An import line holds a comment, which a rebuilt line would drop, so the block falls back to the textual engine.",
+      resolvedImports: 0,
+      unresolvedImports: 1,
+    };
+  }
+  if (hasUnparsableContent(oursLines) || hasUnparsableContent(theirsLines)) {
     return {
       mergedLines: null,
       reason: "The block contains import-like lines that cannot be parsed, so it falls back to the textual engine rather than risk losing a line.",
@@ -632,7 +639,8 @@ export function tryResolveImportConflict(
     // Absent de base → ajout
     if (!base) {
       if (ours && theirs) {
-        if (ours.raw === theirs.raw && ours.indent !== theirs.indent) {
+        // Indentations compared once a block re-indent is applied to both.
+        if (shifted(ours.indent) !== shifted(theirs.indent)) {
           unresolvedImports++;
           return {
             mergedLines: null,

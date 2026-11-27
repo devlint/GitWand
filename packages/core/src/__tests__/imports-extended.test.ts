@@ -88,6 +88,33 @@ describe("tryResolveImportConflict — extended", () => {
     expect(r.mergedLines).toBeNull();
   });
 
+  it("leaves a named import added at two indentations to the textual engine", () => {
+    const r = tryResolveImportConflict(
+      [],
+      ['  import { a } from "x";'],
+      ['    import { b } from "x";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
+  it("takes an import both sides added as the same when one re-indented the block", () => {
+    const r = tryResolveImportConflict(
+      ['import a from "a";'],
+      ['  import a from "a";', '  import x from "x";'],
+      ['import a from "a";', 'import x from "x";'],
+    );
+    expect(r.mergedLines).toEqual(['  import a from "a";', '  import x from "x";']);
+  });
+
+  it("says why a commented import line is not merged", () => {
+    const r = tryResolveImportConflict(
+      ['import { a } from "./lib";'],
+      ['import { a, c } from "./lib";'],
+      ['import { a, /* legacy */ b } from "./lib";'],
+    );
+    expect(r.reason).toMatch(/holds a comment/);
+  });
+
   it("does not drop a re-indent against a deletion", () => {
     const r = tryResolveImportConflict(
       ['import x from "x";', 'import y from "y";'],

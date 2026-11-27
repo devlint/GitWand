@@ -18,9 +18,11 @@ export function useAllowedAiEndpoints() {
   // writes its answer, and `loading` holds until none is in flight.
   let latest = 0;
   let inFlight = 0;
-  // The last revoke's failure, shown until the next revoke whatever loads
-  // run in between: a read clears only its own errors.
+  // The last revoke's failure. It is shown over any read error until a read
+  // started after the revoke's own reload has ended succeeds: that read shows
+  // what is stored, and the failure is old news by then.
   let revokeFailure: string | null = null;
+  let revokeFailureUntil = Infinity;
 
   async function load(): Promise<void> {
     const mine = ++latest;
@@ -32,10 +34,11 @@ export function useAllowedAiEndpoints() {
       const answer = await aiAllowedEndpoints();
       if (mine === latest) {
         origins.value = answer;
+        if (mine > revokeFailureUntil) revokeFailure = null;
         error.value = revokeFailure;
       }
     } catch (e) {
-      if (mine === latest) error.value = e instanceof Error ? e.message : String(e);
+      if (mine === latest) error.value = revokeFailure ?? (e instanceof Error ? e.message : String(e));
     } finally {
       inFlight--;
       loading.value = inFlight > 0;
@@ -46,6 +49,7 @@ export function useAllowedAiEndpoints() {
     if (revoking.value) return;
     revoking.value = origin;
     revokeFailure = null;
+    revokeFailureUntil = Infinity;
     try {
       await aiRevokeEndpoint(origin);
     } catch (e) {
@@ -56,6 +60,7 @@ export function useAllowedAiEndpoints() {
     // What is stored now, whatever happened; a failed revoke keeps its message.
     error.value = revokeFailure;
     await load();
+    revokeFailureUntil = latest;
   }
 
   return { origins, loading, revoking, error, load, revoke };
