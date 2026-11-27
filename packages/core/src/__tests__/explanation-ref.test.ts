@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { classifyConflict } from "../classifier.js";
 import { resolve, EXPLANATION_PARAMS } from "../index.js";
 import { runLlmFallbackPhase } from "../resolver/llm-pipeline.js";
+import { withoutFormatResolver } from "../resolver/retract.js";
 import type { ClassifyInput, ConflictHunk, PatternPlugin } from "../types.js";
 import p0 from "../patterns/same-change.js";
 import p1 from "../patterns/delete-no-change.js";
@@ -122,5 +123,31 @@ describe("explanationRef", () => {
     const out = await runLlmFallbackPhase("", faked, "a.txt", { llmFallback: { enabled: false } } as never);
     expect(out.hunks[0].explanationRef).toEqual({ key: "complex" });
     expect(out.resolutions[0].hunk.explanationRef).toEqual({ key: "complex" });
+  });
+
+  it("does not say a refused format merge was resolved by its resolver", () => {
+    const content = conflict(
+      ["{", '  "name": "app",', '  "alpha": 1', "}"],
+      ["{", '  "name": "app"', "}"],
+      ["{", '  "name": "app",', '  "beta": 2', "}"],
+    );
+    const result = resolve(content, "config.json", { policy: "strict" });
+    expect(result.resolutions[0].autoResolved).toBe(false);
+    for (const h of [result.hunks[0], result.resolutions[0].hunk]) {
+      expect(h.explanationRef?.key).not.toBe("formatSemantic");
+      expect(h.explanation).not.toContain("resolved semantically");
+    }
+  });
+
+  it("puts a withdrawn LLM or format resolution back to the genuine-conflict explanation", () => {
+    const base = resolve(conflict(["x = 1"], ["x = 0"], ["x = 2"]), "a.txt").hunks[0];
+    for (const key of ["llmProposed", "formatSemantic"] as const) {
+      const h = withoutFormatResolver({ ...base, explanation: "claimed", explanationRef: { key, ...(key === "formatSemantic" ? { params: ["json"] } : {}) } });
+      expect(h.explanationRef).toEqual({ key: "complex" });
+      expect(h.explanation).not.toBe("claimed");
+    }
+    // Any other explanation is kept.
+    const kept = withoutFormatResolver({ ...base, explanationRef: { key: "oneSideOurs" } });
+    expect(kept.explanationRef).toEqual({ key: "oneSideOurs" });
   });
 });

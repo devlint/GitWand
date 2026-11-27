@@ -10,6 +10,13 @@ import { makeScore, detectValueOnlyChange } from "./utils.js";
 let _lastInput: ClassifyInput | null = null;
 let _lastLines: [string[], string[], string[]] | null = null;
 let _lastResult: ReturnType<typeof detectValueOnlyChange> = null;
+/** Forgets the cached detection (called at the start of each classification). */
+export function resetValueOnlyCache(): void {
+  _lastInput = null;
+  _lastLines = null;
+  _lastResult = null;
+}
+
 function detectCached(h: ClassifyInput): ReturnType<typeof detectValueOnlyChange> {
   // Keyed on the input and its line arrays: a caller that swaps an array on
   // the same input gets a fresh detection.

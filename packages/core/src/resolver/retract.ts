@@ -6,6 +6,7 @@
  */
 import type { ConflictHunk, HunkResolution } from "../types.js";
 import { applyPostMergeRiskPenalty } from "./validate-parse-tree.js";
+import complexPattern from "../patterns/complex.js";
 
 /**
  * accuracy lot 1 — Les résolutions automatiques d'un fichier dont le contenu
@@ -49,10 +50,18 @@ export function forgetRetractedFormatResolvers(
   };
 }
 
-/** #301 — A hunk whose format-aware resolution was not applied names no resolver. */
+/**
+ * #301 — A hunk whose format-aware resolution was not applied names no
+ * resolver. Nor does its explanation: one that says the hunk was resolved by
+ * a format resolver or proposed by the LLM goes back to the genuine-conflict
+ * one, in both forms (`explanation`, `explanationRef`).
+ */
 export function withoutFormatResolver(hunk: ConflictHunk): ConflictHunk {
   const { formatResolver: _unused, ...rest } = hunk;
-  return rest;
+  const key = rest.explanationRef?.key;
+  if (key !== "formatSemantic" && key !== "llmProposed") return rest;
+  const input = { ...rest, endLine: rest.startLine };
+  return { ...rest, explanation: complexPattern.explanation(input), explanationRef: complexPattern.explanationRef?.(input) };
 }
 
 /**

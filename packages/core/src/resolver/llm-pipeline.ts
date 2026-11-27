@@ -18,7 +18,7 @@
  * les nouvelles résolutions.
  */
 
-import { retractForParseTree } from "./retract.js";
+import { forgetRetractedFormatResolvers, retractForParseTree } from "./retract.js";
 import type {
   ConflictHunk,
   GitWandOptions,
@@ -114,21 +114,13 @@ function reconstructMergedContent(
   return { content: outputLines.join("\n"), allResolved };
 }
 
-/** Unresolved `llm_proposed` hunks the LLM never saw get the genuine-conflict explanation. */
+/** Unresolved `llm_proposed` hunks the LLM never saw get the genuine-conflict explanation (matched by index). */
 function withUnsentLlmExplained(result: MergeResult): MergeResult {
-  const explain = (h: ConflictHunk): ConflictHunk => {
-    const input = { ...h, endLine: h.startLine };
-    return { ...h, explanation: complexPattern.explanation(input), explanationRef: complexPattern.explanationRef?.(input) };
+  const unsent = (i: number) => {
+    const r = result.resolutions[i];
+    return !!r && !r.autoResolved && r.hunk.type === "llm_proposed";
   };
-  const unresolved = new Set(
-    result.resolutions.filter((r) => !r.autoResolved && r.hunk.type === "llm_proposed").map((r) => r.hunk),
-  );
-  if (unresolved.size === 0) return result;
-  return {
-    ...result,
-    hunks: result.hunks.map((h) => (unresolved.has(h) ? explain(h) : h)),
-    resolutions: result.resolutions.map((r) => (unresolved.has(r.hunk) ? { ...r, hunk: explain(r.hunk) } : r)),
-  };
+  return { ...result, ...forgetRetractedFormatResolvers(result.hunks, result.resolutions, unsent) };
 }
 
 /**

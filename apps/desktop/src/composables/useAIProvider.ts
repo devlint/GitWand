@@ -118,6 +118,11 @@ export interface AISuggestion {
   resolvedContent: string;
   /** Brief explanation of why this resolution was chosen. */
   explanation: string;
+  /**
+   * Set when the model gave no explanation: the app's own text, shown with
+   * `t()` at render so it follows the UI language (`explanation` is empty).
+   */
+  explanationKey?: "mergeEditor.aiSuggestedExplanation" | "mergeEditor.aiSuggestedExplanationUnstructured";
   /** Confidence level from the AI (informational). */
   confidence: "high" | "medium" | "low";
 }
@@ -719,14 +724,16 @@ function parseAIResponse(raw: string): AISuggestion {
     const parsed = JSON.parse(jsonStr);
     return {
       resolvedContent: parsed.resolvedContent ?? parsed.resolved_content ?? raw,
-      explanation: parsed.explanation ?? t("mergeEditor.aiSuggestedExplanation"),
+      explanation: parsed.explanation ?? "",
+      ...(parsed.explanation ? {} : { explanationKey: "mergeEditor.aiSuggestedExplanation" as const }),
       confidence: parsed.confidence ?? "medium",
     };
   } catch {
     // If JSON parsing fails, use the raw text as the resolved content
     return {
       resolvedContent: raw,
-      explanation: t("mergeEditor.aiSuggestedExplanationUnstructured"),
+      explanation: "",
+      explanationKey: "mergeEditor.aiSuggestedExplanationUnstructured",
       confidence: "low",
     };
   }

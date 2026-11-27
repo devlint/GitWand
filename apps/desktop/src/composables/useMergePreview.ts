@@ -75,8 +75,9 @@ export interface PreviewHunk {
   confidenceLabel: string;
   /**
    * `resolutionReason` du moteur : pourquoi ce hunk est auto-résolvable, ou
-   * pourquoi il ne l'est pas. C'est le texte du tooltip, et la seule réponse
-   * honnête à « pourquoi celui-là est-il manuel ? ».
+   * pourquoi il ne l'est pas. Le tooltip le donne après l'explication (en
+   * anglais : texte d'audit), et c'est la seule réponse honnête à « pourquoi
+   * celui-là est-il manuel ? ».
    *
    * Volontairement PAS `resolvedLines` : il n'y a pas de case à cocher dans
    * l'aperçu (les index de hunks d'une simulation ne correspondent pas à ceux

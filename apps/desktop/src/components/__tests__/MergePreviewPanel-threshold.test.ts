@@ -135,8 +135,8 @@ describe("MergePreviewPanel — confidence bar", () => {
     expect(row.title).toContain("83%");
     expect(row.title).toContain("high");
     expect(row.title).toContain("differing volatile value");
-    // Core's reason only for a hunk left to the user.
-    expect(row.title).not.toContain("version bump");
+    // Then core's reason, which says more (the side taken, the semver chosen).
+    expect(row.title).toContain("version bump");
   });
 
   it("adds core's reason to the tooltip of a hunk left to the user", async () => {
