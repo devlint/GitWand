@@ -219,6 +219,14 @@ function deferred<T>() {
 }
 
 /**
+ * How long `openTab` waits for the editor, and the tests' timeout above it
+ * (a test may open several tabs). Cold lazy chunks under full-suite load are
+ * what this file waits on; the default 5 s left no room for them.
+ */
+const EDITOR_WAIT_MS = 5_000;
+vi.setConfig({ testTimeout: 20_000 });
+
+/**
  * Let every pending microtask AND macrotask drain.
  *
  * `nextTick` alone is not enough here: mounting awaits the dynamic CodeMirror
@@ -257,15 +265,19 @@ async function openTab(path: string, pin = true) {
  * the tab to show `path`'s diff instead. The file's own text, not any text: every
  * tab shares one editor host, so after a first tab the host is never empty.
  * Every current caller gets its text; a tab restored with edits keeps the
- * file's text inside them. Fails with its own message after `ms`, well under
- * the 5 s test timeout.
+ * file's text inside them. Fails with its own message after `ms`, before
+ * the test's own timeout.
  */
-async function untilEditorShows(path: string, text: string, ms = 1_500) {
+async function untilEditorShows(path: string, text: string, ms = EDITOR_WAIT_MS) {
   // `.cm-content` draws each line as its own element: its text has no newlines.
   const flat = text.trimEnd().replace(/\n/g, "");
   const deadline = Date.now() + ms;
   // The diff must be this file's: the previous tab's may still be up.
-  const done = () => (editorDoc() ?? "").includes(flat) || diffPath() === path;
+  // An editor must be up: every string, the empty file's "" included, contains "".
+  const done = () => {
+    const doc = editorDoc();
+    return (doc !== null && doc.includes(flat)) || diffPath() === path;
+  };
   while (!done() && Date.now() < deadline) {
     await settle(1);
   }

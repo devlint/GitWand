@@ -66,10 +66,13 @@ function runProbeAsync(args) {
     );
   }
   return new Promise((resolve) => {
-    // curl honours the proxy variables and fetch does not: without them both
-    // reach the loopback fixture directly.
-    const env = { ...process.env, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
-    for (const k of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]) delete env[k];
+    // Only what the probe and curl need (AGENTS.md: no secrets in a child's
+    // environment), so no proxy variable either: curl honours them and fetch
+    // does not, and without them both reach the loopback fixture directly.
+    const env = { NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+    for (const k of ["PATH", "Path", "SystemRoot", "TEMP", "TMP", "TMPDIR"]) {
+      if (process.env[k] !== undefined) env[k] = process.env[k];
+    }
     // Nor the user's curlrc, wherever curl looks for it (CURL_HOME,
     // XDG_CONFIG_HOME, HOME, APPDATA, USERPROFILE): a `location` or `proxy`
     // line there would change curl's answer, and `run_curl` does not pass
