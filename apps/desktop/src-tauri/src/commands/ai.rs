@@ -933,7 +933,17 @@ fn parse_claude_caps(help: &str) -> ClaudeCaps {
 /// its own process group, killed as a whole; on Windows `taskkill /T /F`
 /// kills the tree. The reader thread is never waited on past a short grace
 /// period either: if something still holds the pipe, it is left behind.
-fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -> Option<String> {
+fn stdout_within(cmd: std::process::Command, timeout: std::time::Duration) -> Option<String> {
+    output_within(cmd, timeout, false)
+}
+
+/// `stdout_within`, with stderr read into the same text when `with_stderr`
+/// (a CLI printing its `--help` there, like agy).
+fn output_within(
+    mut cmd: std::process::Command,
+    timeout: std::time::Duration,
+    with_stderr: bool,
+) -> Option<String> {
     use std::io::Read;
     use std::process::Stdio;
     use std::time::{Duration, Instant};
@@ -945,7 +955,11 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(if with_stderr {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .spawn()
         .ok()?;
     // Windows: a kill-on-close Job Object holds the child and everything it
@@ -955,16 +969,18 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
     // assignment escapes it; std cannot spawn suspended.
     #[cfg(windows)]
     let job = crate::commands::terminal::job::Job::assign(child.id()).ok();
-    let mut out = child.stdout.take()?;
     // Read incrementally into a shared buffer, so what arrived is usable even
     // if EOF never comes (a grandchild still holding the pipe).
     let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
     let (tx, rx) = std::sync::mpsc::channel::<()>();
-    {
+    let mut readers = 0;
+    let mut spawn_reader = |mut pipe: Box<dyn Read + Send>| {
         let collected = collected.clone();
+        let tx = tx.clone();
+        readers += 1;
         std::thread::spawn(move || {
             let mut chunk = [0u8; 8192];
-            while let Ok(n) = out.read(&mut chunk) {
+            while let Ok(n) = pipe.read(&mut chunk) {
                 if n == 0 {
                     break;
                 }
@@ -974,7 +990,27 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
             }
             let _ = tx.send(());
         });
+    };
+    spawn_reader(Box::new(child.stdout.take()?));
+    if let Some(err) = child.stderr.take() {
+        spawn_reader(Box::new(err));
     }
+    drop(tx);
+    // Every reader at EOF within `wait` (counting those already done).
+    let mut finished = 0;
+    let mut all_done = |wait: Duration| {
+        let until = Instant::now() + wait;
+        while finished < readers {
+            if rx
+                .recv_timeout(until.saturating_duration_since(Instant::now()))
+                .is_err()
+            {
+                return false;
+            }
+            finished += 1;
+        }
+        true
+    };
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
@@ -990,7 +1026,7 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
     // holds it: then kill what is left of the group too — whatever the exit
     // status, so no helper leaks — and keep the output already received. The
     // reader thread is never joined: at worst it is left behind, blocked.
-    if rx.recv_timeout(Duration::from_secs(2)).is_err() {
+    if !all_done(Duration::from_secs(2)) {
         // Only while the group still has members: its id cannot have been
         // reused then. On Windows the child is reaped by now and its pid may
         // be reused, so taskkill is not retried (see kill_tree).
@@ -1008,11 +1044,40 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
         if let Some(job) = job.as_ref() {
             job.terminate();
         }
-        let _ = rx.recv_timeout(Duration::from_secs(1));
+        let _ = all_done(Duration::from_secs(1));
     }
     status.filter(|s| s.success())?;
     let buf = collected.lock().ok()?.clone();
     (!buf.is_empty()).then(|| String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// Whether `binary --help` (stdout or stderr, 10 s at most) mentions every
+/// flag of `flags`: the options a lockdown relies on. Cached per binary
+/// identity (path, size, mtime), so `agy update` / `copilot update` in place
+/// is seen at once; a probe that failed or timed out is not cached.
+fn help_mentions(binary: &str, cli: AiCli, flags: &[&str]) -> bool {
+    use std::sync::Mutex;
+    type Key = ((String, u64, Option<std::time::SystemTime>), String);
+    static SEEN: Mutex<Vec<(Key, bool)>> = Mutex::new(Vec::new());
+    let key: Key = (binary_identity(binary), flags.join(" "));
+    if let Some((_, ok)) = SEEN
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .find(|(k, _)| *k == key)
+    {
+        return *ok;
+    }
+    let mut cmd = ai_cmd(binary, cli);
+    cmd.arg("--help");
+    let Some(help) = output_within(cmd, std::time::Duration::from_secs(10), true) else {
+        return false;
+    };
+    let ok = flags.iter().all(|f| help.contains(f));
+    SEEN.lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push((key, ok));
+    ok
 }
 
 /// Kill `child` and everything it started (see `stdout_within`).
@@ -1259,6 +1324,10 @@ fn random_token() -> String {
     format!("{:016x}{:08x}", h.finish(), std::process::id())
 }
 
+/// Past this age a run directory is swept even when a process with its
+/// owner's pid is alive: that pid has been reused.
+const OWNED_RUN_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
 /// The pid a run directory's name ends with (`run-<16 hex><8 hex pid>`, see
 /// `random_token`), or `None` for any other name.
 fn run_dir_owner_pid(name: &str) -> Option<u32> {
@@ -1331,7 +1400,14 @@ fn sweep_stale_run_dirs(base: &std::path::Path, max_age: std::time::Duration) {
             continue;
         }
         let name = e.file_name().to_string_lossy().into_owned();
-        if run_dir_owner_pid(&name).is_some_and(process_alive) {
+        // A live owner keeps it, up to `OWNED_RUN_MAX_AGE`: past that, the pid
+        // has been reused (a reboot) rather than a run lasting a week.
+        let young = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age < OWNED_RUN_MAX_AGE);
+        if young && run_dir_owner_pid(&name).is_some_and(process_alive) {
             continue;
         }
         if meta.file_type().is_dir() {
@@ -1910,36 +1986,6 @@ fn antigravity_stream_result(stdout: &str) -> Result<String, String> {
         .to_string())
 }
 
-/// Whether this `agy` reads a prompt from stdin and has a plan mode
-/// (`--input-format`, `--mode`; 1.5 has both, 1.0.13 had neither). Asked
-/// once per binary.
-fn antigravity_supports_headless(binary: &str) -> bool {
-    use std::sync::Mutex;
-    static SEEN: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
-    if let Some((_, ok)) = SEEN
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .iter()
-        .find(|(b, _)| b == binary)
-    {
-        return *ok;
-    }
-    let help = ai_cmd(binary, AiCli::Antigravity)
-        .arg("--help")
-        .output()
-        .map(|o| {
-            let mut t = String::from_utf8_lossy(&o.stdout).into_owned();
-            t.push_str(&String::from_utf8_lossy(&o.stderr));
-            t
-        })
-        .unwrap_or_default();
-    let ok = help.contains("--input-format") && help.contains("--mode");
-    SEEN.lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .push((binary.to_string(), ok));
-    ok
-}
-
 fn antigravity_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
@@ -1947,7 +1993,7 @@ fn antigravity_cli_prompt_inner(
 ) -> Result<String, String> {
     let binary =
         resolve_antigravity_binary().ok_or_else(|| "Binaire `agy` introuvable".to_string())?;
-    if !antigravity_supports_headless(&binary) {
+    if !help_mentions(&binary, AiCli::Antigravity, &["--input-format", "--mode"]) {
         return Err(
             "This Antigravity CLI cannot read a prompt from stdin nor run in plan mode: update it with `agy update`"
                 .to_string(),
@@ -2476,35 +2522,6 @@ fn copilot_prompt_args(model: Option<&str>, effort: Option<&str>) -> Vec<String>
     args
 }
 
-/// Whether this `copilot` has the lockdown flags (`--available-tools`,
-/// `--disable-builtin-mcps`). Asked once per binary.
-fn copilot_supports_lockdown(binary: &str) -> bool {
-    use std::sync::Mutex;
-    static SEEN: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
-    if let Some((_, ok)) = SEEN
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .iter()
-        .find(|(b, _)| b == binary)
-    {
-        return *ok;
-    }
-    let help = ai_cmd(binary, AiCli::Copilot)
-        .arg("--help")
-        .output()
-        .map(|o| {
-            let mut t = String::from_utf8_lossy(&o.stdout).into_owned();
-            t.push_str(&String::from_utf8_lossy(&o.stderr));
-            t
-        })
-        .unwrap_or_default();
-    let ok = help.contains("--available-tools") && help.contains("--disable-builtin-mcps");
-    SEEN.lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .push((binary.to_string(), ok));
-    ok
-}
-
 fn copilot_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
@@ -2513,7 +2530,11 @@ fn copilot_cli_prompt_inner(
 ) -> Result<String, String> {
     let binary =
         resolve_copilot_binary().ok_or_else(|| "Binaire `copilot` introuvable".to_string())?;
-    if !copilot_supports_lockdown(&binary) {
+    if !help_mentions(
+        &binary,
+        AiCli::Copilot,
+        &["--available-tools", "--disable-builtin-mcps"],
+    ) {
         return Err(
             "This Copilot CLI cannot restrict its tools: update it with `copilot update`"
                 .to_string(),
@@ -3418,7 +3439,7 @@ mod neutral_dir_tests {
     fn jsonc_becomes_json_without_touching_strings() {
         let text = r#"{
   // a comment
-  "a": "http://x // not a comment", /* block */
+  "a": "http://x // not a comment", /* block */ /*/ "a": "commented out" */
   "b": [1, 2,],
   "c": { "d": "e\" , }", },
 }"#;
@@ -3564,6 +3585,23 @@ mod neutral_dir_tests {
             !base.join(&dead).exists(),
             "an exited process's run was kept"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_week_old_run_dir_is_swept_even_with_a_live_pid() {
+        let scratch = Scratch::new("sweep-reused-pid");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        // This process's pid, as a reused pid would look after a reboot.
+        let old = format!("run-{:016x}{:08x}", 3u64, std::process::id());
+        std::fs::create_dir_all(base.join(&old)).unwrap();
+        let eight_days = std::time::Duration::from_secs(8 * 24 * 60 * 60);
+        std::fs::File::open(base.join(&old))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - eight_days)
+            .unwrap();
+        sweep_stale_run_dirs(&base, std::time::Duration::from_secs(3600));
+        assert!(!base.join(&old).exists());
     }
 
     #[test]
@@ -3739,6 +3777,26 @@ mod neutral_dir_tests {
             "OPENCODE_DISABLE_PROJECT_CONFIG".to_string(),
             "1".to_string()
         )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_within_reads_stderr_when_asked() {
+        let cmd = || {
+            let mut c = std::process::Command::new("sh");
+            c.args([
+                "-c",
+                "echo --mode on stdout; echo --input-format on stderr >&2",
+            ]);
+            c
+        };
+        let both = output_within(cmd(), std::time::Duration::from_secs(5), true).unwrap();
+        assert!(
+            both.contains("--mode") && both.contains("--input-format"),
+            "{both}"
+        );
+        let out = stdout_within(cmd(), std::time::Duration::from_secs(5)).unwrap();
+        assert!(!out.contains("--input-format"));
     }
 
     #[cfg(unix)]

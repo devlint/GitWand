@@ -211,6 +211,18 @@ describe("isLocalRewriteOfUpstream — a pull undone by a reset (#239)", () => {
     expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(false);
   }, GIT_TEST_TIMEOUT_MS);
 
+  it("is true when the user's own pushed commit was undone, then redone", async () => {
+    const { me } = setup();
+    commit(me, "h", "mine\n", "my own work");
+    git(me, ["push", "-q", "origin", "feat"]);
+    // GitWand's Undo last commit is a soft reset; the user commits again.
+    git(me, ["reset", "-q", "--soft", "HEAD~1"]);
+    writeFileSync(join(me, "h"), "mine, redone\n");
+    git(me, ["add", "h"]);
+    git(me, ["commit", "-q", "-m", "my own work, redone"]);
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(true);
+  }, GIT_TEST_TIMEOUT_MS);
+
   it("is true when the user's own pushed commit was amended", async () => {
     const { me } = setup();
     commit(me, "h", "mine\n", "my own work");
@@ -228,10 +240,17 @@ describe("leftThroughRewrite", () => {
     expect(leftThroughRewrite(`b\trebase -i (finish): refs/heads/x onto c\n${T}\tcommit: x\n`, T)).toBe(true);
     expect(leftThroughRewrite(`b\tcommit (amend): x\n${T}\tcommit: x\n`, T)).toBe(true);
   });
-  it("refuses a tip left by a reset, a pull or a plain commit, and the current tip", () => {
+  it("accepts a tip a commit made here, left any way", () => {
+    expect(leftThroughRewrite(`b\tcommit: y\nc\treset: moving to HEAD~1\n${T}\tcommit: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\tcommit: y\n${T}\tcommit: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tcherry-pick: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\tpull --rebase (finish): refs/heads/x onto c\n${T}\tpull: Fast-forward\n`, T)).toBe(true);
+  });
+  it("refuses a tip that arrived from elsewhere and was left by a reset or a commit, a merge made here, and the current tip", () => {
     expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tpull: Fast-forward\n`, T)).toBe(false);
-    expect(leftThroughRewrite(`b\tpull: Merge made by the 'ort' strategy.\n${T}\tcommit: x\n`, T)).toBe(false);
-    expect(leftThroughRewrite(`b\tcommit: y\n${T}\tcommit: x\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\tcommit: y\n${T}\tmerge origin/x: Fast-forward\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tcommit (merge): Merge branch 'x'\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tbranch: Created from origin/x\n`, T)).toBe(false);
     expect(leftThroughRewrite(`${T}\tcommit: x\n`, T)).toBe(false);
   });
 });

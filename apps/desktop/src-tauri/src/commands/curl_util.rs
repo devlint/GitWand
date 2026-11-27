@@ -23,7 +23,7 @@ pub(crate) fn bearer_config(tok: &str) -> String {
 /// there would make an AI request follow a redirect with the key bound to
 /// another origin, and a `proxy` line would reroute forge and AI calls. curl
 /// only honours `-q` as its very first argument.
-fn curl_command(args: &[String]) -> std::process::Command {
+pub(crate) fn curl_command(args: &[String]) -> std::process::Command {
     let mut cmd = hidden_cmd("curl");
     cmd.arg("-q").args(args);
     cmd

@@ -78,12 +78,12 @@ export async function isUpstreamRewriteOnly(cwd: string): Promise<boolean> {
  * Either signal is enough:
  *
  * - the upstream tip was once this branch's own tip (it is in the branch's
- *   reflog) and the branch left it through a rewrite (a rebase or an
- *   amend): the remote only holds an older version of local history. This
- *   survives conflicts resolved during the rebase, which change patches.
- *   Left any other way it proves nothing (#239): a collaborator's commit
- *   that arrived by a pull, then was undone by a reset, was a local tip too,
- *   and a force push would drop it.
+ *   reflog) as a commit made here, or one the branch left through a rewrite
+ *   (`leftThroughRewrite`): the remote only holds an older version of local
+ *   history. This survives conflicts resolved during the rebase, which
+ *   change patches. A tip that only arrived by a pull proves nothing (#239):
+ *   a collaborator's commit undone by a reset was a local tip too, and a
+ *   force push would drop it.
  * - every commit only the upstream has still exists locally as a
  *   patch-equivalent commit (covers a never-checked-out remote tip). Merge
  *   commits are NOT skipped here: a remote-only merge can carry content of its
@@ -127,11 +127,20 @@ export async function probeLocalRewriteOfUpstream(
 }
 
 /**
- * True when the branch's reflog (`%H<TAB>%gs`, newest first) shows `tip` as a
- * past value of the branch, left by a rewrite: the entry right after it
- * (newer) is a rebase (`rebase (finish): …`, `rebase -i (finish): …`) or an
- * amend (`commit (amend): …`). A reset, a pull, a merge or a plain commit on
- * top does not count: the tip may be someone else's commit undone locally.
+ * True when the branch's reflog (`%H<TAB>%gs`, newest first) shows `tip` as
+ * a past value of the branch that was local history:
+ *
+ * - set by a commit made here (`commit: …`, `commit (amend): …`,
+ *   `commit (initial): …`, a cherry-pick): the user's own commit, whatever
+ *   happened to it since (undo last commit then a new one, a squash by
+ *   `reset --soft`);
+ * - or left by a rewrite: a rebase (`rebase (finish): …`, `rebase -i …`,
+ *   `pull --rebase (finish): …`) or an amend.
+ *
+ * A tip that arrived by a pull, a merge, a reset or a branch creation and
+ * was then left by a reset or a plain commit proves nothing (#239): it may
+ * be a collaborator's commit undone locally. A merge commit made here does
+ * not count either: it holds the commits it merged.
  */
 export function leftThroughRewrite(reflog: string, tip: string): boolean {
   const entries = reflog
@@ -143,10 +152,14 @@ export function leftThroughRewrite(reflog: string, tip: string): boolean {
         ? { hash: l.trim(), subject: "" }
         : { hash: l.slice(0, tab).trim(), subject: l.slice(tab + 1) };
     });
+  const madeHere = (subject: string) =>
+    (/^commit\b/.test(subject) && !subject.startsWith("commit (merge)")) ||
+    /^cherry-pick\b/.test(subject);
+  const rewrite = (subject: string) =>
+    /^(rebase|pull --rebase)\b/.test(subject) || subject.startsWith("commit (amend)");
   for (let i = 1; i < entries.length; i++) {
     if (entries[i].hash !== tip) continue;
-    const left = entries[i - 1].subject;
-    if (/^rebase\b/.test(left) || left.startsWith("commit (amend)")) return true;
+    if (madeHere(entries[i].subject) || rewrite(entries[i - 1].subject)) return true;
   }
   return false;
 }

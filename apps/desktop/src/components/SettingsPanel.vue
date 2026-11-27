@@ -1111,6 +1111,8 @@ async function loadModels(explicit = false, provider: AIProvider = settings.valu
     }
   } finally {
     if (request === modelsRequest) modelsLoading.value = false;
+    // Refresh may have asked about the endpoint and been allowed: list it.
+    if (explicit) void allowedAi.load();
   }
 }
 

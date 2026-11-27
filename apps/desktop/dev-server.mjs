@@ -934,8 +934,10 @@ function devJsoncToJson(text) {
       continue;
     }
     if (c === "/" && text[i + 1] === "*") {
+      // The closing `*/` starts after the opening one (`/*/` is not closed).
       i += 2;
-      while (i < text.length && !(text[i - 1] === "*" && text[i] === "/")) i++;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i++; // on the closing `/`; the loop's i++ steps past it
       continue;
     }
     out += c;
@@ -8243,8 +8245,21 @@ async function handleRequest(req, res) {
         });
         const type = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
         if (!upstream.ok || !/^image\/[a-z0-9.+-]+$/.test(type)) throw new Error(`answered ${upstream.status} ${type}`);
-        const body = Buffer.from(await upstream.arrayBuffer());
-        if (body.length === 0 || body.length > 5 * 1024 * 1024) throw new Error("empty or oversized");
+        // Read as it comes and stop past 5 MiB: a chunked answer announces
+        // no size. Mirrors run_curl_capped.
+        const LIMIT = 5 * 1024 * 1024;
+        const parts = [];
+        let size = 0;
+        for await (const chunk of upstream.body ?? []) {
+          size += chunk.length;
+          if (size > LIMIT) {
+            await upstream.body.cancel().catch(() => {});
+            throw new Error("image larger than 5 MiB");
+          }
+          parts.push(chunk);
+        }
+        const body = Buffer.concat(parts);
+        if (body.length === 0) throw new Error("empty image");
         res.writeHead(200, {
           "Content-Type": type,
           "Cache-Control": "max-age=3600",

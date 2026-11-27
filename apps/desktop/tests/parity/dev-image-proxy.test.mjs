@@ -27,6 +27,20 @@ describe("dev-server: image proxy", { timeout: 15_000 }, () => {
         res.writeHead(200, { "Content-Type": "image/png" });
         return res.end(PNG);
       }
+      if (req.url === "/stream.png") {
+        // Chunked, no Content-Length, past 5 MiB.
+        res.writeHead(200, { "Content-Type": "image/png" });
+        const chunk = Buffer.alloc(256 * 1024);
+        let sent = 0;
+        const push = () => {
+          while (sent <= 6 * 1024 * 1024) {
+            sent += chunk.length;
+            if (!res.write(chunk)) return res.once("drain", push);
+          }
+          res.end();
+        };
+        return push();
+      }
       if (req.url === "/page") {
         res.writeHead(200, { "Content-Type": "text/html" });
         return res.end("<script>alert(1)</script>");
@@ -58,6 +72,12 @@ describe("dev-server: image proxy", { timeout: 15_000 }, () => {
   it("refuses an answer that is not an image, and an error status", async () => {
     expect((await get(`${base}/page`)).status).toBe(502);
     expect((await get(`${base}/missing.png`)).status).toBe(502);
+  });
+
+  it("stops a streamed answer past 5 MiB", async () => {
+    const res = await get(`${base}/stream.png`);
+    expect(res.status).toBe(502);
+    expect(await res.text()).toContain("larger than 5 MiB");
   });
 
   it("refuses what is not an http(s) URL without credentials", async () => {

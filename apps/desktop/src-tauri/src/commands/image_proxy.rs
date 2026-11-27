@@ -18,7 +18,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::commands::curl_util::{curl_transport_check, quote_config, run_curl};
+use crate::commands::curl_util::{curl_command, curl_transport_check, quote_config};
 
 pub(crate) const SCHEME: &str = "gwimg";
 
@@ -94,6 +94,64 @@ pub(crate) fn split_output(out: &[u8]) -> Option<(&[u8], u16, &str)> {
     Some((body, status.parse().ok()?, ctype))
 }
 
+/// Room for curl's `-w` trailer past the largest image.
+const TRAILER_SLACK: usize = 1024;
+
+/// Run curl (`-q` first, config on stdin) and read its stdout as it comes,
+/// killing it once more than `cap` bytes arrived: `--max-filesize` only
+/// stops a transfer whose size is announced, and a chunked answer would
+/// otherwise be buffered whole for up to `FETCH_TIMEOUT_SECS`.
+fn run_curl_capped(
+    args: &[String],
+    cfg: &str,
+    cap: usize,
+) -> Result<(Vec<u8>, bool, Option<i32>, String), String> {
+    use std::io::{Read, Write};
+    use std::process::Stdio;
+    let mut child = curl_command(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("curl not found or failed to spawn: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        // Read whole before anything is sent: no deadlock against stdout.
+        let _ = stdin.write_all(cfg.as_bytes());
+    }
+    let mut stderr_pipe = child.stderr.take();
+    let stderr_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(e) = stderr_pipe.as_mut() {
+            let _ = e.take(64 * 1024).read_to_string(&mut text);
+        }
+        text
+    });
+    let mut out = Vec::new();
+    let mut over = false;
+    if let Some(mut stdout) = child.stdout.take() {
+        let mut chunk = [0u8; 16 * 1024];
+        loop {
+            match stdout.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    out.extend_from_slice(&chunk[..n]);
+                    if out.len() > cap {
+                        over = true;
+                        let _ = child.kill();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    let status = child.wait().map_err(|e| e.to_string())?;
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if over {
+        return Err("image larger than 5 MiB".to_string());
+    }
+    Ok((out, status.success(), status.code(), stderr))
+}
+
 /// Fetch `url` with curl and keep it only when it is an image.
 fn fetch(url: &str) -> Result<Image, String> {
     let cfg = format!("url = {}\n", quote_config(url));
@@ -125,14 +183,10 @@ fn fetch(url: &str) -> Result<Image, String> {
     .iter()
     .map(|s| s.to_string())
     .collect();
-    let output = run_curl(&args, Some(&cfg))?;
-    curl_transport_check(
-        output.status.success(),
-        output.status.code(),
-        &String::from_utf8_lossy(&output.stderr),
-    )?;
+    let (stdout, ok, code, stderr) = run_curl_capped(&args, &cfg, MAX_IMAGE_BYTES + TRAILER_SLACK)?;
+    curl_transport_check(ok, code, &stderr)?;
     let (body, status, ctype) =
-        split_output(&output.stdout).ok_or_else(|| "unreadable curl output".to_string())?;
+        split_output(&stdout).ok_or_else(|| "unreadable curl output".to_string())?;
     if !(200..300).contains(&status) {
         return Err(format!("image request answered {status}"));
     }
@@ -187,16 +241,96 @@ impl Cache {
     }
 }
 
-/// The image `uri` asks for, from the cache or fetched.
+/// How long a failed URL answers its failure without being fetched again
+/// (a 404 avatar shown in every row of a list).
+const FAILURE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+/// Fetches running at once; the others wait their turn.
+const MAX_FETCHES: usize = 6;
+
+type Outcome = Result<Arc<Image>, String>;
+
+/// One fetch, shared by every request for its URL that arrives meanwhile.
+struct Flight {
+    outcome: Mutex<Option<Outcome>>,
+    done: std::sync::Condvar,
+}
+
+struct Fetching {
+    flights: Vec<(String, Arc<Flight>)>,
+    failures: Vec<(String, std::time::Instant, String)>,
+    running: usize,
+}
+
+static FETCHING: Mutex<Fetching> = Mutex::new(Fetching {
+    flights: Vec::new(),
+    failures: Vec::new(),
+    running: 0,
+});
+static SLOT_FREED: std::sync::Condvar = std::sync::Condvar::new();
+
+fn lock_fetching() -> std::sync::MutexGuard<'static, Fetching> {
+    FETCHING.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The image `uri` asks for: from the cache, from a fetch of the same URL
+/// already running, from a recent failure, or fetched (at most `MAX_FETCHES`
+/// at once).
 pub(crate) fn serve(uri: &str) -> Result<Arc<Image>, String> {
     let url = requested_url(uri)?;
-    if let Some(hit) = lock_cache().get(&url) {
+    serve_with(&url, fetch)
+}
+
+fn serve_with(url: &str, fetch: impl FnOnce(&str) -> Result<Image, String>) -> Outcome {
+    if let Some(hit) = lock_cache().get(url) {
         return Ok(hit);
     }
-    // Fetched outside the lock: other images are served meanwhile.
-    let image = Arc::new(fetch(&url)?);
-    lock_cache().put(url, image.clone());
-    Ok(image)
+    let flight = {
+        let mut f = lock_fetching();
+        f.failures.retain(|(_, at, _)| at.elapsed() < FAILURE_TTL);
+        if let Some((_, _, e)) = f.failures.iter().find(|(u, _, _)| u == url) {
+            return Err(e.clone());
+        }
+        if let Some((_, flight)) = f.flights.iter().find(|(u, _)| u == url) {
+            let flight = flight.clone();
+            drop(f);
+            let mut outcome = flight.outcome.lock().unwrap_or_else(|p| p.into_inner());
+            while outcome.is_none() {
+                outcome = flight.done.wait(outcome).unwrap_or_else(|p| p.into_inner());
+            }
+            return outcome
+                .clone()
+                .unwrap_or_else(|| Err("image fetch lost".into()));
+        }
+        let flight = Arc::new(Flight {
+            outcome: Mutex::new(None),
+            done: std::sync::Condvar::new(),
+        });
+        f.flights.push((url.to_string(), flight.clone()));
+        while f.running >= MAX_FETCHES {
+            f = SLOT_FREED.wait(f).unwrap_or_else(|p| p.into_inner());
+        }
+        f.running += 1;
+        flight
+    };
+    // Fetched outside every lock: other images are served meanwhile.
+    let outcome: Outcome = fetch(url).map(Arc::new);
+    match &outcome {
+        Ok(image) => lock_cache().put(url.to_string(), image.clone()),
+        Err(e) => {
+            lock_fetching()
+                .failures
+                .push((url.to_string(), std::time::Instant::now(), e.clone()))
+        }
+    }
+    {
+        let mut f = lock_fetching();
+        f.running -= 1;
+        f.flights.retain(|(u, _)| u != url);
+    }
+    SLOT_FREED.notify_one();
+    *flight.outcome.lock().unwrap_or_else(|p| p.into_inner()) = Some(outcome.clone());
+    flight.done.notify_all();
+    outcome
 }
 
 /// The HTTP response for a `gwimg:` request.
@@ -302,6 +436,76 @@ mod tests {
         // Replacing an entry does not count it twice.
         c.put("big".into(), img(10));
         assert_eq!(c.bytes, 10);
+    }
+
+    #[test]
+    fn concurrent_requests_for_a_url_share_one_fetch_and_a_failure_is_kept() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static FETCHES: AtomicUsize = AtomicUsize::new(0);
+        let url = "https://share.example/a.png";
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(move || {
+                    serve_with(url, |_| {
+                        FETCHES.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(200));
+                        Ok(Image {
+                            content_type: "image/png".into(),
+                            bytes: vec![1, 2, 3],
+                        })
+                    })
+                })
+            })
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().unwrap().unwrap().bytes, [1, 2, 3]);
+        }
+        assert_eq!(FETCHES.load(Ordering::SeqCst), 1);
+
+        // A failure answers the next requests without a new fetch.
+        let bad = "https://share.example/missing.png";
+        let err = serve_with(bad, |_| Err("image request answered 404".into())).unwrap_err();
+        assert!(err.contains("404"));
+        let again = serve_with(bad, |_| panic!("fetched again within the failure TTL"));
+        assert_eq!(again.unwrap_err(), err);
+    }
+
+    #[test]
+    fn a_streamed_body_past_the_cap_is_cut_short() {
+        // No Content-Length: curl's --max-filesize cannot stop it.
+        let mut reply =
+            b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nConnection: close\r\n\r\n".to_vec();
+        reply.extend(std::iter::repeat_n(0u8, MAX_IMAGE_BYTES + 64 * 1024));
+        let (port, h) = serve_once(reply);
+        let r = respond(&uri_for(port, "/huge.png"));
+        h.join().unwrap();
+        assert_eq!(r.status(), 502);
+        // A recent curl stops it itself (exit 63); an older one is cut by the cap.
+        let msg = String::from_utf8_lossy(r.body()).into_owned();
+        assert!(
+            msg.contains("larger than 5 MiB") || msg.contains("(63)"),
+            "got: {msg}"
+        );
+    }
+
+    #[test]
+    fn the_cap_kills_curl_whatever_curl_itself_enforces() {
+        let mut reply =
+            b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nConnection: close\r\n\r\n".to_vec();
+        reply.extend(std::iter::repeat_n(0u8, 256 * 1024));
+        let (port, h) = serve_once(reply);
+        // No --max-filesize here: only the cap can stop it.
+        let args: Vec<String> = ["-s", "-S", "--config", "-", "-o", "-"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cfg = format!(
+            "url = {}\n",
+            quote_config(&format!("http://127.0.0.1:{port}/big.png"))
+        );
+        let err = run_curl_capped(&args, &cfg, 16 * 1024).unwrap_err();
+        h.join().unwrap();
+        assert!(err.contains("larger than 5 MiB"), "got: {err}");
     }
 
     /// A one-shot local server answering `reply` to whatever it is asked.
