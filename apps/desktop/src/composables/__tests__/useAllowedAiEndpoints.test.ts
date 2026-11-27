@@ -76,6 +76,24 @@ describe("useAllowedAiEndpoints", () => {
     await next;
   });
 
+  it("keeps a failed revoke's message through a load that ends after it", async () => {
+    const e = useAllowedAiEndpoints();
+    await e.load();
+    let releaseOther!: (v: string[]) => void;
+    aiAllowedEndpoints.mockImplementationOnce(() => new Promise<string[]>((r) => (releaseOther = r)));
+    aiRevokeEndpoint.mockRejectedValueOnce(new Error("keychain locked"));
+    // The revoke fails; its reload is held.
+    const revoke = e.revoke("https://a.example");
+    await new Promise((r) => setTimeout(r, 0));
+    // Settings reopened meanwhile: a later load answers first.
+    await e.load();
+    expect(e.error.value).toBe("keychain locked");
+    // Then the revoke's own reload lands.
+    releaseOther(["https://a.example", "https://b.example"]);
+    await revoke;
+    expect(e.error.value).toBe("keychain locked");
+  });
+
   it("ignores a second revoke while one runs", async () => {
     const e = useAllowedAiEndpoints();
     await e.load();

@@ -92,13 +92,16 @@ function parseImport(line: string): ImportStatement {
   return stmt;
 }
 
+/**
+ * `true` for an import or re-export line holding a comment (`{ a, /* x *\/ b }`,
+ * `…; // x`). Module strings are blanked first, so `"https://…"` is no comment.
+ */
+function hasInlineComment(line: string): boolean {
+  const t = line.trim();
+  return /^(?:import|export)\s/.test(t) && /\/[*/]/.test(t.replace(/(['"])(?:(?!\1).)*\1/g, '""'));
+}
+
 function parseTrimmed(t: string): ImportStatement {
-  // A comment inside an import line (`{ a, /* from "y" */ b }`, `…; // x`) can
-  // hold a \`from "…"\` the patterns would read as the module: such a line is
-  // not parsed. Module strings are blanked first, so \`"https://…"\` is no comment.
-  if (/^(?:import|export)\s/.test(t) && /\/[*/]/.test(t.replace(/(['"])(?:(?!\1).)*\1/g, '""'))) {
-    return { raw: t, source: "", kind: "unknown", names: [], isType: false };
-  }
 
   // Side-effect import
   const sideMatch = t.match(RE_IMPORT_SIDE);
@@ -165,7 +168,8 @@ export function extractImportSources(content: string): string[] {
   const seen = new Set<string>();
   for (const line of content.split("\n")) {
     if (!isImportLike(line)) continue;
-    const stmt = parseImport(line);
+    // A block comment can hold a `from "…"` the patterns would take for the module.
+    const stmt = parseImport(line.replace(/\/\*.*?\*\//g, " "));
     if (stmt.source) seen.add(stmt.source);
   }
   return [...seen];
@@ -439,7 +443,10 @@ export function tryResolveImportConflict(
   };
   const hasUnparsableContent = (lines: string[]): boolean =>
     lines.some((l) => !isBenignUnknown(l) && parseImport(l).kind === "unknown");
-  if (hasUnparsableContent(oursLines) || hasUnparsableContent(theirsLines)) {
+  // A comment inside an import line can hold a `from "…"` the patterns would
+  // read as the module, and a rebuilt line would drop it: not merged here.
+  const commented = [baseLines, oursLines, theirsLines].some((lines) => lines.some(hasInlineComment));
+  if (commented || hasUnparsableContent(oursLines) || hasUnparsableContent(theirsLines)) {
     return {
       mergedLines: null,
       reason: "The block contains import-like lines that cannot be parsed, so it falls back to the textual engine rather than risk losing a line.",
@@ -625,7 +632,15 @@ export function tryResolveImportConflict(
     // Absent de base → ajout
     if (!base) {
       if (ours && theirs) {
-        if (ours.raw === theirs.raw) {
+        if (ours.raw === theirs.raw && ours.indent !== theirs.indent) {
+          unresolvedImports++;
+          return {
+            mergedLines: null,
+            reason: `Conflict on import '${ours.source}': added at two indentations.`,
+            resolvedImports,
+            unresolvedImports,
+          };
+        } else if (ours.raw === theirs.raw) {
           // Même ajout → garder une fois
           keep(ours);
           resolvedImports++;
@@ -675,8 +690,9 @@ export function tryResolveImportConflict(
       continue;
     }
 
+    // A re-indent is a change against a deletion.
     if (!ours) {
-      if (!theirsChanged) {
+      if (!theirsChanged && theirs?.indent === base.indent) {
         resolvedImports++; // theirs = base, ours supprimé → supprimer
       } else {
         unresolvedImports++;
@@ -691,7 +707,7 @@ export function tryResolveImportConflict(
     }
 
     if (!theirs) {
-      if (!oursChanged) {
+      if (!oursChanged && ours.indent === base.indent) {
         resolvedImports++; // ours = base, theirs supprimé → supprimer
       } else {
         unresolvedImports++;

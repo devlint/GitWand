@@ -57,4 +57,10 @@ describe("extractImportSources", () => {
   it("returns [] for empty content", () => {
     expect(extractImportSources("")).toEqual([]);
   });
+
+  it("reads the module of a line holding a block comment", () => {
+    expect(
+      extractImportSources('import { a, /* legacy */ b } from "./x";\nimport { c, /* from "y" */ d } from "./z";'),
+    ).toEqual(["./x", "./z"]);
+  });
 });

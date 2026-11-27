@@ -79,6 +79,33 @@ describe("tryResolveImportConflict — extended", () => {
     expect(r.mergedLines).toEqual(['import { a, b, c } from "./lib";']);
   });
 
+  it("leaves the same import added at two indentations to the textual engine", () => {
+    const r = tryResolveImportConflict(
+      [],
+      ['  import x from "x";'],
+      ['    import x from "x";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
+  it("does not drop a re-indent against a deletion", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";', 'import y from "y";'],
+      ['  import x from "x";', 'import y from "y";'],
+      ['import y from "y";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
+  it("leaves a commented import in the base to the textual engine", () => {
+    const r = tryResolveImportConflict(
+      ['import { a, /* b */ b } from "./lib";'],
+      ['import { a } from "./lib";'],
+      ['import { a, b, c } from "./lib";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
   it("leaves two different re-indentations of a line to the textual engine", () => {
     const r = tryResolveImportConflict(
       ['import x from "x";'],
