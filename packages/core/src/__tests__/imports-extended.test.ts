@@ -27,6 +27,163 @@ describe("tryResolveImportConflict — extended", () => {
     expect(merged).toContain("useState");
   });
 
+  it("keeps the file's quotes on a merged named import", () => {
+    const double = tryResolveImportConflict(
+      ['import { a } from "./lib";'],
+      ['import { a, c } from "./lib";'],
+      ['import { a, b } from "./lib";'],
+    );
+    expect(double.mergedLines).toEqual(['import { a, b, c } from "./lib";']);
+    const single = tryResolveImportConflict(
+      ["import { a } from './lib';"],
+      ["import { a, c } from './lib';"],
+      ["import { a, b } from './lib';"],
+    );
+    expect(single.mergedLines).toEqual(["import { a, b, c } from './lib';"]);
+    // The multi-line form too.
+    const long = "aaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbb, cccccccccccccccccccc";
+    const multi = tryResolveImportConflict(
+      [`import { ${long} } from "./a-rather-long-module-path";`],
+      [`import { ${long}, dddddddddddddddddddd } from "./a-rather-long-module-path";`],
+      [`import { ${long}, eeeeeeeeeeeeeeeeeeee } from "./a-rather-long-module-path";`],
+    );
+    expect(multi.mergedLines?.join("\n")).toContain('} from "./a-rather-long-module-path";');
+  });
+
+  it("leaves an import line holding a comment to the textual engine", () => {
+    // A comment can hold a `from "…"` (in either quote) the patterns would
+    // take for the module.
+    for (const comment of [`/* was: from 'old' */`, `/* from "y" */`]) {
+      const r = tryResolveImportConflict(
+        ['import { a } from "./lib";'],
+        ['import { a, c } from "./lib";'],
+        [`import { a, ${comment} b } from "./lib";`],
+      );
+      expect(r.mergedLines).toBeNull();
+    }
+    // A URL module is not a comment.
+    const url = tryResolveImportConflict(
+      ['import { a } from "https://deno.land/x/lib.ts";'],
+      ['import { a, c } from "https://deno.land/x/lib.ts";'],
+      ['import { a, b } from "https://deno.land/x/lib.ts";'],
+    );
+    expect(url.mergedLines).toEqual(['import { a, b, c } from "https://deno.land/x/lib.ts";']);
+  });
+
+  it("takes the quote and semicolon theirs alone changed", () => {
+    const r = tryResolveImportConflict(
+      ["import { a } from './lib'"],
+      ["import { a, c } from './lib'"],
+      ['import { a, b } from "./lib";'],
+    );
+    expect(r.mergedLines).toEqual(['import { a, b, c } from "./lib";']);
+  });
+
+  it("leaves the same import added at two indentations to the textual engine", () => {
+    const r = tryResolveImportConflict(
+      [],
+      ['  import x from "x";'],
+      ['    import x from "x";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
+  it("leaves a named import added at two indentations to the textual engine", () => {
+    const r = tryResolveImportConflict(
+      [],
+      ['  import { a } from "x";'],
+      ['    import { b } from "x";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
+  it("takes an import both sides added as the same when one re-indented the block", () => {
+    const r = tryResolveImportConflict(
+      ['import a from "a";'],
+      ['  import a from "a";', '  import x from "x";'],
+      ['import a from "a";', 'import x from "x";'],
+    );
+    expect(r.mergedLines).toEqual(['  import a from "a";', '  import x from "x";']);
+  });
+
+  it("says why a commented import line is not merged", () => {
+    const r = tryResolveImportConflict(
+      ['import { a } from "./lib";'],
+      ['import { a, c } from "./lib";'],
+      ['import { a, /* legacy */ b } from "./lib";'],
+    );
+    expect(r.reason).toMatch(/holds a comment/);
+  });
+
+  it("does not drop a re-indent against a deletion", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";', 'import y from "y";'],
+      ['  import x from "x";', 'import y from "y";'],
+      ['import y from "y";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
+  it("leaves a commented import in the base to the textual engine", () => {
+    const r = tryResolveImportConflict(
+      ['import { a, /* b */ b } from "./lib";'],
+      ['import { a } from "./lib";'],
+      ['import { a, b, c } from "./lib";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
+  it("leaves two different re-indentations of a line to the textual engine", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";'],
+      ['  import x from "x";'],
+      ['    import x from "x";'],
+    );
+    expect(r.mergedLines).toBeNull();
+  });
+
+  it("gives a line the other side added the block's new indentation", () => {
+    const r = tryResolveImportConflict(
+      ['import a from "a";'],
+      ['  import a from "a";'],
+      ['import a from "a";', 'import b from "b";'],
+    );
+    expect(r.mergedLines).toEqual(['  import a from "a";', '  import b from "b";']);
+  });
+
+  it("keeps the indentation of the import lines", () => {
+    const r = tryResolveImportConflict(
+      ['  import { a } from "./lib";', '  import x from "x";'],
+      ['  import { a, c } from "./lib";', '  import x from "x";'],
+      ['  import { a, b } from "./lib";', '  import x from "x";'],
+    );
+    // Sorted by group: the package first, then the relative module.
+    expect(r.mergedLines).toEqual(['  import x from "x";', '  import { a, b, c } from "./lib";']);
+  });
+
+  it("keeps the indentation a single side gave a line", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";', 'import { a } from "./lib";'],
+      ['  import x from "x";', 'import { a } from "./lib";'],
+      ['import x from "x";', 'import { a, b } from "./lib";'],
+    );
+    expect(r.mergedLines).toEqual(['  import x from "x";', 'import { a, b } from "./lib";']);
+  });
+
+  it("sorts a merged import written over several lines as one statement", () => {
+    const long = "aaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbb, cccccccccccccccccccc";
+    const r = tryResolveImportConflict(
+      [`import { ${long} } from "./a-rather-long-module-path";`, 'import x from "x";'],
+      [`import { ${long}, dddddddddddddddddddd } from "./a-rather-long-module-path";`, 'import x from "x";'],
+      [`import { ${long}, eeeeeeeeeeeeeeeeeeee } from "./a-rather-long-module-path";`, 'import x from "x";'],
+    );
+    const lines = r.mergedLines!;
+    // The package first, then the relative module, its lines together.
+    expect(lines[0]).toBe('import x from "x";');
+    expect(lines[1]).toBe("import {");
+    expect(lines.at(-1)).toBe('} from "./a-rather-long-module-path";');
+  });
+
   it("should merge when ours adds a new module and theirs adds a different one", () => {
     const base = [
       'import React from "react";',
@@ -129,13 +286,116 @@ describe("tryResolveImportConflict — lignes import-like non parsables (garde a
     expect(result.mergedLines).toBeNull();
   });
 
-  it("les commentaires et lignes vides restent tolérés (comportement existant inchangé)", () => {
+  it("leaves a block holding a comment line to the textual engine, which keeps it", () => {
+    // Only imports are written back: merging here would drop `// utils`.
     const result = tryResolveImportConflict(
       ['import { a } from "./a";'],
       ["// utils", 'import { a } from "./a";', ""],
       ['import { a } from "./a";', 'import { b } from "./b";'],
     );
-    expect(result.mergedLines).not.toBeNull();
+    expect(result.mergedLines).toBeNull();
+    // One side added imports: the textual engine may take it over.
+    expect(result.conflict).toBeUndefined();
+  });
+
+  it("blank lines alone are still tolerated", () => {
+    const result = tryResolveImportConflict(
+      ['import { a } from "./a";'],
+      ['import { a } from "./a";', ""],
+      ['import { a } from "./a";', 'import { b } from "./b";'],
+    );
     expect(result.mergedLines!.join("\n")).toContain('"./b"');
+  });
+
+  it("leaves a commented block to the textual engine when the additions bind different names", () => {
+    const result = tryResolveImportConflict(
+      ["// @ts-nocheck", 'import a from "a";'],
+      ["// @ts-nocheck", 'import a from "a";', 'import b from "b";'],
+      ["// @ts-nocheck", 'import c from "c";', 'import a from "a";'],
+    );
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBeUndefined();
+  });
+
+  it("does not take the same addition, or two edits of a base import, for a clash", () => {
+    const same = tryResolveImportConflict([], ["// polyfills", 'import a from "a";'], ['import a from "a";']);
+    expect(same.conflict).toBeUndefined();
+    const edits = tryResolveImportConflict(
+      ["// deps", 'import { a } from "./lib";'],
+      ["// deps", 'import { a, b } from "./lib";'],
+      ["// deps", 'import { a, c } from "./lib";'],
+    );
+    expect(edits.conflict).toBeUndefined();
+  });
+
+  it("counts an import whose bindings cannot be read as a possible clash", () => {
+    const r = tryResolveImportConflict(
+      ["// deps"],
+      ["// deps", 'const { x: { b } } = require("m");'],
+      ["// deps", 'import { b } from "n";'],
+    );
+    expect(r.conflict).toBe(true);
+  });
+
+  it("keeps a clean deletion when the other side re-indented the block", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";', 'import y from "y";'],
+      ['import y from "y";'],
+      ['  import x from "x";', '  import y from "y";'],
+    );
+    expect(r.mergedLines).toEqual(['  import y from "y";']);
+  });
+
+  it("keeps a clean deletion by the side that also re-indented the block", () => {
+    const r = tryResolveImportConflict(
+      ['import x from "x";', 'import y from "y";'],
+      ['  import y from "y";'],
+      ['import x from "x";', 'import y from "y";'],
+    );
+    expect(r.mergedLines).toEqual(['  import y from "y";']);
+  });
+
+  it("does not take the same name added to the same base import for a clash", () => {
+    const r = tryResolveImportConflict(
+      ["// deps", 'import { a } from "./lib";'],
+      ["// deps", 'import { a, b } from "./lib";'],
+      ["// deps", 'import { a, b, c } from "./lib";'],
+    );
+    expect(r.conflict).toBeUndefined();
+  });
+
+  it("skips an import commented out over several lines", () => {
+    const r = tryResolveImportConflict(
+      [],
+      ["/*", 'import { b } from "old";', "*/"],
+      ['import { b } from "new";'],
+    );
+    expect(r.conflict).toBeUndefined();
+  });
+
+  it("does not take a doc comment for a binding clash", () => {
+    const doc = tryResolveImportConflict(
+      ['import a from "a";'],
+      ['import a from "a";', "/**", " * Polyfills", " */", 'import "core-js";'],
+      ['import a from "a";', 'import b from "b";'],
+    );
+    expect(doc.mergedLines).toBeNull();
+    expect(doc.conflict).toBeUndefined();
+  });
+
+  it("hands a commented block where both sides added imports to the user", () => {
+    const result = tryResolveImportConflict(
+      [],
+      ['import { a } from "x"; // used by foo'],
+      ['import { a, b } from "x";'],
+    );
+    expect(result.mergedLines).toBeNull();
+    expect(result.conflict).toBe(true);
+    expect(result.reason).toMatch(/bind the same name/);
+  });
+
+  it("hands the same module added at two indentations to the user", () => {
+    const result = tryResolveImportConflict([], ['  import { a } from "x";'], ['    import { a, b } from "x";']);
+    expect(result.conflict).toBe(true);
   });
 });

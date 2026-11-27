@@ -57,4 +57,14 @@ describe("extractImportSources", () => {
   it("returns [] for empty content", () => {
     expect(extractImportSources("")).toEqual([]);
   });
+
+  it("reads the module of a line holding a block comment", () => {
+    expect(
+      extractImportSources('import { a, /* legacy */ b } from "./x";\nimport { c, /* from "y" */ d } from "./z";'),
+    ).toEqual(["./x", "./z"]);
+    expect(extractImportSources('import x from "./a"; // from "./b"')).toEqual(["./a"]);
+    expect(extractImportSources('import x from "https://deno.land/x/a.ts";')).toEqual(["https://deno.land/x/a.ts"]);
+    expect(extractImportSources('import x from "//esm.sh/react";')).toEqual(["//esm.sh/react"]);
+    expect(extractImportSources('import x from "./a/*"; // */')).toEqual(["./a/*"]);
+  });
 });

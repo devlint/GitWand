@@ -37,12 +37,16 @@ export interface ImportStatement {
   names: string[];
   /** `true` si c'est un `import type` TypeScript */
   isType: boolean;
+  /** Leading whitespace of the source line (`raw` is trimmed). */
+  indent?: string;
+  /** The quote the module is written in (`'`, `"`), for an `import … from` line. */
+  quote?: string;
 }
 
 // ─── Patterns de détection ────────────────────────────────
 
 // import ... from 'module' ou "module"
-const RE_IMPORT_FROM    = /^import\s+(type\s+)?(.+?)\s+from\s+['"](.+?)['"]\s*;?\s*$/;
+const RE_IMPORT_FROM    = /^import\s+(type\s+)?(.+?)\s+from\s+(['"])(.+?)\3\s*;?\s*$/;
 // import 'module' (side-effect)
 const RE_IMPORT_SIDE    = /^import\s+['"](.+?)['"]\s*;?\s*$/;
 // const X = require('module')
@@ -53,6 +57,7 @@ const RE_EXPORT_FROM    = /^export\s+(?:type\s+)?(?:[\w{*,\s]+)\s+from\s+['"](.+
 const RE_NAMESPACE      = /^\*\s+as\s+\w+$/;
 // { X, Y } or { X as Y }
 const RE_NAMED_BLOCK    = /^\{([^}]*)\}$/;
+
 
 /**
  * Vérifie si une ligne est un import (ou commentaire/blanc tolérés dans un bloc d'imports).
@@ -82,7 +87,51 @@ export function isImportBlock(lines: string[]): boolean {
  * Parse une ligne d'import en `ImportStatement`.
  */
 function parseImport(line: string): ImportStatement {
+  const stmt = parseTrimmed(line.trim());
+  stmt.indent = /^\s*/.exec(line)?.[0] ?? "";
+  return stmt;
+}
+
+/**
+ * `true` for an import or re-export line holding a comment (`{ a, /* x *\/ b }`,
+ * `…; // x`). Module strings are blanked first, so `"https://…"` is no comment.
+ */
+function hasInlineComment(line: string): boolean {
   const t = line.trim();
+  return /^(?:import|export)\s/.test(t) && /\/[*/]/.test(t.replace(/(['"])(?:(?!\1).)*\1/g, '""'));
+}
+
+/**
+ * The line without its comments (`/* … *\/`, a trailing `// …`), read outside
+ * the quoted strings: `"//esm.sh/react"` and `"./a/*"` are module names.
+ */
+function stripComments(line: string): string {
+  let out = "";
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      out += c;
+      if (c === "\\" && i + 1 < line.length) out += line[++i];
+      else if (c === quote) quote = null;
+    } else if (c === "'" || c === '"' || c === "`") {
+      quote = c;
+      out += c;
+    } else if (c === "/" && line[i + 1] === "/") {
+      break;
+    } else if (c === "/" && line[i + 1] === "*") {
+      const end = line.indexOf("*/", i + 2);
+      if (end < 0) break;
+      out += " ";
+      i = end + 1;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+function parseTrimmed(t: string): ImportStatement {
 
   // Side-effect import
   const sideMatch = t.match(RE_IMPORT_SIDE);
@@ -95,11 +144,12 @@ function parseImport(line: string): ImportStatement {
   if (fromMatch) {
     const isType = Boolean(fromMatch[1]);
     const specifier = fromMatch[2].trim();
-    const source = fromMatch[3];
+    const quote = fromMatch[3];
+    const source = fromMatch[4];
 
     if (RE_NAMESPACE.test(specifier)) {
       const alias = specifier.replace(/^\*\s+as\s+/, "");
-      return { raw: t, source, kind: "namespace", names: [alias], isType };
+      return { raw: t, source, kind: "namespace", names: [alias], isType, quote };
     }
 
     const namedMatch = specifier.match(RE_NAMED_BLOCK);
@@ -108,11 +158,11 @@ function parseImport(line: string): ImportStatement {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
-      return { raw: t, source, kind: "named", names, isType };
+      return { raw: t, source, kind: "named", names, isType, quote };
     }
 
     // Default import (possibly with named: `import X, { Y }`)
-    return { raw: t, source, kind: "default", names: [specifier], isType };
+    return { raw: t, source, kind: "default", names: [specifier], isType, quote };
   }
 
   // Re-export
@@ -148,7 +198,8 @@ export function extractImportSources(content: string): string[] {
   const seen = new Set<string>();
   for (const line of content.split("\n")) {
     if (!isImportLike(line)) continue;
-    const stmt = parseImport(line);
+    // A comment can hold a `from "…"` the patterns would take for the module.
+    const stmt = parseImport(stripComments(line));
     if (stmt.source) seen.add(stmt.source);
   }
   return [...seen];
@@ -293,16 +344,18 @@ function aggregateNamedImports(stmts: ImportStatement[]): ImportStatement[] {
       // Fusionner les noms
       const merged = new Set([...existing.names, ...stmt.names]);
       const sortedNames = [...merged].sort();
-      const indent = existing.raw.match(/^(\s*)/)?.[1] ?? "";
       const semi = existing.raw.endsWith(";") ? ";" : "";
       const typePrefix = existing.isType ? "type " : "";
-      const newRaw = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from '${stmt.source}'${semi}`;
+      const q = existing.quote ?? "'";
+      const newRaw = `import ${typePrefix}{ ${sortedNames.join(", ")} } from ${q}${stmt.source}${q}${semi}`;
       namedBySource.set(key, {
         raw: newRaw,
         source: existing.source,
         kind: "named",
         names: sortedNames,
         isType: existing.isType,
+        indent: existing.indent,
+        quote: existing.quote,
       });
     } else {
       namedBySource.set(key, stmt);
@@ -365,18 +418,24 @@ function mergeNamedImports(
 
   const sortedNames = [...merged].sort();
   const typePrefix = ours.isType ? "type " : "";
-  const indent = ours.raw.match(/^(\s*)/)?.[1] ?? "";
-  const semi = ours.raw.endsWith(";") ? ";" : "";
+  const indent = ours.indent ?? "";
+  // Quote and semicolon: ours', unless only theirs changed it from base.
+  // With no base (both sides added the import), ours' style is kept: the
+  // file's side being merged into.
+  const hasSemi = (s: ImportStatement) => s.raw.endsWith(";");
+  const semi = (base && hasSemi(ours) === hasSemi(base) ? hasSemi(theirs) : hasSemi(ours)) ? ";" : "";
 
   if (sortedNames.length === 0) return null; // tous les noms supprimés
 
-  const oneLiner = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from '${ours.source}'${semi}`;
+  // The file's own quotes, not a house style.
+  const q = (base && ours.quote === base.quote ? theirs.quote : ours.quote) ?? "'";
+  const oneLiner = `${indent}import ${typePrefix}{ ${sortedNames.join(", ")} } from ${q}${ours.source}${q}${semi}`;
   if (oneLiner.length <= 100 || sortedNames.length <= 3) return oneLiner;
 
   const lines = [
     `${indent}import ${typePrefix}{`,
     ...sortedNames.map((n) => `${indent}  ${n},`),
-    `${indent}} from '${ours.source}'${semi}`,
+    `${indent}} from ${q}${ours.source}${q}${semi}`,
   ];
   return lines.join("\n");
 }
@@ -416,6 +475,84 @@ export function tryResolveImportConflict(
   };
   const hasUnparsableContent = (lines: string[]): boolean =>
     lines.some((l) => !isBenignUnknown(l) && parseImport(l).kind === "unknown");
+  // A comment inside an import line can hold a `from "…"` the patterns would
+  // read as the module, and a rebuilt line would drop it: not merged here.
+  // Comments are not carried through a merge (only imports are written back):
+  // a block holding one, inline or on its own line (`// @ts-ignore`), is left
+  // to the textual engine — and to the user when the imports each side added
+  // bind a same name, which a textual union would declare twice. Lines that
+  // read as no import (a comment's continuation, a fragment left over) bind
+  // nothing here, as for the unparsable fallback below.
+  const isCommentLine = (l: string) => /^\s*(?:\/\/|\/\*|\*)/.test(l);
+  if ([baseLines, oursLines, theirsLines].some((lines) => lines.some((l) => hasInlineComment(l) || isCommentLine(l)))) {
+    const baseSet = new Set(baseLines.map((l) => l.trim()));
+    // (A multi-line import never gets here: its inner lines are not
+    // import-like, and such a block left before this check.)
+    // Names a side binds anew: on its lines missing from the base (a line
+    // both sides added alike is one line, not two), minus what the base
+    // already bound (both sides editing `{ a }` is not a clash on `a`).
+    // A line that reads as no import binds nothing; an import whose bindings
+    // cannot be read could bind anything (null).
+    // Lines inside a `/* … */` spanning lines (a commented-out import) are skipped.
+    const importLines = (lines: string[]) => {
+      const code: string[] = [];
+      let inBlock = false;
+      for (const l of lines) {
+        const t = l.trim();
+        if (inBlock) {
+          if (t.includes("*/")) inBlock = false;
+          continue;
+        }
+        if (t.startsWith("/*") && !t.slice(2).includes("*/")) {
+          inBlock = true;
+          continue;
+        }
+        if (isCommentLine(l)) continue;
+        const c = stripComments(l).trim();
+        if (c) code.push(c);
+      }
+      return code;
+    };
+    const baseCode = new Set(importLines(baseLines));
+    const oursCode = importLines(oursLines).filter((l) => !baseCode.has(l));
+    const theirsCode = importLines(theirsLines).filter((l) => !baseCode.has(l));
+    type Bound = { name: string; source: string };
+    const bindingsOf = (lines: string[]): Bound[] | null => {
+      const out: Bound[] = [];
+      for (const l of lines) {
+        const stmt = parseImport(l);
+        if (stmt.kind === "unknown") continue;
+        const bound = localBindings(stmt);
+        if (bound === null) return null;
+        out.push(...bound.map((name) => ({ name, source: stmt.source })));
+      }
+      return out;
+    };
+    const baseBindings = bindingsOf([...baseCode]) ?? [];
+    const baseBound = new Set(baseBindings.map((b) => b.name));
+    const baseSources = new Set(baseBindings.map((b) => b.source));
+    const newNames = (mine: string[], other: string[]) =>
+      bindingsOf(mine.filter((l) => !other.includes(l)))?.filter((b) => !baseBound.has(b.name)) ?? null;
+    const oursNew = newNames(oursCode, theirsCode);
+    const theirsNew = newNames(theirsCode, oursCode);
+    // The same name added to the same base import on both sides is two edits
+    // of one line (the textual engine stops on it), not a double declaration.
+    const clash =
+      oursNew === null || theirsNew === null
+        ? (oursNew?.length ?? 1) > 0 && (theirsNew?.length ?? 1) > 0
+        : oursNew.some((o) =>
+            theirsNew.some((t) => t.name === o.name && !(t.source === o.source && baseSources.has(o.source))),
+          );
+    return {
+      mergedLines: null,
+      ...(clash ? { conflict: true } : {}),
+      reason: clash
+        ? "The import block holds a comment, and the imports each side added bind the same name: left to you."
+        : "The import block holds a comment, which a rebuilt block would drop, so it is left to the textual engine.",
+      resolvedImports: 0,
+      unresolvedImports: 1,
+    };
+  }
   if (hasUnparsableContent(oursLines) || hasUnparsableContent(theirsLines)) {
     return {
       mergedLines: null,
@@ -563,12 +700,32 @@ export function tryResolveImportConflict(
   const resultLines: string[] = [];
   // Les imports gardés, pour la dernière garde sur les liaisons.
   const keptImports: ImportStatement[] = [];
+  // One side re-indented the whole block (every one of its imports moved from
+  // the base's single indentation to one new one) and the other did not: the
+  // lines the other side kept or added at the base's indentation follow it.
+  const uniformIndent = (stmts: ImportStatement[]): string | undefined => {
+    const set = new Set(stmts.map((x) => x.indent ?? ""));
+    return set.size === 1 ? [...set][0] : undefined;
+  };
+  const baseIndent = uniformIndent(baseImports);
+  const oursIndent = uniformIndent(oursImports);
+  const theirsIndent = uniformIndent(theirsImports);
+  const blockIndent =
+    baseIndent === undefined ? undefined
+    : oursIndent !== undefined && oursIndent !== baseIndent && theirsIndent === baseIndent ? oursIndent
+    : theirsIndent !== undefined && theirsIndent !== baseIndent && oursIndent === baseIndent ? theirsIndent
+    : undefined;
+  const shifted = (indent: string | undefined): string =>
+    blockIndent !== undefined && (indent ?? "") === baseIndent ? blockIndent : (indent ?? "");
+
   const keep = (stmt: ImportStatement) => {
-    resultLines.push(stmt.raw);
+    resultLines.push(shifted(stmt.indent) + stmt.raw);
     keptImports.push(stmt);
   };
+  // A merged import written over several lines stays one entry until it is
+  // sorted, so the sort moves it whole.
   const keepMerged = (text: string) => {
-    resultLines.push(...text.split("\n"));
+    resultLines.push(text);
     keptImports.push(parseImport(text.replace(/\n\s*/g, " ")));
   };
   let resolvedImports = 0;
@@ -582,13 +739,24 @@ export function tryResolveImportConflict(
     // Absent de base → ajout
     if (!base) {
       if (ours && theirs) {
-        if (ours.raw === theirs.raw) {
+        // Indentations compared once a block re-indent is applied to both.
+        if (shifted(ours.indent) !== shifted(theirs.indent)) {
+          unresolvedImports++;
+          // Not for the textual engine either: it would keep both lines.
+          return {
+            mergedLines: null,
+            conflict: true,
+            reason: `Conflict on import '${ours.source}': added at two indentations.`,
+            resolvedImports,
+            unresolvedImports,
+          };
+        } else if (ours.raw === theirs.raw) {
           // Même ajout → garder une fois
           keep(ours);
           resolvedImports++;
         } else if (ours.kind === "named" && theirs.kind === "named") {
           // Named imports du même module ajoutés des deux côtés → merger les noms
-          const merged = mergeNamedImports(undefined, ours, theirs);
+          const merged = mergeNamedImports(undefined, { ...ours, indent: shifted(ours.indent) }, theirs);
           if (merged) {
             keepMerged(merged);
             resolvedImports++;
@@ -632,8 +800,9 @@ export function tryResolveImportConflict(
       continue;
     }
 
+    // A re-indent is a change against a deletion.
     if (!ours) {
-      if (!theirsChanged) {
+      if (!theirsChanged && shifted(theirs?.indent) === shifted(base.indent)) {
         resolvedImports++; // theirs = base, ours supprimé → supprimer
       } else {
         unresolvedImports++;
@@ -648,7 +817,7 @@ export function tryResolveImportConflict(
     }
 
     if (!theirs) {
-      if (!oursChanged) {
+      if (!oursChanged && shifted(ours.indent) === shifted(base.indent)) {
         resolvedImports++; // ours = base, theirs supprimé → supprimer
       } else {
         unresolvedImports++;
@@ -662,22 +831,34 @@ export function tryResolveImportConflict(
       continue;
     }
 
-    // Les deux présents
+    // Les deux présents. Whitespace is not a change of the import (`raw` is
+    // trimmed), but a side that re-indented the line keeps its indentation.
+    if (ours.indent !== base.indent && theirs.indent !== base.indent && ours.indent !== theirs.indent) {
+      unresolvedImports++;
+      return {
+        mergedLines: null,
+        reason: `Conflict on import '${base.source}': both sides re-indented it differently.`,
+        resolvedImports,
+        unresolvedImports,
+      };
+    }
+    const indent = shifted(ours.indent !== base.indent ? ours.indent : theirs.indent);
+    const at = (stmt: ImportStatement): ImportStatement => ({ ...stmt, indent });
     if (!oursChanged && !theirsChanged) {
-      keep(base);
+      keep(at(base));
       resolvedImports++;
     } else if (ours.raw === theirs.raw) {
-      keep(ours);
+      keep(at(ours));
       resolvedImports++;
     } else if (!oursChanged) {
-      keep(theirs);
+      keep(at(theirs));
       resolvedImports++;
     } else if (!theirsChanged) {
-      keep(ours);
+      keep(at(ours));
       resolvedImports++;
     } else if (ours.kind === "named" && theirs.kind === "named") {
       // Named imports du même module modifiés des deux côtés → merger les noms
-      const merged = mergeNamedImports(base, ours, theirs);
+      const merged = mergeNamedImports(base, at(ours), theirs);
       if (merged) {
         keepMerged(merged);
         resolvedImports++;
@@ -733,7 +914,7 @@ export function tryResolveImportConflict(
   }
 
   // Trier les imports dans le résultat (ordre source : types first, puis alphabétique)
-  const sortedResult = sortImportLines(resultLines);
+  const sortedResult = sortImportLines(resultLines).flatMap((entry) => entry.split("\n"));
 
   return {
     mergedLines: sortedResult,
@@ -818,7 +999,7 @@ function sortImportLines(
   // Séparer les commentaires / blancs des imports réels
   const parsed = lines.map((l) => ({
     line: l,
-    stmt: parseImport(l),
+    stmt: parseImport(l.replace(/\n\s*/g, " ")),
   }));
 
   const comments = parsed.filter((p) => p.stmt.kind === "unknown");
