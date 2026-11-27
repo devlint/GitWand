@@ -129,3 +129,12 @@ describe("imports — review du lot A, passe 4", () => {
     expect(result.conflict).toBeUndefined();
   });
 });
+
+describe("imports — review du lot A, passe 5", () => {
+  it("un require illisible inchangé depuis la base ne bloque pas un ajout d'un autre module", () => {
+    const base = [`const a = require('m'), b = require('n');`];
+    const result = tryResolveImportConflict(base, [...base, `import { c } from 'm';`], [...base, `import p from 'p';`]);
+    expect(result.conflict).toBeUndefined();
+    expect(result.mergedLines).not.toBeNull();
+  });
+});

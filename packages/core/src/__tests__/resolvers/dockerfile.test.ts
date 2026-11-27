@@ -538,14 +538,12 @@ describe("Dockerfile — review du lot A, passe 3", () => {
     expect((result.mergedContent ?? "").match(/^# --$/gm)).toHaveLength(1);
   });
 
-  it("chaque côté change le nombre de copies autrement : le résolveur Dockerfile passe la main, sans perdre l'ajout de ours", () => {
-    // ours ajoute une copie en fin, theirs retire celle de la base : le
-    // résolveur Dockerfile ne tranche pas (comptes 2 / 0 / base 1) ; le moteur
-    // textuel fusionne ces lignes distinctes.
+  it("ours ajoute une copie en fin, theirs retire celle de la base : chacune à son emplacement", () => {
+    // Emplacement ENV A : base [# --], ours [# --], theirs [] → retirée.
+    // Fin de stage : seul ours ajoute # --.
     const input = [`FROM node:20`, dockerHunk([`# --`, `ENV A=2`, `# --`], [`# --`, `ENV A=1`], [`ENV A=1`])].join("\n");
     const result = resolve(input, "Dockerfile");
     expect(result.stats.autoResolved).toBe(1);
-    expect(result.resolutions[0]?.resolutionReason).toMatch(/3-way LCS/);
     expect(result.mergedContent).toBe([`FROM node:20`, `ENV A=2`, `# --`].join("\n"));
   });
 
@@ -602,5 +600,29 @@ describe("Dockerfile — review du lot A, passe 4", () => {
     expect(result.mergedContent).toBe(
       [`FROM a AS y`, `RUN 9`, `FROM node:20 AS x`, `COPY --from=y /o /o`, `RUN 1`].join("\n"),
     );
+  });
+});
+
+describe("Dockerfile — review du lot A, passe 5", () => {
+  it("le même séparateur ajouté de chaque côté à des endroits différents : les deux restent", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`# ------`, `ENV A=1`, `ENV B=1`],
+      [`ENV A=1`, `ENV B=1`],
+      [`ENV A=1`, `# ------`, `ENV B=1`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe([`FROM node:20`, `# ------`, `ENV A=1`, `# ------`, `ENV B=1`].join("\n"));
+  });
+
+  it("theirs retire le séparateur au-dessus de ENV A : c'est celui-là qui part, pas l'autre", () => {
+    const input = [`FROM node:20`, dockerHunk(
+      [`# ---`, `ENV A=2`, ``, `# ---`, `ENV B=1`],
+      [`# ---`, `ENV A=1`, ``, `# ---`, `ENV B=1`],
+      [`ENV A=1`, ``, `# ---`, `ENV B=1`],
+    )].join("\n");
+    const result = resolve(input, "Dockerfile");
+    expect(result.stats.autoResolved).toBe(1);
+    expect(result.mergedContent).toBe([`FROM node:20`, `ENV A=2`, ``, `# ---`, `ENV B=1`].join("\n"));
   });
 });

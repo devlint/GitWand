@@ -482,16 +482,12 @@ export function tryResolveImportConflict(
     if (la === null || lb === null) return true; // liaisons inconnues : prudence
     return la.some((n) => lb.includes(n));
   };
-  // Des liaisons illisibles comptent comme une collision : le moteur textuel
-  // garderait les deux lignes, et un nom lié des deux côtés serait déclaré
-  // deux fois.
-  const collisionReported = bindingsCollide;
   const kindMismatch = (a: ImportStatement, b: ImportStatement, source: string) => {
     unresolvedImports++;
     const typeVsValue = a.kind === b.kind && a.isType !== b.isType;
     return {
       mergedLines: null,
-      ...(collisionReported(a, b) ? { conflict: true } : {}),
+      ...(bindingsCollide(a, b) ? { conflict: true } : {}),
       reason: typeVsValue
         ? `Conflict on import '${source}': the same ${a.kind} import as a type on one side and as a value on the other.`
         : `Conflict on import '${source}': incompatible kinds (${a.kind} vs ${b.kind}).`,
@@ -516,7 +512,7 @@ export function tryResolveImportConflict(
     const candidates = (other.get(added.source) ?? []).filter(
       (s) => importKey(s) !== importKey(added) && !isUntouchedBase(s),
     );
-    const colliding = candidates.find((s) => collisionReported(added, s));
+    const colliding = candidates.find((s) => bindingsCollide(added, s));
     if (colliding) return colliding;
     return added.kind !== "named" ? candidates.find((s) => s.kind !== added.kind) : undefined;
   };
@@ -667,15 +663,17 @@ export function tryResolveImportConflict(
 
   // Dernière garde : deux imports gardés du même module qui lient le même nom
   // (chaque côté a changé un import de base différent : `{ a, X }` d'un côté,
-  // `import X` de l'autre). Une paire déjà présente telle quelle dans la base
-  // n'est pas nouvelle et ne compte pas.
+  // `import X` de l'autre).
   const kept = keptImports;
   const baseRaws = new Set(baseImports.map((s) => s.raw.trim()));
   for (let i = 0; i < kept.length; i++) {
     for (let j = i + 1; j < kept.length; j++) {
       const [a, b] = [kept[i], kept[j]];
       if (a.source !== b.source || !a.source || a.raw === b.raw) continue;
-      if (baseRaws.has(a.raw) && baseRaws.has(b.raw)) continue;
+      // Un import resté tel quel depuis la base n'est le changement de personne
+      // (comme dans `sameSourceClash`) : un `require` illisible inchangé ne
+      // bloque pas une fusion que git ferait bien.
+      if (baseRaws.has(a.raw) || baseRaws.has(b.raw)) continue;
       if (bindingsCollide(a, b)) {
         return {
           mergedLines: null,
