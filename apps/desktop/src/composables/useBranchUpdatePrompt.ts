@@ -133,9 +133,11 @@ export async function probeLocalRewriteOfUpstream(
  * - set by a commit made here (`commit: …`, `commit (amend): …`,
  *   `commit (initial): …`, a cherry-pick): the user's own commit, whatever
  *   happened to it since (undo last commit then a new one, a squash by
- *   `reset --soft`);
+ *   `reset --soft`). Not one set by a rebase: a fast-forward rebase onto
+ *   the upstream also writes `rebase (finish)`;
  * - or left by a rewrite: a rebase (`rebase (finish): …`, `rebase -i …`,
- *   `pull --rebase (finish): …`) or an amend.
+ *   a restack), a pull that rebased (`pull --rebase (finish): …`) or an
+ *   amend.
  *
  * A tip that arrived by a pull, a merge, a reset or a branch creation and
  * was then left by a reset or a plain commit proves nothing (#239): it may
@@ -152,11 +154,18 @@ export function leftThroughRewrite(reflog: string, tip: string): boolean {
         ? { hash: l.trim(), subject: "" }
         : { hash: l.slice(0, tab).trim(), subject: l.slice(tab + 1) };
     });
+  // A rebase, a pull that rebased (`pull --rebase (finish)`, `pull -q
+  // --rebase (finish)`: git writes the user's options; its fast-forward,
+  // `pull --rebase: Fast-forward`, is no rewrite), an amend.
+  const rewrite = (subject: string) =>
+    /^rebase\b/.test(subject) ||
+    /^pull\b[^:]*\(finish\)/.test(subject) ||
+    subject.startsWith("commit (amend)");
+  // Not a rebase's result: a fast-forward `git rebase origin/x` writes
+  // `rebase (finish)` too, setting the tip to a collaborator's commit.
   const madeHere = (subject: string) =>
     (/^commit\b/.test(subject) && !subject.startsWith("commit (merge)")) ||
     /^cherry-pick\b/.test(subject);
-  const rewrite = (subject: string) =>
-    /^(rebase|pull --rebase)\b/.test(subject) || subject.startsWith("commit (amend)");
   for (let i = 1; i < entries.length; i++) {
     if (entries[i].hash !== tip) continue;
     if (madeHere(entries[i].subject) || rewrite(entries[i - 1].subject)) return true;

@@ -247,9 +247,14 @@ export async function openAICompatAuth(endpoint: string): Promise<"bearer" | "no
  */
 export function compatAuthError(endpoint: string, status: number, body: string): string {
   const base = `API error ${status}: ${body}`;
+  if (status !== 401 && status !== 403) return base;
   const bound = aiApiKeyOrigin();
-  if ((status === 401 || status === 403) && bound !== null && !aiApiKeyBoundTo(endpoint)) {
+  if (bound !== null && !aiApiKeyBoundTo(endpoint)) {
     return `${t("settings.aiApiKeyBoundElsewhere", bound)} (${base})`;
+  }
+  // A key stored before keys were tied to an endpoint is sent nowhere.
+  if (bound === null && isAiApiKeyConfigured()) {
+    return `${t("settings.aiApiKeyUnbound")} (${base})`;
   }
   return base;
 }

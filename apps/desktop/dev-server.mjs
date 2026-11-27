@@ -915,6 +915,19 @@ function sweepStaleRunDirs(base) {
     } catch { /* gone */ }
   }
 }
+/**
+ * Mirrors `require_lockdown_flags`: null when `bin <helpArgs>` lists every
+ * flag, else the error to answer (too old, or the probe did not answer).
+ */
+function devLockdownError(bin, helpArgs, flags, tooOld) {
+  const r = spawnSync(bin, helpArgs, { encoding: "utf-8", timeout: 10_000 });
+  if (r.error || r.status === null) {
+    return `Could not check the AI CLI's options (\`${basename(bin)} ${helpArgs.join(" ")}\` did not answer within 10 s): try again`;
+  }
+  const help = `${r.stdout || ""}${r.stderr || ""}`;
+  const has = (f) => new RegExp(`(^|[^\\w-])${f.replace(/[-]/g, "\\-")}(?![\\w-])`, "m").test(help);
+  return flags.every(has) ? null : tooOld;
+}
 /** True when a process with this pid exists (EPERM is a live process). */
 function devProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -8293,6 +8306,7 @@ async function handleRequest(req, res) {
           upstream = await fetch(next.href, { headers: { Accept: "image/*" }, redirect: "manual", signal });
           const location = upstream.status >= 300 && upstream.status < 400 ? upstream.headers.get("location") : null;
           if (!location) break;
+          await upstream.body?.cancel().catch(() => {}); // the hop's body is not read
           if (hop >= 3) throw new Error("too many redirects");
           next = new URL(location, next);
           if (next.protocol !== "http:" && next.protocol !== "https:") throw new Error("redirect to a non-http(s) URL");
@@ -8623,12 +8637,9 @@ async function handleRequest(req, res) {
         // config. Mirrors codex_cli_prompt_inner.
         // Mirrors the Rust check: a Codex without --ignore-user-config is
         // refused rather than run with the user's MCP servers.
-        const help = spawnSync(CODEX, ["exec", "--help"], { encoding: "utf-8", timeout: 10_000 });
-        if (!/(^|[^\w-])--ignore-user-config(?![\w-])/m.test(`${help.stdout || ""}${help.stderr || ""}`)) {
-          return jsonResponse(req, res, {
-            error: "This Codex CLI cannot run without your config.toml: update it (`npm i -g @openai/codex` or your package manager)",
-          }, 500);
-        }
+        const cxRefusal = devLockdownError(CODEX, ["exec", "--help"], ["--ignore-user-config"],
+          "This Codex CLI cannot run without your config.toml: update it (`npm i -g @openai/codex` or your package manager)");
+        if (cxRefusal) return jsonResponse(req, res, { error: cxRefusal }, 500);
         const codexArgs = ["exec", "--sandbox", "read-only", "--ignore-user-config"];
         if (body.model && String(body.model).trim()) {
           codexArgs.push("--model", String(body.model).trim());
@@ -8849,6 +8860,9 @@ async function handleRequest(req, res) {
       try {
         const body = await readBody(req);
         const COPILOT = resolveBin("copilot");
+        const cpRefusal = devLockdownError(COPILOT, ["--help"], ["--available-tools", "--disable-builtin-mcps"],
+          "This Copilot CLI cannot restrict its tools: update it with `copilot update`");
+        if (cpRefusal) return jsonResponse(req, res, { error: cpRefusal }, 500);
         const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
           : (body.prompt || "");
@@ -8981,6 +8995,9 @@ async function handleRequest(req, res) {
       try {
         const body = await readBody(req);
         const AGY = resolveBin("agy");
+        const agyRefusal = devLockdownError(AGY, ["--help"], ["--input-format", "--mode"],
+          "This Antigravity CLI cannot read a prompt from stdin nor run in plan mode: update it with `agy update`");
+        if (agyRefusal) return jsonResponse(req, res, { error: agyRefusal }, 500);
         const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
           : (body.prompt || "");

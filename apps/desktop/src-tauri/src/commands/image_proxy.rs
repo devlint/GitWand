@@ -557,6 +557,17 @@ mod tests {
     }
 
     #[test]
+    fn a_bracket_range_in_the_url_is_one_request() {
+        // With globbing, `[1-3]` would be three requests; the one-shot server
+        // answers the first and curl would fail on the others.
+        let (port, h) = serve_once(http("200 OK", "image/png", b"\x89PNG-one"));
+        let r = respond(&uri_for(port, "/[1-3].png"));
+        h.join().unwrap();
+        assert_eq!(r.status(), 200);
+        assert_eq!(r.body(), b"\x89PNG-one");
+    }
+
+    #[test]
     fn a_panicking_fetch_frees_its_slot_and_answers_its_waiters() {
         let url = "https://panic.example/a.png";
         let waiter = std::thread::spawn(move || {

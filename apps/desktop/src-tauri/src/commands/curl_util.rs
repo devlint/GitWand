@@ -22,10 +22,12 @@ pub(crate) fn bearer_config(tok: &str) -> String {
 /// `$XDG_CONFIG_HOME`, `~`, `%APPDATA%`, `%USERPROFILE%`). A `location` line
 /// there would make an AI request follow a redirect with the key bound to
 /// another origin, and a `proxy` line would reroute forge and AI calls. curl
-/// only honours `-q` as its very first argument.
+/// only honours `-q` as its very first argument. URL globbing is off too.
 pub(crate) fn curl_command(args: &[String]) -> std::process::Command {
     let mut cmd = hidden_cmd("curl");
-    cmd.arg("-q").args(args);
+    // `--globoff`: `[1-100000]` or `{a,b}` in a URL (an image in a PR, an
+    // avatar) must stay one request, not expand into thousands.
+    cmd.arg("-q").arg("--globoff").args(args);
     cmd
 }
 
@@ -436,7 +438,7 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(got, ["-q", "-s", "https://example.invalid"]);
+        assert_eq!(got, ["-q", "--globoff", "-s", "https://example.invalid"]);
     }
 
     /// End to end: a curlrc that would add a header is ignored. Served by a

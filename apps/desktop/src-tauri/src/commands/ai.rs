@@ -1081,8 +1081,9 @@ fn help_has_flag(help: &str, flag: &str) -> bool {
 /// Whether `binary <help_args>` (stdout or stderr, 10 s at most) mentions every
 /// flag of `flags`: the options a lockdown relies on. Cached per binary
 /// identity (path, size, mtime), so `agy update` / `copilot update` in place
-/// is seen at once; a probe that failed or timed out is not cached.
-fn help_mentions(binary: &str, cli: AiCli, help_args: &[&str], flags: &[&str]) -> bool {
+/// is seen at once. `None` when the probe itself failed or timed out (not
+/// cached): the caller says so rather than ask for an update.
+fn help_mentions(binary: &str, cli: AiCli, help_args: &[&str], flags: &[&str]) -> Option<bool> {
     use std::sync::Mutex;
     type Key = ((String, u64, Option<std::time::SystemTime>), String);
     static SEEN: Mutex<Vec<(Key, bool)>> = Mutex::new(Vec::new());
@@ -1096,18 +1097,41 @@ fn help_mentions(binary: &str, cli: AiCli, help_args: &[&str], flags: &[&str]) -
         .iter()
         .find(|(k, _)| *k == key)
     {
-        return *ok;
+        return Some(*ok);
     }
     let mut cmd = ai_cmd(binary, cli);
     cmd.args(help_args);
-    let Some(help) = output_within(cmd, std::time::Duration::from_secs(10), true) else {
-        return false;
-    };
+    // No answer: `None`, not cached.
+    let help = output_within(cmd, std::time::Duration::from_secs(10), true)?;
     let ok = flags.iter().all(|f| help_has_flag(&help, f));
     SEEN.lock()
         .unwrap_or_else(|p| p.into_inner())
         .push((key, ok));
-    ok
+    Some(ok)
+}
+
+/// `Ok` when `binary <help_args>` lists every flag a lockdown needs;
+/// `too_old` when it does not; a distinct error when the probe could not run
+/// (a slow start, a busy machine), which a retry may fix.
+fn require_lockdown_flags(
+    binary: &str,
+    cli: AiCli,
+    help_args: &[&str],
+    flags: &[&str],
+    too_old: &str,
+) -> Result<(), String> {
+    match help_mentions(binary, cli, help_args, flags) {
+        Some(true) => Ok(()),
+        Some(false) => Err(too_old.to_string()),
+        None => Err(format!(
+            "Could not check the AI CLI's options (`{} {}` did not answer within 10 s): try again",
+            std::path::Path::new(binary)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| binary.to_string()),
+            help_args.join(" ")
+        )),
+    }
 }
 
 /// Kill `child` and everything it started (see `stdout_within`).
@@ -1660,16 +1684,13 @@ fn codex_cli_prompt_inner(
 
     // `--ignore-user-config` (below) is what keeps the user's MCP servers
     // out: a Codex without it is refused rather than run without it.
-    if !help_mentions(
+    require_lockdown_flags(
         &binary,
         AiCli::Codex,
         &["exec", "--help"],
         &["--ignore-user-config"],
-    ) {
-        return Err(
-            "This Codex CLI cannot run without your config.toml: update it (`npm i -g @openai/codex` or your package manager)".to_string(),
-        );
-    }
+        "This Codex CLI cannot run without your config.toml: update it (`npm i -g @openai/codex` or your package manager)",
+    )?;
 
     // `_run_dir` lives until the end of the function: the CLI has exited.
     let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Codex)?;
@@ -2036,17 +2057,13 @@ fn antigravity_cli_prompt_inner(
 ) -> Result<String, String> {
     let binary =
         resolve_antigravity_binary().ok_or_else(|| "Binaire `agy` introuvable".to_string())?;
-    if !help_mentions(
+    require_lockdown_flags(
         &binary,
         AiCli::Antigravity,
         &["--help"],
         &["--input-format", "--mode"],
-    ) {
-        return Err(
-            "This Antigravity CLI cannot read a prompt from stdin nor run in plan mode: update it with `agy update`"
-                .to_string(),
-        );
-    }
+        "This Antigravity CLI cannot read a prompt from stdin nor run in plan mode: update it with `agy update`",
+    )?;
 
     let full_prompt = match system_prompt {
         Some(sys) if !sys.trim().is_empty() => {
@@ -2629,17 +2646,13 @@ fn copilot_cli_prompt_inner(
 ) -> Result<String, String> {
     let binary =
         resolve_copilot_binary().ok_or_else(|| "Binaire `copilot` introuvable".to_string())?;
-    if !help_mentions(
+    require_lockdown_flags(
         &binary,
         AiCli::Copilot,
         &["--help"],
         &["--available-tools", "--disable-builtin-mcps"],
-    ) {
-        return Err(
-            "This Copilot CLI cannot restrict its tools: update it with `copilot update`"
-                .to_string(),
-        );
-    }
+        "This Copilot CLI cannot restrict its tools: update it with `copilot update`",
+    )?;
 
     // Copilot CLI doesn't expose a separate system channel — prepend the
     // system prompt as a Markdown section, same shape as the other flows.
@@ -3887,6 +3900,36 @@ mod neutral_dir_tests {
             "OPENCODE_DISABLE_PROJECT_CONFIG".to_string(),
             "1".to_string()
         )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lockdown_flags_are_checked_and_a_failed_probe_is_not_called_too_old() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = Scratch::new("lockdown-flags");
+        let script = |name: &str, body: &str| {
+            let p = scratch.0.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p.to_string_lossy().into_owned()
+        };
+        let new = script(
+            "new-cli",
+            "echo '  --available-tools  --disable-builtin-mcps'",
+        );
+        let old = script("old-cli", "echo '  --available-toolset'");
+        let flags = ["--available-tools", "--disable-builtin-mcps"];
+        assert!(
+            require_lockdown_flags(&new, AiCli::Copilot, &["--help"], &flags, "too old").is_ok()
+        );
+        assert_eq!(
+            require_lockdown_flags(&old, AiCli::Copilot, &["--help"], &flags, "too old"),
+            Err("too old".to_string())
+        );
+        let missing = scratch.0.join("absent").to_string_lossy().into_owned();
+        let err = require_lockdown_flags(&missing, AiCli::Copilot, &["--help"], &flags, "too old")
+            .unwrap_err();
+        assert!(err.starts_with("Could not check"), "{err}");
     }
 
     #[test]

@@ -211,6 +211,18 @@ describe("isLocalRewriteOfUpstream — a pull undone by a reset (#239)", () => {
     expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(false);
   }, GIT_TEST_TIMEOUT_MS);
 
+  it("is false when a collaborator's commit came by a fast-forward rebase, then was reset away", async () => {
+    const { teammate, me } = setup();
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["fetch", "-q"]);
+    // No local commit: the rebase fast-forwards, writing `rebase (finish)`.
+    git(me, ["rebase", "-q", "origin/feat"]);
+    git(me, ["reset", "-q", "--hard", "HEAD~1"]);
+    commit(me, "h", "mine\n", "my own work");
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+
   it("is true when the user's own pushed commit was undone, then redone", async () => {
     const { me } = setup();
     commit(me, "h", "mine\n", "my own work");
@@ -249,12 +261,18 @@ describe("leftThroughRewrite", () => {
     // layer with no commit of its own.
     expect(leftThroughRewrite(`b\trebase (restack): x onto c\n${T}\t\n`, T)).toBe(true);
     expect(leftThroughRewrite(`b\trebase (update-refs): refs/heads/x\n${T}\t\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\tpull -q --rebase (finish): refs/heads/x onto c\n${T}\tpull: Fast-forward\n`, T)).toBe(true);
   });
   it("refuses a tip that arrived from elsewhere and was left by a reset or a commit, a merge made here, and the current tip", () => {
     expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tpull: Fast-forward\n`, T)).toBe(false);
     expect(leftThroughRewrite(`b\tcommit: y\n${T}\tmerge origin/x: Fast-forward\n`, T)).toBe(false);
     expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tcommit (merge): Merge branch 'x'\n`, T)).toBe(false);
     expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tbranch: Created from origin/x\n`, T)).toBe(false);
+    // A fast-forward rebase or pull --rebase sets a collaborator's commit:
+    // git writes `rebase (finish)` / `pull --rebase: Fast-forward` for it.
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\trebase (finish): refs/heads/x onto d\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\tcommit: y\n${T}\tpull --rebase: Fast-forward\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\tpull --rebase: Fast-forward\n${T}\tpull: Fast-forward\n`, T)).toBe(false);
     expect(leftThroughRewrite(`${T}\tcommit: x\n`, T)).toBe(false);
   });
 });

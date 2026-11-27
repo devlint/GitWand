@@ -93,6 +93,14 @@ describe("OpenAI-compatible provider without a key", () => {
     await expect(useAIProvider().rawPrompt("sys", "user")).rejects.toThrow(/api\.groq\.com/);
   });
 
+  it("says a key stored before the binding must be entered again when the server refuses", async () => {
+    settings();
+    keyConfigured = true;
+    keyOrigin = null;
+    aiHttpRequest.mockResolvedValueOnce({ status: 401, body: "unauthorized" });
+    await expect(useAIProvider().rawPrompt("sys", "user")).rejects.toThrow(/stored before keys were tied/);
+  });
+
   it("offers the core an LLM endpoint without a key", () => {
     settings();
     expect(useAIProvider().toLlmEndpoint()).not.toBeNull();
