@@ -15,7 +15,7 @@ import {
   type AiAskMode,
 } from "../utils/backend";
 import { t } from "./useI18n";
-import { ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
+import { aiApiKeyBoundTo, aiApiKeyOrigin, endpointOrigin, ensureAiApiKeyLoaded, isAiApiKeyConfigured } from "./useAiApiKey";
 
 /**
  * AI provider types matching SettingsPanel configuration.
@@ -229,6 +229,65 @@ async function callClaude(
 }
 
 /**
+ * An OpenAI-compatible provider that can be used: a key bound to its
+ * endpoint, or, without one, an endpoint on this machine or the local
+ * network (a llama.cpp, vLLM or LM Studio server needs none). A hosted
+ * endpoint with no key bound to it (the default, Anthropic's, shared with the
+ * claude provider; a key cleared or tied elsewhere) is an incomplete setup:
+ * the Claude Code CLI fallback applies, as before keyless servers were
+ * supported. A key bound to another origin is never sent
+ * (`openAICompatAuth`).
+ */
+export function openAICompatUsable(endpoint: string | null | undefined): boolean {
+  if (!endpoint) return false;
+  if (aiApiKeyBoundTo(endpoint)) return true;
+  return isLocalNetworkEndpoint(endpoint);
+}
+
+/** Loopback, a private (RFC 1918 / ULA / link-local) address, or a `.local` name. */
+export function isLocalNetworkEndpoint(endpoint: string): boolean {
+  const origin = endpointOrigin(endpoint);
+  if (!origin) return false;
+  const host = new URL(origin).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+  if (/^127\.|^10\.|^192\.168\.|^169\.254\./.test(host)) return true;
+  const m = /^172\.(\d+)\./.exec(host);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
+  return host === "::1" || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe80:/.test(host);
+}
+
+/**
+ * How a request to the OpenAI-compatible `endpoint` is authenticated: with
+ * the stored key when it is bound to that endpoint's origin, without any
+ * otherwise. A local llama.cpp, vLLM or LM Studio server needs none, and a
+ * key kept for another provider (an Anthropic key) must not make every
+ * request to it fail. Waits for the key's state to be known.
+ */
+export async function openAICompatAuth(endpoint: string): Promise<"bearer" | "none"> {
+  await ensureAiApiKeyLoaded();
+  return aiApiKeyBoundTo(endpoint) ? "bearer" : "none";
+}
+
+/**
+ * The error for a refused OpenAI-compatible request: when the server wants
+ * a key and the stored one is bound to another endpoint (so it was not
+ * sent), say so rather than leave a bare 401.
+ */
+export function compatAuthError(endpoint: string, status: number, body: string): string {
+  const base = `API error ${status}: ${body}`;
+  if (status !== 401 && status !== 403) return base;
+  const bound = aiApiKeyOrigin();
+  if (bound !== null && !aiApiKeyBoundTo(endpoint)) {
+    return `${t("settings.aiApiKeyBoundElsewhere", bound)} (${base})`;
+  }
+  // A key stored before keys were tied to an endpoint is sent nowhere.
+  if (bound === null && isAiApiKeyConfigured()) {
+    return `${t("settings.aiApiKeyUnbound")} (${base})`;
+  }
+  return base;
+}
+
+/**
  * Call an OpenAI-compatible Chat Completions API.
  */
 async function callOpenAICompat(
@@ -237,7 +296,7 @@ async function callOpenAICompat(
   userPrompt: string,
 ): Promise<string> {
   const endpoint = settings.aiApiEndpoint.replace(/\/+$/, "");
-  const res = await aiHttpRequest("POST", `${endpoint}/chat/completions`, "bearer", {
+  const res = await aiHttpRequest("POST", `${endpoint}/chat/completions`, await openAICompatAuth(endpoint), {
     model: settings.aiModel,
     max_tokens: 4096,
     messages: [
@@ -247,7 +306,7 @@ async function callOpenAICompat(
   });
 
   if (!isOk(res.status)) {
-    throw new Error(`API error ${res.status}: ${res.body}`);
+    throw new Error(compatAuthError(endpoint, res.status, res.body));
   }
 
   const data = JSON.parse(res.body);
@@ -575,10 +634,9 @@ export async function fetchOpenAICompatModels(
   opts: ModelListOptions = {},
 ): Promise<AIModelOption[]> {
   const base = endpoint.replace(/\/+$/, "");
-  const auth = isAiApiKeyConfigured() ? "bearer" : "none";
-  const res = await aiHttpRequest("GET", `${base}/models`, auth, undefined, 10, opts);
+  const res = await aiHttpRequest("GET", `${base}/models`, await openAICompatAuth(base), undefined, 10, opts);
   if (!isOk(res.status)) {
-    throw new Error(`API error ${res.status}: ${res.body}`);
+    throw new Error(compatAuthError(base, res.status, res.body));
   }
   const body = JSON.parse(res.body);
   return (body.data ?? [])
@@ -700,7 +758,8 @@ export function useAIProvider() {
     const s = settings.value;
     if (s.aiEnabled) {
       if (s.aiProvider === "claude" && isAiApiKeyConfigured()) return true;
-      if (s.aiProvider === "openai-compat" && isAiApiKeyConfigured() && s.aiApiEndpoint) return true;
+      // A key is optional: a local server often needs none (openAICompatAuth).
+      if (s.aiProvider === "openai-compat" && openAICompatUsable(s.aiApiEndpoint)) return true;
       if (s.aiProvider === "ollama") return true;
       if (s.aiProvider === "claude-code-cli") return true;
       if (s.aiProvider === "codex-cli") return true;
@@ -733,7 +792,7 @@ export function useAIProvider() {
         !s.aiEnabled ||
         s.aiProvider === "none" ||
         (s.aiProvider === "claude" && !isAiApiKeyConfigured()) ||
-        (s.aiProvider === "openai-compat" && (!isAiApiKeyConfigured() || !s.aiApiEndpoint));
+        (s.aiProvider === "openai-compat" && !openAICompatUsable(s.aiApiEndpoint));
       const provider = misconfigured && _claudeCliAvailable.value
         ? "claude-code-cli"
         : s.aiProvider;
@@ -794,7 +853,7 @@ export function useAIProvider() {
       !s.aiEnabled ||
       s.aiProvider === "none" ||
       (s.aiProvider === "claude" && !isAiApiKeyConfigured()) ||
-      (s.aiProvider === "openai-compat" && (!isAiApiKeyConfigured() || !s.aiApiEndpoint));
+      (s.aiProvider === "openai-compat" && !openAICompatUsable(s.aiApiEndpoint));
     const provider = misconfigured && _claudeCliAvailable.value
       ? "claude-code-cli"
       : s.aiProvider;
@@ -847,7 +906,7 @@ export function useAIProvider() {
     if (!s.aiEnabled || s.aiProvider === "none") return null;
     if (s.aiProvider === "mcp") return null; // wired in PLAN §5.2 (Phase 2)
     if (s.aiProvider === "claude" && !isAiApiKeyConfigured()) return null;
-    if (s.aiProvider === "openai-compat" && (!isAiApiKeyConfigured() || !s.aiApiEndpoint)) return null;
+    if (s.aiProvider === "openai-compat" && !openAICompatUsable(s.aiApiEndpoint)) return null;
     return {
       async call(prompt: string): Promise<string> {
         // Forward the core's prompt verbatim — it already contains the

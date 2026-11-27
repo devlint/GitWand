@@ -57,6 +57,7 @@ import {
   forcePushRejectionLine,
   forcePushTarget,
   fetchPushRemote,
+  leftThroughRewrite,
 } from "../useBranchUpdatePrompt";
 
 function git(cwd: string, args: string[]): string {
@@ -194,6 +195,88 @@ describe("isLocalRewriteOfUpstream", () => {
     git(me, ["switch", "-q", "-c", "local-only"]);
     expect(await isLocalRewriteOfUpstream(me, "local-only")).toBe(false);
   }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("isLocalRewriteOfUpstream — a pull undone by a reset (#239)", () => {
+  it("is false when a collaborator's pulled commit was reset away", async () => {
+    const { teammate, me } = setup();
+    // The collaborator's commit reaches the user by a fast-forward pull:
+    // it is then the local tip, so it is in the branch's reflog.
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["pull", "-q", "--ff-only"]);
+    // The user undoes the pull and commits their own work instead.
+    git(me, ["reset", "-q", "--hard", "HEAD~1"]);
+    commit(me, "h", "mine\n", "my own work");
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is false when a collaborator's commit came by a fast-forward rebase, then was reset away", async () => {
+    const { teammate, me } = setup();
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["fetch", "-q"]);
+    // No local commit: the rebase fast-forwards, writing `rebase (finish)`.
+    git(me, ["rebase", "-q", "origin/feat"]);
+    git(me, ["reset", "-q", "--hard", "HEAD~1"]);
+    commit(me, "h", "mine\n", "my own work");
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is true when the user's own pushed commit was undone, then redone", async () => {
+    const { me } = setup();
+    commit(me, "h", "mine\n", "my own work");
+    git(me, ["push", "-q", "origin", "feat"]);
+    // GitWand's Undo last commit is a soft reset; the user commits again.
+    git(me, ["reset", "-q", "--soft", "HEAD~1"]);
+    writeFileSync(join(me, "h"), "mine, redone\n");
+    git(me, ["add", "h"]);
+    git(me, ["commit", "-q", "-m", "my own work, redone"]);
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(true);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is true when the user's own pushed commit was amended", async () => {
+    const { me } = setup();
+    commit(me, "h", "mine\n", "my own work");
+    git(me, ["push", "-q", "origin", "feat"]);
+    writeFileSync(join(me, "h"), "mine, amended\n");
+    git(me, ["commit", "-q", "-a", "--amend", "-m", "my own work, amended"]);
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(true);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("leftThroughRewrite", () => {
+  const T = "a".repeat(40);
+  it("accepts a tip left by a rebase or an amend", () => {
+    expect(leftThroughRewrite(`b\trebase (finish): refs/heads/x onto c\n${T}\tcommit: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\trebase -i (finish): refs/heads/x onto c\n${T}\tcommit: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\tcommit (amend): x\n${T}\tcommit: x\n`, T)).toBe(true);
+  });
+  it("accepts a tip a commit made here, left any way", () => {
+    expect(leftThroughRewrite(`b\tcommit: y\nc\treset: moving to HEAD~1\n${T}\tcommit: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\tcommit: y\n${T}\tcommit: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tcherry-pick: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\trevert: Revert "x"\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tam: x\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\tpull --rebase (finish): refs/heads/x onto c\n${T}\tpull: Fast-forward\n`, T)).toBe(true);
+    // A stack restack: git's `rebase (update-refs)`, or GitWand's own for a
+    // layer with no commit of its own.
+    expect(leftThroughRewrite(`b\trebase (restack): x onto c\n${T}\t\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\trebase (update-refs): refs/heads/x\n${T}\t\n`, T)).toBe(true);
+    expect(leftThroughRewrite(`b\tpull -q --rebase (finish): refs/heads/x onto c\n${T}\tpull: Fast-forward\n`, T)).toBe(true);
+  });
+  it("refuses a tip that arrived from elsewhere and was left by a reset or a commit, a merge made here, and the current tip", () => {
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tpull: Fast-forward\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\tcommit: y\n${T}\tmerge origin/x: Fast-forward\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tcommit (merge): Merge branch 'x'\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\tbranch: Created from origin/x\n`, T)).toBe(false);
+    // A fast-forward rebase or pull --rebase sets a collaborator's commit:
+    // git writes `rebase (finish)` / `pull --rebase: Fast-forward` for it.
+    expect(leftThroughRewrite(`b\treset: moving to HEAD~1\n${T}\trebase (finish): refs/heads/x onto d\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\tcommit: y\n${T}\tpull --rebase: Fast-forward\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`b\tpull --rebase: Fast-forward\n${T}\tpull: Fast-forward\n`, T)).toBe(false);
+    expect(leftThroughRewrite(`${T}\tcommit: x\n`, T)).toBe(false);
+  });
 });
 
 describe("isLocalRewriteOfUpstream — remote merge commits", () => {

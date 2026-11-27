@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSy
 import { resolve, join, dirname, basename, sep, isAbsolute, relative } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { isUtf8 } from "node:buffer";
@@ -905,24 +905,192 @@ function sweepStaleRunDirs(base) {
     const p = join(base, n);
     try {
       const st = lstatSync(p);
-      if (Date.now() - st.mtimeMs > 24 * 60 * 60_000) rmSync(p, { recursive: true, force: true });
+      const age = Date.now() - st.mtimeMs;
+      if (age <= 24 * 60 * 60_000) continue;
+      // Mirrors sweep_stale_run_dirs: a live owner (the pid in the name, the
+      // app's or a dev server's) keeps it, for up to 7 days (a reused pid).
+      const m = /^run-[0-9a-f]{16}([0-9a-f]{8})$/i.exec(n);
+      if (m && age < 7 * 24 * 60 * 60_000 && devProcessAlive(parseInt(m[1], 16))) continue;
+      rmSync(p, { recursive: true, force: true });
     } catch { /* gone */ }
   }
 }
 /**
+ * Mirrors `require_lockdown_flags`: null when `bin <helpArgs>` lists every
+ * flag, else the error to answer (too old, or the probe did not answer).
+ */
+const devLockdownSeen = new Map();
+function devLockdownError(bin, helpArgs, flags, tooOld, cli) {
+  // Cached per binary identity, as help_mentions: an update in place is seen.
+  // A bare name (not found by resolveBin): cached by name for 5 minutes.
+  const what = `${helpArgs.join(" ")}|${flags.join(" ")}`;
+  let id;
+  try { const st = statSync(bin); id = `${bin}|${st.size}|${st.mtimeMs}|${what}`; }
+  catch { id = `${bin}|${Math.floor(Date.now() / 300_000)}|${what}`; }
+  const seen = devLockdownSeen.get(id);
+  // A "missing" answer is checked again after 5 minutes (an update behind a
+  // shim leaves the file unchanged), as RECHECK_MISSING_AFTER in Rust.
+  if (seen && (seen.ok || Date.now() - seen.at < 300_000)) return seen.ok ? null : tooOld;
+  // The run's own filtered environment: no secret reaches the CLI.
+  const r = spawnSync(bin, helpArgs, { encoding: "utf-8", timeout: 10_000, env: aiSpawnEnv(cli) });
+  if (r.error?.code === "ENOENT") return `Binaire \`${basename(bin)}\` introuvable`;
+  if (r.error || r.status === null) {
+    return `Could not check the AI CLI's options (\`${basename(bin)} ${helpArgs.join(" ")}\` did not answer within 10 s): try again`;
+  }
+  const help = `${r.stdout || ""}${r.stderr || ""}`;
+  const has = (f) => new RegExp(`(^|[^\\w-])${f.replace(/[-]/g, "\\-")}(?![\\w-])`, "m").test(help);
+  const ok = flags.every(has);
+  devLockdownSeen.set(id, { ok, at: Date.now() });
+  return ok ? null : tooOld;
+}
+/** True when a process with this pid exists (EPERM is a live process). */
+function devProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e?.code === "EPERM"; }
+}
+/** The image proxy's CSP, as image_proxy.rs sends on gwimg: answers. */
+const DEV_IMAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
+/**
+ * The first JSON object of `text` from offset 0 (strings and escapes
+ * respected), or null: a log line may follow it.
+ */
+function devFirstJsonObject(text) {
+  let depth = 0, inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return text.slice(0, i + 1);
+  }
+  return null;
+}
+
+/** JSON from JSONC: comments and trailing commas dropped. Mirrors `jsonc_to_json`. */
+function devJsoncToJson(text) {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      out += c;
+      if (c === "\\") { out += text[++i] ?? ""; continue; }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      out += "\n";
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      // The closing `*/` starts after the opening one (`/*/` is not closed).
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i++; // on the closing `/`; the loop's i++ steps past it
+      continue;
+    }
+    out += c;
+  }
+  let cleaned = "";
+  inString = false;
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i];
+    if (inString) {
+      cleaned += c;
+      if (c === "\\") { cleaned += out[++i] ?? ""; continue; }
+      if (c === '"') inString = false;
+    } else if (c === '"') { inString = true; cleaned += c; }
+    else if (c === "," && /^\s*[}\]]/.test(out.slice(i + 1))) { /* trailing comma */ }
+    else cleaned += c;
+  }
+  return cleaned;
+}
+
+/**
+ * OPENCODE_CONFIG_CONTENT for a GitWand run: the user's inline config kept,
+ * every MCP server it or the opencode config files declare disabled.
+ * Mirrors `opencode_config_content` + the config files `ai_env_context` reads.
+ */
+let devOpencodeResolved = { at: 0, names: [] };
+function devOpencodeConfigContent(opencodeBin) {
+  const parse = (text) => { try { return JSON.parse(devJsoncToJson(text)); } catch { return null; } };
+  // opencode's resolved config first: every source it reads (mirrors
+  // opencode_resolved_mcp_names), read once a minute at most.
+  const resolvedNames = Date.now() - devOpencodeResolved.at < 60_000 ? [...devOpencodeResolved.names] : [];
+  if (opencodeBin && Date.now() - devOpencodeResolved.at >= 60_000) {
+    try {
+      const r = spawnAiSync(opencodeBin, ["debug", "config"], {
+        env: { ...aiSpawnEnv("opencode"), OPENCODE_DISABLE_PROJECT_CONFIG: "1" },
+        encoding: "utf-8",
+        timeout: 15_000,
+      });
+      // The JSON starts on a line of its own; a log line before it may hold
+      // a brace too. Mirrors opencode_debug_config_mcp_names.
+      const out = r.status === 0 ? String(r.stdout || "") : "";
+      let v = null;
+      let at = 0;
+      for (const line of out.split(/(?<=\n)/)) {
+        if (line.trimStart().startsWith("{")) {
+          const first = devFirstJsonObject(devJsoncToJson(out.slice(at)).trimStart());
+          v = first ? parse(first) : null;
+          if (v) break;
+        }
+        at += line.length;
+      }
+      if (v?.mcp && typeof v.mcp === "object") resolvedNames.push(...Object.keys(v.mcp));
+      // A failed or unreadable read is cached too (empty), as in Rust.
+      devOpencodeResolved = { at: Date.now(), names: [...resolvedNames] };
+    } catch { /* the files below decide */ }
+  }
+  const files = [];
+  if (process.env.OPENCODE_CONFIG?.trim()) files.push(process.env.OPENCODE_CONFIG);
+  const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
+  for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) files.push(join(configHome, "opencode", name));
+  const names = new Set(resolvedNames);
+  for (const f of files) {
+    let text;
+    try { text = readFileSync(f, "utf-8"); } catch { continue; }
+    const v = parse(text);
+    if (v?.mcp && typeof v.mcp === "object") Object.keys(v.mcp).forEach((n) => names.add(n));
+  }
+  const inherited = process.env.OPENCODE_CONFIG_CONTENT ? parse(process.env.OPENCODE_CONFIG_CONTENT) : null;
+  const base = inherited && typeof inherited === "object" && !Array.isArray(inherited) ? inherited : {};
+  // No tool at all, MCP ones included (mirrors opencode_config_content).
+  if (!base.tools || typeof base.tools !== "object" || Array.isArray(base.tools)) base.tools = {};
+  base.tools["*"] = false;
+  if (!base.mcp || typeof base.mcp !== "object" || Array.isArray(base.mcp)) base.mcp = {};
+  Object.keys(base.mcp).forEach((n) => names.add(n));
+  for (const n of [...names].sort()) {
+    const entry = base.mcp[n] && typeof base.mcp[n] === "object" ? base.mcp[n] : {};
+    base.mcp[n] = { ...entry, enabled: false };
+  }
+  return JSON.stringify(base);
+}
+
+/**
  * Mirrors `ai_prompt_cmd` + `AiRunDir` (ai.rs): run an AI CLI in a fresh
- * private directory of its own (mkdtemp: exclusive, 0700), a git repository
+ * private directory of its own (exclusive, 0700, named `run-<16 hex><8 hex pid>` as `random_token`), a git repository
  * when the CLI needs one (Codex), removed afterwards whatever happens — never
  * the repository, never a directory another run could have left files in.
  */
-function spawnAiSync(bin, args, opts, { gitRepo = false } = {}) {
+function spawnAiSync(bin, args, opts, { gitRepo = false, files = {} } = {}) {
   const base = aiRunsBase();
-  const dir = mkdtempSync(join(base, "run-"));
+  const dir = join(base, `run-${randomBytes(8).toString("hex")}${process.pid.toString(16).padStart(8, "0")}`);
+  mkdirSync(dir, { mode: 0o700 }); // fails on any existing entry
   try {
     if (gitRepo) {
       const g = spawnSync(GIT, ["init", "-q"], { cwd: dir });
       if (g.status !== 0) throw new Error(`AI working directory ${dir}: git init failed`);
     }
+    // Files the CLI reads from its run directory (Copilot's prompt.md).
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content, { mode: 0o600 });
     return spawnSync(bin, args, { ...opts, cwd: dir });
   } finally {
     // Best effort, like AiRunDir's Drop: never replaces the CLI's result.
@@ -979,6 +1147,31 @@ function parseAiEndpoint(raw) {
   if (u.username || u.password) throw new Error("AI endpoint must not carry credentials");
   return u;
 }
+/** Hosted providers the app's gate lets through (`KNOWN_PROVIDER_ORIGINS`). */
+const DEV_KNOWN_AI_ORIGINS = ["https://api.anthropic.com", "https://api.openai.com"];
+/**
+ * The app's open-endpoint gate, without its question: loopback and the known
+ * providers pass, any other origin only when GITWAND_DEV_AI_ORIGINS lists it.
+ */
+function devAiOriginAllowed(u) {
+  const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const loopback =
+    host === "localhost" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) || host === "::1";
+  return loopback || DEV_KNOWN_AI_ORIGINS.includes(u.origin) || devAllowedAiOrigins.has(u.origin);
+}
+/**
+ * dev:web stand-in for the origins allowed in the keychain: those
+ * GITWAND_DEV_AI_ORIGINS lists, normalised to an origin. Revoking one
+ * (`/api/ai-revoke-endpoint`) lasts until the dev server restarts.
+ */
+const devAllowedAiOrigins = new Set(
+  String(process.env.GITWAND_DEV_AI_ORIGINS ?? "")
+    .split(",")
+    .map((o) => {
+      try { return parseAiEndpoint(o.trim()).origin; } catch { return null; }
+    })
+    .filter(Boolean),
+);
 const devAiKeyInfo = () => (devAiApiKey ? { hint: aiKeyHint(devAiApiKey), origin: devAiApiKeyOrigin } : null);
 /** dev:web stand-in for the telemetry opt-out marker. */
 let devTelemetryEnabled = true;
@@ -8124,13 +8317,108 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/image-proxy?u=<url> — mirrors the `gwimg:` scheme
+    // (commands/image_proxy.rs): http(s) only, no credentials, 5 MiB and 20 s
+    // at most, served only when the answer is an image.
+    if (url.pathname === "/api/image-proxy" && req.method === "GET") {
+      // Images of the dev page only: another site the developer has open
+      // could otherwise make this server fetch internal URLs. Browsers send
+      // Sec-Fetch-Site; a request without it (tests, curl) is not a page.
+      // A page that names itself (Origin, Referer) must be the dev page's;
+      // another localhost port is same-site, so that header alone does not
+      // tell. An image without a referrer (no-referrer, as Avatar asks) from
+      // another local site still passes: dev-only.
+      const fromPage = req.headers.origin || (() => {
+        try { return req.headers.referer ? new URL(req.headers.referer).origin : null; } catch { return null; }
+      })();
+      if (req.headers["sec-fetch-site"] === "cross-site" || (fromPage && !ALLOWED_ORIGINS.has(fromPage))) {
+        res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+        return res.end("image request from another page refused");
+      }
+      const target = url.searchParams.get("u") ?? "";
+      let u;
+      try {
+        if (/[\s\x00-\x1f\x7f]/.test(target)) throw new Error("control characters");
+        u = new URL(target);
+        if ((u.protocol !== "http:" && u.protocol !== "https:") || !u.hostname) throw new Error("not http(s)");
+        if (u.username || u.password) throw new Error("credentials");
+      } catch (e) {
+        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8", "Content-Security-Policy": DEV_IMAGE_CSP });
+        return res.end(`bad image URL: ${e.message}`);
+      }
+      try {
+        // Redirects followed by hand: 3 at most, http(s) only, as curl's
+        // --max-redirs 3 --proto-redir =http,https in the app.
+        const signal = AbortSignal.timeout(20_000);
+        let upstream;
+        let next = u;
+        for (let hop = 0; ; hop++) {
+          upstream = await fetch(next.href, { headers: { Accept: "image/*" }, redirect: "manual", signal });
+          const location = upstream.status >= 300 && upstream.status < 400 ? upstream.headers.get("location") : null;
+          if (!location) break;
+          await upstream.body?.cancel().catch(() => {}); // the hop's body is not read
+          if (hop >= 3) throw new Error("too many redirects");
+          next = new URL(location, next);
+          if (next.protocol !== "http:" && next.protocol !== "https:") throw new Error("redirect to a non-http(s) URL");
+          if (next.username || next.password) throw new Error("redirect with credentials");
+        }
+        const type = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+        if (!upstream.ok || !/^image\/[a-z0-9.+-]+$/.test(type)) throw new Error(`answered ${upstream.status} ${type}`);
+        // Read as it comes and stop past 5 MiB: a chunked answer announces
+        // no size. Mirrors run_curl_capped.
+        const LIMIT = 5 * 1024 * 1024;
+        const parts = [];
+        let size = 0;
+        for await (const chunk of upstream.body ?? []) {
+          size += chunk.length;
+          if (size > LIMIT) {
+            await upstream.body.cancel().catch(() => {});
+            throw new Error("image larger than 5 MiB");
+          }
+          parts.push(chunk);
+        }
+        const body = Buffer.concat(parts);
+        if (body.length === 0) throw new Error("empty image");
+        res.writeHead(200, {
+          // CORS of the dev server's allowed origins only; its JSON
+          // Content-Type is replaced by the image's.
+          ...corsHeaders(req),
+          "Content-Type": type,
+          "Cache-Control": "max-age=3600",
+          "X-Content-Type-Options": "nosniff",
+          // As gwimg: an SVG opened as a page runs nothing on this origin.
+          "Content-Security-Policy": DEV_IMAGE_CSP,
+        });
+        return res.end(body);
+      } catch (e) {
+        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8", "Content-Security-Policy": DEV_IMAGE_CSP });
+        return res.end(`image request failed: ${e.message}`);
+      }
+    }
+
+    // GET /api/ai-allowed-endpoints -> { origins } — mirrors ai_allowed_endpoints.
+    if (url.pathname === "/api/ai-allowed-endpoints" && req.method === "GET") {
+      return jsonResponse(req, res, { origins: [...devAllowedAiOrigins].sort() });
+    }
+
+    // POST /api/ai-revoke-endpoint { origin } — mirrors ai_revoke_endpoint:
+    // any endpoint of the origin revokes it, an unknown one is not an error.
+    if (url.pathname === "/api/ai-revoke-endpoint" && req.method === "POST") {
+      const { origin } = await readBody(req);
+      let parsed;
+      try { parsed = parseAiEndpoint(String(origin ?? "").trim()); }
+      catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
+      devAllowedAiOrigins.delete(parsed.origin);
+      return jsonResponse(req, res, { ok: true });
+    }
+
     // POST /api/ai-http-request { method, url, body?, auth, timeoutSecs? }
     // Mirrors commands::ai_http::ai_http_request: validation, key binding and
     // error text included. Answers { status, body } whatever the upstream status.
-    // Not mirrored: the native question the app asks before a request to an
-    // origin that is neither loopback nor a known provider
-    // (`check_open_endpoint_with`). The dev server has no dialog to
-    // show, so under dev:web such a request goes out unasked.
+    // The open-endpoint gate (`check_open_endpoint_with`) passes loopback and
+    // the known providers, as in the app. The app asks about any other
+    // origin; the dev server has no dialog to show, so it refuses it unless
+    // GITWAND_DEV_AI_ORIGINS lists it (comma-separated origins).
     if (url.pathname === "/api/ai-http-request" && req.method === "POST") {
       const { method, url: target, body, auth, timeoutSecs } = await readBody(req);
       let parsed;
@@ -8138,6 +8426,11 @@ async function handleRequest(req, res) {
       catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
       if (method !== "GET" && method !== "POST") {
         return jsonResponse(req, res, { error: `Unsupported method: ${method}` }, 400);
+      }
+      if (!devAiOriginAllowed(parsed)) {
+        return jsonResponse(req, res, {
+          error: `dev:web refuses AI requests to ${parsed.origin}: the app would ask first, and this server cannot. Allow it with GITWAND_DEV_AI_ORIGINS=${parsed.origin}`,
+        }, 403);
       }
       const headers = { Accept: "application/json" };
       if (auth === "anthropic" || auth === "bearer") {
@@ -8392,7 +8685,14 @@ async function handleRequest(req, res) {
           : (body.prompt || "");
         // v2.17 — model flag precedes the positional prompt on `codex exec`.
         // Read-only sandbox, prompt on stdin (`-`). Mirrors codex_cli_prompt_inner.
-        const codexArgs = ["exec", "--sandbox", "read-only"];
+        // --ignore-user-config: no MCP server or plugin from the user's
+        // config. Mirrors codex_cli_prompt_inner.
+        // Mirrors the Rust check: a Codex without --ignore-user-config is
+        // refused rather than run with the user's MCP servers.
+        const cxRefusal = devLockdownError(CODEX, ["exec", "--help"], ["--ignore-user-config"],
+          "This Codex CLI cannot run without your config.toml: update it (`npm i -g @openai/codex` or your package manager)", "codex");
+        if (cxRefusal) return jsonResponse(req, res, { error: cxRefusal }, 500);
+        const codexArgs = ["exec", "--sandbox", "read-only", "--ignore-user-config"];
         if (body.model && String(body.model).trim()) {
           codexArgs.push("--model", String(body.model).trim());
         }
@@ -8513,6 +8813,7 @@ async function handleRequest(req, res) {
             ...aiSpawnEnv("opencode"),
             OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","webfetch":"deny"}',
             OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+            OPENCODE_CONFIG_CONTENT: devOpencodeConfigContent(OPENCODE),
           },
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
@@ -8611,23 +8912,33 @@ async function handleRequest(req, res) {
       try {
         const body = await readBody(req);
         const COPILOT = resolveBin("copilot");
+        const cpRefusal = devLockdownError(COPILOT, ["--help"], ["--available-tools", "--disable-builtin-mcps"],
+          "This Copilot CLI cannot restrict its tools: update it with `copilot update`", "copilot");
+        if (cpRefusal) return jsonResponse(req, res, { error: cpRefusal }, 500);
         const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
           : (body.prompt || "");
-        const cpArgs = ["--no-color", "--deny-tool=shell", "--deny-tool=write", "--no-ask-user"];
+        // Mirrors copilot_prompt_args: only the file viewer, no built-in MCP,
+        // the prompt in the run directory's prompt.md, never on the argv.
+        const cpArgs = [
+          "--no-color", "-s", "--no-ask-user", "--no-custom-instructions", "--disable-builtin-mcps",
+          "--available-tools", "view", "--deny-tool=shell", "--deny-tool=write", "--deny-tool=url",
+        ];
         if (body.model && String(body.model).trim()) {
           cpArgs.push("--model", String(body.model).trim());
         }
         const cpEffort = validEffort(body.effort);
         if (cpEffort) cpArgs.push("--reasoning-effort", cpEffort);
-        cpArgs.push("-p", fullPrompt);
+        cpArgs.push("-p", "Read the file prompt.md in the current directory and do exactly what it asks. Reply with your answer only.");
         const cpEnv = aiSpawnEnv("copilot");
+        delete cpEnv.COPILOT_ALLOW_ALL;
         const r = spawnAiSync(COPILOT, cpArgs, { // fresh per-run dir — mirrors ai_prompt_cmd
           env: cpEnv,
           encoding: "utf-8",
+          input: "",
           timeout: 5 * 60 * 1000,
           maxBuffer: 20 * 1024 * 1024,
-        });
+        }, { files: { "prompt.md": fullPrompt } });
         if (r.status !== 0) {
           const detail = (r.stderr || r.stdout || "").trim() || "Copilot CLI a échoué sans message";
           return jsonResponse(req, res, { error: detail }, 500);
@@ -8736,25 +9047,39 @@ async function handleRequest(req, res) {
       try {
         const body = await readBody(req);
         const AGY = resolveBin("agy");
+        const agyRefusal = devLockdownError(AGY, ["--help"], ["--input-format", "--mode"],
+          "This Antigravity CLI cannot read a prompt from stdin nor run in plan mode: update it with `agy update`", "antigravity");
+        if (agyRefusal) return jsonResponse(req, res, { error: agyRefusal }, 500);
         const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
           ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
           : (body.prompt || "");
-        const agyArgs = [];
+        // Mirrors antigravity_cli_prompt: plan mode (a headless run denies
+        // commands, edits and URL fetches there), the prompt as one
+        // stream-json turn on stdin, never on the argv.
+        const agyArgs = ["--mode", "plan", "--input-format", "stream-json", "--output-format", "stream-json"];
         if (body.model && String(body.model).trim()) {
           agyArgs.push("--model", String(body.model).trim());
         }
-        agyArgs.push("-p", fullPrompt);
+        agyArgs.push("-p=");
         const r = spawnAiSync(AGY, agyArgs, { // fresh per-run dir — mirrors ai_prompt_cmd
           env: aiSpawnEnv("antigravity"),
           encoding: "utf-8",
+          input: JSON.stringify({ event: "user", message: { content: fullPrompt } }) + "\n",
           timeout: 5 * 60 * 1000,
           maxBuffer: 20 * 1024 * 1024,
         });
-        if (r.status !== 0) {
-          const detail = (r.stderr || r.stdout || "").trim() || "Antigravity CLI a échoué sans message";
-          return jsonResponse(req, res, { error: detail }, 500);
+        let result = null;
+        for (const line of String(r.stdout || "").split("\n")) {
+          try {
+            const v = JSON.parse(line.trim());
+            if (v?.event === "result") result = v.result;
+          } catch { /* not JSON */ }
         }
-        return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(r.stdout);
+        if (r.status === 0 && result?.status === "SUCCESS") {
+          return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(result.response ?? "");
+        }
+        const detail = result?.error || (r.stderr || "").trim() || "Antigravity CLI a échoué sans message";
+        return jsonResponse(req, res, { error: detail }, 500);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }

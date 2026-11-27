@@ -16,6 +16,7 @@
  */
 import { computed, ref, watch } from "vue";
 import { avatarInitials, avatarStyle, gravatarUrl, githubAvatarFromEmail } from "../composables/useAvatar";
+import { proxyImageUrl } from "../utils/imageProxy";
 import { useSettings } from "../composables/useSettings";
 
 const { settings } = useSettings();
@@ -74,7 +75,7 @@ const showPhoto = computed(() => !!resolvedUrl.value);
   >
     <img
       v-if="showPhoto"
-      :src="resolvedUrl!"
+      :src="proxyImageUrl(resolvedUrl!)"
       class="gw-avatar__img"
       alt=""
       loading="lazy"

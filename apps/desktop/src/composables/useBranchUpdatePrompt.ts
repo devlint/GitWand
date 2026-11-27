@@ -78,8 +78,12 @@ export async function isUpstreamRewriteOnly(cwd: string): Promise<boolean> {
  * Either signal is enough:
  *
  * - the upstream tip was once this branch's own tip (it is in the branch's
- *   reflog): the remote only holds an older version of local history. This
- *   survives conflicts resolved during the rebase, which change patches.
+ *   reflog) as a commit made here, or one the branch left through a rewrite
+ *   (`leftThroughRewrite`): the remote only holds an older version of local
+ *   history. This survives conflicts resolved during the rebase, which
+ *   change patches. A tip that only arrived by a pull proves nothing (#239):
+ *   a collaborator's commit undone by a reset was a local tip too, and a
+ *   force push would drop it.
  * - every commit only the upstream has still exists locally as a
  *   patch-equivalent commit (covers a never-checked-out remote tip). Merge
  *   commits are NOT skipped here: a remote-only merge can carry content of its
@@ -101,7 +105,7 @@ export async function probeLocalRewriteOfUpstream(
   try {
     const [upstream, reflog, upstreamOnly, refs] = await Promise.all([
       gitExec(cwd, ["rev-parse", "@{upstream}"]),
-      gitExec(cwd, ["reflog", "show", "--format=%H", `refs/heads/${branch}`]),
+      gitExec(cwd, ["reflog", "show", "--format=%H%x09%gs", `refs/heads/${branch}`]),
       gitExec(cwd, ["rev-list", "--cherry-pick", "--right-only", "HEAD...@{upstream}"]),
       gitExec(cwd, ["rev-parse", "--symbolic-full-name", "@{upstream}", "@{push}"]),
     ]);
@@ -113,13 +117,60 @@ export async function probeLocalRewriteOfUpstream(
     // judged here: never prefer a force push for it.
     const [upRef, pushRef] = refs.stdout.trim().split("\n");
     if (refs.exitCode !== 0 || !upRef || upRef !== pushRef) return { safe: false, upstream: tip };
-    if (reflog.exitCode === 0 && reflog.stdout.split("\n").some((h) => h.trim() === tip)) {
+    if (reflog.exitCode === 0 && leftThroughRewrite(reflog.stdout, tip)) {
       return { safe: true, upstream: tip };
     }
     return { safe: upstreamOnly.exitCode === 0 && upstreamOnly.stdout.trim() === "", upstream: tip };
   } catch {
     return { safe: false, upstream: null };
   }
+}
+
+/**
+ * True when the branch's reflog (`%H<TAB>%gs`, newest first) shows `tip` as
+ * a past value of the branch that was local history:
+ *
+ * - set by a commit made here (`commit: …`, `commit (amend): …`,
+ *   `commit (initial): …`, a cherry-pick, a revert, `git am`): the user's own commit, whatever
+ *   happened to it since (undo last commit then a new one, a squash by
+ *   `reset --soft`). Not one set by a rebase: a fast-forward rebase onto
+ *   the upstream also writes `rebase (finish)`;
+ * - or left by a rewrite: a rebase (`rebase (finish): …`, `rebase -i …`,
+ *   a restack), a pull that rebased (`pull --rebase (finish): …`) or an
+ *   amend.
+ *
+ * A tip that arrived by a pull, a merge, a reset or a branch creation and
+ * was then left by a reset or a plain commit proves nothing (#239): it may
+ * be a collaborator's commit undone locally. A merge commit made here does
+ * not count either: it holds the commits it merged.
+ */
+export function leftThroughRewrite(reflog: string, tip: string): boolean {
+  const entries = reflog
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => {
+      const tab = l.indexOf("\t");
+      return tab < 0
+        ? { hash: l.trim(), subject: "" }
+        : { hash: l.slice(0, tab).trim(), subject: l.slice(tab + 1) };
+    });
+  // A rebase, a pull that rebased (`pull --rebase (finish)`, `pull -q
+  // --rebase (finish)`: git writes the user's options; its fast-forward,
+  // `pull --rebase: Fast-forward`, is no rewrite), an amend.
+  const rewrite = (subject: string) =>
+    /^rebase\b/.test(subject) ||
+    /^pull\b[^:]*\(finish\)/.test(subject) ||
+    subject.startsWith("commit (amend)");
+  // Not a rebase's result: a fast-forward `git rebase origin/x` writes
+  // `rebase (finish)` too, setting the tip to a collaborator's commit.
+  const madeHere = (subject: string) =>
+    (/^commit\b/.test(subject) && !subject.startsWith("commit (merge)")) ||
+    /^(cherry-pick|revert|am)\b/.test(subject);
+  for (let i = 1; i < entries.length; i++) {
+    if (entries[i].hash !== tip) continue;
+    if (madeHere(entries[i].subject) || rewrite(entries[i - 1].subject)) return true;
+  }
+  return false;
 }
 
 /**

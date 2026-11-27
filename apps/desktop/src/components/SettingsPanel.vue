@@ -96,6 +96,7 @@ import {
   listModelsForProvider,
   probeOllama,
   providerEfforts,
+  openAICompatUsable,
 } from "../composables/useAIProvider";
 import { useLogs, type LogEntry } from "../composables/useLogs";
 import { useIdentity } from "../composables/useIdentity";
@@ -122,6 +123,7 @@ import {
 } from "../composables/useSettings";
 import { gitCommitTemplatePath, openExternalUrl, telemetryGetState, telemetrySetEnabled, softwareRenderingGetState, softwareRenderingSetEnabled } from "../utils/backend";
 import { useAiApiKey, useAiApiKeyDraft, stripAiApiKey, toPersistedSettings, normalizeEndpointSetting } from "../composables/useAiApiKey";
+import { useAllowedAiEndpoints } from "../composables/useAllowedAiEndpoints";
 export type { AIProvider };
 
 // Re-export for back-compat — earlier callers imported this shape from
@@ -548,7 +550,10 @@ function ensureAiDetect() {
 // immediate run would hit a TDZ on the detection refs).
 watch(activeSettingsTab, (tab) => {
   if (tab === "logs") markLogsRead();
-  if (tab === "ai") ensureAiDetect();
+  if (tab === "ai") {
+    ensureAiDetect();
+    void allowedAi.load();
+  }
 });
 
 async function copyAllLogs() {
@@ -808,6 +813,8 @@ onUnmounted(() => clearTimeout(ollamaProbeTimer));
 // API key — stored in the OS keychain, never read back: the panel only sees
 // a masked hint. The input holds a draft that is saved on change.
 const aiKey = useAiApiKey();
+// Origins allowed through the AI endpoint question, reloaded each time the AI tab opens.
+const allowedAi = useAllowedAiEndpoints();
 const aiKeyConfigured = aiKey.configured;
 const maskedApiKey = computed(() => aiKey.hint.value ?? "");
 const showApiKey = ref(false);
@@ -1105,6 +1112,8 @@ async function loadModels(explicit = false, provider: AIProvider = settings.valu
     }
   } finally {
     if (request === modelsRequest) modelsLoading.value = false;
+    // Refresh may have asked about the endpoint and been allowed: list it.
+    if (explicit) void allowedAi.load();
   }
 }
 
@@ -1417,7 +1426,10 @@ onMounted(() => {
   // five agents spawns external processes and used to freeze the panel at mount
   // even though the default tab is "general".
   if (activeSettingsTab.value === "logs") markLogsRead();
-  if (activeSettingsTab.value === "ai") ensureAiDetect();
+  if (activeSettingsTab.value === "ai") {
+    ensureAiDetect();
+    void allowedAi.load();
+  }
 });
 
 // Reload `.gitwandrc` when the active repo changes (or on first mount
@@ -2712,7 +2724,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                  in the provider UI). -->
             <div
               v-if="claudeCliInfo?.found && ((settings.aiProvider === 'claude' && !aiKeyConfigured)
-                || (settings.aiProvider === 'openai-compat' && (!aiKeyConfigured || !settings.aiApiEndpoint)))"
+                || (settings.aiProvider === 'openai-compat' && !openAICompatUsable(settings.aiApiEndpoint)))"
               class="sp-row"
             >
               <span class="sp-hint">{{ t('settings.aiProviderCliFallbackHint') }}</span>
@@ -3138,6 +3150,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                     </svg>
                   </button>
                 </div>
+                <span v-if="!aiKeyConfigured" class="sp-hint">{{ t('settings.aiCompatApiKeyOptional') }}</span>
                 <div v-if="aiKeyConfigured" class="sp-key-stored">
                   <span class="sp-hint">{{ t('settings.aiApiKeyStored', maskedApiKey) }}</span>
                   <button class="sp-text-btn" @click="clearApiKey">{{ t('settings.aiAuthDisconnect') }}</button>
@@ -3422,6 +3435,23 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                   <span>{{ t('timeMachine.settingsAiLabels') }}</span>
                 </label>
               </div>
+            </div>
+
+            <!-- Allowed AI endpoints: the origins the user allowed when asked -->
+            <div class="sp-row">
+              <span class="sp-label">{{ t('settings.aiAllowedEndpoints') }}</span>
+              <span class="sp-hint">{{ t('settings.aiAllowedEndpointsHint') }}</span>
+              <p v-if="allowedAi.origins.value.length === 0" class="sp-hint">
+                {{ t('settings.aiAllowedEndpointsEmpty') }}
+              </p>
+              <ul v-else class="sp-allowed-endpoints">
+                <li v-for="origin in allowedAi.origins.value" :key="origin" class="sp-allowed-endpoint">
+                  <code class="mono">{{ origin }}</code>
+                  <button class="sp-text-btn" :disabled="allowedAi.revoking.value !== null"
+                    @click="allowedAi.revoke(origin)">{{ t('settings.aiAllowedEndpointsRevoke') }}</button>
+                </li>
+              </ul>
+              <div v-if="allowedAi.error.value" class="sp-connect-error">{{ allowedAi.error.value }}</div>
             </div>
 
             <!-- AI info box -->
@@ -4272,6 +4302,27 @@ function openAiTemplateKind(kind: AiTemplateKind) {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+}
+
+.sp-allowed-endpoints {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sp-allowed-endpoint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.sp-allowed-endpoint code {
+  overflow-wrap: anywhere;
 }
 
 .sp-input--key {

@@ -616,6 +616,30 @@ export async function aiApiKeyHint(): Promise<AiKeyInfo | null> {
   }
 }
 
+/**
+ * The AI endpoint origins the user allowed through the open-endpoint
+ * question (other than loopback and the known providers, which never ask),
+ * sorted. Under dev:web, the origins GITWAND_DEV_AI_ORIGINS lists.
+ */
+export async function aiAllowedEndpoints(): Promise<string[]> {
+  if (isTauri()) return tauriInvoke<string[]>("ai_allowed_endpoints");
+  const res = await devFetch(`${DEV_SERVER}/api/ai-allowed-endpoints`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || "ai_allowed_endpoints failed");
+  return Array.isArray(data?.origins) ? data.origins : [];
+}
+
+/** Withdraw an allowed origin: the next request to it asks again. */
+export async function aiRevokeEndpoint(origin: string): Promise<void> {
+  if (isTauri()) return tauriInvoke<void>("ai_revoke_endpoint", { origin });
+  const res = await devFetch(`${DEV_SERVER}/api/ai-revoke-endpoint`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ origin }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "ai_revoke_endpoint failed");
+}
+
 // ─── Launch telemetry opt-out ─────────────────────────────
 
 export interface TelemetryState {

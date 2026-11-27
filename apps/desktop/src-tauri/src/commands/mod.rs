@@ -12,6 +12,7 @@ pub(crate) mod gh_issues;
 pub(crate) mod gitea;
 pub(crate) mod github_api;
 pub(crate) mod gitlab;
+pub(crate) mod image_proxy;
 pub(crate) mod mcp_catalog;
 pub(crate) mod network;
 pub(crate) mod ops;

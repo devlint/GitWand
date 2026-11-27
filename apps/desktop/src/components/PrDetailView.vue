@@ -11,6 +11,7 @@
  * - Stat cards refined with icons + gradient hover
  * - Polished tabs with animation + count badges
  */
+import { originalImageUrl, proxyImageUrl } from "../utils/imageProxy";
 import { computed, inject, nextTick, provide, ref, onMounted, onUnmounted, watch } from "vue";
 import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables/usePrPanel";
 import { renderMarkdown, onMarkdownLinkClick, hasBlockedRemoteImages } from "../composables/useSafeHtml";
@@ -418,7 +419,8 @@ function handleDescriptionClick(e: MouseEvent) {
   if (img) {
     const src = img.getAttribute("src");
     if (src) {
-      fullscreenImageUrl.value = src;
+      // The remote URL, not the proxied one: `currentUrl` re-signs it.
+      fullscreenImageUrl.value = originalImageUrl(src);
       return;
     }
   }
@@ -1704,7 +1706,7 @@ function submitRequestReviewers() {
         <!-- Re-resolved: a GitHub attachment's signed URL may have been
              replaced since the click (#302). -->
         <img
-          :src="attachments.currentUrl(fullscreenImageUrl)"
+          :src="proxyImageUrl(attachments.currentUrl(fullscreenImageUrl))"
           class="pdv-image-overlay-content"
         />
       </div>

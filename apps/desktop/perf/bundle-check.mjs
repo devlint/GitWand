@@ -145,7 +145,15 @@ const BUDGETS = {
   // 1,004 KB. `@gitwand/core` is bundled into main, and the two resolvers
   // now merge deletions, comments, reorders and every import of a module
   // three-way instead of falling back to the text engine.
-  main_max_kb: 1005,
+  //
+  // 3.15.x lot C (security & data safety): main measured at 1,006 KB: the
+  // image proxy rewrite (`imageProxy`, used by the eager Avatar and
+  // useSafeHtml), the PR edit overlay of #234 (usePrPanel), the en strings
+  // of the allowed AI endpoints and of the optional OpenAI-compatible key.
+  // After the lot C review: 1,008 KB (the PR edit overlay's read tracking,
+  // the image URL resolution in useSafeHtml, the local-network rule of the
+  // OpenAI-compatible provider).
+  main_max_kb: 1009,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked

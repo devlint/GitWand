@@ -1506,6 +1506,11 @@ const en = {
     aiCompatEndpoint: "API endpoint",
     aiCompatEndpointHint: "Compatible with OpenAI, Mistral, Groq, Azure, etc.",
     aiCompatApiKey: "API key",
+    aiCompatApiKeyOptional: "Optional: leave it empty for a server that needs no key (llama.cpp, vLLM, LM Studio).",
+    aiAllowedEndpoints: "Allowed AI endpoints",
+    aiAllowedEndpointsHint: "GitWand asks before sending a request to an AI endpoint other than your own machine, Anthropic or OpenAI. The ones you allowed are listed here; revoke one and the next request to it asks again.",
+    aiAllowedEndpointsEmpty: "None so far.",
+    aiAllowedEndpointsRevoke: "Revoke",
     // AI tab — Ollama
     aiOllamaUrl: "Ollama URL",
     aiOllamaTest: "Test connection",

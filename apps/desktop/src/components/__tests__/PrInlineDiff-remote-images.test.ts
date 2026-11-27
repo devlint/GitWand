@@ -7,6 +7,7 @@
  * comments withholds an image (`commentsWithheldImages`).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { proxyImageUrl } from "../../utils/imageProxy";
 import { createApp, defineComponent, h, nextTick, provide, ref, type App } from "vue";
 import PrInlineDiff from "../PrInlineDiff.vue";
 import { PR_REMOTE_IMAGES_KEY, commentsWithheldImages } from "../../composables/useRemoteImages";
@@ -66,11 +67,12 @@ describe("inline review threads — remote images", () => {
 
     expect(el.querySelectorAll(".md-img-blocked").length).toBe(1);
     expect(el.querySelector(`img[src="${IMG}"]`)).toBeNull();
+    expect(el.querySelector(`img[src="${proxyImageUrl(IMG)}"]`)).toBeNull();
 
     shown.value = true;
     await nextTick();
     expect(el.querySelector(".md-img-blocked")).toBeNull();
-    expect(el.querySelector(`img[src="${IMG}"]`)).not.toBeNull();
+    expect(el.querySelector(`img[src="${proxyImageUrl(IMG)}"]`)).not.toBeNull();
   });
 
   it("commentsWithheldImages drives the button above the diff", () => {

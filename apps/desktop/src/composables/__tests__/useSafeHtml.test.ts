@@ -12,6 +12,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
+import { proxyImageUrl } from "../../utils/imageProxy";
 import { renderMarkdown, safeHtml, hasBlockedRemoteImages } from "../useSafeHtml";
 import { useSettings } from "../useSettings";
 import { commentsWithheldImages } from "../useRemoteImages";
@@ -147,7 +148,7 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
   it("renders raw HTML img tags with width and height in markdown", () => {
     useSettings().settings.value.allowRemoteImages = true;
     const out = renderMarkdown('hello <img width="2521" height="203" alt="image" src="https://github.com/user-attachments/assets/5284ccc2-4567-40f0-88b7-1faec2289bbe" /> world');
-    expect(out).toContain('<img width="2521" height="203" alt="image" src="https://github.com/user-attachments/assets/5284ccc2-4567-40f0-88b7-1faec2289bbe">');
+    expect(out).toContain(`<img width="2521" height="203" alt="image" src="${proxyImageUrl("https://github.com/user-attachments/assets/5284ccc2-4567-40f0-88b7-1faec2289bbe")}">`);
   });
 
   it("withholds remote images by default (tracking pixels)", () => {
@@ -207,11 +208,13 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
   it("loads remote images for one render when the caller passes consent", () => {
     const md = "![shot](https://example.com/s.png)";
     const allowed = renderMarkdown(md, { allowRemoteImages: true });
-    expect(allowed).toContain('src="https://example.com/s.png"');
+    // Allowed: fetched through the backend's image proxy, not by the webview.
+    expect(allowed).toContain(`src="${proxyImageUrl("https://example.com/s.png")}"`);
     expect(hasBlockedRemoteImages(allowed)).toBe(false);
     // The consent does not leak into the next render.
     const next = renderMarkdown(md);
     expect(next).not.toContain('src="https://example.com/s.png"');
+    expect(next).not.toContain(encodeURIComponent("https://example.com/s.png"));
     expect(hasBlockedRemoteImages(next)).toBe(true);
   });
 
@@ -294,9 +297,41 @@ describe("GitHub attachments (#302)", () => {
 
   it("loads a file uploaded to GitHub without consent when rendering a GitHub PR", () => {
     const out = renderMarkdown(`![shot](${asset}) ![t](https://tracker.example/p.png)`, gh);
-    expect(out).toContain(`src="${asset}"`);
+    expect(out).toContain(`src="${proxyImageUrl(asset)}"`);
     expect(out).not.toContain(`src="https://tracker.example`);
+    expect(out).not.toContain(encodeURIComponent("https://tracker.example"));
     expect(hasBlockedRemoteImages(out)).toBe(true);
+  });
+
+  it("gives the same result when sanitised twice (the proxied URL is judged as its original)", () => {
+    const once = renderMarkdown(`![shot](${asset})`, gh);
+    expect(safeHtml(once, gh)).toContain(`src="${proxyImageUrl(asset)}"`);
+    expect(hasBlockedRemoteImages(safeHtml(once, gh))).toBe(false);
+  });
+
+  it("keeps the app's gwimg: image URL through a second pass, judged as its original", () => {
+    // What the first pass writes in the app (jsdom is not Tauri: build it).
+    const app = (u: string) => `gwimg://localhost/?u=${encodeURIComponent(u)}`;
+    expect(safeHtml(`<img src="${app(asset)}" alt="x">`, gh)).toContain(`src="${proxyImageUrl(asset)}"`);
+    // Not allowed: blocked like the remote image it points to.
+    const blocked = safeHtml(`<img src="${app("https://tracker.example/p.png")}" alt="t">`);
+    expect(hasBlockedRemoteImages(blocked)).toBe(true);
+  });
+
+  it("proxies the URL the browser would fetch for odd remote spellings", () => {
+    for (const src of ["https:img.example/x.png", "//img.example/x.png", "/\\img.example/x.png"]) {
+      const out = safeHtml(`<img src="${src}" alt="x">`, { allowRemoteImages: true });
+      expect(out, src).toContain(`src="${proxyImageUrl("https://img.example/x.png")}"`);
+    }
+    const http = safeHtml(`<img src="http:img.example/x.png" alt="x">`, { allowRemoteImages: true });
+    expect(http).toContain(`src="${proxyImageUrl("http://img.example/x.png")}"`);
+  });
+
+  it("treats a proxy URL written in a PR as the remote image it points to", () => {
+    const crafted = proxyImageUrl("https://tracker.example/p.png");
+    const out = safeHtml(`<img src="${crafted}" alt="t">`);
+    expect(hasBlockedRemoteImages(out)).toBe(true);
+    expect(out).not.toContain(`src="${crafted}"`);
   });
 
   it("withholds it like any remote image elsewhere (README, other forges)", () => {
@@ -322,7 +357,7 @@ describe("GitHub attachments (#302)", () => {
       githubAttachments: true,
       resolveImage: (src) => (src === asset ? signed : null),
     });
-    expect(out).toContain(`src="${signed}"`);
+    expect(out).toContain(`src="${proxyImageUrl(signed)}"`);
     expect(hasBlockedRemoteImages(out)).toBe(false);
   });
 
@@ -335,7 +370,7 @@ describe("GitHub attachments (#302)", () => {
 
   it("drops the resolver once the call returns", () => {
     renderMarkdown(`![x](${asset})`, { resolveImage: () => "https://tracker.example/p.png" });
-    expect(renderMarkdown(`![x](${asset})`, gh)).toContain(`src="${asset}"`);
+    expect(renderMarkdown(`![x](${asset})`, gh)).toContain(`src="${proxyImageUrl(asset)}"`);
     expect(hasBlockedRemoteImages(renderMarkdown(`![x](${asset})`))).toBe(true);
   });
 });

@@ -28,6 +28,7 @@
  * image mime types.
  */
 
+import { originalImageUrl, proxyImageUrl } from "../utils/imageProxy";
 import DOMPurify from "dompurify";
 import { openExternalUrl } from "../utils/backend";
 import { markdownToHtml } from "../utils/markdown";
@@ -146,6 +147,25 @@ const LOCAL_IMAGE_BASES = [
  * backslash forms, `scheme:host` shorthands, absolute URLs of any scheme, and
  * anything unparsable all count as remote.
  */
+/**
+ * `src` as the webview resolves it from its own page (`tauri://` or
+ * `http://tauri.localhost`, never `https:`): `https:host/x` is absolute
+ * there, `//host/x` and `/\host/x` take the host. Fetched over https unless
+ * written `http:`.
+ */
+function resolvedImageUrl(src: string): string {
+  try {
+    // `http:host/x` / `https:host/x`: a page that is not on that scheme
+    // reads it as absolute; spell it so before resolving.
+    const spelled = src.trim().replace(/^(https?):(?![/\\]{2})[/\\]?/i, "$1://");
+    const u = new URL(spelled, "http://gitwand-local.invalid/");
+    if (u.protocol === "http:" && !/^\s*http:/i.test(src)) u.protocol = "https:";
+    return u.href;
+  } catch {
+    return src;
+  }
+}
+
 function isRemoteImageSrc(src: string): boolean {
   try {
     return LOCAL_IMAGE_BASES.some((base) => new URL(src, base).origin !== base.origin);
@@ -170,7 +190,8 @@ function hardenLinksAndImages(node: Element) {
     }
   }
   if (node.tagName === "IMG") {
-    let src = node.getAttribute("src") ?? "";
+    // Already proxied (a second sanitising pass): decide on the original.
+    let src = originalImageUrl(node.getAttribute("src") ?? "");
     // Decide on what the browser will actually fetch, not on the raw text.
     let norm = normalizeUrlText(src);
     const resolved = src && imageResolver ? imageResolver(norm) : null;
@@ -194,6 +215,11 @@ function hardenLinksAndImages(node: Element) {
       node.setAttribute("class", "md-img-blocked");
       if (!node.getAttribute("alt")) node.setAttribute("alt", t("common.remoteImageBlocked"));
       node.setAttribute("title", `${t("common.remoteImageBlocked")} — ${src.trim()}`);
+    } else if (src && isRemoteImageSrc(norm)) {
+      // Allowed: fetched by the backend, not the webview (`img-src` is closed).
+      // Proxy what the browser would fetch: `https:host/x`, `/\host/x`,
+      // `//host/x` all resolve to an absolute URL first.
+      node.setAttribute("src", proxyImageUrl(resolvedImageUrl(norm)));
     }
   }
 }
@@ -203,6 +229,15 @@ function hardenLinksAndImages(node: Element) {
 let hooksInstalled = false;
 function ensureHooks() {
   if (hooksInstalled) return;
+  // DOMPurify's URI check drops a `gwimg:` src (the app's image proxy)
+  // before `afterSanitizeAttributes` runs, so a second sanitising pass over
+  // HTML this module produced lost its images. Keep it: the hook judges it
+  // as the remote image it points to (`originalImageUrl`).
+  DOMPurify.addHook("uponSanitizeAttribute", (node: Element, data) => {
+    if (node.tagName === "IMG" && data.attrName === "src" && /^gwimg:/i.test(data.attrValue.trim())) {
+      data.forceKeepAttr = true;
+    }
+  });
   DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
     hardenLinksAndImages(node);
   });

@@ -944,7 +944,10 @@ pub(crate) fn finalize(
         }
         for b in &empty {
             let r = format!("refs/heads/{b}");
-            let out = exec(repo, &["update-ref", &r, &p.onto, &p.old_base])?;
+            // A reflog subject the force-push judgement reads as a rewrite
+            // (`leftThroughRewrite`), as git's own `rebase (update-refs)` is.
+            let msg = format!("rebase (restack): {b} onto {}", p.onto);
+            let out = exec(repo, &["update-ref", "-m", &msg, &r, &p.onto, &p.old_base])?;
             if !out.status.success() {
                 return Err(format!(
                     "could not move {b} onto the restacked stack: {}",

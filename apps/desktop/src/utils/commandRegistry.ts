@@ -47,9 +47,11 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   // same branch through helpers (`gh_list_prs_inner` and friends), and finding
   // them means following call chains this audit did not undertake. Treat an
   // absent `cliPathOnly` on a forge command as "not checked", not as "agrees".
+  ai_allowed_endpoints: { route: "/api/ai-allowed-endpoints" },
   ai_api_key_hint: { route: "/api/ai-api-key" },
   ai_api_key_set: { route: "/api/ai-api-key" },
   ai_http_request: { route: "/api/ai-http-request" },
+  ai_revoke_endpoint: { route: "/api/ai-revoke-endpoint" },
   antigravity_cli_prompt: { route: "/api/antigravity-cli-prompt" },
   antigravity_list_models: { route: "/api/antigravity-models" },
   claude_cli_login: { route: "/api/claude-cli-login" },

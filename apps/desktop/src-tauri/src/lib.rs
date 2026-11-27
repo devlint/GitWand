@@ -901,7 +901,18 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_clipboard_manager::init());
+        .plugin(tauri_plugin_clipboard_manager::init())
+        // Remote images, fetched by the backend (`img-src` stays closed).
+        .register_asynchronous_uri_scheme_protocol(
+            commands::image_proxy::SCHEME,
+            |_ctx, request, responder| {
+                // A few dedicated workers, not a thread per image nor the
+                // shared blocking pool (see image_proxy::enqueue).
+                commands::image_proxy::enqueue(request.uri().to_string(), move |r| {
+                    responder.respond(r)
+                });
+            },
+        );
 
     // Anonymous launch telemetry (release builds with --features telemetry
     // only). Registered conditionally because APTABASE_APP_KEY and the
@@ -1255,6 +1266,8 @@ pub fn run() {
             commands::credentials::delete_credential,
             commands::ai_http::ai_api_key_set,
             commands::ai_http::ai_api_key_hint,
+            commands::ai_http::ai_allowed_endpoints,
+            commands::ai_http::ai_revoke_endpoint,
             commands::ai_http::ai_http_request,
             commands::telemetry::telemetry_get_state,
             commands::telemetry::telemetry_set_enabled,

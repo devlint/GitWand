@@ -187,6 +187,9 @@ pub(crate) struct AiEnvContext {
     /// Variable names the user's own config points the CLI at — Codex
     /// `env_key` (custom providers), opencode `{env:NAME}`.
     config_refs: Vec<String>,
+    /// MCP servers the user's opencode config declares, disabled for
+    /// GitWand's runs (`opencode_config_content`).
+    opencode_mcp: Vec<String>,
 }
 
 /// A truthy flag value as Claude Code reads it (`1`, `true`, …).
@@ -311,6 +314,139 @@ fn parse_opencode_env_refs(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// JSON from JSONC (opencode accepts both): `//` and `/* */` comments and
+/// trailing commas dropped, strings left as they are.
+fn jsonc_to_json(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if c == '\\' {
+                if let Some(n) = chars.next() {
+                    out.push(n);
+                }
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                for n in chars.by_ref() {
+                    if n == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut prev = ' ';
+                for n in chars.by_ref() {
+                    if prev == '*' && n == '/' {
+                        break;
+                    }
+                    prev = n;
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    // Trailing commas: a `,` followed (after blanks) by `}` or `]`.
+    let mut cleaned = String::with_capacity(out.len());
+    let bytes: Vec<char> = out.chars().collect();
+    let mut in_string = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_string {
+            cleaned.push(c);
+            if c == '\\' && i + 1 < bytes.len() {
+                cleaned.push(bytes[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == '"' {
+                in_string = false;
+            }
+        } else if c == '"' {
+            in_string = true;
+            cleaned.push(c);
+        } else if c == ',' {
+            let next = bytes[i + 1..].iter().find(|n| !n.is_whitespace());
+            if !matches!(next, Some('}') | Some(']')) {
+                cleaned.push(c);
+            }
+        } else {
+            cleaned.push(c);
+        }
+        i += 1;
+    }
+    cleaned
+}
+
+/// The MCP servers an opencode config (JSON or JSONC) declares under `mcp`.
+fn opencode_mcp_names(text: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(&jsonc_to_json(text))
+        .ok()
+        .and_then(|v| {
+            v.get("mcp")?
+                .as_object()
+                .map(|o| o.keys().cloned().collect())
+        })
+        .unwrap_or_default()
+}
+
+/// `OPENCODE_CONFIG_CONTENT` for a GitWand run: the user's own inline config
+/// (`inherited`, kept) with every MCP server it or the config files declare
+/// (`names`) disabled. opencode merges it over the files (checked on 1.17.11:
+/// a server so disabled is not even started).
+fn opencode_config_content(inherited: Option<&str>, names: &[String]) -> String {
+    let mut base = inherited
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&jsonc_to_json(t)).ok())
+        .filter(|v| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut all: Vec<String> = names.to_vec();
+    if let Some(own) = base.get("mcp").and_then(|m| m.as_object()) {
+        all.extend(own.keys().cloned());
+    }
+    all.sort();
+    all.dedup();
+    let obj = base.as_object_mut().expect("an object");
+    // No tool at all (MCP ones included): GitWand wants a text answer.
+    // opencode takes `"*"` as a glob over tool names.
+    let tools = obj.entry("tools").or_insert_with(|| serde_json::json!({}));
+    if !tools.is_object() {
+        *tools = serde_json::json!({});
+    }
+    tools
+        .as_object_mut()
+        .expect("an object")
+        .insert("*".to_string(), serde_json::Value::Bool(false));
+    let mcp = obj.entry("mcp").or_insert_with(|| serde_json::json!({}));
+    if !mcp.is_object() {
+        *mcp = serde_json::json!({});
+    }
+    let mcp = mcp.as_object_mut().expect("an object");
+    for name in all {
+        let entry = mcp.entry(name).or_insert_with(|| serde_json::json!({}));
+        if !entry.is_object() {
+            *entry = serde_json::json!({});
+        }
+        entry
+            .as_object_mut()
+            .expect("an object")
+            .insert("enabled".to_string(), serde_json::Value::Bool(false));
+    }
+    base.to_string()
+}
+
 /// Build the context for `cli` from `env` (GitWand's environment) and the
 /// user-level / system-level config files it locates.
 fn ai_env_context(cli: AiCli, env: &dyn Fn(&str) -> Option<String>) -> AiEnvContext {
@@ -405,6 +541,7 @@ fn ai_env_context_with(
             for f in files {
                 if let Some(text) = read(f) {
                     ctx.config_refs.extend(parse_opencode_env_refs(&text));
+                    ctx.opencode_mcp.extend(opencode_mcp_names(&text));
                 }
             }
         }
@@ -806,7 +943,17 @@ fn parse_claude_caps(help: &str) -> ClaudeCaps {
 /// its own process group, killed as a whole; on Windows `taskkill /T /F`
 /// kills the tree. The reader thread is never waited on past a short grace
 /// period either: if something still holds the pipe, it is left behind.
-fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -> Option<String> {
+fn stdout_within(cmd: std::process::Command, timeout: std::time::Duration) -> Option<String> {
+    output_within(cmd, timeout, false)
+}
+
+/// `stdout_within`, with stderr read into the same text when `with_stderr`
+/// (a CLI printing its `--help` there, like agy).
+fn output_within(
+    mut cmd: std::process::Command,
+    timeout: std::time::Duration,
+    with_stderr: bool,
+) -> Option<String> {
     use std::io::Read;
     use std::process::Stdio;
     use std::time::{Duration, Instant};
@@ -818,29 +965,64 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(if with_stderr {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .spawn()
         .ok()?;
-    let mut out = child.stdout.take()?;
-    // Read incrementally into a shared buffer, so what arrived is usable even
-    // if EOF never comes (a grandchild still holding the pipe).
-    let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    // Windows: a kill-on-close Job Object holds the child and everything it
+    // starts from now on. Closing it (end of this function) kills a
+    // grandchild that outlived the child, which `taskkill /T` cannot find
+    // once the child has exited. A process started in the instant before the
+    // assignment escapes it; std cannot spawn suspended.
+    #[cfg(windows)]
+    let job = crate::commands::terminal::job::Job::assign(child.id()).ok();
+    // Read incrementally, one buffer per stream (joined stdout then stderr:
+    // interleaved chunks could split an option name), so what arrived is
+    // usable even if EOF never comes (a grandchild still holding the pipe).
+    let out_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let err_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
     let (tx, rx) = std::sync::mpsc::channel::<()>();
-    {
-        let collected = collected.clone();
-        std::thread::spawn(move || {
-            let mut chunk = [0u8; 8192];
-            while let Ok(n) = out.read(&mut chunk) {
-                if n == 0 {
-                    break;
+    let mut readers = 0;
+    let mut spawn_reader =
+        |mut pipe: Box<dyn Read + Send>, collected: std::sync::Arc<std::sync::Mutex<Vec<u8>>>| {
+            let tx = tx.clone();
+            readers += 1;
+            std::thread::spawn(move || {
+                let mut chunk = [0u8; 8192];
+                while let Ok(n) = pipe.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    if let Ok(mut c) = collected.lock() {
+                        c.extend_from_slice(&chunk[..n]);
+                    }
                 }
-                if let Ok(mut c) = collected.lock() {
-                    c.extend_from_slice(&chunk[..n]);
-                }
-            }
-            let _ = tx.send(());
-        });
+                let _ = tx.send(());
+            });
+        };
+    spawn_reader(Box::new(child.stdout.take()?), out_buf.clone());
+    if let Some(err) = child.stderr.take() {
+        spawn_reader(Box::new(err), err_buf.clone());
     }
+    drop(tx);
+    // Every reader at EOF within `wait` (counting those already done).
+    let mut finished = 0;
+    let mut all_done = |wait: Duration| {
+        let until = Instant::now() + wait;
+        while finished < readers {
+            if rx
+                .recv_timeout(until.saturating_duration_since(Instant::now()))
+                .is_err()
+            {
+                return false;
+            }
+            finished += 1;
+        }
+        true
+    };
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
@@ -856,7 +1038,7 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
     // holds it: then kill what is left of the group too — whatever the exit
     // status, so no helper leaks — and keep the output already received. The
     // reader thread is never joined: at worst it is left behind, blocked.
-    if rx.recv_timeout(Duration::from_secs(2)).is_err() {
+    if !all_done(Duration::from_secs(2)) {
         // Only while the group still has members: its id cannot have been
         // reused then. On Windows the child is reaped by now and its pid may
         // be reused, so taskkill is not retried (see kill_tree).
@@ -869,11 +1051,92 @@ fn stdout_within(mut cmd: std::process::Command, timeout: std::time::Duration) -
                 }
             }
         }
-        let _ = rx.recv_timeout(Duration::from_secs(1));
+        // The job still holds the grandchild: end it, the pipe closes.
+        #[cfg(windows)]
+        if let Some(job) = job.as_ref() {
+            job.terminate();
+        }
+        let _ = all_done(Duration::from_secs(1));
     }
-    status.filter(|s| s.success())?;
-    let buf = collected.lock().ok()?.clone();
+    // A `--help` read with stderr is wanted whatever the exit status (some
+    // CLIs exit non-zero after printing it); other reads only on success.
+    // A run killed at the timeout gives nothing either way.
+    let status = status?;
+    if !with_stderr && !status.success() {
+        return None;
+    }
+    let mut buf = out_buf.lock().ok()?.clone();
+    buf.extend_from_slice(&err_buf.lock().ok()?);
     (!buf.is_empty()).then(|| String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// `flag` as a whole option name in `help`: `--mode` is not found in
+/// `--model`, nor in `--modes`.
+fn help_has_flag(help: &str, flag: &str) -> bool {
+    let is_name = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    help.match_indices(flag).any(|(i, _)| {
+        let before = help[..i].chars().next_back();
+        let after = help[i + flag.len()..].chars().next();
+        !before.is_some_and(is_name) && !after.is_some_and(is_name)
+    })
+}
+
+/// Whether `binary <help_args>` (stdout or stderr, 10 s at most) mentions every
+/// flag of `flags`: the options a lockdown relies on. Cached per binary
+/// identity (path, size, mtime), so `agy update` / `copilot update` in place
+/// is seen at once. `None` when the probe itself failed or timed out (not
+/// cached): the caller says so rather than ask for an update.
+fn help_mentions(binary: &str, cli: AiCli, help_args: &[&str], flags: &[&str]) -> Option<bool> {
+    use std::sync::Mutex;
+    type Key = ((String, u64, Option<std::time::SystemTime>), String);
+    // A "missing" answer is kept 5 minutes only: an update behind a shim
+    // (npm `.cmd`, volta, asdf) leaves the resolved file unchanged.
+    const RECHECK_MISSING_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+    static SEEN: Mutex<Vec<(Key, bool, std::time::Instant)>> = Mutex::new(Vec::new());
+    let key: Key = (
+        binary_identity(binary),
+        format!("{} | {}", help_args.join(" "), flags.join(" ")),
+    );
+    {
+        let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
+        seen.retain(|(_, ok, at)| *ok || at.elapsed() < RECHECK_MISSING_AFTER);
+        if let Some((_, ok, _)) = seen.iter().find(|(k, _, _)| *k == key) {
+            return Some(*ok);
+        }
+    }
+    let mut cmd = ai_cmd(binary, cli);
+    cmd.args(help_args);
+    // No answer: `None`, not cached.
+    let help = output_within(cmd, std::time::Duration::from_secs(10), true)?;
+    let ok = flags.iter().all(|f| help_has_flag(&help, f));
+    SEEN.lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push((key, ok, std::time::Instant::now()));
+    Some(ok)
+}
+
+/// `Ok` when `binary <help_args>` lists every flag a lockdown needs;
+/// `too_old` when it does not; a distinct error when the probe could not run
+/// (a slow start, a busy machine), which a retry may fix.
+fn require_lockdown_flags(
+    binary: &str,
+    cli: AiCli,
+    help_args: &[&str],
+    flags: &[&str],
+    too_old: &str,
+) -> Result<(), String> {
+    match help_mentions(binary, cli, help_args, flags) {
+        Some(true) => Ok(()),
+        Some(false) => Err(too_old.to_string()),
+        None => Err(format!(
+            "Could not check the AI CLI's options (`{} {}` did not answer within 10 s): try again",
+            std::path::Path::new(binary)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| binary.to_string()),
+            help_args.join(" ")
+        )),
+    }
 }
 
 /// Kill `child` and everything it started (see `stdout_within`).
@@ -890,10 +1153,8 @@ fn kill_tree(child: &mut std::process::Child) {
     }
     // Windows: `taskkill /T` walks the tree from the child, so it only reaches
     // the grandchildren while the child is still alive (the timeout path).
-    // Once the child has exited, a grandchild still holding stdout cannot be
-    // found this way; a Job Object would, but needs Win32 bindings this crate
-    // does not take on. `stdout_within` therefore never joins its reader: at
-    // worst that grandchild and a blocked thread are left behind.
+    // Once the child has exited, `stdout_within`'s Job Object ends what is
+    // left (see there).
     #[cfg(windows)]
     {
         let _ = hidden_cmd("taskkill")
@@ -1122,9 +1383,62 @@ fn random_token() -> String {
     format!("{:016x}{:08x}", h.finish(), std::process::id())
 }
 
+/// Past this age a run directory is swept even when a process with its
+/// owner's pid is alive: that pid has been reused.
+const OWNED_RUN_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
+/// The pid a run directory's name ends with (`run-<16 hex><8 hex pid>`, see
+/// `random_token`), or `None` for any other name.
+fn run_dir_owner_pid(name: &str) -> Option<u32> {
+    let token = name.strip_prefix("run-")?;
+    if token.len() != 24 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(&token[16..], 16).ok()
+}
+
+/// True when a process with this pid exists. A reused pid keeps a stale
+/// directory a while longer, which is harmless; a live run is never removed.
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: signal 0 only checks the pid exists. EPERM is a live process.
+    let probed = unsafe { libc::kill(pid, 0) };
+    probed == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    const STILL_ACTIVE: u32 = 259;
+    // SAFETY: plain Win32 calls; the handle is closed before returning.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            // Access denied still means the process exists.
+            return std::io::Error::last_os_error().raw_os_error() == Some(5);
+        }
+        let mut code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        !ok || code == STILL_ACTIVE
+    }
+}
+
 /// Remove `run-*` directories older than `max_age` — leftovers of a run whose
 /// process was killed before its `AiRunDir` was dropped. Called when the base
 /// is prepared (`ai_runs_base`). Symlinks are removed as links, never followed.
+/// A directory whose owner process (the pid in its name) is still alive is
+/// kept whatever its age: another GitWand process may have a run in it that
+/// has lasted longer than `max_age`.
 fn sweep_stale_run_dirs(base: &std::path::Path, max_age: std::time::Duration) {
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
@@ -1142,6 +1456,17 @@ fn sweep_stale_run_dirs(base: &std::path::Path, max_age: std::time::Duration) {
             .and_then(|m| m.elapsed().ok())
             .is_some_and(|age| age > max_age);
         if !old {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy().into_owned();
+        // A live owner keeps it, up to `OWNED_RUN_MAX_AGE`: past that, the pid
+        // has been reused (a reboot) rather than a run lasting a week.
+        let young = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age < OWNED_RUN_MAX_AGE);
+        if young && run_dir_owner_pid(&name).is_some_and(process_alive) {
             continue;
         }
         if meta.file_type().is_dir() {
@@ -1362,6 +1687,16 @@ fn codex_cli_prompt_inner(
     // Strip NUL bytes defensively — binary content can leak them into a diff.
     let full_prompt = full_prompt.replace('\0', "");
 
+    // `--ignore-user-config` (below) is what keeps the user's MCP servers
+    // out: a Codex without it is refused rather than run without it.
+    require_lockdown_flags(
+        &binary,
+        AiCli::Codex,
+        &["exec", "--help"],
+        &["--ignore-user-config"],
+        "This Codex CLI cannot run without your config.toml: update it (`npm i -g @openai/codex` or your package manager)",
+    )?;
+
     // `_run_dir` lives until the end of the function: the CLI has exited.
     let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Codex)?;
     cmd.arg("exec");
@@ -1369,6 +1704,12 @@ fn codex_cli_prompt_inner(
     // content: pin the sandbox to read-only (no writes, no network) whatever
     // the user's own Codex config says.
     cmd.args(["--sandbox", "read-only"]);
+    // No user config: its MCP servers and plugins would be callable by a
+    // prompt-injected diff, and `-c mcp_servers.X.enabled=false` cannot
+    // reach the servers the ChatGPT app adds (checked on codex-cli 0.147).
+    // Auth still comes from CODEX_HOME; a custom provider or profile in
+    // config.toml no longer applies to GitWand's calls.
+    cmd.arg("--ignore-user-config");
     // v2.17 — explicit model. Flags must precede the positional `-` on
     // `codex exec`, so push `--model <m>` before it.
     if let Some(m) = model.as_ref() {
@@ -1646,6 +1987,12 @@ fn detect_antigravity_cli_inner() -> Result<AntigravityCliInfo, String> {
 /// Antigravity exposes no separate system channel, so the system prompt is
 /// prepended as a Markdown section — same portable shape as the Claude /
 /// Codex / opencode / Copilot flows. Auth is managed by Antigravity itself.
+///
+/// The prompt holds repository content: it goes on stdin, as one
+/// `stream-json` turn, never on the argv where any local user can read it.
+/// The run is in `plan` mode: a headless run cannot ask, so `agy` denies
+/// terminal commands, file edits and URL fetches there, where its default
+/// (Auto) mode would run a command a prompt-injected diff asked for.
 #[tauri::command]
 pub(crate) async fn antigravity_cli_prompt(
     prompt: String,
@@ -1659,6 +2006,55 @@ pub(crate) async fn antigravity_cli_prompt(
     .map_err(|e| e.to_string())?
 }
 
+/// `agy` arguments for a headless prompt read from stdin, in plan mode.
+fn antigravity_prompt_args(model: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "--mode",
+        "plan",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    // An empty `-p` value: the turn comes from stdin. Last, so `-p` never
+    // takes a flag as its prompt.
+    args.push("-p=".to_string());
+    args
+}
+
+/// The single `stream-json` turn `agy` reads from stdin.
+fn antigravity_stream_input(prompt: &str) -> String {
+    format!(
+        "{}\n",
+        serde_json::json!({ "event": "user", "message": { "content": prompt } })
+    )
+}
+
+/// The answer in `agy`'s `stream-json` output: its `result` event.
+fn antigravity_stream_result(stdout: &str) -> Result<String, String> {
+    let result = stdout
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l.trim()).ok())
+        .rfind(|v| v["event"] == "result")
+        .ok_or_else(|| "Antigravity CLI gave no result".to_string())?;
+    let r = &result["result"];
+    if r["status"] == "SUCCESS" {
+        return Ok(r["response"].as_str().unwrap_or_default().to_string());
+    }
+    Err(r["error"]
+        .as_str()
+        .filter(|e| !e.is_empty())
+        .unwrap_or("Antigravity CLI failed")
+        .to_string())
+}
+
 fn antigravity_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
@@ -1666,6 +2062,13 @@ fn antigravity_cli_prompt_inner(
 ) -> Result<String, String> {
     let binary =
         resolve_antigravity_binary().ok_or_else(|| "Binaire `agy` introuvable".to_string())?;
+    require_lockdown_flags(
+        &binary,
+        AiCli::Antigravity,
+        &["--help"],
+        &["--input-format", "--mode"],
+        "This Antigravity CLI cannot read a prompt from stdin nor run in plan mode: update it with `agy update`",
+    )?;
 
     let full_prompt = match system_prompt {
         Some(sys) if !sys.trim().is_empty() => {
@@ -1674,36 +2077,23 @@ fn antigravity_cli_prompt_inner(
         _ => prompt,
     };
 
-    // Strip NUL bytes — the prompt is passed as a CLI argument and an interior
-    // `\0` makes the spawn fail with "nul byte found in provided data".
-    let full_prompt = full_prompt.replace('\0', "");
-
     // `_run_dir` lives until the end of the function: the CLI has exited.
     let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Antigravity)?;
-    // Flags precede the positional prompt passed via `-p`.
-    if let Some(m) = model.as_ref() {
-        if !m.trim().is_empty() {
-            cmd.args(["--model", m.trim()]);
-        }
-    }
-    cmd.args(["-p", full_prompt.as_str()]);
+    cmd.args(antigravity_prompt_args(model.as_deref()));
 
-    let output = cmd
-        .output()
+    let output = output_with_stdin(cmd, antigravity_stream_input(&full_prompt))
         .map_err(|e| format!("Failed to run antigravity CLI: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if stderr.is_empty() { stdout } else { stderr };
-        return Err(if detail.is_empty() {
-            "Antigravity CLI a échoué sans message".to_string()
-        } else {
-            detail
-        });
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if output.status.success() {
+        return antigravity_stream_result(&stdout);
     }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    // A failed run: the result event's error first, then stderr.
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(antigravity_stream_result(&stdout)
+        .err()
+        .filter(|e| e != "Antigravity CLI gave no result")
+        .or_else(|| (!stderr.is_empty()).then_some(stderr))
+        .unwrap_or_else(|| "Antigravity CLI a échoué sans message".to_string()))
 }
 
 // ─── opencode CLI provider (v2.17) ───────────────────────────────────────
@@ -1997,6 +2387,19 @@ fn opencode_run_cmd(
     );
     // Belt and braces with the per-run directory (see opencode_cli_prompt_inner).
     cmd.env("OPENCODE_DISABLE_PROJECT_CONFIG", "1");
+    // The user's MCP servers would be callable by a prompt-injected diff:
+    // disabled by name, over their own inline config if they have one. The
+    // names come from opencode's resolved config (every source it reads:
+    // OPENCODE_CONFIG_DIR, a remote config…) and from the files GitWand
+    // reads itself.
+    let ctx = cached_ai_env_context(AiCli::Opencode);
+    let inherited = std::env::var("OPENCODE_CONFIG_CONTENT").ok();
+    let mut names = ctx.opencode_mcp.clone();
+    names.extend(opencode_resolved_mcp_names(binary, run_dir));
+    cmd.env(
+        "OPENCODE_CONFIG_CONTENT",
+        opencode_config_content(inherited.as_deref(), &names),
+    );
     // Model is `provider/model` form; flags precede the positional message.
     if let Some(m) = model {
         if !m.trim().is_empty() {
@@ -2004,6 +2407,75 @@ fn opencode_run_cmd(
         }
     }
     cmd
+}
+
+/// The MCP servers in opencode's resolved config (`opencode debug config`,
+/// 15 s at most), read in the run's directory with the run's environment
+/// (project config off, the user's inline config). Empty when it cannot be
+/// read: the config files GitWand reads itself then decide.
+fn opencode_resolved_mcp_names(binary: &str, run_dir: &std::path::Path) -> Vec<String> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    // One read per binary for a minute: a batch of generations does not pay
+    // an opencode start-up each. A config change is seen within that minute.
+    const TTL: Duration = Duration::from_secs(60);
+    type Entry = (
+        (String, u64, Option<std::time::SystemTime>),
+        Instant,
+        Vec<String>,
+    );
+    static CACHE: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+    let id = binary_identity(binary);
+    if let Some((_, _, names)) = CACHE
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .find(|(k, at, _)| *k == id && at.elapsed() < TTL)
+    {
+        return names.clone();
+    }
+    let mut cmd = ai_prompt_cmd_in(binary, AiCli::Opencode, run_dir);
+    cmd.env("OPENCODE_DISABLE_PROJECT_CONFIG", "1");
+    cmd.args(["debug", "config"]);
+    // A failed or hung read is cached too (empty): the files GitWand reads
+    // and the all-tools-off setting then decide, without a 15 s wait on
+    // every prompt.
+    let names = output_within(cmd, Duration::from_secs(15), false)
+        .map(|out| opencode_debug_config_mcp_names(&out))
+        .unwrap_or_default();
+    let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    cache.retain(|(k, _, _)| *k != id);
+    cache.push((id, Instant::now(), names.clone()));
+    names
+}
+
+/// The `mcp` keys of `opencode debug config`'s output (a JSON object, after
+/// whatever opencode prints before it).
+fn opencode_debug_config_mcp_names(out: &str) -> Vec<String> {
+    // The JSON starts on a line of its own; a log line before it may hold a
+    // brace too (`WARN {service=config}`). Try each line opening with `{`.
+    let mut at = 0;
+    for line in out.split_inclusive('\n') {
+        if line.trim_start().starts_with('{') {
+            // The first JSON value only: a log line may follow it too.
+            let rest = jsonc_to_json(&out[at..]);
+            let first = serde_json::Deserializer::from_str(&rest)
+                .into_iter::<serde_json::Value>()
+                .next();
+            if let Some(Ok(v)) = first {
+                return v
+                    .get("mcp")
+                    .and_then(|m| m.as_object())
+                    .map(|o| o.keys().cloned().collect())
+                    .unwrap_or_default();
+            }
+        }
+        at += line.len();
+    }
+    if !out.trim().is_empty() {
+        eprintln!("[ai] opencode debug config gave no readable JSON; its MCP servers are disabled from the config files only (all tools stay off)");
+    }
+    Vec::new()
 }
 
 /// Enumerate the models opencode knows about (`opencode models`). Each line
@@ -2145,6 +2617,55 @@ pub(crate) async fn copilot_cli_prompt(
     .map_err(|e| e.to_string())?
 }
 
+/// What `copilot -p` is told: the prompt itself is in a file of the run's
+/// private directory (Copilot 1.0 reads no prompt from stdin outside
+/// `--fleet`), which it reads with its `view` tool.
+const COPILOT_PROMPT_FILE: &str = "prompt.md";
+const COPILOT_INSTRUCTION: &str =
+    "Read the file prompt.md in the current directory and do exactly what it asks. Reply with your answer only.";
+
+/// `copilot` arguments for a one-shot prompt, locked down. The prompt carries
+/// untrusted repo content; GitWand only wants a text answer:
+///
+/// - `--available-tools view`: the model sees one tool, the file viewer it
+///   needs for `prompt.md` (file access is confined to the run's directory
+///   and the temp directory). No shell, no write, no `web_fetch`, no MCP tool.
+/// - `--deny-tool` shell / write / url, should a later version add a tool
+///   `--available-tools` does not filter.
+/// - `--disable-builtin-mcps`: no GitHub MCP server, a way to post anywhere.
+/// - `--no-custom-instructions`, `--no-ask-user`, `-s` (the answer only).
+///
+/// Checked on Copilot CLI 1.0.117: a prompt asking for `touch` and a
+/// `web_fetch` ran neither.
+fn copilot_prompt_args(model: Option<&str>, effort: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "--no-color",
+        "-s",
+        "--no-ask-user",
+        "--no-custom-instructions",
+        "--disable-builtin-mcps",
+        "--available-tools",
+        "view",
+        "--deny-tool=shell",
+        "--deny-tool=write",
+        "--deny-tool=url",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    if let Some(e) = effort {
+        args.push("--reasoning-effort".to_string());
+        args.push(e.to_string());
+    }
+    args.push("-p".to_string());
+    args.push(COPILOT_INSTRUCTION.to_string());
+    args
+}
+
 fn copilot_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
@@ -2153,6 +2674,13 @@ fn copilot_cli_prompt_inner(
 ) -> Result<String, String> {
     let binary =
         resolve_copilot_binary().ok_or_else(|| "Binaire `copilot` introuvable".to_string())?;
+    require_lockdown_flags(
+        &binary,
+        AiCli::Copilot,
+        &["--help"],
+        &["--available-tools", "--disable-builtin-mcps"],
+        "This Copilot CLI cannot restrict its tools: update it with `copilot update`",
+    )?;
 
     // Copilot CLI doesn't expose a separate system channel — prepend the
     // system prompt as a Markdown section, same shape as the other flows.
@@ -2163,33 +2691,21 @@ fn copilot_cli_prompt_inner(
         _ => prompt,
     };
 
-    // Strip NUL bytes — the prompt is passed as a CLI argument and an interior
-    // `\0` makes the spawn fail with "nul byte found in provided data".
-    let full_prompt = full_prompt.replace('\0', "");
-
-    // `_run_dir` lives until the end of the function: the CLI has exited.
-    let (mut cmd, _run_dir) = ai_prompt_cmd(&binary, AiCli::Copilot)?;
-    // `--no-color` keeps stdout free of ANSI escapes. Flags precede the
-    // positional prompt passed via `-p`.
-    cmd.arg("--no-color");
-    // Safety: GitWand only wants a text answer back. Deny the tools that
-    // could mutate the user's machine (shell exec, file writes) and disable
-    // the interactive `ask_user` tool so a one-shot run can never block
-    // waiting for input. `COPILOT_ALLOW_ALL` is stripped from the inherited
-    // env so a stray variable can't silently re-enable every tool.
+    // `run_dir` lives until the end of the function: the CLI has exited.
+    let (mut cmd, run_dir) = ai_prompt_cmd(&binary, AiCli::Copilot)?;
+    // The prompt (repository content) in the private run directory, never
+    // on the argv where any local user can read it.
+    std::fs::write(run_dir.path().join(COPILOT_PROMPT_FILE), full_prompt)
+        .map_err(|e| format!("Failed to write the Copilot prompt: {e}"))?;
+    // A stray variable must not re-enable every tool.
     cmd.env_remove("COPILOT_ALLOW_ALL");
-    cmd.args(["--deny-tool=shell", "--deny-tool=write", "--no-ask-user"]);
-    if let Some(m) = model.as_ref() {
-        if !m.trim().is_empty() {
-            cmd.args(["--model", m.trim()]);
-        }
-    }
-    if let Some(e) = valid_effort(effort.as_ref()) {
-        cmd.args(["--reasoning-effort", e]);
-    }
-    cmd.args(["-p", full_prompt.as_str()]);
+    cmd.args(copilot_prompt_args(
+        model.as_deref(),
+        valid_effort(effort.as_ref()),
+    ));
 
     let output = cmd
+        .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| format!("Failed to run copilot CLI: {}", e))?;
 
@@ -3047,16 +3563,227 @@ mod neutral_dir_tests {
         std::fs::create_dir_all(base.join("run-old/.claude")).unwrap();
         std::fs::create_dir_all(base.join("keep-me")).unwrap();
         let fresh = AiRunDir::create(&base, false).unwrap();
-        // Everything counts as stale with a zero max age, except non-run names.
+        // Everything counts as stale with a zero max age, except non-run names
+        // and runs whose process is alive (this one's, here).
         std::thread::sleep(std::time::Duration::from_millis(20));
         sweep_stale_run_dirs(&base, std::time::Duration::from_millis(1));
         assert!(!base.join("run-old").exists());
         assert!(base.join("keep-me").exists());
-        assert!(!fresh.path().exists());
+        assert!(fresh.path().exists());
         // With an hour's grace, a live run is left alone.
         let live = AiRunDir::create(&base, false).unwrap();
         sweep_stale_run_dirs(&base, std::time::Duration::from_secs(3600));
         assert!(live.path().exists());
+    }
+
+    #[test]
+    fn jsonc_becomes_json_without_touching_strings() {
+        let text = r#"{
+  // a comment
+  "a": "http://x // not a comment", /* block */ /*/ "a": "commented out" */
+  "b": [1, 2,],
+  "c": { "d": "e\" , }", },
+}"#;
+        let v: serde_json::Value = serde_json::from_str(&jsonc_to_json(text)).unwrap();
+        assert_eq!(v["a"], "http://x // not a comment");
+        assert_eq!(v["b"], serde_json::json!([1, 2]));
+        assert_eq!(v["c"]["d"], "e\" , }");
+    }
+
+    #[test]
+    fn opencode_mcp_servers_are_read_and_disabled_by_name() {
+        let cfg = r#"{
+  // servers
+  "mcp": { "fs": { "type": "local", "command": ["x"] }, "web": { "type": "remote", "url": "https://x" }, },
+  "model": "anthropic/claude",
+}"#;
+        assert_eq!(opencode_mcp_names(cfg), ["fs", "web"]);
+        assert!(opencode_mcp_names("not json").is_empty());
+        assert!(opencode_mcp_names(r#"{"model":"m"}"#).is_empty());
+
+        // The user's inline config is kept, its own servers disabled too.
+        let inherited = r#"{"model":"openai/x","mcp":{"inline":{"type":"local","command":["y"]}}}"#;
+        let out: serde_json::Value = serde_json::from_str(&opencode_config_content(
+            Some(inherited),
+            &["fs".to_string(), "web".to_string()],
+        ))
+        .unwrap();
+        assert_eq!(out["model"], "openai/x");
+        for name in ["fs", "web", "inline"] {
+            assert_eq!(out["mcp"][name]["enabled"], false, "{name}");
+        }
+        assert_eq!(out["mcp"]["inline"]["command"], serde_json::json!(["y"]));
+
+        // Nothing inherited (or unreadable): only the disables.
+        let bare: serde_json::Value =
+            serde_json::from_str(&opencode_config_content(Some("{oops"), &["fs".to_string()]))
+                .unwrap();
+        assert_eq!(
+            bare,
+            serde_json::json!({"tools": {"*": false}, "mcp": {"fs": {"enabled": false}}})
+        );
+        let empty: serde_json::Value =
+            serde_json::from_str(&opencode_config_content(None, &[])).unwrap();
+        assert_eq!(empty, serde_json::json!({"tools": {"*": false}, "mcp": {}}));
+        assert_eq!(
+            opencode_debug_config_mcp_names("\u{1b}[0m\n{\"mcp\":{\"b\":{\"type\":\"local\"}}}"),
+            ["b"]
+        );
+        // A log line after the JSON.
+        assert_eq!(
+            opencode_debug_config_mcp_names("{\"mcp\": {\"d\": {}}}\nINFO shutting down\n"),
+            ["d"]
+        );
+        // A log line with a brace before the JSON.
+        assert_eq!(
+            opencode_debug_config_mcp_names(
+                "WARN {service=config} slow\n{\n  \"mcp\": {\"c\": {}}\n}\n"
+            ),
+            ["c"]
+        );
+        assert!(opencode_debug_config_mcp_names("Error: nothing").is_empty());
+    }
+
+    #[test]
+    fn the_opencode_run_carries_the_mcp_disables() {
+        let dir = std::env::temp_dir();
+        // A binary that does not exist: no real opencode runs in a test.
+        let cmd = opencode_run_cmd("/nonexistent/opencode", None, &dir);
+        let content = cmd
+            .get_envs()
+            .find(|(k, _)| *k == "OPENCODE_CONFIG_CONTENT")
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+            .expect("OPENCODE_CONFIG_CONTENT is set");
+        let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(v["mcp"].is_object());
+    }
+
+    #[test]
+    fn copilot_sees_only_its_file_viewer_and_never_the_prompt() {
+        let args = copilot_prompt_args(Some(" gpt-5 "), Some("high"));
+        let at = |flag: &str| args.iter().position(|a| a == flag).unwrap();
+        assert_eq!(args[at("--available-tools") + 1], "view");
+        for flag in [
+            "--disable-builtin-mcps",
+            "--no-custom-instructions",
+            "--no-ask-user",
+            "--deny-tool=shell",
+            "--deny-tool=write",
+            "--deny-tool=url",
+            "-s",
+        ] {
+            assert!(args.iter().any(|a| a == flag), "{flag}");
+        }
+        assert_eq!(args[at("--model") + 1], "gpt-5");
+        assert_eq!(args[at("--reasoning-effort") + 1], "high");
+        // `-p` last, with the fixed instruction: the prompt is in prompt.md.
+        assert_eq!(&args[args.len() - 2..], ["-p", COPILOT_INSTRUCTION]);
+        assert!(COPILOT_INSTRUCTION.contains(COPILOT_PROMPT_FILE));
+        assert!(!copilot_prompt_args(Some(" "), None)
+            .iter()
+            .any(|a| a == "--model" || a == "--reasoning-effort"));
+    }
+
+    #[test]
+    fn antigravity_reads_its_prompt_from_stdin_in_plan_mode() {
+        let args = antigravity_prompt_args(Some(" gemini-3-pro "));
+        assert_eq!(
+            args,
+            [
+                "--mode",
+                "plan",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--model",
+                "gemini-3-pro",
+                "-p="
+            ]
+        );
+        assert_eq!(antigravity_prompt_args(Some("  ")).last().unwrap(), "-p=");
+        // The prompt is in the stdin turn, escaped, never in the arguments.
+        let secret = "diff --git a/x\n\"quoted\" \u{0}line";
+        let input = antigravity_stream_input(secret);
+        assert!(input.ends_with('\n') && input.lines().count() == 1);
+        let v: serde_json::Value = serde_json::from_str(input.trim()).unwrap();
+        assert_eq!(v["event"], "user");
+        assert_eq!(v["message"]["content"], secret);
+        assert!(!args.iter().any(|a| a.contains("diff --git")));
+    }
+
+    #[test]
+    fn antigravity_answers_come_from_the_result_event() {
+        let ok = concat!(
+            "{\"event\":\"init\",\"init\":{}}\n",
+            "{\"event\":\"step_update\",\"step_update\":{\"text_delta\":\"O\"}}\n",
+            "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"OK\\n\"}}\n"
+        );
+        assert_eq!(antigravity_stream_result(ok).unwrap(), "OK\n");
+        let failed = "{\"event\":\"result\",\"result\":{\"status\":\"ERROR\",\"response\":\"\",\"error\":\"quota\"}}";
+        assert_eq!(antigravity_stream_result(failed).unwrap_err(), "quota");
+        assert!(antigravity_stream_result("warning: nothing\n").is_err());
+    }
+
+    #[test]
+    fn an_old_run_dir_is_kept_while_its_process_lives() {
+        let scratch = Scratch::new("sweep-owner");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        // A run of a live process (this one) and one of a process that has
+        // exited (a child we reaped), both past the max age.
+        let live = format!("run-{:016x}{:08x}", 1u64, std::process::id());
+        let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" });
+        if cfg!(windows) {
+            child.args(["/C", "exit"]);
+        }
+        let mut child = child.spawn().unwrap();
+        let dead_pid = child.id();
+        child.wait().unwrap();
+        let dead = format!("run-{:016x}{:08x}", 2u64, dead_pid);
+        std::fs::create_dir_all(base.join(&live)).unwrap();
+        std::fs::create_dir_all(base.join(&dead)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        sweep_stale_run_dirs(&base, std::time::Duration::from_millis(1));
+        assert!(base.join(&live).exists(), "a live process's run was swept");
+        assert!(
+            !base.join(&dead).exists(),
+            "an exited process's run was kept"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_week_old_run_dir_is_swept_even_with_a_live_pid() {
+        let scratch = Scratch::new("sweep-reused-pid");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        // This process's pid, as a reused pid would look after a reboot.
+        let old = format!("run-{:016x}{:08x}", 3u64, std::process::id());
+        std::fs::create_dir_all(base.join(&old)).unwrap();
+        let eight_days = std::time::Duration::from_secs(8 * 24 * 60 * 60);
+        std::fs::File::open(base.join(&old))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - eight_days)
+            .unwrap();
+        sweep_stale_run_dirs(&base, std::time::Duration::from_secs(3600));
+        assert!(!base.join(&old).exists());
+    }
+
+    #[test]
+    fn run_dir_names_give_their_owner_pid() {
+        assert_eq!(run_dir_owner_pid("run-0123456789abcdef0000002a"), Some(42));
+        assert_eq!(run_dir_owner_pid("run-old"), None);
+        assert_eq!(run_dir_owner_pid("keep-me"), None);
+        assert_eq!(run_dir_owner_pid("run-0123456789abcdef0000002g"), None);
+        let scratch = Scratch::new("pid-name");
+        let base = prepare_runs_base(&scratch.0.join("ai-runs")).unwrap();
+        let made = AiRunDir::create(&base, false).unwrap();
+        let name = made
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(run_dir_owner_pid(&name), Some(std::process::id()));
     }
 
     #[test]
@@ -3196,7 +3923,11 @@ mod neutral_dir_tests {
 
     #[test]
     fn opencode_runs_in_the_given_dir_without_project_config() {
-        let cmd = opencode_run_cmd("opencode", None, std::path::Path::new("/neutral"));
+        let cmd = opencode_run_cmd(
+            "/nonexistent/opencode",
+            None,
+            std::path::Path::new("/neutral"),
+        );
         assert_eq!(
             cmd.get_current_dir(),
             Some(std::path::Path::new("/neutral"))
@@ -3214,6 +3945,72 @@ mod neutral_dir_tests {
             "OPENCODE_DISABLE_PROJECT_CONFIG".to_string(),
             "1".to_string()
         )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lockdown_flags_are_checked_and_a_failed_probe_is_not_called_too_old() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = Scratch::new("lockdown-flags");
+        let script = |name: &str, body: &str| {
+            let p = scratch.0.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p.to_string_lossy().into_owned()
+        };
+        let new = script(
+            "new-cli",
+            "echo '  --available-tools  --disable-builtin-mcps'",
+        );
+        let old = script("old-cli", "echo '  --available-toolset'");
+        let flags = ["--available-tools", "--disable-builtin-mcps"];
+        assert!(
+            require_lockdown_flags(&new, AiCli::Copilot, &["--help"], &flags, "too old").is_ok()
+        );
+        assert_eq!(
+            require_lockdown_flags(&old, AiCli::Copilot, &["--help"], &flags, "too old"),
+            Err("too old".to_string())
+        );
+        let missing = scratch.0.join("absent").to_string_lossy().into_owned();
+        let err = require_lockdown_flags(&missing, AiCli::Copilot, &["--help"], &flags, "too old")
+            .unwrap_err();
+        assert!(err.starts_with("Could not check"), "{err}");
+    }
+
+    #[test]
+    fn help_flags_match_whole_option_names() {
+        let help = "  --model <m>   the model\n  --input-format=text\n  -p, --print\n";
+        assert!(!help_has_flag(help, "--mode"));
+        assert!(help_has_flag(help, "--model"));
+        assert!(help_has_flag(help, "--input-format"));
+        assert!(help_has_flag(help, "--print"));
+        assert!(help_has_flag("--mode plan", "--mode"));
+        assert!(!help_has_flag("--modes", "--mode"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_within_reads_stderr_when_asked() {
+        let cmd = || {
+            let mut c = std::process::Command::new("sh");
+            c.args([
+                "-c",
+                "echo --mode on stdout; echo --input-format on stderr >&2",
+            ]);
+            c
+        };
+        let both = output_within(cmd(), std::time::Duration::from_secs(5), true).unwrap();
+        assert!(
+            both.contains("--mode") && both.contains("--input-format"),
+            "{both}"
+        );
+        let out = stdout_within(cmd(), std::time::Duration::from_secs(5)).unwrap();
+        assert!(!out.contains("--input-format"));
+        // A help printed by a CLI that then exits non-zero is still read.
+        let mut failing = std::process::Command::new("sh");
+        failing.args(["-c", "echo --mode >&2; exit 2"]);
+        let help = output_within(failing, std::time::Duration::from_secs(5), true).unwrap();
+        assert!(help.contains("--mode"));
     }
 
     #[cfg(unix)]
