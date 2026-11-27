@@ -84,6 +84,9 @@ function runProbeAsync(args) {
       if (code === 0) resolve({ ok: true, value: parsed, exitCode: code });
       else resolve({ ok: false, error: parsed.error ?? err, exitCode: code });
     });
+    // A probe that exits before reading (an older binary without this
+    // command) closes stdin: the EPIPE is answered by its exit, not thrown.
+    child.stdin.on("error", () => {});
     child.stdin.end(JSON.stringify(args));
   });
 }

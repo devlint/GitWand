@@ -60,6 +60,7 @@ _v3.15.0 (combined diffs, guided bisect, AI requests only to approved endpoints,
 - the `ai-runs` sweep (24 h, at base setup) could remove a run directory still in use by a run older than that in another GitWand process
 - `img-src` stays `https: http:` for self-hosted forge avatars — proxy or allowlist avatar hosts, then tighten it
 - #234: a background revalidation racing a save can briefly show the old title/body of a PR (confirmed still open when #314 merged)
+- curl reads the user's `~/.curlrc` (or `$CURL_HOME/.curlrc`): `run_curl` (`curl_util.rs`) does not pass `-q` first, so a `location` line there makes an AI request follow a redirect with its bound key, and a `proxy` line reroutes forge and AI calls. Pass `-q` as curl's first argument for every caller, and consider which environment variables `run_curl` should pass through (seen in the lot B review)
 - `ai_http_request` under `pnpm dev:web` goes to any origin unasked: the dev server has no native dialog to mirror `check_open_endpoint_with` (from #314)
 - allowed AI endpoints cannot be listed or revoked from Settings (they live in the keychain, service `gitwand:ai`, one account `open-endpoint:<SHA-256 of the origin>` per origin); a refusal lasts until restart or an explicit Test connection / Refresh (from #314)
 - an OpenAI-compatible server without a key: the model list loads (`auth: "none"`), but `isAvailable` requires a key and `callOpenAICompat` always sends `bearer`, so completions are never offered. Support it end to end or say so in Settings (from #314)

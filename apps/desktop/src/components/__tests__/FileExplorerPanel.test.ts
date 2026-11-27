@@ -244,25 +244,22 @@ async function openTab(path: string, pin = true) {
   // CodeMirror is a lazy chunk: the first test of the file pays for its cold
   // import, which a fixed number of ticks did not always cover under the
   // full suite's load. Await the same cached promise the panel awaits, then
-  // wait for the editor of a readable file to show it.
+  // wait for the editor of a readable file to show its text.
   await loadCodeMirror();
   await settle();
-  const content = files[path];
-  if (content !== undefined) await untilEditorShows(content.trimEnd());
+  if (files[path] !== undefined) await untilEditorShows();
 }
 
 /**
- * Wait, up to `ms`, for the mounted editor to show `text`, or for the tab to
- * show its diff instead (no editor text to wait for then). Well under the
- * 5 s test timeout, so a missing editor fails on the test's own assertion,
- * not on a timeout.
+ * Wait, up to `ms`, for an editor holding text, or for the tab to show its
+ * diff instead. Any text, not the file's: a tab restored with unsaved edits,
+ * or a read still held by a test, legitimately shows something else. The
+ * test's own assertions then check what it shows. Well under the 5 s test
+ * timeout, so a missing editor fails on those assertions, not on a timeout.
  */
-async function untilEditorShows(text: string, ms = 1_500) {
+async function untilEditorShows(ms = 1_500) {
   const deadline = Date.now() + ms;
-  // `.cm-content` draws each line as its own element: its text has no newlines.
-  const flat = text.replace(/\n/g, "");
-  const done = () =>
-    (editorDoc() ?? "").includes(flat) || container.querySelector(".fe__diff") !== null;
+  const done = () => (editorDoc() ?? "") !== "" || container.querySelector(".fe__diff") !== null;
   while (!done() && Date.now() < deadline) {
     await settle(1);
   }
