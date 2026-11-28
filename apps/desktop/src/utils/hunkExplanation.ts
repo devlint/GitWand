@@ -47,6 +47,7 @@ export function loadExplanations(code: string): Promise<void> {
     p = load()
       .then((m) => {
         dictionaries[code] = m.default;
+        retries.delete(code);
       })
       .catch(() => {
         // Left in English for now. The dictionary cache is reactive, so what
@@ -73,7 +74,17 @@ let following = false;
 function followLocale(): void {
   if (following) return;
   following = true;
-  effectScope(true).run(() => watch(locale, (code) => void loadExplanations(code), { immediate: true }));
+  effectScope(true).run(() =>
+    watch(
+      locale,
+      (code) => {
+        // Each switch to a language gets its own retries.
+        retries.delete(code);
+        void loadExplanations(code);
+      },
+      { immediate: true },
+    ),
+  );
 }
 
 export function hunkExplanation(hunk: Pick<ConflictHunk, "explanation" | "explanationRef">): string {

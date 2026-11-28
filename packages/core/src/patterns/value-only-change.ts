@@ -17,9 +17,10 @@ export function resetValueOnlyCache(): void {
 }
 
 function detectCached(h: ClassifyInput): ReturnType<typeof detectValueOnlyChange> {
-  // Keyed on the lines' contents: an input edited in place gets a fresh
-  // detection. Joining is cheap next to the token comparison it saves.
-  const key = `${h.baseLines.length > 0 ? 1 : 0}\u0000${h.oursLines.join("\n")}\u0000${h.theirsLines.join("\n")}`;
+  // Keyed on the lines' contents (unambiguously: JSON keeps line bounds), so
+  // an input edited in place gets a fresh detection. Cheap next to the token
+  // comparison it saves.
+  const key = JSON.stringify([h.baseLines.length > 0, h.oursLines, h.theirsLines]);
   if (key !== _lastKey) {
     _lastKey = key;
     _lastResult = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
