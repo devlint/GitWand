@@ -7,13 +7,14 @@
  * text is shown, with its exact singular and plural; under another language
  * the string of `locales/explain/<code>.ts`.
  *
- * Those dictionaries are loaded on demand, one per language, when the UI
- * language becomes that language: they stay out of the main bundle. Until it
+ * Those dictionaries are loaded on demand, one per language: the UI
+ * language's on the first explanation shown, then on each language change.
+ * They stay out of the main bundle. Until it
  * has arrived, and for a hunk with no known key (an older core, a hunk built
  * elsewhere), the English text is shown; the cache is reactive, so what is
  * rendered from it updates once it lands.
  */
-import { shallowReactive, watch } from "vue";
+import { effectScope, shallowReactive, watch } from "vue";
 import type { ExplanationKey, ConflictHunk } from "@gitwand/core";
 import { useI18n } from "../composables/useI18n";
 
@@ -28,8 +29,14 @@ const LOADERS: Record<string, () => Promise<{ default: Dictionary }>> = {
 
 const dictionaries = shallowReactive<Record<string, Dictionary>>({});
 const pending = new Map<string, Promise<void>>();
-/** A failed load is tried again this long after, while that language is still the UI's. */
+/**
+ * A failed load is tried again this long after, while that language is still
+ * the UI's, at most MAX_RETRIES times (a module map may remember the failure:
+ * then the explanations simply stay in English).
+ */
 const RETRY_AFTER_MS = 30_000;
+const MAX_RETRIES = 3;
+const retries = new Map<string, number>();
 
 /** Loads the dictionary of `code` (once); resolves when it is there, or at once for English. */
 export function loadExplanations(code: string): Promise<void> {
@@ -44,6 +51,9 @@ export function loadExplanations(code: string): Promise<void> {
       .catch(() => {
         // Left in English for now. The dictionary cache is reactive, so what
         // is rendered from it updates once a retry lands.
+        const n = retries.get(code) ?? 0;
+        if (n >= MAX_RETRIES) return;
+        retries.set(code, n + 1);
         setTimeout(() => {
           if (locale.value === code) void loadExplanations(code);
         }, RETRY_AFTER_MS);
@@ -55,11 +65,21 @@ export function loadExplanations(code: string): Promise<void> {
 }
 
 const { locale } = useI18n();
-watch(locale, (code) => void loadExplanations(code), { immediate: true });
+
+// The dictionary of the UI language loads on the first explanation shown, then
+// follows language changes: an app that never shows one never fetches it. The
+// watcher lives in a detached scope, not in the component rendering first.
+let following = false;
+function followLocale(): void {
+  if (following) return;
+  following = true;
+  effectScope(true).run(() => watch(locale, (code) => void loadExplanations(code), { immediate: true }));
+}
 
 export function hunkExplanation(hunk: Pick<ConflictHunk, "explanation" | "explanationRef">): string {
   const ref = hunk.explanationRef;
   if (!ref) return hunk.explanation;
+  followLocale();
   const code = locale.value;
   const dict = dictionaries[code];
   if (!dict) return hunk.explanation;

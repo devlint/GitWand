@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { EXPLANATION_PARAMS } from "@gitwand/core";
 import fr from "../../locales/explain/fr";
 import es from "../../locales/explain/es";
@@ -50,6 +50,13 @@ describe("hunkExplanation", () => {
     expect(
       hunkExplanation({ explanation: "x", explanationRef: { key: "refactoringBoth", params: ["{1}", 2] } }),
     ).toContain("{1} renommage(s)");
+  });
+
+  it("loads the UI language's dictionary on the first explanation shown", async () => {
+    setLocale("es");
+    // English until the dictionary has arrived, then the translation.
+    expect(hunkExplanation(hunk)).toBe(hunk.explanation);
+    await vi.waitFor(() => expect(hunkExplanation(hunk)).toContain("resolvedor «json»"));
   });
 
   it("falls back to the English text without a known key", async () => {

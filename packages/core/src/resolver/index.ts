@@ -120,15 +120,13 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
   };
 }
 
-/**
- * An `llm_proposed` hunk is a complex one the LLM would have been asked
- * about: its confidence is the LLM placeholder (non-determinism penalties).
- * A format resolver that merges it starts from the complex classification.
- */
-function asComplex(hunk: ConflictHunk): ConflictHunk {
-  if (hunk.type !== "llm_proposed") return hunk;
-  const input: ClassifyInput = { ...hunk, endLine: hunk.startLine };
-  return { ...hunk, type: "complex", confidence: complexPattern.confidence(input) };
+/** The format-semantic explanation, in both forms, on a hunk that keeps its type. */
+function explainedAsFormatMerge(hunk: ConflictHunk, resolverUsed: string): ConflictHunk {
+  return {
+    ...hunk,
+    explanation: `Hunk resolved semantically by the "${resolverUsed}" resolver (merged by the format's structure, not by lines).`,
+    explanationRef: { key: "formatSemantic", params: [resolverUsed] },
+  };
 }
 
 /**
@@ -275,17 +273,22 @@ function resolveHunk(
   if (!generatedGate) {
     const dispatch = dispatchFormatAware(hunk, filePath, options);
     if (dispatch.status === "resolved") {
-      // `llm_proposed` is what `complex` becomes while the LLM fallback is on:
-      // resolved here, the LLM never sees it, so it is a format-semantic hunk.
-      const effective = hunk.type === "complex" || hunk.type === "llm_proposed"
-        ? reclassifyFormatSemantic(asComplex(hunk), dispatch.resolverUsed)
-        : boostFormatValidated(hunk, dispatch.resolverUsed);
+      // `llm_proposed` is what `complex` becomes while the LLM fallback is on.
+      // It keeps that type (so a refused or retracted merge still reaches the
+      // LLM phase), but says what resolved it: the format resolver.
+      const effective = hunk.type === "complex"
+        ? reclassifyFormatSemantic(hunk, dispatch.resolverUsed)
+        : hunk.type === "llm_proposed"
+          ? explainedAsFormatMerge(boostFormatValidated(hunk, dispatch.resolverUsed), dispatch.resolverUsed)
+          : boostFormatValidated(hunk, dispatch.resolverUsed);
       const { policy: fmtPolicy, cfg: fmtCfg } = computeEffectivePolicy(filePath, options);
       const fmtMinConfidence = computeEffectiveMinConfidence(fmtCfg, options);
       // Une fusion sémantique combine du contenu des deux côtés — même famille
       // de risque que non_overlapping. Les politiques qui l'excluent (strict,
       // prefer-safety) l'excluent donc aussi, comme pour le résolveur imports.
-      if (effective.type === "format_semantic" && !fmtCfg.allowNonOverlapping) {
+      // An llm_proposed hunk merged here is the same semantic merge (it only
+      // keeps its type for the LLM phase): the policy applies to it too.
+      if ((effective.type === "format_semantic" || hunk.type === "llm_proposed") && !fmtCfg.allowNonOverlapping) {
         return {
           // Not applied: no resolver produced this hunk's resolution.
           hunk: heldBack(hunk, effective),

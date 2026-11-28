@@ -1,7 +1,7 @@
 /**
  * Conflict hunk explanations, fr: one string per `explanationRef` key of
  * `@gitwand/core` (English comes from core's own `explanation`). Kept out
- * of the main locale file so they load with the merge editor, not at startup;
+ * of the main locale file: loaded on demand, when an explanation is first shown;
  * typed so that a key core adds does not compile until it is translated.
  */
 import type { ExplanationKey } from "@gitwand/core";

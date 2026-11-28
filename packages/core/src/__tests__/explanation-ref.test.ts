@@ -149,6 +149,11 @@ describe("explanationRef", () => {
       expect(h.explanationRef).toEqual({ key: "complex" });
       expect(h.explanation).not.toBe("claimed");
     }
+    // An llm_proposed hunk whose format merge is withdrawn stays llm_proposed
+    // (the LLM phase picks it up), without the format claim.
+    const llm = withoutFormatResolver({ ...base, type: "llm_proposed", explanationRef: { key: "formatSemantic", params: ["json"] } });
+    expect(llm.type).toBe("llm_proposed");
+    expect(llm.explanationRef).toEqual({ key: "complex" });
     // The type stays (a held-back hunk is still classified format_semantic).
     const fmt = withoutFormatResolver({ ...base, type: "format_semantic", explanationRef: { key: "formatSemantic", params: ["json"] } });
     expect(fmt.type).toBe("format_semantic");
@@ -157,7 +162,7 @@ describe("explanationRef", () => {
     expect(kept.explanationRef).toEqual({ key: "oneSideOurs" });
   });
 
-  it("calls a format merge a format merge, not an LLM proposal, with the LLM fallback on", async () => {
+  it("calls a format merge a format merge, not an LLM proposal, with the LLM fallback on (type kept)", async () => {
     const content = conflict(
       ["{", '  "name": "app",', '  "alpha": 1', "}"],
       ["{", '  "name": "app"', "}"],
@@ -167,11 +172,11 @@ describe("explanationRef", () => {
     const endpoint = { async call() { calls++; return "CANNOT_RESOLVE"; } };
     const result = await resolveAsync(content, "config.json", { llmFallback: { enabled: true, endpoint }, validationLevel: "off" });
     expect(result.resolutions[0].autoResolved).toBe(true);
-    expect(result.hunks[0].type).toBe("format_semantic");
-    expect(result.hunks[0].explanationRef?.key).toBe("formatSemantic");
+    // The type stays llm_proposed (a withdrawn merge must still reach the LLM
+    // phase); the explanation names what resolved it.
+    expect(result.hunks[0].type).toBe("llm_proposed");
+    expect(result.hunks[0].explanationRef).toEqual({ key: "formatSemantic", params: [result.hunks[0].formatResolver] });
     expect(calls).toBe(0);
-    // Not the LLM placeholder's confidence.
-    expect(result.hunks[0].confidence.penalties.join(" ")).not.toMatch(/LLM/);
   });
 
   it("still sends a hunk whose format merge the policy refused to the LLM fallback", async () => {
