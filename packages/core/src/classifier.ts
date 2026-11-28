@@ -25,7 +25,6 @@ import llmProposed         from "./patterns/llm-proposed.js";    // v2.5 — pri
 import refactoringAwareMerge from "./patterns/refactoring-aware-merge.js"; // v2.6 — priority 970
 import complex             from "./patterns/complex.js";
 import { getLastTokenMergeResult } from "./patterns/token-level-merge.js";
-import { resetValueOnlyCache } from "./patterns/value-only-change.js";
 
 // ─── Registre ────────────────────────────────────────────────
 
@@ -132,8 +131,6 @@ function buildSummary(type: ConflictType, h: ClassifyInput): string {
  * @returns ClassifyResult avec type, confidence, explanation et trace
  */
 export function classifyConflict(hunk: ClassifyInput): ClassifyResult {
-  // A cached detection never outlives one classification (inputs may be mutated between calls).
-  resetValueOnlyCache();
   const hasBase = hunk.baseLines.length > 0;
 
   // Filtrer par `requires` + trier par priorité

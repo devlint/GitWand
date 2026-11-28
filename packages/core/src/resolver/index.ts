@@ -274,8 +274,10 @@ function resolveHunk(
     const dispatch = dispatchFormatAware(hunk, filePath, options);
     if (dispatch.status === "resolved") {
       // `llm_proposed` is what `complex` becomes while the LLM fallback is on.
-      // It keeps that type (so a refused or retracted merge still reaches the
-      // LLM phase), but says what resolved it: the format resolver.
+      // It keeps that type, so a merge refused here (policy, confidence) or
+      // retracted inside `resolve()` still reaches the LLM phase; it says what
+      // resolved it: the format resolver. (A parse-tree retraction in
+      // resolveAsync returns before that phase, as for every hunk.)
       const effective = hunk.type === "complex"
         ? reclassifyFormatSemantic(hunk, dispatch.resolverUsed)
         : hunk.type === "llm_proposed"

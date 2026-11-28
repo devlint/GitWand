@@ -310,13 +310,17 @@ const props = defineProps<{
 }>();
 
 /**
- * A hunk's tooltip: its explanation in the UI language, then core's reason
- * when it says more (the side a policy took, a convention note, why a hunk is
- * manual: a guard, a retraction…), which is English audit text.
+ * A hunk's tooltip. In English, core's reason (as before). In another
+ * language, the explanation translated, then core's reason when it says more
+ * (the side a policy took, a convention note, why a hunk is manual: a guard,
+ * a retraction…), which is English audit text.
  */
 function hunkTitle(h: PreviewHunk): string {
-  if (h.messageKey) return `${h.confidenceScore}% (${h.confidenceLabel}) — ${t(h.messageKey)}`;
-  const head = `${h.confidenceScore}% (${h.confidenceLabel}) — ${hunkExplanation(h)}`;
+  const score = `${h.confidenceScore}% (${h.confidenceLabel})`;
+  if (h.messageKey) return `${score} — ${t(h.messageKey)}`;
+  // English: core's reason alone, as before (the explanation would say it twice).
+  if (locale.value === "en") return `${score} — ${h.reason || h.explanation}`;
+  const head = `${score} — ${hunkExplanation(h)}`;
   return !h.reason || h.reason === h.explanation ? head : `${head}\n${h.reason}`;
 }
 

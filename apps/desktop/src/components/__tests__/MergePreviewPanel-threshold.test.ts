@@ -128,15 +128,15 @@ describe("MergePreviewPanel — confidence bar", () => {
     expect(bars[2].className).toContain("ph-confidence--medium");
   });
 
-  it("puts the score and the explanation in the tooltip of every row", async () => {
+  it("puts the score and core's reason in the tooltip of every row (English UI)", async () => {
     mountPanel(base(0));
     await expandFile();
     const row = container.querySelector<HTMLElement>(".preview-hunk")!;
     expect(row.title).toContain("83%");
     expect(row.title).toContain("high");
-    expect(row.title).toContain("differing volatile value");
-    // Then core's reason, which says more (the side taken, the semver chosen).
     expect(row.title).toContain("version bump");
+    // In English the explanation would say it twice: not added.
+    expect(row.title).not.toContain("differing volatile value");
   });
 
   it("adds core's reason to the tooltip of a hunk left to the user", async () => {

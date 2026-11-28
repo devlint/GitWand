@@ -51,7 +51,12 @@ export function forgetRetractedFormatResolvers(
   };
 }
 
-/** Explanations that say a mechanism resolved the hunk (not a proposal of the pattern). */
+/**
+ * Explanations that say a mechanism resolved the hunk. Only these are
+ * withdrawn: a pattern's explanation ("Resolution: take theirs.") describes
+ * the resolution it proposes, which a retracted or held-back hunk still
+ * offers as a proposal (the merge editor shows it), so it stays true.
+ */
 const CLAIMS_A_RESOLUTION = new Set<ExplanationKey>([
   "formatSemantic",
   "llmProposed",
