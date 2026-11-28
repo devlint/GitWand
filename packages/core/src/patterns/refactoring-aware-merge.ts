@@ -37,6 +37,7 @@
  */
 
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { makeScore, scopeImpact } from "./utils.js";
 import { tryRefMerge } from "../refactoring/orchestration.js";
 import type { RefMergeResult } from "../refactoring/orchestration.js";
@@ -130,6 +131,16 @@ const refactoringAwareMerge: PatternPlugin = {
       return `Refactoring conflict: ${parts.join(", ") || "refactoring detected"}. Resolved through the RefMerge pipeline (invert, merge, replay).`;
     }
     return "Conflict caused by a concurrent refactoring, resolved through the RefMerge pipeline.";
+  },
+  explanationRef(_h: ClassifyInput): ExplanationRef {
+    if (!_lastResult) return { key: "refactoringFallback" };
+    const refs = [..._lastResult.oursRefs, ..._lastResult.theirsRefs];
+    const moves = refs.filter((r) => r.kind === "move-method").length;
+    const renames = refs.length - moves;
+    if (renames > 0 && moves > 0) return { key: "refactoringBoth", params: [renames, moves] };
+    if (renames > 0) return { key: "refactoringRenames", params: [renames] };
+    if (moves > 0) return { key: "refactoringMoves", params: [moves] };
+    return { key: "refactoringDetected" };
   },
 
   passReason(_h: ClassifyInput): string {

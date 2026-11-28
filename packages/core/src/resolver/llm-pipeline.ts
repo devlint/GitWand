@@ -18,7 +18,7 @@
  * les nouvelles résolutions.
  */
 
-import { retractForParseTree } from "./retract.js";
+import { forgetRetractedFormatResolvers, retractForParseTree } from "./retract.js";
 import type {
   ConflictHunk,
   GitWandOptions,
@@ -30,6 +30,8 @@ import type {
 import type { StructuralLoaderOptions } from "../structural/index.js";
 import { parseConflictMarkers } from "../parser.js";
 import { tryLlmFallbackResolve } from "../resolvers/llm-fallback.js";
+import llmProposedPattern from "../patterns/llm-proposed.js";
+import complexPattern from "../patterns/complex.js";
 import { checkParseTreeValid } from "./validate-parse-tree.js";
 import { validateMergedContent } from "./validation.js";
 import {
@@ -112,6 +114,15 @@ function reconstructMergedContent(
   return { content: outputLines.join("\n"), allResolved };
 }
 
+/** Unresolved `llm_proposed` hunks the LLM never saw get the genuine-conflict explanation (matched by index). */
+function withUnsentLlmExplained(result: MergeResult): MergeResult {
+  const unsent = (i: number) => {
+    const r = result.resolutions[i];
+    return !!r && !r.autoResolved && r.hunk.type === "llm_proposed";
+  };
+  return { ...result, ...forgetRetractedFormatResolvers(result.hunks, result.resolutions, unsent) };
+}
+
 /**
  * Applique le fallback LLM sur les hunks `complex` non résolus.
  *
@@ -132,7 +143,9 @@ export async function runLlmFallbackPhase(
   const llmConfig: LlmFallbackConfig = options.llmFallback ?? { enabled: false };
 
   if (!llmConfig.enabled || !llmConfig.endpoint) {
-    return result;
+    // Not reached from resolveAsync (llm_proposed needs an endpoint), but a
+    // hunk the LLM never saw must not say it proposed a resolution.
+    return withUnsentLlmExplained(result);
   }
 
   const contextLines = llmConfig.contextLines ?? 50;
@@ -195,9 +208,13 @@ export async function runLlmFallbackPhase(
 
     if (llmResult.lines !== null) {
       // Résolution acceptée — mettre à jour le hunk et la résolution
+      // Set explicitly: the explanation always matches the type it ends with.
+      const input = { ...updatedHunks[idx], endLine: updatedHunks[idx].startLine };
       const updatedHunk: ConflictHunk = {
         ...updatedHunks[idx],
         type: "llm_proposed",
+        explanation: llmProposedPattern.explanation(input),
+        explanationRef: llmProposedPattern.explanationRef?.(input),
         trace: {
           ...updatedHunks[idx].trace,
           selected: "llm_proposed",
@@ -213,9 +230,15 @@ export async function runLlmFallbackPhase(
         resolutionReason: llmResult.reason,
       };
     } else {
-      // Résolution refusée — enrichir la trace avec llmTrace pour l'audit
+      // Résolution refusée — enrichir la trace avec llmTrace pour l'audit.
+      // The type stays llm_proposed (the tier stats count the attempt), but the
+      // hunk is unresolved: its explanation is the genuine-conflict one, not
+      // "proposed by the LLM".
+      const input = { ...updatedHunks[idx], endLine: updatedHunks[idx].startLine };
       const updatedHunk: ConflictHunk = {
         ...updatedHunks[idx],
+        explanation: complexPattern.explanation(input),
+        explanationRef: complexPattern.explanationRef?.(input),
         trace: {
           ...updatedHunks[idx].trace,
           summary: `${updatedHunks[idx].trace.summary} | LLM rejected: ${llmResult.reason}`,

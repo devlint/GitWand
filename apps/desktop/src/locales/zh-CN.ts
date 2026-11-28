@@ -769,6 +769,7 @@ const zhCN: Locale = {
     commitPicker: "要拣选的提交",
     commitPickerLoading: "正在加载提交…",
     commitPickerEmpty: "未找到提交",
+    notSimulated: "没有可分析的内容：无法模拟该冲突。",
   },
 
   // ─── Guided bisect ─────────────────────────────────────
@@ -2347,6 +2348,8 @@ const zhCN: Locale = {
       reject: "拒绝 → 手动解决",
       accepted: "已接受",
     },
+    aiSuggestedExplanation: "AI 建议的解决方式",
+    aiSuggestedExplanationUnstructured: "AI 建议的解决方式（非结构化回复）",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

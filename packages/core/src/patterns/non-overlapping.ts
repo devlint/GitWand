@@ -1,4 +1,5 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { mergeNonOverlapping } from "../diff.js";
 import { scopeImpact, makeScore } from "./utils.js";
 
@@ -21,6 +22,9 @@ const nonOverlapping: PatternPlugin = {
 
   explanation(_h: ClassifyInput): string {
     return "The branches modified different regions of the same block, so an automatic merge is possible.";
+  },
+  explanationRef(_h: ClassifyInput): ExplanationRef {
+    return { key: "nonOverlapping" };
   },
 
   passReason(_h: ClassifyInput): string {

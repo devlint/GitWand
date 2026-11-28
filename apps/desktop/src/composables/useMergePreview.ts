@@ -25,7 +25,7 @@ import {
 // always mounted), which is the same reason `engine()` is lazy above: a static
 // value import from `@gitwand/core` here puts part of the package back into
 // the boot chunk, and the main bundle has single-digit KB of budget headroom.
-import type { GitWandOptions, MergeContext } from "@gitwand/core";
+import type { ExplanationRef, GitWandOptions, MergeContext } from "@gitwand/core";
 // `resolve` is loaded lazily via `engine()` — this composable sits on an
 // eager path (AppHeader → BranchSelector → useMergePreview, always mounted),
 // so a static import here would put the ~244 KB raw / ~73 KB gzip resolution
@@ -33,6 +33,7 @@ import type { GitWandOptions, MergeContext } from "@gitwand/core";
 // See ../utils/coreEngine.ts.
 import { engine } from "../utils/coreEngine.js";
 import { useResolutionSelection } from "./useResolutionSelection";
+import type { LocaleKey } from "../locales";
 
 // ─── Opérations prédictibles (v2.20.0) ───────────────────
 //
@@ -74,8 +75,9 @@ export interface PreviewHunk {
   confidenceLabel: string;
   /**
    * `resolutionReason` du moteur : pourquoi ce hunk est auto-résolvable, ou
-   * pourquoi il ne l'est pas. C'est le texte du tooltip, et la seule réponse
-   * honnête à « pourquoi celui-là est-il manuel ? ».
+   * pourquoi il ne l'est pas. Le tooltip le donne après l'explication (en
+   * anglais : texte d'audit), et c'est la seule réponse honnête à « pourquoi
+   * celui-là est-il manuel ? ».
    *
    * Volontairement PAS `resolvedLines` : il n'y a pas de case à cocher dans
    * l'aperçu (les index de hunks d'une simulation ne correspondent pas à ceux
@@ -83,6 +85,15 @@ export interface PreviewHunk {
    * garde le résumé petit sur un gros merge.
    */
   reason: string;
+  /**
+   * The hunk's explanation, English, and its translatable form: the panel
+   * shows `hunkExplanation()` of them at render time, so it follows the UI
+   * language (`reason` above is core's English audit text).
+   */
+  explanation: string;
+  explanationRef?: ExplanationRef;
+  /** A message of the app itself (not core's), shown with `t()` at render instead. */
+  messageKey?: LocaleKey;
 }
 
 export interface PreviewFileResult {
@@ -235,6 +246,8 @@ export function useMergePreview(cwd: () => string) {
               confidenceScore: r.hunk.confidence.score,
               confidenceLabel: r.hunk.confidence.label,
               reason: r.resolutionReason,
+              explanation: r.hunk.explanation,
+              explanationRef: r.hunk.explanationRef,
             }))
           : result.hunks.map(h => ({
               startLine: h.startLine,
@@ -243,6 +256,8 @@ export function useMergePreview(cwd: () => string) {
               confidenceScore: h.confidence.score,
               confidenceLabel: h.confidence.label,
               reason: h.explanation,
+              explanation: h.explanation,
+              explanationRef: h.explanationRef,
             }));
 
         files.push({
@@ -268,6 +283,8 @@ export function useMergePreview(cwd: () => string) {
           confidenceScore: 0,
           confidenceLabel: "low",
           reason: "No content to analyse: the conflict could not be simulated.",
+          explanation: "",
+          messageKey: "mergePreview.notSimulated",
         }],
         });
       }

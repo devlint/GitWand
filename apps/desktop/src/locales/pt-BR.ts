@@ -756,6 +756,7 @@ const ptBR: Locale = {
     commitPicker: "Commit para cherry-pick",
     commitPickerLoading: "Carregando commits…",
     commitPickerEmpty: "Nenhum commit encontrado",
+    notSimulated: "Nenhum conteúdo para analisar: não foi possível simular o conflito.",
   },
 
   // ─── Guided bisect ─────────────────────────────────────
@@ -2338,6 +2339,8 @@ const ptBR: Locale = {
       reject: "Rejeitar → resolver manualmente",
       accepted: "Aceito",
     },
+    aiSuggestedExplanation: "Resolução sugerida pela IA",
+    aiSuggestedExplanationUnstructured: "Resolução sugerida pela IA (resposta não estruturada)",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

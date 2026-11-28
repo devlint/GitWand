@@ -313,7 +313,7 @@ export function detectValueOnlyChange(
   oursLines: string[],
   theirsLines: string[],
   hasBase = false,
-): { confidenceScore: ConfidenceScore; explanation: string; traceReason: string } | null {
+): { confidenceScore: ConfidenceScore; explanation: string; traceReason: string; diffCount: number } | null {
   if (oursLines.length !== theirsLines.length) return null;
   if (oursLines.length === 0) return null;
 
@@ -381,7 +381,7 @@ export function detectValueOnlyChange(
   const traceReason =
     `${diffCount} of ${totalTokens} tokens differ, all identified as volatile (hash, version, timestamp…). Ratio: ${(diffRatio * 100).toFixed(1)}%, score ${confidenceScore.score} (${confidenceScore.label}).`;
 
-  return { confidenceScore, explanation, traceReason };
+  return { confidenceScore, explanation, traceReason, diffCount };
 }
 
 

@@ -760,6 +760,7 @@ const fr: Locale = {
     commitPicker: "Commit à cherry-picker",
     commitPickerLoading: "Chargement des commits…",
     commitPickerEmpty: "Aucun commit trouvé",
+    notSimulated: "Aucun contenu à analyser : le conflit n'a pas pu être simulé.",
   },
 
   // ─── Guided bisect ─────────────────────────────────────
@@ -2348,6 +2349,8 @@ const fr: Locale = {
       reject: "Rejeter → résolution manuelle",
       accepted: "Accepté",
     },
+    aiSuggestedExplanation: "Résolution suggérée par l'IA",
+    aiSuggestedExplanationUnstructured: "Résolution suggérée par l'IA (réponse non structurée)",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

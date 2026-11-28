@@ -5,6 +5,8 @@
  * et la résolution automatique de conflits Git.
  */
 
+import type { ExplanationRef } from "./explanation-keys.js";
+
 /** Les trois versions d'un fichier en conflit */
 export interface MergeInput {
   /** Contenu de la version ancêtre commune (base) */
@@ -362,6 +364,8 @@ export interface ClassifyResult {
   type: ConflictType;
   confidence: ConfidenceScore;
   explanation: string;
+  /** `explanation` as a translatable key (see `explanation-keys.ts`). */
+  explanationRef?: ExplanationRef;
   trace: DecisionTrace;
 }
 
@@ -383,6 +387,8 @@ export interface PatternPlugin {
   detect(h: ClassifyInput): boolean;
   confidence(h: ClassifyInput): ConfidenceScore;
   explanation(h: ClassifyInput): string;
+  /** `explanation` as a translatable key (see `explanation-keys.ts`). Every built-in pattern has one. */
+  explanationRef?(h: ClassifyInput): ExplanationRef;
   passReason(h: ClassifyInput): string;
   failReason(h: ClassifyInput): string;
 }
@@ -403,6 +409,12 @@ export interface ConflictHunk {
   confidence: ConfidenceScore;
   /** Explication lisible de la résolution (pour l'audit) */
   explanation: string;
+  /**
+   * `explanation` as a translatable key and parameters, for an app that shows
+   * it in the user's language. Whoever replaces `explanation` replaces this
+   * too (or drops it): a stale key would show another text.
+   */
+  explanationRef?: ExplanationRef;
   /** Trace de la décision de classification (Phase 7.1) */
   trace: DecisionTrace;
   /**

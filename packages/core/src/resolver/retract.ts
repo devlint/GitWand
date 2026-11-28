@@ -5,7 +5,9 @@
  * the end, resolved by.
  */
 import type { ConflictHunk, HunkResolution } from "../types.js";
+import type { ExplanationKey } from "../explanation-keys.js";
 import { applyPostMergeRiskPenalty } from "./validate-parse-tree.js";
+import complexPattern from "../patterns/complex.js";
 
 /**
  * accuracy lot 1 — Les résolutions automatiques d'un fichier dont le contenu
@@ -49,10 +51,38 @@ export function forgetRetractedFormatResolvers(
   };
 }
 
-/** #301 — A hunk whose format-aware resolution was not applied names no resolver. */
+/**
+ * Explanations that say a mechanism resolved the hunk. Only these are
+ * withdrawn: a pattern's explanation ("Resolution: take theirs.") describes
+ * the resolution it proposes, which a retracted or held-back hunk still
+ * offers as a proposal (the merge editor shows it), so it stays true.
+ */
+const CLAIMS_A_RESOLUTION = new Set<ExplanationKey>([
+  "formatSemantic",
+  "llmProposed",
+  "structuralMerge",
+  // "Resolved through the RefMerge pipeline".
+  "refactoringRenames",
+  "refactoringMoves",
+  "refactoringBoth",
+  "refactoringDetected",
+  "refactoringFallback",
+]);
+
+/**
+ * #301 — A hunk whose format-aware resolution was not applied names no
+ * resolver. Nor does its explanation: one that says the hunk was resolved by
+ * a format resolver, a structural merge, RefMerge or the LLM goes back to the
+ * genuine-conflict one, in both forms (`explanation`, `explanationRef`).
+ */
 export function withoutFormatResolver(hunk: ConflictHunk): ConflictHunk {
   const { formatResolver: _unused, ...rest } = hunk;
-  return rest;
+  const key = rest.explanationRef?.key;
+  if (key === undefined || !CLAIMS_A_RESOLUTION.has(key)) return rest;
+  const input = { ...rest, endLine: rest.startLine };
+  // The type stays (a held-back format_semantic hunk is still classified and
+  // traced as one: min-confidence-score's contract); only the claim goes.
+  return { ...rest, explanation: complexPattern.explanation(input), explanationRef: complexPattern.explanationRef?.(input) };
 }
 
 /**

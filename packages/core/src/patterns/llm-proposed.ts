@@ -1,4 +1,5 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { makeScore } from "./utils.js";
 
 /**
@@ -65,6 +66,9 @@ const llmProposed: PatternPlugin = {
 
   explanation(_h: ClassifyInput): string {
     return "Resolution proposed by the LLM fallback. The hunk is sent to the configured LLM endpoint for an assisted resolution, which is validated (parse tree plus tsc/eslint) before it can be accepted.";
+  },
+  explanationRef(_h: ClassifyInput): ExplanationRef {
+    return { key: "llmProposed" };
   },
 
   passReason(_h: ClassifyInput): string {

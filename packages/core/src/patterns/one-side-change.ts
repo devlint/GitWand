@@ -1,4 +1,5 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { scopeImpact, makeScore } from "./utils.js";
 
 const oneSideChange: PatternPlugin = {
@@ -33,6 +34,9 @@ const oneSideChange: PatternPlugin = {
       return "Only the incoming branch (theirs) modified this block. Resolution: take theirs.";
     }
     return "Only the current branch (ours) modified this block. Resolution: take ours.";
+  },
+  explanationRef(h: ClassifyInput): ExplanationRef {
+    return { key: h.oursLines.join("\n") === h.baseLines.join("\n") ? "oneSideTheirs" : "oneSideOurs" };
   },
 
   passReason(h: ClassifyInput): string {

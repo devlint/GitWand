@@ -1,4 +1,5 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { makeScore, detectValueOnlyChange } from "./utils.js";
 
 const valueOnlyChange: PatternPlugin = {
@@ -25,6 +26,10 @@ const valueOnlyChange: PatternPlugin = {
   explanation(h: ClassifyInput): string {
     const result = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
     return result?.explanation ?? "Differing volatile values.";
+  },
+  explanationRef(h: ClassifyInput): ExplanationRef {
+    const result = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
+    return result ? { key: "valueOnly", params: [result.diffCount] } : { key: "valueOnlyFallback" };
   },
 
   passReason(h: ClassifyInput): string {

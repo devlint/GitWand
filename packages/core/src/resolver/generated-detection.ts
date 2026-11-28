@@ -115,6 +115,7 @@ export function reclassifyIfGenerated(
     type: "generated_file",
     confidence: generatedScore,
     explanation: `Generated file (${genInfo.label}). This file is regenerated, not merged: resolve its source, then re-run the tool that produces it (install/build).`,
+    explanationRef: { key: "generatedFile", params: [genInfo.label] },
     // Update the trace to reflect the reclassification
     trace: {
       ...hunk.trace,

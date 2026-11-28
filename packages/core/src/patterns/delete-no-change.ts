@@ -1,4 +1,5 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { makeScore } from "./utils.js";
 
 const deleteNoChange: PatternPlugin = {
@@ -56,6 +57,13 @@ const deleteNoChange: PatternPlugin = {
       return "The current branch (ours) deleted this block. Without a base, confidence is medium. Proposed resolution: delete.";
     }
     return "The incoming branch (theirs) deleted this block. Without a base, confidence is medium. Proposed resolution: delete.";
+  },
+  explanationRef(h: ClassifyInput): ExplanationRef {
+    if (h.baseLines.length > 0) {
+      const oursDeleted = h.oursLines.length === 0 && h.theirsLines.join("\n") === h.baseLines.join("\n");
+      return { key: oursDeleted ? "deleteOurs" : "deleteTheirs" };
+    }
+    return { key: h.oursLines.length === 0 ? "deleteOursNoBase" : "deleteTheirsNoBase" };
   },
 
   passReason(h: ClassifyInput): string {

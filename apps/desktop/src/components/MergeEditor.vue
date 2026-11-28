@@ -27,6 +27,8 @@ import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
 import { CREATE_ISSUE_KEY } from "../composables/useCreateIssue";
 import { useAcceptedReports } from "../composables/useAcceptedReports";
 import { acceptedLabel, reportFor as buildReport, type ProposalKind, type ResolutionReport } from "../utils/resolutionReport";
+import { hunkExplanation } from "../utils/hunkExplanation";
+import type { AISuggestion } from "../composables/useAIProvider";
 // Async on purpose, and NOT a contradiction of the static-import justification
 // above: that one covers thin BaseModal wrappers with no heavy dependencies.
 // CodeEditor is the entry point to CodeMirror (~400 KB), and it sits behind a
@@ -40,6 +42,11 @@ import AiSparkle from "./AiSparkle.vue";
 import ResolveAutoSummaryModal from "./ResolveAutoSummaryModal.vue";
 
 const { t, locale } = useI18n();
+
+/** An AI suggestion's explanation: the model's, or the app's own text in the UI language. */
+function aiSuggestionText(s: AISuggestion): string {
+  return s.explanationKey ? t(s.explanationKey) : s.explanation;
+}
 const { isAvailable: aiAvailable } = useAIProvider();
 const { isGenerating: aiExplainLoading, explain: aiExplain } = useHunkExplanation();
 const { findMatchingRule, executeRule } = useCustomAutomations();
@@ -1304,7 +1311,7 @@ useResizeObserver(contentEl, drawMinimap);
               v-if="hunkForSegment(seg) && seg.hunkIndex != null && showResolutionPreviewFor(seg.hunkIndex, hunkForSegment(seg)!)"
               :resolved-lines="resolutions[seg.hunkIndex]!.resolvedLines!"
               :hunk-id="seg.hunkIndex"
-              :explanation="hunkForSegment(seg)!.explanation"
+              :explanation="hunkExplanation(hunkForSegment(seg)!)"
               :confidence-score="hunkForSegment(seg)!.confidence.score"
               :confidence-label="hunkForSegment(seg)!.confidence.label"
               :can-report="canReport"
@@ -1436,11 +1443,11 @@ useResizeObserver(contentEl, drawMinimap);
             </div>
 
             <!-- ── AI explanation banner ──────────────────── -->
-            <div v-if="aiQueue.suggestionFor(seg.hunkIndex!)?.explanation && editingHunkIndex === seg.hunkIndex && editSource === 'ai'" class="ai-explanation-banner">
+            <div v-if="(aiQueue.suggestionFor(seg.hunkIndex!)?.explanation || aiQueue.suggestionFor(seg.hunkIndex!)?.explanationKey) && editingHunkIndex === seg.hunkIndex && editSource === 'ai'" class="ai-explanation-banner">
               <svg class="ai-explanation-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
                 <path d="M8 1v2m0 10v2M1 8h2m10 0h2"/><circle cx="8" cy="8" r="4"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
               </svg>
-              <span>{{ aiQueue.suggestionFor(seg.hunkIndex!)?.explanation }}</span>
+              <span>{{ aiSuggestionText(aiQueue.suggestionFor(seg.hunkIndex!)!) }}</span>
             </div>
 
             <!-- ── Hunk NL explanation (Phase 1.3.2) ──────── -->
@@ -1566,7 +1573,7 @@ useResizeObserver(contentEl, drawMinimap);
               v-if="hunkForSegment(seg)?.explanation"
               class="hunk-explanation muted"
             >
-              {{ hunkForSegment(seg)!.explanation }}
+              {{ hunkExplanation(hunkForSegment(seg)!) }}
             </div>
           </div>
         </template>

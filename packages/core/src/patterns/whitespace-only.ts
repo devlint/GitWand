@@ -1,4 +1,5 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { scopeImpact, makeScore, normalizeForWhitespaceCheck, extractQuotedSegments } from "./utils.js";
 
 const whitespaceOnly: PatternPlugin = {
@@ -39,6 +40,9 @@ const whitespaceOnly: PatternPlugin = {
 
   explanation(_h: ClassifyInput): string {
     return "Both branches contain the same code, differing only in whitespace.";
+  },
+  explanationRef(_h: ClassifyInput): ExplanationRef {
+    return { key: "whitespaceOnly" };
   },
 
   passReason(_h: ClassifyInput): string {

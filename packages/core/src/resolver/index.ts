@@ -103,6 +103,7 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
     formatResolver: resolverUsed,
     confidence,
     explanation: `Hunk resolved semantically by the "${resolverUsed}" resolver (merged by the format's structure, not by lines).`,
+    explanationRef: { key: "formatSemantic", params: [resolverUsed] },
     trace: {
       ...hunk.trace,
       selected: "format_semantic",
@@ -117,6 +118,25 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
       ],
     },
   };
+}
+
+/** The format-semantic explanation, in both forms, on a hunk that keeps its type. */
+function explainedAsFormatMerge(hunk: ConflictHunk, resolverUsed: string): ConflictHunk {
+  return {
+    ...hunk,
+    explanation: `Hunk resolved semantically by the "${resolverUsed}" resolver (merged by the format's structure, not by lines).`,
+    explanationRef: { key: "formatSemantic", params: [resolverUsed] },
+  };
+}
+
+/**
+ * A format-aware resolution that was not applied (policy, confidence gate).
+ * The hunk stays classified `format_semantic`, naming no resolver and not
+ * claiming the merge — except an `llm_proposed` one, returned as it came so
+ * that the LLM fallback still gets it.
+ */
+function heldBack(hunk: ConflictHunk, effective: ConflictHunk): ConflictHunk {
+  return hunk.type === "llm_proposed" ? hunk : withoutFormatResolver(effective);
 }
 
 /**
@@ -134,6 +154,7 @@ function reclassifyFormatConflict(hunk: ConflictHunk, resolverUsed: string, reas
     type: "complex",
     confidence: complexPattern.confidence(input),
     explanation: complexPattern.explanation(input),
+    explanationRef: complexPattern.explanationRef?.(input),
     trace: {
       ...hunk.trace,
       selected: "complex",
@@ -252,18 +273,27 @@ function resolveHunk(
   if (!generatedGate) {
     const dispatch = dispatchFormatAware(hunk, filePath, options);
     if (dispatch.status === "resolved") {
+      // `llm_proposed` is what `complex` becomes while the LLM fallback is on.
+      // It keeps that type, so a merge refused here (policy, confidence) or
+      // retracted inside `resolve()` still reaches the LLM phase; it says what
+      // resolved it: the format resolver. (A parse-tree retraction in
+      // resolveAsync returns before that phase, as for every hunk.)
       const effective = hunk.type === "complex"
         ? reclassifyFormatSemantic(hunk, dispatch.resolverUsed)
-        : boostFormatValidated(hunk, dispatch.resolverUsed);
+        : hunk.type === "llm_proposed"
+          ? explainedAsFormatMerge(boostFormatValidated(hunk, dispatch.resolverUsed), dispatch.resolverUsed)
+          : boostFormatValidated(hunk, dispatch.resolverUsed);
       const { policy: fmtPolicy, cfg: fmtCfg } = computeEffectivePolicy(filePath, options);
       const fmtMinConfidence = computeEffectiveMinConfidence(fmtCfg, options);
       // Une fusion sémantique combine du contenu des deux côtés — même famille
       // de risque que non_overlapping. Les politiques qui l'excluent (strict,
       // prefer-safety) l'excluent donc aussi, comme pour le résolveur imports.
-      if (effective.type === "format_semantic" && !fmtCfg.allowNonOverlapping) {
+      // An llm_proposed hunk merged here is the same semantic merge (it only
+      // keeps its type for the LLM phase): the policy applies to it too.
+      if ((effective.type === "format_semantic" || hunk.type === "llm_proposed") && !fmtCfg.allowNonOverlapping) {
         return {
           // Not applied: no resolver produced this hunk's resolution.
-          hunk: withoutFormatResolver(effective),
+          hunk: heldBack(hunk, effective),
           lines: null,
           reason: `Semantic merge (${dispatch.resolverUsed}) disabled by the "${fmtPolicy}" policy — it combines content from both sides.`,
         };
@@ -281,7 +311,7 @@ function resolveHunk(
             ? `below the minConfidenceScore of ${fmtGate.required}`
             : `insufficient (minimum required: ${fmtGate.required}, policy: ${fmtPolicy})`;
         return {
-          hunk: withoutFormatResolver(effective),
+          hunk: heldBack(hunk, effective),
           lines: null,
           reason: `Confidence ${effective.confidence.label} (score: ${effective.confidence.score}) is ${because} to apply the format-aware resolution.`,
         };

@@ -287,6 +287,14 @@ with the locale files when a language is added. Other backend error strings
 (the `Err` of a Rust command, shown as the error detail) stay in English, as
 they always have; this exception is only for text the backend shows itself.
 
+A second exception: the explanation of a conflict hunk (`explanationRef` from
+`@gitwand/core`) is translated in `locales/explain/<code>.ts`, one dictionary per
+non-English language typed `Record<ExplanationKey, string>` — English is core's own
+`explanation`. `utils/hunkExplanation.ts` loads them with a dynamic `import()`,
+one per language, so they stay out of the main bundle; never import them
+statically from code in the main chunk. A key core adds does not compile until
+each dictionary has it.
+
 | Code  | Language        |
 |-------|-----------------|
 | `en`  | English (default) |

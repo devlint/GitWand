@@ -1,4 +1,5 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
+import type { ExplanationRef } from "../explanation-keys.js";
 import { scopeImpact, makeScore } from "./utils.js";
 
 const sameChange: PatternPlugin = {
@@ -18,6 +19,9 @@ const sameChange: PatternPlugin = {
 
   explanation(_h: ClassifyInput): string {
     return "Both branches made exactly the same edit.";
+  },
+  explanationRef(_h: ClassifyInput): ExplanationRef {
+    return { key: "sameChange" };
   },
 
   passReason(_h: ClassifyInput): string {

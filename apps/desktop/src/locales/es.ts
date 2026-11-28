@@ -755,6 +755,7 @@ const es: Locale = {
     commitPicker: "Commit a cherry-pick",
     commitPickerLoading: "Cargando commits…",
     commitPickerEmpty: "No se encontraron commits",
+    notSimulated: "No hay contenido que analizar: no se pudo simular el conflicto.",
   },
 
   // ─── Guided bisect ─────────────────────────────────────
@@ -2338,6 +2339,8 @@ const es: Locale = {
       reject: "Rechazar → resolver manualmente",
       accepted: "Aceptado",
     },
+    aiSuggestedExplanation: "Resolución sugerida por la IA",
+    aiSuggestedExplanationUnstructured: "Resolución sugerida por la IA (respuesta no estructurada)",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

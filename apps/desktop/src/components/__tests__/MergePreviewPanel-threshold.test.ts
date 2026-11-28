@@ -28,6 +28,7 @@ const hunk = (over: Partial<PreviewHunk>): PreviewHunk => ({
   confidenceScore: 83,
   confidenceLabel: "high",
   reason: "version bump resolved to the highest semver",
+  explanation: "Same structure with 1 differing volatile value.",
   ...over,
 });
 
@@ -127,13 +128,22 @@ describe("MergePreviewPanel — confidence bar", () => {
     expect(bars[2].className).toContain("ph-confidence--medium");
   });
 
-  it("puts the score and the reason in the tooltip of every row", async () => {
+  it("puts the score and core's reason in the tooltip of every row (English UI)", async () => {
     mountPanel(base(0));
     await expandFile();
     const row = container.querySelector<HTMLElement>(".preview-hunk")!;
     expect(row.title).toContain("83%");
     expect(row.title).toContain("high");
     expect(row.title).toContain("version bump");
+    // In English the explanation would say it twice: not added.
+    expect(row.title).not.toContain("differing volatile value");
+  });
+
+  it("adds core's reason to the tooltip of a hunk left to the user", async () => {
+    mountPanel(base(0));
+    await expandFile();
+    const rows = Array.from(container.querySelectorAll<HTMLElement>(".preview-hunk"));
+    expect(rows.some((r) => r.title.includes("no automatic heuristic applies"))).toBe(true);
   });
 
   it("shows no number at a bar of 0: it would not be actionable", async () => {

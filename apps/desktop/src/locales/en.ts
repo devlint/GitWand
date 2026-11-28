@@ -767,6 +767,7 @@ const en = {
     commitPicker: "Commit to cherry-pick",
     commitPickerLoading: "Loading commits…",
     commitPickerEmpty: "No commits found",
+    notSimulated: "No content to analyse: the conflict could not be simulated.",
   },
 
   // ─── Guided bisect ─────────────────────────────────────
@@ -2372,6 +2373,8 @@ const en = {
       reject: "Reject \u2192 resolve manually",
       accepted: "Accepted",
     },
+    aiSuggestedExplanation: "Resolution suggested by the AI",
+    aiSuggestedExplanationUnstructured: "Resolution suggested by the AI (unstructured answer)",
   },
 
   // ─── PR inline diff — AI review ─────────────────────────
